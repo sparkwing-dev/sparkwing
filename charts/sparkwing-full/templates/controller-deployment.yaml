@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkwing-full.controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  # Recreate, not RollingUpdate: the controller's state DB is local
+  # SQLite on an RWO PVC. A second pod can't multi-attach; rolling
+  # would deadlock. Single-instance posture per decision 0001 --
+  # multi-replica HA lives in the paid feature pack.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "sparkwing-full.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkwing-full.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkwing-full.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: controller
+          image: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/usr/local/bin/sparkwing-controller"]
+          args:
+            - {{ printf "--addr=0.0.0.0:%d" (int .Values.controller.port) | quote }}
+            {{- if .Values.controller.pool.enabled }}
+            - "--pool"
+            {{- if .Values.controller.pool.namespace }}
+            - {{ printf "--pool-namespace=%s" .Values.controller.pool.namespace | quote }}
+            {{- end }}
+            {{- end }}
+          env:
+            # SPARKWING_HOME on a writable mount: the orchestrator's
+            # DefaultPaths() mkdir's this at startup, and runAsUser
+            # 65534 can't write to "/".
+            - name: SPARKWING_HOME
+              value: /data
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- if .Values.controller.githubWebhookSecret.name }}
+            # Verifies HMAC signatures on POST /webhooks/github/{pipeline}.
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.githubWebhookSecret.name | quote }}
+                  key: {{ .Values.controller.githubWebhookSecret.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.secretsKey.name }}
+            # AT-REST encryption key for the secrets store.
+            # Without it, the controller logs a WARNING at startup
+            # and stores secret values as plaintext in its DB.
+            - name: SPARKWING_SECRETS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.secretsKey.name | quote }}
+                  key: {{ .Values.controller.secretsKey.key | quote }}
+            {{- end }}
+            - name: OTEL_SERVICE_NAME
+              value: "sparkwing-controller"
+            {{- with .Values.controller.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.controller.port }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          {{- if eq .Values.controller.storage.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ include "sparkwing-full.controller.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

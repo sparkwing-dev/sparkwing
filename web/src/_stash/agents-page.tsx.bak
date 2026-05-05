@@ -1,0 +1,323 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { type Job, type Agent, getJobs, getAgents } from "@/lib/api";
+import Tooltip from "@/components/Tooltip";
+
+export default function AgentsPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+
+  const refresh = useCallback(async () => {
+    const [jobData, agentData] = await Promise.all([getJobs(), getAgents()]);
+    setAgents(agentData.sort((a, b) => a.name.localeCompare(b.name)));
+    setJobs(jobData);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const i = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, 3000);
+    return () => clearInterval(i);
+  }, []);
+
+  const [showSystem, setShowSystem] = useState(false);
+  const runningJobs = jobs.filter(
+    (j) => j.status === "running" || j.status === "claimed",
+  );
+  const pendingCount = jobs.filter((j) => j.status === "pending").length;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-5xl mx-auto w-full">
+      {/* System status — collapsible */}
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg mb-6 overflow-hidden">
+        <button
+          onClick={() => setShowSystem(!showSystem)}
+          className="w-full flex items-center gap-3 px-3 py-2 text-xs hover:bg-[var(--surface-raised)] transition-colors"
+        >
+          <span className="w-4 text-center text-[var(--muted)]">
+            {showSystem ? "▾" : "▸"}
+          </span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            System Components
+          </span>
+          <span className="flex items-center gap-3 ml-2">
+            {[
+              { name: "controller", color: "bg-green-400" },
+              { name: "dind", color: "bg-green-400" },
+              { name: "registry", color: "bg-green-400" },
+              { name: "web", color: "bg-green-400" },
+            ].map((c) => (
+              <span key={c.name} className="flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${c.color}`} />
+                <span className="font-mono text-[var(--muted)]">{c.name}</span>
+              </span>
+            ))}
+          </span>
+          <span className="ml-auto text-[var(--muted)]">
+            {pendingCount > 0 && (
+              <span className="text-yellow-400 mr-3">
+                {pendingCount} pending
+              </span>
+            )}
+            {runningJobs.length > 0 && (
+              <span className="text-indigo-400 mr-3">
+                {runningJobs.length} running
+              </span>
+            )}
+            {jobs.length} total
+          </span>
+        </button>
+        {showSystem && (
+          <div className="grid grid-cols-2 gap-3 px-3 pb-3">
+            <div className="bg-[var(--background)] rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-xs font-bold">Controller</span>
+                <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
+                  sparkwing-controller
+                </span>
+              </div>
+              <p className="text-[10px] text-[var(--muted)] mb-2">
+                Receives triggers, queues jobs, matches to agents, tracks
+                results.
+              </p>
+              <div className="flex gap-3 text-[10px]">
+                <span className="text-[var(--muted)]">
+                  Pending:{" "}
+                  <span className="text-[var(--foreground)] font-mono">
+                    {pendingCount}
+                  </span>
+                </span>
+                <span className="text-[var(--muted)]">
+                  Processed:{" "}
+                  <span className="text-[var(--foreground)] font-mono">
+                    {jobs.length}
+                  </span>
+                </span>
+              </div>
+            </div>
+            <div className="bg-[var(--background)] rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-xs font-bold">Docker-in-Docker</span>
+                <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
+                  dind:2375
+                </span>
+              </div>
+              <p className="text-[10px] text-[var(--muted)] mb-2">
+                Shared Docker daemon. Caches layers, git repos, and package
+                manager data on persistent volumes.
+              </p>
+              <div className="flex gap-3 text-[10px]">
+                <span className="text-[var(--muted)]">
+                  Cache: <span className="text-green-400 font-mono">warm</span>
+                </span>
+                <span className="text-[var(--muted)]">
+                  Volumes: <span className="font-mono">persistent</span>
+                </span>
+              </div>
+            </div>
+            <div className="bg-[var(--background)] rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-xs font-bold">Registry</span>
+                <span className="text-[10px] bg-yellow-500/15 text-yellow-400 px-1 rounded">
+                  kind only
+                </span>
+                <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
+                  registry:5000
+                </span>
+              </div>
+              <p className="text-[10px] text-[var(--muted)]">
+                Local dev registry. Production uses ECR/GCR/GHCR via profile
+                config.
+              </p>
+            </div>
+            <div className="bg-[var(--background)] rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-xs font-bold">Web Dashboard</span>
+                <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
+                  sparkwing-web
+                </span>
+              </div>
+              <p className="text-[10px] text-[var(--muted)]">
+                This UI. Polls controller every 2s. Port 3100.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Agents */}
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden mb-6">
+        <div className="px-3 py-2 border-b border-[var(--border)] flex items-center">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            Agents ({agents.length})
+          </span>
+        </div>
+        {agents.length === 0 ? (
+          <div className="px-3 py-4 text-sm text-[var(--muted)]">
+            No agents connected. Run{" "}
+            <code className="bg-[var(--background)] px-1.5 py-0.5 rounded text-xs font-mono">
+              sparkwing agent
+            </code>
+          </div>
+        ) : (
+          <div>
+            {agents.map((agent) => {
+              const activeJobIds = agent.active_jobs || [];
+              const activeJobs = activeJobIds
+                .map((id) => jobs.find((j) => j.id === id))
+                .filter((j): j is Job => j != null);
+              const maxC = agent.max_concurrent || 1;
+              const usedSlots = activeJobIds.length;
+
+              return (
+                <div
+                  key={agent.name}
+                  className="border-b border-[var(--border)] last:border-b-0"
+                >
+                  {/* Agent row */}
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs">
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${agent.status === "busy" ? "bg-indigo-400 animate-pulse" : "bg-green-400"}`}
+                    />
+                    <span className="font-mono font-bold">{agent.name}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        agent.type === "local"
+                          ? "bg-blue-500/20 text-blue-400"
+                          : agent.type === "listener"
+                            ? "bg-purple-500/20 text-purple-400"
+                            : "bg-gray-500/20 text-gray-400"
+                      }`}
+                    >
+                      {agent.type}
+                    </span>
+                    {agent.labels &&
+                      Object.entries(agent.labels).map(([k, v]) => (
+                        <span
+                          key={k}
+                          className="bg-[var(--background)] px-1 py-0.5 rounded text-[10px] font-mono text-[var(--muted)]"
+                        >
+                          {k}={v}
+                        </span>
+                      ))}
+                    {/* Capacity dots */}
+                    <span className="ml-auto flex items-center gap-1">
+                      <span className="text-[var(--muted)] mr-1">
+                        {usedSlots}/{maxC}
+                      </span>
+                      {Array.from({ length: maxC }).map((_, i) => (
+                        <span
+                          key={i}
+                          className={`w-1.5 h-1.5 rounded-full ${i < usedSlots ? "bg-indigo-400" : "bg-[var(--background)]"}`}
+                        />
+                      ))}
+                    </span>
+                    <Tooltip
+                      content={
+                        <>
+                          Last seen:{" "}
+                          {new Date(agent.last_seen).toLocaleString()}
+                        </>
+                      }
+                    >
+                      <span className="text-[var(--muted)] font-mono ml-2">
+                        {new Date(agent.last_seen).toLocaleTimeString()}
+                      </span>
+                    </Tooltip>
+                  </div>
+
+                  {/* Active jobs — inline */}
+                  {activeJobs.length > 0 && (
+                    <div className="px-3 pb-2 flex flex-wrap gap-1.5 ml-4">
+                      {activeJobs.map((j) => {
+                        const elapsed = Math.floor(
+                          (Date.now() -
+                            new Date(j.claimed_at || j.created_at).getTime()) /
+                            1000,
+                        );
+                        return (
+                          <a
+                            key={j.id}
+                            href={`/workflows?job=${j.id}`}
+                            className="flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded px-2 py-1 text-[10px] hover:brightness-125 transition-colors"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                            <span className="text-indigo-300 font-medium">
+                              {j.pipeline}
+                            </span>
+                            {j.env?.TEST_SHARD != null && (
+                              <span className="text-violet-400 font-mono">
+                                s{j.env.TEST_SHARD}
+                              </span>
+                            )}
+                            <span className="text-[var(--muted)] font-mono">
+                              {elapsed}s
+                            </span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Active jobs table */}
+      {runningJobs.length > 0 && (
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="px-3 py-2 border-b border-[var(--border)]">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+              Active jobs ({runningJobs.length})
+            </span>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-[var(--border)] text-[var(--muted)]">
+                <th className="px-3 py-1.5 text-left font-medium">App</th>
+                <th className="px-3 py-1.5 text-left font-medium">Agent</th>
+                <th className="px-3 py-1.5 text-left font-medium">ID</th>
+                <th className="px-3 py-1.5 text-left font-medium">Started</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runningJobs.map((job) => (
+                <tr
+                  key={job.id}
+                  className="border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface-raised)] cursor-pointer"
+                  onClick={() =>
+                    (window.location.href = `/workflows?job=${job.id}`)
+                  }
+                >
+                  <td className="px-3 py-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                      {job.pipeline}
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-[var(--muted)]">
+                    {job.agent_id || "pending"}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-[var(--muted)]">
+                    {job.id}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-[var(--muted)]">
+                    {new Date(job.created_at).toLocaleTimeString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

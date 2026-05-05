@@ -1,0 +1,66 @@
+Sparkwing full self-host installed.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
+
+Components:
+  Controller (1 replica)  -> {{ include "sparkwing-full.controller.fullname" . }}
+  Web        ({{ .Values.web.replicas }} replica(s)) -> {{ include "sparkwing-full.web.fullname" . }}
+{{- if index .Values "sparkwing-runner-bundle" "enabled" }}
+  Runner-bundle sub-chart -> see `helm get manifest {{ .Release.Name }}` for runner / cache / logs.
+{{- else }}
+  Runner-bundle: DISABLED -- runners must be deployed separately.
+{{- end }}
+
+Reach the dashboard:
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+{{- else }}
+  # Port-forward (no ingress configured):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sparkwing-full.web.fullname" . }} 8080:80
+  # then open http://localhost:8080
+
+  # Or expose via your own ingress / Service of type LoadBalancer.
+{{- end }}
+
+Controller in-cluster URL (for runners / external clients in the same cluster):
+  {{ include "sparkwing-full.controller.serviceURL" . }}
+
+{{- if not .Values.controller.githubWebhookSecret.name }}
+
+NOTE: controller.githubWebhookSecret.name is empty -- GitHub webhook
+HMAC verification is OFF. Pre-create a Secret and set the value
+before exposing /webhooks/github/* publicly:
+
+  kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-webhook \
+    --from-literal=webhook-secret=<your-shared-secret>
+  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
+    --reuse-values --set controller.githubWebhookSecret.name=sparkwing-webhook
+{{- end }}
+
+{{- if not .Values.controller.secretsKey.name }}
+
+NOTE: controller.secretsKey.name is empty -- secrets stored via the
+controller will be plaintext at rest in the state DB. Generate and
+attach a key for production installs:
+
+  openssl rand -base64 32 > /tmp/sparkwing-key
+  kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
+    --from-file=key=/tmp/sparkwing-key
+  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
+    --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
+{{- end }}
+
+Inspect controller logs:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-full.controller.fullname" . }} -f
+
+Inspect web logs:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-full.web.fullname" . }} -f
+
+Confirm the controller is healthy:
+  kubectl -n {{ .Release.Namespace }} run --rm -it -q probe --image=curlimages/curl -- \
+    curl -s {{ include "sparkwing-full.controller.serviceURL" . }}/api/v1/health

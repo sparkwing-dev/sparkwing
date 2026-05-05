@@ -1,0 +1,43 @@
+apiVersion: v2
+name: sparkwing-runner-bundle
+description: |
+  Runner-side bundle for Sparkwing -- deploys sparkwing-runner +
+  sparkwing-cache + sparkwing-logs into a customer-owned namespace.
+  This is the "data plane lives with the runner" Helm chart referenced
+  in decision 0001 (open-core tier strategy): when customers run
+  self-hosted runners against a remote (cloud or self-hosted)
+  controller, this chart bundles every service that needs to live next
+  to the runner so logs / artifacts / git fanout never cross the VPC
+  boundary.
+  Does NOT include the controller or web SPA -- those ship in the
+  full-self-host chart (sparkwing-stack).
+
+# application: this chart deploys runnable workloads (Deployments,
+# Services, PVCs). A library chart would be wrong here -- there is no
+# parent chart consuming these templates as helpers.
+type: application
+
+# Chart version: SemVer for this chart's *templates / values surface*.
+# Independent of the appVersion below. Bump on any user-facing
+# values.yaml change or template structural change.
+version: 0.1.0
+
+# appVersion: the sparkwing release this chart is *known to be tested
+# against*. Per-component image.tag in values.yaml overrides it.
+# Keep in sync with the latest sparkwing release as the chart evolves.
+appVersion: "0.1.0"
+
+keywords:
+  - sparkwing
+  - ci
+  - cd
+  - runner
+  - pipelines
+
+home: https://github.com/sparkwing-dev/sparkwing
+sources:
+  - https://github.com/sparkwing-dev/sparkwing
+
+maintainers:
+  - name: sparkwing
+    url: https://github.com/sparkwing-dev/sparkwing

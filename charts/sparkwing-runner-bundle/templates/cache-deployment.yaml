@@ -1,0 +1,107 @@
+{{- if .Values.cache.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkwing-runner-bundle.cache.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "cache") | nindent 4 }}
+spec:
+  replicas: {{ .Values.cache.replicas }}
+  # Recreate, not RollingUpdate: the cache is backed by an RWO PVC
+  # which a second pod can't multi-attach to. RollingUpdate would
+  # deadlock the rollout; Recreate accepts ~30s of downtime per
+  # upgrade in exchange for not getting stuck.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "cache") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "cache") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The cache image runs as uid 1000 (sparkwing user); override
+      # the chart-wide nobody default for this one component.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      {{- with .Values.cache.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cache.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cache.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: cache
+          image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.cache.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.cache.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            {{- if .Values.cache.repos }}
+            - name: GITCACHE_REPOS
+              value: {{ .Values.cache.repos | quote }}
+            {{- end }}
+            {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
+            - name: SPARKWING_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.tokenSecret.name | quote }}
+                  key: {{ .Values.controller.tokenSecret.key | quote }}
+                  optional: true
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.cache.service.targetPort }}
+          volumeMounts:
+            {{- if .Values.cache.sshKeySecret.name }}
+            - name: ssh-key
+              mountPath: /etc/ssh-key
+              readOnly: true
+            {{- end }}
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.cache.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+      volumes:
+        {{- if .Values.cache.sshKeySecret.name }}
+        - name: ssh-key
+          secret:
+            secretName: {{ .Values.cache.sshKeySecret.name | quote }}
+            defaultMode: 0400
+            optional: true
+        {{- end }}
+        - name: data
+          {{- if .Values.cache.storage.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "sparkwing-runner-bundle.cache.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

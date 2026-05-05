@@ -1,0 +1,25 @@
+{{- if eq .Values.controller.storage.type "pvc" -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sparkwing-full.controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+  {{- if .Values.controller.storage.pvc.keepOnUninstall }}
+  annotations:
+    # PVC survives `helm uninstall` so run history isn't wiped on
+    # an accidental uninstall. Operators who want a clean slate
+    # can `kubectl delete pvc` after.
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.controller.storage.pvc.size | quote }}
+  {{- if .Values.controller.storage.pvc.storageClassName }}
+  storageClassName: {{ .Values.controller.storage.pvc.storageClassName | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,17 @@
+{{- if .Values.cache.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sparkwing-runner-bundle.cache.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "cache") | nindent 4 }}
+spec:
+  type: {{ .Values.cache.service.type }}
+  selector:
+    {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "cache") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.cache.service.port }}
+      targetPort: {{ .Values.cache.service.targetPort }}
+{{- end }}

@@ -1,0 +1,121 @@
+package sparkwing_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+func TestCacheOptions_EmptyIsNoop(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{})
+	if n.CacheOpts().HasKey() {
+		t.Fatalf("empty Cache options should not register coordination")
+	}
+}
+
+func TestCacheOptions_KeyOnlyApplyDefaults(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Key: "foo"})
+	got := n.CacheOpts()
+	if got.Key != "foo" {
+		t.Fatalf("Key = %q, want foo", got.Key)
+	}
+	if got.Max != 1 {
+		t.Fatalf("Max = %d, want 1", got.Max)
+	}
+	if got.OnLimit != sparkwing.Queue {
+		t.Fatalf("OnLimit = %q, want %q", got.OnLimit, sparkwing.Queue)
+	}
+	if got.CacheTTL != 0 {
+		t.Fatalf("CacheTTL = %s, want 0 (no memoization without CacheKey)", got.CacheTTL)
+	}
+}
+
+func TestCacheOptions_CacheKeyDefaultsTTL(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{
+		Key:      "foo",
+		CacheKey: func(_ context.Context) sparkwing.CacheKey { return "k" },
+	})
+	if got := n.CacheOpts().CacheTTL; got != sparkwing.DefaultCacheTTL {
+		t.Fatalf("CacheTTL = %s, want DefaultCacheTTL", got)
+	}
+}
+
+func TestCacheOptions_ClampsLongTTL(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{
+		Key:      "foo",
+		CacheKey: func(_ context.Context) sparkwing.CacheKey { return "k" },
+		CacheTTL: 365 * 24 * time.Hour,
+	})
+	if got := n.CacheOpts().CacheTTL; got != sparkwing.MaxCacheTTL {
+		t.Fatalf("CacheTTL = %s, want MaxCacheTTL", got)
+	}
+}
+
+func TestCacheOptions_PanicsOnNegativeMax(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on Max<0")
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Key: "k", Max: -1})
+}
+
+func TestCacheOptions_PanicsOnNegativeTTL(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on CacheTTL<0")
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Key: "k", CacheTTL: -time.Second})
+}
+
+func TestCacheOptions_PlanLevelRejectsCoalesce(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on plan-level Coalesce")
+		}
+	}()
+	plan.Cache(sparkwing.CacheOptions{Key: "k", OnLimit: sparkwing.Coalesce})
+}
+
+func TestCacheOptions_PlanLevelRejectsCacheKey(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on plan-level CacheKey")
+		}
+	}()
+	plan.Cache(sparkwing.CacheOptions{
+		Key:      "k",
+		CacheKey: func(_ context.Context) sparkwing.CacheKey { return "v" },
+	})
+}
+
+func TestCacheOptions_NodeLevelCoalesceOK(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{
+		Key:     "k",
+		OnLimit: sparkwing.Coalesce,
+	})
+	if n.CacheOpts().OnLimit != sparkwing.Coalesce {
+		t.Fatalf("node-level Coalesce should be allowed")
+	}
+}
+
+func TestCacheOptions_PlanLevelQueueOK(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Cache(sparkwing.CacheOptions{Key: "prod-deploys", Max: 3})
+	got := plan.CacheOpts()
+	if got.Key != "prod-deploys" || got.Max != 3 {
+		t.Fatalf("plan-level cache = %+v", got)
+	}
+}

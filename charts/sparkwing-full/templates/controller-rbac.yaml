@@ -1,0 +1,80 @@
+{{- if .Values.rbac.create -}}
+# Namespace-scoped Role: the controller's warm-PVC pool feature
+# (folded in from sparkwing-pool) creates + patches PVCs and
+# spawns ephemeral warmer pods in its own namespace. Also reads
+# namespaces (for identity lookups) and configmaps/events (for
+# state surfacing). Keeping this scoped to the install namespace
+# is the OSS posture; multi-namespace pools are a future feature.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "sparkwing-full.controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sparkwing-full.controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sparkwing-full.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "sparkwing-full.controller.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- if .Values.rbac.clusterStorageClasses }}
+---
+# Cluster-scoped read on StorageClasses for the controller's
+# startup default-class probe. Without this the controller logs
+# "skipped: list StorageClasses: forbidden" at boot but otherwise
+# functions. Disable via rbac.clusterStorageClasses=false in
+# clusters where you cannot grant cluster-wide reads.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "sparkwing-full.controller.fullname" . }}-storageclasses
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "sparkwing-full.controller.fullname" . }}-storageclasses
+  labels:
+    {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sparkwing-full.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "sparkwing-full.controller.fullname" . }}-storageclasses
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

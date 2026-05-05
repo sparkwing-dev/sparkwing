@@ -1,0 +1,4 @@
+# Helm template files mix Go-template syntax with YAML; prettier's
+# YAML parser misinterprets `{{ ... }}` as flow mappings and mangles
+# templates on save. Skip the templates dir entirely.
+templates/

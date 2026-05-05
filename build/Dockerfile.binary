@@ -1,0 +1,54 @@
+# ISS-052: parameterized Dockerfile for the cluster-deployable OSS binaries.
+#
+# One Dockerfile, five images. The release.yaml workflow drives this
+# under a matrix and overrides BINARY per cell:
+#
+#   docker build --build-arg BINARY=sparkwing-controller \
+#                --build-arg SPARKWING_VERSION=v0.6.0 \
+#                -f build/Dockerfile.binary .
+#
+# Built locally (no module-proxy round trip): the workflow checks out
+# this repo at the tag, so we `go build ./cmd/${BINARY}` against the
+# in-tree source. That avoids a chicken-and-egg with the proxy on a
+# brand-new tag (the proxy can take minutes to ingest a fresh tag) and
+# matches the binary-build job's source-of-truth.
+#
+# Multi-arch: TARGETOS / TARGETARCH come from buildx; CGO_ENABLED=0 +
+# alpine runtime -> the binary doesn't link libc, so cross-arch is
+# trivial. QEMU only kicks in on the runtime-FROM stage (which is
+# alpine + ca-certificates -- negligible).
+#
+# Note: sparkwing-web embeds its Next.js bundle via //go:embed
+# all:next-out in internal/web/server.go. The bundle is committed at
+# pkg/orchestrator/web/next-out/ in this repo, so the embed resolves
+# at build time without needing a Node stage.
+
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH BINARY SPARKWING_VERSION
+WORKDIR /src
+COPY . .
+
+# go build is preferred over go install here because the source is
+# already on disk (COPY . .). When TARGETOS/TARGETARCH match the
+# build host this writes to /out directly; when cross-compiling, the
+# same -o path applies -- no per-arch directory shuffle needed.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    mkdir -p /out && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w -X main.Version=${SPARKWING_VERSION}" \
+      -o /out/${BINARY} \
+      ./cmd/${BINARY}
+
+FROM alpine:3.21@sha256:c3f8e73fdb79deaebaa2037150150191b9dcbfba68b4a46d70103204c53f4709
+RUN apk add --no-cache ca-certificates
+ARG BINARY
+ENV BINARY=${BINARY}
+COPY --from=build /out/${BINARY} /usr/local/bin/${BINARY}
+USER 65534:65534
+# Indirect entrypoint so ${BINARY} resolves at container runtime --
+# can't reference build-time ARG in JSON-form ENTRYPOINT directly.
+# Shell-form exec preserves PID 1 + signal handling.
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/${BINARY} \"$@\"", "--"]

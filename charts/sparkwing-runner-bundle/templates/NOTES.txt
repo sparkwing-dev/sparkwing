@@ -1,0 +1,32 @@
+Sparkwing runner bundle installed.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
+
+Components:
+  Runner    {{ .Values.runner.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.runner.fullname" . }}
+{{- if .Values.cache.enabled }}
+  Cache     {{ .Values.cache.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.cache.fullname" . }}
+{{- end }}
+{{- if .Values.logs.enabled }}
+  Logs      {{ .Values.logs.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.logs.fullname" . }}
+{{- end }}
+
+{{- if not .Values.controller.url }}
+
+WARNING: controller.url is empty. The runner will not be able to claim
+work until you set it:
+
+  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-runner-bundle \
+    --namespace {{ .Release.Namespace }} \
+    --set controller.url=https://your-controller.example.com \
+    --set controller.tokenSecret.name=sparkwing-token
+
+{{- end }}
+
+Inspect runner logs:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-runner-bundle.runner.fullname" . }} -f
+
+Verify the runner registered with the controller:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "sparkwing-runner-bundle.runner.fullname" . }} | grep -i 'claim\|register'

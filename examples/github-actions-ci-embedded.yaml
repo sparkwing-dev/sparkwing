@@ -1,0 +1,46 @@
+# Example GitHub Actions workflow that runs a sparkwing pipeline in
+# ci-embedded mode. Logs + final run state go to S3 so a dashboard
+# elsewhere can replay the run.
+#
+# Setup:
+# 1. Add AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY repository secrets
+#    with permissions to PUT/GET/DELETE on the bucket below.
+# 2. Adjust SPARKWING_LOG_STORE and SPARKWING_ARTIFACT_STORE to your
+#    bucket and prefix layout.
+# 3. Make sure your repo has a .sparkwing/ directory with the pipeline
+#    you want to run (e.g. release-prod).
+
+name: ci-embedded
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Install sparkwing CLI
+        run: curl -fsSL https://sparkwing.dev/install.sh | bash
+
+      - name: Run release pipeline
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-west-2
+          SPARKWING_LOG_STORE: s3://my-team-sparkwing/logs
+          SPARKWING_ARTIFACT_STORE: s3://my-team-sparkwing/cache
+          # Skip sparks resolution at run time -- trust the committed
+          # .resolved.mod overlay. Refresh by running
+          # `sparkwing pipeline sparks update` locally and committing
+          # the diff; the publish step picks up the new versions on
+          # next push.
+          SPARKWING_NO_SPARKS_RESOLVE: "1"
+        run: sparkwing run release-prod --mode=ci-embedded --workers=4

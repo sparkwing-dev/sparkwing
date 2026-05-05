@@ -1,0 +1,1479 @@
+"use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import {
+  type Job,
+  type Agent,
+  type PipelineMeta,
+  getJobsPaginated,
+  getAgents,
+  getPipelines,
+  getBreakpointStatus,
+  continueBreakpoint,
+  cancelJob,
+  retryJob,
+} from "@/lib/api";
+import PipelineViewComponent from "@/components/PipelineView";
+import StepView from "@/components/StepView";
+import LiveLogs from "@/components/LiveLogs";
+import StatusLabel from "@/components/StatusLabel";
+import Tooltip from "@/components/Tooltip";
+import {
+  LogBucketViewFromRaw,
+  hasStepBanners,
+} from "@/components/LogBucketView";
+import RemoteLogs from "@/components/RemoteLogs";
+import TriggerForm from "@/components/TriggerForm";
+import { HeartbeatLabel } from "@/components/HeartbeatDot";
+import FailureReasonBadge from "@/components/FailureReasonBadge";
+import ResourceChart from "@/components/ResourceChart";
+import ExecutionWaterfall from "@/components/ExecutionWaterfall";
+
+function dagStatusDot(status: string) {
+  if (status === "complete") return "bg-green-400";
+  if (status === "failed") return "bg-red-400";
+  if (status === "running" || status === "claimed")
+    return "bg-indigo-400 animate-pulse";
+  if (status === "pending") return "bg-gray-400 animate-pulse";
+  return "bg-gray-500";
+}
+
+function dagNodeClass(status: string, isSelected: boolean) {
+  const base =
+    status === "complete"
+      ? "bg-green-500/10"
+      : status === "failed"
+        ? "bg-red-500/10"
+        : status === "running" || status === "claimed"
+          ? "bg-indigo-500/10"
+          : "bg-gray-500/10";
+  const border = isSelected
+    ? "border-amber-400 shadow-md shadow-amber-400/15"
+    : status === "complete"
+      ? "border-green-500/30"
+      : status === "failed"
+        ? "border-red-500/30"
+        : status === "running" || status === "claimed"
+          ? "border-indigo-500/30"
+          : "border-gray-500/20";
+  return `${base} ${border}`;
+}
+
+function dagEdgeColor(status: string) {
+  if (status === "complete") return "rgba(74,222,128,0.4)";
+  if (status === "failed") return "rgba(248,113,113,0.4)";
+  if (status === "running" || status === "claimed")
+    return "rgba(129,140,248,0.4)";
+  return "rgba(107,114,128,0.3)";
+}
+
+function JobDAG({
+  parent,
+  children,
+  selectedJob,
+  onSelect,
+}: {
+  parent: Job;
+  children: Job[];
+  selectedJob: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState<
+    { x1: number; y1: number; x2: number; y2: number; color: string }[]
+  >([]);
+  const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
+
+  const computeEdges = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    setSvgSize({ width: rect.width, height: rect.height });
+    const src = container.querySelector<HTMLElement>('[data-dag="parent"]');
+    if (!src) return;
+    const sr = src.getBoundingClientRect();
+    const next: typeof edges = [];
+    container
+      .querySelectorAll<HTMLElement>('[data-dag="child"]')
+      .forEach((tgt) => {
+        const tr = tgt.getBoundingClientRect();
+        const color = dagEdgeColor(tgt.dataset.status || "");
+        next.push({
+          x1: sr.right - rect.left,
+          y1: sr.top + sr.height / 2 - rect.top,
+          x2: tr.left - rect.left,
+          y2: tr.top + tr.height / 2 - rect.top,
+          color,
+        });
+      });
+    setEdges(next);
+  }, [children]);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(computeEdges);
+    window.addEventListener("resize", computeEdges);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener("resize", computeEdges);
+    };
+  }, [computeEdges]);
+
+  return (
+    <div ref={containerRef} className="relative flex items-start gap-12 py-2">
+      <svg
+        className="absolute top-0 left-0 pointer-events-none"
+        width={svgSize.width}
+        height={svgSize.height}
+        style={{ overflow: "visible" }}
+      >
+        {edges.map((e, i) => {
+          const dx = e.x2 - e.x1;
+          return (
+            <path
+              key={i}
+              d={`M ${e.x1} ${e.y1} C ${e.x1 + dx * 0.4} ${e.y1}, ${e.x2 - dx * 0.4} ${e.y2}, ${e.x2} ${e.y2}`}
+              fill="none"
+              stroke={e.color}
+              strokeWidth="1.5"
+            />
+          );
+        })}
+      </svg>
+
+      {/* Parent node */}
+      <div className="flex flex-col justify-center self-center shrink-0">
+        <button
+          data-dag="parent"
+          onClick={() => onSelect(parent.id)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs min-w-[140px] transition-all hover:brightness-125 ${dagNodeClass(parent.status, selectedJob === parent.id)}`}
+        >
+          <div
+            className={`w-2 h-2 rounded-full shrink-0 ${dagStatusDot(parent.status)}`}
+          />
+          <span className="font-mono truncate">{parent.pipeline}</span>
+        </button>
+      </div>
+
+      {/* Children nodes */}
+      <div className="flex flex-col gap-2">
+        {children.map((child) => (
+          <button
+            key={child.id}
+            data-dag="child"
+            data-status={child.status}
+            onClick={() => onSelect(child.id)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs min-w-[170px] transition-all hover:brightness-125 ${dagNodeClass(child.status, selectedJob === child.id)}`}
+          >
+            <div
+              className={`w-2 h-2 rounded-full shrink-0 ${dagStatusDot(child.status)}`}
+            />
+            <span className="font-mono truncate">
+              {child.env?.TEST_NAME || child.pipeline}
+            </span>
+            <span className="text-[var(--muted)] ml-auto shrink-0">
+              {child.result?.duration
+                ? `${(child.result.duration / 1e9).toFixed(1)}s`
+                : "—"}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Duration({ ns }: { ns: number }) {
+  if (!ns) return <span className="text-[var(--muted)]">—</span>;
+  const s = ns / 1e9;
+  if (s < 1) return <span>{(s * 1000).toFixed(0)}ms</span>;
+  return <span>{s.toFixed(1)}s</span>;
+}
+
+function TimeAgo({ ts }: { ts: string }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(i);
+  }, []);
+  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (sec < 60) return <span>-{sec}s</span>;
+  if (sec < 3600) return <span>-{Math.floor(sec / 60)}m</span>;
+  return <span>-{Math.floor(sec / 3600)}h</span>;
+}
+
+export default function WorkflowsPage() {
+  return (
+    <Suspense>
+      <Workflows />
+    </Suspense>
+  );
+}
+
+function Workflows() {
+  const searchParams = useSearchParams();
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const pageSize = 50;
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(
+    searchParams.get("job"),
+  );
+  const [selectedJob, setSelectedJob] = useState<string | null>(
+    searchParams.get("job"),
+  );
+  const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
+  const [filterRepo, setFilterRepo] = useState<string[]>([]);
+  const [filterBranch, setFilterBranch] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
+  const [filterWorkflow, setFilterWorkflow] = useState<string[]>([]);
+  const [filterTag, setFilterTag] = useState<string[]>([]);
+  const [pipelineMeta, setPipelineMeta] = useState<
+    Record<string, PipelineMeta>
+  >({});
+  const [showTrigger, setShowTrigger] = useState(false);
+
+  const toggleFilter = (
+    arr: string[],
+    set: (v: string[]) => void,
+    val: string,
+  ) => {
+    set(arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]);
+  };
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggle = (key: string) =>
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!openDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setOpenDropdown(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openDropdown]);
+
+  const refresh = useCallback(async () => {
+    const [jobPage, agentData, pipelineData] = await Promise.all([
+      getJobsPaginated(pageSize, page * pageSize),
+      getAgents(),
+      getPipelines(),
+    ]);
+    setAgents(agentData);
+    setPipelineMeta(pipelineData);
+    setJobs(
+      (jobPage.jobs ?? []).sort((a, b) =>
+        b.created_at.localeCompare(a.created_at),
+      ),
+    );
+    setTotal(jobPage.total);
+  }, [page]);
+
+  useEffect(() => {
+    refresh();
+    const i = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, 2000);
+    return () => clearInterval(i);
+  }, [refresh]);
+
+  // Build parent→children map
+  const childMap = new Map<string, Job[]>();
+  for (const j of jobs) {
+    if (j.parent_id) {
+      const ch = childMap.get(j.parent_id) || [];
+      ch.push(j);
+      childMap.set(j.parent_id, ch);
+    }
+  }
+
+  // Unique values for filter dropdowns
+  const allJobs = jobs.filter((j) => !j.parent_id);
+  const repos = [
+    ...new Set(allJobs.map((j) => j.repo_name || "unknown").filter(Boolean)),
+  ];
+  const branches = [...new Set(allJobs.map((j) => j.branch).filter(Boolean))];
+  const workflows = [
+    ...new Set(allJobs.map((j) => j.pipeline).filter(Boolean)),
+  ];
+  const allTags = [
+    ...new Set(Object.values(pipelineMeta).flatMap((m) => m.tags || [])),
+  ].sort();
+  const statuses = ["complete", "failed", "running", "pending", "claimed"];
+
+  // Filter (arrays = OR within same type, AND across types)
+  const topLevel = allJobs.filter((j) => {
+    if (filterRepo.length && !filterRepo.includes(j.repo_name || "unknown"))
+      return false;
+    if (filterBranch.length && !filterBranch.includes(j.branch)) return false;
+    if (filterStatus.length && !filterStatus.includes(j.status)) return false;
+    if (filterWorkflow.length && !filterWorkflow.includes(j.pipeline))
+      return false;
+    if (filterTag.length) {
+      const jobTags = pipelineMeta[j.pipeline]?.tags || [];
+      if (!filterTag.some((t) => jobTags.includes(t))) return false;
+    }
+    return true;
+  });
+
+  const activeFilterCount =
+    filterRepo.length +
+    filterBranch.length +
+    filterStatus.length +
+    filterWorkflow.length +
+    filterTag.length;
+  const workflow = jobs.find((j) => j.id === selectedWorkflow) || null;
+  const workflowChildren = workflow ? childMap.get(workflow.id) || [] : [];
+  const selected = jobs.find((j) => j.id === selectedJob) || null;
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* Left: Workflow list */}
+      <div
+        className={`${workflow ? "w-40" : "w-96"} border-r border-[var(--border)] flex flex-col shrink-0 transition-all`}
+      >
+        {workflow && (
+          <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            Pipelines
+          </div>
+        )}
+        {/* Filters */}
+        <div ref={filterRef} className="border-b border-[var(--border)]">
+          {workflow ? (
+            /* Compact: filter icon with popout */
+            <div className="relative flex items-center px-2 py-1.5 gap-1">
+              <button
+                onClick={() =>
+                  setOpenDropdown(
+                    openDropdown === "compact-filter" ? null : "compact-filter",
+                  )
+                }
+                className={`text-[10px] transition-colors ${activeFilterCount > 0 ? "text-[var(--foreground)]" : "text-[var(--muted)] hover:text-[var(--foreground)]"}`}
+              >
+                Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}{" "}
+                <span className="text-[8px]">▾</span>
+              </button>
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={() => {
+                    setFilterRepo([]);
+                    setFilterBranch([]);
+                    setFilterStatus([]);
+                    setFilterWorkflow([]);
+                    setFilterTag([]);
+                  }}
+                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-auto"
+                >
+                  clear
+                </button>
+              )}
+              {openDropdown === "compact-filter" && (
+                <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[200px] p-2 space-y-2">
+                  {[
+                    {
+                      key: "repo",
+                      label: "Repo",
+                      values: filterRepo,
+                      set: setFilterRepo,
+                      options: repos,
+                      activeText: "text-cyan-300",
+                      activeBg: "bg-cyan-500/15",
+                    },
+                    {
+                      key: "workflow",
+                      label: "Pipeline",
+                      values: filterWorkflow,
+                      set: setFilterWorkflow,
+                      options: workflows,
+                      activeText: "text-violet-300",
+                      activeBg: "bg-violet-500/15",
+                    },
+                    {
+                      key: "tag",
+                      label: "Tag",
+                      values: filterTag,
+                      set: setFilterTag,
+                      options: allTags,
+                      activeText: "text-pink-300",
+                      activeBg: "bg-pink-500/15",
+                    },
+                    {
+                      key: "branch",
+                      label: "Branch",
+                      values: filterBranch,
+                      set: setFilterBranch,
+                      options: branches,
+                      activeText: "text-amber-300",
+                      activeBg: "bg-amber-500/15",
+                    },
+                    {
+                      key: "status",
+                      label: "Status",
+                      values: filterStatus,
+                      set: setFilterStatus,
+                      options: statuses,
+                      activeText: "text-emerald-300",
+                      activeBg: "bg-emerald-500/15",
+                    },
+                  ].map((f) => (
+                    <div key={f.key}>
+                      <div className="text-[10px] text-[var(--muted)] font-bold uppercase tracking-wider mb-1">
+                        {f.label}
+                      </div>
+                      {f.options.map((opt) => {
+                        const displayOpt =
+                          f.key === "status" && opt === "complete"
+                            ? "passed"
+                            : opt;
+                        const isChecked = f.values.includes(opt);
+                        return (
+                          <button
+                            key={opt}
+                            onClick={() => toggleFilter(f.values, f.set, opt)}
+                            className={`w-full text-left px-2 py-1 text-xs hover:bg-[var(--surface-raised)] font-mono flex items-center gap-2 rounded ${isChecked ? f.activeText : ""}`}
+                          >
+                            <span
+                              className={`w-3 h-3 rounded border flex items-center justify-center text-[9px] ${isChecked ? `${f.activeBg} border-current` : "border-[var(--border)]"}`}
+                            >
+                              {isChecked && "✓"}
+                            </span>
+                            {f.key === "branch"
+                              ? `⎇ ${displayOpt}`
+                              : displayOpt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Filter bar */}
+              <div className="flex items-center px-2 py-1.5 gap-1">
+                <span className="text-[var(--muted)] text-xs mr-0.5">
+                  Filter:
+                </span>
+                {[
+                  {
+                    key: "repo",
+                    label: "REPO",
+                    values: filterRepo,
+                    set: setFilterRepo,
+                    options: repos,
+                    color: "text-cyan-400",
+                    activeBg: "bg-cyan-500/15",
+                    activeText: "text-cyan-300",
+                  },
+                  {
+                    key: "workflow",
+                    label: "PIPELINE",
+                    values: filterWorkflow,
+                    set: setFilterWorkflow,
+                    options: workflows,
+                    color: "text-violet-400",
+                    activeBg: "bg-violet-500/15",
+                    activeText: "text-violet-300",
+                  },
+                  {
+                    key: "tag",
+                    label: "TAG",
+                    values: filterTag,
+                    set: setFilterTag,
+                    options: allTags,
+                    color: "text-pink-400",
+                    activeBg: "bg-pink-500/15",
+                    activeText: "text-pink-300",
+                  },
+                  {
+                    key: "branch",
+                    label: "BRANCH",
+                    values: filterBranch,
+                    set: setFilterBranch,
+                    options: branches,
+                    color: "text-amber-400",
+                    activeBg: "bg-amber-500/15",
+                    activeText: "text-amber-300",
+                  },
+                  {
+                    key: "status",
+                    label: "STATUS",
+                    values: filterStatus,
+                    set: setFilterStatus,
+                    options: statuses,
+                    color: "text-emerald-400",
+                    activeBg: "bg-emerald-500/15",
+                    activeText: "text-emerald-300",
+                  },
+                ].map((f) => (
+                  <div key={f.key} className="relative">
+                    <button
+                      onClick={() =>
+                        setOpenDropdown(openDropdown === f.key ? null : f.key)
+                      }
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
+                        f.values.length
+                          ? `${f.activeBg} ${f.activeText}`
+                          : `text-[var(--muted)] hover:${f.color}`
+                      }`}
+                    >
+                      {f.label}
+                      {f.values.length > 0 ? ` (${f.values.length})` : ""}{" "}
+                      <span className="text-[8px]">▾</span>
+                    </button>
+                    {openDropdown === f.key && (
+                      <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[160px] max-h-48 overflow-y-auto">
+                        {f.values.length > 0 && (
+                          <button
+                            onClick={() => {
+                              f.set([]);
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] text-[var(--muted)] border-b border-[var(--border)]"
+                          >
+                            Clear all
+                          </button>
+                        )}
+                        {f.options.map((opt) => {
+                          const displayOpt =
+                            f.key === "status" && opt === "complete"
+                              ? "passed"
+                              : opt;
+                          const isSelected = f.values.includes(opt);
+                          return (
+                            <button
+                              key={opt}
+                              onClick={() => toggleFilter(f.values, f.set, opt)}
+                              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] font-mono flex items-center gap-2 ${isSelected ? f.activeText : ""}`}
+                            >
+                              <span
+                                className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${isSelected ? `${f.activeBg} border-current` : "border-[var(--border)]"}`}
+                              >
+                                {isSelected && "✓"}
+                              </span>
+                              {f.key === "branch"
+                                ? `⎇ ${displayOpt}`
+                                : displayOpt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Active filters */}
+              {activeFilterCount > 0 && (
+                <div className="flex items-center gap-1 px-2 pb-1.5 flex-wrap">
+                  {filterRepo.map((v) => (
+                    <span
+                      key={`r-${v}`}
+                      className="inline-flex items-center gap-1 bg-cyan-500/15 text-cyan-300 px-2 py-0.5 rounded text-xs font-mono"
+                    >
+                      {v}
+                      <button
+                        onClick={() =>
+                          toggleFilter(filterRepo, setFilterRepo, v)
+                        }
+                        className="hover:text-white"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {filterWorkflow.map((v) => (
+                    <span
+                      key={`w-${v}`}
+                      className="inline-flex items-center gap-1 bg-violet-500/15 text-violet-300 px-2 py-0.5 rounded text-xs font-mono"
+                    >
+                      {v}
+                      <button
+                        onClick={() =>
+                          toggleFilter(filterWorkflow, setFilterWorkflow, v)
+                        }
+                        className="hover:text-white"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {filterTag.map((v) => (
+                    <span
+                      key={`t-${v}`}
+                      className="inline-flex items-center gap-1 bg-pink-500/15 text-pink-300 px-2 py-0.5 rounded text-xs font-mono"
+                    >
+                      {v}
+                      <button
+                        onClick={() => toggleFilter(filterTag, setFilterTag, v)}
+                        className="hover:text-white"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {filterBranch.map((v) => (
+                    <span
+                      key={`b-${v}`}
+                      className="inline-flex items-center gap-1 bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded text-xs font-mono"
+                    >
+                      ⎇ {v}
+                      <button
+                        onClick={() =>
+                          toggleFilter(filterBranch, setFilterBranch, v)
+                        }
+                        className="hover:text-white"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {filterStatus.map((v) => (
+                    <span
+                      key={`s-${v}`}
+                      className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-300 px-2 py-0.5 rounded text-xs font-mono"
+                    >
+                      {v === "complete" ? "passed" : v}
+                      <button
+                        onClick={() =>
+                          toggleFilter(filterStatus, setFilterStatus, v)
+                        }
+                        className="hover:text-white"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    onClick={() => {
+                      setFilterRepo([]);
+                      setFilterBranch([]);
+                      setFilterStatus([]);
+                      setFilterWorkflow([]);
+                      setFilterTag([]);
+                    }}
+                    className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-1"
+                  >
+                    clear all
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {topLevel.map((job) => {
+            const isActive = selectedWorkflow === job.id;
+            return (
+              <div
+                key={job.id}
+                data-job-id={job.id}
+                className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${isActive ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
+                onClick={() => {
+                  if (isActive) {
+                    setSelectedWorkflow(null);
+                    setSelectedJob(null);
+                  } else {
+                    setSelectedWorkflow(job.id);
+                    setSelectedJob(job.id);
+                  }
+                }}
+              >
+                {workflow ? (
+                  /* Compact: colored dot + workflow name + time */
+                  <div className="flex items-center gap-2">
+                    <Tooltip
+                      content={
+                        <>
+                          {job.status === "complete" ? "passed" : job.status}
+                          {job.result?.duration
+                            ? ` in ${(job.result.duration / 1e9).toFixed(1)}s`
+                            : ""}
+                        </>
+                      }
+                    >
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                          job.status === "complete"
+                            ? "bg-green-400"
+                            : job.status === "failed"
+                              ? "bg-red-400"
+                              : job.status === "running" ||
+                                  job.status === "claimed"
+                                ? "bg-indigo-400 animate-pulse"
+                                : job.status === "pending"
+                                  ? "bg-yellow-400 animate-pulse"
+                                  : job.status === "cancelled"
+                                    ? "bg-gray-400"
+                                    : "bg-gray-500"
+                        }`}
+                      />
+                    </Tooltip>
+                    <Tooltip
+                      content={
+                        <>
+                          <span className="text-[var(--muted)]">Pipeline:</span>{" "}
+                          {job.pipeline}
+                          <br />
+                          <span className="text-[var(--muted)]">
+                            Repo:
+                          </span>{" "}
+                          {job.repo_name || "unknown"}
+                          <br />
+                          <span className="text-[var(--muted)]">
+                            Branch:
+                          </span>{" "}
+                          {job.branch}
+                          <br />
+                          <span className="text-[var(--muted)]">ID:</span>{" "}
+                          <span className="font-mono">{job.id}</span>
+                          {job.status_detail && (
+                            <>
+                              <br />
+                              <span className="text-[var(--muted)]">
+                                Activity:
+                              </span>{" "}
+                              {job.status_detail}
+                            </>
+                          )}
+                          {job.retried_as && (
+                            <>
+                              <br />
+                              <span className="text-yellow-400">
+                                Retried as #{job.retried_as}
+                              </span>
+                            </>
+                          )}
+                          {job.retry_of && (
+                            <>
+                              <br />
+                              <span className="text-cyan-400">
+                                Retry of #{job.retry_of}
+                              </span>
+                            </>
+                          )}
+                        </>
+                      }
+                    >
+                      <span className="text-xs text-violet-300 truncate">
+                        {job.pipeline}
+                      </span>
+                    </Tooltip>
+                    <span className="ml-auto shrink-0">
+                      <Tooltip
+                        content={
+                          <>
+                            <span className="text-[var(--muted)]">
+                              Created:
+                            </span>{" "}
+                            {new Date(job.created_at).toLocaleString()}
+                            <br />
+                            {job.claimed_at && (
+                              <>
+                                <span className="text-[var(--muted)]">
+                                  Claimed:
+                                </span>{" "}
+                                {new Date(job.claimed_at).toLocaleString()}
+                                <br />
+                              </>
+                            )}
+                            <span className="text-[var(--muted)]">
+                              Duration:
+                            </span>{" "}
+                            {job.result?.duration
+                              ? `${(job.result.duration / 1e9).toFixed(1)}s`
+                              : "in progress"}
+                          </>
+                        }
+                      >
+                        <span className="text-[10px] font-mono text-[var(--muted)]">
+                          <TimeAgo ts={job.created_at} />
+                        </span>
+                      </Tooltip>
+                    </span>
+                  </div>
+                ) : (
+                  /* Full: status, repo, workflow, branch, duration, time */
+                  <>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <StatusLabel status={job.status} />
+                      <span className="text-cyan-400/70 text-xs">
+                        {job.repo_name || "repo"}
+                      </span>
+                      <span className="text-[var(--muted)] text-xs">/</span>
+                      <span className="font-medium text-sm text-violet-300 truncate">
+                        {job.pipeline}
+                      </span>
+                      <span className="ml-auto text-xs font-mono shrink-0">
+                        <Duration ns={job.result?.duration || 0} />
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                      {job.branch && (
+                        <span className="text-amber-400/70">
+                          ⎇ {job.branch}
+                        </span>
+                      )}
+                      {job.commit && (
+                        <span className="font-mono">{job.commit}</span>
+                      )}
+                      <span className="ml-auto font-mono">
+                        {new Date(job.created_at).toLocaleTimeString()}
+                      </span>
+                      <span>
+                        (<TimeAgo ts={job.created_at} />)
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {topLevel.length === 0 && (
+            <div className="p-8 text-center text-[var(--muted)] text-sm">
+              {filterRepo.length ||
+              filterBranch.length ||
+              filterStatus.length ||
+              filterWorkflow.length ||
+              filterTag.length
+                ? "No matching jobs"
+                : "No jobs yet"}
+            </div>
+          )}
+        </div>
+        {/* Pagination footer */}
+        {total > pageSize && (
+          <div className="border-t border-[var(--border)] shrink-0 flex items-center justify-between px-3 py-2 text-xs">
+            <span className="text-[var(--muted)]">
+              {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of{" "}
+              {total}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(Math.max(0, page - 1))}
+                disabled={page === 0}
+                className="px-2 py-1 rounded bg-[var(--surface-raised)] hover:bg-[var(--surface)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                ← prev
+              </button>
+              <span className="text-[var(--muted)] px-2">
+                {page + 1}/{Math.max(1, Math.ceil(total / pageSize))}
+              </span>
+              <button
+                onClick={() => setPage(page + 1)}
+                disabled={(page + 1) * pageSize >= total}
+                className="px-2 py-1 rounded bg-[var(--surface-raised)] hover:bg-[var(--surface)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                next →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Middle: Jobs panel */}
+      {workflow && (
+        <div className="w-48 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
+          <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            Jobs ({workflowChildren.length + 1})
+          </div>
+          {/* Parent job */}
+          <div
+            className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selectedJob === workflow.id ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
+            onClick={() => setSelectedJob(workflow.id)}
+          >
+            <div className="flex items-center gap-2">
+              <Tooltip
+                content={
+                  <>
+                    {workflow.status === "complete"
+                      ? "passed"
+                      : workflow.status}
+                  </>
+                }
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${dagStatusDot(workflow.status)}`}
+                />
+              </Tooltip>
+              <span className="text-xs text-violet-300 truncate">
+                {workflow.pipeline}
+              </span>
+            </div>
+          </div>
+          {/* Child jobs */}
+          {workflowChildren.map((child) => (
+            <div
+              key={child.id}
+              className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selectedJob === child.id ? "bg-[var(--surface-raised)] border-l-2 border-l-indigo-400" : ""}`}
+              onClick={() => setSelectedJob(child.id)}
+            >
+              <div className="flex items-center gap-2">
+                <Tooltip
+                  content={
+                    <>
+                      {child.status === "complete" ? "passed" : child.status}
+                      {child.result?.duration
+                        ? ` in ${(child.result.duration / 1e9).toFixed(1)}s`
+                        : ""}
+                    </>
+                  }
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${dagStatusDot(child.status)}`}
+                  />
+                </Tooltip>
+                <span className="text-xs truncate">
+                  {child.env?.TEST_NAME || child.pipeline}
+                </span>
+                <span className="ml-auto text-[10px] font-mono text-[var(--muted)] shrink-0">
+                  <Duration ns={child.result?.duration || 0} />
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Right: Detail + Logs */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {selected ? (
+          <>
+            {/* Summary — collapsible */}
+            <div className="border-b border-[var(--border)] shrink-0">
+              <div className="flex items-center gap-2 px-4 py-2 text-xs">
+                <button
+                  onClick={() => toggle("summary")}
+                  className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  <span className="w-4 text-center">
+                    {collapsed.summary ? "▸" : "▾"}
+                  </span>
+                  <StatusLabel status={selected.status} />
+                  {selected.result?.failure_reason && (
+                    <FailureReasonBadge
+                      reason={selected.result.failure_reason}
+                      exitCode={selected.result.exit_code}
+                      compact
+                    />
+                  )}
+                  <span className="text-cyan-400">
+                    {selected.repo_name || "repo"}
+                  </span>
+                  <span className="text-[var(--muted)]">/</span>
+                  <span className="font-bold text-sm text-violet-300">
+                    {selected.pipeline}
+                  </span>
+                </button>
+                <span
+                  className="font-mono text-[var(--muted)] cursor-pointer hover:text-[var(--foreground)]"
+                  onClick={() => navigator.clipboard.writeText(selected.id)}
+                >
+                  #{selected.id}
+                </span>
+                <span className="ml-auto flex items-center gap-2">
+                  <BreakpointButton jobId={selected.id} />
+                  {(selected.status === "running" ||
+                    selected.status === "claimed" ||
+                    selected.status === "pending") && (
+                    <CancelButton jobId={selected.id} onDone={refresh} />
+                  )}
+                  <RetryButton
+                    jobId={selected.id}
+                    app={selected.pipeline}
+                    onDone={refresh}
+                  />
+                  <button
+                    onClick={() => setShowTrigger(!showTrigger)}
+                    className="bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-green-500/30 transition-colors"
+                  >
+                    Run
+                  </button>
+                </span>
+              </div>
+              {!collapsed.summary && (
+                <div className="px-4 pb-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                  {selected.commit && (
+                    <div className="text-[var(--muted)]">
+                      Commit:{" "}
+                      {selected.github_owner && selected.github_repo ? (
+                        <a
+                          href={`https://github.com/${selected.github_owner}/${selected.github_repo}/commit/${selected.github_sha || selected.commit}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-400 font-mono hover:underline"
+                        >
+                          {selected.commit}
+                        </a>
+                      ) : (
+                        <span className="text-[var(--foreground)] font-mono">
+                          {selected.commit}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <div className="text-[var(--muted)]">
+                    Branch:{" "}
+                    {selected.github_owner && selected.github_repo ? (
+                      <a
+                        href={`https://github.com/${selected.github_owner}/${selected.github_repo}/tree/${selected.branch}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-amber-400 font-mono hover:underline"
+                      >
+                        ⎇ {selected.branch}
+                      </a>
+                    ) : (
+                      <span className="text-amber-400 font-mono">
+                        ⎇ {selected.branch}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[var(--muted)]">
+                    Agent:{" "}
+                    <span className="text-[var(--foreground)] font-mono">
+                      {selected.agent_id || "pending"}
+                    </span>
+                  </div>
+                  <div className="text-[var(--muted)]">
+                    Started:{" "}
+                    <span className="text-[var(--foreground)] font-mono">
+                      {new Date(selected.created_at).toLocaleTimeString()}
+                    </span>{" "}
+                    <span className="text-[var(--muted)]">
+                      (<TimeAgo ts={selected.created_at} />)
+                    </span>
+                  </div>
+                  {selected.claimed_at && (
+                    <div className="text-[var(--muted)]">
+                      Claimed:{" "}
+                      <span className="text-[var(--foreground)] font-mono">
+                        {new Date(selected.claimed_at).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
+                  {selected.status_detail && (
+                    <div className="text-[var(--muted)]">
+                      Activity:{" "}
+                      <span className="text-[var(--foreground)] font-mono">
+                        {selected.status_detail}
+                      </span>
+                    </div>
+                  )}
+                  {(selected.status === "running" ||
+                    selected.status === "claimed") &&
+                    selected.last_heartbeat && (
+                      <div className="text-[var(--muted)]">
+                        Heartbeat:{" "}
+                        <HeartbeatLabel
+                          lastHeartbeat={selected.last_heartbeat}
+                        />
+                      </div>
+                    )}
+                  {selected.retry_of && (
+                    <div className="text-[var(--muted)]">
+                      Retry of:{" "}
+                      <button
+                        onClick={() => {
+                          const el = document.querySelector(
+                            `[data-job-id="${selected.retry_of}"]`,
+                          );
+                          if (el) (el as HTMLElement).click();
+                        }}
+                        className="text-cyan-400 font-mono hover:underline"
+                      >
+                        #{selected.retry_of}
+                      </button>
+                    </div>
+                  )}
+                  {selected.retried_as && (
+                    <div className="text-[var(--muted)]">
+                      Retried as:{" "}
+                      <button
+                        onClick={() => {
+                          const el = document.querySelector(
+                            `[data-job-id="${selected.retried_as}"]`,
+                          );
+                          if (el) (el as HTMLElement).click();
+                        }}
+                        className="text-yellow-400 font-mono hover:underline"
+                      >
+                        #{selected.retried_as}
+                      </button>
+                    </div>
+                  )}
+                  {selected.prefer && (
+                    <div className="text-[var(--muted)]">
+                      Prefer:{" "}
+                      <span className="text-indigo-400">{selected.prefer}</span>
+                    </div>
+                  )}
+                  {selected.require && (
+                    <div className="text-[var(--muted)]">
+                      Require:{" "}
+                      <span className="text-orange-400">
+                        {selected.require}
+                      </span>
+                    </div>
+                  )}
+                  {selected.env?.TEST_NAME && (
+                    <div className="text-[var(--muted)]">
+                      Test:{" "}
+                      <span className="text-[var(--foreground)]">
+                        {selected.env.TEST_NAME}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Failure reason banner */}
+              {selected.status === "failed" &&
+                selected.result?.failure_reason && (
+                  <div
+                    className={`mx-4 mb-3 px-3 py-2 rounded border text-xs font-mono ${
+                      selected.result.failure_reason === "oom_killed"
+                        ? "bg-orange-500/10 border-orange-500/30 text-orange-300"
+                        : "bg-red-500/10 border-red-500/30 text-red-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <FailureReasonBadge
+                        reason={selected.result.failure_reason}
+                        exitCode={selected.result.exit_code}
+                      />
+                    </div>
+                    {selected.result.failure_reason === "oom_killed" && (
+                      <div className="text-[11px] opacity-80 mt-1">
+                        The container exceeded its memory limit and was killed
+                        by the kernel. Check the resource usage chart below or
+                        increase the memory limit.
+                      </div>
+                    )}
+                    {selected.result.failure_reason === "agent_lost" && (
+                      <div className="text-[11px] opacity-80 mt-1">
+                        The runner stopped sending heartbeats. The pod may have
+                        crashed, been evicted, or lost network connectivity.
+                      </div>
+                    )}
+                    {selected.result.failure_reason === "timeout" && (
+                      <div className="text-[11px] opacity-80 mt-1">
+                        The job exceeded its configured execution timeout.
+                        Consider increasing the timeout or optimizing the
+                        pipeline.
+                      </div>
+                    )}
+                    {selected.result.failure_reason === "queue_timeout" && (
+                      <div className="text-[11px] opacity-80 mt-1">
+                        No agent claimed this job in time. Check that agents are
+                        running and match the pipeline&apos;s scheduling
+                        constraints.
+                      </div>
+                    )}
+                  </div>
+                )}
+            </div>
+
+            {showTrigger && (
+              <div className="border-b border-[var(--border)] shrink-0 p-4">
+                <TriggerForm
+                  pipeline={selected.pipeline}
+                  onTriggered={refresh}
+                  onClose={() => setShowTrigger(false)}
+                />
+              </div>
+            )}
+
+            {/* DAG — collapsible */}
+            {workflowChildren.length > 0 && (
+              <div className="border-b border-[var(--border)] shrink-0">
+                <button
+                  onClick={() => toggle("dag")}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  <span className="w-4 text-center">
+                    {collapsed.dag ? "▸" : "▾"}
+                  </span>
+                  <span className="font-semibold text-[var(--foreground)]">
+                    DAG
+                  </span>
+                  <span className="font-mono">
+                    {workflowChildren.length} jobs
+                  </span>
+                </button>
+                {!collapsed.dag && (
+                  <div className="px-4 pb-3">
+                    <JobDAG
+                      parent={workflow!}
+                      children={workflowChildren}
+                      selectedJob={selectedJob}
+                      onSelect={setSelectedJob}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Pipeline — collapsible */}
+            {selected.result?.pipeline_result && (
+              <div className="border-b border-[var(--border)] shrink-0">
+                <button
+                  onClick={() => toggle("pipeline")}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  <span className="w-4 text-center">
+                    {collapsed.pipeline ? "▸" : "▾"}
+                  </span>
+                  <span className="font-semibold text-[var(--foreground)]">
+                    Pipeline
+                  </span>
+                  <span className="font-mono">
+                    {selected.result.pipeline_result.jobs.length} jobs
+                  </span>
+                </button>
+                {!collapsed.pipeline && (
+                  <div className="p-4">
+                    <PipelineViewComponent
+                      result={selected.result.pipeline_result as any}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Execution timeline — collapsible */}
+            <div className="border-b border-[var(--border)] shrink-0">
+              <button
+                onClick={() => toggle("timeline")}
+                className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <span className="w-4 text-center">
+                  {collapsed.timeline ? "▸" : "▾"}
+                </span>
+                <span className="font-semibold text-[var(--foreground)]">
+                  Timeline
+                </span>
+              </button>
+              {!collapsed.timeline && (
+                <div className="px-4 pb-3">
+                  <ExecutionWaterfall job={selected} />
+                </div>
+              )}
+            </div>
+
+            {/* Resource usage chart — collapsible */}
+            <div className="border-b border-[var(--border)] shrink-0">
+              <button
+                onClick={() => toggle("resources")}
+                className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <span className="w-4 text-center">
+                  {collapsed.resources ? "▸" : "▾"}
+                </span>
+                <span className="font-semibold text-[var(--foreground)]">
+                  Resources
+                </span>
+              </button>
+              {!collapsed.resources && (
+                <div className="px-4 pb-3">
+                  <ResourceChart
+                    jobId={selected.id}
+                    isRunning={
+                      selected.status === "running" ||
+                      selected.status === "claimed"
+                    }
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Logs */}
+            <div className="flex-1 overflow-y-auto bg-[#0d1117] p-4 relative">
+              <button
+                onClick={() =>
+                  setCollapsed((prev) => {
+                    const allCollapsed =
+                      prev.summary &&
+                      prev.dag &&
+                      prev.pipeline &&
+                      prev.resources;
+                    return {
+                      ...prev,
+                      summary: !allCollapsed,
+                      dag: !allCollapsed,
+                      pipeline: !allCollapsed,
+                      resources: !allCollapsed,
+                    };
+                  })
+                }
+                className="absolute top-2 right-2 z-10 bg-[#1e293b] border border-[var(--border)] rounded px-2 py-1 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+              >
+                {collapsed.summary &&
+                collapsed.dag &&
+                collapsed.pipeline &&
+                collapsed.resources
+                  ? "▼"
+                  : "▲"}
+              </button>
+              {(() => {
+                // Running/claimed jobs: show live logs first
+                if (
+                  selected.status === "running" ||
+                  selected.status === "claimed"
+                )
+                  return (
+                    <LiveLogs
+                      jobId={selected.id}
+                      logsUrl={selected.logs_url}
+                      fallbackLogs={selected.result?.logs}
+                    />
+                  );
+                if (selected.status === "pending")
+                  return (
+                    <div className="text-sm text-[var(--muted)]">
+                      Waiting for an agent to claim this job...
+                    </div>
+                  );
+                // Completed jobs: show stored logs
+                const pipelineJob =
+                  selected.result?.pipeline_result?.jobs?.find(
+                    (j: { name: string }) => j.name === selected.pipeline,
+                  );
+                if (pipelineJob?.steps && pipelineJob.steps.length > 0)
+                  return (
+                    <StepView steps={pipelineJob.steps} jobId={selected.id} />
+                  );
+                if (
+                  selected.result?.logs &&
+                  hasStepBanners(selected.result.logs)
+                )
+                  return (
+                    <LogBucketViewFromRaw
+                      rawLog={selected.result.logs}
+                      jobId={selected.id}
+                    />
+                  );
+                if (selected.result?.logs)
+                  return (
+                    <LogBucketViewFromRaw
+                      rawLog={selected.result.logs}
+                      jobId={selected.id}
+                    />
+                  );
+                // Inline logs are empty — common for cached jobs now
+                // that the controller no longer duplicates the bytes
+                // into result_json. Fall back to sparkwing-logs via
+                // the Job's logs_url (which the controller routes to
+                // the origin for cache hits).
+                if (selected.logs_url)
+                  return (
+                    <RemoteLogs
+                      jobId={selected.id}
+                      logsUrl={selected.logs_url}
+                    />
+                  );
+                return (
+                  <div className="text-sm text-[var(--muted)]">
+                    No logs available for this job.
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-[var(--muted)] text-sm">
+            ← Select a pipeline to view details and logs
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CancelButton({
+  jobId,
+  onDone,
+}: {
+  jobId: string;
+  onDone: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  return (
+    <button
+      onClick={async (e) => {
+        e.stopPropagation();
+        setLoading(true);
+        await cancelJob(jobId);
+        onDone();
+        setLoading(false);
+      }}
+      disabled={loading}
+      className="bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-red-500/30 transition-colors"
+    >
+      {loading ? "..." : "Cancel"}
+    </button>
+  );
+}
+
+function RetryButton({
+  jobId,
+  app,
+  onDone,
+}: {
+  jobId: string;
+  app: string;
+  onDone: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  return (
+    <button
+      onClick={async (e) => {
+        e.stopPropagation();
+        setLoading(true);
+        await retryJob(jobId);
+        onDone();
+        setLoading(false);
+      }}
+      disabled={loading}
+      className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-indigo-500/30 transition-colors"
+    >
+      {loading ? "..." : "Rerun"}
+    </button>
+  );
+}
+
+function BreakpointButton({ jobId }: { jobId: string }) {
+  const [status, setStatus] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      const res = await getBreakpointStatus(jobId);
+      setStatus(res.status);
+    };
+    check();
+    const i = setInterval(check, 2000);
+    return () => clearInterval(i);
+  }, [jobId]);
+
+  if (status !== "paused") return null;
+
+  return (
+    <button
+      onClick={async () => {
+        setLoading(true);
+        await continueBreakpoint(jobId);
+        setStatus("continue");
+        setLoading(false);
+      }}
+      disabled={loading}
+      className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-3 py-1 rounded text-xs font-medium hover:bg-yellow-500/30 transition-colors animate-pulse"
+    >
+      {loading ? "Resuming..." : "⏸ Breakpoint paused — Click to continue"}
+    </button>
+  );
+}

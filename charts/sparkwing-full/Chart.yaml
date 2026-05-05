@@ -1,0 +1,74 @@
+apiVersion: v2
+name: sparkwing-full
+description: |
+  Full self-host Helm chart for Sparkwing -- deploys the complete OSS
+  stack into a single cluster: sparkwing-controller (orchestrator) +
+  sparkwing-web (dashboard SPA host) + the runner-side bundle
+  (runner + cache + logs) via a sub-chart dependency.
+
+  This is the chart referenced in decision 0001 ("Enterprise
+  self-host" topology) for operators who want everything in one
+  place. Single-tenant, single-instance posture: HA features
+  (multi-replica controller, leader election, replication) are paid
+  tier and live in separate charts.
+
+  If you only need a runner pool against a remote controller (cloud
+  or external self-host), install sparkwing-runner-bundle directly
+  instead -- this chart pulls it in as a dependency, so re-using
+  the same values surface.
+
+# application: deploys runnable workloads (Deployments, Services,
+# PVCs, RBAC). Not a library chart -- nothing imports these
+# templates as helpers.
+type: application
+
+# Chart version: SemVer for this chart's *templates / values surface*.
+# Independent of appVersion. Bump on any user-facing values.yaml
+# change or template structural change.
+version: 0.1.0
+
+# appVersion: the sparkwing release this chart is *known to be tested
+# against*. Per-component image.tag in values.yaml overrides it.
+appVersion: "0.1.0"
+
+keywords:
+  - sparkwing
+  - ci
+  - cd
+  - self-host
+  - controller
+  - dashboard
+
+home: https://github.com/sparkwing-dev/sparkwing
+sources:
+  - https://github.com/sparkwing-dev/sparkwing
+
+maintainers:
+  - name: sparkwing
+    url: https://github.com/sparkwing-dev/sparkwing
+
+# The runner-side bundle is a separate chart so it can also be
+# installed standalone (Cloud + self-hosted-runners topology). Here
+# we pull it in as a sub-chart so a single `helm install
+# sparkwing-full` deploys controller + web + runner + cache + logs
+# in one shot.
+#
+# repository: file://../sparkwing-runner-bundle
+#   Local sibling-directory dependency. After `helm dep up`, the
+#   sub-chart is vendored under charts/. For a real release this
+#   would point at the published chart repo -- out of scope for
+#   ORG-005.
+#
+# Sub-chart values are overridden under the
+# `sparkwing-runner-bundle:` key in this chart's values.yaml. By
+# default we wire `controller.url` to point at the bundled
+# sparkwing-controller Service, so the runner immediately claims
+# work from the in-cluster controller.
+dependencies:
+  - name: sparkwing-runner-bundle
+    version: "0.1.0"
+    repository: "file://../sparkwing-runner-bundle"
+    # condition lets operators disable the runner side entirely
+    # (e.g. they already have runners deployed elsewhere and just
+    # want this chart to manage controller+web).
+    condition: sparkwing-runner-bundle.enabled

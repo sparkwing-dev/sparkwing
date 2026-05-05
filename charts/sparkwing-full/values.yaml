@@ -1,0 +1,282 @@
+# Default values for sparkwing-full.
+#
+# Override with `helm install ... --set key=value` or `-f
+# my-values.yaml`. The minimum-viable override is nothing -- a bare
+# `helm install` produces a working single-instance stack assuming
+# the cluster has a default StorageClass.
+#
+# Sections, in roughly the order operators care about:
+#   1. controller.*               -- the orchestrator
+#   2. web.*                      -- the dashboard SPA host
+#   3. ingress.*                  -- optional public ingress for the dashboard
+#   4. serviceAccount / rbac      -- shared identity / permissions
+#   5. secrets.*                  -- references to pre-created Secrets
+#   6. imagePullSecrets / security defaults
+#   7. sparkwing-runner-bundle.*  -- sub-chart pass-through
+
+# -----------------------------------------------------------------------
+# 1. Controller. Single-instance orchestrator: owns the state DB,
+#    serves /api/v1/*, hosts webhooks. HA-multi-instance lives in the
+#    paid feature pack (ORG-006+); the OSS posture is one pod.
+# -----------------------------------------------------------------------
+controller:
+  # Single-instance is the OSS posture (decision 0001). Don't bump
+  # this -- the controller's state DB is local SQLite; multi-replica
+  # would corrupt it. HA controller is a paid feature.
+  replicas: 1
+
+  image:
+    # Default assumes images publish to GHCR under sparkwing-dev. If
+    # you mirror images internally, point this at your registry.
+    # NOTE: GHCR publishing is in flight (ISS-052). Until images
+    # land, build locally from sparkwing-platform/build/Dockerfile.sparkwing
+    # or point at your own mirror.
+    repository: ghcr.io/sparkwing-dev/sparkwing-controller
+    tag: "" # falls back to .Chart.AppVersion when empty
+    pullPolicy: IfNotPresent
+
+  # Bind addr. Service maps :80 -> :4344. Match the controller's
+  # default to keep things readable; operators rarely need to change.
+  port: 4344
+
+  # The controller's warm-PVC pool feature (creates ephemeral
+  # warmer pods to pre-pull images onto PVCs). Requires K8s API
+  # access in the install namespace; rbac.create must be true.
+  pool:
+    enabled: true
+    # Empty = use install namespace. Override only if the controller
+    # should manage a pool in a *different* namespace.
+    namespace: ""
+
+  # Webhook signing. Enables HMAC verification on
+  # POST /webhooks/github/{pipeline}. Reference an existing Secret
+  # (rotation = kubectl edit secret + rollout restart, no helm
+  # upgrade needed).
+  githubWebhookSecret:
+    # Empty name disables the env var injection (webhooks accept
+    # without HMAC verification -- fine for kind/dev, not prod).
+    name: ""
+    key: webhook-secret
+
+  # Secrets-store encryption key. When set, the controller encrypts
+  # secret values stored in the state DB at rest. Without it, the
+  # controller logs a WARNING at startup and stores plaintext.
+  # Generate with `openssl rand -base64 32`.
+  secretsKey:
+    # Empty name disables; controller runs with plaintext secrets.
+    name: ""
+    key: key
+
+  # State DB lives on a PVC. Single-instance, so RWO is fine.
+  storage:
+    # "pvc" mounts a PersistentVolumeClaim at /data.
+    # "emptyDir" runs ephemeral (state lost on pod restart -- only
+    # useful for kind / CI smoke tests).
+    type: pvc
+    pvc:
+      size: 5Gi
+      # Empty = use the cluster default StorageClass.
+      storageClassName: ""
+      # PVC survives `helm uninstall` so run history isn't wiped on
+      # an accidental uninstall. Operators who want a clean slate
+      # can `kubectl delete pvc` after.
+      keepOnUninstall: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # Optional Pod-level scheduling controls. Empty = no constraints.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Extra env passed to the controller container. Useful for
+  # forwarding GOPRIVATE, OTEL_*, etc.
+  extraEnv: []
+  # - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+  #   value: http://tempo.monitoring.svc.cluster.local:4318/v1/traces
+
+# -----------------------------------------------------------------------
+# 2. Web. Thin SPA host that proxies /api/v1/* to the controller.
+#    Stateless; the embedded Next.js bundle ships in the binary.
+# -----------------------------------------------------------------------
+web:
+  # Web is stateless -- a 2-replica deployment is fine if you want
+  # zero-downtime rollouts. Default 1 to match the OSS single-pod
+  # posture.
+  replicas: 1
+
+  image:
+    repository: ghcr.io/sparkwing-dev/sparkwing-web
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # Bind addr. Service maps :80 -> :4343.
+  port: 4343
+
+  controller:
+    # Where the web pod proxies /api/v1/* to. Empty = auto-generate
+    # to point at the in-cluster controller Service. Override if
+    # you're running the controller out-of-cluster or in another
+    # namespace.
+    url: ""
+
+  logs:
+    # Where the web pod proxies log reads to. Empty = auto-generate
+    # to point at the bundled sparkwing-runner-bundle's logs
+    # Service. Set explicitly if logs live elsewhere.
+    url: ""
+
+  # Bearer token the web pod uses when proxying to the controller
+  # (so the controller's /api/v1/auth checks pass). Reference an
+  # existing Secret; the chart does NOT create it.
+  tokenSecret:
+    name: ""
+    key: token
+
+  # Force unauthenticated browsers to /login. Leave false on a
+  # fresh install (the tokens table is empty so login would loop);
+  # turn on after bootstrapping the admin user.
+  requireLogin: false
+
+  # Optional: explicit API URL injected into the dashboard's
+  # client-side bundle. Leave empty to use same-origin (the
+  # browser hits the same host that served the SPA). Set when
+  # the API is hosted on a different domain than the SPA.
+  apiUrl: ""
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  extraEnv: []
+
+# -----------------------------------------------------------------------
+# 3. Ingress. Optional public ingress for the dashboard. Disabled by
+#    default -- many self-host operators front the dashboard with
+#    their own Ingress / Gateway / cloud LB and don't want this chart
+#    to manage one.
+# -----------------------------------------------------------------------
+ingress:
+  enabled: false
+  # IngressClass name. Empty = cluster default.
+  className: ""
+  annotations: {}
+  # - cert-manager.io/cluster-issuer: letsencrypt-prod
+  # - nginx.ingress.kubernetes.io/proxy-body-size: 50m
+  hosts:
+    - host: sparkwing.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - hosts:
+  #     - sparkwing.example.com
+  #   secretName: sparkwing-tls
+
+# -----------------------------------------------------------------------
+# 4. ServiceAccount + RBAC for the controller. The controller needs
+#    K8s API access for its warm-PVC pool: namespaces/get, PVC CRUD,
+#    pods CRUD, configmaps/events read, plus a small ClusterRole on
+#    storage.k8s.io/storageclasses for the startup default-class
+#    probe.
+#
+#    The runner-side SA + RBAC is managed by the sparkwing-runner-bundle
+#    sub-chart -- see `sparkwing-runner-bundle.serviceAccount` /
+#    `sparkwing-runner-bundle.rbac` below.
+# -----------------------------------------------------------------------
+serviceAccount:
+  # Create a SA for the controller pod (recommended). Set false if
+  # you've pre-created one with custom IRSA / Workload Identity
+  # annotations.
+  create: true
+  # Empty + create=true => name generated from .Release.Name.
+  name: ""
+  # Annotations on the SA. Common case: IRSA (EKS) role binding for
+  # ECR pulls, S3 backups, etc.
+  annotations: {}
+
+rbac:
+  # Create the namespace-scoped Role + RoleBinding for the
+  # controller's pool feature. Set false to drop the chart-managed
+  # RBAC (e.g. you've pre-applied your own).
+  create: true
+  # Cluster-scoped read on storage.k8s.io/storageclasses for the
+  # startup default-class probe. Without it the controller logs a
+  # one-line "skipped: list StorageClasses: forbidden" warning at
+  # boot but otherwise functions. Set false in clusters where you
+  # can't grant ClusterRole.
+  clusterStorageClasses: true
+
+# -----------------------------------------------------------------------
+# 5. Image pull secrets applied to controller + web. The runner-side
+#    bundle has its own (`sparkwing-runner-bundle.imagePullSecrets`).
+# -----------------------------------------------------------------------
+imagePullSecrets: []
+# - name: ghcr-pull-secret
+
+# -----------------------------------------------------------------------
+# 6. Pod-level security defaults. Applied to controller + web
+#    unless a per-component override sets its own.
+# -----------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+# -----------------------------------------------------------------------
+# 7. Sub-chart: sparkwing-runner-bundle. All values nested here are
+#    forwarded as the sub-chart's `.Values`. Defaults below override
+#    the sub-chart's own defaults so the runner immediately claims
+#    work from the in-cluster controller installed by THIS chart.
+#
+#    Full schema in charts/sparkwing-runner-bundle/values.yaml.
+# -----------------------------------------------------------------------
+sparkwing-runner-bundle:
+  # Toggles whether this chart deploys the runner side at all. Off
+  # if operators want only controller+web in this release (e.g.
+  # they're running runners in another cluster).
+  enabled: true
+
+  controller:
+    # Wire the bundled runner at the bundled controller's Service.
+    # Empty here means "the chart will inject the in-cluster
+    # service URL via templates/_helpers.tpl". If you want the
+    # runner to claim from a *different* controller, override.
+    url: ""
+    # The controller-token Secret the runner mounts. Empty =
+    # unauthenticated to the controller (fine for kind / dev;
+    # not for shared installs). Pre-create with:
+    #   kubectl create secret generic sparkwing-token \
+    #     --from-literal=token=<token>
+    tokenSecret:
+      name: ""
+      key: token
+
+  # Sensible defaults for a single-cluster install. Override if you
+  # need a beefier runner pool or different label set.
+  runner:
+    replicas: 1
+    labels:
+      - cluster
+    maxConcurrent: 2
+    alsoClaimTriggers: true

@@ -1,0 +1,260 @@
+# Default values for sparkwing-runner-bundle.
+#
+# Override anything below with `helm install ... --set key=value` or
+# `-f my-values.yaml`. The minimum-viable override is `controller.url`;
+# everything else has a working default for a kind / single-node test
+# cluster.
+#
+# Sections, in roughly the order operators care about:
+#   1. controller.*          -- where to claim work from
+#   2. runner.*              -- the work-claiming pool
+#   3. cache.*               -- git + artifact + go-mod proxy
+#   4. logs.*                -- log streaming + storage service
+#   5. serviceAccount.*      -- shared SA for runner pods
+#   6. secrets.*             -- references to pre-created Secrets
+#   7. image / imagePullSecrets -- shared image policy
+
+# -----------------------------------------------------------------------
+# 1. Controller (the orchestrator this runner pool claims work from).
+# -----------------------------------------------------------------------
+controller:
+  # REQUIRED. URL the runner uses to claim triggers / nodes. Must be
+  # reachable from inside the cluster. Typical values:
+  #   https://app.sparkwing.dev                (Sparkwing Cloud)
+  #   http://sparkwing-controller.sparkwing.svc.cluster.local
+  #     (in-cluster controller, e.g. enterprise self-host)
+  url: ""
+
+  # Auth token used by both the runner and the logs service when
+  # talking to the controller. Reference an existing Secret created
+  # out-of-band; the chart does NOT create the secret itself (so you
+  # can rotate it without `helm upgrade`).
+  tokenSecret:
+    # Name of the Secret in the install namespace.
+    name: ""
+    # Key inside the Secret holding the bearer token.
+    key: token
+
+# -----------------------------------------------------------------------
+# 2. Runner pool. Long-lived pods that poll the controller, claim
+#    triggers + nodes, and execute pipeline DAGs.
+# -----------------------------------------------------------------------
+runner:
+  # Pool size. RollingUpdate strategy means a `helm upgrade` doesn't
+  # drop all pods at once; one in-flight claim's worth of work may
+  # need to retry but the pool stays available.
+  replicas: 2
+
+  image:
+    # Image registry path. Default assumes images publish to GHCR
+    # under sparkwing-dev. If you mirror images internally, point
+    # this at your registry.
+    repository: ghcr.io/sparkwing-dev/sparkwing-runner
+    tag: "" # falls back to .Chart.AppVersion when empty
+    pullPolicy: IfNotPresent
+
+  # --label flags advertised to the controller for RunsOn matching.
+  # Each label entry can be a bare tag ("cluster") or a key=value
+  # ("arch=arm64"). Pipelines call .RunsOn("cluster") /
+  # .RunsOn("arch=arm64") to pin to this pool.
+  labels:
+    - cluster
+
+  # Max nodes a single runner pod will execute concurrently before
+  # backpressuring the claim loop. Memory-bound on the remote-compile
+  # fallback path; tune up if your compute is roomy.
+  maxConcurrent: 2
+
+  # Poll interval for the controller claim loop. 500ms is the prod
+  # default; raise to 2s+ if you have many pools and want to spread
+  # request load.
+  pollInterval: 500ms
+
+  # --max-claims-before-restart: kubelet-restart the pod after N
+  # successful claims to shed accumulated goroutines / drift / cached
+  # state from previous jobs. 0 disables.
+  maxClaimsBeforeRestart: 25
+
+  # When true, this pool also claims TRIGGERS (the webhook-side
+  # workflow that turns a push into a Run). Single-pool deployments
+  # want this on. Multi-pool deployments typically dedicate one pool
+  # to trigger-claiming and leave the others node-only.
+  alsoClaimTriggers: true
+
+  # Optional metrics scrape port. The Prometheus client registry on
+  # the runner serves /metrics here. Disable by setting to 0.
+  metricsPort: 9090
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  # Optional Pod-level scheduling controls. Empty = no constraints.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Extra env passed to the runner container. Useful for forwarding
+  # AWS_REGION, GOPRIVATE, DOCKER_HOST, etc.
+  extraEnv: []
+  # - name: GOPRIVATE
+  #   value: github.com/your-org
+
+  # Extra volume mounts (e.g. ssh keys, custom CA bundles).
+  extraVolumes: []
+  extraVolumeMounts: []
+
+# -----------------------------------------------------------------------
+# 3. Cache. Git + artifact + go-mod proxy that runners hit on every
+#    fetch. Single-replica with RWO storage; cluster-local Service
+#    means runners never egress for a clone.
+# -----------------------------------------------------------------------
+cache:
+  # Set to false to skip the cache entirely (e.g. if you're providing
+  # your own git mirror). Runners will hit upstream Git directly,
+  # which works but loses the gitcache speedup.
+  enabled: true
+
+  # RWO PVC -- replicas: 1 is the only safe value.
+  replicas: 1
+
+  image:
+    repository: ghcr.io/sparkwing-dev/sparkwing-cache
+    tag: "" # falls back to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+
+  service:
+    # ClusterIP: only the runner needs to reach the cache. Set to
+    # LoadBalancer / NodePort if you have an out-of-cluster runner
+    # pool you want to share this cache with.
+    type: ClusterIP
+    port: 80
+    targetPort: 8090
+
+  # Repos the cache should pre-warm / proxy. Format matches the
+  # GITCACHE_REPOS env: comma-separated `<alias>=<git-url>` pairs.
+  # Empty = cache acts as a transparent proxy with no preloaded
+  # repos.
+  repos: ""
+
+  # Optional ssh-key Secret for cloning private repos over SSH. The
+  # cache will mount it read-only at /etc/ssh-key if the Secret
+  # exists; if it doesn't, the volume is `optional: true` and the
+  # cache falls back to https.
+  sshKeySecret:
+    name: ssh-key
+
+  storage:
+    # Persistence is recommended -- a fresh cache pod takes minutes
+    # to warm. Disable only for ephemeral tests.
+    enabled: true
+    size: 20Gi
+    # Empty = use the cluster default StorageClass. Set to e.g.
+    # "gp3" / "premium-rwo" / "managed-csi" if you want a specific
+    # class.
+    storageClassName: ""
+    # Reclaim policy is governed by the StorageClass; the chart
+    # doesn't override it. Be aware that `helm uninstall` will not
+    # delete the PVC by default (annotation
+    # helm.sh/resource-policy=keep).
+    keepOnUninstall: true
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------
+# 4. Logs. Stores per-run log files and serves the SSE tail endpoint
+#    the controller / dashboard read from.
+# -----------------------------------------------------------------------
+logs:
+  enabled: true
+
+  replicas: 1
+
+  image:
+    repository: ghcr.io/sparkwing-dev/sparkwing-logs
+    tag: "" # falls back to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 4345
+
+  # Path prefix served by the logs pod. The controller is told this
+  # URL at trigger time; it appears in the dashboard's log links.
+  rootPath: /data/logs
+
+  storage:
+    # Disable for an ephemeral / test deployment; log history is
+    # lost on every pod restart.
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+    keepOnUninstall: true
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------
+# 5. ServiceAccount. Shared by runner + cache + logs.
+# -----------------------------------------------------------------------
+serviceAccount:
+  # Create one (true) or use an existing SA you've already RBAC'd.
+  create: true
+  # Empty + create=true => name is generated from .Release.Name.
+  name: ""
+  # Annotations on the SA. Common case: IRSA (EKS) role binding for
+  # ECR / S3 access on the runner side.
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
+  annotations: {}
+
+# RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
+# Runners do NOT need cluster-admin. The default permissions cover
+# the runner reading its own pod metadata and surfacing pod events
+# to the controller for debugging.
+rbac:
+  create: true
+
+# -----------------------------------------------------------------------
+# 6. Image pull secrets. Same list applies to all three components.
+# -----------------------------------------------------------------------
+imagePullSecrets: []
+# - name: ghcr-pull-secret
+
+# -----------------------------------------------------------------------
+# 7. Pod-level security defaults. Applied uniformly across runner +
+#    cache + logs unless a per-component override sets its own.
+# -----------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]

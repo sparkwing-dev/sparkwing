@@ -1,0 +1,46 @@
+{{- if .Values.rbac.create -}}
+# Namespace-scoped Role: runner pods read their own pod metadata so
+# the orchestrator can surface pod events / exit reasons in the
+# dashboard. Deliberately scoped to the install namespace; if your
+# pipelines need cluster-wide access (kubectl apply across
+# namespaces, etc.) add a separate ClusterRole/Binding outside this
+# chart.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "sparkwing-runner-bundle.fullname" . }}-runner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.labels" . | nindent 4 }}
+rules:
+  # Read own pod info (status, events) for self-debugging output.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # Read configmaps + secrets the runner is configured to mount.
+  # Deliberately not write -- pipelines that need to mutate cluster
+  # state (kubectl apply, sealed-secrets, etc.) ship credentials
+  # via separate Roles outside this chart.
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sparkwing-runner-bundle.fullname" . }}-runner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "sparkwing-runner-bundle.fullname" . }}-runner
+{{- end }}

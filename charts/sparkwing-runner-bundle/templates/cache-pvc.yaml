@@ -1,0 +1,26 @@
+{{- if and .Values.cache.enabled .Values.cache.storage.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sparkwing-runner-bundle.cache.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "cache") | nindent 4 }}
+  {{- if .Values.cache.storage.keepOnUninstall }}
+  annotations:
+    # PVCs survive `helm uninstall` by default with this annotation.
+    # Cache rebuild after a re-install takes minutes; keeping the
+    # volume avoids that pain. Operators who want a clean wipe can
+    # `kubectl delete pvc` after uninstall.
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.cache.storage.size | quote }}
+  {{- if .Values.cache.storage.storageClassName }}
+  storageClassName: {{ .Values.cache.storage.storageClassName | quote }}
+  {{- end }}
+{{- end }}

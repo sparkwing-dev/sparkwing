@@ -1,0 +1,252 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { type Job, getJobs } from "@/lib/api";
+
+interface FlakyReport {
+  runs: number;
+  timestamp: string;
+  flaky: { name: string; passes: number; fails: number; total: number; rate: number }[];
+  always_failing: { name: string; total: number }[];
+  stable_count: number;
+  total_tests: number;
+}
+
+export default function TestsPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [report, setReport] = useState<FlakyReport | null>(null);
+
+  const refresh = useCallback(async () => {
+    const [jobData] = await Promise.all([getJobs()]);
+    setJobs(jobData);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const i = setInterval(refresh, 3000);
+    return () => clearInterval(i);
+  }, []);
+
+  // Try to load flaky report from the API (served as static file)
+  useEffect(() => {
+    fetch("/flaky-report.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setReport(data); })
+      .catch(() => {});
+  }, []);
+
+  // Derive test job stats from workflow jobs
+  const testJobs = jobs.filter((j) => j.pipeline?.includes("test") || j.env?.TEST_SHARD);
+  const recentTests = testJobs
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 50);
+
+  const passed = recentTests.filter((j) => j.result?.success).length;
+  const failed = recentTests.filter((j) => j.result && !j.result.success).length;
+  const running = recentTests.filter((j) => j.status === "running" || j.status === "claimed").length;
+
+  // Pass rate by app
+  const appStats: Record<string, { passed: number; failed: number; total: number }> = {};
+  for (const j of recentTests) {
+    if (!j.result) continue;
+    const app = j.pipeline;
+    if (!appStats[app]) appStats[app] = { passed: 0, failed: 0, total: 0 };
+    appStats[app].total++;
+    if (j.result.success) appStats[app].passed++;
+    else appStats[app].failed++;
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-5xl mx-auto w-full">
+      <h1 className="text-lg font-bold mb-1">Tests</h1>
+      <p className="text-sm text-[var(--muted)] mb-6">
+        Test job results, flaky test detection, and pass rates.
+      </p>
+
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
+          <div className="text-xs text-[var(--muted)]">Recent test jobs</div>
+          <div className="text-2xl font-bold">{recentTests.length}</div>
+        </div>
+        <div className="bg-[var(--surface)] border border-green-500/30 rounded-lg p-4">
+          <div className="text-xs text-green-400">Passed</div>
+          <div className="text-2xl font-bold text-green-400">{passed}</div>
+        </div>
+        <div className="bg-[var(--surface)] border border-red-500/30 rounded-lg p-4">
+          <div className="text-xs text-red-400">Failed</div>
+          <div className="text-2xl font-bold text-red-400">{failed}</div>
+        </div>
+        <div className="bg-[var(--surface)] border border-indigo-500/30 rounded-lg p-4">
+          <div className="text-xs text-indigo-400">Running</div>
+          <div className="text-2xl font-bold text-indigo-400">{running}</div>
+        </div>
+      </div>
+
+      {/* Flaky test report */}
+      <section className="mb-8">
+        <h2 className="font-medium mb-3">Flaky test detection</h2>
+        {report ? (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
+            <div className="flex items-center gap-4 mb-4 text-sm">
+              <span className="text-[var(--muted)]">Last run: {new Date(report.timestamp).toLocaleString()}</span>
+              <span className="text-[var(--muted)]">{report.runs} iterations</span>
+              <span className="text-[var(--muted)]">{report.total_tests} tests</span>
+            </div>
+
+            {report.flaky.length > 0 && (
+              <div className="mb-4">
+                <div className="text-sm font-medium text-yellow-400 mb-2">
+                  Flaky tests ({report.flaky.length})
+                </div>
+                <div className="space-y-2">
+                  {report.flaky.map((t) => (
+                    <div key={t.name} className="flex items-center gap-3 bg-[var(--background)] rounded px-3 py-2 text-sm">
+                      <div className="w-2 h-2 rounded-full bg-yellow-400" />
+                      <span className="font-mono">{t.name}</span>
+                      <span className="ml-auto text-[var(--muted)]">
+                        {t.passes}/{t.total} pass
+                      </span>
+                      <div className="w-24 bg-[var(--surface)] rounded-full h-2">
+                        <div
+                          className="bg-yellow-400 h-2 rounded-full"
+                          style={{ width: `${t.rate}%` }}
+                        />
+                      </div>
+                      <span className="font-mono text-yellow-400 w-12 text-right">{t.rate}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {report.always_failing.length > 0 && (
+              <div className="mb-4">
+                <div className="text-sm font-medium text-red-400 mb-2">
+                  Always failing ({report.always_failing.length})
+                </div>
+                {report.always_failing.map((t) => (
+                  <div key={t.name} className="flex items-center gap-3 bg-[var(--background)] rounded px-3 py-2 text-sm">
+                    <div className="w-2 h-2 rounded-full bg-red-400" />
+                    <span className="font-mono">{t.name}</span>
+                    <span className="ml-auto text-red-400">0/{t.total} pass</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="text-sm text-green-400">
+              {report.stable_count} stable tests
+            </div>
+          </div>
+        ) : (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--muted)]">
+            <p>No flaky test report available.</p>
+            <p className="mt-2">
+              Run: <code className="bg-[var(--background)] px-1.5 py-0.5 rounded text-xs font-mono">./bin/flaky-detect.sh 20</code>
+            </p>
+            <p className="mt-1 text-xs">
+              The report will appear here after it generates flaky-report.json.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Pass rate by app */}
+      {Object.keys(appStats).length > 0 && (
+        <section className="mb-8">
+          <h2 className="font-medium mb-3">Pass rate by workflow</h2>
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
+                  <th className="px-3 py-2 text-left font-medium">Workflow</th>
+                  <th className="px-3 py-2 text-left font-medium">Passed</th>
+                  <th className="px-3 py-2 text-left font-medium">Failed</th>
+                  <th className="px-3 py-2 text-left font-medium">Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(appStats).map(([app, stats]) => {
+                  const rate = stats.total > 0 ? Math.round((stats.passed / stats.total) * 100) : 0;
+                  return (
+                    <tr key={app} className="border-b border-[var(--border)]">
+                      <td className="px-3 py-2 font-mono">{app}</td>
+                      <td className="px-3 py-2 text-green-400">{stats.passed}</td>
+                      <td className="px-3 py-2 text-red-400">{stats.failed}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 bg-[var(--background)] rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full ${rate >= 80 ? "bg-green-400" : rate >= 50 ? "bg-yellow-400" : "bg-red-400"}`}
+                              style={{ width: `${rate}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-mono">{rate}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Recent test jobs */}
+      <section>
+        <h2 className="font-medium mb-3">Recent test jobs ({recentTests.length})</h2>
+        {recentTests.length === 0 ? (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--muted)]">
+            No test jobs found. Test jobs are identified by app name containing "test" or having a TEST_SHARD env var.
+          </div>
+        ) : (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
+                  <th className="px-3 py-2 text-left font-medium">Status</th>
+                  <th className="px-3 py-2 text-left font-medium">App</th>
+                  <th className="px-3 py-2 text-left font-medium">Shard</th>
+                  <th className="px-3 py-2 text-left font-medium">Duration</th>
+                  <th className="px-3 py-2 text-left font-medium">Agent</th>
+                  <th className="px-3 py-2 text-left font-medium">Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentTests.slice(0, 20).map((j) => (
+                  <tr
+                    key={j.id}
+                    className="border-b border-[var(--border)] hover:bg-[var(--surface-raised)] cursor-pointer"
+                    onClick={() => window.location.href = `/workflows?job=${j.id}`}
+                  >
+                    <td className="px-3 py-2">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-mono ${
+                        j.status === "complete" ? "bg-green-500/15 text-green-400" :
+                        j.status === "failed" ? "bg-red-500/15 text-red-400" :
+                        j.status === "running" ? "bg-indigo-500/15 text-indigo-400" :
+                        "bg-gray-500/15 text-gray-400"
+                      }`}>
+                        {j.status === "complete" ? "pass" : j.status === "failed" ? "fail" : j.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 font-mono">{j.pipeline}</td>
+                    <td className="px-3 py-2 font-mono text-[var(--muted)]">{j.env?.TEST_SHARD ?? "—"}</td>
+                    <td className="px-3 py-2 font-mono">
+                      {j.result?.duration ? `${(j.result.duration / 1e9).toFixed(1)}s` : "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-[var(--muted)]">{j.agent_id || "—"}</td>
+                    <td className="px-3 py-2 text-xs text-[var(--muted)]">
+                      {new Date(j.created_at).toLocaleTimeString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}

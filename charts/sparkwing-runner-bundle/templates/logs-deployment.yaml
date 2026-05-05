@@ -1,0 +1,101 @@
+{{- if .Values.logs.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkwing-runner-bundle.logs.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "logs") | nindent 4 }}
+spec:
+  replicas: {{ .Values.logs.replicas }}
+  # Recreate, not RollingUpdate: same RWO-PVC reasoning as the cache
+  # Deployment.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "logs") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "logs") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.logs.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.logs.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.logs.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: logs
+          image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.logs.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.logs.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/usr/local/bin/sparkwing-logs"]
+          args:
+            - --addr
+            - {{ printf "0.0.0.0:%d" (int .Values.logs.service.targetPort) | quote }}
+            - --root
+            - {{ .Values.logs.rootPath | quote }}
+            {{- if .Values.controller.url }}
+            # whoami-based auth: incoming Authorization headers get
+            # forwarded to <controller>/api/v1/auth/whoami to resolve
+            # principal + scopes. Empty controller = auth off
+            # (kind / single-tenant test only).
+            - --controller
+            - {{ .Values.controller.url | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.logs.service.targetPort }}
+          env:
+            {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
+            - name: SPARKWING_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.tokenSecret.name | quote }}
+                  key: {{ .Values.controller.tokenSecret.key | quote }}
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.logs.rootPath | quote }}
+          resources:
+            {{- toYaml .Values.logs.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          {{- if .Values.logs.storage.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "sparkwing-runner-bundle.logs.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

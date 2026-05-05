@@ -1,0 +1,281 @@
+# LOCAL-009: cross-compile + upload sparkwing binaries to GH Releases
+# on every tag push. Replaces the manual gh release upload scripts
+# under .claude-scratch/.
+#
+# Trigger: any tag matching v*. Release notes are auto-generated from
+# PR titles since the previous tag.
+#
+# To cut a release locally:
+#     wing release --version vX.Y.Z   # in sparkwing-platform/.sparkwing
+# That pipeline pushes the tag; this workflow takes it from there.
+#
+# Shape: matrix-parallel build (one runner per binary × platform),
+# followed by a single release job that downloads every artifact and
+# pushes the bundle to GH Releases. Cuts wall-clock from ~8 min
+# sequential to ~1-2 min parallel; trades runner-minutes for latency.
+#
+# Per-binary platform constraints:
+#   - sparkwing, sparkwing-local-ws -- run on user laptops; 6 platforms
+#     (linux/darwin/windows × amd64/arm64).
+#   - sparkwing-cache, controller, runner, logs, web -- server-side
+#     components meant for Linux containers. linux + darwin (for local
+#     dev) only; windows is excluded because (a) nobody runs these on
+#     a Windows host, and (b) sparkwing-cache uses POSIX-only Setpgid
+#     + syscall.Kill so it won't compile there anyway.
+
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # required: gh release create + upload
+  packages: write # required: GHCR push (build-images job)
+  id-token: write # required: cosign keyless OIDC (build-images job)
+
+jobs:
+  build:
+    # fail-fast: false so a cell failure doesn't cancel siblings and
+    # leave the release half-built. The release job's `needs: build`
+    # gate then refuses to run on partial results, so the user sees a
+    # clean "build failed; release not created" outcome rather than a
+    # release with missing assets.
+    strategy:
+      fail-fast: false
+      matrix:
+        binary:
+          - sparkwing
+          - sparkwing-local-ws
+          - sparkwing-cache
+          - sparkwing-controller
+          - sparkwing-runner
+          - sparkwing-logs
+          - sparkwing-web
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - { binary: sparkwing-cache, goos: windows }
+          - { binary: sparkwing-controller, goos: windows }
+          - { binary: sparkwing-runner, goos: windows }
+          - { binary: sparkwing-logs, goos: windows }
+          - { binary: sparkwing-web, goos: windows }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
+
+      # actions/setup-go@v5 caches ~/go/pkg/mod (module deps); this
+      # cache covers ~/.cache/go-build (compiled object files for
+      # stdlib + dep packages, target-specific). Key includes goos +
+      # goarch since cross-compiled object files don't share, and
+      # all .go files so any source change invalidates fully. Cells
+      # with the same (goos, goarch) but different binary share the
+      # cache because the cached entries are binary-agnostic.
+      - name: Cache Go build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('**/go.sum', '**/*.go') }}
+          restore-keys: |
+            gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-
+
+      # sparkwing-web embeds the dashboard via //go:embed all:next-out.
+      # Other binaries don't import internal/web, so they skip this.
+      - name: Setup Node (sparkwing-web only)
+        if: matrix.binary == 'sparkwing-web'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build dashboard + populate next-out (sparkwing-web only)
+        if: matrix.binary == 'sparkwing-web'
+        run: |
+          set -euo pipefail
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          rm -rf internal/web/next-out
+          mkdir -p internal/web/next-out
+          cp -R web/out/. internal/web/next-out/
+          touch internal/web/next-out/.gitkeep
+
+      - name: Build ${{ matrix.binary }} for ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          BIN: ${{ matrix.binary }}
+          # GitHub injects ${{ github.ref_name }} as the tag name;
+          # keep it in an env so the run script reads it as a normal
+          # bash var rather than YAML interpolation in a heredoc.
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ext=""
+          [ "$GOOS" = "windows" ] && ext=".exe"
+          out="dist/${BIN}-${GOOS}-${GOARCH}${ext}"
+          echo "==> $out"
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${TAG}" \
+            -o "$out" "./cmd/${BIN}"
+          ls -la "$out"
+
+      # Each cell uploads exactly one binary as a uniquely-named
+      # artifact. The release job re-downloads all of them with
+      # merge-multiple so they land in a single dist/ for sha256sum +
+      # upload. retention-days: 1 because these are immediately
+      # consumed by the release job; no value in keeping them after.
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.binary }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ matrix.binary }}-${{ matrix.goos }}-${{ matrix.goarch }}*
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # gh release create --generate-notes shells out to git to walk
+      # commits since the last tag, so the release job needs the repo
+      # history. We don't build anything here; checkout is purely to
+      # let --generate-notes work. fetch-depth: 0 because shallow
+      # clones can miss the previous tag and produce empty notes.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # merge-multiple: true flattens every artifact into one dist/
+      # without per-artifact subdirectories, so sha256sum + the upload
+      # glob below pick up all files in one shot.
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Compute SHA256SUMS
+        # Operators verifying via install.sh (or any third party) can
+        # diff against this; the contents are fully reproducible from
+        # the GitHub-Actions-built binaries.
+        working-directory: dist
+        run: |
+          sha256sum sparkwing-* > SHA256SUMS
+          ls -la
+
+      - name: Create or update release + upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          # Idempotent: re-running this workflow against the same tag
+          # (after a fix) replaces existing assets via --clobber.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "==> existing release $tag; updating assets"
+          else
+            echo "==> creating release $tag"
+            gh release create "$tag" \
+              --title "sparkwing CLI $tag" \
+              --generate-notes
+          fi
+          # Glob expands to every binary + SHA256SUMS in one upload
+          # call; --clobber replaces existing assets on workflow re-run.
+          gh release upload "$tag" --clobber dist/*
+          gh release view "$tag"
+
+  # ISS-052: publish multi-arch container images for the cluster-side
+  # binaries to GHCR on every v* tag push. Independent of the binary
+  # build matrix above -- they share the trigger but not artifacts;
+  # buildx compiles from source inside the Docker stage. Sibling job
+  # (not gated on `build`) so an image build failure never blocks
+  # the GitHub-Release upload, and vice versa.
+  #
+  # Five images, parameterized off a single Dockerfile (build/
+  # Dockerfile.binary) via --build-arg BINARY=. The matrix fans out
+  # one runner per binary; each does its own buildx + push + sign.
+  #
+  # Cosign signs keylessly via GitHub OIDC (id-token: write at the
+  # workflow level). No KMS key, no secret -- the signature commits
+  # the workflow + repo + tag triple as the signing identity, which
+  # `cosign verify --certificate-identity-regexp ...` can attest.
+  build-images:
+    name: Build & publish container images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        binary:
+          - sparkwing-controller
+          - sparkwing-runner
+          - sparkwing-cache
+          - sparkwing-logs
+          - sparkwing-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action emits the full tag list:
+      #   - type=ref,event=tag       -> ghcr.io/.../<bin>:v1.2.3
+      #   - type=raw,value=latest    -> ghcr.io/.../<bin>:latest
+      # `:latest` is gated on the tag NOT containing a hyphen so
+      # pre-release tags (v1.2.3-rc.1) don't clobber the stable
+      # rolling pointer.
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/sparkwing-dev/${{ matrix.binary }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: build/Dockerfile.binary
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BINARY=${{ matrix.binary }}
+            SPARKWING_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=${{ matrix.binary }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      # Keyless signing: cosign requests a short-lived cert from
+      # Fulcio, signed by the GitHub OIDC token, and uploads the
+      # signature to the same GHCR repository as `<digest>.sig`.
+      # `--yes` skips the interactive confirm prompt.
+      - name: Sign image (cosign keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes \
+            "ghcr.io/sparkwing-dev/${{ matrix.binary }}@${DIGEST}"

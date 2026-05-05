@@ -1,0 +1,22 @@
+{{- if and .Values.logs.enabled .Values.logs.storage.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sparkwing-runner-bundle.logs.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "logs") | nindent 4 }}
+  {{- if .Values.logs.storage.keepOnUninstall }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.logs.storage.size | quote }}
+  {{- if .Values.logs.storage.storageClassName }}
+  storageClassName: {{ .Values.logs.storage.storageClassName | quote }}
+  {{- end }}
+{{- end }}

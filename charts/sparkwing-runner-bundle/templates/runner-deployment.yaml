@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "runner") | nindent 4 }}
+spec:
+  replicas: {{ .Values.runner.replicas }}
+  # RollingUpdate so a `helm upgrade` doesn't drop the entire pool
+  # at once; the controller's lease reaper handles in-flight claims
+  # on the rolled pod.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "runner") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "runner") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.runner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.runner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.runner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: runner
+          image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # The runner image entrypoint is runner-entrypoint.sh which
+          # seeds ~/.netrc from $GITHUB_TOKEN before exec'ing the
+          # binary. Keep the wrapper in the command chain; pass
+          # subcommand + flags through args.
+          command:
+            - /usr/local/bin/runner-entrypoint.sh
+            - /usr/local/bin/sparkwing-runner
+          args:
+            - runner
+            {{- if .Values.controller.url }}
+            - {{ printf "--controller=%s" .Values.controller.url | quote }}
+            {{- end }}
+            {{- if .Values.logs.enabled }}
+            - {{ printf "--logs=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.logs.fullname" .) .Release.Namespace | quote }}
+            {{- end }}
+            {{- if .Values.cache.enabled }}
+            - {{ printf "--gitcache=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
+            {{- end }}
+            - {{ printf "--max-concurrent=%d" (int .Values.runner.maxConcurrent) | quote }}
+            - {{ printf "--poll=%s" .Values.runner.pollInterval | quote }}
+            {{- include "sparkwing-runner-bundle.runnerLabelArgs" . | nindent 12 }}
+            {{- if gt (int .Values.runner.metricsPort) 0 }}
+            - {{ printf "--metrics-addr=:%d" (int .Values.runner.metricsPort) | quote }}
+            {{- end }}
+            {{- if .Values.runner.alsoClaimTriggers }}
+            - --also-claim-triggers
+            {{- end }}
+            {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
+            - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}
+            {{- end }}
+          {{- if gt (int .Values.runner.metricsPort) 0 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.runner.metricsPort }}
+          {{- end }}
+          env:
+            # HOME on the writable scratch volume so runner-entrypoint
+            # can write ~/.netrc (private go-mod fetch) and `go build`
+            # has somewhere to land caches.
+            - name: HOME
+              value: /tmp/sparkwing
+            - name: SPARKWING_HOME
+              value: /tmp/sparkwing
+            - name: GOCACHE
+              value: /tmp/sparkwing/gocache
+            - name: GOMODCACHE
+              value: /tmp/sparkwing/gomodcache
+            - name: SPARKWING_BAKED_BINARY
+              value: /usr/local/bin/wing
+            {{- if .Values.cache.enabled }}
+            - name: SPARKWING_GITCACHE_URL
+              value: {{ printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
+            # Bearer token for both controller-claim auth and
+            # logs-service auth (logs forwards to controller's
+            # /api/v1/auth/whoami).
+            - name: SPARKWING_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.tokenSecret.name | quote }}
+                  key: {{ .Values.controller.tokenSecret.key | quote }}
+                  optional: true
+            {{- end }}
+            {{- with .Values.runner.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.runner.resources | nindent 12 }}
+          volumeMounts:
+            - name: sparkwing-home
+              mountPath: /tmp/sparkwing
+            {{- with .Values.runner.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: sparkwing-home
+          emptyDir: {}
+        {{- with .Values.runner.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
