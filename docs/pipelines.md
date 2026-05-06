@@ -481,9 +481,9 @@ timeout resolves it.
 
 ```go
 approve := sw.Job(plan, "approve-prod", &sw.Approval{
-    Message:   fmt.Sprintf("Promote %s to prod?", git.SHA),
-    Timeout:   2 * time.Hour,
-    OnTimeout: sw.ApprovalFail,
+    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
+    Timeout:  2 * time.Hour,
+    OnExpiry: sw.ApprovalFail,
 }).Needs(integStg)
 sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
 ```
@@ -495,8 +495,10 @@ Fields:
   weave in run-time values.
 - `Timeout` - maximum wait before the waiter writes a `timed_out`
   resolution itself. Zero (the default) means never time out.
-- `OnTimeout` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
+- `OnExpiry` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
   or `sw.ApprovalApprove`. Unrecognised values panic at plan time.
+  Named `OnExpiry` (not `OnTimeout`) so it doesn't read like
+  `Node.Timeout()`, which is unrelated.
 
 Resolution paths:
 

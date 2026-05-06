@@ -1255,7 +1255,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.Node) runner.Result {
 	})
 
 	timeoutMS := cfg.Timeout.Milliseconds()
-	onTimeout := string(cfg.OnTimeout)
+	onTimeout := string(cfg.OnExpiry)
 	if onTimeout == "" {
 		onTimeout = store.ApprovalOnTimeoutFail
 	}
@@ -1663,7 +1663,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 			sn.Approval = &snapshotApproval{
 				Message:   cfg.Message,
 				TimeoutMS: cfg.Timeout.Milliseconds(),
-				OnTimeout: string(cfg.OnTimeout),
+				OnTimeout: string(cfg.OnExpiry),
 			}
 		}
 		sn.Modifiers = nodeModifiersSnapshot(n)

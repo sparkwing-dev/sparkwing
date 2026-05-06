@@ -140,3 +140,29 @@ func TestMustSecret_PanicMessageIncludesName(t *testing.T) {
 	// No resolver installed -> Secret returns an error -> MustSecret panics.
 	MustSecret(context.Background(), "DATABASE_URL")
 }
+
+func TestMustConfig_PanicMessageIncludesName(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic")
+		}
+		msg := ""
+		switch v := r.(type) {
+		case error:
+			msg = v.Error()
+		case string:
+			msg = v
+		default:
+			t.Fatalf("panic of unexpected type %T: %v", r, r)
+		}
+		if !strings.Contains(msg, `"REGION"`) {
+			t.Fatalf("panic %q must include the config name", msg)
+		}
+		if !strings.Contains(msg, "MustConfig") {
+			t.Fatalf("panic %q should name the calling helper", msg)
+		}
+	}()
+	// No resolver installed -> Config returns an error -> MustConfig panics.
+	MustConfig(context.Background(), "REGION")
+}

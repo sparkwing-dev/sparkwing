@@ -7,6 +7,12 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **`sparkwing.MustConfig` for parity with `MustSecret` (SDK-036).**
+  `MustSecret(ctx, name)` has long had a panic-on-error shortcut for
+  call sites where a missing secret is genuinely a programmer
+  mistake; the sibling `Config` had no equivalent. `MustConfig` fills
+  the asymmetry — same shape, same trade-off (prefer the
+  error-returning form unless the value's absence is unrecoverable).
 - **Public sparkwing repo gains a `.sparkwing/` pipeline tree (Phase 4
   of the release-pipeline restructure).** Five wing pipelines now live
   in this repo so the platform release-all (in the sibling
@@ -102,6 +108,19 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   consumers keep working.
 
 ### Removed (BREAKING)
+- **`Approval.OnTimeout` field renamed to `Approval.OnExpiry`
+  (SDK-036).** The old name read as if it paralleled `Node.Timeout()`
+  (per-attempt execution budget), but the two fields are unrelated
+  concepts: `Approval.OnExpiry` decides how an unanswered gate
+  resolves once its `Timeout` elapses; `Node.Timeout()` bounds how
+  long a job step is allowed to run. Renamed the SDK-facing field to
+  break the accidental association. The internal store / wire
+  format (`store.Approval.OnTimeout`, `on_timeout` JSON field, DB
+  column) is unchanged so approvals already in flight still resolve.
+  Authors update by replacing `OnTimeout:` with `OnExpiry:` in
+  `&sparkwing.Approval{...}` literals — type and constants
+  (`ApprovalTimeoutPolicy`, `ApprovalFail` / `Deny` / `Approve`) are
+  unchanged.
 - **`sparkwing.JobNode` is gone; replaced by `sparkwing.NewDetachedNode`
   (SDK-035).** The detached-node primitive (used internally by
   `JobFanOutDynamic`, `Node.OnFailure`, and the orchestrator's

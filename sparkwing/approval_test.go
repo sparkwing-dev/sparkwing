@@ -10,9 +10,9 @@ import (
 func TestApproval_CreatesGateNode(t *testing.T) {
 	plan := NewPlan()
 	gate := Job(plan, "approve-prod", &Approval{
-		Message:   fmt.Sprintf("Promote %s to prod?", "abc123"),
-		Timeout:   2 * time.Hour,
-		OnTimeout: ApprovalDeny,
+		Message:  fmt.Sprintf("Promote %s to prod?", "abc123"),
+		Timeout:  2 * time.Hour,
+		OnExpiry: ApprovalDeny,
 	})
 	if !gate.IsApproval() {
 		t.Fatalf("IsApproval = false")
@@ -27,8 +27,8 @@ func TestApproval_CreatesGateNode(t *testing.T) {
 	if cfg.Timeout != 2*time.Hour {
 		t.Errorf("Timeout = %v", cfg.Timeout)
 	}
-	if cfg.OnTimeout != ApprovalDeny {
-		t.Errorf("OnTimeout = %q", cfg.OnTimeout)
+	if cfg.OnExpiry != ApprovalDeny {
+		t.Errorf("OnExpiry = %q", cfg.OnExpiry)
 	}
 	if plan.Node("approve-prod") != gate {
 		t.Errorf("plan.Node mismatch")
@@ -40,9 +40,9 @@ func TestApproval_ZeroValueIsEmptyPolicy(t *testing.T) {
 	gate := Job(plan, "g", &Approval{})
 	// The zero value of ApprovalTimeoutPolicy is "". The orchestrator
 	// treats it as ApprovalFail at dispatch time -- authors who want
-	// the default leave OnTimeout unset.
-	if got := gate.Approval().OnTimeout; got != "" {
-		t.Fatalf("default OnTimeout = %q, want zero value", got)
+	// the default leave OnExpiry unset.
+	if got := gate.Approval().OnExpiry; got != "" {
+		t.Fatalf("default OnExpiry = %q, want zero value", got)
 	}
 }
 
@@ -67,11 +67,11 @@ func TestApproval_EmptyIDPanics(t *testing.T) {
 	_ = Job(plan, "", &Approval{})
 }
 
-// Approval.OnTimeout used to silently ignore policies it didn't
+// Approval.OnExpiry used to silently ignore policies it didn't
 // recognize, leaving the gate on ApprovalFail without any signal to
 // the caller. A typo or stale constant should panic at plan
 // construction so the author sees it immediately.
-func TestApproval_InvalidOnTimeoutPanics(t *testing.T) {
+func TestApproval_InvalidOnExpiryPanics(t *testing.T) {
 	plan := NewPlan()
 	defer func() {
 		r := recover()
@@ -88,7 +88,7 @@ func TestApproval_InvalidOnTimeoutPanics(t *testing.T) {
 			t.Fatalf("panic value not stringy: %T", r)
 		}
 	}()
-	Job(plan, "g", &Approval{OnTimeout: ApprovalTimeoutPolicy("not-a-real-policy")})
+	Job(plan, "g", &Approval{OnExpiry: ApprovalTimeoutPolicy("not-a-real-policy")})
 }
 
 func TestApproval_RegularNodeIsNotApproval(t *testing.T) {

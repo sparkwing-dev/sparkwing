@@ -281,15 +281,16 @@ Approval gates register through `sw.Job` with the built-in
 
 ```go
 approve := sw.Job(plan, "approve-prod", &sw.Approval{
-    Message:   fmt.Sprintf("Promote %s to prod?", git.SHA),
-    Timeout:   2 * time.Hour,
-    OnTimeout: sw.ApprovalFail,
+    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
+    Timeout:  2 * time.Hour,
+    OnExpiry: sw.ApprovalFail,
 }).Needs(integStg)
 ```
 
-`OnTimeout` defaults to fail; valid values are `sw.ApprovalFail`,
+`OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
 `sw.ApprovalDeny`, `sw.ApprovalApprove`. Unknown values panic at
-plan time.
+plan time. (Named `OnExpiry` rather than `OnTimeout` to keep it
+distinct from `Node.Timeout()`, which bounds per-attempt execution.)
 
 Plan accessors (reads; methods on `*Plan`):
 
@@ -470,6 +471,7 @@ hatch `sparkwing.WithAwaitArgs(map[string]string{...})`.
 Secret(ctx, name) (string, error)        // resolve a cluster secret; auto-masked in logs
 MustSecret(ctx, name) string             // panic on miss
 Config(ctx, name) (string, error)        // unmasked config value
+MustConfig(ctx, name) string             // panic on miss
 ```
 
 Register a custom resolver for tests:

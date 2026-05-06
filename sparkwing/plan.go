@@ -105,14 +105,14 @@ func newNode(caller, id string, job Workable) *Node {
 	// Approval gates: the *Approval Job type is a marker -- Work() is
 	// empty and never executes; the orchestrator routes via n.approval.
 	if app, ok := job.(*Approval); ok {
-		switch app.OnTimeout {
+		switch app.OnExpiry {
 		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
 			// ok
 		default:
 			panic(fmt.Sprintf(
-				"sparkwing: %s(%q): Approval.OnTimeout = %q is not one of "+
+				"sparkwing: %s(%q): Approval.OnExpiry = %q is not one of "+
 					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
-				caller, id, app.OnTimeout))
+				caller, id, app.OnExpiry))
 		}
 		return &Node{
 			id:       id,
@@ -340,12 +340,12 @@ type Node struct {
 // gate. The orchestrator routes *Approval nodes through the
 // approval-waiter flow rather than dispatching Work; the gate
 // pauses until a human (via the dashboard or `sparkwing approve/deny`)
-// resolves it. Denied / timed-out gates fail per OnTimeout.
+// resolves it. Denied / expired gates fail per OnExpiry.
 //
 //	approve := sw.Job(plan, "approve-prod", &sparkwing.Approval{
-//	    Message:   fmt.Sprintf("Promote %s to prod?", git.SHA),
-//	    Timeout:   2 * time.Hour,
-//	    OnTimeout: sparkwing.ApprovalFail,
+//	    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
+//	    Timeout:  2 * time.Hour,
+//	    OnExpiry: sparkwing.ApprovalFail,
 //	}).Needs(integStg)
 //	sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
 //
@@ -359,11 +359,13 @@ type Approval struct {
 	// Timeout bounds how long the gate waits for a human answer. Zero
 	// means never time out.
 	Timeout time.Duration
-	// OnTimeout controls behavior when Timeout elapses. The zero value
-	// is ApprovalFail ("something went wrong, the gate wasn't
-	// answered"). ApprovalDeny treats no-answer as a soft "no" and
-	// ApprovalApprove as a soft "yes".
-	OnTimeout ApprovalTimeoutPolicy
+	// OnExpiry controls how an unanswered gate resolves once Timeout
+	// elapses. The zero value is ApprovalFail ("something went wrong,
+	// the gate wasn't answered"). ApprovalDeny treats no-answer as a
+	// soft "no" and ApprovalApprove as a soft "yes". Named OnExpiry
+	// rather than OnTimeout to avoid confusion with Node.Timeout(),
+	// which is unrelated (per-attempt execution budget).
+	OnExpiry ApprovalTimeoutPolicy
 }
 
 // Work satisfies the Job interface but never executes; Approval

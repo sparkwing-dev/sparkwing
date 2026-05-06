@@ -105,3 +105,14 @@ func MustSecret(ctx context.Context, name string) string {
 	}
 	return v
 }
+
+// MustConfig is Config that panics on error. Same trade-off as
+// MustSecret: prefer the error-returning form unless a missing value
+// is genuinely a programmer mistake.
+func MustConfig(ctx context.Context, name string) string {
+	v, err := Config(ctx, name)
+	if err != nil {
+		panic(fmt.Errorf("sparkwing.MustConfig(%q): %w", name, err))
+	}
+	return v
+}
