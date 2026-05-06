@@ -27,6 +27,13 @@ type Plan struct {
 
 	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
+
+	// inputs captures the typed Inputs value the registration's
+	// invoke wrapper parsed for this run. The orchestrator reads this
+	// back via Plan.Inputs() and installs it on dispatch ctx so step
+	// bodies can call sparkwing.Inputs[T](ctx) instead of threading
+	// the value through closures.
+	inputs any
 }
 
 // LintWarning is a non-fatal Plan-time advisory attached to a node.
@@ -39,6 +46,30 @@ type LintWarning struct {
 // NewPlan returns an empty Plan.
 func NewPlan() *Plan {
 	return &Plan{byID: map[string]*Node{}}
+}
+
+// Inputs returns the parsed Inputs value the orchestrator handed to
+// this pipeline's Plan() method, or nil for a Plan built directly
+// (outside the registration path). The orchestrator uses this at
+// dispatch time to install the value on each runner ctx via
+// sparkwing.WithInputs, so step bodies can call sparkwing.Inputs[T].
+//
+// Type-erased on purpose -- Plan can't carry a generic type
+// parameter; the typed Inputs[T] accessor does the assertion at the
+// call site.
+func (p *Plan) Inputs() any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.inputs
+}
+
+// setInputs stores the parsed Inputs value on the Plan. Called by
+// the registration's invoke wrapper after parseInputs returns;
+// pipeline authors don't call this directly.
+func (p *Plan) setInputs(in any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.inputs = in
 }
 
 // Nodes returns the plan's nodes in insertion order. For plans with

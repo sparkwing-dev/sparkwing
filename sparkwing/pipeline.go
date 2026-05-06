@@ -118,6 +118,11 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		// Mark ctx as plan-time so side-effect helpers panic if Plan()
 		// shells out instead of declaring a node that does the work.
 		plan := NewPlan()
+		// Capture the parsed Inputs on the Plan so the orchestrator
+		// can install them on dispatch ctx -- step bodies then read
+		// the same value via sparkwing.Inputs[T](ctx) without closure
+		// threading. (SDK-041.)
+		plan.setInputs(in)
 		if err := p.Plan(withPlanTime(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}

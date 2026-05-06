@@ -133,6 +133,13 @@ func RunNodeOnce(
 		secrets.NewCached(httpSource, masker).AsResolver())
 	_ = masker
 
+	// SDK-041: pod-side install of the typed Inputs the registration
+	// parsed, so step bodies can read via sparkwing.Inputs[T](ctx)
+	// without per-job closure threading.
+	if in := plan.Inputs(); in != nil {
+		ctx = sparkwing.WithInputs(ctx, in)
+	}
+
 	// Pod-side twin of dispatchState.pipelineRef.
 	ctx = sparkwing.WithPipelineResolver(ctx, sparkwing.PipelineResolverFunc(
 		func(innerCtx context.Context, pipeline, refNode string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {

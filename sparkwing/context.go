@@ -93,6 +93,7 @@ const (
 	keyPipelineAwaiter
 	keyJobStack
 	keySpawnHandler
+	keyInputs
 )
 
 // WithLogger returns a derived context carrying the given logger.

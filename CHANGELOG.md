@@ -98,6 +98,19 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   no-op: that's the explicit "disable caching" form.
 
 ### Added
+- **`sparkwing.Inputs[T](ctx) T` accessor for trigger inputs from
+  step bodies (SDK-041).** A pipeline's `Plan(ctx, plan, in T, rc)`
+  method receives the typed Inputs once; until now, reading the
+  same value from a step body deep in the DAG meant threading it
+  through closures or job-struct fields. The new `sw.Inputs[T](ctx)`
+  free function returns the parsed Inputs struct directly --
+  mirrors the runtime accessor shape of `sw.Secret(ctx, name)` /
+  `sw.Config(ctx, name)`. The orchestrator installs the value on
+  every node's runner ctx via `sparkwing.WithInputs(ctx, in)`
+  during dispatch, so step closures (in `JobFn`, `Job` Work bodies,
+  spawned children, etc.) see the same struct the Plan method
+  received. Panics outside a dispatch ctx or on a wrong concrete
+  type so a misuse is loud rather than silently zero-valued.
 - **`sparkwing.Approval` free function returning `*ApprovalGate` for
   manual gates (SDK-040).** Authors register approval gates via
   `sw.Approval(plan, id, sparkwing.ApprovalConfig{...})` instead of

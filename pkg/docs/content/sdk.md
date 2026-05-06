@@ -498,6 +498,35 @@ MustConfig(ctx, name) string             // panic on miss
 Register a custom resolver for tests:
 `WithSecretResolver(ctx, SecretResolverFunc(...))`.
 
+## Trigger inputs from step bodies
+
+The pipeline's `Plan(ctx, plan, in T, rc)` method receives the typed
+Inputs once. To read the same value from a step body deep in the
+DAG without threading it through closures or job-struct fields,
+call `sw.Inputs[T](ctx)`:
+
+```go
+type DeployArgs struct {
+    Service string `flag:"service"`
+    Env     string `flag:"env" default:"staging"`
+}
+
+func (Deploy) Plan(ctx context.Context, plan *sw.Plan, _ DeployArgs, rc sw.RunContext) error {
+    sw.Job(plan, "deploy", sw.JobFn(func(ctx context.Context) error {
+        args := sw.Inputs[DeployArgs](ctx)
+        return runDeploy(ctx, args.Service, args.Env)
+    }))
+    return nil
+}
+```
+
+Panics outside a dispatch ctx (no installer) or on a wrong concrete
+type. The orchestrator installs the parsed Inputs on every node's
+runner ctx automatically.
+
+For tests outside the orchestrator boundary:
+`WithInputs(ctx, args) context.Context`.
+
 ## Pipeline registration
 
 In `.sparkwing/jobs/<name>.go`:
