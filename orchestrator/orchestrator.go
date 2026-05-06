@@ -75,6 +75,15 @@ type Options struct {
 	StartAt string
 	StopAt  string
 
+	// DryRun selects the no-mutation dispatch path: every step's
+	// DryRunFn (or its apply Fn when the step is explicitly marked
+	// SafeWithoutDryRun) runs in place of the apply Fn. Steps that
+	// declared neither are soft-skipped with reason
+	// `no_dry_run_defined` so existing pipelines keep working under
+	// `--dry-run` while making the contract gap visible in the run
+	// logs. IMP-014.
+	DryRun bool
+
 	// Debug carries pause directives populated by `sparkwing debug run`.
 	Debug DebugDirectives
 
@@ -238,6 +247,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 		ctx = sparkwing.WithStepRange(ctx, opts.StartAt, opts.StopAt)
+	}
+	// IMP-014: install the dry-run mode flag on the run-wide ctx so
+	// every Work executed under it routes through DryRunFn instead
+	// of the apply Fn. Steps without a dry-run body soft-skip with
+	// reason `no_dry_run_defined`.
+	if opts.DryRun {
+		ctx = sparkwing.WithDryRun(ctx)
 	}
 
 	emitRunStart(opts.Delegate, runID, opts.Pipeline)
@@ -1584,9 +1600,14 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 // planSnapshot is the stored DAG with each Node's eager-materialized
 // inner Work tree.
 type planSnapshot struct {
-	Pipeline string         `json:"pipeline"`
-	RunID    string         `json:"run_id"`
-	Nodes    []snapshotNode `json:"nodes"`
+	Pipeline string `json:"pipeline"`
+	RunID    string `json:"run_id"`
+	// Venue is the author-declared dispatch constraint surfaced at
+	// the top of the plan snapshot. IMP-011: agents reading
+	// --explain JSON see the venue alongside the DAG so they can
+	// honor it without a separate `--describe` round-trip.
+	Venue string         `json:"venue,omitempty"`
+	Nodes []snapshotNode `json:"nodes"`
 }
 
 type snapshotNode struct {
@@ -1669,6 +1690,16 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 	snap := planSnapshot{
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
+	}
+	// IMP-011: surface the registered venue at the snapshot top so
+	// agents reading --explain JSON honor the dispatch constraint
+	// without a separate --describe round-trip. Best-effort lookup --
+	// synthetic test fixtures with a Plan but no Registration just
+	// emit no venue field (json:"omitempty").
+	if rc.Pipeline != "" {
+		if reg, ok := sparkwing.Lookup(rc.Pipeline); ok {
+			snap.Venue = sparkwing.PipelineVenue(reg).String()
+		}
 	}
 	// Cycle detection threads through the snapshot walk to catch
 	// A->B->A loops in one pass.

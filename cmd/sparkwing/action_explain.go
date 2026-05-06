@@ -24,9 +24,12 @@ import (
 // modifiers move into a dedicated `modifiers` block so renderers can
 // label each node with its dispatch envelope.
 type planSnapshotDoc struct {
-	Pipeline string             `json:"pipeline"`
-	RunID    string             `json:"run_id"`
-	Nodes    []planSnapshotNode `json:"nodes"`
+	Pipeline string `json:"pipeline"`
+	RunID    string `json:"run_id"`
+	// Venue mirrors orchestrator.planSnapshot.Venue: the author-
+	// declared dispatch constraint, "" for pre-IMP-011 binaries.
+	Venue string             `json:"venue,omitempty"`
+	Nodes []planSnapshotNode `json:"nodes"`
 }
 
 type planSnapshotNode struct {
@@ -365,6 +368,12 @@ func printAllExplainTable(results []allExplainResult, failed int) {
 func printPlanSnapshot(snap *planSnapshotDoc) {
 	if snap.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", snap.Pipeline)
+	}
+	// IMP-011: surface the dispatch constraint near the top so an
+	// operator scanning the explain output sees the gate before
+	// reading the DAG. Suppressed for the permissive default.
+	if snap.Venue != "" && snap.Venue != "either" {
+		fmt.Printf("Venue: %s\n", snap.Venue)
 	}
 	if len(snap.Nodes) == 0 {
 		fmt.Println("(no nodes)")

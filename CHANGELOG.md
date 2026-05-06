@@ -19,6 +19,69 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   -- the bridge fixes a discoverability gap, not a capability one.
 
 ### Added
+- **Per-step dry-run with `--dry-run` wing flag (IMP-014).** Authors
+  declare a `DryRunFn` alongside the apply `Fn` (or mark the step
+  `SafeWithoutDryRun()` when its apply Fn is read-only by author
+  contract); `wing X --dry-run` then walks the DAG running each
+  step's no-mutation body in apply-equivalent order. Pairs with
+  IMP-013's `pipeline plan` to give sparkwing the verify-before-
+  execute primitive modern infra tools have had for a decade and
+  CI/CD has not.
+  - SDK surface: `WorkStep.DryRun(fn)`, `WorkStep.SafeWithoutDryRun()`,
+    `sparkwing.WithDryRun(ctx)`, `sparkwing.IsDryRun(ctx)` (so apply
+    bodies that need to branch on the mode for ops without a native
+    `--dry-run` flag can read it directly), `WorkStep.HasDryRun()` /
+    `WorkStep.IsSafeWithoutDryRun()` introspection.
+  - Wing-level flag: `--dry-run` (registered in
+    `cmd/sparkwing/wing_flags.go` + `wingTokenSpecs` table; added
+    to `ReservedFlagNames()` so a pipeline `flag:"dry-run"` tag
+    panics at registration with the IMP-003 collision message).
+    Forwarded to the pipeline binary via `SPARKWING_DRY_RUN=1` env
+    on the local-exec path and `Trigger.Env` on the `--on` remote-
+    dispatch path so behavior is identical across venues.
+  - Dispatch precedence inside `RunWork` matches the IMP-013
+    preview lens: `range_skip > user_skipif > dry_run`. A step
+    that's already going to be skipped keeps its reason; only
+    "would_run under apply" steps become "would_dry_run" /
+    "would_run (safe)" / "would_skip (no_dry_run_defined)" under
+    `--dry-run`.
+  - Steps with neither `DryRunFn` nor `SafeWithoutDryRun()` soft-
+    skip with reason `no_dry_run_defined` so existing pipelines
+    keep working under `--dry-run` while the contract gap is
+    visible in run logs and `pipeline plan` output. IMP-015 will
+    tighten this to a hard refusal at dispatch time when paired
+    with blast-radius markers.
+  - PreviewPlan integration: `PreviewOptions.DryRun` routes
+    `PreviewItem.Decision` through the same lens
+    (would_dry_run / would_run-safe / would_skip:no_dry_run_defined),
+    so `sparkwing pipeline plan --dry-run` matches the runtime path.
+  - Pinned by 7 SDK unit tests in `sparkwing/dry_run_test.go`
+    (DryRunFn called / apply skipped, SafeWithoutDryRun apply runs
+    unchanged, missing-contract soft-skipped, non-dry-run mode
+    apply runs as usual, DryRunFn failure propagates, IsDryRun
+    readable from ctx) and 1 PreviewPlan integration test pinning
+    the three-decision rendering on a single Work.
+  - Out of scope: sparks-core common-backend dry-run bodies
+    (filed as a follow-up); IMP-015's destructive markers (parallel
+    PR; dry-run is the safe escape hatch for that gate).
+- **Author-declared pipeline venue + dispatcher gate (IMP-011).**
+  Pipelines opt into a dispatch constraint by implementing the
+  optional `Venue() sparkwing.Venue` method on the pipeline value:
+  `VenueLocalOnly` refuses `--on PROFILE` (cluster-up shells out to
+  terraform / aws against laptop credentials; the cluster doesn't
+  have those), `VenueClusterOnly` refuses bare invocation
+  (in-cluster state-touching chores like prune-pvcs that would
+  fail confusingly from the laptop), `VenueEither` (the zero value
+  and the existing default) preserves dispatch-anywhere. The wing
+  CLI reads venue from the per-repo describe cache and gates
+  `--on PROFILE` before sending the trigger; a stale or pre-IMP-011
+  cache silently degrades to `either` so the gate is purely
+  additive. `sparkwing pipeline list` / `describe` / `explain` /
+  `plan` all surface the venue alongside their existing output, and
+  `--describe` / `--explain` / `--plan` JSON snapshots carry a new
+  top-level `venue` field so agents see the constraint without a
+  separate round-trip. Closes the cluster-up-against-prod footgun
+  flagged in the 2026-05-05 kikd-infra session.
 - **`sparkwing pipeline plan` — runtime-resolved DAG without execution
   (IMP-013).** Same DAG `pipeline explain` shows, plus per-step
   `would_run` / `would_skip <reason>` decisions evaluated against

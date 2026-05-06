@@ -143,6 +143,21 @@ func runWing(args []string) error {
 		}
 	}
 
+	// IMP-011: gate dispatch against the pipeline's author-declared
+	// venue. LocalOnly pipelines refuse `--on PROFILE` (cluster-up
+	// shells out to terraform / aws against laptop credentials);
+	// ClusterOnly pipelines refuse bare invocation (in-cluster
+	// state-touching chores). Venue is resolved from the describe
+	// cache so the gate fires before the dispatch round-trip; a cold
+	// cache silently degrades to "either" (the safe permissive
+	// default), which is the same behavior pipelines without an
+	// explicit Venue() get.
+	if v := lookupCachedVenue(dir, pipelineName); v != "" {
+		if err := enforcePipelineVenue(v, pipelineName, wf.on); err != nil {
+			return err
+		}
+	}
+
 	if wf.on != "" {
 		return dispatchRemote(pipelineName, wf, passthrough)
 	}
@@ -185,6 +200,12 @@ func runWing(args []string) error {
 	}
 	if wf.stopAt != "" {
 		env = append(env, "SPARKWING_STOP_AT="+wf.stopAt)
+	}
+	// IMP-014: same env-var protocol for --dry-run; the pipeline
+	// binary lifts SPARKWING_DRY_RUN onto Options.DryRun and the
+	// orchestrator installs WithDryRun(ctx) on the run.
+	if wf.dryRun {
+		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
 	if wf.secrets != "" {
 		env = append(env, "SPARKWING_SECRETS_PROFILE="+wf.secrets)

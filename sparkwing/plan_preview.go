@@ -17,6 +17,12 @@ import (
 // static structure without re-parsing.
 type PlanPreview struct {
 	Pipeline string `json:"pipeline"`
+	// Venue is the pipeline's author-declared dispatch constraint
+	// ("either" / "local-only" / "cluster-only"). IMP-011: pre-flight
+	// consumers see venue alongside the DAG so a `pipeline plan`
+	// renderer can warn an operator that this pipeline can't be
+	// `--on`'d without going through the dispatcher first.
+	Venue string `json:"venue,omitempty"`
 	// ResolvedArgs are the typed Inputs values after default
 	// resolution + flag parsing. Plain map for JSON-friendliness.
 	ResolvedArgs map[string]string `json:"resolved_args,omitempty"`
@@ -71,10 +77,18 @@ type PreviewWork struct {
 type PreviewItem struct {
 	ID    string   `json:"id"`
 	Needs []string `json:"needs,omitempty"`
-	// Decision: "would_run" | "would_skip".
+	// Decision: "would_run" | "would_dry_run" | "would_skip".
+	// "would_dry_run" only appears under PreviewOptions.DryRun and
+	// indicates the step has a DryRunFn that would execute in place
+	// of the apply Fn (IMP-014).
 	Decision string `json:"decision"`
-	// SkipReason categorizes a "would_skip": "user_skipif",
-	// "range_skip", "synthetic". Empty for "would_run".
+	// SkipReason categorizes a "would_skip":
+	//   - "user_skipif"        : a SkipIf predicate matched
+	//   - "range_skip"         : outside --start-at..--stop-at window
+	//   - "no_dry_run_defined" : --dry-run + no DryRunFn + no
+	//                            SafeWithoutDryRun marker (IMP-014)
+	//   - "synthetic"          : hidden generator items
+	// Empty for "would_run" / "would_dry_run".
 	SkipReason string `json:"skip_reason,omitempty"`
 	// SkipDetail is human text accompanying the reason: the
 	// stringified bound for range_skip, or the panic message if a
@@ -96,6 +110,13 @@ type PreviewItem struct {
 type PreviewOptions struct {
 	StartAt string
 	StopAt  string
+	// DryRun routes the per-step decision through the dry-run lens:
+	// steps with a DryRunFn render as "would_dry_run", steps marked
+	// SafeWithoutDryRun keep "would_run" (their apply body is
+	// read-only by author contract), and steps with neither become
+	// "would_skip" + reason "no_dry_run_defined" so the contract
+	// gap is visible in the preview output. IMP-014.
+	DryRun bool
 }
 
 // PreviewPlan walks an already-built Plan and returns the runtime-
@@ -119,6 +140,14 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 		ResolvedArgs: resolvedArgs,
 		StartAt:      opts.StartAt,
 		StopAt:       opts.StopAt,
+	}
+	// IMP-011: surface the registered venue as plan-level metadata so
+	// `sparkwing pipeline plan` consumers can render the dispatch
+	// constraint above the DAG. Lookup is best-effort -- a Plan built
+	// against an unregistered name (synthetic test fixtures) just
+	// omits the field.
+	if reg, ok := Lookup(pipeline); ok {
+		out.Venue = PipelineVenue(reg).String()
 	}
 	for _, lw := range plan.LintWarnings() {
 		out.LintWarnings = append(out.LintWarnings, PreviewLintWarning{
@@ -203,7 +232,25 @@ func previewWork(ctx context.Context, w *Work, opts PreviewOptions) *PreviewWork
 
 	pw := &PreviewWork{}
 	for _, s := range w.Steps() {
-		pw.Steps = append(pw.Steps, previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates()))
+		item := previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates())
+		// IMP-014: refine the per-step decision through the dry-run
+		// lens AFTER the skip precedence (range / user-skipif) is
+		// computed -- a step that's already going to be skipped
+		// keeps that reason regardless of dry-run mode.
+		if opts.DryRun && item.Decision == "would_run" {
+			switch {
+			case s.HasDryRun():
+				item.Decision = "would_dry_run"
+			case s.IsSafeWithoutDryRun():
+				// keep "would_run" -- author marked the apply Fn
+				// read-only, so dispatch under --dry-run runs it
+				// unmodified.
+			default:
+				item.Decision = "would_skip"
+				item.SkipReason = "no_dry_run_defined"
+			}
+		}
+		pw.Steps = append(pw.Steps, item)
 	}
 	for _, sp := range w.Spawns() {
 		pw.Spawns = append(pw.Spawns, previewItem(ctx, sp.ID(), sp.DepIDs(), rangeSkips, sp.SkipPredicates()))

@@ -60,6 +60,15 @@ type DescribePipeline struct {
 	// Extra is true when the pipeline's Inputs struct declares a
 	// `flag:",extra"` bag; in that mode unknown flags don't error.
 	Extra bool `json:"extra,omitempty"`
+	// Venue is the author-declared dispatch constraint
+	// ("either" / "local-only" / "cluster-only"). IMP-011: the wing
+	// dispatcher gates `--on PROFILE` against this so a pipeline
+	// that needs laptop-local credentials (terraform / aws SSO) can
+	// refuse remote dispatch at CLI time. Empty string means "venue
+	// metadata not present in this cache file" — older binaries
+	// pre-IMP-011 omit the field entirely; the dispatcher treats
+	// absent + "either" as the same permissive default.
+	Venue string `json:"venue,omitempty"`
 }
 
 // DescribeArg is one CLI-visible argument. Name is the user-facing
@@ -106,6 +115,7 @@ func DescribePipelineByName(name string) (DescribePipeline, bool, error) {
 		Name:  reg.Name,
 		Args:  []DescribeArg{},
 		Extra: reg.Schema.Extra,
+		Venue: PipelineVenue(reg).String(),
 	}
 	if inst := reg.instance(); inst != nil {
 		if s, ok := inst.(ShortHelpProvider); ok {

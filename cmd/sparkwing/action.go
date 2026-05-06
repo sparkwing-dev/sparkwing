@@ -35,6 +35,13 @@ type Pipeline struct {
 	Entrypoint string                  `json:"entrypoint,omitempty"`
 	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
 	Examples   []sparkwing.Example     `json:"examples,omitempty"`
+	// Venue is the pipeline's author-declared dispatch constraint
+	// ("either" / "local-only" / "cluster-only"). Sourced from the
+	// describe cache; empty when the pipeline binary predates
+	// IMP-011 or hasn't been re-described since the field was
+	// added. Treated as "either" (the safe permissive default) by
+	// the dispatcher gate.
+	Venue string `json:"venue,omitempty"`
 }
 
 // runPipelineRunDispatch extracts --pipeline from args and forwards the
@@ -355,6 +362,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Help = dp.Help
 				a.Args = dp.Args
 				a.Examples = dp.Examples
+				a.Venue = dp.Venue
 			}
 			seen[p.Name] = struct{}{}
 			out = append(out, a)
@@ -439,6 +447,13 @@ func printPipelineTable(pipelineList []Pipeline) {
 			if short == "" {
 				short = a.Help
 			}
+			// IMP-011: prepend a venue tag for pipelines that
+			// declared a non-default dispatch constraint. Keeps the
+			// `wing <TAB>` companion view honest about which
+			// pipelines refuse `--on` / require it.
+			if a.Venue != "" && a.Venue != "either" {
+				short = "[" + a.Venue + "] " + short
+			}
 			fmt.Printf("  %-*s  %s\n", nameWidth, a.Name, short)
 		}
 	}
@@ -454,6 +469,14 @@ func printPipelineDetail(a *Pipeline) {
 	}
 	if a.Entrypoint != "" {
 		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
+	}
+	// IMP-011: surface the author-declared dispatch constraint near
+	// the top so an operator considering `--on PROFILE` sees the
+	// gate before reading the rest of the entry. "either" is the
+	// permissive default; we suppress it to keep the surface quiet
+	// for pipelines that didn't opt in.
+	if a.Venue != "" && a.Venue != "either" {
+		fmt.Printf("venue: %s\n", a.Venue)
 	}
 	if len(a.Tags) > 0 {
 		fmt.Printf("tags:  %s\n", strings.Join(a.Tags, ", "))

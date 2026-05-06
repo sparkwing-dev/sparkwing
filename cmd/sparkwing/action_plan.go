@@ -20,7 +20,11 @@ import (
 // separate to avoid pulling the SDK package into the wrapper just
 // for the schema.
 type planPreviewDoc struct {
-	Pipeline     string               `json:"pipeline"`
+	Pipeline string `json:"pipeline"`
+	// Venue mirrors sparkwing.PlanPreview.Venue: the author-declared
+	// dispatch constraint surfaced on the runtime-resolved view.
+	// Empty for pre-IMP-011 pipeline binaries.
+	Venue        string               `json:"venue,omitempty"`
 	ResolvedArgs map[string]string    `json:"resolved_args,omitempty"`
 	StartAt      string               `json:"start_at,omitempty"`
 	StopAt       string               `json:"stop_at,omitempty"`
@@ -192,6 +196,12 @@ func runPipelinePlan(args []string) error {
 func printPlanPreview(doc *planPreviewDoc) {
 	if doc.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", doc.Pipeline)
+	}
+	// IMP-011: surface the dispatch constraint right after the name
+	// so a `pipeline plan` reader sees "venue: local-only" before
+	// reading the DAG. Suppressed for the permissive default.
+	if doc.Venue != "" && doc.Venue != "either" {
+		fmt.Printf("Venue: %s\n", doc.Venue)
 	}
 	if doc.StartAt != "" || doc.StopAt != "" {
 		fmt.Printf("Range: --start-at=%s --stop-at=%s\n",
