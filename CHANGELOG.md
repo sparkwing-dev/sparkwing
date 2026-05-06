@@ -7,6 +7,16 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **`cluster tokens list` surfaces scopes (IMP-024).** The table view
+  now carries a `SCOPES` column so operators can spot a missing scope
+  (the IMP-002 root cause: warm-runner pods mounted a token without
+  `logs.write`, and there was no operator surface that would have
+  shown the gap). `--json` / `-o json` emits a top-level array of
+  `{prefix, kind, principal, scopes, last_used_at, revoked_at}` so
+  `jq '.[].scopes'` works directly. Tokens carrying the controller's
+  `admin` superset render as `*` in the table (JSON keeps the literal
+  scope name); empty scope sets render as `-`. Help text + an example
+  pinning the warm-runner diagnostic flow updated.
 - **Blast-radius annotations + default-deny dispatch (IMP-015).**
   Authors mark steps that mutate prod / cost money / can blow things
   up; the wing dispatcher walks the per-step set and refuses to

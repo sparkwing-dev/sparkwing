@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -90,11 +92,24 @@ func runTokensCreate(args []string) error {
 	return nil
 }
 
+// tokenListItem is the typed projection used by `tokens list`. It
+// mirrors the controller's tokenRecordJSON for the fields we render.
+type tokenListItem struct {
+	Prefix     string   `json:"prefix"`
+	Kind       string   `json:"kind"`
+	Principal  string   `json:"principal"`
+	Scopes     []string `json:"scopes"`
+	LastUsedAt *int64   `json:"last_used_at,omitempty"`
+	RevokedAt  *int64   `json:"revoked_at,omitempty"`
+}
+
 func runTokensList(args []string) error {
 	fs := flag.NewFlagSet(cmdTokensList.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
 	kind := fs.String("type", "", "filter by type (user|runner|service)")
 	includeRevoked := fs.Bool("include-revoked", false, "include revoked tokens")
+	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
+	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdTokensList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -121,37 +136,64 @@ func runTokensList(args []string) error {
 		return err
 	}
 	var out struct {
-		Tokens []map[string]any `json:"tokens"`
+		Tokens []tokenListItem `json:"tokens"`
 	}
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
-	if len(out.Tokens) == 0 {
-		fmt.Println("(no tokens)")
-		return nil
+
+	if *asJSON || *outputFormat == "json" {
+		return renderTokensJSON(os.Stdout, out.Tokens)
 	}
-	fmt.Printf("%-14s %-8s %-20s %-40s %s\n", "PREFIX", "TYPE", "PRINCIPAL", "SCOPES", "LAST_USED")
-	for _, t := range out.Tokens {
-		scopes := ""
-		if ss, ok := t["scopes"].([]any); ok {
-			parts := make([]string, 0, len(ss))
-			for _, s := range ss {
-				parts = append(parts, fmt.Sprint(s))
-			}
-			scopes = strings.Join(parts, ",")
-		}
+	return renderTokensTable(os.Stdout, out.Tokens)
+}
+
+// renderTokensJSON emits the typed list as a top-level JSON array so
+// callers can `jq '.[].scopes'` directly without unwrapping a "tokens"
+// envelope. Always emits []; never null.
+func renderTokensJSON(w io.Writer, tokens []tokenListItem) error {
+	if tokens == nil {
+		tokens = []tokenListItem{}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(tokens)
+}
+
+func renderTokensTable(w io.Writer, tokens []tokenListItem) error {
+	if len(tokens) == 0 {
+		_, err := fmt.Fprintln(w, "(no tokens)")
+		return err
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "PREFIX\tTYPE\tPRINCIPAL\tSCOPES\tLAST_USED")
+	for _, t := range tokens {
 		lastUsed := "-"
-		if v, ok := t["last_used_at"].(float64); ok {
-			lastUsed = time.Unix(int64(v), 0).UTC().Format("2006-01-02 15:04")
+		if t.LastUsedAt != nil {
+			lastUsed = time.Unix(*t.LastUsedAt, 0).UTC().Format("2006-01-02 15:04")
 		}
-		revoked := ""
-		if _, ok := t["revoked_at"]; ok {
-			revoked = " (revoked)"
+		if t.RevokedAt != nil {
+			lastUsed += " (revoked)"
 		}
-		fmt.Printf("%-14s %-8s %-20s %-40s %s%s\n",
-			t["prefix"], t["kind"], t["principal"], scopes, lastUsed, revoked)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			t.Prefix, t.Kind, t.Principal, formatScopes(t.Scopes), lastUsed)
 	}
-	return nil
+	return tw.Flush()
+}
+
+// formatScopes renders a token's scope set for the table view.
+// `admin` is the controller's superset scope (see auth.requireScope:
+// `admin` short-circuits any other scope check), so admin tokens
+// collapse to "*" instead of the literal scope name. An empty scope
+// set renders as "-" so it's visually distinct from a missing column.
+func formatScopes(scopes []string) string {
+	if len(scopes) == 0 {
+		return "-"
+	}
+	if slices.Contains(scopes, "admin") {
+		return "*"
+	}
+	return strings.Join(scopes, ",")
 }
 
 func runTokensRevoke(args []string) error {

@@ -1337,15 +1337,26 @@ var cmdTokensList = Command{
 	Synopsis: "List token prefixes + metadata",
 	Description: `Prints the non-secret prefix + metadata (type, principal,
 scopes, last-used) for every token. The raw token value is
-never printed by this command.`,
+never printed by this command.
+
+The SCOPES column shows the comma-separated scope set granted
+to each token. Tokens carrying the controller's "admin"
+superset render as "*" since admin short-circuits every other
+scope check. An empty scope set renders as "-".
+
+Use --json (or -o json) to get a structured array with explicit
+scope arrays, suitable for piping into jq.`,
 	Flags: []FlagSpec{
 		{Name: "type", Argument: "KIND", Desc: "Filter by token type", Group: "Filter"},
 		{Name: "include-revoked", Desc: "Include revoked tokens in the output", Group: "Filter"},
+		{Name: "json", Desc: "Emit JSON instead of a table (alias for -o json)", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: table | json", Default: "table", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"List all active tokens", "sparkwing cluster tokens list"},
 		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked"},
+		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --on prod -o json | jq '.[] | select(.principal==\"agent:sparkwing-warm-runner\") | .scopes'"},
 	},
 }
 
