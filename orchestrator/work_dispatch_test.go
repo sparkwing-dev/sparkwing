@@ -83,11 +83,11 @@ type jobFnPipe struct{ sparkwing.Base }
 var jobFnRan atomic.Bool
 
 func (jobFnPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "via-add", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "via-add", func(ctx context.Context) error {
 		jobFnRan.Store(true)
 		sparkwing.Info(ctx, "JobFn ran via sw.Job")
 		return nil
-	}))
+	})
 	return nil
 }
 

@@ -9,30 +9,28 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestJobFn_SingleStepWork verifies that JobFn produces a Job whose
-// Work has exactly one Step (id "run") and no typed result.
-func TestJobFn_SingleStepWork(t *testing.T) {
+// TestJob_ClosureFormSingleStepWork verifies that sparkwing.Job
+// accepts a func(ctx) error closure directly and wraps it as a Job
+// whose Work has exactly one Step (id "run") and no typed result.
+// This replaces the pre-SDK-042 sparkwing.JobFn explicit-wrapper
+// path.
+func TestJob_ClosureFormSingleStepWork(t *testing.T) {
 	called := false
-	job := sparkwing.JobFn(func(ctx context.Context) error {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "single", func(ctx context.Context) error {
 		called = true
 		return nil
 	})
-	w := sparkwing.NewWork()
-	resultStep, err := job.Work(w)
-	if err != nil {
-		t.Fatalf("JobFn.Work() returned error: %v", err)
+	if n.ResultStep() != nil {
+		t.Fatal("closure-form Job should not have a typed result step")
 	}
-	if resultStep != nil {
-		t.Fatal("JobFn.Work() should not return a typed result step")
-	}
-	steps := w.Steps()
+	steps := n.Work().Steps()
 	if len(steps) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(steps))
 	}
 	if steps[0].ID() != "run" {
 		t.Fatalf("step id = %q, want %q", steps[0].ID(), "run")
 	}
-	// Smoke-execute the underlying fn.
 	if _, err := steps[0].Fn()(context.Background()); err != nil {
 		t.Fatalf("step fn returned %v", err)
 	}
@@ -82,13 +80,13 @@ func TestPlanJob_PanicsOnNilJob(t *testing.T) {
 
 func TestPlanJob_PanicsOnDuplicateID(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
 	defer func() {
 		if recover() == nil {
 			t.Fatal("sw.Job duplicate id should panic")
 		}
 	}()
-	sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
 }
 
 // TestWork_StepDuplicateIDPanics locks down the inner contract.
@@ -118,17 +116,15 @@ func TestWork_StepNeeds(t *testing.T) {
 	}
 }
 
-// TestWork_SequenceAndParallel mirrors the Plan-layer combinator
-// behavior at the inner layer.
-func TestWork_SequenceAndParallel(t *testing.T) {
+// TestWork_NeedsChainAndGroupSteps verifies the post-SDK-042 DAG
+// shape: sequential deps via direct .Needs chains and fan-in via
+// sparkwing.GroupSteps. Sequence/Parallel sugar verbs were dropped;
+// this exercises the canonical primitive.
+func TestWork_NeedsChainAndGroupSteps(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil })
-	c := sparkwing.Step(w, "c", func(ctx context.Context) error { return nil })
-	terminal := w.Sequence(a, b, c)
-	if terminal != c {
-		t.Fatal("Work.Sequence should return last step")
-	}
+	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil }).Needs(a)
+	c := sparkwing.Step(w, "c", func(ctx context.Context) error { return nil }).Needs(b)
 	if got := b.DepIDs(); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("b should depend on a, got %v", got)
 	}
@@ -138,10 +134,36 @@ func TestWork_SequenceAndParallel(t *testing.T) {
 
 	x := sparkwing.Step(w, "x", func(ctx context.Context) error { return nil })
 	y := sparkwing.Step(w, "y", func(ctx context.Context) error { return nil })
-	group := w.Parallel(x, y)
+	group := sparkwing.GroupSteps(w, "fanout", x, y)
+	if group.Name() != "fanout" {
+		t.Fatalf("StepGroup.Name() = %q, want %q", group.Name(), "fanout")
+	}
 	join := sparkwing.Step(w, "join", func(ctx context.Context) error { return nil }).Needs(group)
 	if got := join.DepIDs(); len(got) != 2 {
-		t.Fatalf("join should fan in 2 deps from a parallel group, got %v", got)
+		t.Fatalf("join should fan in 2 deps from a step group, got %v", got)
+	}
+}
+
+// TestGroupSteps_NeedsAndSkipIfDelegate verifies the *StepGroup
+// modifier surface mirrors *WorkStep -- Needs and SkipIf delegate to
+// every member.
+func TestGroupSteps_NeedsAndSkipIfDelegate(t *testing.T) {
+	w := sparkwing.NewWork()
+	setup := sparkwing.Step(w, "setup", func(ctx context.Context) error { return nil })
+	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
+	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil })
+	g := sparkwing.GroupSteps(w, "members", a, b).
+		Needs(setup).
+		SkipIf(func(ctx context.Context) bool { return false })
+
+	for _, m := range g.Members() {
+		deps := m.DepIDs()
+		if len(deps) != 1 || deps[0] != "setup" {
+			t.Fatalf("group member %q should depend on setup, got %v", m.ID(), deps)
+		}
+		if len(m.SkipPredicates()) != 1 {
+			t.Fatalf("group member %q should have one skip predicate, got %d", m.ID(), len(m.SkipPredicates()))
+		}
 	}
 }
 
@@ -253,8 +275,8 @@ func TestStep_RejectsBadFnSignatures(t *testing.T) {
 func TestSpawnNode_DeclaredAtPlanTime(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	target := sparkwing.JobFn(func(ctx context.Context) error { return nil })
-	h := w.SpawnNode("scan", target).Needs(a)
+	target := func(ctx context.Context) error { return nil }
+	h := sparkwing.JobSpawn(w, "scan", target).Needs(a)
 	if h == nil {
 		t.Fatal("SpawnNode should return a handle")
 	}
@@ -275,7 +297,7 @@ func TestSpawnNode_PanicsOnEmptyID(t *testing.T) {
 			t.Fatal("SpawnNode with empty id should panic")
 		}
 	}()
-	w.SpawnNode("", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.JobSpawn(w, "", func(ctx context.Context) error { return nil })
 }
 
 // TestNodeForEach_RegistersExpansion verifies the new generator wires
@@ -297,9 +319,9 @@ func TestJobFanOutDynamic_RegistersExpansion(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	src := sparkwing.Job(plan, "discover", &discoverJob{items: []string{"a", "b"}})
 	calls := 0
-	group := sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, sparkwing.Workable) {
+	group := sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, any) {
 		calls++
-		return "build-" + s, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+		return "build-" + s, func(ctx context.Context) error { return nil }
 	})
 	if group == nil {
 		t.Fatal("JobFanOutDynamic should return a Group")
@@ -379,7 +401,7 @@ func TestWork_StepFnReturnsError(t *testing.T) {
 func TestSpawnNodeForEach_RejectsNonSliceItems(t *testing.T) {
 	expectSpawnEachPanic(t, "items must be a slice", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach("not-a-slice", func(s string) (string, sparkwing.Workable) {
+		sparkwing.JobSpawnEach(w, "not-a-slice", func(s string) (string, any) {
 			return "", nil
 		})
 	})
@@ -388,14 +410,14 @@ func TestSpawnNodeForEach_RejectsNonSliceItems(t *testing.T) {
 func TestSpawnNodeForEach_RejectsNonFuncFn(t *testing.T) {
 	expectSpawnEachPanic(t, "fn must be a func", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach([]string{"a"}, "not-a-func")
+		sparkwing.JobSpawnEach(w, []string{"a"}, "not-a-func")
 	})
 }
 
 func TestSpawnNodeForEach_RejectsWrongArgCount(t *testing.T) {
 	expectSpawnEachPanic(t, "fn must take exactly 1 argument", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach([]string{"a"}, func(a, b string) (string, sparkwing.Workable) {
+		sparkwing.JobSpawnEach(w, []string{"a"}, func(a, b string) (string, sparkwing.Workable) {
 			return "", nil
 		})
 	})
@@ -404,14 +426,16 @@ func TestSpawnNodeForEach_RejectsWrongArgCount(t *testing.T) {
 func TestSpawnNodeForEach_RejectsWrongReturnCount(t *testing.T) {
 	expectSpawnEachPanic(t, "fn must return (string, sparkwing.Workable)", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach([]string{"a"}, func(s string) string { return "" })
+		// The panic message lists both accepted shapes; we just need
+		// "(string, sparkwing.Workable)" to appear somewhere in it.
+		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) string { return "" })
 	})
 }
 
 func TestSpawnNodeForEach_RejectsMismatchedItemType(t *testing.T) {
 	expectSpawnEachPanic(t, "not assignable", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach([]int{1, 2, 3}, func(s string) (string, sparkwing.Workable) {
+		sparkwing.JobSpawnEach(w, []int{1, 2, 3}, func(s string) (string, any) {
 			return "", nil
 		})
 	})
@@ -420,16 +444,17 @@ func TestSpawnNodeForEach_RejectsMismatchedItemType(t *testing.T) {
 func TestSpawnNodeForEach_RejectsNonStringFirstReturn(t *testing.T) {
 	expectSpawnEachPanic(t, "first return value must be string", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach([]string{"a"}, func(s string) (int, sparkwing.Workable) {
+		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) (int, sparkwing.Workable) {
 			return 0, nil
 		})
 	})
 }
 
 func TestSpawnNodeForEach_RejectsNonWorkableSecondReturn(t *testing.T) {
-	expectSpawnEachPanic(t, "implement sparkwing.Workable", func() {
+	expectSpawnEachPanic(t, "must be sparkwing.Workable or func", func() {
 		w := sparkwing.NewWork()
-		w.SpawnNodeForEach([]string{"a"}, func(s string) (string, int) {
+		// int is neither Workable nor func(ctx) error.
+		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) (string, int) {
 			return "", 0
 		})
 	})
@@ -437,7 +462,7 @@ func TestSpawnNodeForEach_RejectsNonWorkableSecondReturn(t *testing.T) {
 
 func TestSpawnNodeForEach_AcceptsCorrectShape(t *testing.T) {
 	w := sparkwing.NewWork()
-	w.SpawnNodeForEach([]string{"a", "b"}, func(s string) (string, sparkwing.Workable) {
+	sparkwing.JobSpawnEach(w, []string{"a", "b"}, func(s string) (string, any) {
 		return s, nil
 	})
 	if got := len(w.SpawnGens()); got != 1 {

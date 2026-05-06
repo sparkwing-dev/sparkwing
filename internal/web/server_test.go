@@ -30,18 +30,18 @@ func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]
 type webOK struct{ sparkwing.Base }
 
 func (webOK) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error {
 		sparkwing.Info(ctx, "web hello")
 		return nil
-	}))
+	})
 	return nil
 }
 
 type webDAG struct{ sparkwing.Base }
 
 func (webDAG) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	a := sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	sparkwing.Job(plan, "b", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(a)
+	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
+	sparkwing.Job(plan, "b", func(ctx context.Context) error { return nil }).Needs(a)
 	return nil
 }
 
@@ -50,10 +50,10 @@ func (webDAG) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInpu
 type webANSI struct{ sparkwing.Base }
 
 func (webANSI) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "web-ansi", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "web-ansi", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "\x1b[31mansi-hello\x1b[0m")
 		return nil
-	}))
+	})
 	return nil
 }
 

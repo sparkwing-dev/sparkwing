@@ -33,7 +33,7 @@ func (inputsPipe) Plan(_ context.Context, plan *sparkwing.Plan, in inputsArgs, r
 	// Sanity-pin Plan-time view too: the value we get here should
 	// equal what a step body retrieves via Inputs[T](ctx).
 	planArgs := in
-	sparkwing.Job(plan, "deploy", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
 		got := sparkwing.Inputs[inputsArgs](ctx)
 		if got != planArgs {
 			return fmt.Errorf("step body Inputs[inputsArgs] = %+v, want %+v (Plan-time value)", got, planArgs)
@@ -43,7 +43,7 @@ func (inputsPipe) Plan(_ context.Context, plan *sparkwing.Plan, in inputsArgs, r
 		v := got
 		inputsObserved = &v
 		return nil
-	}))
+	})
 	return nil
 }
 

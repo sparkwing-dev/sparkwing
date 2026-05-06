@@ -329,11 +329,11 @@ func runOneSpawn(ctx context.Context, spec *SpawnSpec, parentNodeID string, hand
 func runSpawnEach(ctx context.Context, spec *SpawnGenSpec, parentNodeID string, handler SpawnHandler) (any, error) {
 	rv := reflect.ValueOf(spec.items)
 	if rv.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("sparkwing: SpawnNodeForEach: items must be a slice, got %T", spec.items)
+		return nil, fmt.Errorf("sparkwing: JobSpawnEach: items must be a slice, got %T", spec.items)
 	}
 	fnv := reflect.ValueOf(spec.fn)
 	if fnv.Kind() != reflect.Func {
-		return nil, fmt.Errorf("sparkwing: SpawnNodeForEach: fn must be a func, got %T", spec.fn)
+		return nil, fmt.Errorf("sparkwing: JobSpawnEach: fn must be a func, got %T", spec.fn)
 	}
 	n := rv.Len()
 	if n == 0 {
@@ -352,13 +352,13 @@ func runSpawnEach(ctx context.Context, spec *SpawnGenSpec, parentNodeID string, 
 		elem := rv.Index(i).Interface()
 		out := fnv.Call([]reflect.Value{reflect.ValueOf(elem)})
 		if len(out) != 2 {
-			return nil, fmt.Errorf("sparkwing: SpawnNodeForEach: fn must return (string, sparkwing.Workable), got %d return values", len(out))
+			return nil, fmt.Errorf("sparkwing: JobSpawnEach: fn must return (string, sparkwing.Workable) or (string, func(ctx) error), got %d return values", len(out))
 		}
 		idStr, _ := out[0].Interface().(string)
-		job, ok := out[1].Interface().(Workable)
-		if !ok || idStr == "" {
-			return nil, fmt.Errorf("sparkwing: SpawnNodeForEach: fn must return (string, sparkwing.Workable), got (%T, %T) for item %d", out[0].Interface(), out[1].Interface(), i)
+		if idStr == "" {
+			return nil, fmt.Errorf("sparkwing: JobSpawnEach: fn returned empty id for item %d", i)
 		}
+		job := coerceSpawnEachJob(out[1].Interface())
 		go func() {
 			_, err := handler.Spawn(childCtx, parentNodeID, idStr, job)
 			results <- childResult{idx: i, err: err}

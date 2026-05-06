@@ -71,8 +71,8 @@ func TestTypedJobOutput(t *testing.T) {
 	}
 }
 
-func jobFnNoop() sparkwing.Workable {
-	return sparkwing.JobFn(func(ctx context.Context) error { return nil })
+func jobFnNoop() func(ctx context.Context) error {
+	return func(ctx context.Context) error { return nil }
 }
 
 func TestParallel(t *testing.T) {
@@ -80,7 +80,7 @@ func TestParallel(t *testing.T) {
 	a := sparkwing.Job(plan, "a", jobFnNoop())
 	b := sparkwing.Job(plan, "b", jobFnNoop())
 
-	checks := sparkwing.Group(plan, "", a, b)
+	checks := sparkwing.GroupJobs(plan, "", a, b)
 	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(checks)
 	deps := d.DepIDs()
 	if len(deps) != 2 {
@@ -94,7 +94,7 @@ func TestPlanGroup_NamedMembership(t *testing.T) {
 	test := sparkwing.Job(plan, "test", jobFnNoop())
 	sparkwing.Job(plan, "other", jobFnNoop())
 
-	checks := sparkwing.Group(plan, "safety", lint, test)
+	checks := sparkwing.GroupJobs(plan, "safety", lint, test)
 	if checks.Name() != "safety" {
 		t.Fatalf("Group name: got %q, want safety", checks.Name())
 	}
@@ -114,8 +114,8 @@ func TestPlanGroup_UnnamedSkipped(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	a := sparkwing.Job(plan, "a", jobFnNoop())
 	b := sparkwing.Job(plan, "b", jobFnNoop())
-	_ = sparkwing.Group(plan, "", a, b)
-	_ = sparkwing.Group(plan, "", a, b)
+	_ = sparkwing.GroupJobs(plan, "", a, b)
+	_ = sparkwing.GroupJobs(plan, "", a, b)
 	if names := plan.NodeGroupNames("a"); len(names) != 0 {
 		t.Fatalf("unnamed groups should not contribute memberships, got %v", names)
 	}
@@ -126,8 +126,8 @@ func TestPlanGroup_MultiMembership(t *testing.T) {
 	a := sparkwing.Job(plan, "a", jobFnNoop())
 	b := sparkwing.Job(plan, "b", jobFnNoop())
 	c := sparkwing.Job(plan, "c", jobFnNoop())
-	_ = sparkwing.Group(plan, "g1", a, b)
-	_ = sparkwing.Group(plan, "g2", a, c)
+	_ = sparkwing.GroupJobs(plan, "g1", a, b)
+	_ = sparkwing.GroupJobs(plan, "g2", a, c)
 	names := plan.NodeGroupNames("a")
 	if len(names) != 2 || names[0] != "g1" || names[1] != "g2" {
 		t.Fatalf("a memberships: got %v, want [g1 g2]", names)
@@ -222,7 +222,7 @@ func TestNeeds_AcceptsVariedForms(t *testing.T) {
 	a := sparkwing.Job(plan, "a", jobFnNoop())
 	b := sparkwing.Job(plan, "b", jobFnNoop())
 	c := sparkwing.Job(plan, "c", jobFnNoop())
-	group := sparkwing.Group(plan, "", a, b)
+	group := sparkwing.GroupJobs(plan, "", a, b)
 	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(c, group, "a")
 	deps := d.DepIDs()
 	// "a" is also in the group but should dedupe.

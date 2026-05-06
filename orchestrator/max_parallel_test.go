@@ -76,7 +76,7 @@ type maxParallelPipe struct {
 func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	for i := range p.fanOut {
 		id := jobName(i)
-		sparkwing.Job(plan, id, sparkwing.JobFn(func(ctx context.Context) error {
+		sparkwing.Job(plan, id, func(ctx context.Context) error {
 			n := p.active.Add(1)
 			if n == 1 {
 				p.observedAtZero.Store(true)
@@ -94,7 +94,7 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 			time.Sleep(50 * time.Millisecond)
 			p.active.Add(-1)
 			return nil
-		}))
+		})
 	}
 	return nil
 }

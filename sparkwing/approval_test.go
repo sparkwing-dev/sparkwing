@@ -9,7 +9,7 @@ import (
 
 func TestApproval_CreatesGateNode(t *testing.T) {
 	plan := NewPlan()
-	gate := Approval(plan, "approve-prod", ApprovalConfig{
+	gate := JobApproval(plan, "approve-prod", ApprovalConfig{
 		Message:  fmt.Sprintf("Promote %s to prod?", "abc123"),
 		Timeout:  2 * time.Hour,
 		OnExpiry: ApprovalDeny,
@@ -37,7 +37,7 @@ func TestApproval_CreatesGateNode(t *testing.T) {
 
 func TestApproval_ZeroValueIsEmptyPolicy(t *testing.T) {
 	plan := NewPlan()
-	gate := Approval(plan, "g", ApprovalConfig{})
+	gate := JobApproval(plan, "g", ApprovalConfig{})
 	// The zero value of ApprovalTimeoutPolicy is "". The orchestrator
 	// treats it as ApprovalFail at dispatch time -- authors who want
 	// the default leave OnExpiry unset.
@@ -48,13 +48,13 @@ func TestApproval_ZeroValueIsEmptyPolicy(t *testing.T) {
 
 func TestApproval_DuplicateIDPanics(t *testing.T) {
 	plan := NewPlan()
-	_ = Approval(plan, "g", ApprovalConfig{})
+	_ = JobApproval(plan, "g", ApprovalConfig{})
 	defer func() {
 		if recover() == nil {
 			t.Fatal("expected panic on duplicate id")
 		}
 	}()
-	_ = Approval(plan, "g", ApprovalConfig{})
+	_ = JobApproval(plan, "g", ApprovalConfig{})
 }
 
 func TestApproval_EmptyIDPanics(t *testing.T) {
@@ -64,7 +64,7 @@ func TestApproval_EmptyIDPanics(t *testing.T) {
 			t.Fatal("expected panic on empty id")
 		}
 	}()
-	_ = Approval(plan, "", ApprovalConfig{})
+	_ = JobApproval(plan, "", ApprovalConfig{})
 }
 
 // ApprovalConfig.OnExpiry rejects unrecognized policies at plan
@@ -86,7 +86,7 @@ func TestApproval_InvalidOnExpiryPanics(t *testing.T) {
 			t.Fatalf("panic value not stringy: %T", r)
 		}
 	}()
-	Approval(plan, "g", ApprovalConfig{OnExpiry: ApprovalTimeoutPolicy("not-a-real-policy")})
+	JobApproval(plan, "g", ApprovalConfig{OnExpiry: ApprovalTimeoutPolicy("not-a-real-policy")})
 }
 
 func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
@@ -109,7 +109,7 @@ func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
 func TestApproval_GateNeedsAndChain(t *testing.T) {
 	plan := NewPlan()
 	upstream := Job(plan, "build", &fakeJob{})
-	gate := Approval(plan, "approve", ApprovalConfig{Message: "?"}).
+	gate := JobApproval(plan, "approve", ApprovalConfig{Message: "?"}).
 		Needs(upstream).
 		SkipIf(func(context.Context) bool { return false })
 	if got := gate.Node().DepIDs(); len(got) != 1 || got[0] != "build" {

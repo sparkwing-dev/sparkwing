@@ -51,7 +51,7 @@ func (j *spawnSingleParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error)
 		sparkwing.Info(ctx, "parent setup")
 		return nil
 	})
-	scan := w.SpawnNode("scan", &spawnedChildJob{tag: "scan", ran: j.childRan}).Needs(setup)
+	scan := sparkwing.JobSpawn(w, "scan", &spawnedChildJob{tag: "scan", ran: j.childRan}).Needs(setup)
 	sparkwing.Step(w, "after", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "parent post-spawn")
 		return nil
@@ -81,7 +81,7 @@ func (spawnFailingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type spawnFailParent struct{ sparkwing.Base }
 
 func (spawnFailParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.SpawnNode("doomed-child", spawnFailingChild{})
+	sparkwing.JobSpawn(w, "doomed-child", spawnFailingChild{})
 	return nil, nil
 }
 
@@ -103,13 +103,13 @@ type spawnEachParent struct {
 
 func (j *spawnEachParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	items := []string{"a", "b", "c"}
-	w.SpawnNodeForEach(items, func(s string) (string, sparkwing.Workable) {
+	sparkwing.JobSpawnEach(w, items, func(s string) (string, any) {
 		tag := s
-		return "shard-" + tag, sparkwing.JobFn(func(ctx context.Context) error {
+		return "shard-" + tag, func(ctx context.Context) error {
 			j.count.Add(1)
 			sparkwing.Info(ctx, "shard %s ran", tag)
 			return nil
-		})
+		}
 	})
 	return nil, nil
 }

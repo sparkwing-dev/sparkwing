@@ -39,7 +39,7 @@ type retryOK struct{ sparkwing.Base }
 var retryOKState = &flakyState{succeedAfter: 2}
 
 func (retryOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "flaky", sparkwing.JobFn(retryOKState.step())).Retry(3)
+	sparkwing.Job(plan, "flaky", retryOKState.step()).Retry(3)
 	return nil
 }
 
@@ -48,7 +48,7 @@ type retryExhausted struct{ sparkwing.Base }
 var retryExhaustedState = &flakyState{succeedAfter: 99}
 
 func (retryExhausted) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "always-fails", sparkwing.JobFn(retryExhaustedState.step())).Retry(2)
+	sparkwing.Job(plan, "always-fails", retryExhaustedState.step()).Retry(2)
 	return nil
 }
 
@@ -57,14 +57,14 @@ func (retryExhausted) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 type timeoutPipe struct{ sparkwing.Base }
 
 func (timeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "slow", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "slow", func(ctx context.Context) error {
 		select {
 		case <-time.After(2 * time.Second):
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	})).Timeout(50 * time.Millisecond)
+	}).Timeout(50 * time.Millisecond)
 	return nil
 }
 
@@ -75,13 +75,13 @@ type onFailurePipe struct{ sparkwing.Base }
 var rollbackCalled atomic.Bool
 
 func (onFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "deploy", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
 		return errors.New("deploy failed")
-	})).OnFailure("rollback", sparkwing.JobFn(func(ctx context.Context) error {
+	}).OnFailure("rollback", func(ctx context.Context) error {
 		rollbackCalled.Store(true)
 		sparkwing.Info(ctx, "rollback fired")
 		return nil
-	}))
+	})
 	return nil
 }
 
@@ -108,9 +108,9 @@ func (detachedRollbackJob) run(ctx context.Context) error {
 }
 
 func (onFailureDetachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "deploy", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
 		return errors.New("deploy failed")
-	})).OnFailure("detached-rollback", &detachedRollbackJob{})
+	}).OnFailure("detached-rollback", &detachedRollbackJob{})
 	return nil
 }
 
@@ -119,12 +119,12 @@ type onFailureSkipPipe struct{ sparkwing.Base }
 var skipRollbackCalled atomic.Bool
 
 func (onFailureSkipPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "deploy", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
 		return nil // succeeds
-	})).OnFailure("rollback", sparkwing.JobFn(func(ctx context.Context) error {
+	}).OnFailure("rollback", func(ctx context.Context) error {
 		skipRollbackCalled.Store(true)
 		return nil
-	}))
+	})
 	return nil
 }
 

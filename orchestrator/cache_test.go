@@ -61,10 +61,10 @@ func resetHooksCounters() {
 }
 
 func (hooksPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "work", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "work", func(ctx context.Context) error {
 		atomic.AddInt32(&hooks.ran, 1)
 		return nil
-	})).
+	}).
 		BeforeRun(func(ctx context.Context) error {
 			atomic.AddInt32(&hooks.before, 1)
 			return nil
@@ -80,10 +80,10 @@ type beforeFails struct{ sparkwing.Base }
 var beforeFailsRan atomic.Bool
 
 func (beforeFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "never-runs", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "never-runs", func(ctx context.Context) error {
 		beforeFailsRan.Store(true)
 		return nil
-	})).BeforeRun(func(ctx context.Context) error {
+	}).BeforeRun(func(ctx context.Context) error {
 		return errors.New("refusing to run")
 	})
 	return nil
@@ -94,9 +94,9 @@ type afterFiresOnFailure struct{ sparkwing.Base }
 var afterOnFailureErr atomic.Value // stores error
 
 func (afterFiresOnFailure) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "boom", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "boom", func(ctx context.Context) error {
 		return errors.New("job failed")
-	})).AfterRun(func(ctx context.Context, err error) {
+	}).AfterRun(func(ctx context.Context, err error) {
 		afterOnFailureErr.Store(errorSentinel{err: err})
 	})
 	return nil
@@ -119,10 +119,10 @@ func recordHook(i int, label string) {
 }
 
 func (hookOrderingPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "seq", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "seq", func(ctx context.Context) error {
 		recordHook(1, "run")
 		return nil
-	})).
+	}).
 		BeforeRun(func(ctx context.Context) error {
 			recordHook(0, "before")
 			return nil

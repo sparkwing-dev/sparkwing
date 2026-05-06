@@ -16,7 +16,7 @@ import (
 type approvePipe struct{ sparkwing.Base }
 
 func (approvePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Approval(plan, "gate", sparkwing.ApprovalConfig{
+	sparkwing.JobApproval(plan, "gate", sparkwing.ApprovalConfig{
 		Message: "approve?",
 		Timeout: 5 * time.Second,
 	})
@@ -27,7 +27,7 @@ func (approvePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 type approveTimeoutPipe struct{ sparkwing.Base }
 
 func (approveTimeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Approval(plan, "gate", sparkwing.ApprovalConfig{
+	sparkwing.JobApproval(plan, "gate", sparkwing.ApprovalConfig{
 		Message: "fast timeout",
 		Timeout: 200 * time.Millisecond,
 	})

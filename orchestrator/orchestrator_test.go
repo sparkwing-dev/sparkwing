@@ -33,36 +33,36 @@ func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]
 type okPipe struct{ sparkwing.Base }
 
 func (okPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error {
 		sparkwing.Info(ctx, "work complete")
 		return nil
-	}))
+	})
 	return nil
 }
 
 type failPipe struct{ sparkwing.Base }
 
 func (failPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(func(ctx context.Context) error { return errors.New("boom") }))
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return errors.New("boom") })
 	return nil
 }
 
 type fanOutOK struct{ sparkwing.Base }
 
 func (fanOutOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	setup := sparkwing.Job(plan, "setup", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	a := sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(setup)
-	b := sparkwing.Job(plan, "b", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(setup)
-	sparkwing.Job(plan, "fin", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(a, b)
+	setup := sparkwing.Job(plan, "setup", func(ctx context.Context) error { return nil })
+	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil }).Needs(setup)
+	b := sparkwing.Job(plan, "b", func(ctx context.Context) error { return nil }).Needs(setup)
+	sparkwing.Job(plan, "fin", func(ctx context.Context) error { return nil }).Needs(a, b)
 	return nil
 }
 
 type middleFails struct{ sparkwing.Base }
 
 func (middleFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	a := sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	b := sparkwing.Job(plan, "b", sparkwing.JobFn(func(ctx context.Context) error { return errors.New("mid fail") })).Needs(a)
-	sparkwing.Job(plan, "c", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(b)
+	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
+	b := sparkwing.Job(plan, "b", func(ctx context.Context) error { return errors.New("mid fail") }).Needs(a)
+	sparkwing.Job(plan, "c", func(ctx context.Context) error { return nil }).Needs(b)
 	return nil
 }
 

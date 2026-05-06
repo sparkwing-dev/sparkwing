@@ -13,8 +13,8 @@ import (
 func TestJobFanOut_StaticMembers(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	items := []string{"a", "b", "c"}
-	g := sparkwing.JobFanOut(plan, "builds", items, func(s string) (string, sparkwing.Workable) {
-		return "build-" + s, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+	g := sparkwing.JobFanOut(plan, "builds", items, func(s string) (string, any) {
+		return "build-" + s, func(ctx context.Context) error { return nil }
 	})
 	if g == nil {
 		t.Fatal("JobFanOut should return a Group")
@@ -43,9 +43,9 @@ func TestJobFanOut_StaticMembers(t *testing.T) {
 func TestJobFanOut_EmptyItemsReturnsEmptyGroup(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	calls := 0
-	g := sparkwing.JobFanOut(plan, "noop", []int{}, func(int) (string, sparkwing.Workable) {
+	g := sparkwing.JobFanOut(plan, "noop", []int{}, func(int) (string, any) {
 		calls++
-		return "x", sparkwing.JobFn(func(ctx context.Context) error { return nil })
+		return "x", func(ctx context.Context) error { return nil }
 	})
 	if g == nil {
 		t.Fatal("JobFanOut should return a Group even when items is empty")
@@ -56,7 +56,7 @@ func TestJobFanOut_EmptyItemsReturnsEmptyGroup(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("fn should not run on empty items; ran %d times", calls)
 	}
-	consumer := sparkwing.Job(plan, "after", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	consumer := sparkwing.Job(plan, "after", func(ctx context.Context) error { return nil })
 	consumer.Needs(g)
 	if deps := consumer.DepIDs(); len(deps) != 0 {
 		t.Fatalf("Needs(empty group) should add no deps; got %v", deps)
@@ -65,9 +65,9 @@ func TestJobFanOut_EmptyItemsReturnsEmptyGroup(t *testing.T) {
 
 func TestGroup_NeedsAppliesToEveryMember(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	upstream := sparkwing.Job(plan, "upstream", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, sparkwing.Workable) {
-		return "build-" + s, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+	upstream := sparkwing.Job(plan, "upstream", func(ctx context.Context) error { return nil })
+	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, any) {
+		return "build-" + s, func(ctx context.Context) error { return nil }
 	}).Needs(upstream)
 	for _, m := range g.Members() {
 		if !slices.Contains(m.DepIDs(), "upstream") {
@@ -78,8 +78,8 @@ func TestGroup_NeedsAppliesToEveryMember(t *testing.T) {
 
 func TestGroup_RetryAndTimeoutApplyToEveryMember(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, sparkwing.Workable) {
-		return "build-" + s, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, any) {
+		return "build-" + s, func(ctx context.Context) error { return nil }
 	}).Retry(3).Timeout(10 * time.Second)
 	for _, m := range g.Members() {
 		if got := m.RetryConfig().Attempts; got != 3 {

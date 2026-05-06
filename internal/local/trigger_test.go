@@ -228,10 +228,10 @@ func TestTrigger_DispatcherError(t *testing.T) {
 type triggerE2EPipe struct{ sparkwing.Base }
 
 func (triggerE2EPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "work", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "work", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "work via webhook trigger")
 		return nil
-	}))
+	})
 	return nil
 }
 

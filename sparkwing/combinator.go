@@ -7,10 +7,9 @@ import (
 )
 
 // NodeGroup is a handle to a set of nodes. Static groups (from
-// plan.Group, plan.Parallel, or sparkwing.JobFanOut) fix their
-// members at plan-construction; dynamic groups (from
-// sparkwing.JobFanOutDynamic) populate them at dispatch-time after
-// the generator runs.
+// sparkwing.GroupJobs or sparkwing.JobFanOut) fix their members at
+// plan-construction; dynamic groups (from sparkwing.JobFanOutDynamic)
+// populate them at dispatch-time after the generator runs.
 //
 // Named groups render as a single collapsible cluster in the
 // dashboard DAG view. The empty name means "structural collection
@@ -42,7 +41,7 @@ func (g *NodeGroup) Members() []*Node {
 }
 
 // Dynamic reports whether this group's membership is determined at
-// dispatch-time (ExpandFrom) rather than plan-construction (Parallel).
+// dispatch-time (ExpandFrom) rather than plan-construction (GroupJobs).
 func (g *NodeGroup) Dynamic() bool { return g.dynamic }
 
 // Ready returns a channel that closes once a dynamic group's
@@ -75,14 +74,18 @@ func (g *NodeGroup) Finalize(members []*Node, err error) {
 	close(g.ready)
 }
 
-// Group declares a named bundle of existing nodes. The returned *NodeGroup
-// is both a Needs target (downstream depends on every member) and a
-// dashboard cluster (rendered as a single visual unit under the given
-// name). An empty name means "structural collection only" -- still a
-// Needs target, but no UI cluster.
+// GroupJobs declares a named bundle of existing Plan nodes. The
+// returned *NodeGroup is both a Needs target (downstream depends on
+// every member) and a dashboard cluster (rendered as a single visual
+// unit under the given name). An empty name means "structural
+// collection only" -- still a Needs target, but no UI cluster.
+//
+// The Work-layer mirror is sparkwing.GroupSteps; both follow the
+// noun-prefix convention so tab-complete on Group* surfaces every
+// grouping verb.
 //
 //	build := sw.Job(plan, "build", &BuildJob{})
-//	checks := sw.Group(plan, "safety",
+//	checks := sw.GroupJobs(plan, "safety",
 //	    sw.Job(plan, "lint",     &LintJob{}).Needs(build),
 //	    sw.Job(plan, "security", &SecurityJob{}).Needs(build),
 //	    sw.Job(plan, "test",     &TestJob{}).Needs(build),
@@ -93,9 +96,9 @@ func (g *NodeGroup) Finalize(members []*Node, err error) {
 // cluster and a single arrow renders from the cluster to deploy.
 //
 // For an unnamed structural collection (no UI cluster), pass name="".
-func Group(p *Plan, name string, nodes ...*Node) *NodeGroup {
+func GroupJobs(p *Plan, name string, nodes ...*Node) *NodeGroup {
 	if p == nil {
-		panic("sparkwing: Group: plan must be non-nil")
+		panic("sparkwing: GroupJobs: plan must be non-nil")
 	}
 	g := &NodeGroup{name: name, members: nodes}
 	p.groups = append(p.groups, g)
@@ -110,7 +113,11 @@ func Group(p *Plan, name string, nodes ...*Node) *NodeGroup {
 // items may be empty -- the returned *NodeGroup has no members and
 // .Needs(group) becomes a no-op edge.
 //
-//	images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, sparkwing.Workable) {
+// The per-item fn's second return value accepts the same shapes as
+// sparkwing.Job's third arg (a Workable struct or a bare func(ctx)
+// error closure); the SDK coerces uniformly.
+//
+//	images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, any) {
 //	    return "build-" + img.Name, &BuildImageJob{Image: img}
 //	}).Needs(webBuild, discover)
 //	sw.Job(plan, "artifact", &ArtifactJob{}).Needs(images)
@@ -118,7 +125,7 @@ func Group(p *Plan, name string, nodes ...*Node) *NodeGroup {
 // Implemented as a free function because Go does not allow type
 // parameters on methods. For runtime fan-out (slice produced by an
 // upstream Node's typed output), use JobFanOutDynamic instead.
-func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, Workable)) *NodeGroup {
+func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *NodeGroup {
 	if p == nil {
 		panic("sparkwing: JobFanOut: plan must be non-nil")
 	}
@@ -143,9 +150,9 @@ func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, Worka
 //
 //	// DiscoverServices embeds sparkwing.Produces[[]string]
 //	discover := sw.Job(plan, "discover", &DiscoverServices{})
-//	builds   := sw.JobFanOutDynamic(plan, "service-builds", discover, func(svc string) (string, sparkwing.Workable) {
+//	builds   := sw.JobFanOutDynamic(plan, "service-builds", discover, func(svc string) (string, any) {
 //	    s := svc
-//	    return "build-" + s, sparkwing.JobFn(func(ctx context.Context) error { return build(ctx, s) })
+//	    return "build-" + s, func(ctx context.Context) error { return build(ctx, s) }
 //	})
 //	sw.Job(plan, "publish", &PublishJob{}).Needs(builds)
 //
@@ -155,7 +162,10 @@ func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, Worka
 // RefTo[[]T](source) Plan-time-validates the contract and panics with
 // a node-id-tagged message on mismatch. For Plan-time fan-out (slice
 // known at Plan() time), use JobFanOut.
-func JobFanOutDynamic[T any](p *Plan, name string, source *Node, fn func(T) (string, Workable)) *NodeGroup {
+//
+// The per-item fn's second return value accepts the same shapes as
+// sparkwing.Job's third arg (Workable struct or func(ctx) error).
+func JobFanOutDynamic[T any](p *Plan, name string, source *Node, fn func(T) (string, any)) *NodeGroup {
 	if p == nil {
 		panic("sparkwing: JobFanOutDynamic: plan must be non-nil")
 	}
@@ -175,7 +185,8 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *Node, fn func(T) (str
 		items := srcRef.Get(ctx)
 		out := make([]*Node, 0, len(items))
 		for _, it := range items {
-			id, job := fn(it)
+			id, x := fn(it)
+			job := coerceJobArg("JobFanOutDynamic", id, x)
 			out = append(out, newNode("JobFanOutDynamic", id, job))
 		}
 		return out

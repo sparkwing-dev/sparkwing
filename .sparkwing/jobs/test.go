@@ -26,7 +26,7 @@ func (Test) Examples() []sparkwing.Example {
 }
 
 func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(p.run))
+	sparkwing.Job(plan, rc.Pipeline, p.run)
 	return nil
 }
 

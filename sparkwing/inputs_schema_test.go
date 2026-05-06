@@ -431,7 +431,7 @@ type secretPipe struct{ captured secretInputs }
 
 func (sp *secretPipe) Plan(_ context.Context, plan *Plan, in secretInputs, rc RunContext) error {
 	sp.captured = in
-	Job(plan, rc.Pipeline, JobFn(func(ctx context.Context) error { return nil }))
+	Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
 	return nil
 }
 
@@ -675,7 +675,7 @@ type embeddedRegPipe struct{ captured embedOuter }
 
 func (p *embeddedRegPipe) Plan(_ context.Context, plan *Plan, in embedOuter, rc RunContext) error {
 	p.captured = in
-	Job(plan, rc.Pipeline, JobFn(func(ctx context.Context) error { return nil }))
+	Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
 	return nil
 }
 

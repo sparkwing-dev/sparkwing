@@ -92,7 +92,7 @@ func (earlyFailSpawnPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 type spawnRetryChildPipe struct{ sparkwing.Base }
 
 func (spawnRetryChildPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
 	return nil
 }
 

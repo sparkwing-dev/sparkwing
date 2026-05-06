@@ -18,7 +18,7 @@ import (
 // is omitted entirely from the wrapped node response).
 type Decorations struct {
 	// Groups is every named *NodeGroup this node belongs to (declared
-	// via sparkwing.Group(plan, name, members...)). Empty for
+	// via sparkwing.GroupJobs(plan, name, members...)). Empty for
 	// ungrouped nodes; the dashboard renders those flat.
 	Groups []string `json:"groups,omitempty"`
 	// Dynamic marks nodes whose downstream shape is runtime-variable
@@ -26,7 +26,7 @@ type Decorations struct {
 	// The dashboard paints a rainbow "DYNAMIC" pill on these, matching
 	// the terminal's rainbow-letter tag.
 	Dynamic bool `json:"dynamic,omitempty"`
-	// Approval marks nodes declared with plan.Approval(...). The
+	// Approval marks nodes declared with sparkwing.JobApproval(...). The
 	// dashboard always renders an approval pill on these -- grey
 	// before the gate is reached, amber-pulsing while pending, solid
 	// green/red once resolved -- so the gate is visible throughout

@@ -44,8 +44,8 @@ var exclusiveState = &exclusiveCounter{}
 
 func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	// Two peer nodes, both exclusive on the same key, both try to
 	// run concurrently. The lock should serialize them.
-	sparkwing.Job(plan, "a", sparkwing.JobFn(exclusiveState.step(150*time.Millisecond))).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
-	sparkwing.Job(plan, "b", sparkwing.JobFn(exclusiveState.step(150*time.Millisecond))).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
+	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
+	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
 	return nil
 }
 
@@ -58,19 +58,19 @@ var (
 	optB atomic.Bool
 )
 
-func (optionalDepsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	a := sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error {
+func (optionalDepsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	a := sparkwing.Job(plan, "a", func(ctx context.Context) error {
 		optA.Store(true)
 		return nil
-	}))
+	})
 	// b declares NeedsOptional("a", "missing-node"). Should wait on
 	// a (present) and silently skip the missing ID.
-	sparkwing.Job(plan, "b", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "b", func(ctx context.Context) error {
 		if !optA.Load() {
 			return errors.New("b ran before a")
 		}
 		optB.Store(true)
 		return nil
-	})).NeedsOptional(a, "missing-node")
+	}).NeedsOptional(a, "missing-node")
 	return nil
 }
 
@@ -83,14 +83,14 @@ var (
 	cOErrNextRan atomic.Bool
 )
 
-func (continueOnErrorPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	failer := sparkwing.Job(plan, "failer", sparkwing.JobFn(func(ctx context.Context) error {
+func (continueOnErrorPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	failer := sparkwing.Job(plan, "failer", func(ctx context.Context) error {
 		cOErrFailRan.Store(true)
 		return errors.New("planned failure")
-	})).ContinueOnError()
-	sparkwing.Job(plan, "next", sparkwing.JobFn(func(ctx context.Context) error {
+	}).ContinueOnError()
+	sparkwing.Job(plan, "next", func(ctx context.Context) error {
 		cOErrNextRan.Store(true)
 		return nil
-	})).Needs(failer)
+	}).Needs(failer)
 	return nil
 }
 
@@ -103,14 +103,14 @@ var (
 	optFailNext atomic.Bool
 )
 
-func (optionalFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	bad := sparkwing.Job(plan, "bad", sparkwing.JobFn(func(ctx context.Context) error {
+func (optionalFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	bad := sparkwing.Job(plan, "bad", func(ctx context.Context) error {
 		optFailRan.Store(true)
 		return errors.New("optional failure")
-	})).Optional()
-	sparkwing.Job(plan, "after", sparkwing.JobFn(func(ctx context.Context) error {
+	}).Optional()
+	sparkwing.Job(plan, "after", func(ctx context.Context) error {
 		optFailNext.Store(true)
 		return nil
-	})).Needs(bad)
+	}).Needs(bad)
 	return nil
 }
 

@@ -20,10 +20,10 @@ import (
 type ciEmbeddedHelloPipe struct{ sparkwing.Base }
 
 func (ciEmbeddedHelloPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "hello", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "hello", func(ctx context.Context) error {
 		sparkwing.LoggerFromContext(ctx).Log("info", "hello-from-ci-embedded")
 		return nil
-	}))
+	})
 	return nil
 }
 

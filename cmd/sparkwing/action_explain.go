@@ -20,7 +20,7 @@ import (
 // planSnapshotDoc mirrors the shape pkg/orchestrator emits. Kept
 // separate to avoid importing the orchestrator for just the schema.
 // PR5 expanded the wire shape: each node now carries its
-// inner Work (Steps + SpawnNode + SpawnNodeForEach), and Plan-layer
+// inner Work (Steps + JobSpawn + JobSpawnEach), and Plan-layer
 // modifiers move into a dedicated `modifiers` block so renderers can
 // label each node with its dispatch envelope.
 type planSnapshotDoc struct {
@@ -518,7 +518,7 @@ func printWork(w *planSnapshotWork, indent string) {
 		if job == "" {
 			job = "<unknown>"
 		}
-		fmt.Printf("%s  SpawnNode %q (job=%s)%s%s\n", indent, sp.ID, job, skip, needs)
+		fmt.Printf("%s  JobSpawn %q (job=%s)%s%s\n", indent, sp.ID, job, skip, needs)
 		if sp.TargetWork != nil {
 			printWork(sp.TargetWork, indent+"    ")
 		}
@@ -532,7 +532,7 @@ func printWork(w *planSnapshotWork, indent string) {
 		if job == "" {
 			job = "<runtime>"
 		}
-		fmt.Printf("%s  SpawnNodeForEach %q (per item; job=%s)%s\n", indent, e.ID, job, needs)
+		fmt.Printf("%s  JobSpawnEach %q (per item; job=%s)%s\n", indent, e.ID, job, needs)
 		if e.Note != "" {
 			fmt.Printf("%s    note: %s\n", indent, e.Note)
 		}

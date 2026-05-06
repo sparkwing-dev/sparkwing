@@ -155,8 +155,8 @@ func TestPlanValidate_StringMatchingExistingStep_NoPanic(t *testing.T) {
 type planTypoPipe struct{ sparkwing.Base }
 
 func (planTypoPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "fetch", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	sparkwing.Job(plan, "compile", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs("fetchh")
+	sparkwing.Job(plan, "fetch", func(ctx context.Context) error { return nil })
+	sparkwing.Job(plan, "compile", func(ctx context.Context) error { return nil }).Needs("fetchh")
 	return nil
 }
 
@@ -181,7 +181,7 @@ func TestPlanValidate_NodeNeedsTypo_Suggests(t *testing.T) {
 type spawnTypoJob struct{ sparkwing.Base }
 
 func (spawnTypoJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.SpawnNode("seed", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.JobSpawn(w, "seed", func(ctx context.Context) error { return nil })
 	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs("seedd")
 	return nil, nil
 }
@@ -212,7 +212,7 @@ func TestPlanValidate_StringRefToMissingSpawn_Suggests(t *testing.T) {
 type spawnStringExactJob struct{ sparkwing.Base }
 
 func (spawnStringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.SpawnNode("seed", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.JobSpawn(w, "seed", func(ctx context.Context) error { return nil })
 	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs("seed")
 	return nil, nil
 }

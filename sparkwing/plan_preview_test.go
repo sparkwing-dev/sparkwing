@@ -24,7 +24,7 @@ func nopStep(ctx context.Context) error {
 type previewSinglePipe struct{ sparkwing.Base }
 
 func (previewSinglePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "only", sparkwing.JobFn(nopStep))
+	sparkwing.Job(plan, "only", nopStep)
 	return nil
 }
 
@@ -269,8 +269,8 @@ type previewFanOutJob struct{ sparkwing.Base }
 func (previewFanOutJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "seed", nopStep)
 	// Empty-slice generator is fine for plan-time -- we never run it.
-	w.SpawnNodeForEach([]string{}, func(s string) (string, sparkwing.Workable) {
-		return "child-" + s, sparkwing.JobFn(nopStep)
+	sparkwing.JobSpawnEach(w, []string{}, func(s string) (string, any) {
+		return "child-" + s, nopStep
 	})
 	return nil, nil
 }
@@ -320,7 +320,7 @@ type previewArgsInputs struct {
 type previewArgsPipe struct{ sparkwing.Base }
 
 func (previewArgsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ previewArgsInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "only", sparkwing.JobFn(nopStep))
+	sparkwing.Job(plan, "only", nopStep)
 	return nil
 }
 
@@ -330,8 +330,8 @@ func (previewArgsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ preview
 type previewOnFailurePipe struct{ sparkwing.Base }
 
 func (previewOnFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	parent := sparkwing.Job(plan, "build", sparkwing.JobFn(nopStep))
-	parent.OnFailure("rollback", sparkwing.JobFn(nopStep))
+	parent := sparkwing.Job(plan, "build", nopStep)
+	parent.OnFailure("rollback", nopStep)
 	return nil
 }
 
@@ -380,12 +380,12 @@ func TestPreviewPlan_OnFailureRecoverySurfaced(t *testing.T) {
 // recovery node's id when set, "" when not. IMP-029.
 func TestNodeOnFailureNodeID(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	bare := sparkwing.Job(plan, "bare", sparkwing.JobFn(nopStep))
+	bare := sparkwing.Job(plan, "bare", nopStep)
 	if got := bare.OnFailureNodeID(); got != "" {
 		t.Errorf("bare node OnFailureNodeID: got %q, want \"\"", got)
 	}
-	parent := sparkwing.Job(plan, "parent", sparkwing.JobFn(nopStep))
-	parent.OnFailure("rollback", sparkwing.JobFn(nopStep))
+	parent := sparkwing.Job(plan, "parent", nopStep)
+	parent.OnFailure("rollback", nopStep)
 	if got := parent.OnFailureNodeID(); got != "rollback" {
 		t.Errorf("parent OnFailureNodeID: got %q, want %q", got, "rollback")
 	}

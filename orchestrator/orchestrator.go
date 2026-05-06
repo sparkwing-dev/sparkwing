@@ -2039,12 +2039,15 @@ func materializeSpawnEachTemplate(spec *sparkwing.SpawnGenSpec) (id string, job 
 		return "", nil, errors.New("generator fn first return is not string id")
 	}
 	id = out[0].String()
-	if out[1].IsValid() && !out[1].IsNil() {
-		j, ok := out[1].Interface().(sparkwing.Workable)
-		if !ok {
-			return id, nil, errors.New("generator fn second return is not sparkwing.Workable")
+	if out[1].IsValid() {
+		raw := out[1].Interface()
+		if raw != nil {
+			j, cerr := sparkwing.CoerceSpawnEachJob(raw)
+			if cerr != nil {
+				return id, nil, cerr
+			}
+			job = j
 		}
-		job = j
 	}
 	return id, job, nil
 }

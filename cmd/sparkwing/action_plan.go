@@ -268,10 +268,10 @@ func printPlanPreviewWork(w *planPreviewWorkDoc, indent string) {
 		printPlanPreviewItem("Step", &s, indent)
 	}
 	for _, sp := range w.Spawns {
-		printPlanPreviewItem("SpawnNode", &sp, indent)
+		printPlanPreviewItem("JobSpawn", &sp, indent)
 	}
 	for _, sg := range w.SpawnEach {
-		printPlanPreviewItem("SpawnNodeForEach", &sg, indent)
+		printPlanPreviewItem("JobSpawnEach", &sg, indent)
 	}
 }
 

@@ -135,8 +135,8 @@ func newNode(caller, id string, job Workable) *Node {
 
 	// Approval gates: the *approvalJob Workable is a marker -- Work()
 	// is empty and never executes; the orchestrator routes via
-	// n.approval. Pipeline authors construct via sw.Approval, never
-	// build *approvalJob directly.
+	// n.approval. Pipeline authors construct via sw.JobApproval,
+	// never build *approvalJob directly.
 	if app, ok := job.(*approvalJob); ok {
 		switch app.cfg.OnExpiry {
 		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
@@ -243,45 +243,73 @@ func (p *Plan) InsertExpanded(source *Node, children []*Node) error {
 	return nil
 }
 
-// Job registers a typed sparkwing.Workable under id and returns the node
-// handle for further configuration (Needs, Env, etc.). The value must
-// implement Work() *Work; the inner DAG is materialized at registration
-// time so pipeline-explain / dashboard renderers / cycle detection see
-// the full graph before dispatch starts.
+// Job registers a Workable (or a bare func(ctx) error closure) under
+// id and returns the node handle for further configuration (Needs,
+// Env, etc.). For multi-step or typed pipelines, pass a struct that
+// implements Workable; for the single-closure case pass the closure
+// directly and the SDK wraps it. The inner DAG is materialized at
+// registration time so pipeline-explain / dashboard renderers /
+// cycle detection see the full graph before dispatch starts.
 //
-// Approval gates are registered through the same verb by passing
-// *Approval as the job. The orchestrator detects it and routes the
-// node through the approval-waiter flow rather than executing Work().
+// The third parameter is typed `any` rather than Workable so the
+// closure form is accepted without an explicit wrapper. Wrong types
+// panic at register time with a typed message, matching how Step's
+// reflection-validated fn behaves. The accepted shapes are:
+//
+//	sparkwing.Workable
+//	func(ctx context.Context) error
 //
 // Output contract: a job that produces a typed value must embed
-// sparkwing.Produces[T] AND call Work.SetResult on a step that returns
-// T. Either marker or SetResult on its own is a Plan-time panic.
+// sparkwing.Produces[T] AND its Work must return a *WorkStep whose
+// step fn returns (T, error). Either marker or returned step on its
+// own is a Plan-time panic.
 //
 // For secrets, jobs call sparkwing.Secret(ctx, name) inside their step
 // closures.
 //
-// Panics if id is empty, already registered, or job is nil.
+// Panics if id is empty, already registered, or x is nil / wrong type.
 //
-//	sw.Job(plan, "test", sparkwing.JobFn(func(ctx context.Context) error {
+//	sw.Job(plan, "test", func(ctx context.Context) error {
 //	    _, err := sparkwing.Bash(ctx, "go test ./...").Run()
 //	    return err
-//	}))
+//	})
 //
-//	sw.Approval(plan, "approve-prod", sparkwing.ApprovalConfig{
+//	sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
 //	    Message: "Promote build to prod?",
 //	    Timeout: 2 * time.Hour,
 //	}).Needs(integStg)
-func Job(p *Plan, id string, job Workable) *Node {
+func Job(p *Plan, id string, x any) *Node {
 	if p == nil {
 		panic("sparkwing: Job: plan must be non-nil")
 	}
 	if _, ok := p.byID[id]; ok {
 		panic(fmt.Sprintf("sparkwing: Job: duplicate node id %q", id))
 	}
+	job := coerceJobArg("Job", id, x)
 	n := newNode("Job", id, job)
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
 	return n
+}
+
+// coerceJobArg validates the third argument of Job (or any caller that
+// accepts the same author-facing shapes) and returns the underlying
+// Workable. nil and unsupported types panic with a typed message
+// pointing at the calling verb.
+func coerceJobArg(caller, id string, x any) Workable {
+	switch v := x.(type) {
+	case nil:
+		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))
+	case Workable:
+		return v
+	case func(ctx context.Context) error:
+		return &jobFn{fn: v}
+	default:
+		panic(fmt.Sprintf(
+			"sparkwing: %s(%q): third argument must be sparkwing.Workable or "+
+				"func(ctx context.Context) error, got %T",
+			caller, id, x))
+	}
 }
 
 // LintWarnings returns the non-fatal Plan-time advisories accumulated
@@ -374,11 +402,11 @@ type Node struct {
 }
 
 // ApprovalConfig describes a manual approval gate. Authors fill it
-// out and pass it to sw.Approval; the orchestrator reads it back via
-// Node.ApprovalConfig when routing the gate to the approval-waiter
-// flow.
+// out and pass it to sw.JobApproval; the orchestrator reads it back
+// via Node.ApprovalConfig when routing the gate to the approval-
+// waiter flow.
 //
-//	approve := sw.Approval(plan, "approve-prod", sparkwing.ApprovalConfig{
+//	approve := sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
 //	    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
 //	    Timeout:  2 * time.Hour,
 //	    OnExpiry: sparkwing.ApprovalFail,
@@ -401,9 +429,9 @@ type ApprovalConfig struct {
 }
 
 // approvalJob is the unexported Workable that backs an approval gate.
-// Pipeline authors don't construct it directly; sw.Approval builds it
-// internally and the orchestrator detects it via the type assertion
-// in newNode.
+// Pipeline authors don't construct it directly; sw.JobApproval builds
+// it internally and the orchestrator detects it via the type
+// assertion in newNode.
 type approvalJob struct {
 	Base
 	cfg ApprovalConfig
@@ -432,7 +460,7 @@ func (n *Node) IsApproval() bool { return n.approval != nil }
 // call this.
 func (n *Node) ApprovalConfig() *ApprovalConfig { return n.approval }
 
-// ApprovalGate is the handle returned by sw.Approval. It exposes a
+// ApprovalGate is the handle returned by sw.JobApproval. It exposes a
 // narrower modifier surface than *Node -- only the modifiers that
 // make sense for a human gate (Needs, NeedsOptional, OnFailure
 // recovery, BeforeRun/AfterRun hooks, SkipIf, Optional,
@@ -444,30 +472,34 @@ type ApprovalGate struct {
 	n *Node
 }
 
-// Approval registers a manual approval gate under id and returns the
-// gate handle for further configuration. The orchestrator routes
+// JobApproval registers a manual approval gate under id and returns
+// the gate handle for further configuration. The orchestrator routes
 // approval nodes through the approval-waiter flow rather than
 // dispatching Work; the gate pauses until a human (via the dashboard
 // or `sparkwing approve/deny`) resolves it. Denied / expired gates
 // resolve per cfg.OnExpiry.
 //
+// The verb is named JobApproval (not Approval) to keep the Job-prefix
+// convention: every Plan-layer verb that adds a Node carries the
+// Job- prefix so tab-complete on Job* surfaces the full set.
+//
 // Panics if id is empty or already registered, or if cfg.OnExpiry is
 // not one of the documented constants.
 //
-//	approve := sw.Approval(plan, "approve-prod", sparkwing.ApprovalConfig{
+//	approve := sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
 //	    Message:  "Promote to prod?",
 //	    Timeout:  2 * time.Hour,
 //	    OnExpiry: sparkwing.ApprovalFail,
 //	}).Needs(integStg)
 //	sw.Job(plan, "deploy-prod", &DeployJob{}).Needs(approve)
-func Approval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
+func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
 	if p == nil {
-		panic("sparkwing: Approval: plan must be non-nil")
+		panic("sparkwing: JobApproval: plan must be non-nil")
 	}
 	if _, ok := p.byID[id]; ok {
-		panic(fmt.Sprintf("sparkwing: Approval: duplicate node id %q", id))
+		panic(fmt.Sprintf("sparkwing: JobApproval: duplicate node id %q", id))
 	}
-	n := newNode("Approval", id, &approvalJob{cfg: cfg})
+	n := newNode("JobApproval", id, &approvalJob{cfg: cfg})
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
 	return &ApprovalGate{n: n}
@@ -498,9 +530,10 @@ func (g *ApprovalGate) NeedsOptional(deps ...any) *ApprovalGate {
 }
 
 // OnFailure registers a recovery node that runs if the gate resolves
-// to ApprovalFail. Useful for rollback / alert hooks.
-func (g *ApprovalGate) OnFailure(id string, job Workable) *ApprovalGate {
-	g.n.OnFailure(id, job)
+// to ApprovalFail. Useful for rollback / alert hooks. Accepts the
+// same argument shapes as sparkwing.Job.
+func (g *ApprovalGate) OnFailure(id string, x any) *ApprovalGate {
+	g.n.OnFailure(id, x)
 	return g
 }
 
@@ -730,7 +763,11 @@ func (n *Node) Timeout(d time.Duration) *Node {
 // terminates with outcome=failed; otherwise it's marked Skipped. The
 // recovery inherits no dependencies from its parent. Useful for
 // rollback, alerting, and cleanup hooks.
-func (n *Node) OnFailure(id string, job Workable) *Node {
+//
+// Accepts the same argument shapes as sparkwing.Job (a Workable struct
+// or a bare func(ctx) error closure).
+func (n *Node) OnFailure(id string, x any) *Node {
+	job := coerceJobArg("OnFailure", id, x)
 	n.onFailure = newNode("OnFailure", id, job)
 	return n
 }

@@ -291,7 +291,7 @@ func TestRunWork_SpawnRejectedWithoutHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
 	sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	w.SpawnNode("scan", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.JobSpawn(w, "scan", func(ctx context.Context) error { return nil })
 
 	_, err := sparkwing.RunWork(ctx, w)
 	if err == nil {
@@ -307,7 +307,7 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	scan := w.SpawnNode("scan", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(a)
+	scan := sparkwing.JobSpawn(w, "scan", func(ctx context.Context) error { return nil }).Needs(a)
 	var afterSawSpawn bool
 	sparkwing.Step(w, "after", func(ctx context.Context) error {
 		// SpawnHandle.Spec().ResolvedID is set by the handler stub.
@@ -349,8 +349,8 @@ func TestRunWork_SpawnForEachDispatchesEachItem(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
 	items := []string{"alpha", "beta", "gamma"}
-	w.SpawnNodeForEach(items, func(s string) (string, sparkwing.Workable) {
-		return "shard-" + s, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+	sparkwing.JobSpawnEach(w, items, func(s string) (string, any) {
+		return "shard-" + s, func(ctx context.Context) error { return nil }
 	})
 
 	var seen sync.Map

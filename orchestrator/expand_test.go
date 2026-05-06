@@ -51,13 +51,13 @@ var (
 
 func (expandOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	discover := sparkwing.Job(plan, "discover", &discoverJob{})
-	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
+	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, any) {
 		return "build-" + img, &recordingBuild{image: img}
 	})
-	sparkwing.Job(plan, "fanin", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "fanin", func(ctx context.Context) error {
 		faninRan.Store(true)
 		return nil
-	})).Needs(group)
+	}).Needs(group)
 	return nil
 }
 
@@ -88,13 +88,13 @@ var emptyFaninRan atomic.Bool
 
 func (expandEmpty) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	discover := sparkwing.Job(plan, "discover", &discoverJob{})
-	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
-		return "should-not-create-" + img, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, any) {
+		return "should-not-create-" + img, func(ctx context.Context) error { return nil }
 	})
-	sparkwing.Job(plan, "fanin", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "fanin", func(ctx context.Context) error {
 		emptyFaninRan.Store(true)
 		return nil
-	})).Needs(group)
+	}).Needs(group)
 	return nil
 }
 
@@ -120,14 +120,14 @@ func (failingDiscover) run(ctx context.Context) ([]string, error) {
 
 func (expandSourceFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	discover := sparkwing.Job(plan, "discover", &failingDiscover{})
-	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
+	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, any) {
 		failedGenRan.Store(true)
-		return "should-not-create-" + img, sparkwing.JobFn(func(ctx context.Context) error { return nil })
+		return "should-not-create-" + img, func(ctx context.Context) error { return nil }
 	})
-	sparkwing.Job(plan, "fanin", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "fanin", func(ctx context.Context) error {
 		failedFaninRan.Store(true)
 		return nil
-	})).Needs(group)
+	}).Needs(group)
 	return nil
 }
 
@@ -139,13 +139,13 @@ var panicFaninRan atomic.Bool
 
 func (expandGenPanics) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	discover := sparkwing.Job(plan, "discover", &discoverJob{})
-	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
+	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, any) {
 		panic("boom")
 	})
-	sparkwing.Job(plan, "fanin", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "fanin", func(ctx context.Context) error {
 		panicFaninRan.Store(true)
 		return nil
-	})).Needs(group)
+	}).Needs(group)
 	return nil
 }
 

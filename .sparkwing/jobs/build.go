@@ -50,14 +50,14 @@ func (Build) Examples() []sparkwing.Example {
 func (p *Build) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	for _, bin := range publicBinaries {
 		bin := bin
-		sparkwing.Job(plan, "build-"+bin, sparkwing.JobFn(func(ctx context.Context) error {
+		sparkwing.Job(plan, "build-"+bin, func(ctx context.Context) error {
 			cmd := fmt.Sprintf("go build -o /dev/null ./cmd/%s", bin)
 			if _, err := sparkwing.Bash(ctx, cmd).Run(); err != nil {
 				return fmt.Errorf("build %s: %w", bin, err)
 			}
 			sparkwing.Info(ctx, "build %s: ok", bin)
 			return nil
-		}))
+		})
 	}
 	return nil
 }

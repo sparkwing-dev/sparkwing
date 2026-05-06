@@ -17,13 +17,13 @@ import (
 type authFailPipe struct{ sparkwing.Base }
 
 func (authFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "only", sparkwing.JobFn(func(ctx context.Context) error {
+	sparkwing.Job(plan, "only", func(ctx context.Context) error {
 		// User code "succeeds" but every Emit silently fails on 403
 		// in the unfixed world; with IMP-002 the run still ends up
 		// failed because the auth error is fatal.
 		sparkwing.Info(ctx, "doing the work")
 		return nil
-	}))
+	})
 	return nil
 }
 

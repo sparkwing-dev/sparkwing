@@ -17,10 +17,10 @@ import (
 //	}
 //
 //	func (Deploy) Plan(ctx context.Context, plan *sw.Plan, _ DeployArgs, rc sw.RunContext) error {
-//	    sw.Job(plan, "deploy", sw.JobFn(func(ctx context.Context) error {
+//	    sw.Job(plan, "deploy", func(ctx context.Context) error {
 //	        args := sw.Inputs[DeployArgs](ctx)
 //	        return runDeploy(ctx, args.Service, args.Env)
-//	    }))
+//	    })
 //	    return nil
 //	}
 //

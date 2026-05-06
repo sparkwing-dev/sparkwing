@@ -22,7 +22,7 @@ type deployInputs struct {
 type deployForDescribe struct{ sparkwing.Base }
 
 func (deployForDescribe) Plan(_ context.Context, plan *sparkwing.Plan, _ deployInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
 	return nil
 }
 
@@ -118,7 +118,7 @@ type populatePipe struct {
 
 func (pp *populatePipe) Plan(_ context.Context, plan *sparkwing.Plan, in populateInputs, rc sparkwing.RunContext) error {
 	pp.captured = in
-	sparkwing.Job(plan, rc.Pipeline, sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
 	return nil
 }
 

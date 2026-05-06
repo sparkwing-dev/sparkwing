@@ -45,7 +45,7 @@ func (cli017Pipe) Plan(_ context.Context, plan *sparkwing.Plan, in cli017Inputs,
 		if _, dropped := skip[name]; dropped {
 			return
 		}
-		sparkwing.Job(plan, name, sparkwing.JobFn(func(ctx context.Context) error { return nil }))
+		sparkwing.Job(plan, name, func(ctx context.Context) error { return nil })
 	}
 	register("build")
 	register("artifact")

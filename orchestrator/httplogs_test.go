@@ -15,15 +15,15 @@ import (
 
 type httpLogsPipe struct{ sparkwing.Base }
 
-func (httpLogsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	a := sparkwing.Job(plan, "a", sparkwing.JobFn(func(ctx context.Context) error {
+func (httpLogsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	a := sparkwing.Job(plan, "a", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "a: first line")
 		sparkwing.Info(ctx, "a: second line")
 		return nil
-	}))
-	sparkwing.Job(plan, "b", sparkwing.JobFn(func(ctx context.Context) error {
+	})
+	sparkwing.Job(plan, "b", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "b: only line")
 		return nil
-	})).Needs(a)
+	}).Needs(a)
 	return nil
 }
 

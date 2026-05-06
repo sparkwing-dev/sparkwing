@@ -97,11 +97,11 @@ func unsharedStep(label string) func(ctx context.Context) error {
 type publishReleasePipe struct{ sparkwing.Base }
 
 func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	build := sparkwing.Job(plan, "build-artifact", sparkwing.JobFn(unsharedStep("release-build")))
-	push := sparkwing.Job(plan, "push-s3", sparkwing.JobFn(s3Push())).
+	build := sparkwing.Job(plan, "build-artifact", unsharedStep("release-build"))
+	push := sparkwing.Job(plan, "push-s3", s3Push()).
 		Needs(build).
 		Cache(sparkwing.CacheOptions{Key: "shared-s3-bucket", OnLimit: sparkwing.Queue})
-	sparkwing.Job(plan, "notify-slack", sparkwing.JobFn(unsharedStep("release-notify"))).Needs(push)
+	sparkwing.Job(plan, "notify-slack", unsharedStep("release-notify")).Needs(push)
 	return nil
 }
 
@@ -109,11 +109,11 @@ func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 type syncBackupPipe struct{ sparkwing.Base }
 
 func (syncBackupPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	snapshot := sparkwing.Job(plan, "snapshot-db", sparkwing.JobFn(unsharedStep("backup-snapshot")))
-	push := sparkwing.Job(plan, "push-s3", sparkwing.JobFn(s3Push())).
+	snapshot := sparkwing.Job(plan, "snapshot-db", unsharedStep("backup-snapshot"))
+	push := sparkwing.Job(plan, "push-s3", s3Push()).
 		Needs(snapshot).
 		Cache(sparkwing.CacheOptions{Key: "shared-s3-bucket", OnLimit: sparkwing.Queue})
-	sparkwing.Job(plan, "update-inventory", sparkwing.JobFn(unsharedStep("backup-inventory"))).Needs(push)
+	sparkwing.Job(plan, "update-inventory", unsharedStep("backup-inventory")).Needs(push)
 	return nil
 }
 

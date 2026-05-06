@@ -163,7 +163,7 @@ func TestBlastRadiusBlockedError_Message(t *testing.T) {
 // decision.
 func TestPreviewItem_BlastRadius(t *testing.T) {
 	plan := NewPlan()
-	Job(plan, "deploy", JobFn(func(ctx context.Context) error { return nil }))
+	Job(plan, "deploy", func(ctx context.Context) error { return nil })
 	// Grab the inner step and decorate it.
 	node := plan.Nodes()[0]
 	step := node.Work().Steps()[0]
@@ -187,7 +187,7 @@ func TestPreviewItem_BlastRadius(t *testing.T) {
 // blast_radius field (omitempty wire shape).
 func TestPreviewItem_BlastRadiusEmpty(t *testing.T) {
 	plan := NewPlan()
-	Job(plan, "plain", JobFn(func(ctx context.Context) error { return nil }))
+	Job(plan, "plain", func(ctx context.Context) error { return nil })
 	preview, err := PreviewPlan(plan, "plain", nil, PreviewOptions{})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)

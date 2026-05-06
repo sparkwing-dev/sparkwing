@@ -24,7 +24,7 @@ type snapshotParentJob struct{}
 
 func (snapshotParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	analyze := sparkwing.Step(w, "analyze", func(ctx context.Context) error { return nil })
-	w.SpawnNode("scan-child", snapshotChildJob{}).Needs(analyze)
+	sparkwing.JobSpawn(w, "scan-child", snapshotChildJob{}).Needs(analyze)
 	return nil, nil
 }
 
@@ -78,12 +78,12 @@ type snapshotCycleA struct{}
 type snapshotCycleB struct{}
 
 func (snapshotCycleA) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.SpawnNode("to-b", snapshotCycleB{})
+	sparkwing.JobSpawn(w, "to-b", snapshotCycleB{})
 	return nil, nil
 }
 
 func (snapshotCycleB) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.SpawnNode("to-a", snapshotCycleA{})
+	sparkwing.JobSpawn(w, "to-a", snapshotCycleA{})
 	return nil, nil
 }
 
@@ -106,7 +106,7 @@ type snapshotForEachJob struct{}
 
 func (snapshotForEachJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	items := []string{"a", "b", "c"}
-	w.SpawnNodeForEach(items, func(item string) (string, sparkwing.Workable) {
+	sparkwing.JobSpawnEach(w, items, func(item string) (string, sparkwing.Workable) {
 		return "shard-" + item, snapshotChildJob{}
 	})
 	return nil, nil

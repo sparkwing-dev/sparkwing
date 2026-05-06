@@ -18,9 +18,10 @@ import (
 // Work at Plan-time so renderers see the full graph before any
 // dispatch begins.
 //
-// For the trivial single-step case use sparkwing.JobFn; for typed
-// jobs declare a struct embedding sparkwing.Produces[T] and return
-// the typed step's *WorkStep from Work.
+// For the trivial single-step case pass a func(ctx) error directly to
+// sparkwing.Job; for typed jobs declare a struct embedding
+// sparkwing.Produces[T] and return the typed step's *WorkStep from
+// Work.
 type Workable interface {
 	Work(w *Work) (*WorkStep, error)
 }
@@ -61,7 +62,7 @@ func (w *Work) StepByID(id string) *WorkStep {
 	return w.byID[id]
 }
 
-// Spawns returns the static SpawnNode declarations registered on
+// Spawns returns the static JobSpawn declarations registered on
 // this Work.
 func (w *Work) Spawns() []*SpawnSpec {
 	out := make([]*SpawnSpec, len(w.spawns))
@@ -69,8 +70,8 @@ func (w *Work) Spawns() []*SpawnSpec {
 	return out
 }
 
-// SpawnGens returns the SpawnNodeForEach declarations. Shape is
-// known at Plan-time; cardinality is decided at dispatch.
+// SpawnGens returns the JobSpawnEach declarations. Shape is known at
+// Plan-time; cardinality is decided at dispatch.
 func (w *Work) SpawnGens() []*SpawnGenSpec {
 	out := make([]*SpawnGenSpec, len(w.spawnGens))
 	copy(out, w.spawnGens)
@@ -244,39 +245,27 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 	return typed
 }
 
-// Sequence wires Needs edges between consecutive steps so each depends
-// on the previous one. Returns the terminal step so the caller can
-// chain further .Needs or modifiers on the endpoint.
-func (w *Work) Sequence(steps ...*WorkStep) *WorkStep {
-	for i := 1; i < len(steps); i++ {
-		steps[i].Needs(steps[i-1])
-	}
-	if len(steps) == 0 {
-		return nil
-	}
-	return steps[len(steps)-1]
-}
-
-// Parallel groups steps that should run concurrently. The returned
-// StepGroup can be passed to a downstream step's Needs for fan-in.
-func (w *Work) Parallel(steps ...*WorkStep) *StepGroup {
-	return &StepGroup{members: steps}
-}
-
-// SpawnNode dispatches a registered Job as a fresh Plan node from
+// JobSpawn dispatches a registered Job as a fresh Plan node from
 // inside a Work. The spawning runner suspends until the spawned node
 // completes. Use sparingly: a suspended runner holds a slot of
 // compute.
 //
 // The returned *SpawnHandle accepts .Needs to declare which Steps must
 // complete before the spawn fires, and .Get(ctx) for typed output.
-func (w *Work) SpawnNode(id string, job Workable) *SpawnHandle {
+//
+// "Spawn" is a lifecycle suffix here -- the verb adds a Plan Node
+// from inside Work, hence the Job- prefix.
+//
+// Accepts the same argument shapes as sparkwing.Job's third arg
+// (Workable struct or func(ctx) error closure).
+func JobSpawn(w *Work, id string, x any) *SpawnHandle {
+	if w == nil {
+		panic("sparkwing: JobSpawn: w must be non-nil")
+	}
 	if id == "" {
-		panic("sparkwing: Work.SpawnNode: id must not be empty")
+		panic("sparkwing: JobSpawn: id must not be empty")
 	}
-	if job == nil {
-		panic(fmt.Sprintf("sparkwing: Work.SpawnNode(%q): job must be non-nil", id))
-	}
+	job := coerceJobArg("JobSpawn", id, x)
 	spec := &SpawnSpec{
 		id:  id,
 		job: job,
@@ -285,7 +274,7 @@ func (w *Work) SpawnNode(id string, job Workable) *SpawnHandle {
 	return &SpawnHandle{spec: spec}
 }
 
-// SpawnNodeForEach is the cardinality-many variant of SpawnNode. The
+// JobSpawnEach is the cardinality-many variant of JobSpawn. The
 // generator runs once after the Spawn's Needs are satisfied; each
 // returned (id, job) pair becomes a fresh Plan node dispatched in
 // parallel. The spawning runner suspends across the entire fan-out.
@@ -296,9 +285,12 @@ func (w *Work) SpawnNode(id string, job Workable) *SpawnHandle {
 //
 // where T is assignable from items's element type. Both shapes are
 // validated at Plan time via reflection so a wrong-shaped fn panics
-// alongside other structural errors (Produces/SetResult mismatch,
+// alongside other structural errors (Produces/Work-return mismatch,
 // duplicate IDs) rather than blowing up later during dispatch.
-func (w *Work) SpawnNodeForEach(items any, fn any) *SpawnGroup {
+func JobSpawnEach(w *Work, items any, fn any) *SpawnGroup {
+	if w == nil {
+		panic("sparkwing: JobSpawnEach: w must be non-nil")
+	}
 	validateSpawnEach(items, fn)
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -313,62 +305,101 @@ func (w *Work) SpawnNodeForEach(items any, fn any) *SpawnGroup {
 	return &SpawnGroup{spec: spec}
 }
 
-// validateSpawnEach checks SpawnNodeForEach's reflective contract at
+// validateSpawnEach checks JobSpawnEach's reflective contract at
 // Plan time so a bad fn signature panics during plan construction
 // rather than at dispatch -- matches how every other structural
-// SDK error (Produces/SetResult mismatch, duplicate IDs, invalid
+// SDK error (Produces/Work-return mismatch, duplicate IDs, invalid
 // Approval.OnExpiry) surfaces.
 func validateSpawnEach(items any, fn any) {
 	if items == nil {
-		panic("sparkwing: Work.SpawnNodeForEach: items must be non-nil")
+		panic("sparkwing: JobSpawnEach: items must be non-nil")
 	}
 	if fn == nil {
-		panic("sparkwing: Work.SpawnNodeForEach: fn must be non-nil")
+		panic("sparkwing: JobSpawnEach: fn must be non-nil")
 	}
 	itemsT := reflect.TypeOf(items)
 	if k := itemsT.Kind(); k != reflect.Slice && k != reflect.Array {
-		panic(fmt.Sprintf("sparkwing: Work.SpawnNodeForEach: items must be a slice or array, got %T", items))
+		panic(fmt.Sprintf("sparkwing: JobSpawnEach: items must be a slice or array, got %T", items))
 	}
 	fnT := reflect.TypeOf(fn)
 	if fnT.Kind() != reflect.Func {
-		panic(fmt.Sprintf("sparkwing: Work.SpawnNodeForEach: fn must be a func, got %T", fn))
+		panic(fmt.Sprintf("sparkwing: JobSpawnEach: fn must be a func, got %T", fn))
 	}
 	if fnT.NumIn() != 1 {
 		panic(fmt.Sprintf(
-			"sparkwing: Work.SpawnNodeForEach: fn must take exactly 1 argument (the item), got %d (signature: %v)",
+			"sparkwing: JobSpawnEach: fn must take exactly 1 argument (the item), got %d (signature: %v)",
 			fnT.NumIn(), fnT))
 	}
 	if fnT.NumOut() != 2 {
 		panic(fmt.Sprintf(
-			"sparkwing: Work.SpawnNodeForEach: fn must return (string, sparkwing.Workable), got %d return values (signature: %v)",
+			"sparkwing: JobSpawnEach: fn must return (string, sparkwing.Workable) "+
+				"or (string, func(ctx context.Context) error), "+
+				"got %d return values (signature: %v)",
 			fnT.NumOut(), fnT))
 	}
 	elemT := itemsT.Elem()
 	argT := fnT.In(0)
 	if !elemT.AssignableTo(argT) {
 		panic(fmt.Sprintf(
-			"sparkwing: Work.SpawnNodeForEach: fn argument type %v is not assignable from items element type %v",
+			"sparkwing: JobSpawnEach: fn argument type %v is not assignable from items element type %v",
 			argT, elemT))
 	}
 	stringT := reflect.TypeOf("")
 	if fnT.Out(0) != stringT {
 		panic(fmt.Sprintf(
-			"sparkwing: Work.SpawnNodeForEach: fn first return value must be string, got %v",
+			"sparkwing: JobSpawnEach: fn first return value must be string, got %v",
 			fnT.Out(0)))
 	}
 	workableT := reflect.TypeOf((*Workable)(nil)).Elem()
-	if !fnT.Out(1).Implements(workableT) {
+	closureT := reflect.TypeOf((func(context.Context) error)(nil))
+	emptyIfaceT := reflect.TypeOf((*any)(nil)).Elem()
+	out1 := fnT.Out(1)
+	// Accept Workable, func(ctx) error, or any. The any case defers
+	// the runtime check to coerceSpawnEachJob, mirroring how
+	// sparkwing.Job handles its `any` third arg.
+	if !out1.Implements(workableT) && out1 != closureT && out1 != emptyIfaceT {
 		panic(fmt.Sprintf(
-			"sparkwing: Work.SpawnNodeForEach: fn second return value must implement sparkwing.Workable, got %v",
-			fnT.Out(1)))
+			"sparkwing: JobSpawnEach: fn second return value must be sparkwing.Workable "+
+				"or func(ctx context.Context) error, got %v",
+			out1))
 	}
+}
+
+// CoerceSpawnEachJob normalizes the second-return of a JobSpawnEach
+// per-item callback into a Workable. Mirrors coerceJobArg for the
+// fan-out case so closure-form jobs work uniformly without an
+// explicit wrapper. Exported so the orchestrator's template
+// materializer can apply the same shape rules at dispatch time.
+func CoerceSpawnEachJob(v any) (Workable, error) {
+	switch j := v.(type) {
+	case Workable:
+		return j, nil
+	case func(ctx context.Context) error:
+		return &jobFn{fn: j}, nil
+	}
+	rv := reflect.ValueOf(v)
+	if rv.IsValid() && rv.Type().Implements(reflect.TypeOf((*Workable)(nil)).Elem()) {
+		return rv.Interface().(Workable), nil
+	}
+	return nil, fmt.Errorf("sparkwing: JobSpawnEach: per-item job has unsupported type %T", v)
+}
+
+// coerceSpawnEachJob is the panic-on-error variant used inside the
+// runner where a structurally-valid spec is already guaranteed by
+// validateSpawnEach.
+func coerceSpawnEachJob(v any) Workable {
+	job, err := CoerceSpawnEachJob(v)
+	if err != nil {
+		panic(err.Error())
+	}
+	return job
 }
 
 // WorkStep is one unit of work inside a Work. Steps are not Jobs;
 // they run inside the Node's runner process and share its filesystem,
 // environment, and ctx. Node-only modifiers (Retry, Timeout, OnFailure,
 // Cache, RunsOn, BeforeRun/AfterRun) are deliberately absent on
-// WorkStep -- promote to a Node via SpawnNode if you need them.
+// WorkStep -- promote to a Node via JobSpawn if you need them.
 type WorkStep struct {
 	id      string
 	fn      func(ctx context.Context) (any, error)
@@ -534,12 +565,20 @@ func (s *WorkStep) awaitDone(ctx context.Context) error {
 	}
 }
 
-// StepGroup is a handle to a static group of Steps. Returned by
-// w.Parallel. Downstream .Needs(group) expands eagerly to the group's
-// members.
+// StepGroup is a handle to a named group of Steps. Returned by
+// sparkwing.GroupSteps. Downstream .Needs(group) expands eagerly to
+// the group's members. Modifiers (Needs, SkipIf) delegate to every
+// member, mirroring the *WorkStep modifier surface so future
+// step-level modifiers can be added uniformly to both.
 type StepGroup struct {
+	name    string
 	members []*WorkStep
 }
+
+// Name returns the group's declared name. The dashboard's Work view
+// renders the cluster under this name; an empty name means
+// "structural collection only" (no UI cluster).
+func (g *StepGroup) Name() string { return g.name }
 
 // Members returns the group's steps.
 func (g *StepGroup) Members() []*WorkStep {
@@ -548,7 +587,55 @@ func (g *StepGroup) Members() []*WorkStep {
 	return out
 }
 
-// SpawnSpec is the static record of a SpawnNode declaration. The
+// GroupSteps declares a named bundle of Work steps. The returned
+// *StepGroup is both a Needs target (downstream depends on every
+// member) and a dashboard cluster (rendered as a single visual unit
+// under the given name; empty name = structural collection only).
+//
+//	fetch := sw.Step(w, "fetch", j.fetch)
+//	checks := sw.GroupSteps(w, "safety",
+//	    sw.Step(w, "lint",    j.lint).Needs(fetch),
+//	    sw.Step(w, "secscan", j.secscan).Needs(fetch),
+//	    sw.Step(w, "vet",     j.vet).Needs(fetch),
+//	)
+//	return sw.Step(w, "deploy", j.deploy).Needs(checks), nil
+//
+// The mirror of sparkwing.GroupJobs at the Work layer.
+func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup {
+	if w == nil {
+		panic("sparkwing: GroupSteps: w must be non-nil")
+	}
+	members := make([]*WorkStep, 0, len(steps))
+	for _, s := range steps {
+		if s != nil {
+			members = append(members, s)
+		}
+	}
+	return &StepGroup{name: name, members: members}
+}
+
+// Needs declares an upstream dependency on every member of the group.
+// Accepts the same shapes as WorkStep.Needs.
+func (g *StepGroup) Needs(deps ...any) *StepGroup {
+	for _, m := range g.members {
+		m.Needs(deps...)
+	}
+	return g
+}
+
+// SkipIf registers a predicate on every member of the group. See
+// WorkStep.SkipIf.
+func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup {
+	if fn == nil {
+		return g
+	}
+	for _, m := range g.members {
+		m.SkipIf(fn)
+	}
+	return g
+}
+
+// SpawnSpec is the static record of a JobSpawn declaration. The
 // orchestrator walks every Work's spawns at Plan-time and recursively
 // materializes each target Job's own Work.
 type SpawnSpec struct {
@@ -625,7 +712,7 @@ func (s *SpawnSpec) awaitDone(ctx context.Context) error {
 	}
 }
 
-// SpawnHandle is the author-facing handle to a SpawnNode declaration.
+// SpawnHandle is the author-facing handle to a JobSpawn declaration.
 type SpawnHandle struct {
 	spec *SpawnSpec
 }
@@ -652,7 +739,7 @@ func (h *SpawnHandle) SkipIf(fn SkipPredicate) *SpawnHandle {
 	return h
 }
 
-// SpawnGenSpec is the static record of a SpawnNodeForEach declaration.
+// SpawnGenSpec is the static record of a JobSpawnEach declaration.
 // The generator runs at dispatch time once Needs are satisfied.
 type SpawnGenSpec struct {
 	id    string
@@ -661,7 +748,7 @@ type SpawnGenSpec struct {
 	needs []string
 }
 
-// syntheticID returns the scheduling-id for a SpawnNodeForEach
+// syntheticID returns the scheduling-id for a JobSpawnEach
 // fan-out group.
 func (g *SpawnGenSpec) syntheticID() string { return g.id }
 
@@ -683,7 +770,7 @@ func (g *SpawnGenSpec) DepIDs() []string {
 	return out
 }
 
-// SpawnGroup is the author-facing handle returned by SpawnNodeForEach.
+// SpawnGroup is the author-facing handle returned by JobSpawnEach.
 type SpawnGroup struct {
 	spec *SpawnGenSpec
 }
@@ -731,19 +818,10 @@ func unwrapStep(v any) *WorkStep {
 	return nil
 }
 
-// JobFn wraps a closure as a single-step Job:
-//
-//	plan.Node("test", sparkwing.JobFn(func(ctx context.Context) error {
-//	    _, err := sparkwing.Bash(ctx, "go test ./...").Run()
-//	    return err
-//	}))
-func JobFn(fn func(ctx context.Context) error) Workable {
-	if fn == nil {
-		panic("sparkwing: JobFn: fn must be non-nil")
-	}
-	return &jobFn{fn: fn}
-}
-
+// jobFn is the unexported Workable wrapper used internally when
+// sparkwing.Job receives a func(ctx) error directly. Pipeline authors
+// don't construct it -- pass the closure to sparkwing.Job and the
+// plan-time wrapper installs it transparently.
 type jobFn struct {
 	fn func(ctx context.Context) error
 }

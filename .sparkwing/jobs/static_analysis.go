@@ -35,8 +35,8 @@ func (StaticAnalysis) Examples() []sparkwing.Example {
 }
 
 func (p *StaticAnalysis) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "staticcheck", sparkwing.JobFn(p.staticcheck))
-	sparkwing.Job(plan, "tidy-drift", sparkwing.JobFn(p.tidyDrift))
+	sparkwing.Job(plan, "staticcheck", p.staticcheck)
+	sparkwing.Job(plan, "tidy-drift", p.tidyDrift)
 	return nil
 }
 
