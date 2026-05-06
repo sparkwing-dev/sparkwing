@@ -17,7 +17,7 @@
 # -----------------------------------------------------------------------
 # 1. Controller. Single-instance orchestrator: owns the state DB,
 #    serves /api/v1/*, hosts webhooks. HA-multi-instance lives in the
-#    paid feature pack (ORG-006+); the OSS posture is one pod.
+#    paid feature pack; the OSS posture is one pod.
 # -----------------------------------------------------------------------
 controller:
   # Single-instance is the OSS posture (decision 0001). Don't bump
@@ -28,8 +28,9 @@ controller:
   image:
     # Default assumes images publish to GHCR under sparkwing-dev. If
     # you mirror images internally, point this at your registry.
-    # NOTE: GHCR publishing is in flight (ISS-052). Until images
-    # land, build locally from sparkwing-platform/build/Dockerfile.sparkwing
+    # NOTE: GHCR publishing is in flight. Until container images are
+    # published, build the binary locally with
+    # `go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest`
     # or point at your own mirror.
     repository: ghcr.io/sparkwing-dev/sparkwing-controller
     tag: "" # falls back to .Chart.AppVersion when empty

@@ -56,8 +56,7 @@ maintainers:
 # repository: file://../sparkwing-runner-bundle
 #   Local sibling-directory dependency. After `helm dep up`, the
 #   sub-chart is vendored under charts/. For a real release this
-#   would point at the published chart repo -- out of scope for
-#   ORG-005.
+#   would point at the published chart repo -- out of scope here.
 #
 # Sub-chart values are overridden under the
 # `sparkwing-runner-bundle:` key in this chart's values.yaml. By

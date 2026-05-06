@@ -113,7 +113,7 @@ type pipelineExplainArgs struct {
 //
 // The "--" separator is consumed (not forwarded). Forwarding it to
 // the pipeline binary would cause Go's flag package to stop flag
-// parsing at that point, which is exactly what CLI-016 needs to
+// parsing at that point, which is exactly what we need to
 // avoid: `pipeline explain --name X -- --skip artifact` must reach
 // the inner binary as `--explain --skip artifact`, not
 // `--explain -- --skip artifact`.

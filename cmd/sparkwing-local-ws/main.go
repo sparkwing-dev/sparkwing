@@ -25,7 +25,7 @@ func main() {
 		"sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	on := fs.String("on", "",
 		"profile name from ~/.config/sparkwing/profiles.yaml; "+
-			"uses its log_store + artifact_store fields (LOCAL-003)")
+			"uses its log_store + artifact_store fields")
 	logStoreURL := fs.String("log-store", "",
 		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. "+
 			"Overrides --on. Intended for ci-embedded VMs without a profiles.yaml.")
@@ -36,7 +36,7 @@ func main() {
 		"reject POST/PUT/DELETE/PATCH on /api/v1/* (auth + webhooks remain open)")
 	noLocalStore := fs.Bool("no-local-store", false,
 		"skip the local SQLite store; list runs from --artifact-store instead. "+
-			"Requires --log-store + --artifact-store. Powers tailing CI runs from a fresh laptop without an ingest step (LOCAL-011).")
+			"Requires --log-store + --artifact-store. Powers tailing CI runs from a fresh laptop without an ingest step.")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
 	}

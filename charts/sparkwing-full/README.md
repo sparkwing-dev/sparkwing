@@ -12,8 +12,7 @@ This is the chart referenced in architectural decision 0001 for the
 **Enterprise self-host** topology -- one `helm install` and you have
 a working Sparkwing instance. Single-tenant, single-instance: HA
 features (multi-replica controller, leader election, replication,
-zero-downtime upgrades) are paid tier and live in separate charts
-(ORG-006+).
+zero-downtime upgrades) are paid tier and live in separate charts.
 
 If you only need a runner pool against a remote controller (Cloud or
 external self-host), use the standalone
@@ -232,7 +231,7 @@ dependencies:
 This works for local development. **For a real release** the
 repository should point at a published Helm chart repo (TBD --
 likely `https://sparkwing-dev.github.io/charts`). That migration is
-out of scope for ORG-005.
+out of scope here.
 
 After any change to the sub-chart's templates / version, re-run:
 
@@ -254,7 +253,7 @@ Default images:
 
 > **NOTE:** Multi-arch (linux/amd64 + linux/arm64) images are
 > published to GHCR on every `v*` tag push by
-> `.github/workflows/release.yaml` (ISS-052). Each release pushes
+> `.github/workflows/release.yaml`. Each release pushes
 > `:vX.Y.Z`; stable (non-pre-release) tags also update `:latest`.
 > All images are cosign-keyless-signed via GitHub OIDC -- verify
 > with:
@@ -331,5 +330,4 @@ install.
 - Chart: `charts/sparkwing-full/` in
   [`sparkwing-dev/sparkwing`](https://github.com/sparkwing-dev/sparkwing).
 - Decision: 0001 -- open-core tier strategy.
-- Ticket: ORG-005.
-- Sibling chart: `charts/sparkwing-runner-bundle/` (ORG-004).
+- Sibling chart: `charts/sparkwing-runner-bundle/`.

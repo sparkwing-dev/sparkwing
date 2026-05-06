@@ -168,7 +168,7 @@ internally.
 
 > **NOTE:** Multi-arch (linux/amd64 + linux/arm64) images are
 > published to GHCR on every `v*` tag push by
-> `.github/workflows/release.yaml` (ISS-052). Each release pushes
+> `.github/workflows/release.yaml`. Each release pushes
 > `:vX.Y.Z`; stable (non-pre-release) tags also update `:latest`.
 > All images are cosign-keyless-signed via GitHub OIDC -- verify
 > with:
@@ -246,4 +246,3 @@ needs an Ingress or external Service in front of the logs pod.
 - Chart: `charts/sparkwing-runner-bundle/` in
   [`sparkwing-dev/sparkwing`](https://github.com/sparkwing-dev/sparkwing).
 - Decision: 0001 -- open-core tier strategy.
-- Ticket: ORG-004.

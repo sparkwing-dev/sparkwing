@@ -285,7 +285,7 @@ var cmdVersionUpdate = Command{
           to avoid SIGKILL on first run.
 
   --sdk   Bump the SDK pin in this project's .sparkwing/go.mod via
-          'go get github.com/sparkwing-dev/sparkwing-platform@<version>',
+          'go get github.com/sparkwing-dev/sparkwing@<version>',
           then 'go mod tidy'. Doesn't touch the running binary.
 
 Exactly one of --cli or --sdk must be set; they conflict with
@@ -566,7 +566,7 @@ var cmdDebugReplay = Command{
 replay_of_node_id, creates a single nodes row for the target, and
 exec's the wing pipeline binary to execute that one node. The
 node's input struct is reconstituted from the stored dispatch
-snapshot (TOD-077); upstream Refs resolve against the original
+snapshot; upstream Refs resolve against the original
 run's outputs without re-executing them.
 
 Replay is "what would this node do now, with the same args+env?":
