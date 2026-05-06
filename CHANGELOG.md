@@ -79,6 +79,15 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   only field-level addition this ticket made; IMP-016 owns receipt
   fields). Pairs with IMP-001's `_compile` synthetic node, which
   finally attaches to a Run row that exists.
+- **`Work.SpawnNodeForEach` validates fn signature at Plan time
+  (SDK-039).** The reflective contract -- `items` is a slice with
+  element type `T`, `fn` is `func(T) (string, sparkwing.Workable)`
+  -- used to be checked only at dispatch time, so a typo'd fn shape
+  surfaced as a runtime spawn error after the parent's Needs
+  cleared (often minutes into a run) rather than at plan
+  construction. Wrong-shape fn / mismatched item type now panics
+  alongside other structural SDK errors (`Produces`/`SetResult`
+  mismatch, duplicate node IDs, invalid `Approval.OnExpiry`).
 - **`Node.Cache` / `Plan.Cache` now reject typo-shaped CacheOptions
   (SDK-038).** Passing a `CacheOptions` literal with `Max` /
   `OnLimit` / `CacheKey` / `CacheTTL` / `CancelTimeout` set but `Key`

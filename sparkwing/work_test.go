@@ -3,6 +3,7 @@ package sparkwing_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -326,4 +327,99 @@ func TestWork_StepFnReturnsError(t *testing.T) {
 	if _, err := s.Fn()(context.Background()); !errors.Is(err, myErr) {
 		t.Fatalf("step fn should propagate error, got %v", err)
 	}
+}
+
+// SDK-039: SpawnNodeForEach validates fn signature at Plan time so
+// a wrong-shaped fn panics during plan construction rather than
+// during dispatch (which previously surfaced as a runtime spawn
+// error after the parent's Needs cleared, much later than the
+// structural mistake actually happened).
+
+func TestSpawnNodeForEach_RejectsNonSliceItems(t *testing.T) {
+	expectSpawnEachPanic(t, "items must be a slice", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach("not-a-slice", func(s string) (string, sparkwing.Workable) {
+			return "", nil
+		})
+	})
+}
+
+func TestSpawnNodeForEach_RejectsNonFuncFn(t *testing.T) {
+	expectSpawnEachPanic(t, "fn must be a func", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach([]string{"a"}, "not-a-func")
+	})
+}
+
+func TestSpawnNodeForEach_RejectsWrongArgCount(t *testing.T) {
+	expectSpawnEachPanic(t, "fn must take exactly 1 argument", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach([]string{"a"}, func(a, b string) (string, sparkwing.Workable) {
+			return "", nil
+		})
+	})
+}
+
+func TestSpawnNodeForEach_RejectsWrongReturnCount(t *testing.T) {
+	expectSpawnEachPanic(t, "fn must return (string, sparkwing.Workable)", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach([]string{"a"}, func(s string) string { return "" })
+	})
+}
+
+func TestSpawnNodeForEach_RejectsMismatchedItemType(t *testing.T) {
+	expectSpawnEachPanic(t, "not assignable", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach([]int{1, 2, 3}, func(s string) (string, sparkwing.Workable) {
+			return "", nil
+		})
+	})
+}
+
+func TestSpawnNodeForEach_RejectsNonStringFirstReturn(t *testing.T) {
+	expectSpawnEachPanic(t, "first return value must be string", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach([]string{"a"}, func(s string) (int, sparkwing.Workable) {
+			return 0, nil
+		})
+	})
+}
+
+func TestSpawnNodeForEach_RejectsNonWorkableSecondReturn(t *testing.T) {
+	expectSpawnEachPanic(t, "implement sparkwing.Workable", func() {
+		w := sparkwing.NewWork()
+		w.SpawnNodeForEach([]string{"a"}, func(s string) (string, int) {
+			return "", 0
+		})
+	})
+}
+
+func TestSpawnNodeForEach_AcceptsCorrectShape(t *testing.T) {
+	w := sparkwing.NewWork()
+	w.SpawnNodeForEach([]string{"a", "b"}, func(s string) (string, sparkwing.Workable) {
+		return s, nil
+	})
+	if got := len(w.SpawnGens()); got != 1 {
+		t.Fatalf("SpawnGens len = %d, want 1", got)
+	}
+}
+
+// expectSpawnEachPanic runs body and asserts the panic value
+// stringifies to something containing want.
+func expectSpawnEachPanic(t *testing.T, want string, body func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic containing %q", want)
+		}
+		msg, _ := r.(string)
+		if msg == "" {
+			t.Fatalf("panic value not a string: %T %v", r, r)
+		}
+		if !strings.Contains(msg, want) {
+			t.Fatalf("panic %q must contain %q", msg, want)
+		}
+	}()
+	body()
 }

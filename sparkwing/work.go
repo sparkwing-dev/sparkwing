@@ -220,13 +220,17 @@ func (w *Work) SpawnNode(id string, job Workable) *SpawnHandle {
 // generator runs once after the Spawn's Needs are satisfied; each
 // returned (id, job) pair becomes a fresh Plan node dispatched in
 // parallel. The spawning runner suspends across the entire fan-out.
+//
+// items must be a slice (or array). fn must be a func of shape
+//
+//	func(T) (string, sparkwing.Workable)
+//
+// where T is assignable from items's element type. Both shapes are
+// validated at Plan time via reflection so a wrong-shaped fn panics
+// alongside other structural errors (Produces/SetResult mismatch,
+// duplicate IDs) rather than blowing up later during dispatch.
 func (w *Work) SpawnNodeForEach(items any, fn any) *SpawnGroup {
-	if items == nil {
-		panic("sparkwing: Work.SpawnNodeForEach: items must be non-nil")
-	}
-	if fn == nil {
-		panic("sparkwing: Work.SpawnNodeForEach: fn must be non-nil")
-	}
+	validateSpawnEach(items, fn)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	spec := &SpawnGenSpec{
@@ -238,6 +242,57 @@ func (w *Work) SpawnNodeForEach(items any, fn any) *SpawnGroup {
 	}
 	w.spawnGens = append(w.spawnGens, spec)
 	return &SpawnGroup{spec: spec}
+}
+
+// validateSpawnEach checks SpawnNodeForEach's reflective contract at
+// Plan time so a bad fn signature panics during plan construction
+// rather than at dispatch -- matches how every other structural
+// SDK error (Produces/SetResult mismatch, duplicate IDs, invalid
+// Approval.OnExpiry) surfaces.
+func validateSpawnEach(items any, fn any) {
+	if items == nil {
+		panic("sparkwing: Work.SpawnNodeForEach: items must be non-nil")
+	}
+	if fn == nil {
+		panic("sparkwing: Work.SpawnNodeForEach: fn must be non-nil")
+	}
+	itemsT := reflect.TypeOf(items)
+	if k := itemsT.Kind(); k != reflect.Slice && k != reflect.Array {
+		panic(fmt.Sprintf("sparkwing: Work.SpawnNodeForEach: items must be a slice or array, got %T", items))
+	}
+	fnT := reflect.TypeOf(fn)
+	if fnT.Kind() != reflect.Func {
+		panic(fmt.Sprintf("sparkwing: Work.SpawnNodeForEach: fn must be a func, got %T", fn))
+	}
+	if fnT.NumIn() != 1 {
+		panic(fmt.Sprintf(
+			"sparkwing: Work.SpawnNodeForEach: fn must take exactly 1 argument (the item), got %d (signature: %v)",
+			fnT.NumIn(), fnT))
+	}
+	if fnT.NumOut() != 2 {
+		panic(fmt.Sprintf(
+			"sparkwing: Work.SpawnNodeForEach: fn must return (string, sparkwing.Workable), got %d return values (signature: %v)",
+			fnT.NumOut(), fnT))
+	}
+	elemT := itemsT.Elem()
+	argT := fnT.In(0)
+	if !elemT.AssignableTo(argT) {
+		panic(fmt.Sprintf(
+			"sparkwing: Work.SpawnNodeForEach: fn argument type %v is not assignable from items element type %v",
+			argT, elemT))
+	}
+	stringT := reflect.TypeOf("")
+	if fnT.Out(0) != stringT {
+		panic(fmt.Sprintf(
+			"sparkwing: Work.SpawnNodeForEach: fn first return value must be string, got %v",
+			fnT.Out(0)))
+	}
+	workableT := reflect.TypeOf((*Workable)(nil)).Elem()
+	if !fnT.Out(1).Implements(workableT) {
+		panic(fmt.Sprintf(
+			"sparkwing: Work.SpawnNodeForEach: fn second return value must implement sparkwing.Workable, got %v",
+			fnT.Out(1)))
+	}
 }
 
 // WorkStep is one unit of work inside a Work. Steps are not Jobs;
