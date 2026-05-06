@@ -50,6 +50,20 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   string match. Documented under the Auth section of `docs/api.md`.
 
 ### Fixed
+- **`pipeline plan` validates `--start-at` / `--stop-at` (IMP-037).**
+  `sparkwing.PreviewPlan` now calls `ValidateStepRange` against the
+  resolved Plan's step registry before walking the DAG, mirroring the
+  orchestrator's dispatch-time validation. A typo'd
+  `--start-at instal-argocd` against a pipeline with `install-argocd`
+  now errors with the IMP-008 "did you mean ...?" Levenshtein
+  suggestion and refuses to render -- previously the unknown id
+  silently no-op'd the range filter and every step rendered
+  `would_run`, exactly the iteration footgun IMP-007's acceptance
+  committed to preventing for both `wing X` (dispatch) and
+  `pipeline plan` (preview). Far-miss typos with no near match still
+  list every available step id so the operator can pick. Three new
+  unit tests in `sparkwing/plan_preview_test.go` pin the
+  near-miss / far-miss / exact-match contracts.
 - **`runs list` / `runs status` surface trigger failures (IMP-004).**
   The trigger-intake handler now writes a `pending` Run row alongside
   the Trigger row, so `sparkwing runs list --on prod` and

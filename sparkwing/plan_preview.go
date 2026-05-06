@@ -142,6 +142,16 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 	if plan == nil {
 		return nil, fmt.Errorf("PreviewPlan: plan is nil")
 	}
+	// IMP-037: a typo in --start-at / --stop-at must surface as a
+	// "did you mean X?" error before any preview is rendered, matching
+	// the orchestrator's dispatch-time validation
+	// (orchestrator/orchestrator.go ValidateStepRange call). Without
+	// this, an unknown id silently no-ops the range filter and every
+	// step shows would_run -- exactly the iteration footgun IMP-007's
+	// acceptance committed to preventing.
+	if err := ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
+		return nil, err
+	}
 	out := &PlanPreview{
 		Pipeline:     pipeline,
 		ResolvedArgs: resolvedArgs,

@@ -2,6 +2,7 @@ package sparkwing_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -155,6 +156,112 @@ func TestPreviewPlan_StartAtRangeSkipReported(t *testing.T) {
 		if s.ID == "b" && s.Decision != "would_run" {
 			t.Errorf("step b decision: got %q, want would_run", s.Decision)
 		}
+	}
+}
+
+// --- IMP-037: PreviewPlan rejects unknown --start-at / --stop-at with
+// the same Levenshtein-suggesting error as the orchestrator's dispatch
+// path. Without this, a typo silently no-ops the filter and every step
+// renders would_run -- the footgun IMP-007's acceptance committed to
+// preventing but didn't ship for the plan-preview surface.
+
+type previewRangeValidatePipe struct{ sparkwing.Base }
+
+type previewRangeValidateJob struct{ sparkwing.Base }
+
+func (previewRangeValidateJob) Work() *sparkwing.Work {
+	w := sparkwing.NewWork()
+	w.Step("install-argocd", nopStep)
+	w.Step("install-karpenter", nopStep)
+	return w
+}
+
+func (previewRangeValidatePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "cluster-up", previewRangeValidateJob{})
+	return nil
+}
+
+func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("imp037-near-miss",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
+	reg, _ := sparkwing.Lookup("imp037-near-miss")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp037-near-miss"})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	previewExecCounter.Store(0)
+	preview, err := sparkwing.PreviewPlan(plan, "imp037-near-miss", nil, sparkwing.PreviewOptions{StartAt: "instal-argocd"})
+	if err == nil {
+		t.Fatalf("expected error for typo'd --start-at, got nil (preview = %+v)", preview)
+	}
+	if preview != nil {
+		t.Errorf("expected nil preview when validation fails; got %+v", preview)
+	}
+	if previewExecCounter.Load() != 0 {
+		t.Fatalf("step body executed during failed preview (counter = %d)", previewExecCounter.Load())
+	}
+	for _, want := range []string{"--start-at", `"instal-argocd"`, `did you mean "install-argocd"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q\nfull: %s", want, err.Error())
+		}
+	}
+}
+
+func TestPreviewPlan_UnknownStartAtFarMissListsAvailable(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("imp037-far-miss",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
+	reg, _ := sparkwing.Lookup("imp037-far-miss")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp037-far-miss"})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	previewExecCounter.Store(0)
+	preview, err := sparkwing.PreviewPlan(plan, "imp037-far-miss", nil, sparkwing.PreviewOptions{StartAt: "completely-unrelated-name"})
+	if err == nil {
+		t.Fatalf("expected error for far-miss --start-at, got nil")
+	}
+	if preview != nil {
+		t.Errorf("expected nil preview when validation fails; got %+v", preview)
+	}
+	if previewExecCounter.Load() != 0 {
+		t.Fatalf("step body executed during failed preview (counter = %d)", previewExecCounter.Load())
+	}
+	// Far miss: no Levenshtein suggestion, but the available step ids
+	// should appear so the operator can pick one.
+	for _, want := range []string{"--start-at", `"completely-unrelated-name"`, "install-argocd", "install-karpenter"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q\nfull: %s", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("far-miss should not include a Levenshtein suggestion; got: %s", err.Error())
+	}
+}
+
+func TestPreviewPlan_KnownStartAtSucceeds(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("imp037-known",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
+	reg, _ := sparkwing.Lookup("imp037-known")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp037-known"})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	previewExecCounter.Store(0)
+	preview, err := sparkwing.PreviewPlan(plan, "imp037-known", nil, sparkwing.PreviewOptions{StartAt: "install-argocd"})
+	if err != nil {
+		t.Fatalf("PreviewPlan with valid --start-at: unexpected error %v", err)
+	}
+	if preview == nil {
+		t.Fatalf("expected non-nil preview")
+	}
+	if previewExecCounter.Load() != 0 {
+		t.Fatalf("step body executed during preview (counter = %d)", previewExecCounter.Load())
+	}
+	if preview.StartAt != "install-argocd" {
+		t.Errorf("StartAt echo: got %q, want install-argocd", preview.StartAt)
 	}
 }
 
