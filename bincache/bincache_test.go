@@ -7,10 +7,9 @@ import (
 	"testing"
 )
 
-// newPipelineDir creates a minimal .sparkwing-style pipeline module at a
-// temp dir and returns its path. The module has a trivial main.go and a
-// go.mod with no local replaces, so PipelineCacheKey's behavior is
-// driven entirely by the files we add on top (overlay files, etc.).
+// newPipelineDir creates a minimal .sparkwing-style pipeline module
+// with no local replaces, so PipelineCacheKey is driven entirely by
+// files added on top.
 func newPipelineDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -39,7 +38,6 @@ func TestPipelineCacheKey_UnchangedWithoutOverlay(t *testing.T) {
 	if first != second {
 		t.Fatalf("key should be stable without overlay: %s vs %s", first, second)
 	}
-	// Sanity: key format aaaaaaaa-bbbbbbbb.
 	if len(first) != 17 || first[8] != '-' {
 		t.Fatalf("unexpected key format: %q", first)
 	}
@@ -89,9 +87,8 @@ func installFakeGo(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
 	log := filepath.Join(binDir, "argv.log")
+	// Honors `-o <dest>` by creating an empty file there.
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n" +
-		// Honor `-o <dest>` by creating an empty file there so the
-		// caller's rename / stat logic does not choke.
 		"while [ $# -gt 0 ]; do\n" +
 		"  if [ \"$1\" = \"-o\" ]; then\n" +
 		"    shift\n" +
@@ -152,7 +149,6 @@ func TestCompilePipeline_WithOverlay_UsesModfile(t *testing.T) {
 }
 
 func TestPipelineCacheKey_IgnoresMissingOverlay(t *testing.T) {
-	// No overlay files present: repeated calls must succeed and match.
 	dir := newPipelineDir(t)
 	keyA := mustKey(t, dir)
 	keyB := mustKey(t, dir)
@@ -160,7 +156,7 @@ func TestPipelineCacheKey_IgnoresMissingOverlay(t *testing.T) {
 		t.Fatalf("key should be stable when overlays absent: %s vs %s", keyA, keyB)
 	}
 
-	// Adding only .resolved.sum must still work (no .resolved.mod).
+	// .resolved.sum without .resolved.mod must still work.
 	if err := os.WriteFile(filepath.Join(dir, ".resolved.sum"), []byte("x\n"), 0o644); err != nil {
 		t.Fatalf("write lone sum: %v", err)
 	}

@@ -20,8 +20,6 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
 
-	// Source binary: any non-empty file works; bincache treats the
-	// payload as opaque bytes.
 	srcDir := t.TempDir()
 	src := filepath.Join(srcDir, "fake-binary")
 	if err := os.WriteFile(src, []byte("#!/bin/sh\necho hello\n"), 0o755); err != nil {
@@ -31,7 +29,6 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 	const key = "abcd1234-ef567890"
 	ctx := context.Background()
 
-	// Upload + verify Has.
 	if err := bincache.UploadToArtifactStore(ctx, store, key, src); err != nil {
 		t.Fatalf("Upload: %v", err)
 	}
@@ -40,7 +37,6 @@ func TestArtifactStoreRoundTrip(t *testing.T) {
 		t.Fatalf("Has = (%v, %v); want (true, nil)", has, err)
 	}
 
-	// Fetch into a fresh dest path; verify mode + bytes match.
 	dest := filepath.Join(t.TempDir(), "downloaded")
 	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); err != nil {
 		t.Fatalf("Fetch: %v", err)

@@ -35,9 +35,7 @@ func TestRepoNameFromURL(t *testing.T) {
 }
 
 // gitExecPath returns the directory containing git-http-backend, or
-// "" if `git --exec-path` fails or the binary isn't there. Tests skip
-// when this is empty rather than fail; ISS-031 unit tests are
-// integration-flavored and not all CI hosts ship git-http-backend.
+// "" if unavailable. Tests skip when empty.
 func gitExecPath(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("git", "--exec-path").Output()
@@ -52,9 +50,7 @@ func gitExecPath(t *testing.T) string {
 }
 
 // startGitcacheTestServer mounts git-http-backend CGI at /git/<name>/...
-// against repoParent (which holds bare repos named <name>.git) and
-// stubs /git/register to 200 OK with a JSON body. Mirrors what the
-// production sparkwing-cache pod serves to runners.
+// against repoParent and stubs /git/register to 200 OK.
 func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 	t.Helper()
 	execPath := gitExecPath(t)
@@ -73,25 +69,21 @@ func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 			"GIT_PROJECT_ROOT=" + repoParent,
 			"GIT_HTTP_EXPORT_ALL=1",
 		},
-		// Strip the leading /git so PATH_INFO inside the CGI handler
-		// becomes /<name>.git/info/refs etc -- what http-backend wants.
+		// Strip /git so PATH_INFO becomes /<name>.git/info/refs etc.
 		Root: "/git",
 	})
 	return httptest.NewServer(mux)
 }
 
-// makeBareRepoWithSparkwing builds a bare repo at <repoParent>/<name>.git
-// containing two commits on the named branch, both with a `.sparkwing/`
-// subdir. Returns the SHA of the first (older) commit and the SHA of
-// the branch tip (second commit). Used to verify exact-SHA fetch
-// lands at the OLDER SHA when both commits are reachable.
+// makeBareRepoWithSparkwing builds a bare repo with two commits on
+// the named branch, both with a `.sparkwing/` subdir. Returns the
+// older SHA and the branch-tip SHA.
 func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (oldSHA, tipSHA string) {
 	t.Helper()
 	if err := os.MkdirAll(repoParent, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Working tree where we make commits.
 	work := filepath.Join(t.TempDir(), name+"-work")
 	mustGit := func(dir string, args ...string) string {
 		cmd := exec.Command("git", args...)
@@ -132,8 +124,7 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 
 	bare := filepath.Join(repoParent, name+".git")
 	mustGit("", "clone", "--bare", "--quiet", work, bare)
-	// Required for fetch-by-SHA to work over smart-HTTP. Mirrors what
-	// the production cache pod does in enableSHAFetch.
+	// Required for fetch-by-SHA over smart-HTTP.
 	mustGit(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
 	// http-backend rejects bare repos that aren't marked exportable.
 	if err := os.WriteFile(filepath.Join(bare, "git-daemon-export-ok"), nil, 0o644); err != nil {
@@ -164,7 +155,6 @@ func TestFetchPipelineSource_PinsToExactSHA(t *testing.T) {
 	if got != oldSHA {
 		t.Errorf("HEAD landed at %s, want pinned %s (tip is %s)", got, oldSHA, tipSHA)
 	}
-	// .git must exist -- the whole point of ISS-031.
 	if _, err := os.Stat(filepath.Join(workTree, ".git")); err != nil {
 		t.Errorf("expected .git in %s: %v", workTree, err)
 	}
@@ -211,9 +201,6 @@ func TestFetchPipelineSource_BadSHA(t *testing.T) {
 
 func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 	repoParent := t.TempDir()
-	// Build a bare repo with a single commit that does NOT contain a
-	// .sparkwing dir. FetchPipelineSource should clone successfully
-	// then fail with a clear "no .sparkwing" error.
 	work := filepath.Join(t.TempDir(), "noSparkwing-work")
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		t.Fatal(err)
@@ -261,7 +248,6 @@ func TestFetchPipelineSource_RegistersWithCache(t *testing.T) {
 	repoParent := t.TempDir()
 	_, _ = makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
 
-	// Wrap the gitcache mux to capture register calls.
 	execPath := gitExecPath(t)
 	if execPath == "" {
 		t.Skip("git --exec-path unavailable")

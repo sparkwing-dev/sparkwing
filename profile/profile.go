@@ -1,22 +1,13 @@
-// Package profile is the single source of truth for "which
-// sparkwing controller am I talking to, with what token."
+// Package profile manages named bundles of controller connection info
+// (URL, logs URL, token, gitcache URL) used by `--on <name>`.
 //
-// A profile is a named bundle of connection info: controller URL,
-// logs-service URL, auth token, optional gitcache URL. Users
-// register one or more profiles in `~/.config/sparkwing/profiles.yaml`
-// and select one per command via `--on <name>`. The CLI never
-// accepts raw `--controller` / `--token` flags on client commands:
-// the profile is the only connection-config surface, which keeps the
-// experience unambiguous (one profile in flight, visible at a glance
-// in the command line).
+// Path resolution (first match wins):
 //
-// Profile config path resolution (first match wins):
-//
-//  1. $SPARKWING_PROFILES if set
-//  2. $XDG_CONFIG_HOME/sparkwing/profiles.yaml if set
+//  1. $SPARKWING_PROFILES
+//  2. $XDG_CONFIG_HOME/sparkwing/profiles.yaml
 //  3. $HOME/.config/sparkwing/profiles.yaml
 //
-// The on-disk shape:
+// On-disk shape:
 //
 //	default: local
 //	profiles:
@@ -29,10 +20,7 @@
 //	    token: swu_...
 //	    gitcache: https://gitcache.example.dev
 //
-// Missing optional fields (logs, gitcache, token) come back as empty
-// strings; callers treat zero as "not configured" per their needs
-// (the agent accepts empty token as "auth disabled locally", the
-// fleet-worker errors on empty gitcache, etc.).
+// Missing optional fields come back as empty strings.
 package profile
 
 import (
@@ -53,10 +41,8 @@ type Profile struct {
 	Token      string `yaml:"token,omitempty"`
 	Gitcache   string `yaml:"gitcache,omitempty"`
 
-	// Pluggable storage URLs (LOCAL-003). Both fields accept the
-	// storeurl shapes: fs:///abs/path or s3://bucket/prefix. When set
-	// they replace the default filesystem reads in sparkwing-local /
-	// `sparkwing dashboard start --on <profile>`.
+	// Pluggable storage URLs. Accepts fs:///abs/path or
+	// s3://bucket/prefix.
 	LogStore      string `yaml:"log_store,omitempty"`
 	ArtifactStore string `yaml:"artifact_store,omitempty"`
 }
@@ -68,17 +54,15 @@ type Config struct {
 }
 
 // ErrNoProfile is returned by Resolve when no profile can be
-// identified. The caller should surface a message telling the user
-// to set a default or pass --on.
+// identified.
 var ErrNoProfile = errors.New("no profile configured")
 
 // ErrProfileNotFound is returned when --on names a profile that
 // doesn't exist in profiles.yaml.
 var ErrProfileNotFound = errors.New("profile not found")
 
-// DefaultPath returns the resolved profiles.yaml path for this
-// machine, honoring SPARKWING_PROFILES > XDG_CONFIG_HOME > $HOME.
-// Missing $HOME is an error (no sane fallback).
+// DefaultPath returns the resolved profiles.yaml path, honoring
+// SPARKWING_PROFILES > XDG_CONFIG_HOME > $HOME.
 func DefaultPath() (string, error) {
 	if v := os.Getenv("SPARKWING_PROFILES"); v != "" {
 		return v, nil
@@ -94,10 +78,7 @@ func DefaultPath() (string, error) {
 }
 
 // Load reads and parses profiles.yaml at path. Missing file returns
-// an empty Config without error -- callers that need a populated
-// file check len(cfg.Profiles) themselves. Parse errors are returned
-// so operators see "your profiles.yaml is malformed" rather than
-// silent fallback to empty.
+// an empty Config without error; parse errors are surfaced.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -113,8 +94,8 @@ func Load(path string) (*Config, error) {
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]*Profile{}
 	}
-	// Stamp each profile with its own name so Resolve can return a
-	// fully-populated *Profile without a separate lookup.
+	// Stamp .Name from the map key so Resolve returns a fully-formed
+	// Profile without a separate lookup.
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			cfg.Profiles[name] = &Profile{Name: name}
@@ -125,21 +106,14 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes cfg to path atomically: marshals, writes a sibling
-// tmp file, renames. Creates parent dirs as needed.
-//
-// Permissions are 0600 because profiles.yaml carries bearer tokens
-// in plaintext. A stricter mode makes accidents (cat-into-shared-dir,
-// rsync without --chmod) surface as permission errors rather than
-// silent credential leaks.
+// Save writes cfg to path atomically (write tmp, rename). Mode 0600
+// because profiles.yaml carries bearer tokens in plaintext.
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	// Copy so we can strip the redundant .Name field before marshal
-	// (it duplicates the map key). A fresh map keeps Save's output
-	// stable regardless of how callers mutate the in-memory Config.
+	// Strip .Name before marshal (duplicates the map key).
 	out := &Config{Default: cfg.Default, Profiles: map[string]*Profile{}}
 	for name, p := range cfg.Profiles {
 		if p == nil {
@@ -165,14 +139,11 @@ func Save(path string, cfg *Config) error {
 
 // Resolve returns the profile matching the caller's intent:
 //
-//   - explicitName non-empty -> look up that profile (ErrProfileNotFound
-//     if missing).
-//   - else if cfg.Default is set -> that profile
-//     (ErrProfileNotFound if the default points at an unknown name).
+//   - explicitName non-empty -> look up that profile.
+//   - else cfg.Default if set.
 //   - else ErrNoProfile.
 //
-// The returned pointer is owned by cfg; callers that mutate fields
-// should clone first.
+// The returned pointer is owned by cfg.
 func Resolve(cfg *Config, explicitName string) (*Profile, error) {
 	if cfg == nil {
 		return nil, ErrNoProfile
@@ -191,9 +162,7 @@ func Resolve(cfg *Config, explicitName string) (*Profile, error) {
 	return p, nil
 }
 
-// LoadAndResolve is the one-shot most client commands want: find
-// profiles.yaml on disk, parse it, pick the right profile, return.
-// Any step's error is surfaced so the caller can pretty-print it.
+// LoadAndResolve does DefaultPath + Load + Resolve in one call.
 func LoadAndResolve(explicitName string) (*Profile, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -206,9 +175,7 @@ func LoadAndResolve(explicitName string) (*Profile, error) {
 	return Resolve(cfg, explicitName)
 }
 
-// Names returns the profile names sorted alphabetically. Used by
-// `sparkwing profiles list` and by error messages that want to tell
-// the user what's available.
+// Names returns the profile names sorted alphabetically.
 func (c *Config) Names() []string {
 	out := make([]string, 0, len(c.Profiles))
 	for name := range c.Profiles {
@@ -219,8 +186,7 @@ func (c *Config) Names() []string {
 }
 
 // HintMissing formats a human-readable error body pointing the
-// operator at next steps. Centralized so every command that hits
-// "no profile" produces the same message.
+// operator at next steps.
 func HintMissing(err error, cfg *Config) string {
 	base := err.Error()
 	if cfg != nil && len(cfg.Profiles) > 0 {

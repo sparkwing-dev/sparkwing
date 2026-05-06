@@ -1,12 +1,6 @@
 // Package bincache wraps the sparkwing-cache HTTP endpoints that
 // distribute compiled .sparkwing/ pipeline binaries and archived
-// source trees. Used by both the `wing` compile path (to pull a
-// precompiled binary before falling back to `go build`) and the
-// sparkwing-fleet-worker (to fetch foreign repo sources on demand).
-//
-// Split out of cmd/sparkwing's internal helpers during the binary
-// split (2026-04-22) so cmd/sparkwing-fleet-worker can use the same
-// primitives without the packages depending on each other.
+// source trees.
 //
 // Endpoints:
 //
@@ -40,29 +34,24 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// ErrMiss is the sentinel for 404 from /bin/<hash>. Callers check it
-// to distinguish "binary not built yet" from "cache server
-// unreachable."
+// ErrMiss is the sentinel for 404 from /bin/<hash>.
 var ErrMiss = errors.New("remote binary cache: miss")
 
-// CacheURL returns the sparkwing-cache base URL from the
-// SPARKWING_GITCACHE_URL env var, stripped of trailing slashes. Empty
-// means "no cache available" -- callers that fall back to local
-// compilation short-circuit on this.
+// CacheURL returns the sparkwing-cache base URL from
+// SPARKWING_GITCACHE_URL, stripped of trailing slashes. Empty means
+// "no cache available".
 func CacheURL() string {
 	return strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/")
 }
 
-// CacheToken returns the bearer used for PUT /bin/<hash>. GETs are
-// unauthenticated inside the cluster. Empty is fine when uploads
-// aren't configured -- the upload step silently skips.
+// CacheToken returns the bearer used for PUT /bin/<hash>. Empty
+// disables uploads.
 func CacheToken() string {
 	return os.Getenv("SPARKWING_CACHE_TOKEN")
 }
 
 // TryBinary fetches /bin/<hash> from the cache server into dest.
-// Returns nil on success (binary written + chmod'd 0755), ErrMiss on
-// 404, or a wrapped error on other failures.
+// Returns ErrMiss on 404.
 func TryBinary(gcURL, hash, dest string) error {
 	req, err := http.NewRequest(http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
@@ -83,8 +72,8 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	// Write to a temp file then rename so partial downloads never
-	// leave a half-written binary at the canonical path.
+	// Temp + rename so partial downloads never leave a half-written
+	// binary at the canonical path.
 	tmp := dest + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
@@ -102,10 +91,8 @@ func TryBinary(gcURL, hash, dest string) error {
 	return os.Rename(tmp, dest)
 }
 
-// UploadBinary PUTs a compiled binary to /bin/<hash>. Token is
-// required in prod (cache server enforces it on writes); empty token
-// sends the request unauthenticated and will 401 against an
-// auth-enabled cache.
+// UploadBinary PUTs a compiled binary to /bin/<hash>. Empty token
+// sends the request unauthenticated.
 func UploadBinary(gcURL, token, hash, src string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
@@ -132,31 +119,17 @@ func UploadBinary(gcURL, token, hash, src string) error {
 }
 
 // FetchPipelineSource lands the given git repo's source tree at the
-// trigger's exact SHA (or the branch tip if no SHA is supplied) under
+// trigger's exact SHA (or the branch tip if no SHA is empty) under
 // parentDir/<name> via sparkwing-cache's git smart-HTTP endpoint, and
 // returns the path to the cloned tree's .sparkwing subdirectory.
-// Callers `go build` that directory for a pipeline binary.
 //
-// Cluster runners need a real .git so the SDK's git helpers
-// (sparks/docker.ComputeTags, sparkwing/git.CurrentSHA, etc.) work
-// without env-var stamping (ISS-031). depth=1 keeps the on-disk
-// footprint small; no history beyond the requested commit.
+// Cluster runners need a real .git so the SDK's git helpers work
+// without env-var stamping. depth=1 keeps the on-disk footprint small.
 //
-// SHA vs branch tip: when sha is non-empty we `git fetch --depth 1
-// origin <sha> && git checkout FETCH_HEAD` so the build lands at
-// exactly the SHA the webhook recorded, not at whatever the branch
-// tip has advanced to between webhook delivery and runner claim.
-// Requires uploadpack.allowReachableSHA1InWant on the cache pod's
-// bare mirrors (set in handleGitRegister). Empty sha (legitimate
-// for CLI dispatches without webhook context) falls back to a
-// branch-tip clone.
-//
-// The clone URL is <gcURL>/git/<name> where <name> is derived from
-// the repo URL's basename. The repo is registered idempotently with
-// the cache pod first so a cold cache backfills from the canonical
-// SSH URL on the first request. Failures bubble up loudly -- the
-// prior tarball fallback hid silent-degrade bugs that ate hours of
-// debugging time, so this path is intentionally unforgiving.
+// Pinning to a non-empty sha requires
+// uploadpack.allowReachableSHA1InWant on the cache pod's bare mirrors.
+// The repo is registered idempotently with the cache pod first so a
+// cold cache backfills from the canonical SSH URL on the first request.
 func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
@@ -181,9 +154,7 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return "", err
 	}
-	// If a previous claim left the workTree behind (RemoveAll is best-
-	// effort), git refuses to write into a non-empty dir. Wipe before
-	// cloning rather than carrying stale tree state forward.
+	// git refuses to write into a non-empty dir; wipe stale state.
 	if err := os.RemoveAll(workTree); err != nil {
 		return "", fmt.Errorf("clear workTree: %w", err)
 	}
@@ -205,12 +176,8 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	return "", fmt.Errorf("cloned tree has no .sparkwing directory under %s", workTree)
 }
 
-// fetchExactSHA initializes a fresh repo at dest, points origin at
-// cloneURL, and fetches just the requested SHA at depth 1 before
-// checking it out. Defeats the branch-tip race where HEAD advances
-// between trigger persistence and runner claim. Requires the server
-// to allow reachable-SHA fetches (uploadpack.allowReachableSHA1InWant
-// on the bare mirror).
+// fetchExactSHA fetches just the requested SHA at depth 1 and checks
+// it out. Requires uploadpack.allowReachableSHA1InWant on the server.
 func fetchExactSHA(cloneURL, sha, dest string) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
@@ -237,10 +204,7 @@ func fetchExactSHA(cloneURL, sha, dest string) error {
 }
 
 // shallowCloneBranch runs `git clone --depth 1 --single-branch
-// --branch B URL DEST`. Used for the no-SHA fallback (manual CLI
-// dispatch with no webhook payload). Caller is responsible for
-// logging that the fallback path was taken so operators can see when
-// trigger-time SHA pinning is bypassed.
+// --branch B URL DEST` for the no-SHA fallback path.
 func shallowCloneBranch(cloneURL, branch, dest string) error {
 	cmd := exec.Command("git", "clone",
 		"--depth", "1",
@@ -257,11 +221,9 @@ func shallowCloneBranch(cloneURL, branch, dest string) error {
 	return nil
 }
 
-// registerRepoWithCache POSTs /git/register on the cache pod so the
-// pod knows the canonical SSH URL for `name` and can backfill from it
-// if its mirror is cold. Idempotent: re-registering an existing name
-// with the same URL returns 200; only a name conflict (different URL)
-// errors. Mirrors the same call `sparkwing push` makes.
+// registerRepoWithCache POSTs /git/register so the cache pod knows the
+// canonical SSH URL for `name`. Idempotent for matching URL; only a
+// name conflict errors.
 func registerRepoWithCache(gcURL, name, repoURL string) error {
 	q := neturl.Values{}
 	q.Set("name", name)
@@ -288,12 +250,6 @@ func registerRepoWithCache(gcURL, name, repoURL string) error {
 // RepoNameFromURL returns the friendly name registered with the cache
 // pod for a given repo URL. Strips trailing .git and returns the path
 // component after the final "/" or ":". Empty for malformed input.
-//
-// Examples:
-//   - git@github.com:sparkwing-dev/sparkwing.git → sparkwing
-//   - https://github.com/sparkwing-dev/sparkwing-platform → sparkwing-platform
-//   - sparkwing-dev/sparkwing                    → sparkwing
-//   - sparkwing                                  → sparkwing
 func RepoNameFromURL(repoURL string) string {
 	repoURL = strings.TrimSpace(repoURL)
 	repoURL = strings.TrimSuffix(repoURL, "/")
@@ -304,10 +260,8 @@ func RepoNameFromURL(repoURL string) string {
 	return repoURL
 }
 
-// RepoURLFromGitHub converts a `full_name` like "owner/repo"
-// (shape GitHub webhook payloads use) into an SSH URL the gitcache
-// understands. Prefer SSH so the cache can reach private repos via
-// its configured deploy key.
+// RepoURLFromGitHub converts a "owner/repo" full_name into an SSH URL.
+// SSH so the cache can reach private repos via its deploy key.
 func RepoURLFromGitHub(fullName string) string {
 	if fullName == "" {
 		return ""
@@ -319,15 +273,8 @@ func RepoURLFromGitHub(fullName string) string {
 }
 
 // --- compile helpers ---
-//
-// Moved here from cmd/sparkwing/compile.go during the binary split
-// so both `wing`'s compile-and-exec path and sparkwing-fleet-worker's
-// foreign-repo compile path share one implementation.
 
-// SparkwingHome mirrors the paths logic in pkg/orchestrator: honors
-// SPARKWING_HOME if set, otherwise ~/.sparkwing. Duplicated from the
-// orchestrator package to avoid cmd/ binaries pulling the whole
-// orchestrator into a small compile helper.
+// SparkwingHome honors SPARKWING_HOME if set, otherwise ~/.sparkwing.
 func SparkwingHome() string {
 	if h := os.Getenv("SPARKWING_HOME"); h != "" {
 		return h
@@ -337,8 +284,7 @@ func SparkwingHome() string {
 }
 
 // CachedBinaryPath returns where a pipeline binary with the given
-// hash lives. One subdir per hash lets old entries be pruned with a
-// single rmdir.
+// hash lives.
 func CachedBinaryPath(hash string) string {
 	root := filepath.Join(SparkwingHome(), "cache", "pipelines", hash)
 	name := "pipelines"
@@ -350,30 +296,19 @@ func CachedBinaryPath(hash string) string {
 
 // ErrMissingGoSum is returned by CompilePipeline when `go build`
 // fails because go.sum doesn't list every module that go.mod requires.
-// Callers (see cmd/sparkwing/compile.go) recover by running
-// `go mod download` and retrying once -- this is the classic "first
-// run after `pipeline new` if post-scaffold tidy was skipped" case.
+// Recoverable by `go mod download`.
 var ErrMissingGoSum = errors.New("missing go.sum entries")
 
 // CompilePipeline `go build`s sparkwingDir -> dest. Stdout + stderr
-// go to the parent's stderr so `wing` callers (which may want clean
-// stdout) don't see noise on success. Stderr is also captured into a
-// small ring buffer so we can detect the "missing go.sum entry" case
-// and surface ErrMissingGoSum for caller-side recovery; the live
-// display to the user is unchanged.
+// go to the parent's stderr; stderr is also tee'd into a buffer so we
+// can detect the missing-go.sum case and return ErrMissingGoSum.
 //
-// If the consumer repo ships a sparks overlay modfile
-// (`.sparkwing/.resolved.mod`, written by internal/sparks), the
-// compile is invoked with `-modfile=<path>` so the overlay's resolved
-// versions take precedence over the git-tracked go.mod. Absent overlay
-// -> plain `go build` as before. Callers that have already resolved
-// sparks externally can just drop a `.resolved.mod` next to go.mod;
-// that's the contract REG-011d relies on.
+// If `.sparkwing/.resolved.mod` exists, compile is invoked with
+// `-modfile=<path>` so the overlay's resolved versions take precedence
+// over the git-tracked go.mod.
 func CompilePipeline(sparkwingDir, dest string) error {
-	// Pre-flight: bare `exec.Command("go", ...)` with no Go on PATH
-	// fails as `exec: "go": executable file not found in $PATH` --
-	// surfaces in user output verbatim and reads as a sparkwing bug.
-	// Catch it ourselves and point at the right fix.
+	// Bare exec.Command("go", ...) with no Go on PATH surfaces a
+	// confusing message; preempt with a clearer one.
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
@@ -390,17 +325,10 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = sparkwingDir
 	cmd.Stdout = os.Stderr
-	// Tee stderr: live-display to os.Stderr (so the user sees compile
-	// errors as they happen) while also capturing into a buffer so we
-	// can post-classify the failure. io.MultiWriter is exactly this.
 	var captured bytes.Buffer
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = os.Environ()
 	if err := cmd.Run(); err != nil {
-		// "missing go.sum entry for module providing package X" is
-		// `go build`'s diagnostic when go.sum doesn't cover everything
-		// in go.mod. Recoverable via `go mod download`. Substring
-		// match is stable across Go versions back to ~1.16.
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
 		}
@@ -409,10 +337,8 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	return nil
 }
 
-// overlayModfilePath returns the absolute path to
-// `.sparkwing/.resolved.mod` if present, else "". Checks only a regular
-// file; symlinks and dirs are ignored (malformed state, bail out
-// cleanly to the no-overlay path).
+// overlayModfilePath returns the path to `.sparkwing/.resolved.mod`
+// if present as a regular file, else "".
 func overlayModfilePath(sparkwingDir string) string {
 	p := filepath.Join(sparkwingDir, ".resolved.mod")
 	fi, err := os.Stat(p)
@@ -423,32 +349,24 @@ func overlayModfilePath(sparkwingDir string) string {
 }
 
 // PipelineCacheKey returns a 16-char hex fingerprint of the pipeline
-// module contents plus every local replace target. Any change to an
-// input file, go.mod, or an SDK referenced via `replace` busts the
-// cache. Hashes for the host's platform; cross-compile callers
-// (LOCAL-006 publish) use PipelineCacheKeyForPlatform.
+// module contents plus every local replace target. Hashes for the
+// host's platform; cross-compile callers use
+// PipelineCacheKeyForPlatform.
 //
-// Format: aaaaaaaa-bbbbbbbb (8-8 split). Matches the cache server's
-// /bin/<hash> regex ^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$.
+// Format: aaaaaaaa-bbbbbbbb (8-8 split).
 func PipelineCacheKey(sparkwingDir string) (string, error) {
 	return PipelineCacheKeyForPlatform(sparkwingDir, runtime.GOOS, runtime.GOARCH)
 }
 
 // PipelineCacheKeyForPlatform is PipelineCacheKey with explicit
-// GOOS/GOARCH inputs. Used by `sparkwing pipeline publish` when
-// cross-compiling: runtime.GOOS / runtime.GOARCH are baked at host-
-// build time, so they don't reflect the target arch even after
-// os.Setenv("GOOS", ...). Pass the target platform here so each
-// produced binary lands at a distinct cache key.
+// GOOS/GOARCH inputs (runtime.GOOS/GOARCH are baked at host-build time
+// and don't reflect post-Setenv changes).
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
 	h := sha256.New()
 
-	// Mix in only the major.minor of the Go runtime, not the full
-	// patch. Cross-machine binary caching (LOCAL-006) routinely sees
-	// `go1.26.0` on a laptop publish and `go1.26.2` on a CI fetch
-	// for the same source. Patch releases don't change generated-
-	// code ABI in any meaningful way; major.minor jumps do (new
-	// opcodes, runtime layout) so we still bust the cache then.
+	// Mix only major.minor of the Go runtime; patch releases don't
+	// change generated-code ABI but commonly differ between operator
+	// + CI installs.
 	fmt.Fprintf(h, "go:%s\n", goMajorMinor())
 	fmt.Fprintf(h, "arch:%s/%s\n", goos, goarch)
 
@@ -469,13 +387,9 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 		}
 	}
 
-	// Overlay modfile: once sparks libraries are consumed via
-	// .sparkwing/.resolved.mod (REG-011b) instead of local replaces,
-	// the replace-target walk above no longer captures sparks version
-	// changes. Hash the overlay's contents explicitly so a version
-	// bump in .resolved.mod (or its .resolved.sum) busts the cache.
-	// Absent files are fine; behavior matches today's when neither
-	// exists.
+	// Overlay modfile: when sparks are consumed via .resolved.mod
+	// instead of local replaces, the replace-target walk doesn't
+	// capture version bumps. Hash overlay contents directly.
 	for _, overlay := range []struct {
 		name   string
 		prefix string
@@ -501,18 +415,8 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 }
 
 // ExecReplace replaces the current process image with the target
-// binary via syscall.Exec. Unlike fork-then-exec, this leaves no
-// parent wrapper hanging around -- PID 1 sees the compiled pipeline
-// binary directly. Critical for long-running invocations like
-// `wing worker` where a signal handler targeting the wrapper would
-// orphan the actual worker.
-//
-// Windows has no exec(2)-equivalent; syscall.Exec there returns
-// "not supported by windows". Fall back to fork+exec: spawn the
-// child, wire stdio, propagate its exit code via os.Exit so the
-// parent's exit code matches what the child returned. The wrapper
-// sparkwing.exe stays alive for the child's lifetime -- a small cost
-// vs. the POSIX path where the wrapper is gone immediately.
+// binary via syscall.Exec. Windows has no exec(2)-equivalent; falls
+// back to fork+exec and propagates the child's exit code.
 func ExecReplace(bin string, args []string, dir string, env []string) error {
 	if dir != "" {
 		if err := os.Chdir(dir); err != nil {
@@ -526,9 +430,8 @@ func ExecReplace(bin string, args []string, dir string, env []string) error {
 	return syscall.Exec(bin, argv, env)
 }
 
-// execChildWindows runs bin as a foreground subprocess, exits with
-// the child's status code. Returns only on failure to spawn the
-// child; on a clean child exit it calls os.Exit and never returns.
+// execChildWindows runs bin as a foreground subprocess and exits with
+// the child's status code. Returns only on spawn failure.
 func execChildWindows(bin string, args, env []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
@@ -555,12 +458,9 @@ func goSourceOnly(name string) bool {
 }
 
 // goMajorMinor returns runtime.Version()'s "go1.26" prefix, stripping
-// the patch component. Stable enough to bust the cache on minor
-// upgrades (Go 1.26 -> 1.27) without falsely missing on routine
-// patch differences between operator + CI Go installs.
+// the patch component.
 func goMajorMinor() string {
 	v := runtime.Version() // "go1.26.0", "go1.26.2", "devel ..."
-	// Trim past the second dot.
 	dots := 0
 	for i, c := range v {
 		if c == '.' {
@@ -590,11 +490,8 @@ func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, path)
-		// Content-hash, not mtime+size: LOCAL-006 cross-machine
-		// binary cache requires a reproducible key, and mtime
-		// trivially diverges between operator + CI checkouts of
-		// identical content. .sparkwing/ trees are tiny so the
-		// extra read cost is negligible.
+		// Content-hash, not mtime+size: cross-machine cache requires
+		// a reproducible key (mtime diverges between checkouts).
 		f, err := os.Open(path)
 		if err != nil {
 			return err
@@ -611,9 +508,8 @@ func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
 }
 
 // localReplaceTargets returns absolute paths of every local-path
-// replace directive in go.mod. Remote replaces are ignored (they're
-// resolved via the module cache and change only on go.mod edits,
-// which the go.mod hash already covers).
+// replace directive in go.mod. Remote replaces are ignored (the go.mod
+// hash already covers them).
 func localReplaceTargets(goModPath string) ([]string, error) {
 	data, err := os.ReadFile(goModPath)
 	if err != nil {

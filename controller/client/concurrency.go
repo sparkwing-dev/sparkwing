@@ -11,7 +11,7 @@ import (
 )
 
 // AcquireSlotRequest mirrors the controller's acquireSlotReq JSON
-// shape. Clients build one per arrival.
+// shape.
 type AcquireSlotRequest struct {
 	HolderID      string
 	RunID         string
@@ -24,10 +24,9 @@ type AcquireSlotRequest struct {
 	Lease         time.Duration
 }
 
-// AcquireSlotResponse surfaces the full controller response so the
-// caller can branch on Kind. "granted" and "cached" both map to
-// 200 OK with Granted=true; everything else is either 202 Accepted
-// (Queued/Coalesced/CancellingOthers) or 429 (Skipped/Failed).
+// AcquireSlotResponse surfaces the controller response so the caller
+// can branch on Kind. "granted"/"cached" map to 200 with Granted=true;
+// 202 covers Queued/Coalesced/CancellingOthers; 429 Skipped/Failed.
 type AcquireSlotResponse struct {
 	Granted          bool      `json:"granted"`
 	Kind             string    `json:"kind"`
@@ -43,10 +42,9 @@ type AcquireSlotResponse struct {
 	DriftNote        string    `json:"drift_note,omitempty"`
 }
 
-// AcquireSlot requests a concurrency slot under the RUN-015 unified
-// primitive. The server performs the cache lookup, capacity check,
-// and waiter-row insertion in a single transaction; the response
-// describes the outcome so the caller can branch.
+// AcquireSlot requests a concurrency slot. The server performs the
+// cache lookup, capacity check, and waiter-row insertion in a single
+// transaction; the response describes the outcome.
 func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotRequest) (*AcquireSlotResponse, error) {
 	body := map[string]any{
 		"holder_id": req.HolderID,
@@ -99,16 +97,15 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 	}
 }
 
-// HeartbeatSlotResponse carries the new lease expiry and the
-// supersede flag the runner uses to short-circuit to its cancel path.
+// HeartbeatSlotResponse carries the new lease expiry and a flag the
+// runner uses to short-circuit to its cancel path.
 type HeartbeatSlotResponse struct {
 	LeaseExpiresAt   time.Time `json:"lease_expires_at"`
 	CancelledByNewer bool      `json:"cancelled_by_newer"`
 }
 
-// HeartbeatSlot extends the holder's lease. A CancelledByNewer=true
-// return indicates that a CancelOthers arrival has marked this
-// holder superseded; callers should abort.
+// HeartbeatSlot extends the holder's lease. CancelledByNewer=true
+// indicates a CancelOthers arrival has superseded this holder.
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error) {
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
@@ -137,7 +134,7 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 }
 
 // ReleaseSlot drops the holder row and optionally stores a cache
-// entry when outcome == "success" and cacheKeyHash is non-empty.
+// entry when outcome=="success" and cacheKeyHash is non-empty.
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
 	body := map[string]any{
 		"holder_id": holderID,

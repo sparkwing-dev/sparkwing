@@ -1,6 +1,4 @@
-// Secrets CRUD against the controller. Used by `sparkwing secret`
-// and (future) pipeline runners that inject secrets as env vars
-// before executing a node.
+// Secrets CRUD against the controller.
 package client
 
 import (
@@ -15,9 +13,7 @@ import (
 
 // Secret mirrors the wire shape of one secret row. Value is populated
 // only on GetSecret; ListSecrets blanks it. Masked indicates whether
-// the value is sensitive (should be redacted in run logs); REG-019
-// allows operators to set masked=false on non-secret config so
-// sparkwing.Config can read it cleanly.
+// the value should be redacted in run logs.
 type Secret struct {
 	Name      string `json:"name"`
 	Value     string `json:"value,omitempty"`
@@ -27,22 +23,15 @@ type Secret struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
-// CreateSecret uploads value under name. Replaces any existing row
-// with the same name; the controller is the single writer so there
-// is no merge / conflict semantics to worry about on the client.
-//
-// masked controls whether log output should redact this value when
-// jobs read it. Defaults to true for safety; pass false to register
-// non-secret config (region, log level, feature flags).
+// CreateSecret uploads value under name, replacing any existing row.
+// masked=false registers non-secret config (region, log level, etc).
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error {
 	body := map[string]any{"name": name, "value": value, "masked": masked}
 	return c.post(ctx, "/api/v1/secrets", body, http.StatusNoContent, nil)
 }
 
 // GetSecret fetches one row including its value. Returns
-// store.ErrNotFound when the secret doesn't exist so callers can
-// distinguish "missing" from "connection error" and surface a clear
-// error message to the operator.
+// store.ErrNotFound when the secret doesn't exist.
 func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	u := fmt.Sprintf("%s/api/v1/secrets/%s", c.baseURL, url.PathEscape(name))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -68,8 +57,8 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	}
 }
 
-// ListSecrets fetches every secret row with the Value field blanked
-// by the server. Safe to render to an operator.
+// ListSecrets fetches every secret row with Value blanked by the
+// server.
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
 	u := c.baseURL + "/api/v1/secrets"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -93,9 +82,8 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
 	return body.Secrets, nil
 }
 
-// DeleteSecret removes the row by name. Returns store.ErrNotFound when
-// no row existed so the CLI can differentiate "already gone" from an
-// actual error.
+// DeleteSecret removes the row by name. Returns store.ErrNotFound
+// when no row existed.
 func (c *Client) DeleteSecret(ctx context.Context, name string) error {
 	u := fmt.Sprintf("%s/api/v1/secrets/%s", c.baseURL, url.PathEscape(name))
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)

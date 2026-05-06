@@ -12,8 +12,7 @@ import (
 )
 
 // WriteNodeDispatch POSTs a dispatch snapshot for the given run/node.
-// Best-effort: caller treats a non-2xx as a no-op so a snapshot
-// failure can't fail the node it describes.
+// Best-effort; the caller treats non-2xx as a no-op.
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	if d.RunID == "" || d.NodeID == "" {
 		return fmt.Errorf("WriteNodeDispatch: run_id and node_id required")
@@ -23,8 +22,8 @@ func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) er
 	return c.post(ctx, path, d, http.StatusCreated, nil)
 }
 
-// GetNodeDispatch fetches the dispatch snapshot at the given seq. Pass
-// seq < 0 to fetch the most-recent attempt. ErrNotFound when no row
+// GetNodeDispatch fetches the dispatch snapshot at the given seq;
+// seq < 0 fetches the most-recent attempt. ErrNotFound when no row
 // matches.
 func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error) {
 	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s/dispatch",
@@ -55,9 +54,8 @@ func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq 
 	}
 }
 
-// ListNodeDispatches fetches every dispatch snapshot for (runID, nodeID),
-// oldest seq first. Returns an empty slice (not ErrNotFound) when the
-// node has no recorded dispatches.
+// ListNodeDispatches fetches every dispatch snapshot for (runID,
+// nodeID), oldest seq first.
 func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error) {
 	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s/dispatches",
 		c.baseURL, url.PathEscape(runID), url.PathEscape(nodeID))

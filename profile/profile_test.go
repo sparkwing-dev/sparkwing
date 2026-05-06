@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/profile"
 )
 
-// TestLoad_MissingFile returns an empty Config without error so
-// callers can distinguish "no profiles yet" from "malformed yaml".
 func TestLoad_MissingFile(t *testing.T) {
 	cfg, err := profile.Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
@@ -22,7 +20,6 @@ func TestLoad_MissingFile(t *testing.T) {
 	}
 }
 
-// TestLoadSaveRoundTrip: save a config, reload it, check shape.
 func TestLoadSaveRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
 	in := &profile.Config{
@@ -58,15 +55,11 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		out.Profiles["prod"].ArtifactStore != "s3://your-team-sparkwing-store/cache" {
 		t.Fatalf("storage URL roundtrip: %+v", out.Profiles["prod"])
 	}
-	// .Name is populated on load so Resolve can return a fully-formed Profile.
 	if out.Profiles["local"].Name != "local" {
 		t.Fatalf("Name not stamped on load: %+v", out.Profiles["local"])
 	}
 }
 
-// TestSave_0600Mode: saved file is 0600 so accidental shared-dir
-// writes surface as permission errors instead of silent credential
-// exposure.
 func TestSave_0600Mode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
 	if err := profile.Save(path, &profile.Config{
@@ -85,7 +78,6 @@ func TestSave_0600Mode(t *testing.T) {
 	}
 }
 
-// TestResolve_ExplicitWins: --on wins even when a default is set.
 func TestResolve_ExplicitWins(t *testing.T) {
 	cfg := &profile.Config{
 		Default: "local",
@@ -103,7 +95,6 @@ func TestResolve_ExplicitWins(t *testing.T) {
 	}
 }
 
-// TestResolve_DefaultFallback: no --on, default fires.
 func TestResolve_DefaultFallback(t *testing.T) {
 	cfg := &profile.Config{
 		Default: "local",
@@ -120,7 +111,6 @@ func TestResolve_DefaultFallback(t *testing.T) {
 	}
 }
 
-// TestResolve_NoProfile: nothing configured, no --on -> ErrNoProfile.
 func TestResolve_NoProfile(t *testing.T) {
 	cfg := &profile.Config{Profiles: map[string]*profile.Profile{}}
 	_, err := profile.Resolve(cfg, "")
@@ -129,7 +119,6 @@ func TestResolve_NoProfile(t *testing.T) {
 	}
 }
 
-// TestResolve_ProfileNotFound: --on names a missing profile.
 func TestResolve_ProfileNotFound(t *testing.T) {
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
@@ -145,9 +134,8 @@ func TestResolve_ProfileNotFound(t *testing.T) {
 	}
 }
 
-// TestResolve_DefaultMissing: the default points at a profile that
-// doesn't exist (user deleted it without clearing the default).
-// Surface as ErrProfileNotFound rather than silently ignoring.
+// TestResolve_DefaultMissing covers the case where the default points
+// at a deleted profile.
 func TestResolve_DefaultMissing(t *testing.T) {
 	cfg := &profile.Config{
 		Default:  "gone",
@@ -159,8 +147,6 @@ func TestResolve_DefaultMissing(t *testing.T) {
 	}
 }
 
-// TestNames_Sorted ensures list output is deterministic so operators
-// get the same result every invocation.
 func TestNames_Sorted(t *testing.T) {
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
@@ -175,7 +161,6 @@ func TestNames_Sorted(t *testing.T) {
 	}
 }
 
-// TestDefaultPath_RespectsEnv: env overrides fire first.
 func TestDefaultPath_RespectsEnv(t *testing.T) {
 	t.Setenv("SPARKWING_PROFILES", "/explicit/path.yaml")
 	p, err := profile.DefaultPath()
@@ -187,7 +172,6 @@ func TestDefaultPath_RespectsEnv(t *testing.T) {
 	}
 }
 
-// TestDefaultPath_XDG: XDG_CONFIG_HOME takes second precedence.
 func TestDefaultPath_XDG(t *testing.T) {
 	t.Setenv("SPARKWING_PROFILES", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
