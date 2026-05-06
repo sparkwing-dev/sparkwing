@@ -6,6 +6,18 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ## [Unreleased]
 
+### Docs
+- **Surface dowing as the chore-tier sibling from inside sparkwing's
+  CLI (IMP-012).** `sparkwing info` now prints a SEE ALSO block under
+  NEXT STEPS pointing to dowing (https://github.com/koreyGambill/dowing)
+  for repo-local bash chores -- formatters, port-forwards, and other
+  single-script tasks where sparkwing's compile cycle / DAG / run
+  records are over-tax. The same pointer lands at the bottom of the
+  `sparkwing info --first-time` onboarding card and as a "See also"
+  paragraph in `sparkwing pipeline new --help`. Pure CLI-text change;
+  no behavior or flag surface added. Sparkwing remains Go-pipeline-only
+  -- the bridge fixes a discoverability gap, not a capability one.
+
 ### Added
 - **Built-in `--start-at` / `--stop-at` wing flags for resume-from-step
   (IMP-007).** Every pipeline now gets per-step resume support without

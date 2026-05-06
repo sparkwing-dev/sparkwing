@@ -260,6 +260,13 @@ func printFirstTimeCard() {
 	fmt.Printf("  web:        %s\n", color.Cyan("https://sparkwing.dev/docs/"))
 	fmt.Printf("  llms-full:  %s %s\n", color.Cyan("https://sparkwing.dev/llms-full.txt"), color.Dim("(full corpus, one fetch)"))
 	fmt.Printf("  llms.txt:   %s %s\n", color.Cyan("https://sparkwing.dev/llms.txt"), color.Dim("(short index)"))
+	fmt.Println()
+
+	fmt.Println(color.Bold("SEE ALSO"))
+	fmt.Println("  Different tools for different jobs: sparkwing runs Go pipelines (DAGs,")
+	fmt.Println("  retries, run records); for one-off bash chores in a repo (formatters,")
+	fmt.Println("  port-forwards) reach for " + color.Cyan("dowing") + " instead - it runs *.sh files from")
+	fmt.Println("  bin/ or scripts/ with no compile cycle. https://github.com/koreyGambill/dowing")
 }
 
 func userShellBase() string {
@@ -636,6 +643,10 @@ func printInfoTable(info Info) {
 
 	fmt.Println(color.Bold("NEXT STEPS"))
 	printAlignedSteps(info.NextSteps)
+	fmt.Println()
+
+	fmt.Println(color.Bold("SEE ALSO"))
+	fmt.Printf("  %s %s\n", color.Cyan("dowing"), color.Dim("- run *.sh tasks from bin/ or scripts/ for repo-local chores (formatters, port-forwards). https://github.com/koreyGambill/dowing"))
 	fmt.Println()
 
 	if len(info.ForAgents) > 0 {

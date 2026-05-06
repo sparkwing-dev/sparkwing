@@ -852,7 +852,13 @@ Refuses to clobber: if the name already exists in pipelines.yaml
 the command fails before writing anything.
 
 Supply --group to set the tab-complete section header; --hidden
-to hide from default listings; --short to pre-fill the description.`,
+to hide from default listings; --short to pre-fill the description.
+
+See also:
+  If your pipeline is a single linear shell sequence with no DAG,
+  retry, or cross-runner concerns, dowing is probably a better fit
+  -- it runs *.sh files from bin/ or scripts/ with no compile cycle:
+  https://github.com/koreyGambill/dowing`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "template", Argument: "KIND", Desc: "minimal (one node, default) | build-test-deploy (three-node build->test->deploy DAG)", Default: "minimal", Group: "Scaffold"},
