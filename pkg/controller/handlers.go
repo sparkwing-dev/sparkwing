@@ -513,6 +513,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The trigger ID doubles as the eventual run ID.
+	now := time.Now()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:            runID,
 		Pipeline:      body.Pipeline,
@@ -526,12 +527,43 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RepoURL:       body.Git.RepoURL,
 		GithubOwner:   body.Git.GithubOwner,
 		GithubRepo:    body.Git.GithubRepo,
-		CreatedAt:     time.Now(),
+		CreatedAt:     now,
 		ParentRunID:   body.ParentRunID,
 		ParentNodeID:  body.ParentNodeID,
 		RetryOf:       body.RetryOf,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
+		return
+	}
+
+	// IMP-004: every accepted trigger gets a Run row up front so
+	// `runs list` / `runs status` surface it before the runner has
+	// even claimed the trigger. The orchestrator's CreateRun upserts
+	// the status from 'pending' -> 'running' once it actually starts;
+	// the trigger-loop's pre-orchestrator failure paths transition
+	// straight to 'failed' via FinishRun.
+	if err := s.store.CreateRun(r.Context(), store.Run{
+		ID:            runID,
+		Pipeline:      body.Pipeline,
+		Status:        "pending",
+		TriggerSource: body.Trigger.Source,
+		GitBranch:     body.Git.Branch,
+		GitSHA:        body.Git.SHA,
+		Args:          body.Args,
+		ParentRunID:   body.ParentRunID,
+		Repo:          body.Git.Repo,
+		RepoURL:       body.Git.RepoURL,
+		GithubOwner:   body.Git.GithubOwner,
+		GithubRepo:    body.Git.GithubRepo,
+		RetryOf:       body.RetryOf,
+		CreatedAt:     now,
+		// started_at is required (NOT NULL); use the same instant.
+		// The orchestrator overwrites this on the pending->running
+		// upsert, so the value here is only ever read for runs that
+		// fail at the trigger-loop fetch/compile stage.
+		StartedAt: now,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
 		return
 	}
 

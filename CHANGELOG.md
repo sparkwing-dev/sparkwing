@@ -6,6 +6,39 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- **Structured JSON body for auth-error responses (IMP-022).**
+  401 and 403 responses from the controller, the laptop-local
+  controller, and the logs service now emit a stable JSON shape:
+  `{"error": "missing_scope" | "unauthenticated", "missing_scope":
+  "logs.write", "principal": "runner:warm-runner-7", "message":
+  "token lacks required scope: logs.write"}`. The on-wire
+  `logs.AuthErrorBody` type pins the shape so client and server stay
+  in lockstep. The `logs.AuthError.Scope` parser introduced by IMP-002
+  now reads `missing_scope` directly instead of regexing the human
+  message; if a future operator-clarity pass rewords the message, the
+  runner still distinguishes "fatal scope misconfig" from "transient
+  transport blip." Pre-IMP-022 servers (older controllers, third-party
+  proxies) emit plain text and the parser falls back to the existing
+  string match. Documented under the Auth section of `docs/api.md`.
+
+### Fixed
+- **`runs list` / `runs status` surface trigger failures (IMP-004).**
+  The trigger-intake handler now writes a `pending` Run row alongside
+  the Trigger row, so `sparkwing runs list --on prod` and
+  `sparkwing runs status --run X --on prod` are visible as soon as a
+  webhook is accepted (not just after the orchestrator's CreateRun
+  fires). The cluster trigger-loop's pre-orchestrator failure paths
+  (fetch-source / compile / no-baked-binary) now call FinishRun with
+  `status=failed` and the wrapper error so the operator sees the
+  actual cause in `runs list` instead of the misleading "no runs
+  yet". The orchestrator's CreateRun became an idempotent upsert that
+  promotes `pending -> running` on start while preserving the
+  trigger-time `created_at`. Schema gained `runs.created_at` (the
+  only field-level addition this ticket made; IMP-016 owns receipt
+  fields). Pairs with IMP-001's `_compile` synthetic node, which
+  finally attaches to a Run row that exists.
+
 ### Added
 - **`cluster tokens list` surfaces scopes (IMP-024).** The table view
   now carries a `SCOPES` column so operators can spot a missing scope

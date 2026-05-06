@@ -198,6 +198,122 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	}
 }
 
+// IMP-004: every accepted trigger creates a pending Run row so
+// `runs list` / `runs status` show it before the runner has even
+// claimed it. Without this, dispatches that fail at fetch / compile
+// would never surface in the CLI.
+func TestTrigger_CreatesPendingRunRow(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline": "demo",
+		"trigger":  map[string]string{"source": "github"},
+		"git":      map[string]string{"branch": "main", "sha": "deadbeef"},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.RunID == "" {
+		t.Fatal("empty run_id")
+	}
+
+	run, err := st.GetRun(context.Background(), body.RunID)
+	if err != nil {
+		t.Fatalf("GetRun(%s): %v", body.RunID, err)
+	}
+	if run.Status != "pending" {
+		t.Errorf("Status=%q want pending", run.Status)
+	}
+	if run.Pipeline != "demo" {
+		t.Errorf("Pipeline=%q want demo", run.Pipeline)
+	}
+	if run.GitSHA != "deadbeef" {
+		t.Errorf("GitSHA=%q want deadbeef", run.GitSHA)
+	}
+	if run.CreatedAt.IsZero() {
+		t.Error("CreatedAt is zero")
+	}
+	// runs list should include it.
+	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	found := false
+	for _, r := range runs {
+		if r.ID == body.RunID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ListRuns did not include the pending run %s", body.RunID)
+	}
+}
+
+// IMP-004: a controller-pre-allocated pending row gets transitioned
+// to running when the orchestrator's CreateRun fires. This is the
+// claimed -> running edge in the ticket. The upsert deliberately
+// preserves the original CreatedAt so receipt fields (IMP-016) can
+// reason about queue latency = StartedAt - CreatedAt.
+func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	created := time.Now().Add(-time.Hour)
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-pending-1",
+		Pipeline:  "demo",
+		Status:    "pending",
+		CreatedAt: created,
+		StartedAt: created,
+	}); err != nil {
+		t.Fatalf("CreateRun pending: %v", err)
+	}
+
+	// Orchestrator-side promotion: same id, status=running, fresh started_at.
+	started := time.Now()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-pending-1",
+		Pipeline:  "demo",
+		Status:    "running",
+		StartedAt: started,
+	}); err != nil {
+		t.Fatalf("CreateRun running upsert: %v", err)
+	}
+
+	got, err := st.GetRun(ctx, "run-pending-1")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Status != "running" {
+		t.Errorf("Status=%q want running", got.Status)
+	}
+	// CreatedAt preserved from original pending insert.
+	if got.CreatedAt.Truncate(time.Second) != created.Truncate(time.Second) {
+		t.Errorf("CreatedAt=%v want %v (lost on upsert)", got.CreatedAt, created)
+	}
+}
+
 // TestTrigger_DispatcherError surfaces dispatcher-reported errors
 // as 500 responses so the caller can retry.
 func TestTrigger_DispatcherError(t *testing.T) {

@@ -103,6 +103,21 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		if err != nil {
 			logger.Error("trigger loop: trigger failed",
 				"run_id", trigger.ID, "err", err)
+			// IMP-004: pre-orchestrator failures (fetch / compile /
+			// no-baked-binary) never reach orchestrator.Run, which is
+			// where FinishRun would normally fire. Mark the
+			// controller-pre-allocated Run row failed here so the
+			// operator sees status=failed + the wrapper error in
+			// `runs list` / `runs status` instead of a stuck pending
+			// row. Use a fresh ctx; the trigger ctx may already be
+			// shutting down. Best-effort: a failed write logs and
+			// moves on, since the trigger is about to be finished.
+			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
+				logger.Warn("trigger loop: FinishRun failed",
+					"run_id", trigger.ID, "err", ferr)
+			}
+			cancel()
 			// Best-effort finish so a broken trigger doesn't get re-claimed forever.
 			_ = cli.FinishTrigger(ctx, trigger.ID)
 		}

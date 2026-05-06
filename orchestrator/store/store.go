@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS runs (
     args_json       BLOB,
     plan_json       BLOB,
     error           TEXT NOT NULL DEFAULT '',
+    -- created_at: when the controller first saw the trigger; matches
+    -- triggers.created_at for trigger-originated runs. IMP-004 added
+    -- this so pre-claim "pending" runs have a wall-clock anchor
+    -- distinct from started_at (which becomes non-NULL only when the
+    -- orchestrator actually starts executing).
+    created_at      INTEGER NOT NULL DEFAULT 0,
     started_at      INTEGER NOT NULL,
     finished_at     INTEGER,
     repo            TEXT NOT NULL DEFAULT '',
@@ -392,6 +398,9 @@ func (s *Store) migrate() error {
 		"retry_source":      "TEXT NOT NULL DEFAULT ''",
 		"replay_of_run_id":  "TEXT NOT NULL DEFAULT ''",
 		"replay_of_node_id": "TEXT NOT NULL DEFAULT ''",
+		// IMP-004: created_at lets pending (pre-orchestrator) runs
+		// carry a real timestamp without lying about started_at.
+		"created_at": "INTEGER NOT NULL DEFAULT 0",
 	}); err != nil {
 		return err
 	}
@@ -475,8 +484,13 @@ type Run struct {
 	Args          map[string]string `json:"args,omitempty"`
 	PlanSnapshot  []byte            `json:"-"`
 	Error         string            `json:"error,omitempty"`
-	StartedAt     time.Time         `json:"started_at"`
-	FinishedAt    *time.Time        `json:"finished_at,omitempty"`
+	// CreatedAt is when the controller first persisted the run row
+	// (trigger-intake time for trigger-originated runs, or CreateRun
+	// time for direct CreateRun callers). IMP-004 added this so
+	// "pending" runs have a wall-clock anchor distinct from StartedAt.
+	CreatedAt  time.Time  `json:"created_at,omitempty"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	// ParentRunID identifies the spawning AwaitPipelineJob caller.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// Repo is the short name (e.g. "my-app").
@@ -496,7 +510,11 @@ type Run struct {
 	ReplayOfNodeID string `json:"replay_of_node_id,omitempty"`
 }
 
-// CreateRun inserts a run in the running state.
+// CreateRun inserts a run row, or upgrades an existing 'pending' row
+// (controller-pre-allocated at trigger-intake; IMP-004) to the
+// caller's status. Idempotent for the (pending -> running) transition
+// the orchestrator performs at start-of-run; non-pending existing rows
+// are left untouched so this stays a no-op on retry / replay paths.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	argsJSON, _ := json.Marshal(r.Args)
 	// NULL parent so ancestor walks terminate via IS NULL.
@@ -504,11 +522,42 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if r.ParentRunID != "" {
 		parent = sql.NullString{String: r.ParentRunID, Valid: true}
 	}
+	created := r.CreatedAt
+	if created.IsZero() {
+		// Direct CreateRun (no controller pre-allocation): created_at
+		// = started_at so the column is never zero outside the migration.
+		created = r.StartedAt
+	}
+	// ON CONFLICT DO UPDATE WHERE existing.status = 'pending':
+	// the only legal transition for an existing row is the
+	// orchestrator promoting a controller-allocated pending run to
+	// running. We deliberately do NOT clobber created_at on the
+	// upsert so the trigger-intake timestamp survives.
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+    pipeline       = excluded.pipeline,
+    status         = excluded.status,
+    trigger_source = excluded.trigger_source,
+    git_branch     = excluded.git_branch,
+    git_sha        = excluded.git_sha,
+    args_json      = excluded.args_json,
+    plan_json      = excluded.plan_json,
+    started_at     = excluded.started_at,
+    parent_run_id  = excluded.parent_run_id,
+    repo           = excluded.repo,
+    repo_url       = excluded.repo_url,
+    github_owner   = excluded.github_owner,
+    github_repo    = excluded.github_repo,
+    retry_of       = excluded.retry_of,
+    retried_as     = excluded.retried_as,
+    retry_source   = excluded.retry_source,
+    replay_of_run_id  = excluded.replay_of_run_id,
+    replay_of_node_id = excluded.replay_of_node_id
+WHERE runs.status = 'pending'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
-		argsJSON, r.PlanSnapshot, r.StartedAt.UnixNano(), parent,
+		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.ReplayOfRunID, r.ReplayOfNodeID,
 	)
@@ -541,7 +590,7 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -601,7 +650,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
@@ -645,7 +694,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -704,12 +753,12 @@ type rowScanner interface {
 func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON []byte
-	var startedNS int64
+	var createdNS, startedNS int64
 	var finishedNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
-		&startedNS, &finishedNS, &parent,
+		&createdNS, &startedNS, &finishedNS, &parent,
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID)
@@ -718,6 +767,9 @@ func scanRun(rs rowScanner) (*Run, error) {
 			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	if createdNS > 0 {
+		r.CreatedAt = time.Unix(0, createdNS)
 	}
 	r.StartedAt = time.Unix(0, startedNS)
 	if finishedNS.Valid {
