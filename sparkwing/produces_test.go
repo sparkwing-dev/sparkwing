@@ -20,29 +20,26 @@ type producedJob struct {
 	sparkwing.Produces[buildOut]
 }
 
-func (j *producedJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *producedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (j *producedJob) run(ctx context.Context) (buildOut, error) {
 	return buildOut{Tag: "v9", Digest: "sha256:zzz"}, nil
 }
 
-// markerOnlyJob declares Produces[T] but never calls SetResult. The
-// SDK-032 strict contract panics at Plan time when the marker is
-// present without a matching Work.SetResult.
+// markerOnlyJob declares Produces[T] but never returns a typed step
+// from Work. The strict contract panics at Plan time when the marker
+// is present without a matching Work return value.
 type markerOnlyJob struct {
 	sparkwing.Base
 	sparkwing.Produces[buildOut]
 }
 
-func (j *markerOnlyJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *markerOnlyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", func(ctx context.Context) error { return nil })
-	return w
+	return nil, nil
 }
 
 // otherOut is a distinct type used to provoke marker/Work mismatches.
@@ -55,28 +52,25 @@ type mismatchJob struct {
 	sparkwing.Produces[otherOut]
 }
 
-func (j *mismatchJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *mismatchJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (j *mismatchJob) run(ctx context.Context) (buildOut, error) {
 	return buildOut{}, nil
 }
 
-// unmarkedTypedJob has Work().SetResult but deliberately omits the
-// Produces[T] marker. Under SDK-032 this is a Plan-time panic.
+// unmarkedTypedJob returns a typed *WorkStep from Work but
+// deliberately omits the Produces[T] marker. This is a Plan-time
+// panic.
 type unmarkedTypedJob struct {
 	sparkwing.Base
 }
 
-func (j *unmarkedTypedJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *unmarkedTypedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (j *unmarkedTypedJob) run(ctx context.Context) (buildOut, error) {
@@ -99,11 +93,11 @@ func TestProduces_MarkerWithoutSetResultPanics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("Produces[T] without SetResult should panic")
+			t.Fatal("Produces[T] without typed return from Work should panic")
 		}
 		msg, _ := r.(string)
-		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "SetResult") {
-			t.Fatalf("panic should mention Produces and SetResult, got %q", msg)
+		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "Work") {
+			t.Fatalf("panic should mention Produces and Work, got %q", msg)
 		}
 	}()
 	sparkwing.Job(plan, "marker-only", &markerOnlyJob{})
@@ -114,7 +108,7 @@ func TestProduces_SetResultWithoutMarkerPanics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("Work.SetResult without Produces[T] should panic")
+			t.Fatal("typed Work return without Produces[T] should panic")
 		}
 		msg, _ := r.(string)
 		if !strings.Contains(msg, "Produces[") {
@@ -132,8 +126,8 @@ func TestProduces_MismatchPanics(t *testing.T) {
 			t.Fatal("marker/Work mismatch should panic")
 		}
 		msg, _ := r.(string)
-		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "Work.SetResult") {
-			t.Fatalf("panic message should mention Produces and Work.SetResult, got %q", msg)
+		if !strings.Contains(msg, "Produces[") {
+			t.Fatalf("panic message should mention Produces, got %q", msg)
 		}
 	}()
 	sparkwing.Job(plan, "mismatch", &mismatchJob{})
@@ -149,11 +143,11 @@ func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("OnFailure recovery with marker-without-SetResult should panic")
+			t.Fatal("OnFailure recovery with marker-without-typed-return should panic")
 		}
 		msg, _ := r.(string)
-		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "SetResult") {
-			t.Fatalf("panic should mention Produces and SetResult, got %q", msg)
+		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "Work") {
+			t.Fatalf("panic should mention Produces and Work, got %q", msg)
 		}
 	}()
 	parent.OnFailure("recover", &markerOnlyJob{})
@@ -163,11 +157,11 @@ func TestProduces_NewDetachedNodeAppliesContract(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("NewDetachedNode with marker-without-SetResult should panic")
+			t.Fatal("NewDetachedNode with marker-without-typed-return should panic")
 		}
 		msg, _ := r.(string)
-		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "SetResult") {
-			t.Fatalf("panic should mention Produces and SetResult, got %q", msg)
+		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "Work") {
+			t.Fatalf("panic should mention Produces and Work, got %q", msg)
 		}
 	}()
 	sparkwing.NewDetachedNode("spawn-child", &markerOnlyJob{})

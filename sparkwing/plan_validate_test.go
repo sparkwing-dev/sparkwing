@@ -34,11 +34,10 @@ func expectPanic(t *testing.T, body func(), assert func(msg string)) {
 
 type typoCloseJob struct{ sparkwing.Base }
 
-func (typoCloseJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (typoCloseJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("fetch", func(ctx context.Context) error { return nil })
 	w.Step("compile", func(ctx context.Context) error { return nil }).Needs("fetchh")
-	return w
+	return nil, nil
 }
 
 type typoCloseJobPipe struct{ sparkwing.Base }
@@ -66,11 +65,10 @@ func TestPlanValidate_WorkStepNeedsTypo_Suggests(t *testing.T) {
 
 type typoFarJob struct{ sparkwing.Base }
 
-func (typoFarJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (typoFarJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("fetch", func(ctx context.Context) error { return nil })
 	w.Step("compile", func(ctx context.Context) error { return nil }).Needs("totallyunrelated")
-	return w
+	return nil, nil
 }
 
 type typoFarJobPipe struct{ sparkwing.Base }
@@ -105,11 +103,10 @@ func TestPlanValidate_WorkStepNeedsTypo_NoCloseMatchListsAvailable(t *testing.T)
 // and must not produce a panic.
 type handleNeedsJob struct{ sparkwing.Base }
 
-func (handleNeedsJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (handleNeedsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	fetch := w.Step("fetch", func(ctx context.Context) error { return nil })
 	w.Step("compile", func(ctx context.Context) error { return nil }).Needs(fetch)
-	return w
+	return nil, nil
 }
 
 type handleNeedsPipe struct{ sparkwing.Base }
@@ -131,11 +128,10 @@ func TestPlanValidate_HandleNeedsUnaffected(t *testing.T) {
 // String reference that exactly matches an existing step is fine.
 type stringExactJob struct{ sparkwing.Base }
 
-func (stringExactJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (stringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("fetch", func(ctx context.Context) error { return nil })
 	w.Step("compile", func(ctx context.Context) error { return nil }).Needs("fetch")
-	return w
+	return nil, nil
 }
 
 type stringExactPipe struct{ sparkwing.Base }
@@ -184,11 +180,10 @@ func TestPlanValidate_NodeNeedsTypo_Suggests(t *testing.T) {
 
 type spawnTypoJob struct{ sparkwing.Base }
 
-func (spawnTypoJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (spawnTypoJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("seed", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
 	w.Step("after", func(ctx context.Context) error { return nil }).Needs("seedd")
-	return w
+	return nil, nil
 }
 
 type spawnTypoPipe struct{ sparkwing.Base }
@@ -216,11 +211,10 @@ func TestPlanValidate_StringRefToMissingSpawn_Suggests(t *testing.T) {
 // IDs are part of the same resolution set as steps.
 type spawnStringExactJob struct{ sparkwing.Base }
 
-func (spawnStringExactJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (spawnStringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("seed", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
 	w.Step("after", func(ctx context.Context) error { return nil }).Needs("seed")
-	return w
+	return nil, nil
 }
 
 type spawnStringExactPipe struct{ sparkwing.Base }

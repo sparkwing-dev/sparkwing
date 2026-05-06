@@ -175,11 +175,10 @@ type stepRangePipe struct{ sparkwing.Base }
 
 type stepRangeJob struct{ sparkwing.Base }
 
-func (stepRangeJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (stepRangeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	a := w.Step("fetch", func(ctx context.Context) error { return nil })
 	w.Step("compile", func(ctx context.Context) error { return nil }).Needs(a)
-	return w
+	return nil, nil
 }
 
 func (stepRangePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {

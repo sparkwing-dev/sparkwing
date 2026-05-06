@@ -155,22 +155,25 @@ func newNode(caller, id string, job Workable) *Node {
 		}
 	}
 
-	w := materializeWork(id, job)
-	workType := outputTypeFromWork(w)
+	w, resultStep := materializeWork(id, job)
+	var workType reflect.Type
+	if resultStep != nil {
+		workType = resultStep.outType
+	}
 
-	// Strict Produces / SetResult contract: typed jobs must declare
+	// Strict Produces / Work-return contract: typed jobs must declare
 	// both. Either alone is a Plan-time error.
 	var outType reflect.Type
 	pr, hasMarker := job.(producer)
 	switch {
 	case hasMarker && workType == nil:
 		panic(fmt.Sprintf(
-			"sparkwing: node %q: declares Produces[%v] but Work() never calls SetResult "+
-				"(add a Result/Out step + w.SetResult, or drop the marker)",
-			id, pr.producedType()))
+			"sparkwing: node %q: declares Produces[%v] but Work() returned no typed step "+
+				"(return a typed *WorkStep matching Produces[%v], or drop the marker)",
+			id, pr.producedType(), pr.producedType()))
 	case !hasMarker && workType != nil:
 		panic(fmt.Sprintf(
-			"sparkwing: node %q: Work.SetResult declares output type %v but the job struct does not embed "+
+			"sparkwing: node %q: Work returned a typed step of type %v but the job struct does not embed "+
 				"sparkwing.Produces[%v] (add the marker so the contract is visible at the type level)",
 			id, workType, workType))
 	case hasMarker && workType != nil:
@@ -184,10 +187,11 @@ func newNode(caller, id string, job Workable) *Node {
 	}
 
 	return &Node{
-		id:      id,
-		job:     job,
-		work:    w,
-		outType: outType,
+		id:         id,
+		job:        job,
+		work:       w,
+		resultStep: resultStep,
+		outType:    outType,
 	}
 }
 
@@ -291,37 +295,42 @@ func (p *Plan) LintWarnings() []LintWarning {
 	return out
 }
 
-// materializeWork calls job.Work() under panic recovery so a
-// pathological body produces a helpful Plan-time error.
-func materializeWork(id string, job Workable) *Work {
+// materializeWork constructs a fresh *Work, calls job.Work(w) under
+// panic recovery so a pathological body produces a helpful Plan-time
+// error, and returns both the populated Work and the *WorkStep the
+// Job designated as its typed output (nil for untyped Jobs). A
+// non-nil error from Work surfaces as a node-id-tagged panic
+// matching the structural-error pattern used elsewhere.
+func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 	defer func() {
 		if r := recover(); r != nil {
 			panic(fmt.Sprintf("sparkwing: Plan-time materialization failed for node %q: %v", id, r))
 		}
 	}()
-	w := job.Work()
-	if w == nil {
-		panic(fmt.Sprintf("sparkwing: Plan-time materialization failed for node %q: Job.Work() returned nil", id))
+	w := NewWork()
+	resultStep, err := job.Work(w)
+	if err != nil {
+		panic(fmt.Sprintf("sparkwing: Plan-time materialization failed for node %q: %v", id, err))
 	}
-	return w
-}
-
-func outputTypeFromWork(w *Work) reflect.Type {
-	if w == nil {
-		return nil
+	if resultStep != nil {
+		// Mirror today's behavior: a typed result step is registered
+		// on the Work as the canonical output. Pipeline authors stop
+		// calling SetResult; the SDK does it from the returned step.
+		w.SetResult(resultStep)
 	}
-	return w.ResultType()
+	return w, resultStep
 }
 
 // Node is a single entry in the Plan. It wraps a user-authored job
 // plus dispatch modifiers.
 type Node struct {
-	id      string
-	job     Workable
-	work    *Work // materialized inner DAG; empty for Approval gates
-	needs   []string
-	env     map[string]string
-	outType reflect.Type
+	id         string
+	job        Workable
+	work       *Work     // materialized inner DAG; empty for Approval gates
+	resultStep *WorkStep // step Work() returned as the typed output; nil for untyped Jobs
+	needs      []string
+	env        map[string]string
+	outType    reflect.Type
 
 	// Resilience modifiers. retryAuto switches from in-runner step
 	// re-run to whole-node re-dispatch (right for infra flakes where
@@ -408,7 +417,7 @@ type approvalJob struct {
 
 // Work satisfies the Workable interface but never executes; approval
 // nodes are routed through the approval-waiter path.
-func (a *approvalJob) Work() *Work { return NewWork() }
+func (a *approvalJob) Work(w *Work) (*WorkStep, error) { return nil, nil }
 
 // ApprovalTimeoutPolicy enumerates the resolution applied to an
 // unanswered approval gate when its Timeout elapses.
@@ -577,6 +586,10 @@ func (n *Node) Job() Workable { return n.job }
 // Work returns the materialized inner DAG for the node's job. Empty
 // for Approval gates (their Work is never executed).
 func (n *Node) Work() *Work { return n.work }
+
+// ResultStep returns the *WorkStep the Job designated as its typed
+// output via Work's return value, or nil for untyped Jobs.
+func (n *Node) ResultStep() *WorkStep { return n.resultStep }
 
 // Needs declares hard upstream dependencies. The orchestrator will not
 // dispatch this node until every named dependency is satisfied.

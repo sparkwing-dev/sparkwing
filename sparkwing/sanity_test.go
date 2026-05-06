@@ -21,11 +21,9 @@ type buildJob struct {
 	sparkwing.Produces[buildOut]
 }
 
-func (b *buildJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (b *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", b.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (b *buildJob) run(ctx context.Context) (buildOut, error) {
@@ -37,13 +35,12 @@ type deployJob struct {
 	Build sparkwing.Ref[buildOut]
 }
 
-func (d *deployJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (d *deployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", func(ctx context.Context) error {
 		_ = d.Build.Node()
 		return nil
 	})
-	return w
+	return nil, nil
 }
 
 func TestPlanJobAndNeeds(t *testing.T) {

@@ -27,8 +27,7 @@ type spawnedChildJob struct {
 	ran *atomic.Bool
 }
 
-func (j *spawnedChildJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *spawnedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", func(ctx context.Context) error {
 		if j.ran != nil {
 			j.ran.Store(true)
@@ -36,7 +35,7 @@ func (j *spawnedChildJob) Work() *sparkwing.Work {
 		sparkwing.Info(ctx, "spawned child %s ran", j.tag)
 		return nil
 	})
-	return w
+	return nil, nil
 }
 
 // spawnSingleParent declares one SpawnNode after a setup step. The
@@ -47,8 +46,7 @@ type spawnSingleParent struct {
 	childRan *atomic.Bool
 }
 
-func (j *spawnSingleParent) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *spawnSingleParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	setup := w.Step("setup", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "parent setup")
 		return nil
@@ -58,7 +56,7 @@ func (j *spawnSingleParent) Work() *sparkwing.Work {
 		sparkwing.Info(ctx, "parent post-spawn")
 		return nil
 	}).Needs(scan)
-	return w
+	return nil, nil
 }
 
 type spawnSinglePipe struct {
@@ -75,18 +73,16 @@ func (sp *spawnSinglePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spark
 // surface the failure to the parent step, failing the parent.
 type spawnFailingChild struct{ sparkwing.Base }
 
-func (spawnFailingChild) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (spawnFailingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("doomed", func(ctx context.Context) error { return errors.New("child boom") })
-	return w
+	return nil, nil
 }
 
 type spawnFailParent struct{ sparkwing.Base }
 
-func (spawnFailParent) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (spawnFailParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("doomed-child", spawnFailingChild{})
-	return w
+	return nil, nil
 }
 
 type spawnFailPipe struct{ sparkwing.Base }
@@ -105,8 +101,7 @@ type spawnEachParent struct {
 	count *atomic.Int32
 }
 
-func (j *spawnEachParent) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *spawnEachParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	items := []string{"a", "b", "c"}
 	w.SpawnNodeForEach(items, func(s string) (string, sparkwing.Workable) {
 		tag := s
@@ -116,7 +111,7 @@ func (j *spawnEachParent) Work() *sparkwing.Work {
 			return nil
 		})
 	})
-	return w
+	return nil, nil
 }
 
 type spawnEachPipe struct {

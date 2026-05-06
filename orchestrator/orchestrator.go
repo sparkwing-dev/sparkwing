@@ -1984,9 +1984,9 @@ func (w *workWalker) walkJob(job sparkwing.Workable) (*snapshotWork, error) {
 		w.stack = w.stack[:len(w.stack)-1]
 		delete(w.stackSet, key)
 	}()
-	work := job.Work()
-	if work == nil {
-		return nil, nil
+	work := sparkwing.NewWork()
+	if _, err := job.Work(work); err != nil {
+		return nil, fmt.Errorf("Job.Work failed: %w", err)
 	}
 	out, err := w.walk(work)
 	if err != nil {

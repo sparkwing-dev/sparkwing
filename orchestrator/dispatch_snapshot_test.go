@@ -108,10 +108,9 @@ type stubJob struct {
 	Token  string `json:"token,omitempty"`
 }
 
-func (j *stubJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *stubJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", func(ctx context.Context) error { return nil })
-	return w
+	return nil, nil
 }
 
 // buildNode returns a *sparkwing.Node carrying the given job, with

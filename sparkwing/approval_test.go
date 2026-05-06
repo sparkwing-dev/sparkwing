@@ -124,8 +124,7 @@ func TestApproval_GateNeedsAndChain(t *testing.T) {
 
 type fakeJob struct{ Base }
 
-func (fakeJob) Work() *Work {
-	w := NewWork()
+func (fakeJob) Work(w *Work) (*WorkStep, error) {
 	w.Step("run", func(_ context.Context) error { return nil })
-	return w
+	return nil, nil
 }

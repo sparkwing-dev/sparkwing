@@ -27,11 +27,9 @@ type setupJob struct {
 // skipDeployWant is module-level so tests can flip it per-case.
 var skipDeployWant atomic.Bool
 
-func (j *setupJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *setupJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (setupJob) run(ctx context.Context) (setupOut, error) {
@@ -46,7 +44,8 @@ type skipOnDeployFlag struct{ sparkwing.Base }
 
 var deployRan atomic.Bool
 
-func (skipOnDeployFlag) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	setup := sparkwing.Job(plan, "setup", &setupJob{})
+func (skipOnDeployFlag) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	setup := sparkwing.Job(plan, "setup", &setupJob{})
 	setupRef := sparkwing.RefTo[setupOut](setup)
 	sparkwing.Job(plan, "deploy-step", sparkwing.JobFn(func(ctx context.Context) error {
 		deployRan.Store(true)
@@ -64,7 +63,8 @@ type multiPredicatesOR struct{ sparkwing.Base }
 
 var multiRan atomic.Bool
 
-func (multiPredicatesOR) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	setup := sparkwing.Job(plan, "setup", &setupJob{})
+func (multiPredicatesOR) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	setup := sparkwing.Job(plan, "setup", &setupJob{})
 	setupRef := sparkwing.RefTo[setupOut](setup)
 	sparkwing.Job(plan, "job", sparkwing.JobFn(func(ctx context.Context) error {
 		multiRan.Store(true)
@@ -82,7 +82,8 @@ type slowPredicate struct{ sparkwing.Base }
 
 var slowRan atomic.Bool
 
-func (slowPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	sparkwing.Job(plan, "guarded", sparkwing.JobFn(func(ctx context.Context) error {
+func (slowPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "guarded", sparkwing.JobFn(func(ctx context.Context) error {
 		slowRan.Store(true)
 		return nil
 	})).SkipIf(func(ctx context.Context) bool {
@@ -102,7 +103,8 @@ type panickyPredicate struct{ sparkwing.Base }
 
 var panickyRan atomic.Bool
 
-func (panickyPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	sparkwing.Job(plan, "guarded", sparkwing.JobFn(func(ctx context.Context) error {
+func (panickyPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "guarded", sparkwing.JobFn(func(ctx context.Context) error {
 		panickyRan.Store(true)
 		return nil
 	})).SkipIf(func(ctx context.Context) bool {
@@ -116,7 +118,8 @@ type skippedUpstream struct{ sparkwing.Base }
 
 var downstreamRan atomic.Bool
 
-func (skippedUpstream) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	skipMe := sparkwing.Job(plan, "skip-me", sparkwing.JobFn(func(ctx context.Context) error {
+func (skippedUpstream) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	skipMe := sparkwing.Job(plan, "skip-me", sparkwing.JobFn(func(ctx context.Context) error {
 		return nil
 	})).SkipIf(func(ctx context.Context) bool { return true })
 	sparkwing.Job(plan, "downstream", sparkwing.JobFn(func(ctx context.Context) error {
@@ -233,7 +236,8 @@ type generousTimeout struct{ sparkwing.Base }
 
 var generousRan atomic.Bool
 
-func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	sparkwing.Job(plan, "gated", sparkwing.JobFn(func(ctx context.Context) error {
+func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "gated", sparkwing.JobFn(func(ctx context.Context) error {
 		generousRan.Store(true)
 		return nil
 	})).SkipIf(func(ctx context.Context) bool {

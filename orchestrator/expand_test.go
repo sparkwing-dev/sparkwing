@@ -27,11 +27,9 @@ type discoverJob struct {
 // will see. Set to some non-nil value before Run().
 var discoverItems atomic.Pointer[[]string]
 
-func (j *discoverJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *discoverJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (discoverJob) run(ctx context.Context) ([]string, error) {
@@ -52,7 +50,8 @@ var (
 	faninRan    atomic.Bool
 )
 
-func (expandOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	discover := sparkwing.Job(plan, "discover", &discoverJob{})
+func (expandOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	discover := sparkwing.Job(plan, "discover", &discoverJob{})
 	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
 		return "build-" + img, &recordingBuild{image: img}
 	})
@@ -69,10 +68,9 @@ type recordingBuild struct {
 	image string
 }
 
-func (r *recordingBuild) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (r *recordingBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", r.run)
-	return w
+	return nil, nil
 }
 
 func (r *recordingBuild) run(ctx context.Context) error {
@@ -89,7 +87,8 @@ type expandEmpty struct{ sparkwing.Base }
 
 var emptyFaninRan atomic.Bool
 
-func (expandEmpty) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	discover := sparkwing.Job(plan, "discover", &discoverJob{})
+func (expandEmpty) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	discover := sparkwing.Job(plan, "discover", &discoverJob{})
 	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
 		return "should-not-create-" + img, sparkwing.JobFn(func(ctx context.Context) error { return nil })
 	})
@@ -112,18 +111,17 @@ type failingDiscover struct {
 	sparkwing.Produces[[]string]
 }
 
-func (j *failingDiscover) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *failingDiscover) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (failingDiscover) run(ctx context.Context) ([]string, error) {
 	return nil, errors.New("discover broken")
 }
 
-func (expandSourceFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	discover := sparkwing.Job(plan, "discover", &failingDiscover{})
+func (expandSourceFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	discover := sparkwing.Job(plan, "discover", &failingDiscover{})
 	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
 		failedGenRan.Store(true)
 		return "should-not-create-" + img, sparkwing.JobFn(func(ctx context.Context) error { return nil })
@@ -141,7 +139,8 @@ type expandGenPanics struct{ sparkwing.Base }
 
 var panicFaninRan atomic.Bool
 
-func (expandGenPanics) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	discover := sparkwing.Job(plan, "discover", &discoverJob{})
+func (expandGenPanics) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	discover := sparkwing.Job(plan, "discover", &discoverJob{})
 	group := sparkwing.JobFanOutDynamic(plan, "builds", discover, func(img string) (string, sparkwing.Workable) {
 		panic("boom")
 	})

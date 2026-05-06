@@ -130,10 +130,9 @@ type resolveVersionJob struct {
 	RepoDir  string
 }
 
-func (j *resolveVersionJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
-	sparkwing.Result(w, "run", j.run)
-	return w
+func (j *resolveVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	out := sparkwing.Out(w, "run", j.run)
+	return out.WorkStep, nil
 }
 
 func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
@@ -191,10 +190,9 @@ type validateVersionJob struct {
 	RepoDir string
 }
 
-func (j *validateVersionJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *validateVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (j *validateVersionJob) run(ctx context.Context) error {
@@ -221,10 +219,9 @@ type checkCleanTreeJob struct {
 	RepoDir string
 }
 
-func (j *checkCleanTreeJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *checkCleanTreeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (j *checkCleanTreeJob) run(ctx context.Context) error {
@@ -249,10 +246,9 @@ type checkChangelogJob struct {
 	RepoDir string
 }
 
-func (j *checkChangelogJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *checkChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (j *checkChangelogJob) run(ctx context.Context) error {
@@ -289,10 +285,9 @@ type pushTagJob struct {
 	DryRun  bool
 }
 
-func (j *pushTagJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (j *pushTagJob) run(ctx context.Context) error {

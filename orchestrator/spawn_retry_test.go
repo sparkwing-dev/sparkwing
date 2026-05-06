@@ -28,10 +28,9 @@ type spawnerOut struct{}
 // poll-for-terminal loop runs.
 type spawnerNode struct{ sparkwing.Base }
 
-func (j *spawnerNode) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *spawnerNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (spawnerNode) run(ctx context.Context) error {
@@ -62,10 +61,9 @@ func resetGateCounter() {
 
 type earlyGate struct{ sparkwing.Base }
 
-func (g *earlyGate) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (g *earlyGate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", g.run)
-	return w
+	return nil, nil
 }
 
 func (earlyGate) run(ctx context.Context) error {

@@ -47,11 +47,9 @@ type retryBuild struct {
 	sparkwing.Produces[retryOut]
 }
 
-func (j *retryBuild) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *retryBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (retryBuild) run(ctx context.Context) (retryOut, error) {
@@ -67,10 +65,9 @@ type retryDeploy struct {
 	Build sparkwing.Ref[retryOut]
 }
 
-func (j *retryDeploy) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *retryDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (j *retryDeploy) run(ctx context.Context) error {

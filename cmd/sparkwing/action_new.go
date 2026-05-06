@@ -274,10 +274,9 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 
 type {{STRUCT}}Job struct{ sw.Base }
 
-func (j *{{STRUCT}}Job) Work() *sw.Work {
-	w := sw.NewWork()
+func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 // Paths in ExecIn / BashIn / ReadFile are relative to the repo root,
@@ -338,10 +337,9 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 
 type {{STRUCT}}BuildJob struct{ sw.Base }
 
-func (j *{{STRUCT}}BuildJob) Work() *sw.Work {
-	w := sw.NewWork()
+func (j *{{STRUCT}}BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 // Paths in .Dir() / ReadFile are relative to the repo root, not
@@ -353,10 +351,9 @@ func ({{STRUCT}}BuildJob) run(ctx context.Context) error {
 
 type {{STRUCT}}TestJob struct{ sw.Base }
 
-func (j *{{STRUCT}}TestJob) Work() *sw.Work {
-	w := sw.NewWork()
+func (j *{{STRUCT}}TestJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func ({{STRUCT}}TestJob) run(ctx context.Context) error {
@@ -366,10 +363,9 @@ func ({{STRUCT}}TestJob) run(ctx context.Context) error {
 
 type {{STRUCT}}DeployJob struct{ sw.Base }
 
-func (j *{{STRUCT}}DeployJob) Work() *sw.Work {
-	w := sw.NewWork()
+func (j *{{STRUCT}}DeployJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func ({{STRUCT}}DeployJob) run(ctx context.Context) error {

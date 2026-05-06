@@ -29,8 +29,7 @@ type multiStepWorkJob struct {
 	sparkwing.Produces[workOut]
 }
 
-func (multiStepWorkJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (multiStepWorkJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	prep := w.Step("prep", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "prep ran")
 		return nil
@@ -47,8 +46,7 @@ func (multiStepWorkJob) Work() *sparkwing.Work {
 		sparkwing.Info(ctx, "published tag=%s", got.Tag)
 		return nil
 	}).Needs(tags.WorkStep)
-	w.SetResult(tags.WorkStep)
-	return w
+	return tags.WorkStep, nil
 }
 
 type workOut struct {
@@ -66,11 +64,10 @@ func (workMultiPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 // failed and the run should fail.
 type failingWorkJob struct{ sparkwing.Base }
 
-func (failingWorkJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (failingWorkJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("ok", func(ctx context.Context) error { return nil })
 	w.Step("nope", func(ctx context.Context) error { return errors.New("intentional") })
-	return w
+	return nil, nil
 }
 
 type workFailPipe struct{ sparkwing.Base }

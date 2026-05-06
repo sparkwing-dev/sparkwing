@@ -26,8 +26,7 @@ type autoRetryFlakyJob struct {
 	failUntilDispatch int32
 }
 
-func (j *autoRetryFlakyJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *autoRetryFlakyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", func(ctx context.Context) error {
 		dispatch := autoRetryCount.Add(1)
 		if dispatch <= j.failUntilDispatch {
@@ -35,7 +34,7 @@ func (j *autoRetryFlakyJob) Work() *sparkwing.Work {
 		}
 		return nil
 	})
-	return w
+	return nil, nil
 }
 
 type autoRetrySuccessAfterTwoFailsPipe struct{ sparkwing.Base }

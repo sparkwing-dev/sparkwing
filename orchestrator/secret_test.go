@@ -22,10 +22,9 @@ type secretReaderJob struct{ sparkwing.Base }
 
 var observedToken string
 
-func (j *secretReaderJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *secretReaderJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (secretReaderJob) run(ctx context.Context) error {
@@ -135,10 +134,9 @@ func (c *captureLogger) Snapshot() []sparkwing.LogRecord {
 
 type secretLeakerJob struct{ sparkwing.Base }
 
-func (j *secretLeakerJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *secretLeakerJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", j.run)
-	return w
+	return nil, nil
 }
 
 func (secretLeakerJob) run(ctx context.Context) error {

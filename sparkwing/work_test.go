@@ -17,9 +17,13 @@ func TestJobFn_SingleStepWork(t *testing.T) {
 		called = true
 		return nil
 	})
-	w := job.Work()
-	if w == nil {
-		t.Fatal("JobFn.Work() returned nil")
+	w := sparkwing.NewWork()
+	resultStep, err := job.Work(w)
+	if err != nil {
+		t.Fatalf("JobFn.Work() returned error: %v", err)
+	}
+	if resultStep != nil {
+		t.Fatal("JobFn.Work() should not return a typed result step")
 	}
 	steps := w.Steps()
 	if len(steps) != 1 {
@@ -50,11 +54,10 @@ type countingJob struct {
 	calls int
 }
 
-func (j *countingJob) Work() *sparkwing.Work {
+func (j *countingJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	j.calls++
-	w := sparkwing.NewWork()
 	w.Step("only", func(ctx context.Context) error { return nil })
-	return w
+	return nil, nil
 }
 
 func TestPlanJob_MaterializesWorkAtRegistration(t *testing.T) {
@@ -243,11 +246,9 @@ type discoverJob struct {
 	items []string
 }
 
-func (d *discoverJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (d *discoverJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", d.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (d *discoverJob) run(ctx context.Context) ([]string, error) { return d.items, nil }

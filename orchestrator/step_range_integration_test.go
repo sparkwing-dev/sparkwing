@@ -21,12 +21,11 @@ var stepRangeFlags stepRangeRanFlags
 
 type stepRangeIntegJob struct{ sparkwing.Base }
 
-func (stepRangeIntegJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (stepRangeIntegJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	a := w.Step("fetch", func(ctx context.Context) error { stepRangeFlags.a.Store(true); return nil })
 	b := w.Step("compile", func(ctx context.Context) error { stepRangeFlags.b.Store(true); return nil }).Needs(a)
 	w.Step("publish", func(ctx context.Context) error { stepRangeFlags.c.Store(true); return nil }).Needs(b)
-	return w
+	return nil, nil
 }
 
 type stepRangeIntegPipe struct{ sparkwing.Base }

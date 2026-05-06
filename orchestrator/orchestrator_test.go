@@ -76,11 +76,9 @@ type refBuildJob struct {
 	sparkwing.Produces[refBuildOut]
 }
 
-func (j *refBuildJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *refBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (refBuildJob) run(ctx context.Context) (refBuildOut, error) {
@@ -92,10 +90,9 @@ type refDeployJob struct {
 	Build sparkwing.Ref[refBuildOut]
 }
 
-func (d *refDeployJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (d *refDeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("run", d.run)
-	return w
+	return nil, nil
 }
 
 func (d *refDeployJob) run(ctx context.Context) error {

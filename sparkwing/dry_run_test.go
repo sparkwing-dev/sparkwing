@@ -131,14 +131,13 @@ func TestDryRun_DryRunFnFailure_PropagatedAsStepError(t *testing.T) {
 //   - neither              -> would_skip + reason no_dry_run_defined
 type previewDryRunJob struct{ sparkwing.Base }
 
-func (previewDryRunJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (previewDryRunJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("with-dry-run", func(ctx context.Context) error { return nil }).
 		DryRun(func(ctx context.Context) error { return nil })
 	w.Step("safe-without-dry-run", func(ctx context.Context) error { return nil }).
 		SafeWithoutDryRun()
 	w.Step("missing-contract", func(ctx context.Context) error { return nil })
-	return w
+	return nil, nil
 }
 
 type previewDryRunPipe struct{ sparkwing.Base }

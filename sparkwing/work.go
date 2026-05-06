@@ -9,16 +9,20 @@ import (
 )
 
 // Workable is the interface every dispatchable Job satisfies: a struct
-// that exposes its inner DAG via Work(). Author types embed
-// sparkwing.Base (and optionally sparkwing.Produces[T]); the SDK
-// materializes the inner Work at Plan-time so renderers see the full
-// graph before any dispatch begins.
+// that exposes its inner DAG via Work(w). The SDK constructs the
+// *Work and passes it in; the author registers steps onto w and
+// returns the *WorkStep designated as the Job's typed output (or
+// nil for an untyped Job). A non-nil error fails Plan-time
+// materialization. Author types embed sparkwing.Base (and
+// optionally sparkwing.Produces[T]); the SDK materializes the inner
+// Work at Plan-time so renderers see the full graph before any
+// dispatch begins.
 //
 // For the trivial single-step case use sparkwing.JobFn; for typed
-// jobs declare a struct embedding sparkwing.Produces[T] and emit the
-// result via sparkwing.Result / Out + Work.SetResult.
+// jobs declare a struct embedding sparkwing.Produces[T] and return
+// the typed step's *WorkStep from Work.
 type Workable interface {
-	Work() *Work
+	Work(w *Work) (*WorkStep, error)
 }
 
 // Work is the inner DAG of a Job. Mirrors Plan at the inner layer:
@@ -706,8 +710,7 @@ type jobFn struct {
 	fn func(ctx context.Context) error
 }
 
-func (c *jobFn) Work() *Work {
-	w := NewWork()
+func (c *jobFn) Work(w *Work) (*WorkStep, error) {
 	w.Step("run", c.fn)
-	return w
+	return nil, nil
 }

@@ -13,21 +13,19 @@ import (
 // verify SpawnNode targets recurse into snapshotWork.
 type snapshotChildJob struct{}
 
-func (snapshotChildJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (snapshotChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("scan", func(ctx context.Context) error { return nil })
-	return w
+	return nil, nil
 }
 
 // snapshotParentJob spawns a snapshotChildJob from inside its Work so
 // the snapshot walker has to recurse one level.
 type snapshotParentJob struct{}
 
-func (snapshotParentJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (snapshotParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	analyze := w.Step("analyze", func(ctx context.Context) error { return nil })
 	w.SpawnNode("scan-child", snapshotChildJob{}).Needs(analyze)
-	return w
+	return nil, nil
 }
 
 func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
@@ -79,16 +77,14 @@ func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
 type snapshotCycleA struct{}
 type snapshotCycleB struct{}
 
-func (snapshotCycleA) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (snapshotCycleA) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("to-b", snapshotCycleB{})
-	return w
+	return nil, nil
 }
 
-func (snapshotCycleB) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (snapshotCycleB) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("to-a", snapshotCycleA{})
-	return w
+	return nil, nil
 }
 
 func TestMarshalPlanSnapshot_DetectsSpawnCycle(t *testing.T) {
@@ -108,13 +104,12 @@ func TestMarshalPlanSnapshot_DetectsSpawnCycle(t *testing.T) {
 // the zero-value-template materialization path.
 type snapshotForEachJob struct{}
 
-func (snapshotForEachJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (snapshotForEachJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	items := []string{"a", "b", "c"}
 	w.SpawnNodeForEach(items, func(item string) (string, sparkwing.Workable) {
 		return "shard-" + item, snapshotChildJob{}
 	})
-	return w
+	return nil, nil
 }
 
 func TestMarshalPlanSnapshot_RendersSpawnEachTemplate(t *testing.T) {

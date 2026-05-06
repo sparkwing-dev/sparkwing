@@ -59,11 +59,10 @@ type previewSkipPipe struct{ sparkwing.Base }
 
 type previewSkipJob struct{ sparkwing.Base }
 
-func (previewSkipJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (previewSkipJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("a", nopStep)
 	w.Step("b", nopStep).SkipIf(func(context.Context) bool { return true })
-	return w
+	return nil, nil
 }
 
 func (previewSkipPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -111,11 +110,10 @@ type previewRangePipe struct{ sparkwing.Base }
 
 type previewRangeJob struct{ sparkwing.Base }
 
-func (previewRangeJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (previewRangeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	a := w.Step("a", nopStep)
 	w.Step("b", nopStep).Needs(a)
-	return w
+	return nil, nil
 }
 
 func (previewRangePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -169,11 +167,10 @@ type previewRangeValidatePipe struct{ sparkwing.Base }
 
 type previewRangeValidateJob struct{ sparkwing.Base }
 
-func (previewRangeValidateJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (previewRangeValidateJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("install-argocd", nopStep)
 	w.Step("install-karpenter", nopStep)
-	return w
+	return nil, nil
 }
 
 func (previewRangeValidatePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -269,14 +266,13 @@ func TestPreviewPlan_KnownStartAtSucceeds(t *testing.T) {
 
 type previewFanOutJob struct{ sparkwing.Base }
 
-func (previewFanOutJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (previewFanOutJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.Step("seed", nopStep)
 	// Empty-slice generator is fine for plan-time -- we never run it.
 	w.SpawnNodeForEach([]string{}, func(s string) (string, sparkwing.Workable) {
 		return "child-" + s, sparkwing.JobFn(nopStep)
 	})
-	return w
+	return nil, nil
 }
 
 type previewFanOutPipe struct{ sparkwing.Base }

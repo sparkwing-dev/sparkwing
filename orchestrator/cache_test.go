@@ -34,11 +34,9 @@ type cachedBuildJob struct {
 	sparkwing.Produces[cachedBuildOut]
 }
 
-func (j *cachedBuildJob) Work() *sparkwing.Work {
-	w := sparkwing.NewWork()
+func (j *cachedBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	out := sparkwing.Out(w, "run", j.run)
-	w.SetResult(out.WorkStep)
-	return w
+	return out.WorkStep, nil
 }
 
 func (cachedBuildJob) run(ctx context.Context) (cachedBuildOut, error) {
