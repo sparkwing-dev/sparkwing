@@ -168,8 +168,31 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 	// declarative" message rather than silently shelling out.
 	planCtx := withPlanTime(context.Background())
 
+	// Dedupe recovery nodes that are also plan.Add'd directly --
+	// mirrors the orchestrator's marshalPlanSnapshot walk so the
+	// preview wire shape matches the explain snapshot.
+	seen := make(map[string]bool)
 	for _, n := range plan.Nodes() {
-		out.Nodes = append(out.Nodes, previewNode(planCtx, n, opts))
+		out.Nodes = append(out.Nodes, previewNode(planCtx, n, "", opts))
+		seen[n.ID()] = true
+	}
+	// IMP-029: surface .OnFailure(id, job) recovery nodes. They're
+	// constructed detached and live on the parent's onFailure pointer,
+	// so plan.Nodes() doesn't return them. Emit a PreviewNode for each
+	// unseen recovery with OnFailureOf pointing back to the parent so
+	// `pipeline plan` can render the failure-branch attachment without
+	// re-parsing the snapshot.
+	for _, n := range plan.Nodes() {
+		recID := n.OnFailureNodeID()
+		if recID == "" || seen[recID] {
+			continue
+		}
+		rec := n.OnFailureNode()
+		if rec == nil {
+			continue
+		}
+		out.Nodes = append(out.Nodes, previewNode(planCtx, rec, n.ID(), opts))
+		seen[recID] = true
 	}
 	return out, nil
 }
@@ -178,11 +201,16 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 // gates have no Work; their decision is always "would_run" (the
 // gate always fires; the human's response is the runtime input
 // that's outside plan-time visibility).
-func previewNode(ctx context.Context, n *Node, opts PreviewOptions) PreviewNode {
+//
+// onFailureOf is the parent ID when n is a .OnFailure(id, job)
+// recovery target; "" for ordinary plan nodes. IMP-029: PreviewPlan
+// threads this in from its own walk rather than reaching into n,
+// matching how marshalPlanSnapshot encodes recovery nodes.
+func previewNode(ctx context.Context, n *Node, onFailureOf string, opts PreviewOptions) PreviewNode {
 	pn := PreviewNode{
 		ID:          n.ID(),
 		Deps:        append([]string(nil), n.DepIDs()...),
-		OnFailureOf: onFailureSourceID(n),
+		OnFailureOf: onFailureOf,
 		Decision:    "would_run",
 	}
 	if n.approval != nil {
@@ -215,19 +243,6 @@ func previewNode(ctx context.Context, n *Node, opts PreviewOptions) PreviewNode 
 		pn.SkipReason = "all_steps_skipped"
 	}
 	return pn
-}
-
-// onFailureSourceID returns the Node ID whose failure dispatched
-// this recovery node, or "" if this isn't a recovery target. The
-// existing snapshot encoder reaches for it via the unexported
-// onFailureOf field; we stay symmetric.
-func onFailureSourceID(n *Node) string {
-	// Recovery dispatch is encoded by the orchestrator; expose via
-	// the same path snapshot-marshal uses. Currently no public
-	// accessor exists, so PreviewNode leaves this empty until a
-	// future SDK refactor exposes it. Keeping the field on the
-	// wire shape avoids a follow-up schema bump.
-	return ""
 }
 
 // previewWork iterates Steps / Spawns / SpawnGens and computes the

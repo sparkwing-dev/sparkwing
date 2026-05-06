@@ -248,6 +248,12 @@ func printPlanPreviewNode(n *planPreviewNodeDoc, indent string) {
 	if n.SkipReason != "" {
 		decision += " (" + n.SkipReason + ")"
 	}
+	// IMP-029: surface the recovery attachment so a `pipeline plan`
+	// reader sees which parent's failure dispatches this node, not
+	// just that the node is a recovery in the abstract.
+	if n.OnFailureOf != "" {
+		decision += " [OnFailure: " + n.OnFailureOf + "]"
+	}
 	fmt.Printf("%s%s %q [%s]\n", indent, tag, n.ID, decision)
 	if n.Work != nil {
 		printPlanPreviewWork(n.Work, indent+"  ")

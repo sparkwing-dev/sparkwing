@@ -40,6 +40,18 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   finally attaches to a Run row that exists.
 
 ### Added
+- **Public accessor for Node.OnFailureOf (IMP-029).** `*Node` gains
+  `OnFailureNodeID() string`, returning the id of the recovery node
+  registered via `.OnFailure(id, job)` (or `""` when none is set).
+  PreviewPlan now walks each node's recovery attachment and emits a
+  PreviewNode entry for the recovery with `OnFailureOf` pointing back
+  at the parent, mirroring the orchestrator's snapshot encoder. The
+  `pipeline plan` renderer surfaces the linkage as
+  `[OnFailure: <parent-id>]` on the recovery node's header line, so a
+  reader sees which parent's failure dispatches the recovery without
+  cross-referencing a separate `--explain` run. Closes IMP-013's
+  introspection gap; `pipeline plan` and `pipeline explain` now agree
+  on recovery-branch wiring.
 - **`cluster tokens list` surfaces scopes (IMP-024).** The table view
   now carries a `SCOPES` column so operators can spot a missing scope
   (the IMP-002 root cause: warm-runner pods mounted a token without

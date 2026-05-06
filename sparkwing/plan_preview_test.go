@@ -221,6 +221,73 @@ func (previewArgsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ preview
 	return nil
 }
 
+// --- OnFailure recovery node surfaces with on_failure_of pointing
+// back at the parent. IMP-029.
+
+type previewOnFailurePipe struct{ sparkwing.Base }
+
+func (previewOnFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	parent := sparkwing.Job(plan, "build", sparkwing.JobFn(nopStep))
+	parent.OnFailure("rollback", sparkwing.JobFn(nopStep))
+	return nil
+}
+
+func TestPreviewPlan_OnFailureRecoverySurfaced(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("imp029-onfailure",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewOnFailurePipe{} })
+	reg, _ := sparkwing.Lookup("imp029-onfailure")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp029-onfailure"})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	previewExecCounter.Store(0)
+	preview, err := sparkwing.PreviewPlan(plan, "imp029-onfailure", nil, sparkwing.PreviewOptions{})
+	if err != nil {
+		t.Fatalf("PreviewPlan: %v", err)
+	}
+	if previewExecCounter.Load() != 0 {
+		t.Fatalf("step body executed during preview (counter = %d)", previewExecCounter.Load())
+	}
+
+	var rec *sparkwing.PreviewNode
+	for i := range preview.Nodes {
+		if preview.Nodes[i].ID == "rollback" {
+			rec = &preview.Nodes[i]
+			break
+		}
+	}
+	if rec == nil {
+		t.Fatalf("expected a recovery node 'rollback' in preview; got nodes %+v", preview.Nodes)
+	}
+	if rec.OnFailureOf != "build" {
+		t.Errorf("recovery OnFailureOf: got %q, want %q", rec.OnFailureOf, "build")
+	}
+
+	// Parent should NOT carry OnFailureOf -- it's the source, not the
+	// recovery target.
+	for _, n := range preview.Nodes {
+		if n.ID == "build" && n.OnFailureOf != "" {
+			t.Errorf("parent 'build' should have empty OnFailureOf, got %q", n.OnFailureOf)
+		}
+	}
+}
+
+// TestNodeOnFailureNodeID covers the public accessor: returns the
+// recovery node's id when set, "" when not. IMP-029.
+func TestNodeOnFailureNodeID(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	bare := sparkwing.Job(plan, "bare", sparkwing.JobFn(nopStep))
+	if got := bare.OnFailureNodeID(); got != "" {
+		t.Errorf("bare node OnFailureNodeID: got %q, want \"\"", got)
+	}
+	parent := sparkwing.Job(plan, "parent", sparkwing.JobFn(nopStep))
+	parent.OnFailure("rollback", sparkwing.JobFn(nopStep))
+	if got := parent.OnFailureNodeID(); got != "rollback" {
+		t.Errorf("parent OnFailureNodeID: got %q, want %q", got, "rollback")
+	}
+}
+
 func TestPreviewPlan_ResolvedArgsRoundtrip(t *testing.T) {
 	sparkwing.Register[previewArgsInputs]("imp013-args",
 		func() sparkwing.Pipeline[previewArgsInputs] { return previewArgsPipe{} })

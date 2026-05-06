@@ -594,6 +594,19 @@ func (n *Node) TimeoutDuration() time.Duration { return n.timeout }
 // nil if none.
 func (n *Node) OnFailureNode() *Node { return n.onFailure }
 
+// OnFailureNodeID returns the ID of the recovery node registered via
+// OnFailure, or "" if none. Mirrors OnFailureNode() but returns just
+// the identifier so plan-introspection callers (PreviewPlan, the
+// orchestrator's snapshot encoder, dashboard renderers) can surface
+// the failure-branch attachment without dereferencing the unexported
+// onFailure field. IMP-029.
+func (n *Node) OnFailureNodeID() string {
+	if n.onFailure == nil {
+		return ""
+	}
+	return n.onFailure.ID()
+}
+
 // SkipOption configures a SkipIf registration.
 type SkipOption func(*Node)
 
