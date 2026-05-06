@@ -61,6 +61,10 @@ type planPreviewItemDoc struct {
 	SkipDetail        string   `json:"skip_detail,omitempty"`
 	Cardinality       string   `json:"cardinality,omitempty"`
 	CardinalitySource string   `json:"cardinality_source,omitempty"`
+	// BlastRadius mirrors sparkwing.PreviewItem.BlastRadius:
+	// canonical wire tokens for the author-declared marker set.
+	// IMP-015.
+	BlastRadius []string `json:"blast_radius,omitempty"`
 }
 
 // pipelinePlanArgs holds wrapper-owned flags + passthrough.
@@ -266,6 +270,15 @@ func printPlanPreviewItem(kind string, it *planPreviewItemDoc, indent string) {
 	decision := it.Decision
 	if it.SkipReason != "" {
 		decision += " (" + it.SkipReason + ")"
+	}
+	// IMP-015: append the blast-radius set inline so a `pipeline
+	// plan` reader sees both the runtime decision and the contract
+	// before drilling into needs / cardinality. Format mirrors
+	// IMP-011's `Venue: <kind>` placement: tucked into the same
+	// header line so the renderer stays compact for the common
+	// no-marker case.
+	if len(it.BlastRadius) > 0 {
+		decision += " blast=" + strings.Join(it.BlastRadius, ",")
 	}
 	fmt.Printf("%s%s %q [%s]\n", indent, kind, it.ID, decision)
 	if it.SkipDetail != "" {

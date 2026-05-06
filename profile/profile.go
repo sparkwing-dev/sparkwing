@@ -45,6 +45,26 @@ type Profile struct {
 	// s3://bucket/prefix.
 	LogStore      string `yaml:"log_store,omitempty"`
 	ArtifactStore string `yaml:"artifact_store,omitempty"`
+
+	// AutoAllow pre-authorizes per-marker blast-radius gates for
+	// this profile. IMP-015: a low-stakes environment (laptop, kind
+	// cluster) can declare `auto_allow: { destructive: true }` so an
+	// operator running `wing destroy-cluster --on laptop` doesn't
+	// have to pass --allow-destructive every time. Production
+	// profiles should leave this zero so the gate stays loud.
+	// Defaults are zero everywhere; the field is opt-in.
+	AutoAllow AutoAllow `yaml:"auto_allow,omitempty"`
+}
+
+// AutoAllow is the per-marker pre-authorization block declared
+// inside a Profile. Each field maps to one BlastRadius marker:
+// destructive (BlastRadiusDestructive), production
+// (BlastRadiusAffectsProduction), money (BlastRadiusCostsMoney).
+// IMP-015.
+type AutoAllow struct {
+	Destructive bool `yaml:"destructive,omitempty"`
+	Production  bool `yaml:"production,omitempty"`
+	Money       bool `yaml:"money,omitempty"`
 }
 
 // Config is the on-disk profiles.yaml file.

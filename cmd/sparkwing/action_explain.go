@@ -80,6 +80,9 @@ type planSnapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
+	// BlastRadius mirrors orchestrator.snapshotStep.BlastRadius:
+	// the author-declared marker set, "" for pre-IMP-015 binaries.
+	BlastRadius []string `json:"blast_radius,omitempty"`
 }
 
 type planSnapshotSpawn struct {
@@ -488,6 +491,13 @@ func printWork(w *planSnapshotWork, indent string) {
 		}
 		if s.HasSkipIf {
 			marker += " [skip_if]"
+		}
+		// IMP-015: surface blast-radius markers next to the step id
+		// so a reader scanning explain output sees the contract
+		// before reading the deps. Suppressed when no marker is
+		// declared (the common case).
+		if len(s.BlastRadius) > 0 {
+			marker += " [" + strings.Join(s.BlastRadius, ",") + "]"
 		}
 		needs := ""
 		if len(s.Needs) > 0 {

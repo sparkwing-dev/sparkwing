@@ -6,6 +6,46 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Blast-radius annotations + default-deny dispatch (IMP-015).**
+  Authors mark steps that mutate prod / cost money / can blow things
+  up; the wing dispatcher walks the per-step set and refuses to
+  proceed without explicit acknowledgment. Pairs with IMP-014's
+  `--dry-run`: dry-run dispatches always bypass the gate so agents
+  and operators can preview destructive work without the dance.
+  - SDK surface: `WorkStep.Destructive()`,
+    `WorkStep.AffectsProduction()`, `WorkStep.CostsMoney()`,
+    `WorkStep.BlastRadius()` accessor; typed
+    `sparkwing.BlastRadius` constants
+    (`BlastRadiusDestructive` / `BlastRadiusAffectsProduction` /
+    `BlastRadiusCostsMoney`); typed `*BlastRadiusBlockedError` so
+    callers can pattern-match the refusal.
+  - Wing-level flags: `--allow-destructive` / `--allow-prod` /
+    `--allow-money` (registered in `cmd/sparkwing/wing_flags.go` +
+    `wingTokenSpecs` table; added to `ReservedFlagNames()` so a
+    pipeline `flag:"allow-destructive"` tag panics at registration
+    with the IMP-003 collision message).
+  - Profile-level override: `~/.config/sparkwing/profiles.yaml`
+    profiles can declare
+    `auto_allow: { destructive: bool, production: bool, money: bool }`
+    to pre-authorize specific markers in low-stakes environments
+    (laptop, kind cluster). Default is zero everywhere; production
+    profiles should leave the block empty so the gate stays loud.
+  - Wire surfaces: `DescribePipeline.BlastRadius` (union) +
+    `DescribePipeline.BlastRadiusBySteps` (per-step breakdown),
+    `PreviewItem.BlastRadius`, and `snapshotStep.BlastRadius` so
+    `pipeline plan --json`, `pipeline explain --json`, and the
+    describe-cache reader all read the same canonical wire tokens.
+  - Degrade-gracefully behavior: a stale or pre-IMP-015 describe
+    cache returns no markers, the gate doesn't fire, and the
+    dispatch proceeds. The next `--describe` refresh populates the
+    cache. Mirrors IMP-011's venue-gate shape.
+  - Pinned by 8 SDK unit tests in `sparkwing/blast_radius_test.go`
+    and 13 CLI tests in `cmd/sparkwing/blast_radius_test.go`
+    (modifier accumulation + dedup, error-message contract,
+    PreviewItem rendering, escape-flag passthrough, profile
+    auto-allow per-marker isolation, dry-run bypass).
+
 ### Docs
 - **Surface dowing as the chore-tier sibling from inside sparkwing's
   CLI (IMP-012).** `sparkwing info` now prints a SEE ALSO block under

@@ -1668,6 +1668,12 @@ type snapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
+	// BlastRadius is the author-declared marker set on this step
+	// (IMP-015), stringified to canonical wire tokens. Empty when
+	// no marker was declared. Surfaced in the plan snapshot so
+	// `pipeline explain --json` consumers (agents, dashboard) see
+	// the contract alongside the static DAG.
+	BlastRadius []string `json:"blast_radius,omitempty"`
 }
 
 type snapshotSpawn struct {
@@ -1836,11 +1842,19 @@ func (w *workWalker) walk(work *sparkwing.Work) (*snapshotWork, error) {
 		out.ResultStep = resultStep.ID()
 	}
 	for _, s := range work.Steps() {
+		var br []string
+		if markers := s.BlastRadius(); len(markers) > 0 {
+			br = make([]string, len(markers))
+			for i, m := range markers {
+				br[i] = m.String()
+			}
+		}
 		out.Steps = append(out.Steps, snapshotStep{
-			ID:        s.ID(),
-			Needs:     s.DepIDs(),
-			IsResult:  s == resultStep,
-			HasSkipIf: len(s.SkipPredicates()) > 0,
+			ID:          s.ID(),
+			Needs:       s.DepIDs(),
+			IsResult:    s == resultStep,
+			HasSkipIf:   len(s.SkipPredicates()) > 0,
+			BlastRadius: br,
 		})
 	}
 	for _, s := range work.Spawns() {

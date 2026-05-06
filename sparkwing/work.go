@@ -258,6 +258,12 @@ type WorkStep struct {
 	// execute under --dry-run unmodified.
 	dryRunFn          func(ctx context.Context) error
 	safeWithoutDryRun bool
+	// IMP-015: author-declared blast-radius markers. The dispatcher
+	// walks this set per step against the wing-level --allow-*
+	// flags (and bypasses entirely under --dry-run). An empty set
+	// means "no declared blast radius" -- the gate doesn't fire,
+	// preserving zero-behavior-change for existing pipelines.
+	blastRadius []BlastRadius
 
 	mu       sync.Mutex
 	resolved bool

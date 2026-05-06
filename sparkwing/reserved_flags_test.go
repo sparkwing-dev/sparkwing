@@ -18,6 +18,9 @@ func TestReservedFlagNames(t *testing.T) {
 	got := ReservedFlagNames()
 	want := []string{
 		"C",
+		"allow-destructive",
+		"allow-money",
+		"allow-prod",
 		"change-directory",
 		"config",
 		"dry-run",

@@ -101,6 +101,13 @@ type PreviewItem struct {
 	// CardinalitySource names the item whose runtime output
 	// determines the count, when applicable.
 	CardinalitySource string `json:"cardinality_source,omitempty"`
+	// BlastRadius is the author-declared marker set on this step
+	// (IMP-015): "destructive" / "production" / "money". Empty when
+	// no marker was declared. Surfaced on PreviewItem so
+	// `pipeline plan` consumers and agents see the contract
+	// alongside the runtime decision rather than fetching it from
+	// a separate describe round-trip.
+	BlastRadius []string `json:"blast_radius,omitempty"`
 }
 
 // PreviewOptions carries the operator-supplied state the plan walk
@@ -233,6 +240,18 @@ func previewWork(ctx context.Context, w *Work, opts PreviewOptions) *PreviewWork
 	pw := &PreviewWork{}
 	for _, s := range w.Steps() {
 		item := previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates())
+		// IMP-015: surface the author-declared blast-radius set on
+		// the preview item so agents reading `pipeline plan --json`
+		// see the contract alongside the runtime decision. Stringify
+		// at the wire layer so JSON consumers don't need the typed
+		// constant set.
+		if br := s.BlastRadius(); len(br) > 0 {
+			strs := make([]string, len(br))
+			for i, m := range br {
+				strs[i] = m.String()
+			}
+			item.BlastRadius = strs
+		}
 		// IMP-014: refine the per-step decision through the dry-run
 		// lens AFTER the skip precedence (range / user-skipif) is
 		// computed -- a step that's already going to be skipped

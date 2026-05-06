@@ -69,6 +69,14 @@ type wingFlags struct {
 	// without an explicit SafeWithoutDryRun marker) soft-skip with
 	// reason `no_dry_run_defined` so the contract gap is visible.
 	dryRun bool
+	// IMP-015: per-marker escape hatches for the blast-radius gate.
+	// Each authorizes dispatch when the matching marker is declared
+	// on any step. --dry-run bypasses all three regardless. The gate
+	// degrades gracefully (no marker = no block) so pipelines built
+	// before IMP-015 keep working untouched.
+	allowDestructive bool
+	allowProd        bool
+	allowMoney       bool
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -132,6 +140,9 @@ var wingTokenSpecs = []wingTokenSpec{
 	{tok: "--start-at", takesValue: true},
 	{tok: "--stop-at", takesValue: true},
 	{tok: "--dry-run", takesValue: false},
+	{tok: "--allow-destructive", takesValue: false},
+	{tok: "--allow-prod", takesValue: false},
+	{tok: "--allow-money", takesValue: false},
 	{tok: "-C", takesValue: true},
 	{tok: "--change-directory", takesValue: true},
 }
@@ -393,6 +404,24 @@ func parseWingFlags(args []string) (wingFlags, []string) {
 			i++
 		case a == "--dry-run=false":
 			wf.dryRun = false
+			i++
+		case a == "--allow-destructive", a == "--allow-destructive=true":
+			wf.allowDestructive = true
+			i++
+		case a == "--allow-destructive=false":
+			wf.allowDestructive = false
+			i++
+		case a == "--allow-prod", a == "--allow-prod=true":
+			wf.allowProd = true
+			i++
+		case a == "--allow-prod=false":
+			wf.allowProd = false
+			i++
+		case a == "--allow-money", a == "--allow-money=true":
+			wf.allowMoney = true
+			i++
+		case a == "--allow-money=false":
+			wf.allowMoney = false
 			i++
 		case a == "-C", a == "--change-directory":
 			if i+1 < len(args) {

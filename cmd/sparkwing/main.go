@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingconfig"
+	"github.com/sparkwing-dev/sparkwing/profile"
 	"github.com/sparkwing-dev/sparkwing/repos"
 )
 
@@ -154,6 +155,28 @@ func runWing(args []string) error {
 	// explicit Venue() get.
 	if v := lookupCachedVenue(dir, pipelineName); v != "" {
 		if err := enforcePipelineVenue(v, pipelineName, wf.on); err != nil {
+			return err
+		}
+	}
+
+	// IMP-015: blast-radius gate. Walk per-step markers via the
+	// describe cache and refuse dispatch when a Destructive /
+	// AffectsProduction / CostsMoney step is reachable without the
+	// matching --allow-* escape (or --dry-run, which bypasses every
+	// gate per IMP-014's safe-mode contract). A profile-level
+	// auto_allow can pre-authorize specific markers for a low-stakes
+	// environment. A cold cache or pre-IMP-015 binary silently
+	// degrades to "no markers detected, no gate fires" -- the next
+	// --describe refresh populates the cache.
+	if findings := lookupCachedBlastRadius(dir, pipelineName); len(findings) > 0 {
+		var prof *profile.Profile
+		if wf.on != "" {
+			p, perr := resolveProfile(wf.on)
+			if perr == nil {
+				prof = p
+			}
+		}
+		if err := enforceBlastRadius(pipelineName, findings, wf, prof); err != nil {
 			return err
 		}
 	}

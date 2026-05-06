@@ -42,6 +42,9 @@ var reservedFlagNames = []string{
 	"start-at",
 	"stop-at",
 	"dry-run",
+	"allow-destructive",
+	"allow-prod",
+	"allow-money",
 }
 
 // ReservedFlagNames returns the wing-owned flag names a pipeline Args
