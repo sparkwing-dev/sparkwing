@@ -16,7 +16,7 @@ import (
 func TestDryRun_StepWithDryRunFn_DryRunCalledApplySkipped(t *testing.T) {
 	var applyCount, dryCount atomic.Int64
 	w := sparkwing.NewWork()
-	w.Step("apply-thing", func(ctx context.Context) error {
+	sparkwing.Step(w, "apply-thing", func(ctx context.Context) error {
 		applyCount.Add(1)
 		return nil
 	}).DryRun(func(ctx context.Context) error {
@@ -42,7 +42,7 @@ func TestDryRun_StepWithDryRunFn_DryRunCalledApplySkipped(t *testing.T) {
 func TestDryRun_SafeWithoutDryRun_ApplyRunsUnchanged(t *testing.T) {
 	var count atomic.Int64
 	w := sparkwing.NewWork()
-	w.Step("read-state", func(ctx context.Context) error {
+	sparkwing.Step(w, "read-state", func(ctx context.Context) error {
 		count.Add(1)
 		return nil
 	}).SafeWithoutDryRun()
@@ -64,7 +64,7 @@ func TestDryRun_SafeWithoutDryRun_ApplyRunsUnchanged(t *testing.T) {
 func TestDryRun_StepWithoutDryRunOrSafeMarker_SoftSkipped(t *testing.T) {
 	var count atomic.Int64
 	w := sparkwing.NewWork()
-	w.Step("mutates-something", func(ctx context.Context) error {
+	sparkwing.Step(w, "mutates-something", func(ctx context.Context) error {
 		count.Add(1)
 		return nil
 	})
@@ -84,7 +84,7 @@ func TestDryRun_StepWithoutDryRunOrSafeMarker_SoftSkipped(t *testing.T) {
 func TestDryRun_NotInDryRunMode_ApplyRunsAsUsual(t *testing.T) {
 	var applyCount, dryCount atomic.Int64
 	w := sparkwing.NewWork()
-	w.Step("apply", func(ctx context.Context) error {
+	sparkwing.Step(w, "apply", func(ctx context.Context) error {
 		applyCount.Add(1)
 		return nil
 	}).DryRun(func(ctx context.Context) error {
@@ -109,7 +109,7 @@ func TestDryRun_NotInDryRunMode_ApplyRunsAsUsual(t *testing.T) {
 func TestDryRun_DryRunFnFailure_PropagatedAsStepError(t *testing.T) {
 	w := sparkwing.NewWork()
 	wantErr := errors.New("plan output mismatch")
-	w.Step("apply", func(ctx context.Context) error {
+	sparkwing.Step(w, "apply", func(ctx context.Context) error {
 		t.Errorf("apply Fn must not run under --dry-run when DryRunFn is defined")
 		return nil
 	}).DryRun(func(ctx context.Context) error {
@@ -132,11 +132,11 @@ func TestDryRun_DryRunFnFailure_PropagatedAsStepError(t *testing.T) {
 type previewDryRunJob struct{ sparkwing.Base }
 
 func (previewDryRunJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("with-dry-run", func(ctx context.Context) error { return nil }).
+	sparkwing.Step(w, "with-dry-run", func(ctx context.Context) error { return nil }).
 		DryRun(func(ctx context.Context) error { return nil })
-	w.Step("safe-without-dry-run", func(ctx context.Context) error { return nil }).
+	sparkwing.Step(w, "safe-without-dry-run", func(ctx context.Context) error { return nil }).
 		SafeWithoutDryRun()
-	w.Step("missing-contract", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "missing-contract", func(ctx context.Context) error { return nil })
 	return nil, nil
 }
 
@@ -188,7 +188,7 @@ func TestPreviewPlan_DryRunRendersThreeDecisions(t *testing.T) {
 func TestDryRun_IsDryRunReadableFromCtx(t *testing.T) {
 	var seenDryRun bool
 	w := sparkwing.NewWork()
-	w.Step("inspect", func(ctx context.Context) error {
+	sparkwing.Step(w, "inspect", func(ctx context.Context) error {
 		seenDryRun = sparkwing.IsDryRun(ctx)
 		return nil
 	}).SafeWithoutDryRun()

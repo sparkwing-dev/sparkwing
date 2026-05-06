@@ -38,7 +38,7 @@ import (
 // sparkwing.Bash / Exec, anything in sparkwing/docker or sparkwing/git,
 // or any other ctx-taking helper that touches state from inside Plan()
 // panics at runtime. Move the work into a Job's Work() body and surface
-// the result via sparkwing.Out + Ref[T].
+// the result via sparkwing.Step + Ref[T].
 //
 // Anonymous embedded structs in the Inputs type are walked
 // recursively when the schema is built, so flag-bundles can be

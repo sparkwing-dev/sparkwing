@@ -97,7 +97,7 @@ var detachedRecoveryCalled atomic.Bool
 type detachedRollbackJob struct{ sparkwing.Base }
 
 func (j *detachedRollbackJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 

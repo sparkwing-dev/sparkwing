@@ -33,13 +33,11 @@ type Workable interface {
 // at Plan-time and walks the entire reachable graph (including Spawn
 // targets) before any dispatch.
 type Work struct {
-	mu         sync.Mutex
-	steps      []*WorkStep
-	byID       map[string]*WorkStep
-	spawns     []*SpawnSpec
-	spawnGens  []*SpawnGenSpec
-	resultStep *WorkStep
-	resultType reflect.Type
+	mu        sync.Mutex
+	steps     []*WorkStep
+	byID      map[string]*WorkStep
+	spawns    []*SpawnSpec
+	spawnGens []*SpawnGenSpec
 }
 
 // NewWork returns an empty Work.
@@ -79,104 +77,171 @@ func (w *Work) SpawnGens() []*SpawnGenSpec {
 	return out
 }
 
-// ResultStep returns the WorkStep designated as the Node's typed
-// output via SetResult, or nil if no typed output.
-func (w *Work) ResultStep() *WorkStep { return w.resultStep }
-
-// ResultType returns the Go type of the Work's typed output, or nil
-// if no typed output.
-func (w *Work) ResultType() reflect.Type { return w.resultType }
-
-// SetResult marks step as the WorkStep whose return value is the
-// Node's output. Only typed Steps (created via sparkwing.Out) carry
-// a result type; passing a non-typed WorkStep is a plan-time error.
-func (w *Work) SetResult(step *WorkStep) *Work {
-	if step == nil {
-		panic("sparkwing: Work.SetResult: step must be non-nil")
-	}
-	if step.outType == nil {
-		panic(fmt.Sprintf("sparkwing: Work.SetResult: step %q has no typed output (use sparkwing.Out to declare a typed step)", step.id))
-	}
-	w.resultStep = step
-	w.resultType = step.outType
-	return w
-}
-
-// Step registers an inline closure as a unit of work inside this Work.
-// Steps are executed in dependency order (Needs); independent steps
-// may run in parallel.
+// Step registers a unit of work on this Work. fn must be either
 //
-//	w := sw.NewWork()
-//	fetch := w.Step("fetch", j.fetch)
-//	w.Step("validate", j.validate).Needs(fetch)
-func (w *Work) Step(id string, fn func(ctx context.Context) error) *WorkStep {
-	if id == "" {
-		panic("sparkwing: Work.Step: id must not be empty")
+//	func(ctx context.Context) error              -- untyped step
+//	func(ctx context.Context) (T, error)         -- typed step
+//
+// for some concrete T. Reflection at register time validates the
+// signature and stores the step's typed-output reflect.Type (nil for
+// untyped). A wrong-shape fn panics with a typed message at register
+// time, mirroring JobSpawnEach's plan-time validation.
+//
+// Authors compose typed-step values inside another step body via
+// sparkwing.StepGet[T](ctx, step). The *WorkStep returned for a typed
+// step is the same value the Job's Work returns to mark its typed
+// output; the materializer cross-validates that returned step's
+// outType against any Produces[T] marker on the Job.
+//
+//	fetch := sparkwing.Step(w, "fetch", j.fetch)
+//	sparkwing.Step(w, "validate", j.validate).Needs(fetch)
+//
+//	tags := sparkwing.Step(w, "tags", j.computeTags) // (Tags, error)
+//	return sparkwing.Step(w, "compose", func(ctx context.Context) (Out, error) {
+//	    return Out{Tag: sw.StepGet[Tags](ctx, tags)}, nil
+//	}).Needs(tags), nil
+func Step(w *Work, id string, fn any) *WorkStep {
+	if w == nil {
+		panic("sparkwing: Step: w must be non-nil")
 	}
+	if id == "" {
+		panic("sparkwing: Step: id must not be empty")
+	}
+	outT, dispatch := validateStepFn(fn)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if _, ok := w.byID[id]; ok {
-		panic(fmt.Sprintf("sparkwing: Work.Step: duplicate step id %q", id))
+		panic(fmt.Sprintf("sparkwing: Step: duplicate step id %q", id))
 	}
 	s := &WorkStep{
-		id: id,
-		fn: func(ctx context.Context) (any, error) { return nil, fn(ctx) },
+		id:      id,
+		outType: outT,
+		fn:      dispatch,
 	}
 	w.steps = append(w.steps, s)
 	w.byID[id] = s
 	return s
 }
 
-// Out registers a typed-output WorkStep on w. The returned
-// *TypedStep[T] supports .Get(ctx) for downstream Steps.
-//
-//	tags := sparkwing.Out(w, "compute-tags", func(ctx context.Context) (Tags, error) { ... })
-//	w.Step("publish", func(ctx context.Context) error {
-//	    t := tags.Get(ctx)
-//	    return publish(ctx, t)
-//	}).Needs(tags.WorkStep)
-//
-// For the common case where a Work has exactly one typed step and
-// that step IS the Node's typed output, prefer the Result[T] shortcut.
-func Out[T any](w *Work, id string, fn func(ctx context.Context) (T, error)) *TypedStep[T] {
-	if id == "" {
-		panic("sparkwing: Out: id must not be empty")
+// validateStepFn checks Step's reflective contract at register time
+// so a bad fn signature panics during Work construction rather than
+// at dispatch. Returns the typed output reflect.Type (nil for untyped
+// steps) and the unified dispatch closure the runner invokes.
+func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error)) {
+	if fn == nil {
+		panic("sparkwing: Step: fn must be non-nil")
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if _, ok := w.byID[id]; ok {
-		panic(fmt.Sprintf("sparkwing: Out: duplicate step id %q", id))
+	// Fast paths for the two concrete signatures avoid reflection at
+	// dispatch-time for the common cases.
+	switch f := fn.(type) {
+	case func(ctx context.Context) error:
+		return nil, func(ctx context.Context) (any, error) { return nil, f(ctx) }
 	}
-	var zero T
-	s := &WorkStep{
-		id:      id,
-		outType: reflect.TypeOf(zero),
-		fn: func(ctx context.Context) (any, error) {
-			v, err := fn(ctx)
+
+	fnT := reflect.TypeOf(fn)
+	if fnT.Kind() != reflect.Func {
+		panic(fmt.Sprintf("sparkwing: Step: fn must be a func, got %T", fn))
+	}
+	if fnT.IsVariadic() {
+		panic(fmt.Sprintf("sparkwing: Step: fn must not be variadic (signature: %v)", fnT))
+	}
+	if fnT.NumIn() != 1 {
+		panic(fmt.Sprintf(
+			"sparkwing: Step: fn must take exactly 1 argument (context.Context), got %d (signature: %v)",
+			fnT.NumIn(), fnT))
+	}
+	ctxT := reflect.TypeOf((*context.Context)(nil)).Elem()
+	if fnT.In(0) != ctxT {
+		panic(fmt.Sprintf(
+			"sparkwing: Step: fn argument must be context.Context, got %v",
+			fnT.In(0)))
+	}
+	errT := reflect.TypeOf((*error)(nil)).Elem()
+	switch fnT.NumOut() {
+	case 1:
+		if fnT.Out(0) != errT {
+			panic(fmt.Sprintf(
+				"sparkwing: Step: fn with one return value must return error, got %v "+
+					"(want func(context.Context) error or func(context.Context) (T, error))",
+				fnT.Out(0)))
+		}
+		fnv := reflect.ValueOf(fn)
+		return nil, func(ctx context.Context) (any, error) {
+			out := fnv.Call([]reflect.Value{reflect.ValueOf(ctx)})
+			if e := out[0].Interface(); e != nil {
+				return nil, e.(error)
+			}
+			return nil, nil
+		}
+	case 2:
+		if fnT.Out(1) != errT {
+			panic(fmt.Sprintf(
+				"sparkwing: Step: fn second return value must be error, got %v "+
+					"(want func(context.Context) (T, error))",
+				fnT.Out(1)))
+		}
+		outT := fnT.Out(0)
+		fnv := reflect.ValueOf(fn)
+		return outT, func(ctx context.Context) (any, error) {
+			out := fnv.Call([]reflect.Value{reflect.ValueOf(ctx)})
+			var err error
+			if e := out[1].Interface(); e != nil {
+				err = e.(error)
+			}
 			if err != nil {
 				return nil, err
 			}
-			return v, nil
-		},
+			return out[0].Interface(), nil
+		}
+	default:
+		panic(fmt.Sprintf(
+			"sparkwing: Step: fn must return error or (T, error), got %d return values (signature: %v)",
+			fnT.NumOut(), fnT))
 	}
-	w.steps = append(w.steps, s)
-	w.byID[id] = s
-	return &TypedStep[T]{WorkStep: s}
 }
 
-// Result is a shortcut for the common case where a typed Job's Work
-// has exactly one typed step and that step IS the Job's result.
-// Equivalent to Out followed by w.SetResult.
+// StepGet blocks until step has completed, then returns its typed
+// output as T. Used inside another step's body when composing values
+// from upstream typed steps. Mirrors Plan's sparkwing.RefTo[T](node).Get(ctx).
 //
-//	func (j *MyJob) Work() *sparkwing.Work {
-//	    w := sparkwing.NewWork()
-//	    sparkwing.Result(w, "run", j.run)
-//	    return w
-//	}
-func Result[T any](w *Work, id string, fn func(ctx context.Context) (T, error)) *TypedStep[T] {
-	step := Out(w, id, fn)
-	w.SetResult(step.WorkStep)
-	return step
+// Panics on:
+//   - nil step
+//   - step with no typed output (registered with func(ctx) error)
+//   - step's typed output type doesn't match T
+//   - ctx cancelled before step's MarkDone fires
+func StepGet[T any](ctx context.Context, step *WorkStep) T {
+	var zero T
+	if step == nil {
+		panic("sparkwing: StepGet: step must be non-nil")
+	}
+	wantT := reflect.TypeOf(zero)
+	if step.outType == nil {
+		panic(fmt.Sprintf(
+			"sparkwing: StepGet[%v]: step %q has no typed output "+
+				"(register it with func(ctx) (T, error) to enable StepGet)",
+			wantT, step.id))
+	}
+	if step.outType != wantT {
+		panic(fmt.Sprintf(
+			"sparkwing: StepGet[%v]: step %q produces %v, not %v",
+			wantT, step.id, step.outType, wantT))
+	}
+	if err := step.awaitDone(ctx); err != nil {
+		panic(fmt.Sprintf(
+			"sparkwing: StepGet[%v]: ctx done before step %q completed: %v",
+			wantT, step.id, err))
+	}
+	v := step.Output()
+	if v == nil {
+		return zero
+	}
+	typed, ok := v.(T)
+	if !ok {
+		panic(fmt.Sprintf(
+			"sparkwing: StepGet[%v]: step %q produced %T, not assignable",
+			wantT, step.id, v))
+	}
+	return typed
 }
 
 // Sequence wires Needs edges between consecutive steps so each depends
@@ -342,8 +407,8 @@ func (s *WorkStep) OutputType() reflect.Type { return s.outType }
 func (s *WorkStep) Fn() func(ctx context.Context) (any, error) { return s.fn }
 
 // Needs declares hard upstream Step / Spawn dependencies inside the
-// same Work. Accepts *WorkStep, *TypedStep[T] (via embedded
-// *WorkStep), *StepGroup, *SpawnHandle, *SpawnGroup, or string IDs.
+// same Work. Accepts *WorkStep, *StepGroup, *SpawnHandle, *SpawnGroup,
+// or string IDs.
 func (s *WorkStep) Needs(deps ...any) *WorkStep {
 	for _, d := range deps {
 		coerceDep(d, "WorkStep.Needs", &s.needs)
@@ -426,7 +491,8 @@ func (s *WorkStep) SkipIf(fn SkipPredicate) *WorkStep {
 func (s *WorkStep) SkipPredicates() []SkipPredicate { return s.skipIf }
 
 // MarkDone is called by the runner once the step terminates. Stores
-// the typed output so downstream *TypedStep[T].Get(ctx) calls resolve.
+// the typed output so downstream sparkwing.StepGet[T](ctx, step) calls
+// resolve.
 func (s *WorkStep) MarkDone(out any) {
 	s.mu.Lock()
 	if s.done == nil {
@@ -466,34 +532,6 @@ func (s *WorkStep) awaitDone(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-// TypedStep wraps a WorkStep with a typed Get(ctx) for downstream
-// Steps. Returned by sparkwing.Out.
-type TypedStep[T any] struct {
-	*WorkStep
-}
-
-// Get blocks until the producing step completes, then returns its
-// typed output. Panics if the step failed (the Work execution path
-// already short-circuited; calling Get after failure is a programmer
-// error).
-func (t *TypedStep[T]) Get(ctx context.Context) T {
-	if err := t.WorkStep.awaitDone(ctx); err != nil {
-		var zero T
-		panic(fmt.Sprintf("sparkwing: TypedStep[%T].Get: ctx done before step %q completed: %v", zero, t.WorkStep.id, err))
-	}
-	v := t.WorkStep.Output()
-	if v == nil {
-		var zero T
-		return zero
-	}
-	typed, ok := v.(T)
-	if !ok {
-		var zero T
-		panic(fmt.Sprintf("sparkwing: TypedStep[%T].Get: step %q produced %T, not assignable", zero, t.WorkStep.id, v))
-	}
-	return typed
 }
 
 // StepGroup is a handle to a static group of Steps. Returned by
@@ -662,8 +700,8 @@ func (g *SpawnGroup) Needs(deps ...any) *SpawnGroup {
 	return g
 }
 
-// unwrapStep extracts an embedded *WorkStep from typed wrappers like
-// *TypedStep[T] via reflection. Returns nil if none found.
+// unwrapStep extracts an embedded *WorkStep from typed wrappers via
+// reflection. Returns nil if none found.
 func unwrapStep(v any) *WorkStep {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -711,6 +749,6 @@ type jobFn struct {
 }
 
 func (c *jobFn) Work(w *Work) (*WorkStep, error) {
-	w.Step("run", c.fn)
+	Step(w, "run", c.fn)
 	return nil, nil
 }

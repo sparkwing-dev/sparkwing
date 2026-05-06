@@ -35,8 +35,8 @@ func expectPanic(t *testing.T, body func(), assert func(msg string)) {
 type typoCloseJob struct{ sparkwing.Base }
 
 func (typoCloseJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("fetch", func(ctx context.Context) error { return nil })
-	w.Step("compile", func(ctx context.Context) error { return nil }).Needs("fetchh")
+	sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs("fetchh")
 	return nil, nil
 }
 
@@ -66,8 +66,8 @@ func TestPlanValidate_WorkStepNeedsTypo_Suggests(t *testing.T) {
 type typoFarJob struct{ sparkwing.Base }
 
 func (typoFarJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("fetch", func(ctx context.Context) error { return nil })
-	w.Step("compile", func(ctx context.Context) error { return nil }).Needs("totallyunrelated")
+	sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs("totallyunrelated")
 	return nil, nil
 }
 
@@ -104,8 +104,8 @@ func TestPlanValidate_WorkStepNeedsTypo_NoCloseMatchListsAvailable(t *testing.T)
 type handleNeedsJob struct{ sparkwing.Base }
 
 func (handleNeedsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	fetch := w.Step("fetch", func(ctx context.Context) error { return nil })
-	w.Step("compile", func(ctx context.Context) error { return nil }).Needs(fetch)
+	fetch := sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs(fetch)
 	return nil, nil
 }
 
@@ -129,8 +129,8 @@ func TestPlanValidate_HandleNeedsUnaffected(t *testing.T) {
 type stringExactJob struct{ sparkwing.Base }
 
 func (stringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("fetch", func(ctx context.Context) error { return nil })
-	w.Step("compile", func(ctx context.Context) error { return nil }).Needs("fetch")
+	sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs("fetch")
 	return nil, nil
 }
 
@@ -182,7 +182,7 @@ type spawnTypoJob struct{ sparkwing.Base }
 
 func (spawnTypoJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("seed", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	w.Step("after", func(ctx context.Context) error { return nil }).Needs("seedd")
+	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs("seedd")
 	return nil, nil
 }
 
@@ -213,7 +213,7 @@ type spawnStringExactJob struct{ sparkwing.Base }
 
 func (spawnStringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.SpawnNode("seed", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
-	w.Step("after", func(ctx context.Context) error { return nil }).Needs("seed")
+	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs("seed")
 	return nil, nil
 }
 

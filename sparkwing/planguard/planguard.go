@@ -39,7 +39,7 @@ func Guard(ctx context.Context, what string) {
 		panic(fmt.Sprintf(
 			"sparkwing: %s called inside Pipeline.Plan() -- Plan() must be pure-declarative; "+
 				"move side effects into a Job's Work() body and surface the result via "+
-				"sparkwing.Out(...) + Ref[T]. See docs/sdk.md#plan-must-be-pure",
+				"sparkwing.Step + Ref[T]. See docs/sdk.md#plan-must-be-pure",
 			what,
 		))
 	}

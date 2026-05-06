@@ -275,7 +275,7 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 type {{STRUCT}}Job struct{ sw.Base }
 
 func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -338,7 +338,7 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 type {{STRUCT}}BuildJob struct{ sw.Base }
 
 func (j *{{STRUCT}}BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -352,7 +352,7 @@ func ({{STRUCT}}BuildJob) run(ctx context.Context) error {
 type {{STRUCT}}TestJob struct{ sw.Base }
 
 func (j *{{STRUCT}}TestJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -364,7 +364,7 @@ func ({{STRUCT}}TestJob) run(ctx context.Context) error {
 type {{STRUCT}}DeployJob struct{ sw.Base }
 
 func (j *{{STRUCT}}DeployJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 

@@ -12,10 +12,10 @@ import (
 // order (declared via Needs); independent items run in parallel.
 //
 // For each successful WorkStep the typed output is recorded via
-// MarkDone so downstream TypedStep[T].Get(ctx) calls resolve. The
-// Work's designated ResultStep (set via SetResult) becomes the
-// returned output that the orchestrator stores as the Node's typed
-// output.
+// MarkDone so downstream sparkwing.StepGet[T](ctx, step) calls resolve.
+// RunWork itself returns (nil, err); the Node's typed output is
+// recorded on the *WorkStep the Job's Work returned and read back by
+// the orchestrator via Node.ResultStep().Output().
 //
 // SpawnNode declarations dispatch through the SpawnHandler installed
 // in ctx; the spawning runner remains alive across the child's
@@ -187,9 +187,6 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 
 	if err := getErr(); err != nil {
 		return nil, err
-	}
-	if rs := w.ResultStep(); rs != nil {
-		return rs.Output(), nil
 	}
 	return nil, nil
 }

@@ -22,8 +22,7 @@ type buildJob struct {
 }
 
 func (b *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", b.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", b.run), nil
 }
 
 func (b *buildJob) run(ctx context.Context) (buildOut, error) {
@@ -36,7 +35,7 @@ type deployJob struct {
 }
 
 func (d *deployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", func(ctx context.Context) error {
+	sparkwing.Step(w, "run", func(ctx context.Context) error {
 		_ = d.Build.Node()
 		return nil
 	})

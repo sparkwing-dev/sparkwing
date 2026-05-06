@@ -45,7 +45,7 @@ func newWorkCtx() (context.Context, *recordingWorkLogger) {
 func TestRunWork_SingleStepEmitsStartAndEnd(t *testing.T) {
 	ctx, log := newWorkCtx()
 	w := sparkwing.NewWork()
-	w.Step("only", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "only", func(ctx context.Context) error { return nil })
 
 	out, err := sparkwing.RunWork(ctx, w)
 	if err != nil {
@@ -91,8 +91,8 @@ func TestRunWork_DependencyOrder(t *testing.T) {
 	}
 
 	w := sparkwing.NewWork()
-	a := w.Step("a", func(ctx context.Context) error { record("a-end"); return nil })
-	b := w.Step("b", func(ctx context.Context) error { record("b-end"); return nil }).Needs(a)
+	a := sparkwing.Step(w, "a", func(ctx context.Context) error { record("a-end"); return nil })
+	b := sparkwing.Step(w, "b", func(ctx context.Context) error { record("b-end"); return nil }).Needs(a)
 
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
@@ -123,9 +123,9 @@ func TestRunWork_ParallelStepsRunConcurrently(t *testing.T) {
 	}
 
 	w := sparkwing.NewWork()
-	w.Step("a", func(ctx context.Context) error { enter(); return nil })
-	w.Step("b", func(ctx context.Context) error { enter(); return nil })
-	w.Step("c", func(ctx context.Context) error { enter(); return nil })
+	sparkwing.Step(w, "a", func(ctx context.Context) error { enter(); return nil })
+	sparkwing.Step(w, "b", func(ctx context.Context) error { enter(); return nil })
+	sparkwing.Step(w, "c", func(ctx context.Context) error { enter(); return nil })
 
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
@@ -143,7 +143,7 @@ func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
 	siblingStarted := make(chan struct{})
 
 	w := sparkwing.NewWork()
-	w.Step("sibling", func(ctx context.Context) error {
+	sparkwing.Step(w, "sibling", func(ctx context.Context) error {
 		close(siblingStarted)
 		select {
 		case <-ctx.Done():
@@ -153,7 +153,7 @@ func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
 			return errors.New("sibling not cancelled")
 		}
 	})
-	w.Step("fails", func(ctx context.Context) error {
+	sparkwing.Step(w, "fails", func(ctx context.Context) error {
 		<-siblingStarted
 		return errors.New("nope")
 	})
@@ -170,47 +170,48 @@ func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
 	}
 }
 
-// TestRunWork_TypedResultPropagates runs a multi-step Work whose
-// terminal step is the designated ResultStep; RunWork must return
-// the typed value the ResultStep produced.
-func TestRunWork_TypedResultPropagates(t *testing.T) {
+// TestRunWork_TypedResultRecordsOnStep runs a multi-step Work whose
+// terminal step is typed; RunWork itself returns nil for the value
+// (the orchestrator reads typed output via node.ResultStep().Output()),
+// but the typed step's MarkDone must persist the typed value so
+// readers see it.
+func TestRunWork_TypedResultRecordsOnStep(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
-	prep := w.Step("prep", func(ctx context.Context) error { return nil })
-	produce := sparkwing.Out(w, "produce", func(ctx context.Context) (fooOut, error) {
+	prep := sparkwing.Step(w, "prep", func(ctx context.Context) error { return nil })
+	produce := sparkwing.Step(w, "produce", func(ctx context.Context) (fooOut, error) {
 		return fooOut{Tag: "v9"}, nil
 	})
 	produce.Needs(prep)
-	w.SetResult(produce.WorkStep)
 
-	out, err := sparkwing.RunWork(ctx, w)
-	if err != nil {
+	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
-	got, ok := out.(fooOut)
+	got, ok := produce.Output().(fooOut)
 	if !ok {
-		t.Fatalf("RunWork returned %T, want fooOut", out)
+		t.Fatalf("produce step output type = %T, want fooOut", produce.Output())
 	}
 	if got.Tag != "v9" {
-		t.Fatalf("ResultStep output Tag = %q, want v9", got.Tag)
+		t.Fatalf("produce step Tag = %q, want v9", got.Tag)
 	}
 }
 
-// TestRunWork_TypedStepGetResolvesInDownstream confirms the
-// in-process resolution path: a downstream step calling
-// TypedStep[T].Get(ctx) on its upstream gets the typed value back
-// once MarkDone has fired.
-func TestRunWork_TypedStepGetResolvesInDownstream(t *testing.T) {
+// TestRunWork_StepGetResolvesInDownstream confirms the in-process
+// resolution path: a downstream step calling sw.StepGet[T](ctx, step)
+// on its upstream gets the typed value back once MarkDone has fired.
+// This is the canonical fixture for typed inter-step composition under
+// the SDK-042 single-Step grammar.
+func TestRunWork_StepGetResolvesInDownstream(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
-	tags := sparkwing.Out(w, "tags", func(ctx context.Context) (fooOut, error) {
+	tags := sparkwing.Step(w, "tags", func(ctx context.Context) (fooOut, error) {
 		return fooOut{Tag: "abcd"}, nil
 	})
 	var seen string
-	w.Step("publish", func(ctx context.Context) error {
-		seen = tags.Get(ctx).Tag
+	sparkwing.Step(w, "publish", func(ctx context.Context) error {
+		seen = sparkwing.StepGet[fooOut](ctx, tags).Tag
 		return nil
-	}).Needs(tags.WorkStep)
+	}).Needs(tags)
 
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
@@ -227,11 +228,11 @@ func TestRunWork_SkipIfShortCircuits(t *testing.T) {
 	var ran atomic.Bool
 
 	w := sparkwing.NewWork()
-	a := w.Step("a", func(ctx context.Context) error {
+	a := sparkwing.Step(w, "a", func(ctx context.Context) error {
 		ran.Store(true)
 		return nil
 	}).SkipIf(func(ctx context.Context) bool { return true })
-	w.Step("b", func(ctx context.Context) error { return nil }).Needs(a)
+	sparkwing.Step(w, "b", func(ctx context.Context) error { return nil }).Needs(a)
 
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
@@ -258,8 +259,8 @@ func TestRunWork_SkipIfShortCircuits(t *testing.T) {
 func TestRunWork_CycleProducesError(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
-	a := w.Step("a", func(ctx context.Context) error { return nil })
-	b := w.Step("b", func(ctx context.Context) error { return nil })
+	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
+	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil })
 	a.Needs(b)
 	b.Needs(a)
 
@@ -274,7 +275,7 @@ func TestRunWork_CycleProducesError(t *testing.T) {
 func TestRunWork_PanicInStepBecomesError(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
-	w.Step("oops", func(ctx context.Context) error {
+	sparkwing.Step(w, "oops", func(ctx context.Context) error {
 		panic("dropped a wrench")
 	})
 	_, err := sparkwing.RunWork(ctx, w)
@@ -289,7 +290,7 @@ func TestRunWork_PanicInStepBecomesError(t *testing.T) {
 func TestRunWork_SpawnRejectedWithoutHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
-	w.Step("a", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
 	w.SpawnNode("scan", sparkwing.JobFn(func(ctx context.Context) error { return nil }))
 
 	_, err := sparkwing.RunWork(ctx, w)
@@ -305,10 +306,10 @@ func TestRunWork_SpawnRejectedWithoutHandler(t *testing.T) {
 func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
-	a := w.Step("a", func(ctx context.Context) error { return nil })
+	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
 	scan := w.SpawnNode("scan", sparkwing.JobFn(func(ctx context.Context) error { return nil })).Needs(a)
 	var afterSawSpawn bool
-	w.Step("after", func(ctx context.Context) error {
+	sparkwing.Step(w, "after", func(ctx context.Context) error {
 		// SpawnHandle.Spec().ResolvedID is set by the handler stub.
 		if scan.Spec().ResolvedID() == "test-node/scan" {
 			afterSawSpawn = true

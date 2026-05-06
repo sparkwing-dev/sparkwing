@@ -14,7 +14,7 @@ import (
 type snapshotChildJob struct{}
 
 func (snapshotChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("scan", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "scan", func(ctx context.Context) error { return nil })
 	return nil, nil
 }
 
@@ -23,7 +23,7 @@ func (snapshotChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type snapshotParentJob struct{}
 
 func (snapshotParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	analyze := w.Step("analyze", func(ctx context.Context) error { return nil })
+	analyze := sparkwing.Step(w, "analyze", func(ctx context.Context) error { return nil })
 	w.SpawnNode("scan-child", snapshotChildJob{}).Needs(analyze)
 	return nil, nil
 }

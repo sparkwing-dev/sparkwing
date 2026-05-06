@@ -104,7 +104,7 @@ func (e *BlastRadiusBlockedError) Error() string {
 // the operator passes --allow-destructive (or --dry-run, which
 // bypasses every blast-radius gate by IMP-014's contract).
 //
-//	w.Step("destroy-eks", j.destroyEKS).
+//	sparkwing.Step(w, "destroy-eks", j.destroyEKS).
 //	    Destructive().
 //	    AffectsProduction()
 //

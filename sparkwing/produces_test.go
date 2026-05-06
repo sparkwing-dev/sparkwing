@@ -21,8 +21,7 @@ type producedJob struct {
 }
 
 func (j *producedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (j *producedJob) run(ctx context.Context) (buildOut, error) {
@@ -38,7 +37,7 @@ type markerOnlyJob struct {
 }
 
 func (j *markerOnlyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "run", func(ctx context.Context) error { return nil })
 	return nil, nil
 }
 
@@ -53,8 +52,7 @@ type mismatchJob struct {
 }
 
 func (j *mismatchJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (j *mismatchJob) run(ctx context.Context) (buildOut, error) {
@@ -69,8 +67,7 @@ type unmarkedTypedJob struct {
 }
 
 func (j *unmarkedTypedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (j *unmarkedTypedJob) run(ctx context.Context) (buildOut, error) {

@@ -28,8 +28,7 @@ type setupJob struct {
 var skipDeployWant atomic.Bool
 
 func (j *setupJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (setupJob) run(ctx context.Context) (setupOut, error) {

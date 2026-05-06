@@ -30,12 +30,20 @@ func NewInProcessRunner(backends Backends) *InProcessRunner {
 var _ runner.Runner = (*InProcessRunner)(nil)
 
 // runJobBody executes the node's materialized Work as a step DAG.
+// Returns the typed output of the *WorkStep the Job's Work returned
+// (nil for untyped Jobs).
 func runJobBody(ctx context.Context, node *sparkwing.Node) (any, error) {
 	w := node.Work()
 	if w == nil {
 		return nil, fmt.Errorf("sparkwing: node %q has no Work; non-approval nodes must be registered via plan.Job", node.ID())
 	}
-	return sparkwing.RunWork(ctx, w)
+	if _, err := sparkwing.RunWork(ctx, w); err != nil {
+		return nil, err
+	}
+	if rs := node.ResultStep(); rs != nil {
+		return rs.Output(), nil
+	}
+	return nil, nil
 }
 
 // stateMetricsSink adapts StateBackend to nodemetrics.Sink. Errors

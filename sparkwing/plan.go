@@ -180,7 +180,7 @@ func newNode(caller, id string, job Workable) *Node {
 		declared := pr.producedType()
 		if declared != workType {
 			panic(fmt.Sprintf(
-				"sparkwing: node %q: Produces[%v] but Work.SetResult is %v (align them)",
+				"sparkwing: node %q: Produces[%v] but Work returned a step of type %v (align them)",
 				id, declared, workType))
 		}
 		outType = declared
@@ -311,12 +311,6 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 	resultStep, err := job.Work(w)
 	if err != nil {
 		panic(fmt.Sprintf("sparkwing: Plan-time materialization failed for node %q: %v", id, err))
-	}
-	if resultStep != nil {
-		// Mirror today's behavior: a typed result step is registered
-		// on the Work as the canonical output. Pipeline authors stop
-		// calling SetResult; the SDK does it from the returned step.
-		w.SetResult(resultStep)
 	}
 	return w, resultStep
 }

@@ -28,7 +28,7 @@ type spawnedChildJob struct {
 }
 
 func (j *spawnedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", func(ctx context.Context) error {
+	sparkwing.Step(w, "run", func(ctx context.Context) error {
 		if j.ran != nil {
 			j.ran.Store(true)
 		}
@@ -47,12 +47,12 @@ type spawnSingleParent struct {
 }
 
 func (j *spawnSingleParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	setup := w.Step("setup", func(ctx context.Context) error {
+	setup := sparkwing.Step(w, "setup", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "parent setup")
 		return nil
 	})
 	scan := w.SpawnNode("scan", &spawnedChildJob{tag: "scan", ran: j.childRan}).Needs(setup)
-	w.Step("after", func(ctx context.Context) error {
+	sparkwing.Step(w, "after", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "parent post-spawn")
 		return nil
 	}).Needs(scan)
@@ -74,7 +74,7 @@ func (sp *spawnSinglePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spark
 type spawnFailingChild struct{ sparkwing.Base }
 
 func (spawnFailingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("doomed", func(ctx context.Context) error { return errors.New("child boom") })
+	sparkwing.Step(w, "doomed", func(ctx context.Context) error { return errors.New("child boom") })
 	return nil, nil
 }
 

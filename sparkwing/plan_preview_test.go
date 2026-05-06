@@ -60,8 +60,8 @@ type previewSkipPipe struct{ sparkwing.Base }
 type previewSkipJob struct{ sparkwing.Base }
 
 func (previewSkipJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("a", nopStep)
-	w.Step("b", nopStep).SkipIf(func(context.Context) bool { return true })
+	sparkwing.Step(w, "a", nopStep)
+	sparkwing.Step(w, "b", nopStep).SkipIf(func(context.Context) bool { return true })
 	return nil, nil
 }
 
@@ -111,8 +111,8 @@ type previewRangePipe struct{ sparkwing.Base }
 type previewRangeJob struct{ sparkwing.Base }
 
 func (previewRangeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	a := w.Step("a", nopStep)
-	w.Step("b", nopStep).Needs(a)
+	a := sparkwing.Step(w, "a", nopStep)
+	sparkwing.Step(w, "b", nopStep).Needs(a)
 	return nil, nil
 }
 
@@ -168,8 +168,8 @@ type previewRangeValidatePipe struct{ sparkwing.Base }
 type previewRangeValidateJob struct{ sparkwing.Base }
 
 func (previewRangeValidateJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("install-argocd", nopStep)
-	w.Step("install-karpenter", nopStep)
+	sparkwing.Step(w, "install-argocd", nopStep)
+	sparkwing.Step(w, "install-karpenter", nopStep)
 	return nil, nil
 }
 
@@ -267,7 +267,7 @@ func TestPreviewPlan_KnownStartAtSucceeds(t *testing.T) {
 type previewFanOutJob struct{ sparkwing.Base }
 
 func (previewFanOutJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("seed", nopStep)
+	sparkwing.Step(w, "seed", nopStep)
 	// Empty-slice generator is fine for plan-time -- we never run it.
 	w.SpawnNodeForEach([]string{}, func(s string) (string, sparkwing.Workable) {
 		return "child-" + s, sparkwing.JobFn(nopStep)

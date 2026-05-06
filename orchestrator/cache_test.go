@@ -35,8 +35,7 @@ type cachedBuildJob struct {
 }
 
 func (j *cachedBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (cachedBuildJob) run(ctx context.Context) (cachedBuildOut, error) {

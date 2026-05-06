@@ -109,7 +109,7 @@ type stubJob struct {
 }
 
 func (j *stubJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "run", func(ctx context.Context) error { return nil })
 	return nil, nil
 }
 

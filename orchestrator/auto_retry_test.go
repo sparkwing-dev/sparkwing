@@ -27,7 +27,7 @@ type autoRetryFlakyJob struct {
 }
 
 func (j *autoRetryFlakyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", func(ctx context.Context) error {
+	sparkwing.Step(w, "run", func(ctx context.Context) error {
 		dispatch := autoRetryCount.Add(1)
 		if dispatch <= j.failUntilDispatch {
 			return errors.New("infra flake (simulated)")

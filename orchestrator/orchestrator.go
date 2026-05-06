@@ -1796,7 +1796,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 		}
 		sn.Modifiers = nodeModifiersSnapshot(n)
 		if w := n.Work(); w != nil {
-			work, err := walker.walk(w)
+			work, err := walker.walk(w, n.ResultStep())
 			if err != nil {
 				return nil, fmt.Errorf("plan node %q: %w", n.ID(), err)
 			}
@@ -1824,7 +1824,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 			Modifiers:   nodeModifiersSnapshot(rec),
 		}
 		if w := rec.Work(); w != nil {
-			work, err := walker.walk(w)
+			work, err := walker.walk(w, rec.ResultStep())
 			if err != nil {
 				return nil, fmt.Errorf("plan node %q (on_failure of %q): %w", rec.ID(), n.ID(), err)
 			}
@@ -1902,9 +1902,8 @@ func newWorkWalker() *workWalker {
 	}
 }
 
-func (w *workWalker) walk(work *sparkwing.Work) (*snapshotWork, error) {
+func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) (*snapshotWork, error) {
 	out := &snapshotWork{}
-	resultStep := work.ResultStep()
 	if resultStep != nil {
 		out.ResultStep = resultStep.ID()
 	}
@@ -1985,10 +1984,11 @@ func (w *workWalker) walkJob(job sparkwing.Workable) (*snapshotWork, error) {
 		delete(w.stackSet, key)
 	}()
 	work := sparkwing.NewWork()
-	if _, err := job.Work(work); err != nil {
+	resultStep, err := job.Work(work)
+	if err != nil {
 		return nil, fmt.Errorf("Job.Work failed: %w", err)
 	}
-	out, err := w.walk(work)
+	out, err := w.walk(work, resultStep)
 	if err != nil {
 		return nil, err
 	}

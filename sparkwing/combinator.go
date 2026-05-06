@@ -150,10 +150,11 @@ func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, Worka
 //	sw.Job(plan, "publish", &PublishJob{}).Needs(builds)
 //
 // The source must produce []T (the cardinality-many case): its job
-// must embed sparkwing.Produces[[]T] AND its Work must SetResult on a
-// sparkwing.Out[[]T] step. RefTo[[]T](source) Plan-time-validates the
-// contract and panics with a node-id-tagged message on mismatch. For
-// Plan-time fan-out (slice known at Plan() time), use JobFanOut.
+// must embed sparkwing.Produces[[]T] AND its Work must return a
+// sparkwing.Step whose fn signature is func(ctx) ([]T, error).
+// RefTo[[]T](source) Plan-time-validates the contract and panics with
+// a node-id-tagged message on mismatch. For Plan-time fan-out (slice
+// known at Plan() time), use JobFanOut.
 func JobFanOutDynamic[T any](p *Plan, name string, source *Node, fn func(T) (string, Workable)) *NodeGroup {
 	if p == nil {
 		panic("sparkwing: JobFanOutDynamic: plan must be non-nil")

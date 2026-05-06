@@ -28,8 +28,7 @@ type discoverJob struct {
 var discoverItems atomic.Pointer[[]string]
 
 func (j *discoverJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (discoverJob) run(ctx context.Context) ([]string, error) {
@@ -69,7 +68,7 @@ type recordingBuild struct {
 }
 
 func (r *recordingBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", r.run)
+	sparkwing.Step(w, "run", r.run)
 	return nil, nil
 }
 
@@ -112,8 +111,7 @@ type failingDiscover struct {
 }
 
 func (j *failingDiscover) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (failingDiscover) run(ctx context.Context) ([]string, error) {

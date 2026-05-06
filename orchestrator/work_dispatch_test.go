@@ -23,30 +23,30 @@ import (
 // --- Work-shape pipelines ---
 
 // multiStepWork emits step boundary events and threads typed output
-// between steps via TypedStep.Get + TypedStep.Needs.
+// between steps via sw.StepGet + step.Needs.
 type multiStepWorkJob struct {
 	sparkwing.Base
 	sparkwing.Produces[workOut]
 }
 
 func (multiStepWorkJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	prep := w.Step("prep", func(ctx context.Context) error {
+	prep := sparkwing.Step(w, "prep", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "prep ran")
 		return nil
 	})
-	tags := sparkwing.Out(w, "compute-tags", func(ctx context.Context) (workOut, error) {
+	tags := sparkwing.Step(w, "compute-tags", func(ctx context.Context) (workOut, error) {
 		return workOut{Tag: "vv"}, nil
 	})
 	tags.Needs(prep)
-	w.Step("publish", func(ctx context.Context) error {
-		got := tags.Get(ctx)
+	sparkwing.Step(w, "publish", func(ctx context.Context) error {
+		got := sparkwing.StepGet[workOut](ctx, tags)
 		if got.Tag != "vv" {
 			return fmt.Errorf("unexpected tag %q", got.Tag)
 		}
 		sparkwing.Info(ctx, "published tag=%s", got.Tag)
 		return nil
-	}).Needs(tags.WorkStep)
-	return tags.WorkStep, nil
+	}).Needs(tags)
+	return tags, nil
 }
 
 type workOut struct {
@@ -65,8 +65,8 @@ func (workMultiPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 type failingWorkJob struct{ sparkwing.Base }
 
 func (failingWorkJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("ok", func(ctx context.Context) error { return nil })
-	w.Step("nope", func(ctx context.Context) error { return errors.New("intentional") })
+	sparkwing.Step(w, "ok", func(ctx context.Context) error { return nil })
+	sparkwing.Step(w, "nope", func(ctx context.Context) error { return errors.New("intentional") })
 	return nil, nil
 }
 

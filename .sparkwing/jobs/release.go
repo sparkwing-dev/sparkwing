@@ -131,8 +131,7 @@ type resolveVersionJob struct {
 }
 
 func (j *resolveVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	out := sparkwing.Out(w, "run", j.run)
-	return out.WorkStep, nil
+	return sparkwing.Step(w, "run", j.run), nil
 }
 
 func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
@@ -191,7 +190,7 @@ type validateVersionJob struct {
 }
 
 func (j *validateVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -220,7 +219,7 @@ type checkCleanTreeJob struct {
 }
 
 func (j *checkCleanTreeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -247,7 +246,7 @@ type checkChangelogJob struct {
 }
 
 func (j *checkChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -286,7 +285,7 @@ type pushTagJob struct {
 }
 
 func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 

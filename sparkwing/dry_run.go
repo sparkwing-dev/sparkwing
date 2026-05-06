@@ -37,7 +37,7 @@ func IsDryRun(ctx context.Context) bool {
 // inspected without doing it" (terraform plan, kubectl apply
 // --dry-run=server, helm upgrade --dry-run, etc.).
 //
-//	w.Step("apply-eks", j.applyEKS).
+//	sparkwing.Step(w, "apply-eks", j.applyEKS).
 //	    DryRun(j.dryApplyEKS)
 //
 // IMP-014.
@@ -55,7 +55,7 @@ func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep {
 // one" answer; it should NOT be applied to skip the work of writing
 // a real dry-run for a step that does mutate.
 //
-//	w.Step("read-cluster-state", j.readState).
+//	sparkwing.Step(w, "read-cluster-state", j.readState).
 //	    SafeWithoutDryRun()
 //
 // IMP-014.

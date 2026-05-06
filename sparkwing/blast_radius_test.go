@@ -10,7 +10,7 @@ import (
 // records BlastRadiusDestructive on the step's marker set.
 func TestWorkStep_Destructive(t *testing.T) {
 	w := NewWork()
-	s := w.Step("apply", func(ctx context.Context) error { return nil }).Destructive()
+	s := Step(w, "apply", func(ctx context.Context) error { return nil }).Destructive()
 	got := s.BlastRadius()
 	want := []BlastRadius{BlastRadiusDestructive}
 	if !reflect.DeepEqual(got, want) {
@@ -22,7 +22,7 @@ func TestWorkStep_Destructive(t *testing.T) {
 // modifier records the matching marker.
 func TestWorkStep_AffectsProduction(t *testing.T) {
 	w := NewWork()
-	s := w.Step("touch-prod", func(ctx context.Context) error { return nil }).AffectsProduction()
+	s := Step(w, "touch-prod", func(ctx context.Context) error { return nil }).AffectsProduction()
 	got := s.BlastRadius()
 	want := []BlastRadius{BlastRadiusAffectsProduction}
 	if !reflect.DeepEqual(got, want) {
@@ -34,7 +34,7 @@ func TestWorkStep_AffectsProduction(t *testing.T) {
 // the matching marker.
 func TestWorkStep_CostsMoney(t *testing.T) {
 	w := NewWork()
-	s := w.Step("spin-up-fleet", func(ctx context.Context) error { return nil }).CostsMoney()
+	s := Step(w, "spin-up-fleet", func(ctx context.Context) error { return nil }).CostsMoney()
 	got := s.BlastRadius()
 	want := []BlastRadius{BlastRadiusCostsMoney}
 	if !reflect.DeepEqual(got, want) {
@@ -46,7 +46,7 @@ func TestWorkStep_CostsMoney(t *testing.T) {
 // markers in declaration order.
 func TestWorkStep_Combined(t *testing.T) {
 	w := NewWork()
-	s := w.Step("destroy-prod-eks", func(ctx context.Context) error { return nil }).
+	s := Step(w, "destroy-prod-eks", func(ctx context.Context) error { return nil }).
 		Destructive().
 		AffectsProduction()
 	got := s.BlastRadius()
@@ -61,7 +61,7 @@ func TestWorkStep_Combined(t *testing.T) {
 // dispatcher cares about which markers fire, not the count.
 func TestWorkStep_DuplicateDeclarationCollapses(t *testing.T) {
 	w := NewWork()
-	s := w.Step("dup", func(ctx context.Context) error { return nil }).Destructive().Destructive()
+	s := Step(w, "dup", func(ctx context.Context) error { return nil }).Destructive().Destructive()
 	got := s.BlastRadius()
 	want := []BlastRadius{BlastRadiusDestructive}
 	if !reflect.DeepEqual(got, want) {
@@ -74,7 +74,7 @@ func TestWorkStep_DuplicateDeclarationCollapses(t *testing.T) {
 // pipelines.
 func TestWorkStep_Default(t *testing.T) {
 	w := NewWork()
-	s := w.Step("plain", func(ctx context.Context) error { return nil })
+	s := Step(w, "plain", func(ctx context.Context) error { return nil })
 	if got := s.BlastRadius(); len(got) != 0 {
 		t.Errorf("BlastRadius() default = %v, want empty", got)
 	}

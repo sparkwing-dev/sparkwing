@@ -29,7 +29,7 @@ type spawnerOut struct{}
 type spawnerNode struct{ sparkwing.Base }
 
 func (j *spawnerNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", j.run)
+	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -62,7 +62,7 @@ func resetGateCounter() {
 type earlyGate struct{ sparkwing.Base }
 
 func (g *earlyGate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.Step("run", g.run)
+	sparkwing.Step(w, "run", g.run)
 	return nil, nil
 }
 
