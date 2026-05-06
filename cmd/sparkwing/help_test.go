@@ -82,6 +82,44 @@ func TestBindFlagsDefaults(t *testing.T) {
 	}
 }
 
+// TestWingHelpListsIMPArcFlags pins IMP-039: `wing --help` and
+// `sparkwing run --help` must enumerate the IMP-007/014/015 wing
+// flags. The wing-flag list is sourced from sparkwing.WingFlagDocs()
+// so adding a flag in the SDK surfaces it here automatically; this
+// test is the regression guard.
+func TestWingHelpListsIMPArcFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  Command
+	}{
+		{"wing", cmdWing},
+		{"sparkwing run", cmdRun},
+		{"sparkwing pipeline run", cmdPipelineRun},
+	}
+	mustContain := []string{
+		// IMP-007: range-resume.
+		"--start-at", "--stop-at",
+		// IMP-014: dry-run.
+		"--dry-run",
+		// IMP-015: blast-radius escape hatches.
+		"--allow-destructive", "--allow-prod", "--allow-money",
+		// Pre-existing staples (regression guard).
+		"--from", "--config", "--retry-of", "--on",
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			PrintHelp(tc.cmd, &buf)
+			out := buf.String()
+			for _, f := range mustContain {
+				if !strings.Contains(out, f) {
+					t.Errorf("expected %s --help to list %s; got:\n%s", tc.name, f, out)
+				}
+			}
+		})
+	}
+}
+
 func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {
 	// Walk every parent in the registry; for each subcommand it
 	// lists, the corresponding child Command (if found) reports its

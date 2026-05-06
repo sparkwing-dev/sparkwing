@@ -4,7 +4,11 @@
 // tab-completion menu all describe the same thing.
 package main
 
-import "runtime"
+import (
+	"runtime"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
 
 // helpExampleScratchDir returns a per-OS scratch directory string
 // suitable for inlining into help text. Linux gets "/tmp/<name>",
@@ -614,16 +618,27 @@ continuously.`,
 // wingFlagSpecs is shared between cmdWing (the `wing <pipeline>` help
 // page) and cmdPipelineRun (the `sparkwing pipeline run` help page),
 // since the two invocation surfaces are the same execution path
-// under different names. Declared once so adding a flag lands in
-// both help pages automatically.
-var wingFlagSpecs = []FlagSpec{
-	{Name: "change-directory", Short: "C", Argument: "PATH", Desc: "Re-anchor .sparkwing/ discovery to PATH (mirrors `git -C` / `make -C`)", Group: "Source"},
-	{Name: "from", Argument: "REF", Desc: "Compile from a git ref (branch/tag/SHA) instead of the working tree", Group: "Source"},
-	{Name: "config", Argument: "PRESET", Desc: "Apply a named preset from .sparkwing/config.yaml or ~/.config/sparkwing/config.yaml", Group: "Source"},
-	{Name: "retry-of", Argument: "RUN_ID", Desc: "Retry a prior run: skip nodes that passed, re-run the rest", Group: "Source"},
-	{Name: "full", Desc: "With --retry-of, disable skip-passed so every node re-runs from scratch", Group: "Source"},
-	{Name: "verbose", Short: "v", Desc: "Enable debug logging from the orchestrator (equivalent to SPARKWING_LOG_LEVEL=debug)", Group: "Source"},
-	{Name: "on", Argument: "NAME", Desc: "Dispatch on a remote controller instead of running locally", Group: "System"},
+// under different names. IMP-039: derived from
+// sparkwing.WingFlagDocs() so the per-pipeline footer
+// (orchestrator/main.go's printPipelineHelp) and the top-level
+// `wing --help` enumerate from the same source. Adding a flag in
+// sparkwing/wing_flag_docs.go surfaces it in every wing help page
+// simultaneously.
+var wingFlagSpecs = wingFlagSpecsFromDocs()
+
+func wingFlagSpecsFromDocs() []FlagSpec {
+	docs := sparkwing.WingFlagDocs()
+	out := make([]FlagSpec, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, FlagSpec{
+			Name:     d.Name,
+			Short:    d.Short,
+			Argument: d.Argument,
+			Desc:     d.Desc,
+			Group:    d.Group,
+		})
+	}
+	return out
 }
 
 var cmdWing = Command{
@@ -666,8 +681,14 @@ the preset.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
 	},
-	Flags:       wingFlagSpecs,
-	GroupOrder:  []string{"Pipeline Args", "Source", "System", "Other"},
+	Flags: wingFlagSpecs,
+	// Source: which ref / config / cwd. Range: --start-at/--stop-at
+	// (IMP-007). Safety: --dry-run, --allow-* (IMP-014/015). System:
+	// where it runs (--on). The Range + Safety sections are absent
+	// from per-leaf help in much of the rest of the registry; here
+	// they're load-bearing because IMP-007/014/015 added wing-level
+	// flags users encounter on every invocation. IMP-039.
+	GroupOrder:  []string{"Pipeline Args", "Source", "Range", "Safety", "System", "Other"},
 	UsageSuffix: "[-- extra args]",
 	Examples: []Example{
 		{"Run with no arguments", "wing build-test-deploy"},
@@ -752,7 +773,7 @@ Args.`,
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
 	},
 	Flags:       wingFlagSpecs,
-	GroupOrder:  []string{"Source", "System", "Other"},
+	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Run with no flags", "sparkwing pipeline run build-test-deploy"},
@@ -985,7 +1006,7 @@ v1.2.3' passes --version through to the pipeline's Args.`,
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
 	},
 	Flags:       wingFlagSpecs,
-	GroupOrder:  []string{"Source", "System", "Other"},
+	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run build-test-deploy"},
