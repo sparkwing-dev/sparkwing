@@ -20,7 +20,7 @@ import (
 func printPipelineRuntimePlan(pipeline string, rest []string) error {
 	reg, ok := sparkwing.Lookup(pipeline)
 	if !ok {
-		return fmt.Errorf("unknown pipeline %q", pipeline)
+		return unknownPipelineErr(pipeline)
 	}
 	rest = stripExplainOutputFlags(rest)
 	argsMap, err := parseTypedFlags(pipeline, rest)

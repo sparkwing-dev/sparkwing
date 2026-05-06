@@ -425,7 +425,7 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("unknown pipeline %q", pipeline)
+		return nil, unknownPipelineErr(pipeline)
 	}
 	byName := map[string]sparkwing.DescribeArg{}
 	byShort := map[string]sparkwing.DescribeArg{}

@@ -203,6 +203,16 @@ func unknownRefMessage(site, kind, missing string, known map[string]struct{}) st
 	return b.String()
 }
 
+// SuggestClosest is the public projection of closestMatch for callers
+// outside the sparkwing package (orchestrator main, cmd/sparkwing). It
+// returns the candidate with the smallest Levenshtein distance to
+// target, or "" if no candidate is close enough. Used by IMP-040 to
+// share IMP-008's typo-suggestion threshold across "unknown pipeline"
+// sites without duplicating the helper.
+func SuggestClosest(target string, candidates []string) string {
+	return closestMatch(target, candidates)
+}
+
 // closestMatch returns the candidate with the smallest Levenshtein
 // distance to want, provided the distance is below a threshold
 // proportional to want's length. Empty string when no candidate is

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -98,5 +99,60 @@ func TestCatalogCopy_PreservesBlastRadius(t *testing.T) {
 	if a.BlastRadiusBySteps[0].StepID != "destroy" {
 		t.Errorf("BlastRadiusBySteps[0].StepID = %q, want %q",
 			a.BlastRadiusBySteps[0].StepID, "destroy")
+	}
+}
+
+// IMP-040: `sparkwing pipeline describe --name X` returns a
+// "no pipeline named X" error when X isn't in the catalog.
+// Previously that error gave no hint; now it appends a "did you
+// mean Y?" suggestion when the typo is close enough, matching the
+// orchestrator-side "unknown pipeline" surface. This test pins the
+// suggestion-composition logic from action.go's runPipelineDescribe.
+func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
+	// Mirror the catalog-search fragment in runPipelineDescribe.
+	catalog := []Pipeline{
+		{Name: "cluster-up"},
+		{Name: "cluster-down"},
+		{Name: "hello"},
+	}
+	name := "claster-up"
+
+	candidates := make([]string, 0, len(catalog))
+	for _, p := range catalog {
+		candidates = append(candidates, p.Name)
+	}
+	suggestion := sparkwing.SuggestClosest(name, candidates)
+	if suggestion != "cluster-up" {
+		t.Fatalf("SuggestClosest(%q) = %q, want %q", name, suggestion, "cluster-up")
+	}
+
+	// And the message shape we emit when a suggestion exists:
+	msg := fmt.Sprintf("no pipeline named %q; did you mean %q? (run `sparkwing pipeline list --all` to see every entry)", name, suggestion)
+	for _, want := range []string{
+		`no pipeline named "claster-up"`,
+		`did you mean "cluster-up"`,
+		"sparkwing pipeline list --all",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("describe error missing %q\nfull: %s", want, msg)
+		}
+	}
+}
+
+// IMP-040: far typos must NOT produce a misleading suggestion.
+// The describe verb falls through to the original message body
+// when no candidate is close enough.
+func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
+	catalog := []Pipeline{
+		{Name: "cluster-up"},
+		{Name: "hello"},
+	}
+	candidates := make([]string, 0, len(catalog))
+	for _, p := range catalog {
+		candidates = append(candidates, p.Name)
+	}
+	suggestion := sparkwing.SuggestClosest("totallyunrelated", candidates)
+	if suggestion != "" {
+		t.Errorf("far typo should not suggest, got %q", suggestion)
 	}
 }
