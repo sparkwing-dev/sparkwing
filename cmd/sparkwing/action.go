@@ -42,6 +42,20 @@ type Pipeline struct {
 	// added. Treated as "either" (the safe permissive default) by
 	// the dispatcher gate.
 	Venue string `json:"venue,omitempty"`
+	// BlastRadius is the union of per-step blast-radius markers
+	// declared anywhere in the pipeline's plan, stringified to the
+	// canonical wire tokens ("destructive" / "production" / "money").
+	// Mirrors sparkwing.DescribePipeline.BlastRadius -- IMP-036:
+	// previously the local Pipeline struct dropped this field when
+	// copying from the describe cache, so `pipeline list -o json` /
+	// `pipeline describe -o json` returned no blast-radius info even
+	// when the pipeline declared markers. omitempty keeps the wire
+	// format quiet for pipelines without markers.
+	BlastRadius []string `json:"blast_radius,omitempty"`
+	// BlastRadiusBySteps is the per-step breakdown of declared
+	// markers. Mirrors sparkwing.DescribePipeline.BlastRadiusBySteps
+	// -- IMP-036, see BlastRadius above.
+	BlastRadiusBySteps []sparkwing.DescribeStepBlastRadius `json:"blast_radius_by_step,omitempty"`
 }
 
 // runPipelineRunDispatch extracts --pipeline from args and forwards the
@@ -363,6 +377,12 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Args = dp.Args
 				a.Examples = dp.Examples
 				a.Venue = dp.Venue
+				// IMP-036: surface blast-radius markers in
+				// `pipeline list / describe -o json`. Previously
+				// dropped here even though the SDK side populated
+				// them on DescribePipeline.
+				a.BlastRadius = dp.BlastRadius
+				a.BlastRadiusBySteps = dp.BlastRadiusBySteps
 			}
 			seen[p.Name] = struct{}{}
 			out = append(out, a)
