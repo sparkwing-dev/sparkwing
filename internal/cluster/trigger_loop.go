@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/bincache"
@@ -183,7 +184,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
-	sparkwingDir, fetchErr := bincache.FetchPipelineSource(opts.GitcacheURL, repoURL, branch, sha, workDir)
+	sparkwingDir, fetchErr := fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, repoURL, branch, sha, workDir, logger, trigger.ID)
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
@@ -263,6 +264,72 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 		logger.Warn("trigger loop: failed to ship compile output to logs",
 			"run_id", runID, "err", err)
 	}
+}
+
+// fetchSourceFn is the indirection used by fetchPipelineSourceWithRetry
+// so tests can substitute a fake that fails the first N times. Production
+// code uses bincache.FetchPipelineSource directly.
+var fetchSourceFn = bincache.FetchPipelineSource
+
+// Vars (not consts) so tests can shrink the retry surface.
+//
+// IMP-005: the warm-runner's source fetch races the gitcache's 30s
+// background-fetch loop on the `git push && wing X --on prod` path.
+// 3 attempts spaced ~10s apart (so total wall time ≤ 30s, the
+// background-fetch period) recovers the residual case where the
+// dispatch-time eager refresh either failed or got skipped (e.g. the
+// laptop profile has no gitcache URL configured).
+var (
+	triggerFetchMaxAttempts = 3
+	triggerFetchRetryDelay  = 10 * time.Second
+)
+
+// notOurRefSubstr is the marker we match in fetch errors to decide
+// "this is the gitcache catching up" vs. "this is a real failure".
+// Documented at the call site because git's wording could change in
+// a future release; if it does, the symptom is that retries stop
+// firing and operators see the original cryptic error again.
+const notOurRefSubstr = "not our ref"
+
+// fetchPipelineSourceWithRetry wraps bincache.FetchPipelineSource
+// with bounded retry on the gitcache-lag failure mode. Other errors
+// (auth, missing repo, malformed URL, etc.) fail fast — we never
+// want to delay surfacing an obviously-broken state by 30s.
+//
+// On exhausted retries the caller still gets the original error
+// chain (so errors.Is / errors.As keep working), wrapped in a
+// human-readable message that names the SHA and points at the
+// gitcache-lag root cause instead of leaving operators staring at
+// "fatal: remote error: upload-pack: not our ref".
+func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+	attempts := triggerFetchMaxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		sparkwingDir, err := fetchSourceFn(gcURL, repoURL, branch, sha, workDir)
+		if err == nil {
+			return sparkwingDir, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), notOurRefSubstr) {
+			// Real failure — don't delay surfacing it.
+			return "", err
+		}
+		if i == attempts-1 {
+			break
+		}
+		logger.Warn("trigger loop: gitcache lagging; retrying source fetch",
+			"run_id", runID, "sha", sha, "attempt", i+1, "of", attempts, "err", err)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(triggerFetchRetryDelay):
+		}
+	}
+	return "", fmt.Errorf("SHA %s not yet in gitcache after %d attempts; the background fetch may not have completed since the push: %w",
+		sha, attempts, lastErr)
 }
 
 func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, logger *slog.Logger) (string, error) {

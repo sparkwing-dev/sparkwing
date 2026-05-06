@@ -77,6 +77,35 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   without ast walking; tracked separately).
 
 ### Fixed
+- **`git push && wing X --on prod` no longer races the gitcache's
+  background fetch loop (IMP-005).** Two-part fix for the cryptic
+  `fatal: remote error: upload-pack: not our ref <sha>` operators
+  used to hit when dispatching against a SHA the cache hadn't
+  mirrored yet (the cache fetches every ~30s, so dispatching within
+  ~25s of a push raced). (1) `cmd/sparkwing` `dispatchRemote` now
+  POSTs `/git/refresh?repo=<url>` to the profile's gitcache before
+  creating the trigger, with a 5s timeout — best-effort, falls
+  through with a warning if the cache is unreachable so dispatch
+  itself never blocks on it. New endpoint in `cmd/sparkwing-cache`
+  runs a synchronous `git fetch --prune origin '+refs/heads/*:refs/heads/*'`
+  on the named bare mirror under the existing per-repo lock so a
+  webhook burst doesn't fan out N concurrent fetches. (2) the
+  warm-runner's source fetch in `internal/cluster/trigger_loop.go`
+  now retries `bincache.FetchPipelineSource` up to 3 times spaced
+  10s apart, but only on substring match `"not our ref"` — auth /
+  network / malformed-URL errors fail fast (we never delay an
+  obviously-broken state by 30s). On exhausted retries the operator
+  sees `SHA <sha> not yet in gitcache after 3 attempts; the
+  background fetch may not have completed since the push` instead of
+  the raw upload-pack message, and `errors.Is` against the original
+  fetch error still works. The retry attempt count and delay are
+  package-level vars so tests shrink them; the substring marker is
+  documented at the call site because git's wording could change.
+  Pinned by 4 unit tests in `internal/cluster/fetch_retry_test.go`
+  (recovery / exhaust+rewrite / fail-fast on unrelated err / ctx
+  cancel) plus 4 HTTP-level tests in
+  `cmd/sparkwing-cache/refresh_test.go` (real bare-repo round-trip /
+  missing args / uncached repo / GET rejected).
 - **Pipeline `flag:"..."` tags that collide with wing-owned flags
   now panic at `Register` time with a clear, full-context message
   (IMP-003).** Previously, declaring an Args field like

@@ -183,6 +183,7 @@ func main() {
 	mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
 	mux.HandleFunc("/git/register", handleGitRegister)
+	mux.HandleFunc("/git/refresh", handleGitRefresh)
 	mux.HandleFunc("/git/", handleGit)
 
 	// Proxy routes (package registry cache)
@@ -1448,6 +1449,62 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	log.Printf("git register: %s → %s (%s)", name, repoURL, hash)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": true})
+}
+
+// POST /git/refresh?name=<friendly-name>  (or ?repo=<url>)
+//
+// Synchronously runs `git fetch` on the named bare repo so a freshly
+// pushed SHA shows up before the next dispatch tries to fetch it.
+// Closes the gitcache-lag race window in IMP-005. Best-effort: callers
+// pass a short timeout and continue on failure.
+//
+// Either `name` (preferred — already registered) or `repo` (full URL,
+// auto-resolves via repoHash) works. Returns 404 if neither resolves
+// to a cached bare repo. Concurrent refreshes coalesce on the per-repo
+// lock so a webhook burst doesn't fan out N fetches.
+func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Query().Get("name")
+	repoURL := r.URL.Query().Get("repo")
+	if name == "" && repoURL == "" {
+		http.Error(w, "name or repo query param required", http.StatusBadRequest)
+		return
+	}
+	// Prefer name -> URL lookup so the bare-repo path matches register's hash.
+	if repoURL == "" {
+		repoNamesMu.RLock()
+		repoURL = repoNames[name]
+		repoNamesMu.RUnlock()
+		if repoURL == "" {
+			http.Error(w, fmt.Sprintf("repo %q not registered", name), http.StatusNotFound)
+			return
+		}
+	}
+
+	hash := repoHash(repoURL)
+	bareRepo := filepath.Join(repoDir, hash+".git")
+	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
+		http.Error(w, fmt.Sprintf("repo not cached: %s", hash), http.StatusNotFound)
+		return
+	}
+
+	lock := repoLock(hash)
+	lock.Lock()
+	defer lock.Unlock()
+
+	enableSHAFetch(bareRepo)
+	out, err := gitCmdTimeout(45*time.Second, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	if err != nil {
+		log.Printf("eager refresh: %s failed: %v %s", hash, err, out)
+		http.Error(w, fmt.Sprintf("fetch failed: %s\n%s", err, sshHint(out)), http.StatusBadGateway)
+		return
+	}
+	log.Printf("eager refresh: %s ok", hash)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "hash": hash})
 }
 
 // autoRegisterRepos registers repos listed in GITCACHE_REPOS env var on

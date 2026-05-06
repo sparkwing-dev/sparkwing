@@ -15,6 +15,7 @@ package bincache
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -235,6 +236,49 @@ func registerRepoWithCache(gcURL, name, repoURL string) error {
 	}
 	cli := &http.Client{Timeout: 30 * time.Second}
 	resp, err := cli.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// RefreshRepo POSTs /git/refresh on the cache so a freshly-pushed SHA
+// is mirrored before the runner tries to fetch it. Best-effort: the
+// caller supplies a short timeout and logs / continues on failure
+// (the trigger-loop fetch retry will catch the residual race). Returns
+// nil if the cache acks 2xx, an error otherwise. Empty repoURL is a
+// programmer error and returns immediately.
+//
+// The dispatcher (cmd/sparkwing/wing_flags.go dispatchRemote) calls
+// this before CreateTrigger to close the
+//
+//	git push origin main
+//	wing X --on prod   # immediately
+//
+// race that surfaces as "fatal: remote error: upload-pack: not our
+// ref <sha>" when the cache's 30s background-fetch loop hasn't
+// caught up yet. See IMP-005.
+func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
+	if gcURL == "" {
+		return fmt.Errorf("RefreshRepo: gitcache URL required")
+	}
+	if repoURL == "" {
+		return fmt.Errorf("RefreshRepo: repo URL required")
+	}
+	q := neturl.Values{}
+	q.Set("repo", repoURL)
+	url := strings.TrimRight(gcURL, "/") + "/git/refresh?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}

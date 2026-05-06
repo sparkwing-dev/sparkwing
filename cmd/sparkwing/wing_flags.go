@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/bincache"
 	"github.com/sparkwing-dev/sparkwing/controller/client"
 )
 
@@ -506,6 +508,23 @@ func dispatchRemote(pipelineName string, wf wingFlags, passthrough []string) err
 	// --full is local-only; warn loudly when it would silently no-op remotely.
 	if wf.fullRetry && wf.retryOf != "" {
 		fmt.Fprintln(os.Stderr, "wing: --full is local-only; remote retry always skips passed nodes (ignoring --full)")
+	}
+
+	// IMP-005: best-effort eager refresh closes the
+	// `git push && wing X --on prod` race where the gitcache
+	// hasn't yet mirrored the just-pushed SHA. The retry in the
+	// runner's trigger loop catches the residual race; this just
+	// shrinks the window to ~zero on the happy path. 5s ceiling so
+	// a wedged or unreachable cache never blocks dispatch — log a
+	// warning and continue.
+	if prof.Gitcache != "" && repoURL != "" {
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := bincache.RefreshRepo(refreshCtx, prof.Gitcache, repoURL); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"wing: gitcache eager refresh failed (%v); proceeding — runner will retry on stale-SHA\n",
+				err)
+		}
+		cancel()
 	}
 
 	c := client.NewWithToken(prof.Controller, nil, prof.Token)
