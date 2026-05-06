@@ -226,6 +226,18 @@ done:
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
 
+	// IMP-002: a sticky logs-append auth failure must fail the node
+	// even if the user job body returned success, since the run's
+	// observable logs are gone. Auth wins over a transient
+	// timeout/error since fixing the user code can't unblock it.
+	if fatal := nodeLogFatal(nlog); fatal != nil {
+		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
+		emitNodeEnd(sparkwing.Failed, wrapped.Error())
+		_ = r.backends.State.FinishNodeWithReason(ctx, runID, node.ID(), string(sparkwing.Failed), wrapped.Error(), nil, store.FailureLogsAuth, nil)
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_failed", []byte(wrapped.Error()))
+		return nil, wrapped
+	}
+
 	if lastErr != nil {
 		reason := store.FailureUnknown
 		if lastTimeout {
@@ -235,6 +247,14 @@ done:
 		_ = r.backends.State.FinishNodeWithReason(ctx, runID, node.ID(), string(sparkwing.Failed), lastErr.Error(), nil, reason, nil)
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_failed", []byte(lastErr.Error()))
 		return nil, lastErr
+	}
+
+	// Surface soft drops on the run summary so 5xx-driven log loss
+	// stops being a silent observability hole. Best-effort event;
+	// renderers can also aggregate from `logs_drop` events later.
+	if count, reason := nodeLogDrops(nlog); count > 0 {
+		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
 	}
 
 	var outBytes []byte
@@ -249,6 +269,26 @@ done:
 
 	// Memoization runs in the concurrency primitive's release path.
 	return output, nil
+}
+
+// nodeLogFatal returns the sticky auth error from a NodeLog that
+// implements the optional Fataler interface (IMP-002). NodeLog
+// impls without auth-aware retry (localLogs, fakes) return nil
+// here, matching the no-fatal-state default.
+func nodeLogFatal(nlog NodeLog) error {
+	if f, ok := nlog.(interface{ Fatal() error }); ok {
+		return f.Fatal()
+	}
+	return nil
+}
+
+// nodeLogDrops returns the (count, first-reason) tuple from a
+// NodeLog that implements the optional Dropper interface (IMP-002).
+func nodeLogDrops(nlog NodeLog) (int, string) {
+	if d, ok := nlog.(interface{ Drops() (int, string) }); ok {
+		return d.Drops()
+	}
+	return 0, ""
 }
 
 func (r *InProcessRunner) markSkipped(ctx context.Context, runID, nodeID, reason string) {

@@ -53,6 +53,42 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   exist yet, build locally" caveat.
 
 ### Fixed
+- **Runs no longer report `status: success` when `logs.append` is
+  silently failing (IMP-002).** Previously, a runner whose token
+  lacked the `logs.write` scope produced a series of per-line
+  `WARN logs append dropped` entries in pod stderr while the
+  orchestrator still finished the run as `success` -- so
+  `sparkwing runs status --run <id>` showed a green checkmark and
+  `sparkwing runs logs --run <id>` returned empty for the actual
+  node body. The black-hole was undetectable until an operator
+  went to inspect the run hours later. Three concrete behavioral
+  changes:
+  - `logs.Client.Append` now returns `*logs.AuthError` on 401/403,
+    parsing the missing scope from the controller's response body
+    so callers can distinguish auth misconfig (fatal) from
+    transient transport flakes (retryable).
+  - The orchestrator's `httpNodeLog` retries 5xx / network errors
+    up to 3 times with exponential backoff (200ms / 400ms / 800ms);
+    persistent failures increment a per-node drop counter and emit
+    a `logs_drop` event on the run's event stream rather than
+    being downgraded to per-line WARN.
+  - 401/403 latches a sticky fatal so subsequent emits short-
+    circuit (no more retry storms against a misconfigured token);
+    `executeNode` checks the latched error after the user job body
+    completes and forces the node to `failed` with
+    `failure_reason = logs_auth` and `error: "logs append blocked:
+    token lacks scope \"logs.write\" (HTTP 403)"`. The node-level
+    error surfaces in `runs status`'s per-node table immediately
+    so the operator sees the deploy-time misconfig instead of a
+    silently-broken success.
+
+  Pinned by `logs.TestAppend_403ReturnsAuthErrorWithScope`,
+  `logs.TestAppend_401ReturnsAuthError`,
+  `orchestrator.TestHTTPLogs_403HardFailsRun` (the full slice:
+  pipeline run -> 403 from logs server -> Run.Status=failed +
+  Node.FailureReason=logs_auth), and
+  `orchestrator.TestHTTPLogs_5xxRetriesThenCountsDrop`
+  (transient-failure retry budget + drop counter).
 - **Warm-runner now ships `.sparkwing/` compile stderr into the
   run's structured logs (IMP-001).** Previously, when the trigger
   loop's `go build` of a consumer's `.sparkwing/` directory failed,

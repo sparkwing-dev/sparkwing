@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/otelutil"
@@ -70,9 +71,40 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
+// AuthError is the typed error Append returns on a 401 or 403 from
+// the logs service. Callers (esp. the orchestrator's per-node log
+// sink) treat this as fatal -- a token whose scope set is wrong is
+// a deploy-time misconfig that won't fix itself by retrying, and
+// silently dropping log lines under that misconfig produced the
+// "status: success but no logs" black hole that IMP-002 closes.
+//
+// Scope is best-effort parsed from the controller's body (today the
+// controller writes "token lacks required scope: logs.write").
+// Empty when the body shape doesn't match.
+type AuthError struct {
+	Status  int
+	Scope   string
+	RawBody string
+}
+
+func (e *AuthError) Error() string {
+	if e.Scope != "" {
+		return fmt.Sprintf("logs append blocked: token lacks scope %q (HTTP %d)", e.Scope, e.Status)
+	}
+	if e.RawBody != "" {
+		return fmt.Sprintf("logs append blocked: HTTP %d: %s", e.Status, e.RawBody)
+	}
+	return fmt.Sprintf("logs append blocked: HTTP %d", e.Status)
+}
+
 // Append posts opaque bytes to a node's log. Typically called with
 // one formatted line at a time, but the service accepts arbitrary
 // payloads so clients can batch if they want to.
+//
+// 401 / 403 responses are returned as *AuthError so callers can
+// distinguish auth misconfiguration (fatal) from transient
+// transport errors (retryable). Other non-204 responses come back
+// as a plain `logs append <code>: <body>` error.
 func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) error {
 	u := fmt.Sprintf("%s/api/v1/logs/%s/%s", c.baseURL,
 		url.PathEscape(runID), url.PathEscape(nodeID))
@@ -86,11 +118,38 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("logs append %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
 	}
-	return nil
+	body, _ := io.ReadAll(resp.Body)
+	trimmed := string(bytes.TrimSpace(body))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return &AuthError{
+			Status:  resp.StatusCode,
+			Scope:   parseMissingScope(trimmed),
+			RawBody: trimmed,
+		}
+	}
+	return fmt.Errorf("logs append %d: %s", resp.StatusCode, trimmed)
+}
+
+// parseMissingScope extracts the scope name from controller error
+// bodies of the form "token lacks required scope: <name>". Returns
+// "" when the body doesn't match the canonical phrasing so we
+// degrade to the raw body in AuthError.Error.
+func parseMissingScope(body string) string {
+	const marker = "token lacks required scope:"
+	i := strings.Index(body, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(body[i+len(marker):])
+	// Stop at the first whitespace so trailing punctuation doesn't
+	// leak into the scope name.
+	if j := strings.IndexAny(rest, " \t\n\r,;"); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.Trim(rest, ".\"'")
 }
 
 // Read fetches the current contents of a node's log as raw bytes.
