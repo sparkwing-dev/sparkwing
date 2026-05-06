@@ -117,6 +117,55 @@ func computeStepRangeSkips(items map[string]*workItem, children map[string][]str
 	return skips
 }
 
+// PreviewSkipForRange computes the (id -> human-readable reason)
+// skip set this Work would apply under the given --start-at /
+// --stop-at bounds, WITHOUT executing any step body. Empty bounds
+// (or bounds that don't match any item in this Work) return an
+// empty map. IMP-013 calls this from `pipeline plan` so the
+// renderer can show "would skip: outside --start-at..--stop-at
+// range" alongside the static DAG -- terraform-style plan output
+// for sparkwing.
+func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string {
+	if w == nil || (startAt == "" && stopAt == "") {
+		return nil
+	}
+	steps := w.Steps()
+	spawns := w.Spawns()
+	gens := w.SpawnGens()
+	items := make(map[string]*workItem, len(steps)+len(spawns)+len(gens))
+	add := func(id string, deps []string) {
+		if _, exists := items[id]; exists {
+			return
+		}
+		items[id] = &workItem{id: id, deps: append([]string(nil), deps...)}
+	}
+	for _, s := range steps {
+		add(s.ID(), s.DepIDs())
+	}
+	for _, sp := range spawns {
+		add(sp.ID(), sp.DepIDs())
+	}
+	for _, g := range gens {
+		add(g.ID(), g.DepIDs())
+	}
+	if _, hasStart := items[startAt]; startAt != "" && !hasStart {
+		// Bound names a step in another Work; locally-this is a no-op,
+		// matching RunWork's degrade-gracefully semantics.
+		if _, hasStop := items[stopAt]; stopAt == "" || !hasStop {
+			return nil
+		}
+	}
+	children := make(map[string][]string, len(items))
+	for id, it := range items {
+		for _, d := range it.deps {
+			if _, ok := items[d]; ok {
+				children[d] = append(children[d], id)
+			}
+		}
+	}
+	return computeStepRangeSkips(items, children, stepRange{start: startAt, stop: stopAt})
+}
+
 // reachable returns the set of nodes reachable from `start` by
 // following the given adjacency map. start itself is NOT included
 // in the returned set (callers add it explicitly when needed).

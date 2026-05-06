@@ -713,6 +713,7 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 		{"discover", "Fuzzy search over names, descriptions, tags"},
 		{"new", "Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)"},
 		{"explain", "Render the pipeline's Plan DAG without running"},
+		{"plan", "Render the runtime-resolved DAG (would-run/would-skip) without running"},
 		{"run", "Invoke a pipeline (canonical form of `sparkwing run <name>`)"},
 		{"hooks", "Git pre-commit / pre-push hooks: install / uninstall / status"},
 		{"sparks", "Manage sparks libraries: list / add / remove / lint / resolve / update / warmup"},
@@ -907,6 +908,55 @@ pipeline ever runs.`,
 		{"Preview with args (forwarded to the pipeline)", "sparkwing pipeline explain --name example-release --env prod"},
 		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all --json"},
 		{"Validate every pipeline (CI gate)", "sparkwing pipeline explain --all"},
+	},
+}
+
+// cmdPipelinePlan is the IMP-013 verb: same DAG as `explain` plus
+// per-step would-run / would-skip decisions evaluated against the
+// supplied args + --start-at / --stop-at bounds. NO step bodies
+// execute. Designed as the canonical pre-flight verb -- agents and
+// humans inspect the runtime-resolved plan before destructive
+// operations, terraform-style.
+var cmdPipelinePlan = Command{
+	Path:     "sparkwing pipeline plan",
+	Synopsis: "Render the runtime-resolved DAG without dispatching any jobs",
+	Description: `Compiles the nearest .sparkwing/ binary, calls the named
+pipeline's Plan method, and prints the runtime-resolved DAG --
+the same structure 'explain' shows plus a per-step decision
+("would_run" / "would_skip <reason>") evaluated under the
+supplied args and --start-at / --stop-at bounds. NO step bodies
+execute.
+
+Skip reasons surface their cause:
+  - user_skipif    : a SkipIf predicate would match at run time
+  - range_skip     : item is outside the --start-at..--stop-at window
+
+For SpawnNodeForEach generators (dynamic fan-out), cardinality is
+reported as "unresolved" with a pointer to the source item -- the
+honest answer when the count depends on a runtime value.
+
+State-loading caveat: if a step normally populates in-memory state
+that downstream steps consume, --start-at past it leaves state
+empty. The plan output reflects this honestly (downstream steps
+show "would_run") but operators should design step bodies to
+lazy-load when state isn't populated, so resume-from-step is safe.
+
+Like 'explain', this is the read-only pre-flight surface; pair
+with 'wing <name>' (or 'sparkwing run <name>') to actually
+dispatch.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Pipeline to plan", Group: "Target"},
+		{Name: "start-at", Argument: "STEP", Desc: "Skip every WorkStep upstream of STEP in the resulting plan", Group: "Range"},
+		{Name: "stop-at", Argument: "STEP", Desc: "Skip every WorkStep downstream of STEP in the resulting plan", Group: "Range"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: table | json", Default: "table", Group: "Output"},
+		{Name: "json", Desc: "Alias for --output json (emits raw plan-preview JSON for agents)", Group: "Output"},
+	},
+	GroupOrder:  []string{"Target", "Range", "Output", "Other"},
+	UsageSuffix: "[-- pipeline-flags...]",
+	Examples: []Example{
+		{"Resolve cluster-up's DAG with current args", "sparkwing pipeline plan --name cluster-up"},
+		{"Preview a resume-from-step", "sparkwing pipeline plan --name cluster-up --start-at install-argocd"},
+		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name release-all --json"},
 	},
 }
 

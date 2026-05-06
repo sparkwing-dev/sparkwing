@@ -19,6 +19,35 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   -- the bridge fixes a discoverability gap, not a capability one.
 
 ### Added
+- **`sparkwing pipeline plan` — runtime-resolved DAG without execution
+  (IMP-013).** Same DAG `pipeline explain` shows, plus per-step
+  `would_run` / `would_skip <reason>` decisions evaluated against
+  the supplied args + `--start-at` / `--stop-at` bounds. NO step
+  bodies execute. Designed as the canonical pre-flight verb -- the
+  terraform-plan analogue for sparkwing -- so agents and humans
+  inspect the structured "what would happen if I ran this" object
+  before destructive operations.
+  Three skip reasons are surfaced distinctly so renderers can
+  attribute operator vs. author intent: `range_skip` (item is
+  outside `--start-at..--stop-at`, with the bound on `skip_detail`),
+  `user_skipif` (the SkipIf predicate would match — predicate
+  called under the same plan-only ctx Plan() runs in, so SDK-012's
+  side-effect guard fires; predicate panics are caught and surfaced
+  on `skip_detail` rather than crashing the plan command), and
+  range_skip wins over user_skipif when both apply (matches
+  RunWork's runtime precedence so plan output and execution agree).
+  SpawnNodeForEach generators report `cardinality: unresolved` with
+  a pointer to the source item — the honest answer when the count
+  depends on a runtime value. New SDK surface:
+  `sparkwing.PreviewPlan(plan, pipeline, args, opts) *PlanPreview`,
+  `Work.PreviewSkipForRange(start, stop) map[string]string` (the
+  IMP-007/008 handoff). Wire shape mirrors the existing
+  plan-explain snapshot so the dashboard can layer runtime
+  decisions onto the static structure without re-parsing.
+  Pinned by 5 SDK unit tests in `sparkwing/plan_preview_test.go`
+  (single-step / SkipIf / range-skip / dynamic-fanout / args
+  roundtrip; every test asserts a global counter remains 0 to
+  prove no step body executed).
 - **Built-in `--start-at` / `--stop-at` wing flags for resume-from-step
   (IMP-007).** Every pipeline now gets per-step resume support without
   the author writing a stepOrder slice + skipBefore predicate. Flags

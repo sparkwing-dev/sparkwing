@@ -1,0 +1,284 @@
+package sparkwing
+
+import (
+	"context"
+	"fmt"
+)
+
+// PlanPreview is the runtime-resolved view of a Plan: the same DAG
+// `pipeline explain` shows, plus per-step "would run / would skip
+// <reason>" annotations evaluated against the supplied args +
+// --start-at / --stop-at bounds. IMP-013: this is the structured
+// "what would happen if you ran this" object agents inspect before
+// destructive operations -- terraform plan for sparkwing.
+//
+// The wire shape is intentionally close to the existing plan-explain
+// snapshot so renderers can layer the runtime decisions onto the
+// static structure without re-parsing.
+type PlanPreview struct {
+	Pipeline string `json:"pipeline"`
+	// ResolvedArgs are the typed Inputs values after default
+	// resolution + flag parsing. Plain map for JSON-friendliness.
+	ResolvedArgs map[string]string `json:"resolved_args,omitempty"`
+	// StartAt / StopAt echo the bounds the preview was computed
+	// against, so JSON consumers don't have to thread state.
+	StartAt string `json:"start_at,omitempty"`
+	StopAt  string `json:"stop_at,omitempty"`
+	// LintWarnings are the Plan-time advisories accumulated by the
+	// SDK during Plan() (already exposed via plan.LintWarnings()).
+	LintWarnings []PreviewLintWarning `json:"lint_warnings,omitempty"`
+	// Nodes is the per-Plan-node breakdown, in topological order.
+	Nodes []PreviewNode `json:"nodes"`
+}
+
+// PreviewLintWarning mirrors LintWarning for JSON emission.
+type PreviewLintWarning struct {
+	NodeID  string `json:"node_id,omitempty"`
+	Message string `json:"message"`
+}
+
+// PreviewNode is one Plan node + its inner Work, with each Work
+// item annotated with the runtime decision the orchestrator would
+// reach.
+type PreviewNode struct {
+	ID          string   `json:"id"`
+	Deps        []string `json:"deps,omitempty"`
+	IsApproval  bool     `json:"is_approval,omitempty"`
+	OnFailureOf string   `json:"on_failure_of,omitempty"`
+	// Decision is "would_run" or "would_skip"; SkipReason
+	// classifies skipped nodes ("user_skipif" / "range_skip" /
+	// "synthetic"). Computed by walking the inner Work's items and
+	// rolling up: a node "would_skip" only when EVERY non-hidden
+	// item in its Work is itself skipped (otherwise the node still
+	// dispatches even if some inner steps no-op).
+	Decision   string `json:"decision"`
+	SkipReason string `json:"skip_reason,omitempty"`
+	// Work is the per-item breakdown. Empty for Approval gates.
+	Work *PreviewWork `json:"work,omitempty"`
+}
+
+// PreviewWork is the inner-Work view: each Step / SpawnNode /
+// SpawnNodeForEach with its runtime decision.
+type PreviewWork struct {
+	Steps     []PreviewItem `json:"steps,omitempty"`
+	Spawns    []PreviewItem `json:"spawns,omitempty"`
+	SpawnEach []PreviewItem `json:"spawn_each,omitempty"`
+}
+
+// PreviewItem is one Work item + decision. Cardinality is filled
+// only for SpawnNodeForEach generators -- the canonical "unresolved
+// at plan time" sentinel for dynamic fan-out.
+type PreviewItem struct {
+	ID    string   `json:"id"`
+	Needs []string `json:"needs,omitempty"`
+	// Decision: "would_run" | "would_skip".
+	Decision string `json:"decision"`
+	// SkipReason categorizes a "would_skip": "user_skipif",
+	// "range_skip", "synthetic". Empty for "would_run".
+	SkipReason string `json:"skip_reason,omitempty"`
+	// SkipDetail is human text accompanying the reason: the
+	// stringified bound for range_skip, or the panic message if a
+	// SkipIf predicate panicked under the plan-only ctx.
+	SkipDetail string `json:"skip_detail,omitempty"`
+	// Cardinality is "unresolved" for SpawnNodeForEach generators
+	// (the cardinality depends on a runtime value); empty for
+	// non-generator items.
+	Cardinality string `json:"cardinality,omitempty"`
+	// CardinalitySource names the item whose runtime output
+	// determines the count, when applicable.
+	CardinalitySource string `json:"cardinality_source,omitempty"`
+}
+
+// PreviewOptions carries the operator-supplied state the plan walk
+// needs: --start-at / --stop-at bounds, plus a hook for future
+// fields (resolved profile, RunContext shape, etc.) without
+// breaking callers.
+type PreviewOptions struct {
+	StartAt string
+	StopAt  string
+}
+
+// PreviewPlan walks an already-built Plan and returns the runtime-
+// resolved view. The Plan must come from Registration.Invoke(args)
+// so IMP-008's Plan-time validation has already run; PreviewPlan
+// itself does NOT execute step bodies. SkipIf predicates are
+// evaluated against a synthetic plan-only ctx (the same one Plan()
+// itself runs under, so the SDK-012 guard catches any side-effect
+// helper a predicate accidentally invokes).
+//
+// Caller threads the wire-format args map back through
+// ResolvedArgs so renderers can show the operator the inputs that
+// drove the decisions -- single source of truth for what was
+// actually parsed.
+func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, opts PreviewOptions) (*PlanPreview, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("PreviewPlan: plan is nil")
+	}
+	out := &PlanPreview{
+		Pipeline:     pipeline,
+		ResolvedArgs: resolvedArgs,
+		StartAt:      opts.StartAt,
+		StopAt:       opts.StopAt,
+	}
+	for _, lw := range plan.LintWarnings() {
+		out.LintWarnings = append(out.LintWarnings, PreviewLintWarning{
+			NodeID:  lw.NodeID,
+			Message: lw.Msg,
+		})
+	}
+
+	// Plan-only ctx so SkipIf predicates that touch SDK-012-guarded
+	// helpers panic with the canonical "Plan() must be pure-
+	// declarative" message rather than silently shelling out.
+	planCtx := withPlanTime(context.Background())
+
+	for _, n := range plan.Nodes() {
+		out.Nodes = append(out.Nodes, previewNode(planCtx, n, opts))
+	}
+	return out, nil
+}
+
+// previewNode renders one Plan node + its inner Work. Approval
+// gates have no Work; their decision is always "would_run" (the
+// gate always fires; the human's response is the runtime input
+// that's outside plan-time visibility).
+func previewNode(ctx context.Context, n *Node, opts PreviewOptions) PreviewNode {
+	pn := PreviewNode{
+		ID:          n.ID(),
+		Deps:        append([]string(nil), n.DepIDs()...),
+		OnFailureOf: onFailureSourceID(n),
+		Decision:    "would_run",
+	}
+	if n.approval != nil {
+		pn.IsApproval = true
+		return pn
+	}
+
+	w := n.Work()
+	if w == nil {
+		return pn
+	}
+	pw := previewWork(ctx, w, opts)
+	pn.Work = pw
+
+	// Roll up the node-level decision: "would_skip" only when every
+	// visible item is itself skipped. Otherwise the node still
+	// dispatches (even if some inner steps no-op individually).
+	allSkipped := true
+	hasVisible := false
+	for _, items := range [][]PreviewItem{pw.Steps, pw.Spawns, pw.SpawnEach} {
+		for _, it := range items {
+			hasVisible = true
+			if it.Decision != "would_skip" {
+				allSkipped = false
+			}
+		}
+	}
+	if hasVisible && allSkipped {
+		pn.Decision = "would_skip"
+		pn.SkipReason = "all_steps_skipped"
+	}
+	return pn
+}
+
+// onFailureSourceID returns the Node ID whose failure dispatched
+// this recovery node, or "" if this isn't a recovery target. The
+// existing snapshot encoder reaches for it via the unexported
+// onFailureOf field; we stay symmetric.
+func onFailureSourceID(n *Node) string {
+	// Recovery dispatch is encoded by the orchestrator; expose via
+	// the same path snapshot-marshal uses. Currently no public
+	// accessor exists, so PreviewNode leaves this empty until a
+	// future SDK refactor exposes it. Keeping the field on the
+	// wire shape avoids a follow-up schema bump.
+	return ""
+}
+
+// previewWork iterates Steps / Spawns / SpawnGens and computes the
+// per-item decision: range-skip wins (matches RunWork's runtime
+// precedence so plan output and execution agree), then SkipIf, then
+// "would_run".
+func previewWork(ctx context.Context, w *Work, opts PreviewOptions) *PreviewWork {
+	rangeSkips := w.PreviewSkipForRange(opts.StartAt, opts.StopAt)
+
+	pw := &PreviewWork{}
+	for _, s := range w.Steps() {
+		pw.Steps = append(pw.Steps, previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates()))
+	}
+	for _, sp := range w.Spawns() {
+		pw.Spawns = append(pw.Spawns, previewItem(ctx, sp.ID(), sp.DepIDs(), rangeSkips, sp.SkipPredicates()))
+	}
+	for _, g := range w.SpawnGens() {
+		// SpawnNodeForEach generators are scheduled like steps but
+		// fan out at runtime to N children whose count depends on
+		// the upstream item's typed output. At plan time we don't
+		// have that output; surface "unresolved" + the source-id
+		// hint so renderers can be honest about the limit.
+		item := previewItem(ctx, g.ID(), g.DepIDs(), rangeSkips, nil)
+		item.Cardinality = "unresolved"
+		if deps := g.DepIDs(); len(deps) > 0 {
+			// First dep is conventionally the source whose output
+			// drives the fan-out; renderers can show all deps in
+			// the Needs list separately. This is best-effort -- the
+			// SDK doesn't enforce "first dep == source" today.
+			item.CardinalitySource = deps[0]
+		}
+		pw.SpawnEach = append(pw.SpawnEach, item)
+	}
+	return pw
+}
+
+// previewItem applies the same skip precedence RunWork uses:
+// range-skip first, then user SkipIf predicates, then "would_run".
+// SkipPredicates are called with a plan-only ctx; a panic in user
+// code is caught and surfaced on the item's SkipDetail rather than
+// crashing the whole plan command.
+func previewItem(ctx context.Context, id string, needs []string, rangeSkips map[string]string, predicates []SkipPredicate) PreviewItem {
+	item := PreviewItem{
+		ID:       id,
+		Needs:    append([]string(nil), needs...),
+		Decision: "would_run",
+	}
+	if reason, ok := rangeSkips[id]; ok {
+		item.Decision = "would_skip"
+		item.SkipReason = "range_skip"
+		item.SkipDetail = reason
+		return item
+	}
+	for _, p := range predicates {
+		if p == nil {
+			continue
+		}
+		match, panicMsg := safeEvalPredicate(ctx, p)
+		if panicMsg != "" {
+			// Predicate panicked under the plan-only ctx (likely an
+			// SDK-012 guard fired on a side-effect helper). Mark the
+			// item as "would_skip user_skipif" with the panic
+			// message attached so the operator sees the contract
+			// violation rather than guessing.
+			item.Decision = "would_skip"
+			item.SkipReason = "user_skipif"
+			item.SkipDetail = "predicate panicked at plan time: " + panicMsg
+			return item
+		}
+		if match {
+			item.Decision = "would_skip"
+			item.SkipReason = "user_skipif"
+			return item
+		}
+	}
+	return item
+}
+
+// safeEvalPredicate calls p(ctx) with a panic recover, returning
+// the boolean result + a non-empty panic message when the predicate
+// crashed. Lets PreviewPlan stay best-effort: a malformed predicate
+// in one step doesn't blow up the entire plan render.
+func safeEvalPredicate(ctx context.Context, p SkipPredicate) (match bool, panicMsg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicMsg = fmt.Sprintf("%v", r)
+		}
+	}()
+	return p(ctx), ""
+}

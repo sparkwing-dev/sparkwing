@@ -28,7 +28,7 @@ var allCommands = []*Command{
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
 	&cmdWing,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe, &cmdPipelineDiscover,
-	&cmdPipelineNew, &cmdPipelineExplain, &cmdPipelineRun,
+	&cmdPipelineNew, &cmdPipelineExplain, &cmdPipelinePlan, &cmdPipelineRun,
 	&cmdDashboard, &cmdDashboardStart, &cmdDashboardKill, &cmdDashboardStatus,
 	&cmdWorker, &cmdGC, &cmdCompletion,
 	&cmdProfiles, &cmdProfilesAdd, &cmdProfilesList, &cmdProfilesShow,

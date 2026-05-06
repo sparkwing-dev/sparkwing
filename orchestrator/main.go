@@ -86,6 +86,20 @@ func Main() {
 		}
 	}
 
+	// IMP-013: --plan emits the runtime-resolved plan preview --
+	// same DAG as --explain plus per-step would-run / would-skip
+	// decisions evaluated against the supplied args + --start-at /
+	// --stop-at bounds. NO step bodies execute.
+	for _, tok := range rest {
+		if tok == "--plan" {
+			if err := printPipelineRuntimePlan(pipeline, filterTok(rest, "--plan")); err != nil {
+				fmt.Fprintln(os.Stderr, pipeline+":", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	argsMap, err := parseTypedFlags(pipeline, rest)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, pipeline+":", err)

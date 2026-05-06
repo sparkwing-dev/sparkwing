@@ -78,6 +78,8 @@ func runPipeline(args []string) error {
 		return runPipelineNew(args[1:])
 	case "explain":
 		return runPipelineExplain(args[1:])
+	case "plan":
+		return runPipelinePlan(args[1:])
 	case "run":
 		// Canonical run path. `sparkwing run <name>` is an alias
 		// for this; both end up at the same wing dispatch.
