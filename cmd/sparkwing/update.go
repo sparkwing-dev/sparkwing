@@ -115,7 +115,7 @@ func runUpdateBinary(version string, force bool) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, resolved)
-	fmt.Fprintf(os.Stdout, "what's new: https://sparkwing.dev/CHANGELOG.md\n")
+	fmt.Fprintf(os.Stdout, "what's new: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	return nil
 }
 

@@ -275,7 +275,7 @@ func printVersionTable(r VersionReport) {
 	} else {
 		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing version update --cli"))
 	}
-	fmt.Printf("  changelog: https://sparkwing.dev/CHANGELOG.md\n")
+	fmt.Printf("  releases: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	fmt.Println()
 
 	if r.Project == nil {
