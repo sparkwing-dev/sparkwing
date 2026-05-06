@@ -149,7 +149,10 @@ func runPipelinePlan(args []string) error {
 		PrintHelp(cmdPipelinePlan, os.Stderr)
 		return errors.New("plan: --name is required")
 	}
-	format, err := resolveOutputFormat(parsed.output, parsed.asJSON, cmdPipelinePlan.Path)
+	// Hand-parsed: parsed.output is the empty string when -o/--output
+	// was not provided, otherwise the user-supplied value. Use that to
+	// drive the explicit-set bit the resolver wants (IMP-038).
+	format, err := resolveOutputFormat(parsed.output, parsed.output != "", parsed.asJSON, cmdPipelinePlan.Path)
 	if err != nil {
 		return err
 	}

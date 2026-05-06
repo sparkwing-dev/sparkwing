@@ -109,7 +109,7 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, *asJSON, cmdApprovalsList.Path)
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, cmdApprovalsList.Path)
 	if rerr != nil {
 		return rerr
 	}

@@ -63,7 +63,7 @@ func runConfigureInit(args []string) error {
 		PrintHelp(cmdConfigureInit, os.Stderr)
 		return fmt.Errorf("configure init: unexpected positional %q", fs.Arg(0))
 	}
-	format, err := resolveOutputFormat(*output, *asJSON, cmdConfigureInit.Path)
+	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdConfigureInit.Path)
 	if err != nil {
 		return err
 	}

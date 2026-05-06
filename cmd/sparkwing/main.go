@@ -436,7 +436,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, *asJSON, "jobs list")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs list")
 		if err != nil {
 			return err
 		}
@@ -494,7 +494,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, *asJSON, "jobs status")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs status")
 		if err != nil {
 			return err
 		}
@@ -576,7 +576,16 @@ func runJobs(args []string) error {
 		if effectiveOut == "" && !*asJSON && !color.IsInteractiveStdout() {
 			effectiveOut = "json"
 		}
-		resolvedFmt, err := resolveOutputFormat(effectiveOut, *asJSON, "jobs logs")
+		// jobs logs has its own pre-resolution above (--pretty / --format
+		// fold-in + auto-JSONL when piped), so the explicit-set bit
+		// reflects whether *anyone* (user or pre-resolution) settled on
+		// a non-empty effectiveOut. effectiveOut == "" means "let
+		// resolveOutputFormat default to table"; non-empty means a
+		// concrete choice was made (user-typed -o, or pre-resolution
+		// derived a value), so it should compete with --json on equal
+		// footing -- which matches the kubectl-style explicit-bit
+		// contract for the resolver.
+		resolvedFmt, err := resolveOutputFormat(effectiveOut, effectiveOut != "", *asJSON, "jobs logs")
 		if err != nil {
 			return err
 		}
@@ -623,7 +632,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, *asJSON, "jobs errors")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs errors")
 		if err != nil {
 			return err
 		}
@@ -797,14 +806,24 @@ func runJobs(args []string) error {
 
 // resolveOutputFormat canonicalizes -o/--output + --json into one of
 // {"table","json","plain"}. Disagreeing values error rather than silently win.
-func resolveOutputFormat(outFmt string, jsonAlias bool, cmdPath string) (string, error) {
+//
+// outputChanged distinguishes "user explicitly typed -o/--output" from
+// "the flag took its default value." Callers using pflag pass
+// fs.Changed("output"); hand-parsers pass `parsed.output != ""`. The
+// distinction matters because a default-shaped --output (e.g. the
+// "table" pflag default a leaf may register) must not collide with a
+// user-set --json: --json is documented as an alias for --output=json
+// and "default + --json" should resolve to JSON, not error. Only when
+// BOTH flags are user-set AND disagree do we surface a conflict
+// (IMP-038). Mirrors the kubectl / gh / aws CLI convention.
+func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "table", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of table|json|plain, got %q", cmdPath, outFmt)
 	}
 	if jsonAlias {
-		if outFmt != "" && outFmt != "json" {
+		if outputChanged && outFmt != "" && outFmt != "json" {
 			return "", fmt.Errorf("%s: --json and -o %s disagree", cmdPath, outFmt)
 		}
 		return "json", nil

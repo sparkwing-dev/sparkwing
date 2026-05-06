@@ -191,7 +191,7 @@ func runPipelineExplain(args []string) error {
 		if len(passthrough) > 0 {
 			return fmt.Errorf("explain: --all does not accept pipeline-specific flags (got %v)", passthrough)
 		}
-		format, err := resolveOutputFormat(output, asJSON, cmdPipelineExplain.Path)
+		format, err := resolveOutputFormat(output, output != "", asJSON, cmdPipelineExplain.Path)
 		if err != nil {
 			return err
 		}
@@ -201,7 +201,7 @@ func runPipelineExplain(args []string) error {
 		PrintHelp(cmdPipelineExplain, os.Stderr)
 		return errors.New("explain: --name or --all is required")
 	}
-	format, err := resolveOutputFormat(output, asJSON, cmdPipelineExplain.Path)
+	format, err := resolveOutputFormat(output, output != "", asJSON, cmdPipelineExplain.Path)
 	if err != nil {
 		return err
 	}

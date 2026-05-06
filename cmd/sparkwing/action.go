@@ -132,7 +132,7 @@ func runPipelineList(args []string) error {
 		}
 		return err
 	}
-	format, err := resolveOutputFormat(*output, *asJSON, cmdPipelineList.Path)
+	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineList.Path)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func runPipelineDiscover(args []string) error {
 		PrintHelp(cmdPipelineDiscover, os.Stderr)
 		return errors.New("discover: --query is required")
 	}
-	format, err := resolveOutputFormat(*output, *asJSON, cmdPipelineDiscover.Path)
+	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineDiscover.Path)
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func runPipelineDescribe(args []string) error {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
 		return errors.New("describe: --name is required")
 	}
-	format, err := resolveOutputFormat(*output, *asJSON, cmdPipelineDescribe.Path)
+	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineDescribe.Path)
 	if err != nil {
 		return err
 	}
@@ -318,6 +318,21 @@ func runPipelineDescribe(args []string) error {
 		}
 	}
 	if found == nil {
+		// IMP-040: surface a "did you mean X?" suggestion when the
+		// typo is close to a registered name, mirroring IMP-008.
+		// Source the candidate set from the catalog we just gathered
+		// (rather than sparkwing.Registered() — this CLI verb runs in
+		// the wing process, not the inner pipeline binary, so the
+		// in-process registry is empty here). Far typos fall through
+		// to the existing "list --all" hint.
+		candidates := make([]string, 0, len(pipelines))
+		for _, p := range pipelines {
+			candidates = append(candidates, p.Name)
+		}
+		suggestion := sparkwing.SuggestClosest(name, candidates)
+		if suggestion != "" {
+			return fmt.Errorf("no pipeline named %q; did you mean %q? (run `sparkwing pipeline list --all` to see every entry)", name, suggestion)
+		}
 		return fmt.Errorf("no pipeline named %q (run `sparkwing pipeline list --all` to see every entry)", name)
 	}
 	switch format {

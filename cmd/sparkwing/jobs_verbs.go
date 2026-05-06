@@ -68,7 +68,7 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, *asJSON, "jobs failures")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs failures")
 	if rerr != nil {
 		return rerr
 	}
@@ -286,7 +286,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, *asJSON, "jobs stats")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs stats")
 	if rerr != nil {
 		return rerr
 	}
@@ -417,7 +417,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, *asJSON, "jobs last")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs last")
 	if rerr != nil {
 		return rerr
 	}
@@ -524,7 +524,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, *asJSON, "jobs tree")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs tree")
 	if rerr != nil {
 		return rerr
 	}
@@ -671,7 +671,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, *asJSON, "jobs wait")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs wait")
 	if err != nil {
 		return err
 	}
@@ -784,7 +784,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	if *gitSHA == "" && *pipeline == "" && *repo == "" {
 		return fmt.Errorf("jobs find: at least one of --git-sha, --pipeline, or --repo is required")
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, *asJSON, "jobs find")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs find")
 	if err != nil {
 		return err
 	}

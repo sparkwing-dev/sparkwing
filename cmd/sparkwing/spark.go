@@ -88,7 +88,7 @@ func runSparksList(args []string) error {
 		}
 		return err
 	}
-	format, err := resolveOutputFormat(*outFmt, *asJSON, "spark list")
+	format, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "spark list")
 	if err != nil {
 		return err
 	}

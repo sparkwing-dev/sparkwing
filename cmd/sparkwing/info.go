@@ -170,7 +170,7 @@ func runInfo(args []string) error {
 		return nil
 	}
 
-	format, err := resolveOutputFormat(*output, *asJSON, cmdInfo.Path)
+	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdInfo.Path)
 	if err != nil {
 		return err
 	}
