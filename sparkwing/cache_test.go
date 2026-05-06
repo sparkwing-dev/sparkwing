@@ -2,6 +2,7 @@ package sparkwing_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,40 @@ func TestCacheOptions_EmptyIsNoop(t *testing.T) {
 	if n.CacheOpts().HasKey() {
 		t.Fatalf("empty Cache options should not register coordination")
 	}
+}
+
+// SDK-038: a CacheOptions with Max / OnLimit / CacheKey / CacheTTL /
+// CancelTimeout set but Key empty is almost certainly a typo (the
+// author meant to enable coordination but forgot the key). Reject
+// at Plan time so the silent-no-op footgun fails loud.
+func TestCacheOptions_NodeRejectsTypoShape_MaxWithoutKey(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on Max without Key")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "Max") || !strings.Contains(msg, "Key") {
+			t.Fatalf("panic should name Max and Key, got %q", msg)
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Max: 3})
+}
+
+func TestCacheOptions_PlanRejectsTypoShape_CacheTTLWithoutKey(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on CacheTTL without Key")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "CacheTTL") || !strings.Contains(msg, "Key") {
+			t.Fatalf("panic should name CacheTTL and Key, got %q", msg)
+		}
+	}()
+	plan.Cache(sparkwing.CacheOptions{CacheTTL: time.Hour})
 }
 
 func TestCacheOptions_KeyOnlyApplyDefaults(t *testing.T) {

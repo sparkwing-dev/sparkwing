@@ -79,6 +79,14 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   only field-level addition this ticket made; IMP-016 owns receipt
   fields). Pairs with IMP-001's `_compile` synthetic node, which
   finally attaches to a Run row that exists.
+- **`Node.Cache` / `Plan.Cache` now reject typo-shaped CacheOptions
+  (SDK-038).** Passing a `CacheOptions` literal with `Max` /
+  `OnLimit` / `CacheKey` / `CacheTTL` / `CancelTimeout` set but `Key`
+  empty used to silently drop the whole struct -- the author's intent
+  ("set up coalesce + memoization") quietly disappeared. Now panics
+  at Plan time naming the fields that were set so the typo fails
+  loud. Bare `CacheOptions{}` (every field zero) stays a legitimate
+  no-op: that's the explicit "disable caching" form.
 
 ### Added
 - **Public accessor for Node.OnFailureOf (IMP-029).** `*Node` gains

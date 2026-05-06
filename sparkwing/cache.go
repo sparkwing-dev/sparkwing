@@ -108,6 +108,41 @@ type CacheOptions struct {
 // HasKey reports whether these options declare coordination.
 func (o CacheOptions) HasKey() bool { return o.Key != "" }
 
+// rejectTypoShape catches the common typo: a CacheOptions literal
+// with non-zero Max / OnLimit / CacheKey / CacheTTL / CancelTimeout
+// but Key left empty. Without this check the whole struct silently
+// no-ops -- the author wanted coordination + memoization, the SDK
+// gave them nothing. Bare CacheOptions{} (every field zero) stays a
+// legal no-op.
+func (o CacheOptions) rejectTypoShape(ctx string) {
+	if o.Key != "" {
+		return
+	}
+	var set []string
+	if o.Max != 0 {
+		set = append(set, "Max")
+	}
+	if o.OnLimit != "" {
+		set = append(set, "OnLimit")
+	}
+	if o.CacheKey != nil {
+		set = append(set, "CacheKey")
+	}
+	if o.CacheTTL != 0 {
+		set = append(set, "CacheTTL")
+	}
+	if o.CancelTimeout != 0 {
+		set = append(set, "CancelTimeout")
+	}
+	if len(set) == 0 {
+		return
+	}
+	panic(fmt.Sprintf(
+		"sparkwing: Cache on %s: CacheOptions has %v set but Key is empty -- "+
+			"either set Key to enable coordination, or pass a bare CacheOptions{} to disable",
+		ctx, set))
+}
+
 func (o *CacheOptions) validate(ctx string, isPlan bool) {
 	if o.Max < 0 {
 		panic(fmt.Sprintf("sparkwing: Cache on %s: Max must be >= 0, got %d", ctx, o.Max))
@@ -164,6 +199,7 @@ func (o *CacheOptions) validate(ctx string, isPlan bool) {
 //	})
 func (n *Node) Cache(opts CacheOptions) *Node {
 	if !opts.HasKey() {
+		opts.rejectTypoShape("node " + n.id)
 		n.cache = CacheOptions{}
 		return n
 	}
@@ -187,6 +223,7 @@ func (n *Node) CacheOpts() CacheOptions { return n.cache }
 // Empty CacheOptions{} is a no-op; pass Key to enable coordination.
 func (p *Plan) Cache(opts CacheOptions) *Plan {
 	if !opts.HasKey() {
+		opts.rejectTypoShape("plan")
 		p.cache = CacheOptions{}
 		return p
 	}
