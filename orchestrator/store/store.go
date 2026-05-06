@@ -401,6 +401,14 @@ func (s *Store) migrate() error {
 		// IMP-004: created_at lets pending (pre-orchestrator) runs
 		// carry a real timestamp without lying about started_at.
 		"created_at": "INTEGER NOT NULL DEFAULT 0",
+		// IMP-016: receipt + cost queryable summary. Full receipt
+		// JSON is recomputed on demand from runs+nodes; only these
+		// queryable fields persist. cost_settled flips to 1 when
+		// IMP-018's cloud-billing reconciliation lands.
+		"receipt_sha":   "TEXT NOT NULL DEFAULT ''",
+		"cost_cents":    "INTEGER NOT NULL DEFAULT 0",
+		"cost_currency": "TEXT NOT NULL DEFAULT 'USD'",
+		"cost_settled":  "INTEGER NOT NULL DEFAULT 0",
 	}); err != nil {
 		return err
 	}
