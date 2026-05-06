@@ -110,7 +110,7 @@ type refPipe struct{ sparkwing.Base }
 
 func (refPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	build := sparkwing.Job(plan, "build", &refBuildJob{})
-	sparkwing.Job(plan, "deploy", &refDeployJob{Build: sparkwing.Output[refBuildOut](build)}).Needs(build)
+	sparkwing.Job(plan, "deploy", &refDeployJob{Build: sparkwing.RefTo[refBuildOut](build)}).Needs(build)
 	return nil
 }
 

@@ -47,7 +47,7 @@ type skipOnDeployFlag struct{ sparkwing.Base }
 var deployRan atomic.Bool
 
 func (skipOnDeployFlag) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	setup := sparkwing.Job(plan, "setup", &setupJob{})
-	setupRef := sparkwing.Output[setupOut](setup)
+	setupRef := sparkwing.RefTo[setupOut](setup)
 	sparkwing.Job(plan, "deploy-step", sparkwing.JobFn(func(ctx context.Context) error {
 		deployRan.Store(true)
 		return nil
@@ -65,7 +65,7 @@ type multiPredicatesOR struct{ sparkwing.Base }
 var multiRan atomic.Bool
 
 func (multiPredicatesOR) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {	setup := sparkwing.Job(plan, "setup", &setupJob{})
-	setupRef := sparkwing.Output[setupOut](setup)
+	setupRef := sparkwing.RefTo[setupOut](setup)
 	sparkwing.Job(plan, "job", sparkwing.JobFn(func(ctx context.Context) error {
 		multiRan.Store(true)
 		return nil

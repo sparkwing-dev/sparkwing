@@ -1,6 +1,6 @@
 // Pipeline-name -> repo-path resolution. The piece that lets
-// AwaitPipelineJob(ctx, "lint", "") work without a per-call
-// WithAwaitRepo("owner/name") annotation: we iterate the registry
+// RunAndAwait(ctx, "lint", "") work without a per-call
+// WithFreshRepo("owner/name") annotation: we iterate the registry
 // (explicit repos first, then fallback_paths/*), shell out
 // `<binary> --describe` against each candidate's compiled pipeline
 // binary, and return the first path whose registered pipelines

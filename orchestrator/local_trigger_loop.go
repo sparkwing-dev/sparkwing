@@ -113,7 +113,7 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		repoDir = path
 	} else {
 		return fmt.Errorf("locate %q: not in repos registry and trigger carries no repo slug "+
-			"(register the repo with `sparkwing pipeline add <path>` or pass WithAwaitRepo at the call site)",
+			"(register the repo with `sparkwing pipeline add <path>` or pass WithFreshRepo at the call site)",
 			trig.Pipeline)
 	}
 	sparkwingDir := filepath.Join(repoDir, ".sparkwing")

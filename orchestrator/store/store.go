@@ -491,7 +491,7 @@ type Run struct {
 	CreatedAt  time.Time  `json:"created_at,omitempty"`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	// ParentRunID identifies the spawning AwaitPipelineJob caller.
+	// ParentRunID identifies the spawning RunAndAwait caller.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// Repo is the short name (e.g. "my-app").
 	Repo string `json:"repo,omitempty"`
@@ -1551,7 +1551,7 @@ type Trigger struct {
 	CreatedAt      time.Time         `json:"created_at"`
 	ClaimedAt      *time.Time        `json:"claimed_at,omitempty"`
 	LeaseExpiresAt *time.Time        `json:"lease_expires_at,omitempty"`
-	// ParentRunID: spawning AwaitPipelineJob; for cycle detection.
+	// ParentRunID: spawning RunAndAwait; for cycle detection.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// Mirror of Run repo fields; threaded into CreateRun.
 	Repo        string `json:"repo,omitempty"`

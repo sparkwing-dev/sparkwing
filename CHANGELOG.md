@@ -530,6 +530,49 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   consumers keep working.
 
 ### Removed (BREAKING)
+- **Output-reference surface unified into one `sw.Ref[T]` field type
+  with three named constructors (SDK-037).** Previously: `sw.Ref[T]`
+  for in-run sibling outputs, `sw.PipelineRef[Out, In]` for
+  cross-pipeline reads (with a phantom `In` type parameter that
+  carried no runtime weight), and `sw.AwaitPipelineJob[Out, In]` as
+  the imperative cross-pipeline trigger. Three different field-and-
+  function shapes for what is conceptually "ref to another node's
+  output." Now one field type, three constructors:
+  - `sw.RefTo[T](node) sw.Ref[T]` -- in-run sibling (replaces
+    `sw.Output[T]`).
+  - `sw.RefToLastRun[T](pipeline, nodeID, opts...) sw.Ref[T]` --
+    cross-pipeline, passive (replaces `sw.FromPipeline[Out, In]`;
+    drops the phantom `In`).
+  - `sw.RunAndAwait[Out, In](ctx, pipeline, nodeID, opts...) (Out, error)` --
+    imperative cross-pipeline trigger + wait (rename of
+    `sw.AwaitPipelineJob`). Companion options: `sw.WithFreshInputs`,
+    `sw.WithFreshTimeout`, `sw.WithFreshArgs`, `sw.WithFreshRepo`,
+    `sw.WithFreshBranch` (renames of the `WithAwait*` family).
+
+  `sw.PipelineRef[Out, In]` is gone; cross-pipeline fields are now
+  `sw.Ref[T]` with the `Pipeline` field non-empty. `sw.Ref[T].Get(ctx)`
+  is the uniform read for both routings (dispatches internally to
+  the in-run or cross-pipeline resolver based on whether `Pipeline`
+  is set). Internal collector `collectPipelineRefs` renamed to
+  `collectCrossPipelineRefs`; helper struct `PipelineRefPair` ->
+  `RefTarget`.
+
+  Migration is mechanical:
+  - `sw.Output[T](n)` -> `sw.RefTo[T](n)`
+  - `sw.PipelineRef[Out, In]` field -> `sw.Ref[Out]` field
+  - `sw.FromPipeline[Out, In](...)` -> `sw.RefToLastRun[Out](...)`
+    (drop the second type parameter)
+  - `sw.AwaitPipelineJob[Out, In](...)` -> `sw.RunAndAwait[Out, In](...)`
+  - `sw.WithAwait{Inputs,Timeout,Args,Repo,Branch}` ->
+    `sw.WithFresh{Inputs,Timeout,Args,Repo,Branch}`
+
+  Wire format and store columns are unchanged (no migration on the
+  controller side); this is a pure SDK-surface refactor for
+  authoring clarity. The biggest practical win is for AI-authored
+  pipelines: every typed dependency on another node's output is now
+  `sw.Ref[T]` in the job struct, so an agent reading a struct can
+  see the dependency shape without parsing two different generic
+  forms.
 - **`Approval.OnTimeout` field renamed to `Approval.OnExpiry`
   (SDK-036).** The old name read as if it paralleled `Node.Timeout()`
   (per-attempt execution budget), but the two fields are unrelated

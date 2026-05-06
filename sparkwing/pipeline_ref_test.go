@@ -36,14 +36,14 @@ type buildOut struct {
 	Tag    string `json:"tag"`
 }
 
-// TestPipelineRef_Get_UnmarshalsData exercises the happy path: the
+// TestRefToLastRun_Get_UnmarshalsData exercises the happy path: the
 // resolver returns JSON, Get unmarshals into the typed parameter.
-func TestPipelineRef_Get_UnmarshalsData(t *testing.T) {
+func TestRefToLastRun_Get_UnmarshalsData(t *testing.T) {
 	payload, _ := json.Marshal(buildOut{Digest: "sha256:abc", Tag: "v1.2.3"})
 	r := &stubResolver{runID: "run-xyz", data: payload}
 	ctx := WithPipelineResolver(context.Background(), r)
 
-	ref := FromPipeline[buildOut, NoInputs]("build", "artifact", MaxAge(1*time.Hour))
+	ref := RefToLastRun[buildOut]("build", "artifact", MaxAge(1*time.Hour))
 	got := ref.Get(ctx)
 
 	if got.Digest != "sha256:abc" || got.Tag != "v1.2.3" {
@@ -54,9 +54,9 @@ func TestPipelineRef_Get_UnmarshalsData(t *testing.T) {
 	}
 }
 
-// TestPipelineRef_Get_PanicsWithoutResolver makes the "called outside
+// TestRefToLastRun_Get_PanicsWithoutResolver makes the "called outside
 // the orchestrator" footgun loud.
-func TestPipelineRef_Get_PanicsWithoutResolver(t *testing.T) {
+func TestRefToLastRun_Get_PanicsWithoutResolver(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -67,14 +67,14 @@ func TestPipelineRef_Get_PanicsWithoutResolver(t *testing.T) {
 			t.Fatalf("unexpected panic: %v", r)
 		}
 	}()
-	ref := FromPipeline[buildOut, NoInputs]("build", "artifact")
+	ref := RefToLastRun[buildOut]("build", "artifact")
 	ref.Get(context.Background())
 }
 
-// TestPipelineRef_Get_PanicsOnResolverError surfaces the resolver's
+// TestRefToLastRun_Get_PanicsOnResolverError surfaces the resolver's
 // error via a helpful panic. Authors see "no run within X" rather
 // than a vague nil deref.
-func TestPipelineRef_Get_PanicsOnResolverError(t *testing.T) {
+func TestRefToLastRun_Get_PanicsOnResolverError(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -87,28 +87,28 @@ func TestPipelineRef_Get_PanicsOnResolverError(t *testing.T) {
 	}()
 	r := &stubResolver{err: errors.New("no matching run")}
 	ctx := WithPipelineResolver(context.Background(), r)
-	ref := FromPipeline[buildOut, NoInputs]("build", "artifact")
+	ref := RefToLastRun[buildOut]("build", "artifact")
 	ref.Get(ctx)
 }
 
-// TestPipelineRef_Get_EmptyDataProducesZeroValue:  a resolver that
+// TestRefToLastRun_Get_EmptyDataProducesZeroValue: a resolver that
 // returns nil/empty bytes gives the caller the zero value rather
-// than panicking in json.Unmarshal. Matches how Ref[T].Get treats
-// "no upstream output yet" elsewhere.
-func TestPipelineRef_Get_EmptyDataProducesZeroValue(t *testing.T) {
+// than panicking in json.Unmarshal. Matches how the in-run path
+// treats "no upstream output yet" elsewhere.
+func TestRefToLastRun_Get_EmptyDataProducesZeroValue(t *testing.T) {
 	r := &stubResolver{runID: "run-empty", data: nil}
 	ctx := WithPipelineResolver(context.Background(), r)
-	ref := FromPipeline[buildOut, NoInputs]("build", "artifact")
+	ref := RefToLastRun[buildOut]("build", "artifact")
 	got := ref.Get(ctx)
 	if got.Digest != "" || got.Tag != "" {
 		t.Fatalf("expected zero value, got %+v", got)
 	}
 }
 
-// TestFromPipeline_NoOptions: MaxAge defaults to 0 when the caller
-// skips the option.
-func TestFromPipeline_NoOptions(t *testing.T) {
-	ref := FromPipeline[buildOut, NoInputs]("build", "artifact")
+// TestRefToLastRun_NoOptions: MaxAge defaults to 0 when the caller
+// skips the option, and Pipeline / NodeID round-trip onto the Ref.
+func TestRefToLastRun_NoOptions(t *testing.T) {
+	ref := RefToLastRun[buildOut]("build", "artifact")
 	if ref.MaxAge != 0 {
 		t.Fatalf("MaxAge: %v", ref.MaxAge)
 	}
@@ -117,19 +117,21 @@ func TestFromPipeline_NoOptions(t *testing.T) {
 	}
 }
 
-// TestCollectPipelineRefs_DiscoversFieldByShape: the audit helper
-// should find PipelineRef fields without needing a name prefix or
-// struct tag (same shape match as collectRefs uses for ordinary Ref).
-func TestCollectPipelineRefs_DiscoversFieldByShape(t *testing.T) {
+// TestCollectCrossPipelineRefs_DiscoversFieldByShape: the audit
+// helper should find Ref[T] fields whose Pipeline is non-empty
+// (cross-pipeline routing) and skip in-run refs (Pipeline empty).
+func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
 	type Job struct {
-		Build    PipelineRef[buildOut, NoInputs]
+		Build    Ref[buildOut]
 		NotARef  string
-		Unfilled PipelineRef[buildOut, NoInputs] // empty Pipeline, excluded
+		InRun    Ref[buildOut] // Pipeline=="" -> in-run, excluded
+		Unfilled Ref[buildOut] // empty everywhere, excluded
 	}
 	job := &Job{
-		Build: FromPipeline[buildOut, NoInputs]("build", "artifact", MaxAge(1*time.Hour)),
+		Build: RefToLastRun[buildOut]("build", "artifact", MaxAge(1*time.Hour)),
+		InRun: Ref[buildOut]{NodeID: "sibling"},
 	}
-	pairs := collectPipelineRefs(job)
+	pairs := collectCrossPipelineRefs(job)
 	if len(pairs) != 1 {
 		t.Fatalf("got %d pairs: %+v", len(pairs), pairs)
 	}
@@ -147,7 +149,7 @@ func TestPipelineResolverFunc_AdaptsPlainFunction(t *testing.T) {
 		return &ResolvedPipelineRef{RunID: "fn-run", Data: []byte(`{"digest":"z","tag":"z"}`)}, nil
 	})
 	ctx := WithPipelineResolver(context.Background(), fn)
-	got := FromPipeline[buildOut, NoInputs]("x", "y").Get(ctx)
+	got := RefToLastRun[buildOut]("x", "y").Get(ctx)
 	if !called || got.Digest != "z" {
 		t.Fatalf("func resolver not invoked properly: called=%v got=%+v", called, got)
 	}

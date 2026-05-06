@@ -255,7 +255,7 @@ type allExplainResult struct {
 // .sparkwing/pipelines.yaml catalog, runs `pipeline explain` against
 // each with zero arguments, and aggregates pass/fail. Non-zero exit on
 // any failure makes this a CI gate: a Plan-time mismatch (e.g. a stale
-// sparkwing.Output[T] call against a renamed output type) blocks merges.
+// sparkwing.RefTo[T] call against a renamed output type) blocks merges.
 func runPipelineExplainAll(format string) error {
 	catalog, err := gatherPipelinesCatalog(true)
 	if err != nil {

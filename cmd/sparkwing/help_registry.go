@@ -201,7 +201,7 @@ var cmdVersion = Command{
 	Path:     "sparkwing version",
 	Synopsis: "Show + update versions (CLI, SDK, sparks)",
 	Description: `Reports the installed CLI version + build provenance, the
-latest published release on sparkwing.dev (with a short network
+latest published release on GitHub (with a short network
 fetch -- bounded by ~3s, fail-soft when offline), and the
 .sparkwing/go.mod SDK pin + any sparks-* libraries declared
 alongside it.
@@ -242,7 +242,7 @@ var cmdUpdate = Command{
 	Path:     "sparkwing update",
 	Synopsis: "Self-update the CLI binary",
 	Description: `Downloads, checksum-verifies, and atomically installs the latest
-(or a specific) sparkwing release from sparkwing.dev.
+(or a specific) sparkwing release from GitHub Releases.
 
 By default the command fetches the latest version pointer, pulls
 the matching tarball for the current OS/arch, verifies its SHA256
@@ -283,7 +283,7 @@ var cmdVersionUpdate = Command{
 	Description: `Two targets, one verb:
 
   --cli   Replace the running sparkwing binary with the target
-          release. Resolves the version pointer from sparkwing.dev,
+          release. Resolves the version pointer from GitHub Releases,
           downloads + checksum-verifies the tarball, and atomically
           installs it. macOS arm64 binaries are ad-hoc-codesigned
           to avoid SIGKILL on first run.
@@ -913,7 +913,7 @@ the shape is visible before every flag is provided.
 --all sweeps every pipeline in .sparkwing/pipelines.yaml, runs
 Plan() on each with no extra args, and exits non-zero if any
 pipeline fails. Designed as a CI gate: a Plan-time validation
-mismatch (sparkwing.Output[T] type drift, Produces[T] / SetResult
+mismatch (sparkwing.RefTo[T] type drift, Produces[T] / SetResult
 asymmetry, duplicate node ID, etc.) blocks merges before the
 pipeline ever runs.`,
 	Flags: []FlagSpec{
@@ -1687,7 +1687,7 @@ var cmdJobsLast = Command{
 var cmdJobsTree = Command{
 	Path:        "sparkwing runs tree",
 	Synopsis:    "Show a run and every descendant run as an ASCII tree",
-	Description: `Walks parent_run_id links so cross-pipeline spawns (AwaitPipelineJob) show up under their originating run. Local mode reads from SQLite; --on NAME reads from the profile's controller.`,
+	Description: `Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under their originating run. Local mode reads from SQLite; --on NAME reads from the profile's controller.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Root run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: table|json|plain", Group: "Output"},

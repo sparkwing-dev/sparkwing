@@ -8,37 +8,39 @@ import (
 	"time"
 )
 
-// AwaitPipelineJob triggers a fresh run of pipeline and waits for it
-// to reach terminal state, returning the typed output of nodeID from
-// that run. Unlike PipelineRef (which reads the most recent successful
-// run), AwaitPipelineJob always produces a new run -- use it when
-// downstream work needs freshness tied to the current moment.
+// RunAndAwait triggers a fresh run of pipeline and waits for it to
+// reach terminal state, returning the typed output of nodeID from
+// that run. This is the imperative cross-pipeline path -- call it
+// from inside a step body when downstream work needs freshness tied
+// to the current moment. The declarative passive sibling is
+// sparkwing.RefToLastRun, which reads the most recent successful
+// run without triggering anything.
 //
 // The two type parameters:
 //
 //   - Out: the JSON-decoded return type (the target node's output).
 //   - In: the target pipeline's Inputs struct, so callers feed args
-//     via WithAwaitInputs(in In). Pipelines that take no flags use
+//     via WithFreshInputs(in In). Pipelines that take no flags use
 //     sparkwing.NoInputs.
 //
 // Cross-repo is the primary use case: pipeline A in repo foo can
 // spawn pipeline B from repo bar without importing bar's Go packages.
 // The contract is the wire shape: pipeline name + JSON output schema.
 //
-// Cycle protection: AwaitPipelineJob carries the current run id as
+// Cycle protection: RunAndAwait carries the current run id as
 // parent_run_id on the spawned trigger; the controller walks the
 // ancestor chain and rejects the request with 409 if pipeline is
 // already in it.
 //
-//	build, err := sparkwing.AwaitPipelineJob[BuildOut, BuildInputs](
+//	build, err := sparkwing.RunAndAwait[BuildOut, BuildInputs](
 //	    ctx, "my-app-build-main", "artifact",
-//	    sparkwing.WithAwaitInputs(BuildInputs{Service: "api"}),
-//	    sparkwing.WithAwaitTimeout(10*time.Minute),
+//	    sparkwing.WithFreshInputs(BuildInputs{Service: "api"}),
+//	    sparkwing.WithFreshTimeout(10*time.Minute),
 //	)
 //
 // Callers that can't import the target's Inputs type pass
-// sparkwing.NoInputs and use WithAwaitArgs as the escape hatch.
-func AwaitPipelineJob[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error) {
+// sparkwing.NoInputs and use WithFreshArgs as the escape hatch.
+func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error) {
 	var zero Out
 	cfg := awaitConfig{}
 	for _, opt := range opts {
@@ -46,7 +48,7 @@ func AwaitPipelineJob[Out, In any](ctx context.Context, pipeline, nodeID string,
 	}
 	aw := pipelineAwaiterFromContext(ctx)
 	if aw == nil {
-		return zero, errors.New("sparkwing: AwaitPipelineJob: no awaiter installed in context (called outside the orchestrator?)")
+		return zero, errors.New("sparkwing: RunAndAwait: no awaiter installed in context (called outside the orchestrator?)")
 	}
 	resolved, err := aw.Await(ctx, AwaitRequest{
 		Pipeline: pipeline,
@@ -57,26 +59,26 @@ func AwaitPipelineJob[Out, In any](ctx context.Context, pipeline, nodeID string,
 		Branch:   cfg.branch,
 	})
 	if err != nil {
-		return zero, fmt.Errorf("AwaitPipelineJob(%s/%s): %w", pipeline, nodeID, err)
+		return zero, fmt.Errorf("RunAndAwait(%s/%s): %w", pipeline, nodeID, err)
 	}
 	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
 		return zero, nil
 	}
 	var out Out
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
-		return zero, fmt.Errorf("AwaitPipelineJob(%s/%s): unmarshal from run %s: %w", pipeline, nodeID, resolved.RunID, err)
+		return zero, fmt.Errorf("RunAndAwait(%s/%s): unmarshal from run %s: %w", pipeline, nodeID, resolved.RunID, err)
 	}
 	return out, nil
 }
 
-// WithAwaitInputs flattens a typed Inputs struct into the underlying
-// args map. Preferred over WithAwaitArgs when the target pipeline's
+// WithFreshInputs flattens a typed Inputs struct into the underlying
+// args map. Preferred over WithFreshArgs when the target pipeline's
 // Inputs type is importable. Field-to-flag conversion follows the
 // `flag:"name"` tag spec; unsupported field types panic.
-func WithAwaitInputs[T any](in T) AwaitOption {
+func WithFreshInputs[T any](in T) AwaitOption {
 	args, err := flattenInputs(in)
 	if err != nil {
-		panic(fmt.Sprintf("sparkwing.WithAwaitInputs: %v", err))
+		panic(fmt.Sprintf("sparkwing.WithFreshInputs: %v", err))
 	}
 	return func(c *awaitConfig) {
 		if c.args == nil {
@@ -88,7 +90,7 @@ func WithAwaitInputs[T any](in T) AwaitOption {
 	}
 }
 
-// AwaitOption tunes AwaitPipelineJob's trigger + wait behavior.
+// AwaitOption tunes RunAndAwait's trigger + wait behavior.
 type AwaitOption func(*awaitConfig)
 
 type awaitConfig struct {
@@ -98,17 +100,17 @@ type awaitConfig struct {
 	branch  string
 }
 
-// WithAwaitTimeout bounds the total wait. On timeout AwaitPipelineJob
+// WithFreshTimeout bounds the total wait. On timeout RunAndAwait
 // returns an error; the spawned run continues to completion on the
 // controller's schedule (it's not cancelled). The default is unbounded
 // (rely on the caller's ctx deadline).
-func WithAwaitTimeout(d time.Duration) AwaitOption {
+func WithFreshTimeout(d time.Duration) AwaitOption {
 	return func(c *awaitConfig) { c.timeout = d }
 }
 
-// WithAwaitArgs passes args through to the spawned trigger. Args are
+// WithFreshArgs passes args through to the spawned trigger. Args are
 // not inherited from the parent run; callers opt in to propagation.
-func WithAwaitArgs(args map[string]string) AwaitOption {
+func WithFreshArgs(args map[string]string) AwaitOption {
 	return func(c *awaitConfig) {
 		c.args = make(map[string]string, len(args))
 		for k, v := range args {
@@ -117,7 +119,7 @@ func WithAwaitArgs(args map[string]string) AwaitOption {
 	}
 }
 
-// WithAwaitRepo declares which repo the spawned pipeline lives in
+// WithFreshRepo declares which repo the spawned pipeline lives in
 // (e.g. "owner/repo"). Required for cross-repo awaits: without it
 // the controller falls back to inheriting the parent run's repo/SHA,
 // which silently builds the wrong code when the awaited pipeline is
@@ -125,15 +127,15 @@ func WithAwaitArgs(args map[string]string) AwaitOption {
 //
 // When set, the child trigger lands at the branch tip of `repo`'s
 // `main` (no SHA pinning) so the child always builds the latest.
-// Pass WithAwaitBranch to override.
-func WithAwaitRepo(repo string) AwaitOption {
+// Pass WithFreshBranch to override.
+func WithFreshRepo(repo string) AwaitOption {
 	return func(c *awaitConfig) { c.repo = repo }
 }
 
-// WithAwaitBranch overrides the branch the spawned trigger runs
-// against. Default is "main" when WithAwaitRepo is set; otherwise
+// WithFreshBranch overrides the branch the spawned trigger runs
+// against. Default is "main" when WithFreshRepo is set; otherwise
 // the spawn inherits the parent's branch.
-func WithAwaitBranch(branch string) AwaitOption {
+func WithFreshBranch(branch string) AwaitOption {
 	return func(c *awaitConfig) { c.branch = branch }
 }
 
@@ -155,7 +157,7 @@ type AwaitRequest struct {
 }
 
 // PipelineAwaiter is the orchestrator-installed backend for
-// AwaitPipelineJob. Both local mode and cluster-mode pod runners
+// RunAndAwait. Both local mode and cluster-mode pod runners
 // provide an implementation; user code never implements this.
 type PipelineAwaiter interface {
 	Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)

@@ -72,7 +72,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		Bump:     r.args.Bump,
 		RepoDir:  repoDir,
 	}).Inline()
-	versionRef := sparkwing.Output[string](discover)
+	versionRef := sparkwing.RefTo[string](discover)
 
 	validate := sparkwing.Job(plan, "validate-version", &validateVersionJob{
 		Version: versionRef,

@@ -89,7 +89,7 @@ type retryPipe struct{ sparkwing.Base }
 
 func (retryPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	build := sparkwing.Job(plan, "build", &retryBuild{})
-	sparkwing.Job(plan, "deploy", &retryDeploy{Build: sparkwing.Output[retryOut](build)}).Needs(build)
+	sparkwing.Job(plan, "deploy", &retryDeploy{Build: sparkwing.RefTo[retryOut](build)}).Needs(build)
 	return nil
 }
 

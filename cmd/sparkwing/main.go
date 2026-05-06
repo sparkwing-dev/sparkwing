@@ -123,8 +123,8 @@ func runWing(args []string) error {
 		return err
 	}
 
-	// Auto-register so cross-repo AwaitPipelineJob can resolve names without
-	// a hardcoded WithAwaitRepo. Errors dropped: read-only home shouldn't break wing.
+	// Auto-register so cross-repo RunAndAwait can resolve names without
+	// a hardcoded WithFreshRepo. Errors dropped: read-only home shouldn't break wing.
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
 	// --config PRESET: explicit flags always win over the preset.

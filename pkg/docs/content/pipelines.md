@@ -143,7 +143,7 @@ func (p *Lint) run(ctx context.Context) error {
 ```
 
 For typed-output Jobs (downstream nodes read the value via `Ref[T]` /
-`Output[T]`), define a struct that embeds `sparkwing.Produces[T]` and
+`RefTo[T]`), define a struct that embeds `sparkwing.Produces[T]` and
 have its `Work()` set a typed result step:
 
 ```go
@@ -163,7 +163,7 @@ func (j *Build) run(ctx context.Context) (BuildOut, error) {
 }
 
 build := sw.Job(plan, "build", &Build{})
-buildRef := sparkwing.Output[BuildOut](build)
+buildRef := sparkwing.RefTo[BuildOut](build)
 sw.Job(plan, "deploy", &DeployJob{Build: buildRef}).Needs(build)
 ```
 
@@ -393,7 +393,7 @@ ignored for inline nodes.
 ### `.Dynamic()`
 
 Annotates a Node whose downstream work is runtime-variable - the
-common case is `AwaitPipelineJob` or external task enqueueing. Purely
+common case is `RunAndAwait` or external task enqueueing. Purely
 a signal to readers: the plan preview shows `[dynamic]` so reviewers
 know to inspect the run for the actual child nodes. `JobFanOutDynamic`
 source nodes are auto-marked dynamic at plan finalization, so you only

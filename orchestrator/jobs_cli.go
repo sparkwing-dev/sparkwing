@@ -816,7 +816,7 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 // writeLogsTreeLocal merges a root run and every descendant run's
 // per-node logs into one chronological stream prefixed with the
 // short run id. Remote mode does not support --tree today (no
-// AwaitPipelineJob child relationship is currently surfaced through
+// RunAndAwait child relationship is currently surfaced through
 // a single controller endpoint); the CLI guards against that at the
 // flag layer.
 func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer) error {

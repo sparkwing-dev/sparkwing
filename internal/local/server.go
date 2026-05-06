@@ -247,7 +247,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
 
 	// Cross-pipeline refs: "latest run of pipeline X matching these
-	// statuses / within this age." Powers sparkwing.PipelineRef[T].Get.
+	// statuses / within this age." Powers sparkwing.Ref[T].Get.
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 
 	// Per-node metrics.

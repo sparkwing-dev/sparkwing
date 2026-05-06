@@ -13,7 +13,7 @@ import (
 )
 
 // REG-018: nested-spawn retry_of propagation. When a parent run is
-// retried, child runs spawned via AwaitPipelineJob during the retry
+// retried, child runs spawned via RunAndAwait during the retry
 // must carry retry_of pointing to the prior run's child spawned at
 // the same node + pipeline. Without that chain, the new child's own
 // DAG runs from scratch instead of skip-passed -- defeating the
@@ -21,7 +21,7 @@ import (
 
 type spawnerOut struct{}
 
-// spawnerNode calls AwaitPipelineJob with a tight timeout so the
+// spawnerNode calls RunAndAwait with a tight timeout so the
 // spawn unblocks the test without needing a worker to actually
 // process the spawned trigger. Test asserts on the trigger row,
 // which is created synchronously inside pipelineAwaiter before the
@@ -35,8 +35,8 @@ func (j *spawnerNode) Work() *sparkwing.Work {
 }
 
 func (spawnerNode) run(ctx context.Context) error {
-	_, err := sparkwing.AwaitPipelineJob[spawnerOut, sparkwing.NoInputs](ctx, "spawn-retry-child", "out",
-		sparkwing.WithAwaitTimeout(150*time.Millisecond))
+	_, err := sparkwing.RunAndAwait[spawnerOut, sparkwing.NoInputs](ctx, "spawn-retry-child", "out",
+		sparkwing.WithFreshTimeout(150*time.Millisecond))
 	return err
 }
 

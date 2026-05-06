@@ -2,7 +2,7 @@
 // ~/.config/sparkwing/repos.yaml; consumed by the local trigger
 // consumer (pkg/orchestrator/local_trigger_loop.go) to resolve
 // "pipeline X" -> "checkout at ~/code/Y" without per-call
-// WithAwaitRepo annotations.
+// WithFreshRepo annotations.
 package main
 
 import (
@@ -54,8 +54,8 @@ func printXrepoUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "DESCRIPTION")
 	fmt.Fprintln(w, "  The registry maps pipeline names to local checkouts so")
-	fmt.Fprintln(w, "  cross-repo AwaitPipelineJob calls resolve without")
-	fmt.Fprintln(w, "  hardcoded WithAwaitRepo annotations. Auto-populated when")
+	fmt.Fprintln(w, "  cross-repo RunAndAwait calls resolve without")
+	fmt.Fprintln(w, "  hardcoded WithFreshRepo annotations. Auto-populated when")
 	fmt.Fprintln(w, "  you run `wing <pipeline>` in a .sparkwing/-bearing repo")
 	fmt.Fprintln(w, "  (set SPARKWING_NO_AUTO_REGISTER=1 to disable).")
 	fmt.Fprintln(w)

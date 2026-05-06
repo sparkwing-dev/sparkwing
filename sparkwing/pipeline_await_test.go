@@ -28,20 +28,20 @@ type awaitOut struct {
 	Image string `json:"image"`
 }
 
-// TestAwaitPipelineJob_HappyPath: the installed awaiter returns JSON,
+// TestRunAndAwait_HappyPath: the installed awaiter returns JSON,
 // typed unmarshal produces the expected value, the request carries
 // the pipeline / node / args / timeout passed via options.
-func TestAwaitPipelineJob_HappyPath(t *testing.T) {
+func TestRunAndAwait_HappyPath(t *testing.T) {
 	payload, _ := json.Marshal(awaitOut{Image: "registry/app:v1"})
 	aw := &stubAwaiter{runID: "child", data: payload}
 	ctx := WithPipelineAwaiter(context.Background(), aw)
 
-	got, err := AwaitPipelineJob[awaitOut, NoInputs](ctx, "upstream", "build",
-		WithAwaitTimeout(30*time.Second),
-		WithAwaitArgs(map[string]string{"env": "prod"}),
+	got, err := RunAndAwait[awaitOut, NoInputs](ctx, "upstream", "build",
+		WithFreshTimeout(30*time.Second),
+		WithFreshArgs(map[string]string{"env": "prod"}),
 	)
 	if err != nil {
-		t.Fatalf("AwaitPipelineJob: %v", err)
+		t.Fatalf("RunAndAwait: %v", err)
 	}
 	if got.Image != "registry/app:v1" {
 		t.Fatalf("out: %+v", got)
@@ -57,24 +57,24 @@ func TestAwaitPipelineJob_HappyPath(t *testing.T) {
 	}
 }
 
-// TestAwaitPipelineJob_NoAwaiterInstalled fails with a clear error
-// rather than panicking when the caller uses AwaitPipelineJob outside
+// TestRunAndAwait_NoAwaiterInstalled fails with a clear error
+// rather than panicking when the caller uses RunAndAwait outside
 // of an orchestrator-dispatched ctx.
-func TestAwaitPipelineJob_NoAwaiterInstalled(t *testing.T) {
-	_, err := AwaitPipelineJob[awaitOut, NoInputs](context.Background(), "x", "y")
+func TestRunAndAwait_NoAwaiterInstalled(t *testing.T) {
+	_, err := RunAndAwait[awaitOut, NoInputs](context.Background(), "x", "y")
 	if err == nil || !strings.Contains(err.Error(), "no awaiter installed") {
 		t.Fatalf("unexpected err: %v", err)
 	}
 }
 
-// TestAwaitPipelineJob_AwaiterError wraps awaiter errors with the
+// TestRunAndAwait_AwaiterError wraps awaiter errors with the
 // pipeline/node names so callers see enough context in the returned
 // error to triage without logs.
-func TestAwaitPipelineJob_AwaiterError(t *testing.T) {
+func TestRunAndAwait_AwaiterError(t *testing.T) {
 	aw := &stubAwaiter{err: errors.New("boom")}
 	ctx := WithPipelineAwaiter(context.Background(), aw)
 
-	_, err := AwaitPipelineJob[awaitOut, NoInputs](ctx, "up", "n")
+	_, err := RunAndAwait[awaitOut, NoInputs](ctx, "up", "n")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -86,14 +86,14 @@ func TestAwaitPipelineJob_AwaiterError(t *testing.T) {
 	}
 }
 
-// TestAwaitPipelineJob_EmptyDataZeroValue: the awaiter returned
+// TestRunAndAwait_EmptyDataZeroValue: the awaiter returned
 // success but the target node had no output. Give the caller the
 // zero value rather than surfacing a JSON-unmarshal panic.
-func TestAwaitPipelineJob_EmptyDataZeroValue(t *testing.T) {
+func TestRunAndAwait_EmptyDataZeroValue(t *testing.T) {
 	aw := &stubAwaiter{runID: "child", data: nil}
 	ctx := WithPipelineAwaiter(context.Background(), aw)
 
-	got, err := AwaitPipelineJob[awaitOut, NoInputs](ctx, "up", "n")
+	got, err := RunAndAwait[awaitOut, NoInputs](ctx, "up", "n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestAwaitPipelineJob_EmptyDataZeroValue(t *testing.T) {
 func TestAwaitOption_Defaults(t *testing.T) {
 	aw := &stubAwaiter{runID: "x", data: []byte(`{}`)}
 	ctx := WithPipelineAwaiter(context.Background(), aw)
-	_, _ = AwaitPipelineJob[awaitOut, NoInputs](ctx, "up", "n")
+	_, _ = RunAndAwait[awaitOut, NoInputs](ctx, "up", "n")
 	if aw.lastReq.Timeout != 0 {
 		t.Fatalf("default timeout: %v", aw.lastReq.Timeout)
 	}

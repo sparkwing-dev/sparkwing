@@ -12,7 +12,7 @@ import (
 // hard plan-time contract: a typed job MUST embed Produces[T] AND its
 // Work() MUST call SetResult on a step of type T. Either piece alone
 // is a Plan-time panic so the contract is visible at the type level
-// AND honored at runtime. sw.Output[T] then validates against the
+// AND honored at runtime. sw.RefTo[T] then validates against the
 // marker and never falls back to inference.
 
 type producedJob struct {
@@ -176,7 +176,7 @@ func TestProduces_NewDetachedNodeAppliesContract(t *testing.T) {
 func TestOutput_WiresFromMarker(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	n := sparkwing.Job(plan, "build", &producedJob{})
-	ref := sparkwing.Output[buildOut](n)
+	ref := sparkwing.RefTo[buildOut](n)
 	if ref.Node() != "build" {
 		t.Fatalf("Ref.Node() = %q, want build", ref.Node())
 	}
@@ -188,14 +188,14 @@ func TestOutput_PanicsOnUntypedNode(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("Output[T] on a node with no Produces[T] should panic")
+			t.Fatal("RefTo[T] on a node with no Produces[T] should panic")
 		}
 		msg, _ := r.(string)
 		if !strings.Contains(msg, "Produces[") {
 			t.Fatalf("expected 'Produces[' in panic, got %q", msg)
 		}
 	}()
-	_ = sparkwing.Output[buildOut](n)
+	_ = sparkwing.RefTo[buildOut](n)
 }
 
 func TestOutput_PanicsOnTypeMismatch(t *testing.T) {
@@ -204,14 +204,14 @@ func TestOutput_PanicsOnTypeMismatch(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("Output[T] with wrong T should panic")
+			t.Fatal("RefTo[T] with wrong T should panic")
 		}
 		msg, _ := r.(string)
 		if !strings.Contains(msg, "produces") || !strings.Contains(msg, `"build"`) {
 			t.Fatalf("panic should mention node id and produced type, got %q", msg)
 		}
 	}()
-	_ = sparkwing.Output[otherOut](n)
+	_ = sparkwing.RefTo[otherOut](n)
 }
 
 // LintWarnings used to flag missing Produces / missing SetResult; under

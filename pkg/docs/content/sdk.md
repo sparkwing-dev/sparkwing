@@ -22,7 +22,7 @@ Every example below uses that alias. The package itself is named
 
 Operations that mutate the Plan are **free functions on `sparkwing`**;
 operations that read the Plan are **methods on `*Plan`**. Go forbids
-generic methods, so the typed adders (Output[T], JobFanOut[T]) must
+generic methods, so the typed adders (RefTo[T], JobFanOut[T]) must
 be free functions; for symmetry every adder lives there. Reads stay
 on `*Plan` because they don't have the same constraint and the
 `plan.X()` shape reads naturally for accessors.
@@ -33,7 +33,7 @@ on `*Plan` because they don't have the same constraint and the
 | `sw.JobFanOut(plan, name, items, fn)` | `plan.Node(id)` |
 | `sw.JobFanOutDynamic(plan, name, source, fn)` | `plan.LintWarnings()` |
 | `sw.Group(plan, name, members...)` | `plan.Expansions()` |
-| `sw.Output[T](node)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
+| `sw.RefTo[T](node)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
 
 ## The two-layer model
 
@@ -124,7 +124,7 @@ func (j *DiscoverBuildContextJob) run(ctx context.Context) (BuildContext, error)
 
 func (b *Build) Plan(ctx context.Context, plan *sw.Plan, args BuildArgs, run sw.RunContext) error {
     discover := sw.Job(plan, "discover", &DiscoverBuildContextJob{}).Inline()
-    discoverRef := sw.Output[BuildContext](discover)
+    discoverRef := sw.RefTo[BuildContext](discover)
     sw.Job(plan, "build", &BuildImageJob{Discover: discoverRef}).Needs(discover)
     return nil
 }
@@ -273,7 +273,7 @@ sw.Job(plan, id, job sw.Workable) *Node                                       //
 sw.JobFanOut[T](plan, name, items, fn) *NodeGroup                             // Plan-time static fan-out
 sw.JobFanOutDynamic[T](plan, name, source, fn) *NodeGroup                     // runtime fan-out after source completes
 sw.Group(plan, name, members...) *NodeGroup                                   // named cluster + Needs target (name="" = unnamed)
-sw.Output[T](node) sw.Ref[T]                                                  // typed Ref into node's typed output
+sw.RefTo[T](node) sw.Ref[T]                                                  // typed Ref into node's typed output
 ```
 
 Approval gates register through `sw.Job` with the built-in
@@ -354,7 +354,7 @@ For typed-output Jobs the contract is **strict**: the job
 struct must embed `sw.Produces[T]` AND its `Work().SetResult` must
 land on a step of type `T`. Either alone is a Plan-time panic. The
 marker lives on the struct, where the typed contract belongs;
-`sw.Output[T](node)` validates against the marker and never falls
+`sw.RefTo[T](node)` validates against the marker and never falls
 back to inferring the type from `Work.SetResult`.
 
 For multi-step Jobs, define a struct with a `Work()` method:
@@ -412,10 +412,16 @@ spawn.SkipIf(predicate)                                  // skip predicate befor
 The spawned Plan node's id is namespaced as `parent/spawnID` so logs
 and the run history are unambiguous.
 
-## Cross-node typed outputs
+## Typed outputs (single field type for every routing)
 
-The two-step typed-output pattern: register the producer with `sw.Job`,
-then take a typed Ref with `sw.Output[T]`:
+Every typed dependency on another node's output is a `sw.Ref[T]`
+field. The constructor in `Plan()` carries the routing detail:
+
+| Routing | Constructor | What it does |
+|---|---|---|
+| In-run sibling | `sw.RefTo[T](node)` | Read a `*Node` in the same DAG. Implies a `Needs()` edge. |
+| Cross-pipeline, passive | `sw.RefToLastRun[T](pipeline, nodeID, opts...)` | Read another pipeline's latest successful run. Does not trigger. |
+| Cross-pipeline, active | `sw.RunAndAwait[Out, In](ctx, ...)` (free fn) | Trigger a fresh run of another pipeline, wait, return its output. |
 
 ```go
 type BuildJob struct {
@@ -429,41 +435,46 @@ func (j *BuildJob) Work() *sw.Work {
     return w
 }
 
-build := sw.Job(plan, "build", &BuildJob{})
-buildOut := sw.Output[BuildOut](build)            // Ref[BuildOut]
+type DeployJob struct {
+    sw.Base
+    Build    sw.Ref[BuildOut]   // in-run
+    Manifest sw.Ref[Manifest]   // cross-pipeline, same field type
+}
 
-sw.Job(plan, "deploy", &DeployJob{Build: buildOut}).Needs(build)
+build := sw.Job(plan, "build", &BuildJob{})
+sw.Job(plan, "deploy", &DeployJob{
+    Build:    sw.RefTo[BuildOut](build),                                 // wires the Needs edge
+    Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
+                  sw.MaxAge(24*time.Hour)),                              // staleness guard
+}).Needs(build)
+
+// In step body:
+b := j.Build.Get(ctx)
+m := j.Manifest.Get(ctx)
 ```
 
-`sw.Output[T]` is strict: the node's job MUST embed
-`sw.Produces[T]`. Without the marker -- even if the Work has a
-SetResult of the right type -- `sw.Output[T]` panics. This forces
-the contract to be visible at the type level so readers and agents
-see it on the struct definition alone.
+`sw.RefTo[T]` is strict: the node's job MUST embed `sw.Produces[T]`.
+Without the marker -- even if the Work has a SetResult of the right
+type -- `sw.RefTo[T]` panics. This forces the contract to be visible
+at the type level so readers and agents see it on the struct
+definition alone.
 
 Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
-`sw.Output[T]`; pass plain bytes via env vars or sibling steps.
+`sw.RefTo[T]`; pass plain bytes via env vars or sibling steps.
 
-## Cross-pipeline references
+### Imperative cross-pipeline trigger
 
-```
-PipelineRef[Out, In]{Pipeline, NodeID}              // pin a node from another pipeline
-sparkwing.FromPipeline[Out, In]("upstream", "node-id",
-    sparkwing.MaxAge(24*time.Hour))                 // staleness guard
-ref.Get(ctx)                                        // fetch the latest matching run's output
-```
-
-```
-out, err := sparkwing.AwaitPipelineJob[Out, In](ctx, "build", "artifact",
-    sparkwing.WithAwaitInputs(In{Service: "api"}),  // typed flag struct
-    sparkwing.WithAwaitTimeout(10*time.Minute),
+```go
+out, err := sparkwing.RunAndAwait[Out, In](ctx, "build", "artifact",
+    sparkwing.WithFreshInputs(In{Service: "api"}),  // typed flag struct
+    sparkwing.WithFreshTimeout(10*time.Minute),
 )
 ```
 
 Use `sparkwing.NoInputs` as the second type parameter when the target
 pipeline takes no flags. Cross-repo callers without import access to
 the target's Inputs type pass `sparkwing.NoInputs` and use the escape
-hatch `sparkwing.WithAwaitArgs(map[string]string{...})`.
+hatch `sparkwing.WithFreshArgs(map[string]string{...})`.
 
 ## Secrets and config
 

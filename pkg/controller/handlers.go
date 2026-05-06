@@ -415,7 +415,7 @@ type triggerReq struct {
 	Trigger  sparkwing.TriggerInfo `json:"trigger,omitempty"`
 	Git      triggerReqGit         `json:"git,omitempty"`
 	// ParentRunID identifies the run that spawned this trigger via
-	// sparkwing.AwaitPipelineJob; the controller walks the parent
+	// sparkwing.RunAndAwait; the controller walks the parent
 	// chain to reject cycles before persisting.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// ParentNodeID identifies which node of the parent run did the
@@ -488,7 +488,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Parent-repo inheritance for AwaitPipelineJob:
+		// Parent-repo inheritance for RunAndAwait:
 		//   - Same-repo await (caller didn't set body.Git.Repo): copy
 		//     parent's git context so the spawned run hits the same SHA.
 		//   - Cross-repo await (caller set body.Git.Repo): do NOT copy

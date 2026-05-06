@@ -22,6 +22,31 @@ Authorization: Bearer <SPARKWING_API_TOKEN>
 - `/trigger`: 20 requests per minute per IP+pipeline
 - Auth failures: 10 per IP per minute, then blocked 5 minutes (HTTP 429)
 
+**Auth-error response shape**: 401 and 403 responses from auth-gated
+endpoints (controller, laptop-local controller, and the logs service)
+return a structured JSON body. Programmatic clients should branch on
+the `error` code rather than scraping `message`.
+
+```json
+{
+  "error": "missing_scope",
+  "missing_scope": "logs.write",
+  "principal": "runner:warm-runner-7",
+  "message": "token lacks required scope: logs.write"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `error` | Stable code: `"unauthenticated"` (401, no/invalid token) or `"missing_scope"` (403, principal lacks the required scope). |
+| `missing_scope` | Scope name the request lacked. Set on 403 only. |
+| `principal` | Authenticated identity in `kind:name` form (e.g. `runner:warm-runner-7`). Empty when auth never resolved. |
+| `message` | Human-readable string. Stable enough for logs; do not pattern-match. |
+
+Older controllers / non-controller proxies may still emit a plain-text
+body. Clients fall back to a regex on the legacy phrasing
+`"token lacks required scope: <name>"`.
+
 See [Security](security.md) for full details.
 
 ## Jobs

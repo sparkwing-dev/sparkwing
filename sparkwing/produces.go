@@ -6,7 +6,7 @@ import "reflect"
 // output contract at the type level. The Job adder cross-validates
 // the marker against the Job's Work().SetResult at Plan time and
 // rejects mismatches; downstream consumers read the contract via
-// sw.Output[T](node).
+// sw.RefTo[T](node).
 //
 //	type BuildJob struct {
 //	    sw.Base

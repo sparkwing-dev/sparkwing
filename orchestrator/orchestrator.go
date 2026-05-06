@@ -50,7 +50,7 @@ type Options struct {
 	Runner runner.Runner
 
 	// ParentRunID marks this run as spawned by another via
-	// AwaitPipelineJob; the controller walks the ancestor chain for
+	// RunAndAwait; the controller walks the ancestor chain for
 	// cross-pipeline cycle detection.
 	ParentRunID string
 
@@ -273,7 +273,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
-	// Local-only AwaitPipelineJob trigger consumer; cluster mode
+	// Local-only RunAndAwait trigger consumer; cluster mode
 	// delegates this to the warm-runner pool.
 	if ls, ok := backends.State.(localState); ok {
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)

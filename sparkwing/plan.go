@@ -630,7 +630,7 @@ func SkipBudget(d time.Duration) SkipOption {
 // Typed upstream output is consumed via closure capture + Ref.Get:
 //
 //	setup := sw.Job(plan, "setup", &SetupJob{})
-//	setupOut := sw.Output[SetupOutput](setup)
+//	setupOut := sw.RefTo[SetupOutput](setup)
 //	sw.Job(plan, "deploy", &DeployJob{}).
 //	    Needs(setup).
 //	    SkipIf(func(ctx context.Context) bool {
@@ -784,7 +784,7 @@ func (p *Plan) NodeGroupNames(id string) []string {
 }
 
 // Dynamic marks the node as having runtime-variable downstream work
-// (e.g. invokes AwaitPipelineJob, enqueues external tasks). ExpandFrom
+// (e.g. invokes RunAndAwait, enqueues external tasks). ExpandFrom
 // sources are auto-detected; .Dynamic() is only needed for
 // non-ExpandFrom cases. Dynamic is purely a signal to readers.
 //

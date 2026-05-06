@@ -49,7 +49,7 @@ func (d *deployJob) Work() *sparkwing.Work {
 func TestPlanJobAndNeeds(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	build := sparkwing.Job(plan, "build", &buildJob{})
-	deploy := sparkwing.Job(plan, "deploy", &deployJob{Build: sparkwing.Output[buildOut](build)}).Needs(build)
+	deploy := sparkwing.Job(plan, "deploy", &deployJob{Build: sparkwing.RefTo[buildOut](build)}).Needs(build)
 	_ = deploy
 
 	if got := len(plan.Nodes()); got != 2 {
@@ -67,7 +67,7 @@ func TestPlanJobAndNeeds(t *testing.T) {
 func TestTypedJobOutput(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	build := sparkwing.Job(plan, "build", &buildJob{})
-	if sparkwing.Output[buildOut](build).Node() != "build" {
+	if sparkwing.RefTo[buildOut](build).Node() != "build" {
 		t.Fatalf("typed Ref not wired to node id")
 	}
 	if build.OutputType() == nil {
