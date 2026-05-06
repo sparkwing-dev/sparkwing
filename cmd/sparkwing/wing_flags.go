@@ -96,6 +96,168 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 	return out
 }
 
+// wingTokenSpec classifies a wing-owned flag token at parse time.
+// takesValue is true for flags that consume the next token (e.g.
+// --on prod) versus pure boolean flags (e.g. --full). Used by both
+// parseWingFlags and extractPipelineName so the two stay in sync.
+type wingTokenSpec struct {
+	tok        string
+	takesValue bool
+}
+
+// wingTokenSpecs is the canonical wing-owned flag-token table. Both
+// parseWingFlags and extractPipelineName read from this so adding a
+// new wing flag is a one-line change. The list mirrors the SDK's
+// ReservedFlagNames() set; tests pin them in lockstep.
+var wingTokenSpecs = []wingTokenSpec{
+	{tok: "--from", takesValue: true},
+	{tok: "--on", takesValue: true},
+	{tok: "--retry-of", takesValue: true},
+	{tok: "--full", takesValue: false},
+	{tok: "--config", takesValue: true},
+	{tok: "--no-update", takesValue: false},
+	{tok: "--verbose", takesValue: false},
+	{tok: "-v", takesValue: false},
+	{tok: "--secrets", takesValue: true},
+	{tok: "--mode", takesValue: true},
+	{tok: "--workers", takesValue: true},
+	{tok: "--start-at", takesValue: true},
+	{tok: "--stop-at", takesValue: true},
+	{tok: "-C", takesValue: true},
+	{tok: "--change-directory", takesValue: true},
+}
+
+// classifyWingFlag returns (spec, ok) for a token that matches a
+// wing-owned flag in either bare (`--on`) or `=`-joined
+// (`--on=prod`) form. Used by extractPipelineName to know whether
+// to skip one or two tokens when scanning for the pipeline-name
+// positional.
+func classifyWingFlag(tok string) (wingTokenSpec, bool) {
+	for _, s := range wingTokenSpecs {
+		if tok == s.tok {
+			return s, true
+		}
+		if s.takesValue && strings.HasPrefix(tok, s.tok+"=") {
+			// `=`-joined form is one token regardless of takesValue.
+			return wingTokenSpec{tok: s.tok, takesValue: false}, true
+		}
+	}
+	return wingTokenSpec{}, false
+}
+
+// strictOrderFlags must precede the pipeline-name positional. Other
+// wing flags (`--on`, `--from`, ...) are still consumed from any
+// position by parseWingFlags so existing `wing build --on prod`
+// muscle memory keeps working; the strict-order set is the subset
+// where ambiguity vs the positional is the actual bug -- `-C` whose
+// long form `--change-directory` is the original IMP-006 repro.
+// Adding more flags here is a one-line change and immediately
+// covered by the existing test matrix.
+var strictOrderFlags = map[string]bool{
+	"-C":                 true,
+	"--change-directory": true,
+}
+
+// isStrictOrderFlagToken returns true when tok is a strict-order
+// wing flag (`-C`, `--change-directory`, or their `=value` form).
+func isStrictOrderFlagToken(tok string) bool {
+	if strictOrderFlags[tok] {
+		return true
+	}
+	if eq := strings.IndexByte(tok, '='); eq >= 0 {
+		return strictOrderFlags[tok[:eq]]
+	}
+	return false
+}
+
+// extractPipelineName implements the IMP-006 strict-ordering contract
+// for `wing <name>` and `sparkwing run <name>`. The rule is narrow:
+// only the strict-order flag set (currently just `-C` /
+// `--change-directory`) must appear BEFORE the pipeline-name
+// positional. Other wing-owned flags (`--on`, `--from`, `--start-at`,
+// ...) are still consumed from any position by parseWingFlags so
+// existing `wing build --on prod` invocations keep working untouched.
+//
+// The first non-flag token (or the token immediately after a literal
+// `--`) is the pipeline name; everything else is returned as `rest`
+// for downstream parseWingFlags / pipeline-binary handling. Wing
+// flag-VALUE pairs are consumed as one unit when scanning so a path
+// argument like `/path` after `-C` is never mistaken for the
+// positional.
+//
+// Returns an error if `-C` / `--change-directory` appears after the
+// pipeline name. That covers the previously-silent
+// `wing run foo -C /path` shape, where `-C` would otherwise be
+// treated as a pipeline flag and the path would either get ignored
+// or land in the pipeline's own flag bag.
+//
+// `--` is honored as a strict break: tokens after `--` are treated
+// as opaque pipeline args -- no wing-flag detection runs on them, so
+// `wing run foo -- --my-pipeline-flag value` parses cleanly even if
+// a future wing flag shares the name.
+func extractPipelineName(args []string) (name string, rest []string, err error) {
+	rest = make([]string, 0, len(args))
+	i := 0
+	for i < len(args) {
+		tok := args[i]
+		if tok == "--" {
+			// Everything after `--` is pipeline-side; the pipeline
+			// name must already have been found, otherwise the
+			// invocation has no pipeline at all.
+			if name == "" {
+				return "", nil, fmt.Errorf("pipeline name required before `--`")
+			}
+			rest = append(rest, args[i+1:]...)
+			return name, rest, nil
+		}
+		if isStrictOrderFlagToken(tok) {
+			if name != "" {
+				return "", nil, fmt.Errorf("ambiguous flag position: %s must precede the pipeline name %q", tok, name)
+			}
+			// Consume the flag (and its value if applicable) into
+			// rest so parseWingFlags handles the actual binding.
+			spec, ok := classifyWingFlag(tok)
+			rest = append(rest, tok)
+			if ok && spec.takesValue && i+1 < len(args) {
+				rest = append(rest, args[i+1])
+				i += 2
+				continue
+			}
+			i++
+			continue
+		}
+		if spec, ok := classifyWingFlag(tok); ok {
+			// Non-strict-order wing flag (e.g. --on, --from):
+			// consume the value alongside it so it can't be
+			// mistaken for the pipeline-name positional, then keep
+			// scanning. parseWingFlags will bind it later.
+			rest = append(rest, tok)
+			if spec.takesValue && i+1 < len(args) {
+				rest = append(rest, args[i+1])
+				i += 2
+				continue
+			}
+			i++
+			continue
+		}
+		// Non-wing-flag token. The first one that doesn't start with
+		// `-` (and isn't a value of a wing flag) is the pipeline
+		// name. Flag-looking tokens are pipeline flags -- pass
+		// through to the binary on either side of the positional.
+		if name == "" && (tok == "" || tok[0] != '-') {
+			name = tok
+			i++
+			continue
+		}
+		rest = append(rest, tok)
+		i++
+	}
+	if name == "" {
+		return "", nil, fmt.Errorf("pipeline name required")
+	}
+	return name, rest, nil
+}
+
 // parseWingFlags splits wing-owned flags from pass-through args.
 // Unknown / malformed-trailing flags fall through to the pipeline binary.
 func parseWingFlags(args []string) (wingFlags, []string) {

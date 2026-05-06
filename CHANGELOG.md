@@ -65,6 +65,45 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   without ast walking; tracked separately).
 
 ### Fixed
+- **Pipeline `flag:"..."` tags that collide with wing-owned flags
+  now panic at `Register` time with a clear, full-context message
+  (IMP-003).** Previously, declaring an Args field like
+  `From string \`flag:"from"\`` would silently lose the value to
+  wing's own `--from REF` parsing and surface as a confusing
+  downstream error (`git worktree add invalid reference: ...`).
+  `sparkwing.Register[T]` now walks the resolved Inputs schema and
+  panics if any flag name appears in the wing-reserved set
+  (`from`, `on`, `config`, `retry-of`, `full`, `no-update`,
+  `verbose`/`v`, `secrets`, `mode`, `workers`, `change-directory`/`C`,
+  `start-at`, `stop-at`). The panic body names the pipeline, the Go
+  field, the colliding flag, and the full reserved list so authors
+  don't have to re-discover the contract elsewhere. New SDK
+  surface: `sparkwing.ReservedFlagNames()` returns the canonical
+  sorted list — single source of truth shared with
+  `cmd/sparkwing/wing_flags.go` so the two parser surfaces can never
+  drift. `flag:",extra"` bag fields are exempt (they accept
+  arbitrary keys at runtime; wing-owned flags are stripped before
+  the bag sees them).
+- **`sparkwing run -C <path> <pipeline>` no longer treats `-C` as
+  the pipeline name (IMP-006).** The hand-rolled wing-flag parser
+  used to take `args[0]` as the pipeline-name positional
+  unconditionally, so `sparkwing run -C /path lint --on prod`
+  silently dispatched a pipeline literally named
+  `--change-directory` against the *current* repo. The run-verb
+  now finds the pipeline-name positional via a strict-ordering
+  scan that consumes wing flag-VALUE pairs first; `-C /path` is
+  recognized and stripped before positional resolution. The strict
+  rule is narrow on purpose — `-C` / `--change-directory` are the
+  only flags that must appear before the positional, since they're
+  the ones whose value (a path) is most easily mistaken for the
+  pipeline name. Other wing flags (`--on`, `--from`, `--start-at`,
+  ...) keep working from any position so existing
+  `wing build --on prod` muscle memory is unaffected. The previously
+  silent `wing run foo -C /path` shape now errors with
+  `ambiguous flag position: -C must precede the pipeline name "foo"`.
+  `--` is honored as a hard break: anything after `--` is opaque
+  pipeline-side, so `wing run foo -- --my-pipeline-flag value`
+  parses cleanly even if a future wing flag shares the name.
 - **`sparkwing.MustConfig` for parity with `MustSecret` (SDK-036).**
   `MustSecret(ctx, name)` has long had a panic-on-error shortcut for
   call sites where a missing secret is genuinely a programmer

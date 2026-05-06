@@ -100,12 +100,19 @@ func runWing(args []string) error {
 		return nil
 	}
 
-	pipelineName := args[0]
-	wf, passthrough := parseWingFlags(args[1:])
+	// IMP-006: wing-owned flags must precede the pipeline-name
+	// positional. extractPipelineName enforces that; previously the
+	// parser took args[0] as the pipeline name unconditionally, so
+	// `sparkwing run -C /path foo` silently treated `-C` as the
+	// pipeline name and `/path` as a pipeline arg.
+	pipelineName, rest, err := extractPipelineName(args)
+	if err != nil {
+		return fmt.Errorf("wing: %w", err)
+	}
+	wf, passthrough := parseWingFlags(rest)
 
 	// `-C <path>` re-anchors discovery (same shape as `git -C`).
 	var dir string
-	var err error
 	if wf.changeDir != "" {
 		dir, err = findSparkwingDirFrom(wf.changeDir)
 	} else {
