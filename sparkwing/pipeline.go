@@ -114,6 +114,13 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		if err := p.Plan(withPlanTime(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
+		// IMP-008: catch typo'd string-keyed Needs("...") references
+		// once the DAG is fully materialized but before the
+		// orchestrator can dispatch. Mirrors SDK-002's pattern of
+		// failing loud at Plan time so authors discover misspellings
+		// at registration, not at first dispatch when the typo would
+		// silently make the dependency edge a no-op.
+		validateRefs(plan)
 		return plan, nil
 	}
 

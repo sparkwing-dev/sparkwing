@@ -7,6 +7,28 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **Plan-time validation of string-typed step references (IMP-008).**
+  After a pipeline's `Plan(ctx, plan, in, rc)` returns successfully,
+  the SDK now walks every Node and every materialized Work and
+  panics with a "did you mean X?" suggestion (Levenshtein-driven)
+  if a `Needs("step-id")` string doesn't resolve to a registered
+  step, spawn, or plan node. Mirrors SDK-002's panic-with-pointer
+  pattern: typo'd `Needs("install-karpentr")` calls used to silently
+  make the dependency edge a no-op so the step would run
+  immediately instead of after its intended predecessor; now they
+  fail at pipeline registration / `sparkwing pipeline explain` time
+  with a message that names the offending call site (`node "build"
+  WorkStep "compile" .Needs("fetchh")`) and either suggests the
+  closest match or lists available IDs when no match is close
+  enough. Handle-typed `Needs(*WorkStep)` / `Needs(*Node)` paths
+  are unaffected — the validation only fires when the resolved ID
+  doesn't match the registry, which can only happen via the string
+  overload. Levenshtein implemented inline (~25 LOC, two-row DP) to
+  avoid a new module dep. SkipIf predicate closures are
+  intentionally out of scope (their bodies can't be introspected
+  without ast walking; tracked separately).
+
+### Fixed
 - **`sparkwing.MustConfig` for parity with `MustSecret` (SDK-036).**
   `MustSecret(ctx, name)` has long had a panic-on-error shortcut for
   call sites where a missing secret is genuinely a programmer
