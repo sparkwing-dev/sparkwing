@@ -255,6 +255,21 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		}
 	}
 
+	// IMP-014: under --dry-run, a step that declared neither a
+	// dry-run body nor an explicit SafeWithoutDryRun marker is
+	// soft-skipped with reason `no_dry_run_defined`. The dispatch
+	// path below selects DryRunFn vs Fn for the cases that DO have
+	// a defined dispatch; this branch handles only the "missing
+	// contract" case so the run logs make the gap visible.
+	if it.kind == itemStep && IsDryRun(ctx) && it.step.dryRunFn == nil && !it.step.safeWithoutDryRun {
+		if !it.isHidden {
+			emitStepSkippedWithReason(ctx, it.id, "no_dry_run_defined")
+		}
+		it.markDone(nil)
+		done <- stepResult{id: it.id}
+		return
+	}
+
 	start := time.Now()
 	if !it.isHidden {
 		emitStepEvent(ctx, it.id, "step_start", 0, nil)
@@ -280,6 +295,14 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 func dispatchItem(ctx context.Context, it *workItem, parentNodeID string, handler SpawnHandler) (any, error) {
 	switch it.kind {
 	case itemStep:
+		// IMP-014: dispatch under --dry-run prefers DryRunFn over
+		// the apply Fn. The "step has neither" case is handled
+		// upstream in runOneItem before step_start fires; by the
+		// time we reach dispatchItem the step is guaranteed to
+		// have a runnable body for the current mode.
+		if IsDryRun(ctx) && it.step.dryRunFn != nil {
+			return nil, it.step.dryRunFn(ctx)
+		}
 		return it.step.Fn()(ctx)
 	case itemSpawn:
 		return runOneSpawn(ctx, it.spawn, parentNodeID, handler)

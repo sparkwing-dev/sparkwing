@@ -63,6 +63,12 @@ type wingFlags struct {
 	// "did you mean X?" suggestion at registration time.
 	startAt string
 	stopAt  string
+	// IMP-014: --dry-run runs each step's DryRunFn instead of its
+	// apply Fn. No mutation; safe to run from agents and CI gates
+	// before destructive operations. Steps without a DryRunFn (and
+	// without an explicit SafeWithoutDryRun marker) soft-skip with
+	// reason `no_dry_run_defined` so the contract gap is visible.
+	dryRun bool
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -125,6 +131,7 @@ var wingTokenSpecs = []wingTokenSpec{
 	{tok: "--workers", takesValue: true},
 	{tok: "--start-at", takesValue: true},
 	{tok: "--stop-at", takesValue: true},
+	{tok: "--dry-run", takesValue: false},
 	{tok: "-C", takesValue: true},
 	{tok: "--change-directory", takesValue: true},
 }
@@ -381,6 +388,12 @@ func parseWingFlags(args []string) (wingFlags, []string) {
 		case strings.HasPrefix(a, "--stop-at="):
 			wf.stopAt = strings.TrimPrefix(a, "--stop-at=")
 			i++
+		case a == "--dry-run", a == "--dry-run=true":
+			wf.dryRun = true
+			i++
+		case a == "--dry-run=false":
+			wf.dryRun = false
+			i++
 		case a == "-C", a == "--change-directory":
 			if i+1 < len(args) {
 				wf.changeDir = args[i+1]
@@ -475,6 +488,13 @@ func dispatchRemote(pipelineName string, wf wingFlags, passthrough []string) err
 	}
 	if wf.stopAt != "" {
 		envMap["SPARKWING_STOP_AT"] = wf.stopAt
+	}
+	// IMP-014: forward --dry-run to the remote runner via the same
+	// env-var protocol the local-exec path uses. Behavior is
+	// identical across venues so `wing X --on prod --dry-run`
+	// previews the same way it does locally.
+	if wf.dryRun {
+		envMap["SPARKWING_DRY_RUN"] = "1"
 	}
 
 	triggerBranch := wf.from

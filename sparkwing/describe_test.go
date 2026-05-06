@@ -12,7 +12,7 @@ import (
 type deployInputs struct {
 	Env     string        `flag:"env" required:"true" desc:"Target environment"`
 	Version string        `flag:"version" desc:"Image tag"`
-	DryRun  bool          `flag:"dry-run" desc:"Preview without applying"`
+	NoApply bool          `flag:"no-apply" desc:"Preview without applying"`
 	Count   int           `flag:"count" default:"3" desc:"Number of replicas"`
 	Timeout time.Duration `flag:"timeout" desc:"Deadline"`
 	//lint:ignore U1000 fixture field verifies the parser skips fields without a flag tag
@@ -73,9 +73,9 @@ func TestDescribePipelineShape(t *testing.T) {
 	if env.GoName != "Env" {
 		t.Errorf("env.GoName = %q, want Env", env.GoName)
 	}
-	dry := byName["dry-run"]
+	dry := byName["no-apply"]
 	if dry.Type != "bool" || dry.Required {
-		t.Errorf("dry-run = %+v", dry)
+		t.Errorf("no-apply = %+v", dry)
 	}
 	count := byName["count"]
 	if count.Type != "int" || count.Default != "3" {
@@ -105,7 +105,7 @@ func TestDescribePipelineShape(t *testing.T) {
 type populateInputs struct {
 	Env       string            `flag:"env" required:"true" desc:"Target environment"`
 	Version   string            `flag:"version" desc:"Image tag"`
-	DryRun    bool              `flag:"dry-run"`
+	NoApply   bool              `flag:"no-apply"`
 	Count     int               `flag:"count" default:"3"`
 	Timeout   time.Duration     `flag:"timeout"`
 	BagFields map[string]string `flag:",extra"`
@@ -132,12 +132,12 @@ func TestRegistration_InvokeParsesTypes(t *testing.T) {
 		t.Fatal("not registered")
 	}
 	_, err := reg.Invoke(context.Background(), map[string]string{
-		"env":     "prod",
-		"dry-run": "true",
-		"count":   "7",
-		"timeout": "1m30s",
-		"version": "v1.2.3",
-		"unknown": "stashed-in-bag",
+		"env":      "prod",
+		"no-apply": "true",
+		"count":    "7",
+		"timeout":  "1m30s",
+		"version":  "v1.2.3",
+		"unknown":  "stashed-in-bag",
 	}, sparkwing.RunContext{Pipeline: "populate-fixture"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -145,8 +145,8 @@ func TestRegistration_InvokeParsesTypes(t *testing.T) {
 	if captured.captured.Env != "prod" {
 		t.Errorf("Env = %q", captured.captured.Env)
 	}
-	if !captured.captured.DryRun {
-		t.Error("DryRun false")
+	if !captured.captured.NoApply {
+		t.Error("NoApply false")
 	}
 	if captured.captured.Count != 7 {
 		t.Errorf("Count = %d", captured.captured.Count)

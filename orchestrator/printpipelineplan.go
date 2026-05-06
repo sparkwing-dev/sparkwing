@@ -43,6 +43,7 @@ func printPipelineRuntimePlan(pipeline string, rest []string) error {
 	preview, err := sparkwing.PreviewPlan(plan, pipeline, argsMap, sparkwing.PreviewOptions{
 		StartAt: os.Getenv("SPARKWING_START_AT"),
 		StopAt:  os.Getenv("SPARKWING_STOP_AT"),
+		DryRun:  os.Getenv("SPARKWING_DRY_RUN") == "1",
 	})
 	if err != nil {
 		return fmt.Errorf("preview plan: %w", err)

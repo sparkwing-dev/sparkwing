@@ -20,6 +20,7 @@ func TestReservedFlagNames(t *testing.T) {
 		"C",
 		"change-directory",
 		"config",
+		"dry-run",
 		"from",
 		"full",
 		"mode",

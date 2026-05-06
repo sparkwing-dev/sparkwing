@@ -251,6 +251,13 @@ type WorkStep struct {
 	outType reflect.Type
 	needs   []string
 	skipIf  []SkipPredicate
+	// IMP-014: dry-run contract. dryRunFn is installed via
+	// .DryRun(fn) and runs in place of fn when the orchestrator
+	// dispatches under WithDryRun(ctx). safeWithoutDryRun is the
+	// explicit "this step has no side effects" marker that lets fn
+	// execute under --dry-run unmodified.
+	dryRunFn          func(ctx context.Context) error
+	safeWithoutDryRun bool
 
 	mu       sync.Mutex
 	resolved bool

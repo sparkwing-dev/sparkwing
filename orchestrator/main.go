@@ -123,6 +123,7 @@ func Main() {
 		Full:        os.Getenv("SPARKWING_RETRY_FULL") == "1",
 		StartAt:     os.Getenv("SPARKWING_START_AT"),
 		StopAt:      os.Getenv("SPARKWING_STOP_AT"),
+		DryRun:      os.Getenv("SPARKWING_DRY_RUN") == "1",
 		MaxParallel: runtime.NumCPU(),
 	}
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
