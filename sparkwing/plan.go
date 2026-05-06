@@ -102,22 +102,25 @@ func newNode(caller, id string, job Workable) *Node {
 		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))
 	}
 
-	// Approval gates: the *Approval Job type is a marker -- Work() is
-	// empty and never executes; the orchestrator routes via n.approval.
-	if app, ok := job.(*Approval); ok {
-		switch app.OnExpiry {
+	// Approval gates: the *approvalJob Workable is a marker -- Work()
+	// is empty and never executes; the orchestrator routes via
+	// n.approval. Pipeline authors construct via sw.Approval, never
+	// build *approvalJob directly.
+	if app, ok := job.(*approvalJob); ok {
+		switch app.cfg.OnExpiry {
 		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
 			// ok
 		default:
 			panic(fmt.Sprintf(
-				"sparkwing: %s(%q): Approval.OnExpiry = %q is not one of "+
+				"sparkwing: %s(%q): ApprovalConfig.OnExpiry = %q is not one of "+
 					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
-				caller, id, app.OnExpiry))
+				caller, id, app.cfg.OnExpiry))
 		}
+		cfg := app.cfg
 		return &Node{
 			id:       id,
 			job:      job,
-			approval: app,
+			approval: &cfg,
 		}
 	}
 
@@ -229,7 +232,7 @@ func (p *Plan) InsertExpanded(source *Node, children []*Node) error {
 //	    return err
 //	}))
 //
-//	sw.Job(plan, "approve-prod", &sparkwing.Approval{
+//	sw.Approval(plan, "approve-prod", sparkwing.ApprovalConfig{
 //	    Message: "Promote build to prod?",
 //	    Timeout: 2 * time.Hour,
 //	}).Needs(integStg)
@@ -331,28 +334,23 @@ type Node struct {
 	// plan construction.
 	needsGroups []*NodeGroup
 
-	// approval is non-nil when the node's job is *Approval; the
+	// approval is non-nil when the node's job is an approval gate; the
 	// orchestrator routes these through the approval waiter.
-	approval *Approval
+	approval *ApprovalConfig
 }
 
-// Approval is a built-in Job type that registers a manual approval
-// gate. The orchestrator routes *Approval nodes through the
-// approval-waiter flow rather than dispatching Work; the gate
-// pauses until a human (via the dashboard or `sparkwing approve/deny`)
-// resolves it. Denied / expired gates fail per OnExpiry.
+// ApprovalConfig describes a manual approval gate. Authors fill it
+// out and pass it to sw.Approval; the orchestrator reads it back via
+// Node.ApprovalConfig when routing the gate to the approval-waiter
+// flow.
 //
-//	approve := sw.Job(plan, "approve-prod", &sparkwing.Approval{
+//	approve := sw.Approval(plan, "approve-prod", sparkwing.ApprovalConfig{
 //	    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
 //	    Timeout:  2 * time.Hour,
 //	    OnExpiry: sparkwing.ApprovalFail,
 //	}).Needs(integStg)
 //	sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
-//
-// The returned *Node accepts every standard modifier except Inline:
-// approvals are long-lived by design.
-type Approval struct {
-	Base
+type ApprovalConfig struct {
 	// Message is the operator-facing prompt shown in the dashboard /
 	// CLI. Empty falls back to a generic "Approve <node>?" in the UI.
 	Message string
@@ -368,9 +366,18 @@ type Approval struct {
 	OnExpiry ApprovalTimeoutPolicy
 }
 
-// Work satisfies the Job interface but never executes; Approval
+// approvalJob is the unexported Workable that backs an approval gate.
+// Pipeline authors don't construct it directly; sw.Approval builds it
+// internally and the orchestrator detects it via the type assertion
+// in newNode.
+type approvalJob struct {
+	Base
+	cfg ApprovalConfig
+}
+
+// Work satisfies the Workable interface but never executes; approval
 // nodes are routed through the approval-waiter path.
-func (a *Approval) Work() *Work { return NewWork() }
+func (a *approvalJob) Work() *Work { return NewWork() }
 
 // ApprovalTimeoutPolicy enumerates the resolution applied to an
 // unanswered approval gate when its Timeout elapses.
@@ -385,9 +392,119 @@ const (
 // IsApproval reports whether the node is an approval gate.
 func (n *Node) IsApproval() bool { return n.approval != nil }
 
-// Approval returns the per-node approval configuration, or nil for
-// non-approval nodes.
-func (n *Node) Approval() *Approval { return n.approval }
+// ApprovalConfig returns the per-node approval configuration, or nil
+// for non-approval nodes. Used by the orchestrator to route gate
+// nodes through the approval waiter; pipeline authors don't usually
+// call this.
+func (n *Node) ApprovalConfig() *ApprovalConfig { return n.approval }
+
+// ApprovalGate is the handle returned by sw.Approval. It exposes a
+// narrower modifier surface than *Node -- only the modifiers that
+// make sense for a human gate (Needs, NeedsOptional, OnFailure
+// recovery, BeforeRun/AfterRun hooks, SkipIf, Optional,
+// ContinueOnError). Modifiers that don't apply to gates -- Retry,
+// Timeout, Cache, RunsOn, Inline, Dynamic -- are physically absent
+// from this type, so authoring those mistakes is a compile error
+// rather than the previous mix of panics and silent no-ops.
+type ApprovalGate struct {
+	n *Node
+}
+
+// Approval registers a manual approval gate under id and returns the
+// gate handle for further configuration. The orchestrator routes
+// approval nodes through the approval-waiter flow rather than
+// dispatching Work; the gate pauses until a human (via the dashboard
+// or `sparkwing approve/deny`) resolves it. Denied / expired gates
+// resolve per cfg.OnExpiry.
+//
+// Panics if id is empty or already registered, or if cfg.OnExpiry is
+// not one of the documented constants.
+//
+//	approve := sw.Approval(plan, "approve-prod", sparkwing.ApprovalConfig{
+//	    Message:  "Promote to prod?",
+//	    Timeout:  2 * time.Hour,
+//	    OnExpiry: sparkwing.ApprovalFail,
+//	}).Needs(integStg)
+//	sw.Job(plan, "deploy-prod", &DeployJob{}).Needs(approve)
+func Approval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
+	if p == nil {
+		panic("sparkwing: Approval: plan must be non-nil")
+	}
+	if _, ok := p.byID[id]; ok {
+		panic(fmt.Sprintf("sparkwing: Approval: duplicate node id %q", id))
+	}
+	n := newNode("Approval", id, &approvalJob{cfg: cfg})
+	p.nodes = append(p.nodes, n)
+	p.byID[id] = n
+	return &ApprovalGate{n: n}
+}
+
+// Node returns the underlying *Node. Pipeline authors should rarely
+// need this -- the gate's own methods cover the expected modifier
+// surface; this is the escape hatch for orchestrator-internal code
+// (or for the "I really want a Node-level modifier" case).
+func (g *ApprovalGate) Node() *Node { return g.n }
+
+// ID returns the gate's node id.
+func (g *ApprovalGate) ID() string { return g.n.id }
+
+// Needs declares hard upstream dependencies on the gate. Accepts the
+// same shapes as Node.Needs (*Node, *NodeGroup, *ApprovalGate, string
+// IDs, []*Node).
+func (g *ApprovalGate) Needs(deps ...any) *ApprovalGate {
+	g.n.Needs(deps...)
+	return g
+}
+
+// NeedsOptional declares soft upstream dependencies; missing IDs are
+// silently dropped instead of failing the run.
+func (g *ApprovalGate) NeedsOptional(deps ...any) *ApprovalGate {
+	g.n.NeedsOptional(deps...)
+	return g
+}
+
+// OnFailure registers a recovery node that runs if the gate resolves
+// to ApprovalFail. Useful for rollback / alert hooks.
+func (g *ApprovalGate) OnFailure(id string, job Workable) *ApprovalGate {
+	g.n.OnFailure(id, job)
+	return g
+}
+
+// BeforeRun registers a hook that runs before the gate is presented
+// to the operator. Multiple hooks accumulate.
+func (g *ApprovalGate) BeforeRun(fn BeforeRunFn) *ApprovalGate {
+	g.n.BeforeRun(fn)
+	return g
+}
+
+// AfterRun registers a hook that runs after the gate resolves
+// (regardless of outcome). Multiple hooks accumulate.
+func (g *ApprovalGate) AfterRun(fn AfterRunFn) *ApprovalGate {
+	g.n.AfterRun(fn)
+	return g
+}
+
+// SkipIf registers a predicate that skips the gate (treats it as
+// resolved Approve) when fn returns true. Multiple predicates OR
+// together.
+func (g *ApprovalGate) SkipIf(fn SkipPredicate, opts ...SkipOption) *ApprovalGate {
+	g.n.SkipIf(fn, opts...)
+	return g
+}
+
+// Optional marks the gate as optional: a non-Approve resolution
+// doesn't fail downstream nodes whose only dep is this gate.
+func (g *ApprovalGate) Optional() *ApprovalGate {
+	g.n.Optional()
+	return g
+}
+
+// ContinueOnError marks the gate so a failed resolution is treated
+// as a soft failure for downstream propagation.
+func (g *ApprovalGate) ContinueOnError() *ApprovalGate {
+	g.n.ContinueOnError()
+	return g
+}
 
 // SkipPredicate is a function evaluated by the orchestrator after
 // upstream dependencies complete. Any registered predicate returning
@@ -440,6 +557,10 @@ func (n *Node) Needs(deps ...any) *Node {
 		case *Node:
 			if v != nil {
 				n.addNeed(v.id)
+			}
+		case *ApprovalGate:
+			if v != nil && v.n != nil {
+				n.addNeed(v.n.id)
 			}
 		case *NodeGroup:
 			if v != nil {
@@ -868,6 +989,10 @@ func (n *Node) NeedsOptional(deps ...any) *Node {
 		case *Node:
 			if v != nil {
 				n.needsOptional = append(n.needsOptional, v.id)
+			}
+		case *ApprovalGate:
+			if v != nil && v.n != nil {
+				n.needsOptional = append(n.needsOptional, v.n.id)
 			}
 		case *NodeGroup:
 			if v != nil {

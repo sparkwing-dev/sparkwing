@@ -276,16 +276,26 @@ sw.Group(plan, name, members...) *NodeGroup                                   //
 sw.RefTo[T](node) sw.Ref[T]                                                  // typed Ref into node's typed output
 ```
 
-Approval gates register through `sw.Job` with the built-in
-`*sw.Approval` job type:
+Approval gates register through `sw.Approval` and return an
+`*ApprovalGate` -- a narrower modifier surface than `*Node` so the
+modifiers that don't apply to gates (`Retry`, `Timeout`, `Cache`,
+`RunsOn`, `Inline`) are physically absent and a misuse is a compile
+error rather than a runtime surprise:
 
 ```go
-approve := sw.Job(plan, "approve-prod", &sw.Approval{
+approve := sw.Approval(plan, "approve-prod", sw.ApprovalConfig{
     Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
     Timeout:  2 * time.Hour,
     OnExpiry: sw.ApprovalFail,
 }).Needs(integStg)
+
+sw.Job(plan, "deploy-prod", &DeployJob{}).Needs(approve)
 ```
+
+Available modifiers on `*ApprovalGate`: `Needs`, `NeedsOptional`,
+`OnFailure`, `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`,
+`ContinueOnError`. Plus `Node()` as the escape hatch when an author
+genuinely needs the underlying `*Node`.
 
 `OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
 `sw.ApprovalDeny`, `sw.ApprovalApprove`. Unknown values panic at

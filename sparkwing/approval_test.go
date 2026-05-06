@@ -9,17 +9,17 @@ import (
 
 func TestApproval_CreatesGateNode(t *testing.T) {
 	plan := NewPlan()
-	gate := Job(plan, "approve-prod", &Approval{
+	gate := Approval(plan, "approve-prod", ApprovalConfig{
 		Message:  fmt.Sprintf("Promote %s to prod?", "abc123"),
 		Timeout:  2 * time.Hour,
 		OnExpiry: ApprovalDeny,
 	})
-	if !gate.IsApproval() {
+	if !gate.Node().IsApproval() {
 		t.Fatalf("IsApproval = false")
 	}
-	cfg := gate.Approval()
+	cfg := gate.Node().ApprovalConfig()
 	if cfg == nil {
-		t.Fatalf("Approval is nil")
+		t.Fatalf("ApprovalConfig is nil")
 	}
 	if cfg.Message != "Promote abc123 to prod?" {
 		t.Errorf("Message = %q", cfg.Message)
@@ -30,31 +30,31 @@ func TestApproval_CreatesGateNode(t *testing.T) {
 	if cfg.OnExpiry != ApprovalDeny {
 		t.Errorf("OnExpiry = %q", cfg.OnExpiry)
 	}
-	if plan.Node("approve-prod") != gate {
+	if plan.Node("approve-prod") != gate.Node() {
 		t.Errorf("plan.Node mismatch")
 	}
 }
 
 func TestApproval_ZeroValueIsEmptyPolicy(t *testing.T) {
 	plan := NewPlan()
-	gate := Job(plan, "g", &Approval{})
+	gate := Approval(plan, "g", ApprovalConfig{})
 	// The zero value of ApprovalTimeoutPolicy is "". The orchestrator
 	// treats it as ApprovalFail at dispatch time -- authors who want
 	// the default leave OnExpiry unset.
-	if got := gate.Approval().OnExpiry; got != "" {
+	if got := gate.Node().ApprovalConfig().OnExpiry; got != "" {
 		t.Fatalf("default OnExpiry = %q, want zero value", got)
 	}
 }
 
 func TestApproval_DuplicateIDPanics(t *testing.T) {
 	plan := NewPlan()
-	_ = Job(plan, "g", &Approval{})
+	_ = Approval(plan, "g", ApprovalConfig{})
 	defer func() {
 		if recover() == nil {
 			t.Fatal("expected panic on duplicate id")
 		}
 	}()
-	_ = Job(plan, "g", &Approval{})
+	_ = Approval(plan, "g", ApprovalConfig{})
 }
 
 func TestApproval_EmptyIDPanics(t *testing.T) {
@@ -64,13 +64,11 @@ func TestApproval_EmptyIDPanics(t *testing.T) {
 			t.Fatal("expected panic on empty id")
 		}
 	}()
-	_ = Job(plan, "", &Approval{})
+	_ = Approval(plan, "", ApprovalConfig{})
 }
 
-// Approval.OnExpiry used to silently ignore policies it didn't
-// recognize, leaving the gate on ApprovalFail without any signal to
-// the caller. A typo or stale constant should panic at plan
-// construction so the author sees it immediately.
+// ApprovalConfig.OnExpiry rejects unrecognized policies at plan
+// construction so a typo or stale constant fails loud.
 func TestApproval_InvalidOnExpiryPanics(t *testing.T) {
 	plan := NewPlan()
 	defer func() {
@@ -88,7 +86,7 @@ func TestApproval_InvalidOnExpiryPanics(t *testing.T) {
 			t.Fatalf("panic value not stringy: %T", r)
 		}
 	}()
-	Job(plan, "g", &Approval{OnExpiry: ApprovalTimeoutPolicy("not-a-real-policy")})
+	Approval(plan, "g", ApprovalConfig{OnExpiry: ApprovalTimeoutPolicy("not-a-real-policy")})
 }
 
 func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
@@ -97,8 +95,30 @@ func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
 	if n.IsApproval() {
 		t.Fatal("regular node reported as approval")
 	}
-	if n.Approval() != nil {
-		t.Fatal("regular node has non-nil Approval")
+	if n.ApprovalConfig() != nil {
+		t.Fatal("regular node has non-nil ApprovalConfig")
+	}
+}
+
+// SDK-040: ApprovalGate exposes only the gate-appropriate modifiers.
+// .Inline() / .Retry() / .Timeout() / .Cache() / .RunsOn() are not
+// methods on *ApprovalGate -- the type system makes that class of
+// mistake a compile error rather than a runtime panic / silent
+// no-op. The negative cases would not compile, which is the point;
+// this test exercises the positive shape.
+func TestApproval_GateNeedsAndChain(t *testing.T) {
+	plan := NewPlan()
+	upstream := Job(plan, "build", &fakeJob{})
+	gate := Approval(plan, "approve", ApprovalConfig{Message: "?"}).
+		Needs(upstream).
+		SkipIf(func(context.Context) bool { return false })
+	if got := gate.Node().DepIDs(); len(got) != 1 || got[0] != "build" {
+		t.Fatalf("gate deps = %v, want [build]", got)
+	}
+	// Downstream nodes can take *ApprovalGate as a Needs target too.
+	deploy := Job(plan, "deploy", &fakeJob{}).Needs(gate)
+	if got := deploy.DepIDs(); len(got) != 1 || got[0] != "approve" {
+		t.Fatalf("deploy deps = %v, want [approve]", got)
 	}
 }
 

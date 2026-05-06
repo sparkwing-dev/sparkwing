@@ -1331,7 +1331,7 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 // runApprovalGate writes the approvals row and blocks until resolved.
 // Approved -> Success; Denied -> Failed; timeout per ApprovalOnTimeout.
 func (s *dispatchState) runApprovalGate(node *sparkwing.Node) runner.Result {
-	cfg := node.Approval()
+	cfg := node.ApprovalConfig()
 	if cfg == nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("approval node %q has nil config", node.ID())}
 	}
@@ -1782,7 +1782,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 			Groups:  p.NodeGroupNames(n.ID()),
 			Dynamic: p.IsDynamicNode(n.ID()),
 		}
-		if cfg := n.Approval(); cfg != nil {
+		if cfg := n.ApprovalConfig(); cfg != nil {
 			sn.Approval = &snapshotApproval{
 				Message:   cfg.Message,
 				TimeoutMS: cfg.Timeout.Milliseconds(),

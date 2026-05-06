@@ -98,6 +98,30 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   no-op: that's the explicit "disable caching" form.
 
 ### Added
+- **`sparkwing.Approval` free function returning `*ApprovalGate` for
+  manual gates (SDK-040).** Authors register approval gates via
+  `sw.Approval(plan, id, sparkwing.ApprovalConfig{...})` instead of
+  `sw.Job(plan, id, &sparkwing.Approval{...})`. The new
+  `*ApprovalGate` return type exposes only the modifiers that make
+  sense for a human gate -- `Needs`, `NeedsOptional`, `OnFailure`,
+  `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`,
+  plus `Node()` as the escape hatch -- so the modifiers that don't
+  apply (`.Retry`, `.Timeout`, `.Cache`, `.RunsOn`, `.Inline`,
+  `.Dynamic`) aren't methods on the type. Misuse becomes a compile
+  error rather than the previous mix of runtime panic (`.Inline`)
+  and silent no-op (`.Retry`). The exported struct previously called
+  `sparkwing.Approval` (also-Workable, also-Job) is renamed to the
+  internal `approvalJob` and split: the user-facing config is
+  `sparkwing.ApprovalConfig` (Message / Timeout / OnExpiry); the
+  Workable wrapper that the orchestrator pattern-matches against is
+  unexported. `Node.Approval()` accessor renamed to
+  `Node.ApprovalConfig()` for symmetry. `Node.Needs` /
+  `Node.NeedsOptional` accept `*ApprovalGate` so downstream nodes
+  can pass the gate value directly. Migration is mechanical:
+  `sw.Job(plan, id, &sparkwing.Approval{...})` ->
+  `sw.Approval(plan, id, sparkwing.ApprovalConfig{...})`.
+
+### Added
 - **Public accessor for Node.OnFailureOf (IMP-029).** `*Node` gains
   `OnFailureNodeID() string`, returning the id of the recovery node
   registered via `.OnFailure(id, job)` (or `""` when none is set).

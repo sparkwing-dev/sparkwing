@@ -473,14 +473,14 @@ sources, and artifact packaging; gate external side effects with
 
 ## Approval gates
 
-Pause a run and wait for a human decision by registering an
-`*sw.Approval` job with `sw.Job`. The orchestrator detects the
-*Approval value, flips the Node to `approval_pending`, writes an
-approvals row, and blocks until the dashboard, CLI, or the configured
-timeout resolves it.
+Pause a run and wait for a human decision by registering a gate via
+`sw.Approval`. The orchestrator routes approval nodes through the
+approval-waiter flow, flipping the Node to `approval_pending`,
+writing an approvals row, and blocking until the dashboard, CLI, or
+the configured timeout resolves it.
 
 ```go
-approve := sw.Job(plan, "approve-prod", &sw.Approval{
+approve := sw.Approval(plan, "approve-prod", sw.ApprovalConfig{
     Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
     Timeout:  2 * time.Hour,
     OnExpiry: sw.ApprovalFail,
@@ -488,7 +488,15 @@ approve := sw.Job(plan, "approve-prod", &sw.Approval{
 sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
 ```
 
-Fields:
+`sw.Approval` returns `*ApprovalGate`, a narrower handle than
+`*Node` -- only the modifiers that make sense for a human gate are
+methods on it (`Needs`, `NeedsOptional`, `OnFailure`, `BeforeRun`,
+`AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`). Modifiers
+that don't apply to gates -- `Retry`, `Timeout`, `Cache`, `RunsOn`,
+`Inline` -- are physically absent, so misuse is a compile error
+rather than a runtime panic / silent no-op.
+
+`ApprovalConfig` fields:
 
 - `Message` - operator-facing prompt shown in the dashboard banner
   and CLI list output. Compose with `fmt.Sprintf` if you need to
