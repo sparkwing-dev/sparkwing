@@ -101,6 +101,27 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		}
 	}
 
+	// IMP-007: resolve --start-at / --stop-at against this Work's
+	// items. The orchestrator already validated the strings exist
+	// somewhere in the Plan; here we apply the range only if at least
+	// one bound matches a local item, so the same range plumbed
+	// through ctx for a multi-Job pipeline is a no-op for Works
+	// that don't contain the named step.
+	if r, ok := stepRangeFromContext(ctx); ok && (r.start != "" || r.stop != "") {
+		_, hasStart := items[r.start]
+		_, hasStop := items[r.stop]
+		if r.start == "" || hasStart || r.stop == "" || hasStop {
+			if (r.start != "" && hasStart) || (r.stop != "" && hasStop) {
+				skips := computeStepRangeSkips(items, children, r)
+				for id, reason := range skips {
+					if it, ok := items[id]; ok {
+						it.rangeSkipReason = reason
+					}
+				}
+			}
+		}
+	}
+
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -191,17 +212,37 @@ type workItem struct {
 	spawn    *SpawnSpec
 	gen      *SpawnGenSpec
 	isHidden bool // true for synthetic SpawnNodeForEach items
+	// rangeSkipReason, when non-empty, short-circuits the item with a
+	// `step_skipped` event whose Attrs.reason carries this string.
+	// Populated by RunWork when --start-at / --stop-at puts the item
+	// outside the selected range (IMP-007).
+	rangeSkipReason string
 }
 
-// runOneItem executes a single item to terminal: SkipIf evaluation,
-// then dispatch to the kind-specific executor. Panics in user code
-// are surfaced as item errors so the runner doesn't crash.
+// runOneItem executes a single item to terminal: range skip, SkipIf
+// evaluation, then dispatch to the kind-specific executor. Panics
+// in user code are surfaced as item errors so the runner doesn't
+// crash.
 func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler SpawnHandler, done chan<- stepResult) {
 	defer func() {
 		if r := recover(); r != nil {
 			done <- stepResult{id: it.id, err: fmt.Errorf("item %q panicked: %v", it.id, r)}
 		}
 	}()
+
+	// IMP-007: range skip wins over user-authored SkipIf predicates so
+	// `step_skipped` events carry the operator's intent ("outside
+	// --start-at..--stop-at range") rather than whatever predicate
+	// happened to match. Hidden synthetic items (SpawnNodeForEach
+	// fan-out) never emit step_skipped to keep the dashboard clean.
+	if it.rangeSkipReason != "" {
+		if !it.isHidden {
+			emitStepSkippedWithReason(ctx, it.id, it.rangeSkipReason)
+		}
+		it.markDone(nil)
+		done <- stepResult{id: it.id}
+		return
+	}
 
 	for _, p := range it.skipIf {
 		if p(ctx) {

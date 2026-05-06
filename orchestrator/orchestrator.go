@@ -64,6 +64,17 @@ type Options struct {
 	// Full disables skip-passed rehydration on retry.
 	Full bool
 
+	// StartAt / StopAt name a WorkStep (or Spawn) where the run
+	// resumes / stops, inclusive on both bounds. Items outside the
+	// resulting reachability window are skipped with a `step_skipped`
+	// event whose reason carries "outside --start-at..--stop-at
+	// range". Empty values disable the bound. The orchestrator
+	// validates the strings against every Work's registered ids
+	// before dispatching; unknown ids fail the run with a
+	// Levenshtein-suggesting "did you mean X?" message (IMP-007).
+	StartAt string
+	StopAt  string
+
 	// Debug carries pause directives populated by `sparkwing debug run`.
 	Debug DebugDirectives
 
@@ -215,6 +226,19 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	validatePlanModifiers(opts.Delegate, plan)
+
+	// IMP-007: --start-at / --stop-at must reference a real WorkStep
+	// id; reject with a Levenshtein-suggesting message before the
+	// orchestrator even emits run_start, so the operator's iteration
+	// loop is "save -> wing X -> see typo error" not "save -> dispatch
+	// -> watch run finish silently doing nothing useful."
+	if opts.StartAt != "" || opts.StopAt != "" {
+		if err := sparkwing.ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
+		ctx = sparkwing.WithStepRange(ctx, opts.StartAt, opts.StopAt)
+	}
 
 	emitRunStart(opts.Delegate, runID, opts.Pipeline)
 	emitRunPlan(opts.Delegate, plan)

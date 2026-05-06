@@ -54,6 +54,13 @@ type wingFlags struct {
 	mode string
 	// workers caps concurrent nodes in ci-embedded mode; 0 = NumCPU.
 	workers int
+	// IMP-007: --start-at / --stop-at name an inclusive WorkStep window
+	// the orchestrator runs; ids outside the resulting reachability
+	// set are skipped with `step_skipped`. Either bound can be empty
+	// to leave that side open. Unknown ids fail the run with a
+	// "did you mean X?" suggestion at registration time.
+	startAt string
+	stopAt  string
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -188,6 +195,28 @@ func parseWingFlags(args []string) (wingFlags, []string) {
 				wf.workers = n
 			}
 			i++
+		case a == "--start-at":
+			if i+1 < len(args) {
+				wf.startAt = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--start-at="):
+			wf.startAt = strings.TrimPrefix(a, "--start-at=")
+			i++
+		case a == "--stop-at":
+			if i+1 < len(args) {
+				wf.stopAt = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--stop-at="):
+			wf.stopAt = strings.TrimPrefix(a, "--stop-at=")
+			i++
 		case a == "-C", a == "--change-directory":
 			if i+1 < len(args) {
 				wf.changeDir = args[i+1]
@@ -271,6 +300,17 @@ func dispatchRemote(pipelineName string, wf wingFlags, passthrough []string) err
 	envMap := map[string]string{}
 	if repoSlug != "" {
 		envMap["GITHUB_REPOSITORY"] = repoSlug
+	}
+	// IMP-007: --start-at / --stop-at are wing-level on the local CLI;
+	// the remote runner reads them as SPARKWING_START_AT /
+	// SPARKWING_STOP_AT from trigger env. Same env-var protocol the
+	// laptop-local exec path uses, so behavior is identical across
+	// venues.
+	if wf.startAt != "" {
+		envMap["SPARKWING_START_AT"] = wf.startAt
+	}
+	if wf.stopAt != "" {
+		envMap["SPARKWING_STOP_AT"] = wf.stopAt
 	}
 
 	triggerBranch := wf.from

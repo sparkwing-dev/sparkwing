@@ -6,6 +6,60 @@ import (
 	"strings"
 )
 
+// ValidateStepRange resolves a --start-at / --stop-at pair against
+// every Work materialized in p. Returns a non-nil error when a
+// non-empty bound doesn't match any WorkStep / SpawnNode /
+// SpawnNodeForEach id reachable from the Plan. The error message
+// reuses the same `did you mean X?` formatting as IMP-008 so the
+// operator sees one consistent class of typo error from every
+// string-keyed flag (IMP-007).
+//
+// Empty bounds are no-ops (return nil). nil Plan returns nil.
+func ValidateStepRange(p *Plan, startAt, stopAt string) error {
+	if p == nil || (startAt == "" && stopAt == "") {
+		return nil
+	}
+	known := planStepIDs(p)
+	if startAt != "" {
+		if _, ok := known[startAt]; !ok {
+			return fmt.Errorf("%s", unknownRefMessage(
+				fmt.Sprintf("--start-at %q", startAt),
+				"step",
+				startAt,
+				known,
+			))
+		}
+	}
+	if stopAt != "" {
+		if _, ok := known[stopAt]; !ok {
+			return fmt.Errorf("%s", unknownRefMessage(
+				fmt.Sprintf("--stop-at %q", stopAt),
+				"step",
+				stopAt,
+				known,
+			))
+		}
+	}
+	return nil
+}
+
+// planStepIDs returns the set of every step / spawn / spawnGen id
+// registered on every Work in p. The same registry IMP-008 walks
+// for typo detection.
+func planStepIDs(p *Plan) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, n := range p.Nodes() {
+		w := n.Work()
+		if w == nil {
+			continue
+		}
+		for k := range workKnownIDs(w) {
+			out[k] = struct{}{}
+		}
+	}
+	return out
+}
+
 // validateRefs walks a finalized Plan and panics on any string-typed
 // dependency reference that doesn't resolve to a registered ID. The
 // pipeline runtime calls this once per Plan() invocation, after the

@@ -5,6 +5,62 @@ import (
 	"testing"
 )
 
+// IMP-007: --start-at / --stop-at are wing-owned and must be
+// stripped from the passthrough so the pipeline binary doesn't see
+// them as unknown pipeline flags.
+func TestParseWingFlags_StartAtStopAt(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        []string
+		wantStart string
+		wantStop  string
+		wantPas   []string
+	}{
+		{
+			name:      "separate values",
+			in:        []string{"--start-at", "compile", "--stop-at", "publish", "deploy"},
+			wantStart: "compile",
+			wantStop:  "publish",
+			wantPas:   []string{"deploy"},
+		},
+		{
+			name:      "= form",
+			in:        []string{"--start-at=compile", "--stop-at=publish", "deploy"},
+			wantStart: "compile",
+			wantStop:  "publish",
+			wantPas:   []string{"deploy"},
+		},
+		{
+			name:      "only --start-at",
+			in:        []string{"--start-at", "fetch", "deploy"},
+			wantStart: "fetch",
+			wantStop:  "",
+			wantPas:   []string{"deploy"},
+		},
+		{
+			name:      "trailing --start-at without value falls through",
+			in:        []string{"--start-at"},
+			wantStart: "",
+			wantStop:  "",
+			wantPas:   []string{"--start-at"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, pass := parseWingFlags(tc.in)
+			if wf.startAt != tc.wantStart {
+				t.Errorf("startAt = %q, want %q", wf.startAt, tc.wantStart)
+			}
+			if wf.stopAt != tc.wantStop {
+				t.Errorf("stopAt = %q, want %q", wf.stopAt, tc.wantStop)
+			}
+			if !reflect.DeepEqual(pass, tc.wantPas) {
+				t.Errorf("pass = %v, want %v", pass, tc.wantPas)
+			}
+		})
+	}
+}
+
 // parseWingFlags must strip wing-owned flags from the arg stream
 // and leave everything else for the pipeline binary. The -C flag
 // (and its long form --change-directory, both `--flag value` and

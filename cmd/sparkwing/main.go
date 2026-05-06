@@ -170,6 +170,15 @@ func runWing(args []string) error {
 			env = append(env, "SPARKWING_RETRY_FULL=1")
 		}
 	}
+	// IMP-007: forward --start-at / --stop-at via env so the pipeline
+	// binary's orchestrator/main.go can lift them onto Options
+	// alongside the existing --retry-of plumbing.
+	if wf.startAt != "" {
+		env = append(env, "SPARKWING_START_AT="+wf.startAt)
+	}
+	if wf.stopAt != "" {
+		env = append(env, "SPARKWING_STOP_AT="+wf.stopAt)
+	}
 	if wf.secrets != "" {
 		env = append(env, "SPARKWING_SECRETS_PROFILE="+wf.secrets)
 	}

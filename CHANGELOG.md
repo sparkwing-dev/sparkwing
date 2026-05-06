@@ -7,6 +7,42 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **Built-in `--start-at` / `--stop-at` wing flags for resume-from-step
+  (IMP-007).** Every pipeline now gets per-step resume support without
+  the author writing a stepOrder slice + skipBefore predicate. Flags
+  are wing-level (parsed in `cmd/sparkwing/wing_flags.go`, forwarded
+  via `SPARKWING_START_AT` / `SPARKWING_STOP_AT` env to the pipeline
+  binary on the local-exec path; via `Trigger.Env` on the `--on`
+  remote-dispatch path so behavior is identical across venues), so
+  `wing cluster-up --start-at install-argocd` skips every WorkStep
+  upstream of `install-argocd` in the same Job's Work and resumes
+  from there. Window is inclusive on both bounds; `--start-at X
+  --stop-at X` runs only X. Set semantics — descendants(start) ∩
+  ancestors(stop) plus the bounds — make parallel branches
+  parallelism-aware: `--start-at end` on a diamond DAG skips both
+  sides. Unknown ids fail the run before any step dispatches with
+  the same Levenshtein-suggesting message format IMP-008 introduced
+  ("`--start-at "fetchh"` references unknown step "fetchh"; did
+  you mean "fetch"? available steps: compile, fetch"). User-authored
+  `SkipIf` predicates still apply on top of the range filter (a
+  step the range would run can still be skipped by the user's
+  predicate). Range-skipped items emit `step_skipped` events with
+  `Attrs.reason` carrying the operator-readable bound, so renderers
+  can distinguish operator intent from author intent. New SDK
+  surface: `sparkwing.WithStepRange(ctx, startAt, stopAt)`,
+  `sparkwing.StepRangeFromContext(ctx)`,
+  `sparkwing.ValidateStepRange(plan, startAt, stopAt)`,
+  `Work.TopologicalStepOrder()`. Pinned by 11 unit tests in
+  `sparkwing/step_range_test.go` (linear / branching / inclusive
+  endpoints / SkipIf interaction / no-op contracts / topo
+  stability) plus 2 integration tests in
+  `orchestrator/step_range_integration_test.go` (full Options ->
+  validation -> ctx install -> RunWork skip slice; unknown bound
+  fails the run BEFORE any step dispatches). Caveat documented in
+  the flag help: if an upstream step populates in-memory state for
+  downstream ones, `--start-at` past it leaves state empty —
+  mitigation pattern is "lazy-load inside the step body if state
+  isn't populated."
 - **Plan-time validation of string-typed step references (IMP-008).**
   After a pipeline's `Plan(ctx, plan, in, rc)` returns successfully,
   the SDK now walks every Node and every materialized Work and
