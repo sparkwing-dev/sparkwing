@@ -2,6 +2,7 @@ package logs_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,64 @@ func TestAppend_401ReturnsAuthError(t *testing.T) {
 	// say something useful.
 	if ae.Error() == "" {
 		t.Error("Error() should not be empty")
+	}
+}
+
+// IMP-022: when the server emits the structured JSON body, the
+// client extracts missing_scope from the JSON without depending on
+// the human-readable phrasing. Pinning this so a future reword of
+// the message field can't silently degrade AuthError.Scope.
+func TestAppend_403JSONBodyExtractsScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(logs.AuthErrorBody{
+			Error:        "missing_scope",
+			MissingScope: "logs.write",
+			Principal:    "runner:warm-runner-7",
+			// Deliberately reworded -- the parser must NOT depend on
+			// "token lacks required scope" phrasing when JSON is
+			// present.
+			Message: "your token cannot append logs (logs.write missing)",
+		})
+	}))
+	defer srv.Close()
+
+	c := logs.NewClient(srv.URL, nil)
+	err := c.Append(context.Background(), "run-1", "step-a", []byte("hi"))
+	var ae *logs.AuthError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AuthError, got %T: %v", err, err)
+	}
+	if ae.Scope != "logs.write" {
+		t.Errorf("Scope: got %q, want %q (must come from JSON, not message)", ae.Scope, "logs.write")
+	}
+}
+
+// IMP-022: a JSON body without missing_scope must not crash the
+// parser; Scope stays empty.
+func TestAppend_403JSONBodyNoScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(logs.AuthErrorBody{
+			Error:   "forbidden",
+			Message: "denied by policy",
+		})
+	}))
+	defer srv.Close()
+
+	c := logs.NewClient(srv.URL, nil)
+	err := c.Append(context.Background(), "run-1", "step-a", []byte("hi"))
+	var ae *logs.AuthError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AuthError, got %T: %v", err, err)
+	}
+	if ae.Scope != "" {
+		t.Errorf("Scope: got %q, want empty", ae.Scope)
+	}
+	if !strings.Contains(ae.Error(), "denied by policy") {
+		t.Errorf("Error() should fall back to RawBody: %q", ae.Error())
 	}
 }
 

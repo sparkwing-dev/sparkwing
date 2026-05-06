@@ -3,6 +3,7 @@ package logs
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,9 +79,11 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // silently dropping log lines under that misconfig produced the
 // "status: success but no logs" black hole that IMP-002 closes.
 //
-// Scope is best-effort parsed from the controller's body (today the
-// controller writes "token lacks required scope: logs.write").
-// Empty when the body shape doesn't match.
+// Scope is parsed structured-first from the JSON body's
+// "missing_scope" field (IMP-022). Pre-IMP-022 servers emit a plain
+// string of the form "token lacks required scope: <name>"; the
+// parser falls back to a regex on that exact phrasing.
+// Empty when neither shape matches.
 type AuthError struct {
 	Status  int
 	Scope   string
@@ -133,11 +136,25 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 	return fmt.Errorf("logs append %d: %s", resp.StatusCode, trimmed)
 }
 
-// parseMissingScope extracts the scope name from controller error
-// bodies of the form "token lacks required scope: <name>". Returns
-// "" when the body doesn't match the canonical phrasing so we
-// degrade to the raw body in AuthError.Error.
+// parseMissingScope extracts the scope name from a 401/403 response
+// body. Tries the IMP-022 JSON shape first (`missing_scope` field);
+// falls back to the pre-IMP-022 plain-text phrasing
+// "token lacks required scope: <name>" so mid-rollout we don't
+// degrade against an older logs service / non-controller proxy.
+// Returns "" when neither shape matches.
 func parseMissingScope(body string) string {
+	if body == "" {
+		return ""
+	}
+	// JSON shape (IMP-022). Decode permissively: a body with
+	// `missing_scope` but unexpected siblings still parses.
+	if trimmed := strings.TrimLeft(body, " \t\n\r"); strings.HasPrefix(trimmed, "{") {
+		var b AuthErrorBody
+		if err := json.Unmarshal([]byte(body), &b); err == nil && b.MissingScope != "" {
+			return b.MissingScope
+		}
+	}
+	// Plain-text fallback.
 	const marker = "token lacks required scope:"
 	i := strings.Index(body, marker)
 	if i < 0 {

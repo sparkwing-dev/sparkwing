@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -157,5 +158,71 @@ func TestRequireScope_NoPrincipalPassesThrough(t *testing.T) {
 	requireScope(ScopeAdmin, inner).ServeHTTP(rec, req)
 	if rec.Code != http.StatusTeapot {
 		t.Fatalf("no-principal should pass-through, got %d", rec.Code)
+	}
+}
+
+// IMP-022: 403 body for a missing-scope rejection is structured JSON
+// with code, missing_scope, principal, and a human message. Pinned
+// here so a future reword of the message can't silently break the
+// logs-client parser (or any third-party SDK consuming the shape).
+func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	p := &Principal{Name: "warm-runner-7", Kind: "runner", Scopes: []string{ScopeNodesClaim}}
+	req = req.WithContext(contextWithPrincipal(req.Context(), p))
+	rec := httptest.NewRecorder()
+	requireScope(ScopeRunsRead, teapotHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: got %q, want application/json", ct)
+	}
+	var body authErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v -- raw=%q", err, rec.Body.String())
+	}
+	if body.Code != "missing_scope" {
+		t.Errorf("Code: got %q, want missing_scope", body.Code)
+	}
+	if body.MissingScope != ScopeRunsRead {
+		t.Errorf("MissingScope: got %q, want %q", body.MissingScope, ScopeRunsRead)
+	}
+	if body.Principal != "runner:warm-runner-7" {
+		t.Errorf("Principal: got %q, want runner:warm-runner-7", body.Principal)
+	}
+	if body.Message == "" {
+		t.Errorf("Message must be non-empty for human-readable fallback")
+	}
+}
+
+// IMP-022: 401 body (no token / invalid token) carries the
+// "unauthenticated" code and a non-empty message but no scope or
+// principal -- auth never resolved.
+func TestMiddleware_UnauthenticatedBodyShape(t *testing.T) {
+	a := NewAuthenticator(newStoreForAuth(t), 0)
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	rec := httptest.NewRecorder()
+	a.Middleware(teapotHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: got %q, want application/json", ct)
+	}
+	var body authErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v -- raw=%q", err, rec.Body.String())
+	}
+	if body.Code != "unauthenticated" {
+		t.Errorf("Code: got %q, want unauthenticated", body.Code)
+	}
+	if body.MissingScope != "" {
+		t.Errorf("MissingScope must be empty on 401, got %q", body.MissingScope)
+	}
+	if body.Principal != "" {
+		t.Errorf("Principal must be empty on 401, got %q", body.Principal)
+	}
+	if body.Message == "" {
+		t.Errorf("Message must be non-empty")
 	}
 }

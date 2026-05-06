@@ -154,12 +154,18 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := extractBearer(r)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, err)
+			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
+				Code:    "unauthenticated",
+				Message: err.Error(),
+			})
 			return
 		}
 		p, err := a.Authenticate(raw)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, err)
+			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
+				Code:    "unauthenticated",
+				Message: err.Error(),
+			})
 			return
 		}
 		ctx := contextWithPrincipal(r.Context(), p)
@@ -195,8 +201,40 @@ func requireScope(scope string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		writeError(w, http.StatusForbidden, errors.New("token lacks required scope: "+scope))
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code:         "missing_scope",
+			MissingScope: scope,
+			Principal:    p.label(),
+			Message:      "token lacks required scope: " + scope,
+		})
 	})
+}
+
+// label renders the principal as "<kind>:<name>" for the IMP-022
+// auth-error response body.
+func (p *Principal) label() string {
+	if p == nil {
+		return ""
+	}
+	if p.Kind == "" {
+		return p.Name
+	}
+	return p.Kind + ":" + p.Name
+}
+
+// authErrorBody is the IMP-022 wire shape for 401/403 responses
+// emitted by the controller's auth middleware. Mirrors the
+// logs.AuthErrorBody fields so a single client-side parser handles
+// either origin without a string match on the human message.
+type authErrorBody struct {
+	Code         string `json:"error"`
+	MissingScope string `json:"missing_scope,omitempty"`
+	Principal    string `json:"principal,omitempty"`
+	Message      string `json:"message"`
+}
+
+func writeAuthError(w http.ResponseWriter, status int, body authErrorBody) {
+	writeJSON(w, status, body)
 }
 
 // --- principal ctx helpers ---

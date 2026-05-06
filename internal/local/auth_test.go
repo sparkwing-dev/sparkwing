@@ -1,6 +1,7 @@
 package local
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -157,5 +158,58 @@ func TestRequireScope_NoPrincipalPassesThrough(t *testing.T) {
 	requireScope(ScopeAdmin, inner).ServeHTTP(rec, req)
 	if rec.Code != http.StatusTeapot {
 		t.Fatalf("no-principal should pass-through, got %d", rec.Code)
+	}
+}
+
+// IMP-022: same wire-shape pin as pkg/controller's auth_test.go --
+// laptop-local controller emits the same 401/403 JSON body so a
+// single client parser handles either origin.
+func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	p := &Principal{Name: "alice", Kind: "user", Scopes: []string{ScopeNodesClaim}}
+	req = req.WithContext(contextWithPrincipal(req.Context(), p))
+	rec := httptest.NewRecorder()
+	requireScope(ScopeRunsRead, teapotHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: got %q, want application/json", ct)
+	}
+	var body authErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v -- raw=%q", err, rec.Body.String())
+	}
+	if body.Code != "missing_scope" {
+		t.Errorf("Code: got %q, want missing_scope", body.Code)
+	}
+	if body.MissingScope != ScopeRunsRead {
+		t.Errorf("MissingScope: got %q, want %q", body.MissingScope, ScopeRunsRead)
+	}
+	if body.Principal != "user:alice" {
+		t.Errorf("Principal: got %q, want user:alice", body.Principal)
+	}
+	if body.Message == "" {
+		t.Errorf("Message must be non-empty")
+	}
+}
+
+func TestMiddleware_UnauthenticatedBodyShape(t *testing.T) {
+	a := NewAuthenticator(newStoreForAuth(t), 0)
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	rec := httptest.NewRecorder()
+	a.Middleware(teapotHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	var body authErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v -- raw=%q", err, rec.Body.String())
+	}
+	if body.Code != "unauthenticated" {
+		t.Errorf("Code: got %q, want unauthenticated", body.Code)
+	}
+	if body.Message == "" {
+		t.Errorf("Message must be non-empty")
 	}
 }

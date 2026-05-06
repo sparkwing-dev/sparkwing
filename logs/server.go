@@ -32,8 +32,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/otelutil"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sparkwing-dev/sparkwing/otelutil"
 )
 
 // Server handles HTTP requests against a filesystem-backed log store.
@@ -185,12 +185,18 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := extractBearer(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			writeAuthErrorJSON(w, http.StatusUnauthorized, AuthErrorBody{
+				Error:   "unauthenticated",
+				Message: err.Error(),
+			})
 			return
 		}
 		p, err := s.authenticate(r.Context(), raw)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			writeAuthErrorJSON(w, http.StatusUnauthorized, AuthErrorBody{
+				Error:   "unauthenticated",
+				Message: err.Error(),
+			})
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(contextWithLogsPrincipal(r.Context(), p)))
@@ -211,8 +217,36 @@ func (s *Server) requireScope(scope string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		http.Error(w, "token lacks required scope: "+scope, http.StatusForbidden)
+		writeAuthErrorJSON(w, http.StatusForbidden, AuthErrorBody{
+			Error:        "missing_scope",
+			MissingScope: scope,
+			Principal:    p.label(),
+			Message:      "token lacks required scope: " + scope,
+		})
 	})
+}
+
+// label renders a principal as "<kind>:<name>" for the auth-error
+// response body. Empty when the principal is nil so the JSON omits
+// the field entirely.
+func (p *logsPrincipal) label() string {
+	if p == nil {
+		return ""
+	}
+	if p.Kind == "" {
+		return p.Name
+	}
+	return p.Kind + ":" + p.Name
+}
+
+// writeAuthErrorJSON serializes an AuthErrorBody to the response with
+// Content-Type: application/json. IMP-022 makes auth-error parsing
+// structured-first so callers (logs client, dashboard, MCP) don't
+// scrape the human message.
+func writeAuthErrorJSON(w http.ResponseWriter, status int, body AuthErrorBody) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func extractBearer(r *http.Request) (string, error) {
