@@ -175,7 +175,7 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *Node, fn func(T) (str
 		out := make([]*Node, 0, len(items))
 		for _, it := range items {
 			id, job := fn(it)
-			out = append(out, JobNode(id, job))
+			out = append(out, newNode("JobFanOutDynamic", id, job))
 		}
 		return out
 	}

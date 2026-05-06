@@ -139,6 +139,40 @@ func TestProduces_MismatchPanics(t *testing.T) {
 	sparkwing.Job(plan, "mismatch", &mismatchJob{})
 }
 
+// SDK-035: the same Produces/SetResult contract that Job enforces
+// must also fire on the detached-node paths -- OnFailure recovery
+// nodes, JobFanOutDynamic children, orchestrator SpawnNode dispatch.
+// Before SDK-035 these silently skipped the check.
+func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	parent := sparkwing.Job(plan, "parent", jobFnNoop())
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("OnFailure recovery with marker-without-SetResult should panic")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "SetResult") {
+			t.Fatalf("panic should mention Produces and SetResult, got %q", msg)
+		}
+	}()
+	parent.OnFailure("recover", &markerOnlyJob{})
+}
+
+func TestProduces_NewDetachedNodeAppliesContract(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("NewDetachedNode with marker-without-SetResult should panic")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "SetResult") {
+			t.Fatalf("panic should mention Produces and SetResult, got %q", msg)
+		}
+	}()
+	sparkwing.NewDetachedNode("spawn-child", &markerOnlyJob{})
+}
+
 func TestOutput_WiresFromMarker(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	n := sparkwing.Job(plan, "build", &producedJob{})

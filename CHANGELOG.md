@@ -102,6 +102,23 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   consumers keep working.
 
 ### Removed (BREAKING)
+- **`sparkwing.JobNode` is gone; replaced by `sparkwing.NewDetachedNode`
+  (SDK-035).** The detached-node primitive (used internally by
+  `JobFanOutDynamic`, `Node.OnFailure`, and the orchestrator's
+  `SpawnNode` dispatch path) was exported under the easily-confused
+  name `JobNode` — one letter different from the public `Job` verb.
+  Renamed to `NewDetachedNode` so it doesn't sit next to `Job` in
+  godoc and to make the "not registered on a Plan" semantics explicit.
+  The two in-package callsites (`combinator.go`, `OnFailure`) now use
+  an unexported `newNode` helper directly. Pipeline authors should
+  never have called `JobNode` (its godoc said so); any code that did
+  is a one-line rename to `NewDetachedNode`. As a side effect, the
+  detached-node paths now apply the same `Produces[T]` ↔
+  `Work.SetResult` contract validation that `sparkwing.Job` already
+  enforced, so a typo in an `OnFailure` recovery or fan-out child
+  panics at Plan time instead of silently materializing a malformed
+  node. Approval gates are now also routed correctly through these
+  paths (previously `JobNode` skipped the approval branch).
 - **Every remaining `/api/runs/*` route is gone (LOCAL-016).** The
   parallel surface that LOCAL-014 started removing is now fully
   retired; `/api/v1/*` is the only public dashboard contract. Logs

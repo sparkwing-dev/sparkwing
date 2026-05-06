@@ -81,24 +81,90 @@ type Expansion struct {
 	Gen    ExpandGenerator
 }
 
-// JobNode creates a standalone Node not yet attached to any plan.
-// Used by the orchestrator for JobFanOutDynamic-generated children,
-// SpawnNode dispatch, and OnFailure recovery nodes. Pipeline authors
-// should use sw.Job and the (id, job) form of OnFailure instead.
-func JobNode(id string, job Workable) *Node {
+// newNode builds a detached *Node from (id, job). Shared by Job
+// (which then registers on the plan), JobFanOutDynamic children,
+// Node.OnFailure recovery nodes, and the orchestrator's SpawnNode
+// dispatch path -- every caller that needs a node before it has a
+// home in p.nodes / p.byID.
+//
+// Runs the same validation Job does so a Produces/SetResult typo or
+// an invalid Approval timeout panics at the same point regardless of
+// where the node is destined to live.
+//
+// caller is the verb the user typed (e.g. "Job", "OnFailure"); it
+// shows up in panic messages so the error points at the user's call
+// site, not this helper.
+func newNode(caller, id string, job Workable) *Node {
 	if id == "" {
-		panic("sparkwing: JobNode: id must not be empty")
+		panic(fmt.Sprintf("sparkwing: %s: id must not be empty", caller))
 	}
 	if job == nil {
-		panic(fmt.Sprintf("sparkwing: JobNode(%q): job must be non-nil", id))
+		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))
 	}
+
+	// Approval gates: the *Approval Job type is a marker -- Work() is
+	// empty and never executes; the orchestrator routes via n.approval.
+	if app, ok := job.(*Approval); ok {
+		switch app.OnTimeout {
+		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
+			// ok
+		default:
+			panic(fmt.Sprintf(
+				"sparkwing: %s(%q): Approval.OnTimeout = %q is not one of "+
+					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
+				caller, id, app.OnTimeout))
+		}
+		return &Node{
+			id:       id,
+			job:      job,
+			approval: app,
+		}
+	}
+
 	w := materializeWork(id, job)
+	workType := outputTypeFromWork(w)
+
+	// Strict Produces / SetResult contract: typed jobs must declare
+	// both. Either alone is a Plan-time error.
+	var outType reflect.Type
+	pr, hasMarker := job.(producer)
+	switch {
+	case hasMarker && workType == nil:
+		panic(fmt.Sprintf(
+			"sparkwing: node %q: declares Produces[%v] but Work() never calls SetResult "+
+				"(add a Result/Out step + w.SetResult, or drop the marker)",
+			id, pr.producedType()))
+	case !hasMarker && workType != nil:
+		panic(fmt.Sprintf(
+			"sparkwing: node %q: Work.SetResult declares output type %v but the job struct does not embed "+
+				"sparkwing.Produces[%v] (add the marker so the contract is visible at the type level)",
+			id, workType, workType))
+	case hasMarker && workType != nil:
+		declared := pr.producedType()
+		if declared != workType {
+			panic(fmt.Sprintf(
+				"sparkwing: node %q: Produces[%v] but Work.SetResult is %v (align them)",
+				id, declared, workType))
+		}
+		outType = declared
+	}
+
 	return &Node{
 		id:      id,
 		job:     job,
 		work:    w,
-		outType: outputTypeFromWork(w),
+		outType: outType,
 	}
+}
+
+// NewDetachedNode builds a node with full Job-equivalent validation
+// but does not register it on a Plan. Pipeline authors should not
+// reach for this -- it exists for the orchestrator's SpawnNode
+// dispatch path, where the child node is created at runtime and
+// spliced in via Plan.InsertChild after the parent suspends. Use
+// sparkwing.Job from pipeline code.
+func NewDetachedNode(id string, job Workable) *Node {
+	return newNode("NewDetachedNode", id, job)
 }
 
 // InsertChild splices a fresh node into the running plan WITHOUT
@@ -171,72 +237,10 @@ func Job(p *Plan, id string, job Workable) *Node {
 	if p == nil {
 		panic("sparkwing: Job: plan must be non-nil")
 	}
-	if id == "" {
-		panic("sparkwing: Job: id must not be empty")
-	}
-	if job == nil {
-		panic(fmt.Sprintf("sparkwing: Job(%q): job must be non-nil", id))
-	}
 	if _, ok := p.byID[id]; ok {
 		panic(fmt.Sprintf("sparkwing: Job: duplicate node id %q", id))
 	}
-
-	// Approval gates: the *Approval Job type is a marker -- Work() is
-	// empty and never executes; the orchestrator routes via n.approval.
-	if app, ok := job.(*Approval); ok {
-		switch app.OnTimeout {
-		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
-			// ok
-		default:
-			panic(fmt.Sprintf(
-				"sparkwing: Job(%q): Approval.OnTimeout = %q is not one of "+
-					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
-				id, app.OnTimeout))
-		}
-		n := &Node{
-			id:       id,
-			job:      job,
-			approval: app,
-		}
-		p.nodes = append(p.nodes, n)
-		p.byID[id] = n
-		return n
-	}
-
-	w := materializeWork(id, job)
-	workType := outputTypeFromWork(w)
-
-	// Strict Produces / SetResult contract: typed jobs must declare
-	// both. Either alone is a Plan-time error.
-	var outType reflect.Type
-	pr, hasMarker := job.(producer)
-	switch {
-	case hasMarker && workType == nil:
-		panic(fmt.Sprintf(
-			"sparkwing: node %q: declares Produces[%v] but Work() never calls SetResult "+
-				"(add a Result/Out step + w.SetResult, or drop the marker)",
-			id, pr.producedType()))
-	case !hasMarker && workType != nil:
-		panic(fmt.Sprintf(
-			"sparkwing: node %q: Work.SetResult declares output type %v but the job struct does not embed "+
-				"sparkwing.Produces[%v] (add the marker so the contract is visible at the type level)",
-			id, workType, workType))
-	case hasMarker && workType != nil:
-		declared := pr.producedType()
-		if declared != workType {
-			panic(fmt.Sprintf(
-				"sparkwing: node %q: Produces[%v] but Work.SetResult is %v (align them)",
-				id, declared, workType))
-		}
-		outType = declared
-	}
-
-	n := &Node{
-		id:      id,
-		job:     job,
-		work:    w,
-		outType: outType,
-	}
+	n := newNode("Job", id, job)
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
 	return n
@@ -566,7 +570,7 @@ func (n *Node) Timeout(d time.Duration) *Node {
 // recovery inherits no dependencies from its parent. Useful for
 // rollback, alerting, and cleanup hooks.
 func (n *Node) OnFailure(id string, job Workable) *Node {
-	n.onFailure = JobNode(id, job)
+	n.onFailure = newNode("OnFailure", id, job)
 	return n
 }
 

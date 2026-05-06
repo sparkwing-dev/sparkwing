@@ -36,7 +36,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 		return nil, fmt.Errorf("orchestrator: SpawnNode id collision: %q already in plan", childID)
 	}
 
-	child := sparkwing.JobNode(childID, job)
+	child := sparkwing.NewDetachedNode(childID, job)
 
 	if err := h.state.plan.InsertChild(child); err != nil {
 		return nil, fmt.Errorf("orchestrator: insert spawn child %q: %w", childID, err)
