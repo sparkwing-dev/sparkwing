@@ -587,6 +587,62 @@ func (j *JSONRenderer) Emit(rec sparkwing.LogRecord) {
 	_ = j.enc.Encode(&rec)
 }
 
+// envelopeLogger persists run-level envelope events as JSONL and
+// tees to the user-facing delegate. IMP-010: envelope events
+// (run_start, run_plan, run_finish, plan_warn, validation warnings,
+// the run_summary, etc.) used to live only on the dispatcher's
+// stdout; this tee is the storage half that lets `sparkwing runs
+// logs --follow` reconstruct the same event stream a remote operator
+// would never see otherwise. Per-node body output keeps writing to
+// the node's own log file via nodeLogger -- the merged-stream reader
+// in jobs_cli.go interleaves the two by timestamp.
+//
+// Records that already carry a Node are written verbatim (so a
+// node-tagged plan_warn still threads through the envelope file
+// where the merged reader can find it). Records without a Node are
+// pure run-level events.
+type envelopeLogger struct {
+	mu       sync.Mutex
+	file     io.WriteCloser
+	enc      *json.Encoder
+	delegate sparkwing.Logger // optional tee, may be nil
+}
+
+// newEnvelopeLogger opens path for append. Caller must Close.
+func newEnvelopeLogger(path string, delegate sparkwing.Logger) (*envelopeLogger, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	return &envelopeLogger{
+		file:     f,
+		enc:      json.NewEncoder(f),
+		delegate: delegate,
+	}, nil
+}
+
+func (l *envelopeLogger) Log(level, msg string) {
+	l.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
+}
+
+func (l *envelopeLogger) Emit(rec sparkwing.LogRecord) {
+	if rec.TS.IsZero() {
+		rec.TS = time.Now()
+	}
+	l.mu.Lock()
+	_ = l.enc.Encode(&rec)
+	l.mu.Unlock()
+	if l.delegate != nil {
+		l.delegate.Emit(rec)
+	}
+}
+
+func (l *envelopeLogger) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.file.Close()
+}
+
 // StripANSI removes ANSI CSI/SGR escape sequences from s.
 func StripANSI(s string) string {
 	if !strings.ContainsRune(s, 0x1b) {

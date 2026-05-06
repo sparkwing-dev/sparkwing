@@ -543,6 +543,8 @@ func runJobs(args []string) error {
 		format := fs.String("format", "", "DEPRECATED alias for -o/--output")
 		_ = fs.MarkHidden("format")
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
+		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout (IMP-010)")
+		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- the pre-IMP-010 default; useful when scripts depend on the legacy shape")
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -582,16 +584,18 @@ func runJobs(args []string) error {
 			return errors.New("jobs logs: --tail and --head cannot be combined")
 		}
 		opts := orchestrator.LogsOpts{
-			Node:   *node,
-			JSON:   resolvedFmt == "json",
-			Follow: *follow,
-			Format: resolvedFmt,
-			Tail:   *tail,
-			Head:   *head,
-			Lines:  *lines,
-			Grep:   *grep,
-			Since:  *since,
-			Tree:   *tree,
+			Node:       *node,
+			JSON:       resolvedFmt == "json",
+			Follow:     *follow,
+			Format:     resolvedFmt,
+			Tail:       *tail,
+			Head:       *head,
+			Lines:      *lines,
+			Grep:       *grep,
+			Since:      *since,
+			Tree:       *tree,
+			EventsOnly: *eventsOnly,
+			NoEvents:   *noEvents,
 		}
 		if *on != "" {
 			prof, err := resolveProfile(*on)

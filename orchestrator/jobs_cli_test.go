@@ -237,8 +237,11 @@ func TestJobLogs_UnknownNode(t *testing.T) {
 
 func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
 	// Whole-run logs on a pipeline with a cancelled-downstream node
-	// should summarize the cancelled node on one line, not dump an
-	// empty log file banner.
+	// should summarize the cancelled node, not dump an empty log file
+	// banner. With IMP-010 the default reads the envelope stream
+	// (which includes the run_summary event listing the cancelled
+	// node); the legacy per-node "did not execute" banner only
+	// surfaces under --no-events.
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
@@ -253,8 +256,21 @@ func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
 	if strings.Contains(out, "(no log file yet)") {
 		t.Fatalf("cancelled node should be summarized, not show 'no log file': %s", out)
 	}
-	if !strings.Contains(out, "did not execute") {
-		t.Fatalf("cancelled node should be summarized: %s", out)
+	// Default mode now sources the envelope stream: the cancelled
+	// node appears in the run_summary event listing.
+	if !strings.Contains(out, "cancelled") {
+		t.Fatalf("cancelled node should be summarized via envelope stream: %s", out)
+	}
+
+	// Legacy --no-events mode keeps the original "did not execute"
+	// per-node banner shape.
+	var legacy bytes.Buffer
+	if err := orchestrator.JobLogs(context.Background(), p, res.RunID,
+		orchestrator.LogsOpts{NoEvents: true}, &legacy); err != nil {
+		t.Fatalf("JobLogs --no-events: %v", err)
+	}
+	if !strings.Contains(legacy.String(), "did not execute") {
+		t.Fatalf("--no-events should show legacy 'did not execute' banner: %s", legacy.String())
 	}
 }
 

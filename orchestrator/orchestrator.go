@@ -291,6 +291,45 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	_ = backends.State.FinishRun(ctx, runID, finalStatus, errMsg)
 
+	// IMP-010: emit run_finish here so the envelope tee (installed by
+	// RunLocal around opts.Delegate) captures it. Previously the
+	// outer Main() in this package emitted run_finish AFTER RunLocal
+	// returned -- which meant the envelope log closed before the
+	// terminal event landed, and `runs logs --follow` could never
+	// surface a "run finished" line. The Main() emission becomes the
+	// one for callers that drove orchestrator.Run directly without
+	// the envelope tee; we keep it idempotent there by checking the
+	// presence of the EnvelopeLogger flag in the delegate chain.
+	if opts.Delegate != nil {
+		level := "info"
+		if finalStatus != "success" {
+			level = "error"
+		}
+		attrs := map[string]any{
+			"run_id": runID,
+			"status": finalStatus,
+		}
+		if runErr != nil {
+			attrs["error"] = runErr.Error()
+		}
+		if runID != "" {
+			hints := map[string]string{
+				"status": "sparkwing runs status --run " + runID,
+				"logs":   "sparkwing runs logs --run " + runID,
+			}
+			if finalStatus == "failed" {
+				hints["retry"] = "sparkwing runs retry --run " + runID
+			}
+			attrs["hints"] = hints
+		}
+		opts.Delegate.Emit(sparkwing.LogRecord{
+			TS:    time.Now(),
+			Level: level,
+			Event: "run_finish",
+			Attrs: attrs,
+		})
+	}
+
 	return &Result{RunID: runID, Status: finalStatus, Error: runErr}, nil
 }
 
@@ -311,6 +350,29 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	backends := LocalBackends(paths, st)
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)
+	}
+	// IMP-010: wrap the user-facing delegate with an envelope tee so
+	// every run-wide event (run_start, run_plan, node_start, node_end,
+	// run_summary, run_finish, plan_warn, exec_line, ...) is also
+	// persisted to <runDir>/_envelope.ndjson. The merged-stream reader
+	// in JobLogs replays this file alongside per-node body output so
+	// `runs logs --follow` reconstructs the full chronological event
+	// stream that today only the dispatcher's stdout sees.
+	//
+	// We need the run id to derive the envelope path, but RunLocal
+	// generates the id when opts.RunID is empty. Mint it here so the
+	// inner Run() honors it AND the envelope file lives at the right
+	// directory.
+	if opts.RunID == "" {
+		opts.RunID = newRunID()
+	}
+	if err := paths.EnsureRunDir(opts.RunID); err != nil {
+		return nil, fmt.Errorf("ensure run dir: %w", err)
+	}
+	envLog, envErr := newEnvelopeLogger(paths.EnvelopeLog(opts.RunID), opts.Delegate)
+	if envErr == nil {
+		opts.Delegate = envLog
+		defer envLog.Close()
 	}
 	res, runErr := Run(ctx, backends, opts)
 	// Dump on error too, for post-mortem of partial runs.

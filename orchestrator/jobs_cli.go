@@ -239,6 +239,19 @@ type LogsOpts struct {
 
 	// Since filters by node StartedAt; node-level granularity.
 	Since time.Duration
+
+	// EventsOnly filters output to the run-level envelope events
+	// (run_start, run_plan, node_start, node_end, run_summary,
+	// run_finish, plan_warn, etc.) -- the same NDJSON the dispatcher
+	// streams to stdout today. exec_line records are excluded since
+	// they're really tagged body output. Mutually exclusive with
+	// NoEvents.
+	EventsOnly bool
+
+	// NoEvents filters output to per-node body output only -- the
+	// pre-IMP-010 behavior of `runs logs`. Useful as an explicit opt-
+	// out when scripts depend on the legacy shape.
+	NoEvents bool
 }
 
 // applyClientFilters is the local-mode equivalent of pkg/logs filters.
@@ -327,6 +340,9 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
+	if opts.EventsOnly && opts.NoEvents {
+		return fmt.Errorf("jobs logs: --events-only and --no-events are mutually exclusive")
+	}
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return err
@@ -357,10 +373,207 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return writeLogsTreeLocal(paths, runID, opts, out)
 	}
 
+	// IMP-010: when the envelope file exists (post-rewrite runs) and
+	// the user hasn't asked for the legacy body-only view or pinned
+	// to a single node, the envelope file IS the merged stream --
+	// the dispatcher tees every run-wide event into it, including
+	// exec_line body lines. Read it directly. Pre-IMP-010 runs (no
+	// envelope file) fall back to the per-node path so historical
+	// runs stay readable.
+	if !opts.NoEvents && opts.Node == "" && envelopeExists(paths, runID) {
+		if !opts.Follow {
+			return writeLogsFromEnvelope(paths, runID, opts, out)
+		}
+		return followFromEnvelope(ctx, st, paths, runID, opts, out)
+	}
+	if opts.EventsOnly {
+		// Envelope file missing on a pre-IMP-010 run; nothing to show.
+		return nil
+	}
+
 	if !opts.Follow {
 		return writeLogsText(paths, runID, target, opts, out)
 	}
 	return followLogs(ctx, st, paths, runID, target, opts, out)
+}
+
+// envelopeExists returns true when the run has an envelope file
+// (post-IMP-010). Old runs predating the tee fall back to per-node
+// reads.
+func envelopeExists(paths Paths, runID string) bool {
+	_, err := os.Stat(paths.EnvelopeLog(runID))
+	return err == nil
+}
+
+// writeLogsFromEnvelope streams the run's _envelope.ndjson, optionally
+// filtered to events-only, then renders per opts.Format.
+func writeLogsFromEnvelope(paths Paths, runID string, opts LogsOpts, out io.Writer) error {
+	path := paths.EnvelopeLog(runID)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	// Apply filters (grep / tail / head / lines + events-only) by
+	// buffering; envelope files are bounded by run duration and tend
+	// to be small relative to body output. For very large runs the
+	// follow path is the right tool anyway.
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	if opts.EventsOnly {
+		data = filterEventsOnly(data)
+	}
+	if opts.Tail > 0 || opts.Head > 0 || opts.Lines != "" || opts.Grep != "" {
+		data = opts.applyClientFilters(data)
+	}
+	return renderJSONLStream(bytes.NewReader(data), opts, out)
+}
+
+// filterEventsOnly drops lines whose Event is empty or "exec_line".
+// exec_line is technically an envelope record (the dispatcher emits
+// it) but it carries body output, not a state transition; the
+// `--events-only` user wants the bracketing events for grepping.
+func filterEventsOnly(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	out := make([]byte, 0, len(data))
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		var rec sparkwing.LogRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			// Unparseable; preserve so debugging stays possible.
+			out = append(out, line...)
+			out = append(out, '\n')
+			continue
+		}
+		if rec.Event == "" || rec.Event == "exec_line" {
+			continue
+		}
+		out = append(out, line...)
+		out = append(out, '\n')
+	}
+	return out
+}
+
+// followFromEnvelope tails _envelope.ndjson until the run terminates,
+// applying the same filters as the non-follow path on the fly.
+func followFromEnvelope(ctx context.Context, st *store.Store, paths Paths, runID string, opts LogsOpts, out io.Writer) error {
+	path := paths.EnvelopeLog(runID)
+	jsonOut := opts.JSON || opts.Format == "json"
+	plainOut := opts.Format == "plain"
+	var offset int64
+	var partial []byte
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		f, err := os.Open(path)
+		if err == nil {
+			if _, serr := f.Seek(offset, io.SeekStart); serr == nil {
+				buf := make([]byte, 32*1024)
+				var chunk []byte
+				for {
+					n2, rerr := f.Read(buf)
+					if n2 > 0 {
+						chunk = append(chunk, buf[:n2]...)
+						offset += int64(n2)
+					}
+					if rerr != nil {
+						break
+					}
+				}
+				if len(chunk) > 0 {
+					combined := append(partial, chunk...)
+					lastNL := bytes.LastIndexByte(combined, '\n')
+					if lastNL >= 0 {
+						complete := combined[:lastNL+1]
+						partial = append([]byte(nil), combined[lastNL+1:]...)
+						if opts.EventsOnly {
+							complete = filterEventsOnly(complete)
+						}
+						if opts.Grep != "" {
+							complete = (LogsOpts{Grep: opts.Grep}).applyClientFilters(complete)
+						}
+						if err := emitFollowChunk(complete, jsonOut, plainOut, out); err != nil {
+							f.Close()
+							return err
+						}
+					} else {
+						partial = combined
+					}
+				}
+			}
+			f.Close()
+		}
+		run, err := st.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if isTerminalStatus(run.Status) {
+			// One final drain pass after terminal: file may still
+			// have a trailing run_finish that landed between the last
+			// read and FinishRun's commit. Re-open and drain to EOF.
+			return drainEnvelopeAfterTerminal(path, offset, partial, opts, out)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// drainEnvelopeAfterTerminal flushes any remaining bytes once the run
+// reaches a terminal state. Mirrors followFromEnvelope's per-tick drain
+// but runs once.
+func drainEnvelopeAfterTerminal(path string, offset int64, partial []byte, opts LogsOpts, out io.Writer) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	if len(rest) == 0 && len(partial) == 0 {
+		return nil
+	}
+	jsonOut := opts.JSON || opts.Format == "json"
+	plainOut := opts.Format == "plain"
+	combined := append(partial, rest...)
+	lastNL := bytes.LastIndexByte(combined, '\n')
+	if lastNL < 0 {
+		// No complete line; emit what we have so the operator at
+		// least sees the partial.
+		if len(combined) == 0 {
+			return nil
+		}
+		combined = append(combined, '\n')
+	} else {
+		combined = combined[:lastNL+1]
+	}
+	if opts.EventsOnly {
+		combined = filterEventsOnly(combined)
+	}
+	if opts.Grep != "" {
+		combined = (LogsOpts{Grep: opts.Grep}).applyClientFilters(combined)
+	}
+	return emitFollowChunk(combined, jsonOut, plainOut, out)
 }
 
 func writeLogsText(paths Paths, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {

@@ -48,6 +48,18 @@ func (p Paths) NodeLog(runID, nodeID string) string {
 	return filepath.Join(p.RunDir(runID), sanitizeNodeFile(nodeID)+".log")
 }
 
+// EnvelopeLog returns the path to the run-level envelope event log
+// (run_start, run_plan, run_finish, plan_warn, etc). This is the
+// canonical persisted source for `sparkwing runs logs --follow`'s
+// merged event stream (IMP-010). Per-node body output keeps living
+// at NodeLog(); envelope events live at EnvelopeLog() so the reader
+// can interleave them by timestamp without scanning every node file
+// for needles. Filename starts with `_` to keep it sorted ahead of
+// any node id and visually distinct in `ls`.
+func (p Paths) EnvelopeLog(runID string) string {
+	return filepath.Join(p.RunDir(runID), "_envelope.ndjson")
+}
+
 // Union of POSIX (/) and NTFS (\:*?"<>|) reserved filename chars.
 var reservedNodeFileChars = []string{"/", `\`, ":", "*", "?", `"`, "<", ">", "|"}
 

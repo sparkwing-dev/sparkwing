@@ -7,6 +7,33 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ## [Unreleased]
 
 ### Changed
+- **`runs logs --follow` unified event stream (IMP-010).** `sparkwing
+  runs logs --run X [--follow]` now defaults to a merged event stream
+  that interleaves the orchestrator's run-level envelope events
+  (`run_start`, `run_plan`, `node_start`, `node_end`, `step_start`,
+  `step_end`, `step_skipped`, `run_summary`, `run_finish`, `plan_warn`,
+  ...) chronologically with per-node body output -- the same NDJSON
+  the dispatcher streams to its own stdout today, but readable for any
+  run after the fact. The local dispatcher tees envelope events into
+  `~/.sparkwing/runs/<id>/_envelope.ndjson`; `runs logs` reads from
+  there when present and falls back to the legacy per-node-files view
+  for pre-IMP-010 runs. Two new flags select non-default views:
+  `--events-only` (just the bracketing events, no exec_line bodies --
+  the grep-friendly view that operators were achieving with `tail -f`
+  on the dispatcher's stdout file) and `--no-events` (today's
+  body-only view, kept as the explicit opt-out for scripts that parse
+  the legacy shape). `-o json` continues to pass through raw NDJSON.
+  `--grep` composes with both filters. `run_finish` is now emitted
+  inside `orchestrator.Run` itself instead of the outer `Main()`
+  wrapper so the envelope tee captures the terminal event before
+  closing the file -- previously `--follow` could never observe a
+  "run finished" line. Remote-mode envelope persistence (the
+  symmetric half for `--on PROFILE` runs) requires changes to the
+  cluster logs service ingestion path and is filed as a follow-up;
+  `--events-only --on PROFILE` errors loudly today rather than
+  silently returning empty output. Local-mode tests cover
+  `--events-only`, `--no-events`, `--grep` composition, and the
+  default-merged-stream contract.
 - **Structured JSON body for auth-error responses (IMP-022).**
   401 and 403 responses from the controller, the laptop-local
   controller, and the logs service now emit a stable JSON shape:

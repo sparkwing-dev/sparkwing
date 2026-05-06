@@ -145,33 +145,12 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)
 	}
-
-	level := "info"
-	if res.Status != "success" {
-		level = "error"
-	}
-	attrs := map[string]any{
-		"run_id": res.RunID,
-		"status": res.Status,
-	}
-	if res.Error != nil {
-		attrs["error"] = res.Error.Error()
-	}
-	if res.RunID != "" {
-		hints := map[string]string{
-			"status": "sparkwing runs status --run " + res.RunID,
-			"logs":   "sparkwing runs logs --run " + res.RunID,
-		}
-		if res.Status == "failed" {
-			hints["retry"] = "sparkwing runs retry --run " + res.RunID
-		}
-		attrs["hints"] = hints
-	}
-	delegate.Emit(sparkwing.LogRecord{
-		Level: level,
-		Event: "run_finish",
-		Attrs: attrs,
-	})
+	// IMP-010: run_finish is emitted inside Run() so the envelope
+	// tee captures it. The previous outer emission here happened
+	// after RunLocal had already closed the envelope file, leaving
+	// `runs logs --follow` without a terminal event. Keep the
+	// non-zero exit so wrapper scripts still see the failure.
+	_ = delegate
 	if res.Status != "success" {
 		os.Exit(1)
 	}
