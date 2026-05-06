@@ -47,6 +47,23 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   exist yet, build locally" caveat.
 
 ### Fixed
+- **`wing X --explain --skip Y -o json` now honors `--skip` / `--only`
+  identically to the no-`-o` form (CLI-017).** The pipeline binary's
+  `--explain` entrypoint forwards the user's full argv into
+  `parseTypedFlags` to surface typed pipeline flags (including the
+  `SkipFilterArgs` embed exposing `--skip` / `--only`). Wrapper-only
+  output flags (`-o`, `--output`, `--json`) aren't part of the
+  pipeline schema, so `parseTypedFlags` rejected them as unknown --
+  and the silent error fallback dropped the *entire* parsed argsMap,
+  including `--skip`. The Plan was then built without SkipFilter, so
+  the JSON snapshot included nodes the human-readable form correctly
+  omitted. `printPipelinePlan` now strips explain-output formatting
+  flags before parseTypedFlags via a new `stripExplainOutputFlags`
+  helper (in `orchestrator/main.go`); both render paths consume the
+  same post-filter Plan. Pinned by
+  `orchestrator/explain_skip_filter_test.go`, which exercises every
+  shape of `-o`/`--output`/`--json` against a fixture pipeline that
+  consults `Skip` to drop a named node.
 - **Cluster-mode `RunWorker` no longer wires `Backends.Concurrency`
   through a local SQLite store (RUN-017).** `internal/cluster.RunWorker`
   -- the claim loop powering `sparkwing-runner worker` -- previously

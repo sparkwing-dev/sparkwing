@@ -291,11 +291,22 @@ func printPipelineHelp(pipeline string) error {
 // printPipelinePlan emits the plan snapshot without dispatch. Missing
 // required args are non-fatal; a best-effort plan is more useful for
 // inspection.
+//
+// CLI-017: the inner pipeline binary is invoked with the user's full
+// argv (e.g. `wing X --explain --skip Y -o json`). `-o` / `--output` /
+// `--json` are explain-output formatting flags owned by the wrapper,
+// not pipeline args -- they must be stripped before parseTypedFlags
+// sees them. Otherwise an unknown-flag error in parseTypedFlags falls
+// back to an empty argsMap, silently dropping `--skip` / `--only` /
+// any other typed pipeline flag the user passed alongside `-o`. The
+// result was a Plan rendered with no SkipFilter applied -- diverging
+// from `wing X --explain --skip Y` (no `-o`), which parsed cleanly.
 func printPipelinePlan(pipeline string, rest []string) error {
 	reg, ok := sparkwing.Lookup(pipeline)
 	if !ok {
 		return fmt.Errorf("unknown pipeline %q", pipeline)
 	}
+	rest = stripExplainOutputFlags(rest)
 	argsMap, err := parseTypedFlags(pipeline, rest)
 	if err != nil {
 		argsMap = map[string]string{}
@@ -323,6 +334,39 @@ func filterTok(args []string, drop string) []string {
 	for _, a := range args {
 		if a != drop {
 			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// stripExplainOutputFlags removes explain-output formatting flags
+// (`-o` / `--output` / `--json`) from args. The pipeline binary
+// always emits a JSON plan snapshot for `--explain`; the surrounding
+// `sparkwing pipeline explain` / `wing` wrapper is responsible for
+// any pretty-printing, so these flags are noise to the inner Plan-
+// builder. Stripping them keeps parseTypedFlags from rejecting them
+// as unknown -- which used to drop *all* typed flags (including
+// --skip / --only) into an empty map and silently disable
+// SkipFilter. CLI-017.
+func stripExplainOutputFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		tok := args[i]
+		switch {
+		case tok == "--json", tok == "--json=true", tok == "--json=false":
+			// Boolean toggle; consumed.
+		case tok == "-o", tok == "--output":
+			// Two-token flag; consume the value too if present and
+			// not itself a flag (defensive against malformed input).
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+			}
+		case strings.HasPrefix(tok, "-o="),
+			strings.HasPrefix(tok, "--output="),
+			strings.HasPrefix(tok, "--json="):
+			// Single-token =value form; consumed.
+		default:
+			out = append(out, tok)
 		}
 	}
 	return out
