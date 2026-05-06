@@ -299,9 +299,26 @@ func CachedBinaryPath(hash string) string {
 // Recoverable by `go mod download`.
 var ErrMissingGoSum = errors.New("missing go.sum entries")
 
+// CompileError wraps a `go build` failure with the combined stdout +
+// stderr of the build. Callers that want to surface the real toolchain
+// output (e.g. the warm-runner's trigger loop, which streams it into
+// the run's logs) extract the bytes via errors.As; callers that only
+// want the terse wrapper string (`compile .sparkwing/: <exit>`) keep
+// working unchanged.
+type CompileError struct {
+	Output []byte // combined stdout + stderr captured during `go build`
+	Err    error  // underlying error (typically *exec.ExitError)
+}
+
+func (e *CompileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
+func (e *CompileError) Unwrap() error { return e.Err }
+
 // CompilePipeline `go build`s sparkwingDir -> dest. Stdout + stderr
-// go to the parent's stderr; stderr is also tee'd into a buffer so we
-// can detect the missing-go.sum case and return ErrMissingGoSum.
+// stream to the parent's stderr (so pod logs still show progress);
+// both are also captured into a buffer so a failure returns a
+// *CompileError with the toolchain output. Missing-go.sum is
+// detected up front and surfaced as ErrMissingGoSum so callers can
+// retry after `go mod download`.
 //
 // If `.sparkwing/.resolved.mod` exists, compile is invoked with
 // `-modfile=<path>` so the overlay's resolved versions take precedence
@@ -324,15 +341,19 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
 	cmd.Dir = sparkwingDir
-	cmd.Stdout = os.Stderr
+	// Capture both streams: go-build splits diagnostics across stdout
+	// and stderr depending on flags / toolchain stage (e.g. the
+	// `go: go.mod requires go >= X` toolchain check writes to stderr,
+	// while compiler errors land on stdout). We surface both.
 	var captured bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = os.Environ()
 	if err := cmd.Run(); err != nil {
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
 		}
-		return fmt.Errorf("compile .sparkwing/: %w", err)
+		return &CompileError{Output: append([]byte(nil), captured.Bytes()...), Err: err}
 	}
 	return nil
 }

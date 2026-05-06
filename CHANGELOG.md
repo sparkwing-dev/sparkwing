@@ -53,6 +53,26 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   exist yet, build locally" caveat.
 
 ### Fixed
+- **Warm-runner now ships `.sparkwing/` compile stderr into the
+  run's structured logs (IMP-001).** Previously, when the trigger
+  loop's `go build` of a consumer's `.sparkwing/` directory failed,
+  the operator-facing surface was the wrapper string
+  `compile .sparkwing/: exit status 1`; the actual toolchain output
+  (e.g. `go: go.mod requires go >= 1.26.0`) only existed in the
+  warm-runner pod's stderr and required a `kubectl logs` to see.
+  `bincache.CompilePipeline` now returns a typed `*CompileError`
+  whose `Output` field carries the captured `go build` stdout and
+  stderr (both, since the Go toolchain splits diagnostics across
+  them); the cluster trigger loop POSTs that buffer to a synthetic
+  `_compile` log node on the logs service, so
+  `sparkwing runs logs --run <id>` surfaces the real error
+  alongside the regular per-node output. The wrapper error string
+  on the failed-trigger path stays terse so runner pod logs don't
+  balloon. Best-effort: the ship attempt uses a fresh
+  `context.WithoutCancel` ctx so a parent ctx that's already
+  cancelling on heartbeat-silence doesn't drop the diagnostic, and
+  a failed POST degrades to a warning rather than masking the
+  underlying compile failure.
 - **`wing X --explain --skip Y -o json` now honors `--skip` / `--only`
   identically to the no-`-o` form (CLI-017).** The pipeline binary's
   `--explain` entrypoint forwards the user's full argv into

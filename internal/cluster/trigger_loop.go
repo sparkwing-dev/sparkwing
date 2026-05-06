@@ -12,9 +12,19 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/bincache"
 	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/logs"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/otelutil"
 )
+
+// CompileLogNode is the synthetic node id used to attribute the
+// trigger loop's `go build` stdout + stderr to the run's structured
+// logs when the .sparkwing/ compile fails (IMP-001). The compile
+// step happens before any pipeline binary runs, so there's no real
+// orchestrator node to attach the output to; this fixed id lets
+// `sparkwing runs logs --run <id>` surface the toolchain error
+// without operators having to kubectl-log the warm-runner pod.
+const CompileLogNode = "_compile"
 
 // TriggerLoopOptions configures RunTriggerLoop.
 type TriggerLoopOptions struct {
@@ -180,6 +190,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 	binPath, buildErr := triggerBuildOrFetchBinary(sparkwingDir, opts, logger)
 	if buildErr != nil {
+		shipCompileOutput(ctx, opts, trigger.ID, buildErr, logger)
 		return awaitHeartbeat(), buildErr
 	}
 	logger.Info("trigger loop: binary ready",
@@ -226,6 +237,32 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 		return fmt.Errorf("child pipeline binary: %w", err)
 	}
 	return nil
+}
+
+// shipCompileOutput posts the captured `go build` output for a
+// trigger whose .sparkwing/ compile failed into a synthetic
+// CompileLogNode log on the controller's logs service. Best-effort:
+// we already have a wrapper error to return, so a failed POST
+// degrades silently to a warning -- IMP-002 tracks the broader
+// "logs.append silent-success" hardening.
+func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID string, buildErr error, logger *slog.Logger) {
+	if opts.LogsURL == "" {
+		return
+	}
+	var ce *bincache.CompileError
+	if !errors.As(buildErr, &ce) || len(ce.Output) == 0 {
+		return
+	}
+	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token)
+	// Use a fresh context: the trigger ctx may already be cancelling
+	// (heartbeat goroutine signalled the parent), but we still want
+	// to ship the diagnostic so operators can see why compile failed.
+	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := cli.Append(postCtx, runID, CompileLogNode, ce.Output); err != nil {
+		logger.Warn("trigger loop: failed to ship compile output to logs",
+			"run_id", runID, "err", err)
+	}
 }
 
 func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, logger *slog.Logger) (string, error) {

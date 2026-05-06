@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,6 +146,59 @@ func TestCompilePipeline_WithOverlay_UsesModfile(t *testing.T) {
 	want := "-modfile=" + overlay
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected %q in args, got: %q", want, got)
+	}
+}
+
+// installFailingGo drops a fake `go` on PATH that prints `stderrLine`
+// to stderr, `stdoutLine` to stdout, and exits with status 1. Lets
+// us exercise the failure path of CompilePipeline without depending
+// on a real toolchain.
+func installFailingGo(t *testing.T, stderrLine, stdoutLine string) {
+	t.Helper()
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' " + shQuote(stdoutLine) + "\n" +
+		"printf '%s\\n' " + shQuote(stderrLine) + " 1>&2\n" +
+		"exit 1\n"
+	bin := filepath.Join(binDir, "go")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake go: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// IMP-001: a failed compile must surface the toolchain's stdout +
+// stderr via *CompileError so the trigger loop can ship them into
+// the run's structured logs (instead of operators having to
+// `kubectl logs` the warm-runner pod).
+func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
+	const wantStderr = "go: go.mod requires go >= 9.99.0"
+	const wantStdout = "./pipeline.go:7:2: undefined: Foo"
+	installFailingGo(t, wantStderr, wantStdout)
+	dir := newPipelineDir(t)
+	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
+
+	err := CompilePipeline(dir, dest)
+	if err == nil {
+		t.Fatal("expected CompilePipeline to fail")
+	}
+	var ce *CompileError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *CompileError, got %T: %v", err, err)
+	}
+	out := string(ce.Output)
+	if !strings.Contains(out, wantStderr) {
+		t.Errorf("captured output missing stderr line %q:\n%s", wantStderr, out)
+	}
+	if !strings.Contains(out, wantStdout) {
+		t.Errorf("captured output missing stdout line %q:\n%s", wantStdout, out)
+	}
+	// The wrapper string stays terse so existing log lines don't
+	// suddenly explode in volume.
+	if !strings.HasPrefix(err.Error(), "compile .sparkwing/:") {
+		t.Errorf("expected terse wrapper prefix, got: %q", err.Error())
 	}
 }
 
