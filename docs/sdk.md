@@ -20,20 +20,33 @@ Every example below uses that alias. The package itself is named
 
 ## Read/write split
 
-Operations that mutate the Plan are **free functions on `sparkwing`**;
-operations that read the Plan are **methods on `*Plan`**. Go forbids
-generic methods, so the typed adders (RefTo[T], JobFanOut[T]) must
-be free functions; for symmetry every adder lives there. Reads stay
-on `*Plan` because they don't have the same constraint and the
-`plan.X()` shape reads naturally for accessors.
+Operations that mutate a DAG (Plan or Work) are **free functions on
+`sparkwing`**; operations that read a DAG are **methods on the
+container** (`*Plan` / `*Work`). Go forbids generic methods, so the
+typed adders (`RefTo[T]`, `JobFanOut[T]`, `StepGet[T]`) must be free
+functions; for symmetry every adder lives there. Reads stay on the
+container because they don't have the same constraint and the
+`plan.X()` / `w.X()` shape reads naturally for accessors.
 
-| Mutate (free funcs) | Read (methods) |
-|---|---|
-| `sw.Job(plan, id, job)` | `plan.Nodes()` |
-| `sw.JobFanOut(plan, name, items, fn)` | `plan.Node(id)` |
-| `sw.JobFanOutDynamic(plan, name, source, fn)` | `plan.LintWarnings()` |
-| `sw.Group(plan, name, members...)` | `plan.Expansions()` |
-| `sw.RefTo[T](node)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
+The same grammar applies at both layers: `sw.<Verb>(<container>,
+...args).<modifier>(...)`. Tab-completing `sw.` shows every adder;
+tab-completing `Job` shows every way to put a Job into the run
+(`Job`, `JobFanOut`, `JobFanOutDynamic`, `JobApproval`, `JobSpawn`,
+`JobSpawnEach`) regardless of layer.
+
+| Layer | Mutate (free funcs) | Read (methods) |
+|---|---|---|
+| Plan | `sw.Job(plan, id, x)` | `plan.Nodes()` |
+| Plan | `sw.JobFanOut(plan, name, items, fn)` | `plan.Node(id)` |
+| Plan | `sw.JobFanOutDynamic(plan, name, source, fn)` | `plan.LintWarnings()` |
+| Plan | `sw.JobApproval(plan, id, cfg)` | `plan.Expansions()` |
+| Plan | `sw.GroupJobs(plan, name, members...)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
+| Plan | `sw.RefTo[T](node)` | |
+| Work | `sw.Step(w, id, fn)` | `w.Steps()` / `w.StepByID(id)` |
+| Work | `sw.JobSpawn(w, id, job)` | `w.Spawns()` / `w.SpawnGens()` |
+| Work | `sw.JobSpawnEach(w, items, fn)` | |
+| Work | `sw.GroupSteps(w, name, steps...)` | |
+| Work | `sw.StepGet[T](ctx, step)` | |
 
 ## The two-layer model
 
@@ -57,17 +70,17 @@ the rename auditable.
 
 | API | Layer | Cardinality | Cost |
 |---|---|---|---|
-| `sw.Job(plan, id, job)` | Plan | one, declared at Plan-time | normal node |
+| `sw.Job(plan, id, x)` | Plan | one, declared at Plan-time | normal node |
 | `sw.JobFanOut(plan, name, items, fn)` | Plan | many, items in hand at Plan-time | normal nodes; one per element |
 | `sw.JobFanOutDynamic(plan, name, source, fn)` | Plan | many, source's runtime output | source runner exits before fan-out - no stranded compute |
-| `w.Step(id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
-| `w.SpawnNode(id, job)` | Work | one, decided mid-Work | spawning runner stays suspended until child completes |
-| `w.SpawnNodeForEach(items, fn)` | Work | many, mid-Work fan-out | spawning runner stays suspended across all children |
+| `sw.Step(w, id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
+| `sw.JobSpawn(w, id, job)` | Work | one, decided mid-Work | spawning runner stays suspended until child completes |
+| `sw.JobSpawnEach(w, items, fn)` | Work | many, mid-Work fan-out | spawning runner stays suspended across all children |
 
-The verb tells you the cost: `Node*` is cheap; `SpawnNode*` flags
-the layer jump and the suspended-runner cost. Reach for `SpawnNode`
-when you genuinely need Plan-only modifiers on a unit decided
-mid-execution.
+The verb tells you the cost: `Job*` adders on `plan` are cheap; the
+`JobSpawn*` adders on `w` flag the layer jump and the
+suspended-runner cost. Reach for `JobSpawn` when you genuinely need
+Plan-only modifiers on a unit decided mid-execution.
 
 ## Plan() must be pure
 
@@ -110,10 +123,8 @@ type DiscoverBuildContextJob struct {
     sw.Produces[BuildContext]
 }
 
-func (j *DiscoverBuildContextJob) Work() *sw.Work {
-    w := sw.NewWork()
-    sw.Result(w, "run", j.run)
-    return w
+func (j *DiscoverBuildContextJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "run", j.run), nil
 }
 
 func (j *DiscoverBuildContextJob) run(ctx context.Context) (BuildContext, error) {
@@ -269,21 +280,28 @@ for the moment a Plan starts branching on trigger source / SHA.
 Free-function adders (writes; mutate the Plan):
 
 ```
-sw.Job(plan, id, job sw.Workable) *Node                                       // register a Job
+sw.Job(plan, id, x any) *Node                                                 // register a Job: x is sw.Workable or func(ctx) error
 sw.JobFanOut[T](plan, name, items, fn) *NodeGroup                             // Plan-time static fan-out
 sw.JobFanOutDynamic[T](plan, name, source, fn) *NodeGroup                     // runtime fan-out after source completes
-sw.Group(plan, name, members...) *NodeGroup                                   // named cluster + Needs target (name="" = unnamed)
-sw.RefTo[T](node) sw.Ref[T]                                                  // typed Ref into node's typed output
+sw.JobApproval(plan, id, cfg) *ApprovalGate                                   // human-decision gate (see "Approval gates")
+sw.GroupJobs(plan, name, members...) *NodeGroup                               // named cluster + Needs target (name="" = unnamed)
+sw.RefTo[T](node) sw.Ref[T]                                                   // typed Ref into node's typed output
 ```
 
-Approval gates register through `sw.Approval` and return an
+`sw.Job`'s third argument is `any`: pass either an `sw.Workable`
+implementation (struct with `Work(w *Work) (*WorkStep, error)`) or a
+plain `func(ctx context.Context) error` for the trivial single-closure
+case. Reflection at register time accepts either form. Anything else
+panics at materialize time.
+
+Approval gates register through `sw.JobApproval` and return an
 `*ApprovalGate` -- a narrower modifier surface than `*Node` so the
 modifiers that don't apply to gates (`Retry`, `Timeout`, `Cache`,
 `RunsOn`, `Inline`) are physically absent and a misuse is a compile
 error rather than a runtime surprise:
 
 ```go
-approve := sw.Approval(plan, "approve-prod", sw.ApprovalConfig{
+approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
     Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
     Timeout:  2 * time.Hour,
     OnExpiry: sw.ApprovalFail,
@@ -321,12 +339,13 @@ node.Env(key, value) *Node                         // per-node env var
 group.Needs(deps...) *NodeGroup                    // every member depends on deps; same chainable surface as *Node
 ```
 
-`sw.Group(plan, name, members...)` returns a `*NodeGroup` that is
+`sw.GroupJobs(plan, name, members...)` returns a `*NodeGroup` that is
 both a `Needs` target (a downstream `Needs(group)` depends on every
 member) and a dashboard cluster (members fold under the name; one
 arrow draws into the cluster instead of one-per-member). An empty
 name means "structural collection only" -- still a Needs target,
-but no UI cluster.
+but no UI cluster. The Work-layer twin is `sw.GroupSteps(w, name,
+steps...)`.
 
 Common Plan-layer modifiers (chainable on `*Node`):
 
@@ -348,69 +367,90 @@ Common Plan-layer modifiers (chainable on `*Node`):
 
 ```go
 type Workable interface {
-    Work() *Work
+    Work(w *sw.Work) (*sw.WorkStep, error)
 }
 ```
 
 Every Node carries a Workable (a struct that exposes its inner DAG
-via `Work()`). `Work()` runs at Plan-time and returns the Node's
-inner DAG. The trivial untyped case has a sugar constructor:
+via `Work`). The orchestrator constructs the `*Work` and passes it
+in -- authors don't call `NewWork()`. The returned `*WorkStep` (or
+`nil` for an untyped Job) is the Node's typed output: the
+result-step contract is enforced on Work's return value, not on a
+separate `SetResult` call.
 
-```
-sw.JobFn(fn func(ctx) error) sw.Workable             // single-step Workable
-```
-
-For typed-output Jobs the contract is **strict**: the job
-struct must embed `sw.Produces[T]` AND its `Work().SetResult` must
-land on a step of type `T`. Either alone is a Plan-time panic. The
-marker lives on the struct, where the typed contract belongs;
-`sw.RefTo[T](node)` validates against the marker and never falls
-back to inferring the type from `Work.SetResult`.
-
-For multi-step Jobs, define a struct with a `Work()` method:
+For Jobs with no typed output, return `nil`:
 
 ```go
 type BuildJob struct{ sw.Base }
 
-func (j *BuildJob) Work() *sw.Work {
-    w := sw.NewWork()
-    fetch := w.Step("fetch", j.fetch)
-    w.Step("compile", j.compile).Needs(fetch)
-    return w
+func (j *BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+    fetch := sw.Step(w, "fetch", j.fetch)
+    sw.Step(w, "compile", j.compile).Needs(fetch)
+    return nil, nil
 }
 ```
 
+For typed-output Jobs the contract is **strict**: the job struct
+must embed `sw.Produces[T]` AND its `Work` must return a step whose
+output type is `T`. Either alone is a Plan-time panic. The marker
+lives on the struct, where the typed contract belongs; `sw.RefTo[T]
+(node)` validates against the marker and never falls back to
+inferring the type from the returned step.
+
+For trivial single-closure Jobs (one function, no inner DAG, no
+struct), pass the closure directly to `sw.Job` and skip the
+Workable entirely:
+
+```go
+sw.Job(plan, "lint", p.run)   // p.run is func(ctx context.Context) error
+```
+
+The SDK wraps the closure into an internal Workable; no `JobFn`
+wrapper is needed.
+
 ## Work - the inner DAG
 
-```
-NewWork() *Work
-
-// Step registration
-w.Step(id, fn func(ctx) error) *WorkStep                // basic step
-sparkwing.Result[T](w, id, fn func(ctx) (T, error)) *TypedStep[T]  // typed step + Work result (the common case)
-sparkwing.Out[T](w, id, fn func(ctx) (T, error)) *TypedStep[T]     // typed step alone (multi-typed-step Works)
-
-// Result wiring
-w.SetResult(step *WorkStep) *Work                        // mark step as the Node's typed output (paired with Out for multi-typed-step Works)
-
-// Combinators
-w.Sequence(steps...) *WorkStep                           // wires Needs between consecutive steps
-w.Parallel(steps...) *StepGroup                          // groups steps for downstream fan-in
-
-// Layer escape
-w.SpawnNode(id, job) *SpawnHandle                        // spawn one Plan node from inside Work
-w.SpawnNodeForEach(items, fn) *SpawnGroup                // spawn many Plan nodes (per-item template)
-```
-
-Step modifiers:
+The Work layer mirrors Plan's free-function grammar. Four adders
+plus one typed reader:
 
 ```
-step.Needs(deps...) *WorkStep                            // accepts *WorkStep, *TypedStep[T], *StepGroup, *SpawnHandle, *SpawnGroup, []*WorkStep, string
-step.SkipIf(predicate) *WorkStep                         // OR-accumulating skip predicate
+sw.Step(w, id, fn any) *WorkStep                          // register a step (untyped or typed; see below)
+sw.GroupSteps(w, name, steps...) *StepGroup               // named cluster + Needs target
+sw.JobSpawn(w, id, job) *SpawnHandle                      // spawn one Plan node from inside Work
+sw.JobSpawnEach(w, items, fn) *SpawnGroup                 // spawn many Plan nodes (per-item template)
+sw.StepGet[T](ctx, step) T                                // typed-read accessor for use inside step bodies
 ```
 
-`*TypedStep[T]` (returned by `sparkwing.Out`) embeds `*WorkStep` and
-adds `.Get(ctx) T` for downstream Steps to read the typed result.
+`sw.Step`'s `fn` is either a `func(ctx context.Context) error`
+(untyped) or a `func(ctx context.Context) (T, error)` (typed). The
+SDK validates the signature via reflection at register time and
+stores the step's `outType` (nil for untyped, T for typed). A
+wrong-shape `fn` panics at materialize time with a typed message.
+A single verb covers both shapes -- the function signature is the
+only declaration site for typing.
+
+Step modifiers (chainable on `*WorkStep`):
+
+```
+step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnHandle, *SpawnGroup, []*WorkStep, string
+step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
+```
+
+`*StepGroup` (returned by `sw.GroupSteps`) is both a `Needs` target
+(a downstream `step.Needs(group)` depends on every member) and a
+dashboard cluster (members fold under the name in the Work view).
+Initial modifiers mirror what `*WorkStep` has today:
+
+```
+group.Needs(deps...) *StepGroup                           // applies to every member
+group.SkipIf(predicate) *StepGroup                        // applies to every member
+```
+
+As step-level modifiers land (Retry, Optional, hooks, Cache --
+follow-up tickets), `*StepGroup` will mirror them.
+
+Reads on `*Work` stay methods: `w.Steps()`, `w.StepByID(id)`,
+`w.Spawns()`, `w.SpawnGens()`.
 
 Spawn handles:
 
@@ -421,6 +461,52 @@ spawn.SkipIf(predicate)                                  // skip predicate befor
 
 The spawned Plan node's id is namespaced as `parent/spawnID` so logs
 and the run history are unambiguous.
+
+## Typed step composition
+
+Inside a step body, read another step's typed output via
+`sw.StepGet[T](ctx, step)`. It mirrors Plan's `Ref[T].Get(ctx)` and
+exists as a free function because Go forbids generic methods.
+
+Reach for it when a step needs to compose values from multiple
+typed steps into a single returned result:
+
+```go
+type BuildOut struct {
+    Tag, Platform, Hash string
+}
+
+type Build struct {
+    sw.Base
+    sw.Produces[BuildOut]
+}
+
+func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
+    tag      := sw.Step(w, "tag",      j.computeTag)        // (string, error)
+    platform := sw.Step(w, "platform", j.detectPlatform)    // (string, error)
+    hash     := sw.Step(w, "hash",     j.computeHash)       // (string, error)
+
+    return sw.Step(w, "compose", func(ctx context.Context) (BuildOut, error) {
+        return BuildOut{
+            Tag:      sw.StepGet[string](ctx, tag),
+            Platform: sw.StepGet[string](ctx, platform),
+            Hash:     sw.StepGet[string](ctx, hash),
+        }, nil
+    }).Needs(tag, platform, hash), nil
+}
+```
+
+`StepGet` blocks until the upstream step's terminal completion
+fires, panics on missing or mismatched type. For the common case
+where the Work is one typed step whose return value IS the Job's
+output, you don't need `StepGet` at all -- just return the step
+from `Work`:
+
+```go
+func (j *BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "run", j.run), nil
+}
+```
 
 ## Typed outputs (single field type for every routing)
 
@@ -439,10 +525,8 @@ type BuildJob struct {
     sw.Produces[BuildOut]      // declares the contract on the struct
 }
 
-func (j *BuildJob) Work() *sw.Work {
-    w := sw.NewWork()
-    sw.Result(w, "run", j.run) // runs `func(ctx) (BuildOut, error)` and SetResults it
-    return w
+func (j *BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+    return sw.Step(w, "run", j.run), nil  // returned step IS the Job's typed output
 }
 
 type DeployJob struct {
@@ -464,7 +548,7 @@ m := j.Manifest.Get(ctx)
 ```
 
 `sw.RefTo[T]` is strict: the node's job MUST embed `sw.Produces[T]`.
-Without the marker -- even if the Work has a SetResult of the right
+Without the marker -- even if the Work returns a step of the right
 type -- `sw.RefTo[T]` panics. This forces the contract to be visible
 at the type level so readers and agents see it on the struct
 definition alone.
@@ -512,10 +596,10 @@ type DeployArgs struct {
 }
 
 func (Deploy) Plan(ctx context.Context, plan *sw.Plan, _ DeployArgs, rc sw.RunContext) error {
-    sw.Job(plan, "deploy", sw.JobFn(func(ctx context.Context) error {
+    sw.Job(plan, "deploy", func(ctx context.Context) error {
         args := sw.Inputs[DeployArgs](ctx)
         return runDeploy(ctx, args.Service, args.Env)
-    }))
+    })
     return nil
 }
 ```
@@ -542,11 +626,11 @@ type Inputs struct {
 type MyPipeline struct{ sw.Base }
 
 func (MyPipeline) Plan(ctx context.Context, plan *sw.Plan, in Inputs, rc sw.RunContext) error {
-    sw.Job(plan, "test", sw.JobFn(func(ctx context.Context) error {
+    sw.Job(plan, "test", func(ctx context.Context) error {
         if in.SkipTests { return nil }
         _, err := sw.Bash(ctx, "go test ./...").Run()
         return err
-    }))
+    })
     return nil
 }
 

@@ -106,27 +106,29 @@ dashboard render the full structure before the run starts.
 
 | API | Layer | Cardinality | Cost |
 |---|---|---|---|
-| `sw.Job(plan, id, job)` | Plan | one, declared at Plan-time | normal node |
+| `sw.Job(plan, id, x)` | Plan | one, declared at Plan-time | normal node |
 | `sw.JobFanOut(plan, name, items, fn)` | Plan | many, items in hand at Plan-time | normal nodes; one per element |
 | `sw.JobFanOutDynamic(plan, name, source, fn)` | Plan | many, source's runtime output | source runner exits before fan-out - no stranded compute |
-| `w.Step(id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
-| `w.SpawnNode(id, job)` | Work | one, decided mid-Work | spawning runner stays suspended until child completes |
-| `w.SpawnNodeForEach(items, fn)` | Work | many, mid-Work fan-out | spawning runner stays suspended across all children |
+| `sw.Step(w, id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
+| `sw.JobSpawn(w, id, job)` | Work | one, decided mid-Work | spawning runner stays suspended until child completes |
+| `sw.JobSpawnEach(w, items, fn)` | Work | many, mid-Work fan-out | spawning runner stays suspended across all children |
 
-The verb tells you the cost. `Node*` is cheap; `SpawnNode*` flags the
-layer jump and the suspended-runner cost. Reach for `SpawnNode` when
-you genuinely need Node-only modifiers (Retry, RunsOn, distinct
-runner) on a unit decided mid-execution; otherwise stay inside Work.
+The verb tells you the cost. The Plan-layer `Job*` adders are cheap;
+the Work-layer `JobSpawn*` adders flag the layer jump and the
+suspended-runner cost. Reach for `JobSpawn` when you genuinely need
+Node-only modifiers (Retry, RunsOn, distinct runner) on a unit
+decided mid-execution; otherwise stay inside Work.
 
 ## Trivial single-step jobs
 
-For pipelines that are one closure with no DAG, register a `JobFn`:
+For pipelines that are one closure with no DAG, pass the function
+directly to `sw.Job` -- no struct, no wrapper:
 
 ```go
 type Lint struct{ sparkwing.Base }
 
 func (p *Lint) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-    sw.Job(plan, rc.Pipeline, sw.JobFn(p.run))
+    sw.Job(plan, rc.Pipeline, p.run)
     return nil
 }
 
@@ -142,9 +144,14 @@ func (p *Lint) run(ctx context.Context) error {
 //     sparkwing.Register[sparkwing.NoInputs]("lint", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Lint{} })
 ```
 
+`sw.Job`'s third argument is `any`: a `func(ctx context.Context)
+error` is wrapped into an internal Workable, while a struct
+implementing `Work(w *Work) (*WorkStep, error)` registers as a
+multi-step Job. Reflection picks the right form at register time.
+
 For typed-output Jobs (downstream nodes read the value via `Ref[T]` /
 `RefTo[T]`), define a struct that embeds `sparkwing.Produces[T]` and
-have its `Work()` set a typed result step:
+return the typed step from `Work`:
 
 ```go
 type Build struct {
@@ -152,10 +159,8 @@ type Build struct {
     sparkwing.Produces[BuildOut]
 }
 
-func (j *Build) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    sparkwing.Result(w, "run", j.run)
-    return w
+func (j *Build) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    return sw.Step(w, "run", j.run), nil
 }
 
 func (j *Build) run(ctx context.Context) (BuildOut, error) {
@@ -169,20 +174,20 @@ sw.Job(plan, "deploy", &DeployJob{Build: buildRef}).Needs(build)
 
 ## Multi-step jobs
 
-For jobs whose body is more than one logical phase, implement `Job`
-yourself. The struct's `Work()` method declares the inner DAG: each
-`Step` is a unit of work, `Needs` declares ordering, `Sequence` and
-`Parallel` are convenience combinators.
+For jobs whose body is more than one logical phase, implement
+`Workable` yourself. The struct's `Work(w *Work) (*WorkStep, error)`
+method registers steps onto the passed-in `*Work` and returns the
+result step (or `nil` for an untyped Job). Each `sw.Step` is a unit
+of work; `Needs` declares ordering.
 
 ```go
 type BuildJob struct{ sparkwing.Base }
 
-func (j *BuildJob) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    fetch := w.Step("fetch", j.fetch)
-    validate := w.Step("validate", j.validate)
-    w.Step("compile", j.compile).Needs(fetch, validate)
-    return w
+func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    fetch    := sw.Step(w, "fetch",    j.fetch)
+    validate := sw.Step(w, "validate", j.validate)
+    sw.Step(w, "compile", j.compile).Needs(fetch, validate)
+    return nil, nil  // untyped Job; no result step
 }
 
 func (j *BuildJob) fetch(ctx context.Context) error    { return j.gitFetch(ctx) }
@@ -190,50 +195,75 @@ func (j *BuildJob) validate(ctx context.Context) error { return j.checkGoMod(ctx
 func (j *BuildJob) compile(ctx context.Context) error  { return j.goBuild(ctx) }
 ```
 
-`Sequence` wires `Needs` between consecutive steps; `Parallel` groups
-steps for downstream fan-in:
+The DAG is built entirely from `.Needs()` chains. For sequential
+steps, chain Needs directly; there is no separate `Sequence`
+combinator:
 
 ```go
-func (j *DeployJob) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    a := w.Step("render-manifests", j.render)
-    b := w.Step("argo-sync", j.sync)
-    c := w.Step("verify", j.verify)
-    w.Sequence(a, b, c)  // a -> b -> c
-    return w
+func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    a := sw.Step(w, "render-manifests", j.render)
+    b := sw.Step(w, "argo-sync",        j.sync).Needs(a)
+    sw.Step(w, "verify",                j.verify).Needs(b)
+    return nil, nil
 }
 ```
+
+For named clustering of related steps -- the dashboard's Work view
+folds members under one collapsible header -- use `sw.GroupSteps`:
+
+```go
+func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    fetch := sw.Step(w, "fetch", j.fetch)
+
+    safety := sw.GroupSteps(w, "safety",
+        sw.Step(w, "lint",    j.lint).Needs(fetch),
+        sw.Step(w, "secscan", j.secscan).Needs(fetch),
+        sw.Step(w, "vet",     j.vet).Needs(fetch),
+    )
+
+    return sw.Step(w, "deploy", j.deploy).Needs(safety), nil
+}
+```
+
+`*StepGroup` is both a `Needs` target (downstream steps that
+`Needs(group)` depend on every member) and a UI cluster. Initial
+modifiers mirror what `*WorkStep` has today (`Needs`, `SkipIf`); each
+applies to every member.
 
 ### Typed step output
 
 For the common case -- a Job with a single typed step whose return
-value IS the Job's output -- use `sparkwing.Result[T](w, id, fn)`:
+value IS the Job's output -- declare the step with a typed signature
+and return it from `Work`:
 
 ```go
-func (j *BuildJob) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    sparkwing.Result(w, "compile", j.compile)
-    return w
+func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    return sw.Step(w, "compile", j.compile), nil
 }
 ```
+
+`sw.Step`'s third argument is `any`: pass either a
+`func(ctx context.Context) error` (untyped) or a
+`func(ctx context.Context) (T, error)` (typed). Reflection at
+register time stores the step's output type.
 
 For Works with multiple typed steps where downstream steps inside the
-same Work read intermediate values via `.Get(ctx)`, use `Out[T]`
-directly; pair it with `w.SetResult(step)` to designate which (if
-any) is the Node's typed output:
+same Work read intermediate values, use `sw.StepGet[T](ctx, step)`
+inside the consuming step's body:
 
 ```go
-func (j *DeployJob) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    tags := sparkwing.Out(w, "compute-tags", func(ctx context.Context) (Tags, error) {
+func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    tags := sw.Step(w, "compute-tags", func(ctx context.Context) (Tags, error) {
         return loadTags(ctx)
     })
-    w.Step("publish", func(ctx context.Context) error {
-        return publish(ctx, tags.Get(ctx))
-    }).Needs(tags.WorkStep)
-    return w
+    return sw.Step(w, "publish", func(ctx context.Context) error {
+        return publish(ctx, sw.StepGet[Tags](ctx, tags))
+    }).Needs(tags), nil
 }
 ```
+
+`StepGet` mirrors Plan's `Ref[T].Get(ctx)`. It exists as a free
+function because Go forbids generic methods.
 
 ### Inner step skip
 
@@ -241,7 +271,7 @@ func (j *DeployJob) Work() *sparkwing.Work {
 Work. Multiple `SkipIf` calls accumulate with OR semantics.
 
 ```go
-w.Step("publish", j.publish).
+sw.Step(w, "publish", j.publish).
     Needs(buildOut).
     SkipIf(func(ctx context.Context) bool { return os.Getenv("DRY_RUN") == "1" })
 ```
@@ -280,10 +310,8 @@ type ListShards struct {
     sparkwing.Produces[[]string]
 }
 
-func (j *ListShards) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    sparkwing.Result(w, "run", j.run)
-    return w
+func (j *ListShards) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    return sw.Step(w, "run", j.run), nil
 }
 
 func (j *ListShards) run(ctx context.Context) ([]string, error) {
@@ -310,43 +338,42 @@ BeforeRun, AfterRun, Cache, NeedsOptional). Each call delegates to
 every member and returns the same `*Group` for chaining. `OnFailure`
 is intentionally per-Node; group-level recovery has unclear semantics.
 
-## Layer escape: SpawnNode
+## Layer escape: JobSpawn
 
 When a unit of work decided *mid-Work* needs a Node-only modifier
 (Retry, RunsOn, distinct runner, separate cache key), promote it via
-`SpawnNode`. The spawning runner suspends until the spawned Node
+`sw.JobSpawn`. The spawning runner suspends until the spawned Node
 completes:
 
 ```go
-func (j *ScanJob) Work() *sparkwing.Work {
-    w := sparkwing.NewWork()
-    analyze := w.Step("analyze", j.analyze)
-    scan := w.SpawnNode("compliance", &ComplianceJob{}).Needs(analyze)
-    w.Step("publish", func(ctx context.Context) error {
+func (j *ScanJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    analyze := sw.Step(w, "analyze", j.analyze)
+    scan := sw.JobSpawn(w, "compliance", &ComplianceJob{}).Needs(analyze)
+    sw.Step(w, "publish", func(ctx context.Context) error {
         return publish(ctx, scan)
     }).Needs(scan)
-    return w
+    return nil, nil
 }
 ```
 
 The spawned Node id is namespaced as `parent/spawnID`
 (e.g. `scan/compliance`) so logs and the run history don't collide.
 
-`w.SpawnNodeForEach(items, fn)` is the cardinality-many variant. The
+`sw.JobSpawnEach(w, items, fn)` is the cardinality-many variant. The
 generator runs once Needs are satisfied; each returned `(id, Job)`
 pair becomes a fresh Plan node. The spawning runner stays suspended
 across the entire fan-out:
 
 ```go
-w.SpawnNodeForEach(targets, func(target string) (string, sw.Workable) {
+sw.JobSpawnEach(w, targets, func(target string) (string, sw.Workable) {
     return "deploy-" + target, &DeployJob{Target: target}
 }).Needs(buildStep)
 ```
 
 Reach for spawn primitives sparingly. Each call holds a runner slot
 during the child's lifetime; a deeply nested spawn chain pins one slot
-per layer. The verb is intentionally distinct from `Step` to flag the
-cost at the call site.
+per layer. The `JobSpawn*` prefix flags the layer jump (and the
+suspended-runner cost) at the call site.
 
 ## Modifier scope discipline
 
@@ -360,14 +387,14 @@ cost at the call site.
 | `BeforeRun` / `AfterRun` | Plan only | runner lifecycle hooks |
 | `Approval` | Plan only | gates dispatch on a human decision |
 | `Inline()` | Plan only | bypass the runner entirely |
-| `Group("name")` | Plan only | UI grouping |
+| `Group("name")` | Plan only | UI grouping (free-function form: `sw.GroupJobs`) |
 | `Dynamic()` | Plan only | flag for renderers |
 | `Needs` | both | ordering inside its layer |
 | `SkipIf` | both | skip predicate |
-| typed output | both | `Ref[T]` (Node) / `TypedStep[T]` (Work) |
+| typed output | both | `Ref[T]` (Node) / `*WorkStep` returned from `Work` (Work) |
 
 A Step that needs Retry / Timeout / RunsOn is the canonical signal
-to promote it to a Node via `SpawnNode`.
+to promote it to a Node via `sw.JobSpawn`.
 
 ## Scheduling modifiers
 
@@ -474,13 +501,13 @@ sources, and artifact packaging; gate external side effects with
 ## Approval gates
 
 Pause a run and wait for a human decision by registering a gate via
-`sw.Approval`. The orchestrator routes approval nodes through the
+`sw.JobApproval`. The orchestrator routes approval nodes through the
 approval-waiter flow, flipping the Node to `approval_pending`,
 writing an approvals row, and blocking until the dashboard, CLI, or
 the configured timeout resolves it.
 
 ```go
-approve := sw.Approval(plan, "approve-prod", sw.ApprovalConfig{
+approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
     Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
     Timeout:  2 * time.Hour,
     OnExpiry: sw.ApprovalFail,
@@ -488,7 +515,7 @@ approve := sw.Approval(plan, "approve-prod", sw.ApprovalConfig{
 sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
 ```
 
-`sw.Approval` returns `*ApprovalGate`, a narrower handle than
+`sw.JobApproval` returns `*ApprovalGate`, a narrower handle than
 `*Node` -- only the modifiers that make sense for a human gate are
 methods on it (`Needs`, `NeedsOptional`, `OnFailure`, `BeforeRun`,
 `AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`). Modifiers
@@ -535,15 +562,27 @@ If you're reading old jobs that don't compile, here's the rename map:
 
 | Old | New |
 |---|---|
-| `plan.Add(id, &J{})` | `sw.Job(plan, id, &J{})` (`J` must implement `Work()`) |
-| `plan.Step(id, fn)` | `sw.Job(plan, id, sw.JobFn(fn))` |
+| `plan.Add(id, &J{})` | `sw.Job(plan, id, &J{})` (`J` must implement `Work(w *Work) (*WorkStep, error)`) |
+| `plan.Step(id, fn)` | `sw.Job(plan, id, fn)` (closure passes through directly) |
 | `plan.ExpandFrom(source, gen)` | `sw.JobFanOutDynamic(plan, name, source, fn)` |
 | `sparkwing.NodeForEach(plan, source, fn)` | `sw.JobFanOutDynamic(plan, name, source, fn)` |
-| `Run(ctx) error` on a Job | `Work() *Work` returning a one-step Work |
-| `Run(ctx) (T, error)` on a Job | `Work()` with `sparkwing.Result(w, "run", j.run)` |
+| `Work() *Work` on a Job | `Work(w *Work) (*WorkStep, error)` (return the result step, or nil) |
+| `w.Step(id, fn)` | `sw.Step(w, id, fn)` |
+| `w.Sequence(a, b, c)` | `b.Needs(a); c.Needs(b)` -- pure `.Needs` chain |
+| `w.Parallel(x, y)` for fan-in | `next.Needs(x, y)` directly |
+| `w.Parallel(x, y)` for UI cluster | `sw.GroupSteps(w, "name", x, y)` |
+| `sparkwing.Out(w, id, fn) + .Get(ctx)` | `sw.Step(w, id, fn) + sw.StepGet[T](ctx, step)` |
+| `sparkwing.Result(w, id, fn) + return w` | `return sw.Step(w, id, fn), nil` |
+| `w.SetResult(step)` | return `step` from `Work` |
+| `w.SpawnNode(id, &J{})` | `sw.JobSpawn(w, id, &J{})` |
+| `w.SpawnNodeForEach(items, fn)` | `sw.JobSpawnEach(w, items, fn)` |
+| `sw.Approval(plan, id, cfg)` | `sw.JobApproval(plan, id, cfg)` |
+| `sw.Group(plan, name, ...)` | `sw.GroupJobs(plan, name, ...)` |
+| `sw.JobFn(fn)` | (gone) -- pass `fn` directly to `sw.Job` |
+| `*TypedStep[T]` | (gone) -- only `*WorkStep` remains; `outType` is set by reflection |
 | `sparkwing.Step(ctx, name)` | structured `step_start` / `step_end` events emitted automatically by each `WorkStep` |
 | `sparkwing.StepErr(ctx, err)` | the same step events; for best-effort work, return nil from the step and `sparkwing.Error` if needed |
-| `InvokeJob(ctx, name, &J{})` | compose as a `Step` (or another sub-`Job` via `SpawnNode`) inside the parent's `Work` |
+| `InvokeJob(ctx, name, &J{})` | compose as a `Step` (or another sub-`Job` via `JobSpawn`) inside the parent's `Work` |
 | `InvokeJobsParallel(ctx, NamedJob...)` | declare each as its own Step in the same Work; the runner runs them in parallel by default |
 | `sparkwing.NamedJob` | gone - the `Step` id is the name |
 | `node.CacheKey(fn)` | `node.Cache(sparkwing.CacheOptions{Key: ..., CacheKey: fn})` |

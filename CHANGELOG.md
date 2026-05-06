@@ -4,6 +4,94 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed (BREAKING)
+- **Unified DAG-builder grammar across Plan and Work layers (SDK-042).**
+  Pipeline authors learn one builder pattern and apply it identically to
+  both DAGs. Six coordinated changes ship as a single breaking-change
+  shipment:
+
+  a. `Workable.Work() *Work` -> `Workable.Work(w *Work) (*WorkStep, error)`.
+     The orchestrator constructs the `*Work` and passes it in; authors
+     stop calling `sw.NewWork()`. The returned `*WorkStep` becomes the
+     Job's typed output (replaces the old `w.SetResult(...)`
+     mechanism). Returning `nil` means the Job has no typed output.
+
+  b. **Single `sw.Step` verb.** Drops `sw.Out[T]`, `sw.Result[T]`,
+     `w.SetResult`, the `*TypedStep[T]` generic wrapper, and the
+     method-form `w.Step`. Replacement: `sw.Step(w, id, fn) *WorkStep`
+     where `fn` is either `func(ctx) error` or `func(ctx) (T, error)`
+     (reflection at register time sets the step's `outType`).
+
+  c. **`sw.StepGet[T any](ctx, step *WorkStep) T`** -- typed read inside
+     another step's body, mirroring Plan's `Ref[T].Get(ctx)`. Used when
+     composing values from multiple typed steps into a single returned
+     result.
+
+  d. **Verb renames for prefix consistency.** Plan layer:
+     `sw.Approval` -> `sw.JobApproval`, `sw.Group` -> `sw.GroupJobs`.
+     Work layer (free functions now): `w.SpawnNode` ->
+     `sw.JobSpawn(w, ...)`, `w.SpawnNodeForEach` ->
+     `sw.JobSpawnEach(w, ...)`. Every verb that adds a Plan Node is
+     `Job*`-prefixed; tab-completing `Job` surfaces the full set
+     regardless of caller layer.
+
+  e. **`sw.GroupSteps(w, name, steps...) *StepGroup`** for named
+     Work-layer clustering. Subsumes the old `w.Parallel(...)`'s fan-in
+     role and adds a name the dashboard's Work view can render. Drops
+     `w.Sequence(...)` (pure sugar over `.Needs(prev)`) and
+     `w.Parallel(...)` (subsumed). `*StepGroup.Needs(...)` and
+     `*StepGroup.SkipIf(...)` mirror `*WorkStep`'s existing modifiers;
+     future step modifiers will be added in tandem (SDK-043 through
+     SDK-046).
+
+  f. **`sw.Job(plan, id, X)` accepts `Workable` or `func(context.Context)
+     error`.** Drops `sw.JobFn`. Trivial single-closure pipelines become
+     `sw.Job(plan, "lint", p.run)` -- no struct, no wrapper.
+
+  Migration recipe (mechanical):
+
+  ```
+  // Workable.Work signature
+  func (j *J) Work() *sw.Work {                ->  func (j *J) Work(w *sw.Work) (*sw.WorkStep, error) {
+      w := sw.NewWork()                              // (delete this line)
+      sw.Result(w, "run", j.run)                     out := sw.Step(w, "run", j.run)
+      return w                                       return out, nil
+  }                                              }
+
+  // Step verbs
+  w.Step(id, fn)                                ->  sw.Step(w, id, fn)
+  sw.Out(w, id, fn).Get(ctx)                    ->  sw.StepGet[T](ctx, sw.Step(w, id, fn))
+  sw.Result(w, id, fn) + w.SetResult(...)       ->  sw.Step(w, id, fn) (return it from Work)
+
+  // Plan-layer renames
+  sw.Approval(plan, id, cfg)                    ->  sw.JobApproval(plan, id, cfg)
+  sw.Group(plan, name, ...)                     ->  sw.GroupJobs(plan, name, ...)
+
+  // Work-layer renames + free-function migration
+  w.SpawnNode(id, job)                          ->  sw.JobSpawn(w, id, job)
+  w.SpawnNodeForEach(items, fn)                 ->  sw.JobSpawnEach(w, items, fn)
+
+  // Sugar drops
+  w.Sequence(a, b, c)                           ->  b.Needs(a); c.Needs(b)
+  w.Parallel(x, y)  // for fan-in               ->  // direct .Needs(x, y)
+  w.Parallel(x, y)  // for UI cluster           ->  sw.GroupSteps(w, "name", x, y)
+
+  // JobFn drop
+  sw.Job(plan, id, sw.JobFn(fn))                ->  sw.Job(plan, id, fn)
+  ```
+
+  After migration the Work layer has 4 free-function verbs (`Step`,
+  `JobSpawn`, `JobSpawnEach`, `GroupSteps`) plus `StepGet[T]` for typed
+  reads. The Plan layer has 6 (`Job`, `JobFanOut`, `JobFanOutDynamic`,
+  `JobApproval`, `GroupJobs`, plus `RefTo[T]` / `RefToLastRun[T]` for
+  refs). Both layers read with identical grammar:
+  `sw.<Verb>(<container>, ...args).<modifier>(...)`.
+
+  Step-level modifier additions (Retry, Optional, hooks, Cache) are
+  separate follow-up tickets (SDK-043 through SDK-046).
+
 ## [v1.6.0] - 2026-05-06
 
 ### Changed

@@ -61,10 +61,10 @@ import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 type Hello struct{ sw.Base }
 
 func (Hello) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-    sw.Job(plan, run.Pipeline, sw.JobFn(func(ctx context.Context) error {
+    sw.Job(plan, run.Pipeline, func(ctx context.Context) error {
         sw.Info(ctx, "hello, sparkwing")
         return nil
-    }))
+    })
     return nil
 }
 
