@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -215,7 +216,7 @@ func printPipelineHelp(pipeline string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("unknown pipeline %q", pipeline)
+		return unknownPipelineErr(pipeline)
 	}
 	w := os.Stdout
 	if schema.Help != "" {
@@ -280,8 +281,54 @@ func printPipelineHelp(pipeline string) error {
 		}
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintln(w, "See `wing --help` for wing-owned flags (--on, --from, --config).")
+	// IMP-039: enumerate wing-owned flags from sparkwing.WingFlagDocs()
+	// so this footer stays in lockstep with `wing --help` /
+	// `sparkwing run --help`. The previous hand-coded line
+	// (`-- only --on, --from, --config`) silently drifted whenever a
+	// new wing flag landed (--start-at, --dry-run, --allow-* were all
+	// invisible despite working end-to-end). Sourcing from one list
+	// future-proofs additions.
+	printWingFlagsSection(w)
 	return nil
+}
+
+// printWingFlagsSection renders the "WING FLAGS" block of per-pipeline
+// help. Groups (Source / Range / Safety / System) section the output;
+// within each group, flags walk in WingFlagDocs order. The trailing
+// hint points users at the top-level help for prose detail.
+//
+// Takes io.Writer (not *os.File) so tests can capture into a buffer.
+func printWingFlagsSection(w io.Writer) {
+	docs := sparkwing.WingFlagDocs()
+	if len(docs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "WING FLAGS")
+	// Order groups in declaration order: walk docs once and emit a
+	// blank-line separator the first time a new group appears. Keeps
+	// rendering deterministic without a hardcoded group list.
+	prevGroup := ""
+	first := true
+	for _, d := range docs {
+		if d.Group != prevGroup {
+			if !first {
+				fmt.Fprintln(w)
+			}
+			fmt.Fprintf(w, "  [%s]\n", d.Group)
+			prevGroup = d.Group
+		}
+		first = false
+		head := "--" + d.Name
+		if d.Short != "" {
+			head = "-" + d.Short + ", " + head
+		}
+		if d.Argument != "" {
+			head += " " + d.Argument
+		}
+		fmt.Fprintf(w, "    %-30s %s\n", head, d.Desc)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "See `wing --help` for prose explanations of each wing flag.")
 }
 
 // printPipelinePlan emits the plan snapshot without dispatch. Missing
@@ -300,7 +347,7 @@ func printPipelineHelp(pipeline string) error {
 func printPipelinePlan(pipeline string, rest []string) error {
 	reg, ok := sparkwing.Lookup(pipeline)
 	if !ok {
-		return fmt.Errorf("unknown pipeline %q", pipeline)
+		return unknownPipelineErr(pipeline)
 	}
 	rest = stripExplainOutputFlags(rest)
 	argsMap, err := parseTypedFlags(pipeline, rest)
