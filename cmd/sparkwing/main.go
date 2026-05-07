@@ -795,6 +795,8 @@ func runJobs(args []string) error {
 		return runJobsTree(ctx, paths, args[1:])
 	case "get":
 		return runJobsGet(ctx, paths, args[1:])
+	case "receipt":
+		return runJobsReceipt(ctx, paths, args[1:])
 	case "wait":
 		return runJobsWait(ctx, paths, args[1:])
 	case "find":

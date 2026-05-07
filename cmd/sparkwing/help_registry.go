@@ -1511,6 +1511,7 @@ prune) require a profile; 'jobs logs' supports both.`,
 		{"last", "Show the most recent run; --watch tails new runs"},
 		{"tree", "ASCII tree of a run and every descendant run"},
 		{"get", "Emit one run's raw JSON (run + nodes)"},
+		{"receipt", "Emit a run's IMP-016 audit + cost receipt as JSON"},
 		{"retry", "Trigger a fresh run copying pipeline + args from an old one"},
 		{"cancel", "Request cancellation of an in-flight run"},
 		{"prune", "Delete finished runs older than a threshold"},
@@ -1712,6 +1713,31 @@ var cmdJobsGet = Command{
 	Examples: []Example{
 		{"Fetch a local run as JSON", "sparkwing runs get --run run-..."},
 		{"Fetch a prod run", "sparkwing runs get --run run-... --on prod"},
+	},
+}
+
+var cmdJobsReceipt = Command{
+	Path:     "sparkwing runs receipt",
+	Synopsis: "Emit a run's IMP-016 audit + cost receipt as JSON",
+	Description: `Recomputes the per-run receipt from the run + nodes
+rows on demand and prints it as JSON. The receipt bundles identity
+hashes (pipeline_version_hash, inputs_hash, plan_hash, per-node
+outputs_hash), per-step observability (durations, outcomes), and
+runner-time × profile-rate compute cost.
+
+Local mode reads from the SQLite store and uses the local profile's
+cost_per_runner_hour for the cost calc. --on NAME reads from the
+remote controller's receipt endpoint; in that case the controller's
+configured rate (not the local profile) supplies cost.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json (default)", Group: "Output"},
+		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+	},
+	GroupOrder: []string{"Input", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Local receipt as JSON", "sparkwing runs receipt --run run-..."},
+		{"Prod receipt", "sparkwing runs receipt --run run-... --on prod"},
 	},
 }
 
