@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // IMP-036: the local Pipeline struct used as the wire shape for

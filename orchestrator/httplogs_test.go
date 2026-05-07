@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/logs"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/logs"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type httpLogsPipe struct{ sparkwing.Base }

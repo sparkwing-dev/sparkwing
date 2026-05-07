@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/internal/web"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // Registration is guarded to avoid duplicate panics across test

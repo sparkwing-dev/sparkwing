@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/secrets"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // captureBackend is a StateBackend that records each WriteNodeDispatch

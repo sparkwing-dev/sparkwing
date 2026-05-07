@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 // newTestServer spins up an httptest.Server backed by a fresh SQLite

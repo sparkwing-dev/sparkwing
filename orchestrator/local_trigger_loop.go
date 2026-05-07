@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/bincache"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/repos"
+	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/repos"
 )
 
 // runLocalTriggerLoop polls for pending child triggers and dispatches

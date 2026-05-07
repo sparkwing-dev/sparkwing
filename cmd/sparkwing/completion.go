@@ -12,8 +12,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/v2/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/profile"
 )
 
 func runCompletion(args []string) error {

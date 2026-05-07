@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // These tests exercise the SDK's public shape. They do not run a

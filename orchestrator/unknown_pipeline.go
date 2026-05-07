@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // unknownPipelineErr formats the canonical "unknown pipeline X"

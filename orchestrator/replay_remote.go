@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // SideloadRemoteForReplay copies a remote run's state into the local

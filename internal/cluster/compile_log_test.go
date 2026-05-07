@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/bincache"
+	"github.com/sparkwing-dev/sparkwing/bincache"
 )
 
 // TestShipCompileOutput_PostsToLogsServer verifies IMP-001's wiring:

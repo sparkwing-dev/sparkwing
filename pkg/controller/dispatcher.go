@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // RunRequest is the payload handed to a Dispatcher when a trigger

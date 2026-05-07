@@ -12,8 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/v2/bincache"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func describeCachePath(key string) string {

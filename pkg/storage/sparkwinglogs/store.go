@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/v2/logs"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 // Store implements storage.LogStore on top of logs.Client.

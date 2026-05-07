@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // ctxT is a fresh context bounded by the test deadline.

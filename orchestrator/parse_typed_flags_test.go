@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // Pipeline fixtures used to exercise parseTypedFlags directly. These

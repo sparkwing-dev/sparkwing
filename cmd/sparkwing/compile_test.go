@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/bincache"
+	"github.com/sparkwing-dev/sparkwing/bincache"
 )
 
 // scaffoldPipelineRepo lays out a minimal two-module tree under root:

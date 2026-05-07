@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 func TestStore_RoundTrip(t *testing.T) {

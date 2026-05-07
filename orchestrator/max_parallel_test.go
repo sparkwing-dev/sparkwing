@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // TestMaxParallel_CapsConcurrentNodeExecution verifies LOCAL-006:

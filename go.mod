@@ -1,4 +1,4 @@
-module github.com/sparkwing-dev/sparkwing/v2
+module github.com/sparkwing-dev/sparkwing
 
 go 1.26.0
 

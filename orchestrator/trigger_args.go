@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // resolveTriggerArgs returns the args for Plan(). On retry, returns

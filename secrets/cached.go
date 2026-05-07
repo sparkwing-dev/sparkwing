@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // Source is the read side of a secret store. Implementations: local

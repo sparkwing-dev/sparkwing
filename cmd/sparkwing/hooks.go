@@ -11,7 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
 // sparkwingHookMarker identifies hook files this command manages.

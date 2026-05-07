@@ -14,8 +14,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
 func runPipelineNew(args []string) error {
@@ -246,7 +246,7 @@ const minimalTemplate = `package jobs
 import (
 	"context"
 
-	sw "github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // {{STRUCT}} is a sparkwing pipeline. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
@@ -303,7 +303,7 @@ const buildTestDeployTemplate = `package jobs
 import (
 	"context"
 
-	sw "github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // {{STRUCT}} is a build/test/deploy pipeline.

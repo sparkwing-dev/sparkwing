@@ -1,7 +1,7 @@
 package pool
 
 import (
-	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
+	"github.com/sparkwing-dev/sparkwing/otelutil"
 	"go.opentelemetry.io/otel/metric"
 )
 

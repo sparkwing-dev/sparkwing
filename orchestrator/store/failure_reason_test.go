@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // TestFinishNodeWithReason_PersistsStructuredMetadata verifies that

@@ -3,7 +3,7 @@
 // assign to CacheOptions.CacheKey to skip a node when its inputs match
 // a prior successful run.
 //
-//	import "github.com/sparkwing-dev/sparkwing/v2/sparkwing/inputs"
+//	import "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 //
 //	sd.Cache(sparkwing.CacheOptions{
 //	    Key:      "myapp/build-deploy",
@@ -28,7 +28,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // Helpers return sparkwing.CacheKeyFn so they slot directly into

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestCacheOptions_EmptyIsNoop(t *testing.T) {

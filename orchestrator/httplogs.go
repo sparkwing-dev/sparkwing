@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/logs"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/sparkwinglogs"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // HTTPLogs forwards log lines to a remote sparkwing-logs service.

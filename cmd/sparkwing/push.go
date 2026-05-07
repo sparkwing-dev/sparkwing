@@ -21,7 +21,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/v2/profile"
+	"github.com/sparkwing-dev/sparkwing/profile"
 )
 
 // pushShortCommitLen is how many hex chars we echo back in the

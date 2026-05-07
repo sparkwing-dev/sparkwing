@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"sort"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 // RunOptions configures a one-shot container invocation. The intended

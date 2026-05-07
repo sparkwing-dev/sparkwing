@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // Concurrency service. Callers declare their OnLimit policy on every

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
 )
 
 // TestEnvelopeLog_PersistsRunStartFinish verifies the envelope tee

@@ -5,7 +5,7 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/v2/internal/cluster"
+	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 )
 
 func main() {

@@ -9,7 +9,7 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
 
 	// Side-effect imports: each jobs/ file's init() registers its
 	// pipeline with the sparkwing package's process-global registry.

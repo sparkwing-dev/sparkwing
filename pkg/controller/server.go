@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
-	"github.com/sparkwing-dev/sparkwing/v2/secrets"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/otelutil"
+	"github.com/sparkwing-dev/sparkwing/secrets"
 )
 
 // Server owns the route table, the backing store, and the

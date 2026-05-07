@@ -20,7 +20,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 // ErrDockerUnavailable is returned by every function that shells out

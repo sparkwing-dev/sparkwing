@@ -14,7 +14,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // Receipt is the per-run audit + cost artifact. JSON shape is the

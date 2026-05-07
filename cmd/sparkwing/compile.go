@@ -9,10 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/v2/bincache"
-	"github.com/sparkwing-dev/sparkwing/v2/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/sparks"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
 // compileAndExec compiles the .sparkwing/ Go module to a cache

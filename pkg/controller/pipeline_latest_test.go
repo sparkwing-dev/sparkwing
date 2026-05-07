@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // seedFinishedRun inserts a run in a terminal state with a specific

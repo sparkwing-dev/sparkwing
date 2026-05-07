@@ -3,7 +3,7 @@ module sparkwing-pipelines
 go 1.26.0
 
 require (
-	github.com/sparkwing-dev/sparkwing/v2 v2.0.0
+	github.com/sparkwing-dev/sparkwing v0.1.0
 	golang.org/x/mod v0.35.0
 )
 
@@ -82,4 +82,4 @@ require (
 // pattern follows the standard "consumer .sparkwing/ uses a local
 // replace during development" convention; here the parent IS the
 // SDK rather than a sibling.
-replace github.com/sparkwing-dev/sparkwing/v2 => ..
+replace github.com/sparkwing-dev/sparkwing => ..

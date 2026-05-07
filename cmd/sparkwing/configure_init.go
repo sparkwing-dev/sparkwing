@@ -16,8 +16,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/v2/profile"
-	"github.com/sparkwing-dev/sparkwing/v2/repos"
+	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/repos"
 )
 
 // ConfigureInit is the JSON shape of `sparkwing configure init -o

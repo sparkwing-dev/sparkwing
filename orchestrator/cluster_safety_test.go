@@ -44,9 +44,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // buildClusterRunnerBackends mirrors the runner-pod Backends wiring

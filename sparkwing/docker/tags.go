@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/git"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/git"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 // ImageTag holds the deterministic image-tag components for a single

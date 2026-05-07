@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // dispatchSpawnHandler binds a SpawnNode call site to the active

@@ -10,7 +10,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
 // applyCIEmbeddedEnv populates opts from SPARKWING_* env vars. Warns

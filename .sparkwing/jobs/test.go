@@ -3,7 +3,7 @@ package jobs
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // Test runs `go test ./...` across the public sparkwing module.

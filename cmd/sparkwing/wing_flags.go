@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/bincache"
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
 )
 
 func firstNonEmptyStr(vals ...string) string {

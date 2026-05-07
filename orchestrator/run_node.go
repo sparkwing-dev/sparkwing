@@ -12,12 +12,12 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
-	"github.com/sparkwing-dev/sparkwing/v2/secrets"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/otelutil"
+	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // RunNodeOnce is the shared execution core for cluster-mode node

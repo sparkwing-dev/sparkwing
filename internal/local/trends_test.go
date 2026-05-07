@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	controller "github.com/sparkwing-dev/sparkwing/v2/internal/local"
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	controller "github.com/sparkwing-dev/sparkwing/internal/local"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 func httpGet(url string) ([]byte, error) {

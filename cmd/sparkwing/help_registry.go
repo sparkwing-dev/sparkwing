@@ -7,7 +7,7 @@ package main
 import (
 	"runtime"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // helpExampleScratchDir returns a per-OS scratch directory string
@@ -289,7 +289,7 @@ var cmdVersionUpdate = Command{
           to avoid SIGKILL on first run.
 
   --sdk   Bump the SDK pin in this project's .sparkwing/go.mod via
-          'go get github.com/sparkwing-dev/sparkwing/v2@<version>',
+          'go get github.com/sparkwing-dev/sparkwing@<version>',
           then 'go mod tidy'. Doesn't touch the running binary.
 
 Exactly one of --cli or --sdk must be set; they conflict with

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // stdoutLogger is a local copy of orchestrator.stdoutLogger. Lives

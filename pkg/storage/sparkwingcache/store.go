@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 // Store implements storage.ArtifactStore over the sparkwing-cache

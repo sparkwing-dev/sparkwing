@@ -1,8 +1,8 @@
 package orchestrator
 
 import (
-	"github.com/sparkwing-dev/sparkwing/v2/secrets"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // maskingNodeLog applies secret redaction to every record before it

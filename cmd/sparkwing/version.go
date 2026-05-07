@@ -21,7 +21,7 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 // VersionReport is the JSON shape of `sparkwing version --json`.
@@ -65,7 +65,7 @@ const versionFetchTimeout = 3 * time.Second
 // sdkModulePath is the canonical Go module path for the sparkwing
 // SDK. Used both for the SDK-pin lookup and for distinguishing the
 // SDK from sparks-* sibling modules.
-const sdkModulePath = "github.com/sparkwing-dev/sparkwing/v2"
+const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 func runVersion(args []string) error {
 	// `sparkwing version update ...` is the unified updater verb. Any

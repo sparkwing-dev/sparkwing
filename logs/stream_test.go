@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/logs"
+	"github.com/sparkwing-dev/sparkwing/logs"
 )
 
 // TestStream_TailsAppendedContent is the core SSE contract: append

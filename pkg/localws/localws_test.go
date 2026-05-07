@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 )
 
 func TestRun_LogStore_EndToEnd(t *testing.T) {

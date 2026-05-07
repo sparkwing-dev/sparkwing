@@ -3,7 +3,7 @@ package web
 import (
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/v2/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 )
 
 // CapabilitiesHandler serves GET /api/v1/capabilities from the

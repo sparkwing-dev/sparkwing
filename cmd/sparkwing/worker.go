@@ -15,7 +15,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
 )
 
 func runWorker(args []string) error {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
 )
 
 func TestListJobs_EmptyDB(t *testing.T) {

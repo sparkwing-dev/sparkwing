@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/logutil"
-	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
+	"github.com/sparkwing-dev/sparkwing/logutil"
+	"github.com/sparkwing-dev/sparkwing/otelutil"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"

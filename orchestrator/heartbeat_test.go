@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/controller/client"
 )
 
 type discardWriter struct{}

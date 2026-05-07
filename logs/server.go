@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
+	"github.com/sparkwing-dev/sparkwing/otelutil"
 )
 
 // Server handles HTTP requests against a filesystem-backed log store.

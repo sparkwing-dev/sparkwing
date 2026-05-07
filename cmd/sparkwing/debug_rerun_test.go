@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
 // TestBuildRerunEnv_OverlayWins asserts the snapshot env beats the

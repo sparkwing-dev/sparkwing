@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/v2/profile"
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // IMP-015: enforce the dispatch gate from the wing CLI's

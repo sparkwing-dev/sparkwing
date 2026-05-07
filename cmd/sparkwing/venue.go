@@ -7,7 +7,7 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // lookupCachedVenue returns the venue string ("either" / "local-only"

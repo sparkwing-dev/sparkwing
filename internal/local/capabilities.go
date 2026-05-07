@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 // SetArtifactStore enables the /api/v1/artifacts/{key} read route.

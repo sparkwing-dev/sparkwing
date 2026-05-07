@@ -28,9 +28,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 
-	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/docker"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/docker"
 )
 
 // ErrDockerUnavailable is returned when the `docker` binary is not on
