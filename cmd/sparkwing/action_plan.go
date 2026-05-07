@@ -169,7 +169,7 @@ func runPipelinePlan(args []string) error {
 	// IMP-007 uses for the run path so the inner --plan handler
 	// reads them identically to a real run.
 	cmd := exec.Command(binary, pipelineArgs...)
-	cmd.Env = append(os.Environ())
+	cmd.Env = os.Environ()
 	if parsed.startAt != "" {
 		cmd.Env = append(cmd.Env, "SPARKWING_START_AT="+parsed.startAt)
 	}
