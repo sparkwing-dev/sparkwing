@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build sparkwing-cli binaries and install to ~/.local/bin so the new
-# CLI replaces whatever was previously installed (e.g. an older
-# sparkwing built from the engine repo before the SDK-014 extraction).
+# Build the sparkwing CLI binaries and install to ~/.local/bin so any
+# previously installed copy is replaced.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
