@@ -72,7 +72,7 @@ export default function ApprovalPane({ runID, nodeID, onResolved }: Props) {
           <div className="text-[var(--muted)] whitespace-pre-wrap">
             {appr.comment}
           </div>
-        ) : null}
+        : null}
       </div>
     );
   }

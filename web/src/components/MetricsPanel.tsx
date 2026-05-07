@@ -156,10 +156,10 @@ export default function MetricsPanel({
       j.status === "complete" ||
       j.status === "cached" ||
       j.status === "skipped-concurrent",
-  ).length;
+ .length;
   const failedCount = terminal.filter(
     (j) => j.status === "failed" || j.status === "superseded",
-  ).length;
+ .length;
   const cachedCount = topLevel.filter((j) => j.status === "cached").length;
 
   const durations = topLevel

@@ -6,7 +6,7 @@
 //	import "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 //
 //	sd.Cache(sparkwing.CacheOptions{
-//	    Key:      "rangz-web/build-deploy",
+//	    Key:      "myapp/build-deploy",
 //	    OnLimit:  sparkwing.Coalesce,
 //	    CacheKey: inputs.Compose(
 //	        inputs.RepoFiles(inputs.Ignore("*.md", "docs/**")),

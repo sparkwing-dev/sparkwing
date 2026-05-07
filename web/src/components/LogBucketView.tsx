@@ -104,7 +104,7 @@ function LogLines({
             </span>
             {hasAnsi ? (
               <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
-            ) : (
+            : (
               <span className={semantic}>{line}</span>
             )}
           </div>
@@ -157,7 +157,7 @@ function StepBucket({
             <div className="pl-8">
               <LogLines lines={section.lines} startLine={lineOffset} />
             </div>
-          ) : (
+          : (
             <p className="text-xs text-[var(--muted)] pl-8">No output</p>
           )}
         </div>
@@ -245,7 +245,7 @@ function InlineLogView({
       <div key={key} className="flex hover:bg-[#161b22] group">
         {hasAnsi ? (
           <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
-        ) : (
+        : (
           <span className={fallbackClass}>{line}</span>
         )}
       </div>
@@ -346,7 +346,7 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
   const [viewMode, setViewMode] = useState<"steps" | "inline">("steps");
   const steps = parsed.sections.filter(
     (s) => s.type === "step",
-  ) as StepSection[];
+  as StepSection[];
 
   const allLines = useMemo(
     () => parsed.sections.flatMap((s) => s.lines),
@@ -389,7 +389,7 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
         <div className="px-3 py-2">
           <InlineLogView sections={parsed.sections} />
         </div>
-      ) : (
+      : (
         parsed.sections.map((section, i) => {
           const offset = lineOffset;
           lineOffset += section.lines.length;

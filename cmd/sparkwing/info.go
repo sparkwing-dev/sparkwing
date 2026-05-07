@@ -265,8 +265,8 @@ func printFirstTimeCard() {
 	fmt.Println(color.Bold("SEE ALSO"))
 	fmt.Println("  Different tools for different jobs: sparkwing runs Go pipelines (DAGs,")
 	fmt.Println("  retries, run records); for one-off bash chores in a repo (formatters,")
-	fmt.Println("  port-forwards) reach for " + color.Cyan("dowing") + " instead - it runs *.sh files from")
-	fmt.Println("  bin/ or scripts/ with no compile cycle. https://github.com/koreyGambill/dowing")
+	fmt.Println("  port-forwards) a plain shell-script runner (just / make / a thin")
+	fmt.Println("  wrapper over ./bin/*.sh) is probably a better fit - no compile cycle.")
 }
 
 func userShellBase() string {
@@ -646,7 +646,7 @@ func printInfoTable(info Info) {
 	fmt.Println()
 
 	fmt.Println(color.Bold("SEE ALSO"))
-	fmt.Printf("  %s %s\n", color.Cyan("dowing"), color.Dim("- run *.sh tasks from bin/ or scripts/ for repo-local chores (formatters, port-forwards). https://github.com/koreyGambill/dowing"))
+	fmt.Printf("  %s %s\n", color.Cyan("just / make / shell-script runners"), color.Dim("- for repo-local chores (formatters, port-forwards) without the compile cycle"))
 	fmt.Println()
 
 	if len(info.ForAgents) > 0 {

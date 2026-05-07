@@ -878,9 +878,9 @@ to hide from default listings; --short to pre-fill the description.
 
 See also:
   If your pipeline is a single linear shell sequence with no DAG,
-  retry, or cross-runner concerns, dowing is probably a better fit
-  -- it runs *.sh files from bin/ or scripts/ with no compile cycle:
-  https://github.com/koreyGambill/dowing`,
+  retry, or cross-runner concerns, a plain shell-script runner
+  (e.g. just / make / a wrapper over ./bin/*.sh) is probably a
+  better fit -- it skips the compile cycle.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "template", Argument: "KIND", Desc: "minimal (one node, default) | build-test-deploy (three-node build->test->deploy DAG)", Default: "minimal", Group: "Scaffold"},

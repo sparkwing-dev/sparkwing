@@ -196,7 +196,7 @@ export default function StepView({
                       </div>
                     ))}
                   </pre>
-                ) : (
+                : (
                   <p className="text-xs text-[var(--muted)] pl-8">No output</p>
                 )}
               </div>

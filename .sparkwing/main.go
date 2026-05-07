@@ -3,12 +3,9 @@
 // the first positional arg; orchestrator.Main dispatches to the
 // registered pipeline.
 //
-// This .sparkwing/ tree is intentionally minimal: it exists so the
-// platform release-all can cross-reference build / lint / test /
-// static-analysis / release jobs that operate on the public OSS code
-// (SDK, CLI, embedded docs). The bulk of pipeline orchestration --
-// release-all, deploy, consumer bumps, etc. -- lives in
-// sparkwing-platform/.sparkwing/.
+// This .sparkwing/ tree is intentionally minimal: it covers the
+// build / lint / test / static-analysis / release jobs that operate
+// on the public OSS code (SDK, CLI, embedded docs).
 package main
 
 import (

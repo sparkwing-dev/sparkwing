@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// IMP-006: extractPipelineName enforces strict ordering for `-C` /
+// extractPipelineName enforces strict ordering for `-C` /
 // `--change-directory` against the pipeline-name positional. The
 // flag must appear BEFORE the positional, otherwise the parser
-// would silently treat `-C` as the pipeline name (the original
-// kikd-infra repro: `wing run -C /path lint --on prod` dispatched
+// would silently treat `-C` as the pipeline name (the regression:
+// `wing run -C /path lint --on prod` dispatched
 // "--change-directory" against the wrong repo).
 func TestExtractPipelineName_StrictOrderC(t *testing.T) {
 	cases := []struct {

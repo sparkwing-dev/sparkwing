@@ -43,21 +43,21 @@ func TestClaim_PipelineFilter_BasicInclude(t *testing.T) {
 	}
 	defer st.Close()
 
-	// "other" is older (would win FIFO without filter); "okbot-build"
+	// "other" is older (would win FIFO without filter); "sample-build"
 	// is newer but matches the worker's advertised set.
 	now := time.Now()
 	seedTrigger(t, st, "t1", "other", now.Add(-10*time.Second))
-	seedTrigger(t, st, "t2", "okbot-build", now.Add(-1*time.Second))
+	seedTrigger(t, st, "t2", "sample-build", now.Add(-1*time.Second))
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	c := client.New(srv.URL, nil)
 
-	got, err := c.ClaimTriggerFor(context.Background(), []string{"okbot-build"}, nil)
+	got, err := c.ClaimTriggerFor(context.Background(), []string{"sample-build"}, nil)
 	if err != nil {
 		t.Fatalf("ClaimTriggerFor: %v", err)
 	}
-	if got == nil || got.Pipeline != "okbot-build" {
+	if got == nil || got.Pipeline != "sample-build" {
 		t.Fatalf("claim: %+v", got)
 	}
 

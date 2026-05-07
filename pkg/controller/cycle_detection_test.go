@@ -149,12 +149,12 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:   time.Now(),
-		Repo:        "sparkwing-product",
-		RepoURL:     "git@github.com:koreyGambill/sparkwing-product.git",
+		Repo:        "sample-app",
+		RepoURL:     "git@github.com:acme/sample-app.git",
 		GitBranch:   "main",
 		GitSHA:      "abc123",
-		GithubOwner: "koreyGambill",
-		GithubRepo:  "sparkwing-product",
+		GithubOwner: "acme",
+		GithubRepo:  "sample-app",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,10 +183,10 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Repo != "sparkwing-product" {
-		t.Errorf("Repo: got %q, want sparkwing-product", got.Repo)
+	if got.Repo != "sample-app" {
+		t.Errorf("Repo: got %q, want sample-app", got.Repo)
 	}
-	if got.RepoURL != "git@github.com:koreyGambill/sparkwing-product.git" {
+	if got.RepoURL != "git@github.com:acme/sample-app.git" {
 		t.Errorf("RepoURL: got %q", got.RepoURL)
 	}
 	if got.GitBranch != "main" {
@@ -195,10 +195,10 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if got.GitSHA != "abc123" {
 		t.Errorf("GitSHA: got %q, want abc123", got.GitSHA)
 	}
-	if got.GithubOwner != "koreyGambill" {
+	if got.GithubOwner != "acme" {
 		t.Errorf("GithubOwner: got %q", got.GithubOwner)
 	}
-	if got.GithubRepo != "sparkwing-product" {
+	if got.GithubRepo != "sample-app" {
 		t.Errorf("GithubRepo: got %q", got.GithubRepo)
 	}
 }
@@ -280,8 +280,8 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt: time.Now(),
-		Repo:      "koreyGambill/sparkwing-product",
-		RepoURL:   "git@github.com:koreyGambill/sparkwing-product.git",
+		Repo:      "acme/sample-app",
+		RepoURL:   "git@github.com:acme/sample-app.git",
 		GitBranch: "main",
 		GitSHA:    "parentSHAofProduct",
 	}); err != nil {
@@ -296,7 +296,7 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 		"pipeline":"build",
 		"parent_run_id":"parent",
 		"trigger":{"source":"manual"},
-		"git":{"repo":"koreyGambill/sparkwing","branch":"main"}
+		"git":{"repo":"acme/sample-app","branch":"main"}
 	}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
@@ -318,8 +318,8 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Repo != "koreyGambill/sparkwing" {
-		t.Errorf("Repo = %q, want koreyGambill/sparkwing", got.Repo)
+	if got.Repo != "acme/sample-app" {
+		t.Errorf("Repo = %q, want acme/sample-app", got.Repo)
 	}
 	if got.GitSHA != "" {
 		t.Errorf("GitSHA = %q, want empty (cross-repo must not inherit parent's SHA)", got.GitSHA)

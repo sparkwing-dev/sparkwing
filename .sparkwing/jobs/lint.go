@@ -7,10 +7,9 @@ import (
 )
 
 // Lint runs fast, repo-wide checks: gofmt compliance and go vet
-// across every package in the sparkwing module. Mirrors the
-// platform-repo `lint` pipeline so cross-repo callers (notably
-// sparkwing-platform/release-all) can target the same name in
-// either codebase.
+// across every package in the sparkwing module. Cross-repo callers
+// (a downstream release-all orchestration pipeline) can invoke
+// `wing lint` here as a gate.
 type Lint struct{ sparkwing.Base }
 
 func (Lint) ShortHelp() string { return "Fast static check: gofmt + go vet" }

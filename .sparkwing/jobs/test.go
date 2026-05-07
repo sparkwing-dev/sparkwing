@@ -7,10 +7,10 @@ import (
 )
 
 // Test runs `go test ./...` across the public sparkwing module.
-// -race is omitted intentionally: the SDK's race-clean test pass
-// lives in the platform-repo `test` pipeline (where a heavier matrix
-// is acceptable). The OSS pipeline runs the plain suite so cross-repo
-// validation from sparkwing-platform/release-all stays fast.
+// -race is omitted intentionally: this OSS lane runs the plain
+// suite so it stays fast as a cross-repo gate; a heavier matrix
+// (race + fuzz + integration) belongs in a downstream release-all
+// pipeline.
 type Test struct{ sparkwing.Base }
 
 func (Test) ShortHelp() string { return "Run the Go test suite (go test ./...)" }

@@ -112,11 +112,11 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 		"ref": "refs/heads/main",
 		"before": "0000000000000000000000000000000000000000",
 		"after":  "abc123def456abc123def456abc123def456abcd",
-		"repository": {"full_name": "koreyGambill/moonborn-ws"},
+		"repository": {"full_name": "acme/sample-app"},
 		"pusher": {"name": "alice", "email": "alice@example.com"},
 		"head_commit": {"id": "abc123", "message": "feat: ship it"}
 	}`)
-	resp := postWebhook(t, ts.URL+"/webhooks/github/moonborn-ws-build", "push", body, signWebhook(testWebhookSecret, body))
+	resp := postWebhook(t, ts.URL+"/webhooks/github/sample-app-build", "push", body, signWebhook(testWebhookSecret, body))
 	if resp.StatusCode != http.StatusAccepted {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body %s)", resp.StatusCode, raw)
@@ -140,8 +140,8 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
-	if tr.Pipeline != "moonborn-ws-build" {
-		t.Errorf("pipeline=%q want moonborn-ws-build", tr.Pipeline)
+	if tr.Pipeline != "sample-app-build" {
+		t.Errorf("pipeline=%q want sample-app-build", tr.Pipeline)
 	}
 	if tr.TriggerSource != "github" {
 		t.Errorf("source=%q want github", tr.TriggerSource)
@@ -155,7 +155,7 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	if tr.GitSHA != "abc123def456abc123def456abc123def456abcd" {
 		t.Errorf("sha=%q", tr.GitSHA)
 	}
-	if tr.TriggerEnv["GITHUB_REPOSITORY"] != "koreyGambill/moonborn-ws" {
+	if tr.TriggerEnv["GITHUB_REPOSITORY"] != "acme/sample-app" {
 		t.Errorf("env[GITHUB_REPOSITORY]=%q", tr.TriggerEnv["GITHUB_REPOSITORY"])
 	}
 	if tr.TriggerEnv["GITHUB_DELIVERY"] != "test-delivery-abc" {

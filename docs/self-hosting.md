@@ -86,7 +86,7 @@ For scripting or docs:
 SPARKWING_CONTROLLER=https://api-sparkwing.example.com \
 SPARKWING_LOGS=https://logs-sparkwing.example.com \
 SPARKWING_API_TOKEN=$MY_TOKEN \
-RUNNER_NAME=laptop-korey \
+RUNNER_NAME=dev-laptop \
 MAX_CONCURRENT=2 \
 bash install/install.sh --yes
 ```

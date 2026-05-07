@@ -2,12 +2,9 @@
 # Go struct registered via sparkwing.Register(...) in jobs/ that wing
 # can invoke.
 #
-# This .sparkwing/ tree is intentionally minimal: it exists so the
-# platform release-all (in the sibling sparkwing-platform repo) can
-# cross-reference build / lint / test / static-analysis / release
-# pipelines that operate on the public OSS surface (SDK, CLI,
-# embedded docs). The bulk of orchestration -- release-all, deploy,
-# consumer bumps -- still lives in sparkwing-platform/.sparkwing/.
+# This .sparkwing/ tree is intentionally minimal: it covers the
+# build / lint / test / static-analysis / release pipelines that
+# operate on this repo's OSS surface (SDK, CLI, embedded docs).
 pipelines:
   - name: lint
     entrypoint: Lint

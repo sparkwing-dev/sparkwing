@@ -111,7 +111,7 @@ export default function TriggerForm({
                 </option>
               ))}
             </select>
-          ) : (
+          : (
             <input
               type="text"
               className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono"

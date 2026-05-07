@@ -143,7 +143,7 @@ export default function LiveLogs({
           <LogBucketView parsed={parsed} />
           <div ref={bottomRef} />
         </>
-      ) : (
+      : (
         <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9]">
           {lines.map((line, i) => (
             <div key={i} className="flex hover:bg-white/5">

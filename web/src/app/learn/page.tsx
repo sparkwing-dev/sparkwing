@@ -143,14 +143,14 @@ All pipeline configs live in a single file. Each entry defines triggers and a ro
 
 \`\`\`yaml
 # .sparkwing/pipelines.yaml
-okbot-go:
+myapp:
   on:
     push:
       branches: [main]
-  root: okbot-go
+  root: myapp
 
-okbot-go-test:
-  root: okbot-go-test
+myapp-test:
+  root: myapp-test
 \`\`\`
 
 ## Pipeline fields
@@ -175,8 +175,8 @@ import (
 )
 
 func main() {
-    sparkwing.Register("okbot-go", jobs.JobOkbotGo)
-    sparkwing.Register("okbot-go-test", jobs.JobOkbotGoTest)
+    sparkwing.Register("myapp", jobs.JobMyApp)
+    sparkwing.Register("myapp-test", jobs.JobMyAppTest)
     sparkwing.Register("default", jobs.JobDefault)
     sparkwing.RunPipeline()
 }
@@ -339,7 +339,7 @@ sparkwing.Spawn("deploy-staging")
 
 \`\`\`go
 sparkwing.SpawnAll("tests", testShards,
-    sparkwing.SpawnPipeline("okbot-go-test"),
+    sparkwing.SpawnPipeline("myapp-test"),
     sparkwing.WithEnv(func(val string) map[string]string {
         return map[string]string{"TEST_NAME": val}
     }),
@@ -673,9 +673,9 @@ function InlineCode({ text }: { text: string }) {
           >
             {part.slice(1, -1)}
           </code>
-        ) : (
+        : (
           <span key={i}>{part}</span>
-        ),
+       ,
       )}
     </>
   );

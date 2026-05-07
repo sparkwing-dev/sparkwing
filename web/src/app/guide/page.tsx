@@ -41,8 +41,8 @@ If all pods are Running and the controller returns healthy, you're good to go.
 The most basic operation — trigger a job and watch it appear in the dashboard.
 
 \`\`\`bash
-# Trigger a job for okbot-go
-curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go"
+# Trigger a job for myapp
+curl -X POST "http://localhost:9001/trigger?pipeline=myapp"
 \`\`\`
 
 **What to verify:**
@@ -53,17 +53,17 @@ curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go"
 ## Trigger with environment variables
 
 \`\`\`bash
-curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go&env.BRANCH=main&env.CUSTOM_VAR=hello"
+curl -X POST "http://localhost:9001/trigger?pipeline=myapp&env.BRANCH=main&env.CUSTOM_VAR=hello"
 \`\`\`
 
 ## Trigger with routing preferences
 
 \`\`\`bash
 # Prefer a specific agent type
-curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go&prefer=type:listener"
+curl -X POST "http://localhost:9001/trigger?pipeline=myapp&prefer=type:listener"
 
 # Require specific labels
-curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go&require=cluster:sparkwing"
+curl -X POST "http://localhost:9001/trigger?pipeline=myapp&require=cluster:sparkwing"
 \`\`\`
 
 ## Trigger from the Debug page
@@ -77,7 +77,7 @@ Go to the **Debug** tab in this dashboard. You can:
 ## Trigger via CLI
 
 \`\`\`bash
-sparkwing pipeline run --name okbot-go
+sparkwing pipeline run --name myapp
 \`\`\`
 `,
   },
@@ -220,7 +220,7 @@ The listener is configured with \`MAX_CONCURRENT=3\`. Trigger 4+ jobs rapidly:
 
 \`\`\`bash
 for i in 1 2 3 4 5; do
-  curl -s -X POST "http://localhost:9001/trigger?pipeline=okbot-go&env.RUN=$i" &
+  curl -s -X POST "http://localhost:9001/trigger?pipeline=myapp&env.RUN=$i" &
 done
 wait
 \`\`\`
@@ -352,7 +352,7 @@ import (
 func JobSpawnTest() {
     shards := []string{"0", "1", "2"}
     sparkwing.SpawnAll("shards", shards,
-        sparkwing.SpawnPipeline("okbot-go-test"),
+        sparkwing.SpawnPipeline("myapp-test"),
         sparkwing.WithEnv(func(val string) map[string]string {
             return map[string]string{"SHARD": val}
         }),
@@ -414,9 +414,9 @@ import "github.com/sparkwing-dev/sparks-core/docker"
 
 func JobDockerTest() {
     docker.BuildAndPush(docker.BuildConfig{
-        Image:      "okbot-go",
-        Dockerfile: "okbot-go/Dockerfile",
-        Context:    "okbot-go",
+        Image:      "myapp",
+        Dockerfile: "myapp/Dockerfile",
+        Context:    "myapp",
         Registries: registries,
     })
 }
@@ -469,9 +469,9 @@ sparkwing.RunStep(step.DockerRun("test", "node:22", []string{"npm", "test"},
 import "github.com/sparkwing-dev/sparks-core/deploy"
 
 deploy.Run(deploy.Config{
-    AppName:   "okbot-go",
-    Namespace: "okbot",
-    Images:    []string{"okbot-go"},
+    AppName:   "myapp",
+    Namespace: "myapp",
+    Images:    []string{"myapp"},
 })
 \`\`\`
 
@@ -479,14 +479,14 @@ deploy.Run(deploy.Config{
 
 \`\`\`bash
 # First verify the deployment exists
-kubectl get deploy -n okbot
+kubectl get deploy -n myapp
 
 # Trigger via a pipeline that does: BuildAndPush -> deploy.Run
-curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go"
+curl -X POST "http://localhost:9001/trigger?pipeline=myapp"
 \`\`\`
 
 **What to verify:**
-- The deployment restarts (\`kubectl rollout status deploy/okbot-go -n okbot\`)
+- The deployment restarts (\`kubectl rollout status deploy/myapp -n myapp\`)
 - New pods pull the latest image
 - The app is accessible on its port-forward
 
@@ -495,7 +495,7 @@ curl -X POST "http://localhost:9001/trigger?pipeline=okbot-go"
 Use \`kubectl rollout undo\` for manual rollbacks:
 
 \`\`\`bash
-kubectl rollout undo deploy/okbot-go -n okbot
+kubectl rollout undo deploy/myapp -n myapp
 \`\`\`
 
 ## Deploy with error handling
@@ -505,16 +505,16 @@ Use a custom step that handles deploy errors:
 \`\`\`go
 func JobDeployWithRollback() {
     docker.BuildAndPush(docker.BuildConfig{
-        Image:      "okbot-go",
-        Dockerfile: "okbot-go/Dockerfile",
-        Context:    "okbot-go",
+        Image:      "myapp",
+        Dockerfile: "myapp/Dockerfile",
+        Context:    "myapp",
         Registries: registries,
     })
     sparkwing.RunStep("deploy", func() error {
         deploy.Run(deploy.Config{
-            AppName:   "okbot-go",
-            Namespace: "okbot",
-            Images:    []string{"okbot-go"},
+            AppName:   "myapp",
+            Namespace: "myapp",
+            Images:    []string{"myapp"},
         })
         return nil
     })
@@ -525,10 +525,10 @@ func JobDeployWithRollback() {
 
 \`\`\`bash
 # Check deployment revision history
-kubectl rollout history deploy/okbot-go -n okbot
+kubectl rollout history deploy/myapp -n myapp
 
 # Manually trigger a rollback to confirm it works
-kubectl rollout undo deploy/okbot-go -n okbot
+kubectl rollout undo deploy/myapp -n myapp
 \`\`\`
 `,
   },
@@ -950,7 +950,7 @@ kubectl logs -n sparkwing deploy/sparkwing-controller --tail=20
 
 \`\`\`bash
 # Get a build badge for a pipeline
-curl -s http://localhost:9001/badge/okbot-go
+curl -s http://localhost:9001/badge/myapp
 # Returns SVG badge showing latest build status
 \`\`\`
 

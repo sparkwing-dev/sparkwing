@@ -97,9 +97,9 @@ export default function AgentsPage() {
 
       {!loaded ? (
         <LoadingPanel />
-      ) : sorted.length === 0 ? (
+      : sorted.length === 0 ? (
         <EmptyPanel />
-      ) : (
+      : (
         <div className="space-y-2">
           {sorted.map((a) => {
             const key = `${a.type}:${a.name}`;

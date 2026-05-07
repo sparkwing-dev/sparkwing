@@ -166,12 +166,12 @@ export default function PipelinesPage() {
 
       {!loaded ? (
         <Panel>Loading pipelines...</Panel>
-      ) : filtered.length === 0 ? (
+      : filtered.length === 0 ? (
         <EmptyPanel
           hasFilter={!!filter.trim()}
           hasRegistry={totals.registered > 0}
         />
-      ) : (
+      : (
         <div className="space-y-2">
           {filtered.map((row) => (
             <PipelineCard

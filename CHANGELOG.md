@@ -7,8 +7,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ## [Unreleased]
 
 ### Added
-- **Run receipt: identity hashes + per-step observability + simple cost
-  (IMP-016).** `sparkwing runs receipt --run X` and
+- **Run receipt: identity hashes + per-step observability + simple cost.** `sparkwing runs receipt --run X` and
   `GET /api/v1/runs/{id}/receipt` emit a per-run audit + cost artifact
   separate from `runs status`. The receipt bundles
   `identity.{pipeline_version_hash, inputs_hash, plan_hash,
@@ -18,7 +17,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   (`success | failed | skipped | cancelled`) + `skip_reason`, and a
   simple compute cost (`compute_cents` = runner-time × profile-rate,
   `currency: USD`, `rate_source` provenance string, `settled: false`
-  until cloud-billing reconciliation lands as IMP-018). A top-level
+  until cloud-billing reconciliation lands as. A top-level
   `receipt_sha` certifies the receipt against the run state it
   summarizes. Receipts are recomputed on demand from runs+nodes; only
   four small queryable columns persist on the runs row
@@ -29,7 +28,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   Output is JSON-only today (`-o json` is the canonical view).
 
 ### Removed (BREAKING)
-- **Unified DAG-builder grammar across Plan and Work layers (SDK-042).**
+- **Unified DAG-builder grammar across Plan and Work layers.**
   Pipeline authors learn one builder pattern and apply it identically to
   both DAGs. Six coordinated changes ship as a single breaking-change
   shipment:
@@ -65,8 +64,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
      `w.Sequence(...)` (pure sugar over `.Needs(prev)`) and
      `w.Parallel(...)` (subsumed). `*StepGroup.Needs(...)` and
      `*StepGroup.SkipIf(...)` mirror `*WorkStep`'s existing modifiers;
-     future step modifiers will be added in tandem (SDK-043 through
-     SDK-046).
+     future step modifiers will be added in tandem.
 
   f. **`sw.Job(plan, id, X)` accepts `Workable` or `func(context.Context)
      error`.** Drops `sw.JobFn`. Trivial single-closure pipelines become
@@ -112,12 +110,12 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `sw.<Verb>(<container>, ...args).<modifier>(...)`.
 
   Step-level modifier additions (Retry, Optional, hooks, Cache) are
-  separate follow-up tickets (SDK-043 through SDK-046).
+  separate follow-up tickets.
 
 ## [v1.6.0] - 2026-05-06
 
 ### Changed
-- **`runs logs --follow` unified event stream (IMP-010).** `sparkwing
+- **`runs logs --follow` unified event stream.** `sparkwing
   runs logs --run X [--follow]` now defaults to a merged event stream
   that interleaves the orchestrator's run-level envelope events
   (`run_start`, `run_plan`, `node_start`, `node_end`, `step_start`,
@@ -127,7 +125,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   run after the fact. The local dispatcher tees envelope events into
   `~/.sparkwing/runs/<id>/_envelope.ndjson`; `runs logs` reads from
   there when present and falls back to the legacy per-node-files view
-  for pre-IMP-010 runs. Two new flags select non-default views:
+  for older runs. Two new flags select non-default views:
   `--events-only` (just the bracketing events, no exec_line bodies --
   the grep-friendly view that operators were achieving with `tail -f`
   on the dispatcher's stdout file) and `--no-events` (today's
@@ -144,37 +142,37 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   silently returning empty output. Local-mode tests cover
   `--events-only`, `--no-events`, `--grep` composition, and the
   default-merged-stream contract.
-- **Structured JSON body for auth-error responses (IMP-022).**
+- **Structured JSON body for auth-error responses.**
   401 and 403 responses from the controller, the laptop-local
   controller, and the logs service now emit a stable JSON shape:
   `{"error": "missing_scope" | "unauthenticated", "missing_scope":
   "logs.write", "principal": "runner:warm-runner-7", "message":
   "token lacks required scope: logs.write"}`. The on-wire
   `logs.AuthErrorBody` type pins the shape so client and server stay
-  in lockstep. The `logs.AuthError.Scope` parser introduced by IMP-002
+  in lockstep. The `logs.AuthError.Scope` parser introduced by
   now reads `missing_scope` directly instead of regexing the human
   message; if a future operator-clarity pass rewords the message, the
   runner still distinguishes "fatal scope misconfig" from "transient
-  transport blip." Pre-IMP-022 servers (older controllers, third-party
+  transport blip." Pre-servers (older controllers, third-party
   proxies) emit plain text and the parser falls back to the existing
   string match. Documented under the Auth section of `docs/api.md`.
 
 ### Fixed
-- **`pipeline plan` validates `--start-at` / `--stop-at` (IMP-037).**
+- **`pipeline plan` validates `--start-at` / `--stop-at`.**
   `sparkwing.PreviewPlan` now calls `ValidateStepRange` against the
   resolved Plan's step registry before walking the DAG, mirroring the
   orchestrator's dispatch-time validation. A typo'd
   `--start-at instal-argocd` against a pipeline with `install-argocd`
-  now errors with the IMP-008 "did you mean ...?" Levenshtein
+  now errors with the "did you mean ...?" Levenshtein
   suggestion and refuses to render -- previously the unknown id
   silently no-op'd the range filter and every step rendered
-  `would_run`, exactly the iteration footgun IMP-007's acceptance
+  `would_run`, exactly the iteration footgun its acceptance
   committed to preventing for both `wing X` (dispatch) and
   `pipeline plan` (preview). Far-miss typos with no near match still
   list every available step id so the operator can pick. Three new
   unit tests in `sparkwing/plan_preview_test.go` pin the
   near-miss / far-miss / exact-match contracts.
-- **`runs list` / `runs status` surface trigger failures (IMP-004).**
+- **`runs list` / `runs status` surface trigger failures.**
   The trigger-intake handler now writes a `pending` Run row alongside
   the Trigger row, so `sparkwing runs list --on prod` and
   `sparkwing runs status --run X --on prod` are visible as soon as a
@@ -186,11 +184,10 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   yet". The orchestrator's CreateRun became an idempotent upsert that
   promotes `pending -> running` on start while preserving the
   trigger-time `created_at`. Schema gained `runs.created_at` (the
-  only field-level addition this ticket made; IMP-016 owns receipt
-  fields). Pairs with IMP-001's `_compile` synthetic node, which
+  only field-level addition this ticket made; owns receipt
+  fields). Pairs with its `_compile` synthetic node, which
   finally attaches to a Run row that exists.
-- **`Work.SpawnNodeForEach` validates fn signature at Plan time
-  (SDK-039).** The reflective contract -- `items` is a slice with
+- **`Work.SpawnNodeForEach` validates fn signature at Plan time.** The reflective contract -- `items` is a slice with
   element type `T`, `fn` is `func(T) (string, sparkwing.Workable)`
   -- used to be checked only at dispatch time, so a typo'd fn shape
   surfaced as a runtime spawn error after the parent's Needs
@@ -198,8 +195,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   construction. Wrong-shape fn / mismatched item type now panics
   alongside other structural SDK errors (`Produces`/`SetResult`
   mismatch, duplicate node IDs, invalid `Approval.OnExpiry`).
-- **`Node.Cache` / `Plan.Cache` now reject typo-shaped CacheOptions
-  (SDK-038).** Passing a `CacheOptions` literal with `Max` /
+- **`Node.Cache` / `Plan.Cache` now reject typo-shaped CacheOptions.** Passing a `CacheOptions` literal with `Max` /
   `OnLimit` / `CacheKey` / `CacheTTL` / `CancelTimeout` set but `Key`
   empty used to silently drop the whole struct -- the author's intent
   ("set up coalesce + memoization") quietly disappeared. Now panics
@@ -209,7 +205,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ### Added
 - **`sparkwing.Inputs[T](ctx) T` accessor for trigger inputs from
-  step bodies (SDK-041).** A pipeline's `Plan(ctx, plan, in T, rc)`
+  step bodies.** A pipeline's `Plan(ctx, plan, in T, rc)`
   method receives the typed Inputs once; until now, reading the
   same value from a step body deep in the DAG meant threading it
   through closures or job-struct fields. The new `sw.Inputs[T](ctx)`
@@ -222,7 +218,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   received. Panics outside a dispatch ctx or on a wrong concrete
   type so a misuse is loud rather than silently zero-valued.
 - **`sparkwing.Approval` free function returning `*ApprovalGate` for
-  manual gates (SDK-040).** Authors register approval gates via
+  manual gates.** Authors register approval gates via
   `sw.Approval(plan, id, sparkwing.ApprovalConfig{...})` instead of
   `sw.Job(plan, id, &sparkwing.Approval{...})`. The new
   `*ApprovalGate` return type exposes only the modifiers that make
@@ -245,7 +241,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `sw.Approval(plan, id, sparkwing.ApprovalConfig{...})`.
 
 ### Added
-- **Public accessor for Node.OnFailureOf (IMP-029).** `*Node` gains
+- **Public accessor for Node.OnFailureOf.** `*Node` gains
   `OnFailureNodeID() string`, returning the id of the recovery node
   registered via `.OnFailure(id, job)` (or `""` when none is set).
   PreviewPlan now walks each node's recovery attachment and emits a
@@ -254,12 +250,12 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `pipeline plan` renderer surfaces the linkage as
   `[OnFailure: <parent-id>]` on the recovery node's header line, so a
   reader sees which parent's failure dispatches the recovery without
-  cross-referencing a separate `--explain` run. Closes IMP-013's
+  cross-referencing a separate `--explain` run. Closes its
   introspection gap; `pipeline plan` and `pipeline explain` now agree
   on recovery-branch wiring.
-- **`cluster tokens list` surfaces scopes (IMP-024).** The table view
+- **`cluster tokens list` surfaces scopes.** The table view
   now carries a `SCOPES` column so operators can spot a missing scope
-  (the IMP-002 root cause: warm-runner pods mounted a token without
+  (the root cause: warm-runner pods mounted a token without
   `logs.write`, and there was no operator surface that would have
   shown the gap). `--json` / `-o json` emits a top-level array of
   `{prefix, kind, principal, scopes, last_used_at, revoked_at}` so
@@ -267,10 +263,10 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `admin` superset render as `*` in the table (JSON keeps the literal
   scope name); empty scope sets render as `-`. Help text + an example
   pinning the warm-runner diagnostic flow updated.
-- **Blast-radius annotations + default-deny dispatch (IMP-015).**
+- **Blast-radius annotations + default-deny dispatch.**
   Authors mark steps that mutate prod / cost money / can blow things
   up; the wing dispatcher walks the per-step set and refuses to
-  proceed without explicit acknowledgment. Pairs with IMP-014's
+  proceed without explicit acknowledgment. Pairs with its
   `--dry-run`: dry-run dispatches always bypass the gate so agents
   and operators can preview destructive work without the dance.
   - SDK surface: `WorkStep.Destructive()`,
@@ -284,7 +280,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
     `--allow-money` (registered in `cmd/sparkwing/wing_flags.go` +
     `wingTokenSpecs` table; added to `ReservedFlagNames()` so a
     pipeline `flag:"allow-destructive"` tag panics at registration
-    with the IMP-003 collision message).
+    with the collision message).
   - Profile-level override: `~/.config/sparkwing/profiles.yaml`
     profiles can declare
     `auto_allow: { destructive: bool, production: bool, money: bool }`
@@ -296,10 +292,10 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
     `PreviewItem.BlastRadius`, and `snapshotStep.BlastRadius` so
     `pipeline plan --json`, `pipeline explain --json`, and the
     describe-cache reader all read the same canonical wire tokens.
-  - Degrade-gracefully behavior: a stale or pre-IMP-015 describe
+  - Degrade-gracefully behavior: a stale or older describe
     cache returns no markers, the gate doesn't fire, and the
     dispatch proceeds. The next `--describe` refresh populates the
-    cache. Mirrors IMP-011's venue-gate shape.
+    cache. Mirrors its venue-gate shape.
   - Pinned by 8 SDK unit tests in `sparkwing/blast_radius_test.go`
     and 13 CLI tests in `cmd/sparkwing/blast_radius_test.go`
     (modifier accumulation + dedup, error-message contract,
@@ -307,24 +303,25 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
     auto-allow per-marker isolation, dry-run bypass).
 
 ### Docs
-- **Surface dowing as the chore-tier sibling from inside sparkwing's
-  CLI (IMP-012).** `sparkwing info` now prints a SEE ALSO block under
-  NEXT STEPS pointing to dowing (https://github.com/koreyGambill/dowing)
-  for repo-local bash chores -- formatters, port-forwards, and other
-  single-script tasks where sparkwing's compile cycle / DAG / run
-  records are over-tax. The same pointer lands at the bottom of the
-  `sparkwing info --first-time` onboarding card and as a "See also"
-  paragraph in `sparkwing pipeline new --help`. Pure CLI-text change;
-  no behavior or flag surface added. Sparkwing remains Go-pipeline-only
+- **Surface shell-script runners as the chore-tier sibling from
+  inside sparkwing's CLI.** `sparkwing info` now prints a SEE ALSO
+  block under NEXT STEPS pointing to plain shell-script runners
+  (just / make / ./bin/*.sh wrappers) for repo-local bash chores --
+  formatters, port-forwards, and other single-script tasks where
+  sparkwing's compile cycle / DAG / run records are over-tax. The
+  same pointer lands at the bottom of the `sparkwing info
+  --first-time` onboarding card and as a "See also" paragraph in
+  `sparkwing pipeline new --help`. Pure CLI-text change; no behavior
+  or flag surface added. Sparkwing remains Go-pipeline-only
   -- the bridge fixes a discoverability gap, not a capability one.
 
 ### Added
-- **Per-step dry-run with `--dry-run` wing flag (IMP-014).** Authors
+- **Per-step dry-run with `--dry-run` wing flag.** Authors
   declare a `DryRunFn` alongside the apply `Fn` (or mark the step
   `SafeWithoutDryRun()` when its apply Fn is read-only by author
   contract); `wing X --dry-run` then walks the DAG running each
   step's no-mutation body in apply-equivalent order. Pairs with
-  IMP-013's `pipeline plan` to give sparkwing the verify-before-
+  its `pipeline plan` to give sparkwing the verify-before-
   execute primitive modern infra tools have had for a decade and
   CI/CD has not.
   - SDK surface: `WorkStep.DryRun(fn)`, `WorkStep.SafeWithoutDryRun()`,
@@ -335,11 +332,11 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   - Wing-level flag: `--dry-run` (registered in
     `cmd/sparkwing/wing_flags.go` + `wingTokenSpecs` table; added
     to `ReservedFlagNames()` so a pipeline `flag:"dry-run"` tag
-    panics at registration with the IMP-003 collision message).
+    panics at registration with the collision message).
     Forwarded to the pipeline binary via `SPARKWING_DRY_RUN=1` env
     on the local-exec path and `Trigger.Env` on the `--on` remote-
     dispatch path so behavior is identical across venues.
-  - Dispatch precedence inside `RunWork` matches the IMP-013
+  - Dispatch precedence inside `RunWork` matches the
     preview lens: `range_skip > user_skipif > dry_run`. A step
     that's already going to be skipped keeps its reason; only
     "would_run under apply" steps become "would_dry_run" /
@@ -348,7 +345,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   - Steps with neither `DryRunFn` nor `SafeWithoutDryRun()` soft-
     skip with reason `no_dry_run_defined` so existing pipelines
     keep working under `--dry-run` while the contract gap is
-    visible in run logs and `pipeline plan` output. IMP-015 will
+    visible in run logs and `pipeline plan` output. will
     tighten this to a hard refusal at dispatch time when paired
     with blast-radius markers.
   - PreviewPlan integration: `PreviewOptions.DryRun` routes
@@ -362,9 +359,9 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
     readable from ctx) and 1 PreviewPlan integration test pinning
     the three-decision rendering on a single Work.
   - Out of scope: sparks-core common-backend dry-run bodies
-    (filed as a follow-up); IMP-015's destructive markers (parallel
+    (filed as a follow-up); its destructive markers (parallel
     PR; dry-run is the safe escape hatch for that gate).
-- **Author-declared pipeline venue + dispatcher gate (IMP-011).**
+- **Author-declared pipeline venue + dispatcher gate.**
   Pipelines opt into a dispatch constraint by implementing the
   optional `Venue() sparkwing.Venue` method on the pipeline value:
   `VenueLocalOnly` refuses `--on PROFILE` (cluster-up shells out to
@@ -374,16 +371,14 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   fail confusingly from the laptop), `VenueEither` (the zero value
   and the existing default) preserves dispatch-anywhere. The wing
   CLI reads venue from the per-repo describe cache and gates
-  `--on PROFILE` before sending the trigger; a stale or pre-IMP-011
+  `--on PROFILE` before sending the trigger; a stale or older
   cache silently degrades to `either` so the gate is purely
   additive. `sparkwing pipeline list` / `describe` / `explain` /
   `plan` all surface the venue alongside their existing output, and
   `--describe` / `--explain` / `--plan` JSON snapshots carry a new
   top-level `venue` field so agents see the constraint without a
-  separate round-trip. Closes the cluster-up-against-prod footgun
-  flagged in the 2026-05-05 kikd-infra session.
-- **`sparkwing pipeline plan` — runtime-resolved DAG without execution
-  (IMP-013).** Same DAG `pipeline explain` shows, plus per-step
+  separate round-trip. Closes the cluster-up-against-prod footgun.
+- **`sparkwing pipeline plan` — runtime-resolved DAG without execution.** Same DAG `pipeline explain` shows, plus per-step
   `would_run` / `would_skip <reason>` decisions evaluated against
   the supplied args + `--start-at` / `--stop-at` bounds. NO step
   bodies execute. Designed as the canonical pre-flight verb -- the
@@ -394,7 +389,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   attribute operator vs. author intent: `range_skip` (item is
   outside `--start-at..--stop-at`, with the bound on `skip_detail`),
   `user_skipif` (the SkipIf predicate would match — predicate
-  called under the same plan-only ctx Plan() runs in, so SDK-012's
+  called under the same plan-only ctx Plan() runs in, so its
   side-effect guard fires; predicate panics are caught and surfaced
   on `skip_detail` rather than crashing the plan command), and
   range_skip wins over user_skipif when both apply (matches
@@ -404,15 +399,14 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   depends on a runtime value. New SDK surface:
   `sparkwing.PreviewPlan(plan, pipeline, args, opts) *PlanPreview`,
   `Work.PreviewSkipForRange(start, stop) map[string]string` (the
-  IMP-007/008 handoff). Wire shape mirrors the existing
+  /008 handoff). Wire shape mirrors the existing
   plan-explain snapshot so the dashboard can layer runtime
   decisions onto the static structure without re-parsing.
   Pinned by 5 SDK unit tests in `sparkwing/plan_preview_test.go`
   (single-step / SkipIf / range-skip / dynamic-fanout / args
   roundtrip; every test asserts a global counter remains 0 to
   prove no step body executed).
-- **Built-in `--start-at` / `--stop-at` wing flags for resume-from-step
-  (IMP-007).** Every pipeline now gets per-step resume support without
+- **Built-in `--start-at` / `--stop-at` wing flags for resume-from-step.** Every pipeline now gets per-step resume support without
   the author writing a stepOrder slice + skipBefore predicate. Flags
   are wing-level (parsed in `cmd/sparkwing/wing_flags.go`, forwarded
   via `SPARKWING_START_AT` / `SPARKWING_STOP_AT` env to the pipeline
@@ -425,7 +419,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   ancestors(stop) plus the bounds — make parallel branches
   parallelism-aware: `--start-at end` on a diamond DAG skips both
   sides. Unknown ids fail the run before any step dispatches with
-  the same Levenshtein-suggesting message format IMP-008 introduced
+  the same Levenshtein-suggesting message format introduced
   ("`--start-at "fetchh"` references unknown step "fetchh"; did
   you mean "fetch"? available steps: compile, fetch"). User-authored
   `SkipIf` predicates still apply on top of the range filter (a
@@ -447,12 +441,12 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   downstream ones, `--start-at` past it leaves state empty —
   mitigation pattern is "lazy-load inside the step body if state
   isn't populated."
-- **Plan-time validation of string-typed step references (IMP-008).**
+- **Plan-time validation of string-typed step references.**
   After a pipeline's `Plan(ctx, plan, in, rc)` returns successfully,
   the SDK now walks every Node and every materialized Work and
   panics with a "did you mean X?" suggestion (Levenshtein-driven)
   if a `Needs("step-id")` string doesn't resolve to a registered
-  step, spawn, or plan node. Mirrors SDK-002's panic-with-pointer
+  step, spawn, or plan node. Mirrors its panic-with-pointer
   pattern: typo'd `Needs("install-karpentr")` calls used to silently
   make the dependency edge a no-op so the step would run
   immediately instead of after its intended predecessor; now they
@@ -470,7 +464,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ### Fixed
 - **`git push && wing X --on prod` no longer races the gitcache's
-  background fetch loop (IMP-005).** Two-part fix for the cryptic
+  background fetch loop.** Two-part fix for the cryptic
   `fatal: remote error: upload-pack: not our ref <sha>` operators
   used to hit when dispatching against a SHA the cache hadn't
   mirrored yet (the cache fetches every ~30s, so dispatching within
@@ -499,8 +493,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `cmd/sparkwing-cache/refresh_test.go` (real bare-repo round-trip /
   missing args / uncached repo / GET rejected).
 - **Pipeline `flag:"..."` tags that collide with wing-owned flags
-  now panic at `Register` time with a clear, full-context message
-  (IMP-003).** Previously, declaring an Args field like
+  now panic at `Register` time with a clear, full-context message.** Previously, declaring an Args field like
   `From string \`flag:"from"\`` would silently lose the value to
   wing's own `--from REF` parsing and surface as a confusing
   downstream error (`git worktree add invalid reference: ...`).
@@ -518,7 +511,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   arbitrary keys at runtime; wing-owned flags are stripped before
   the bag sees them).
 - **`sparkwing run -C <path> <pipeline>` no longer treats `-C` as
-  the pipeline name (IMP-006).** The hand-rolled wing-flag parser
+  the pipeline name.** The hand-rolled wing-flag parser
   used to take `args[0]` as the pipeline-name positional
   unconditionally, so `sparkwing run -C /path lint --on prod`
   silently dispatched a pipeline literally named
@@ -537,19 +530,17 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `--` is honored as a hard break: anything after `--` is opaque
   pipeline-side, so `wing run foo -- --my-pipeline-flag value`
   parses cleanly even if a future wing flag shares the name.
-- **`sparkwing.MustConfig` for parity with `MustSecret` (SDK-036).**
+- **`sparkwing.MustConfig` for parity with `MustSecret`.**
   `MustSecret(ctx, name)` has long had a panic-on-error shortcut for
   call sites where a missing secret is genuinely a programmer
   mistake; the sibling `Config` had no equivalent. `MustConfig` fills
   the asymmetry — same shape, same trade-off (prefer the
   error-returning form unless the value's absence is unrecoverable).
-- **Public sparkwing repo gains a `.sparkwing/` pipeline tree (Phase 4
-  of the release-pipeline restructure).** Five wing pipelines now live
-  in this repo so the platform release-all (in the sibling
-  sparkwing-platform repo) can cross-reference into them:
+- **The repo gains a `.sparkwing/` pipeline tree.** Five wing
+  pipelines now live in this repo so cross-repo orchestration can
+  invoke them by name:
   - `wing lint` -- gofmt + go vet across the public module.
-  - `wing test` -- `go test ./...` (race-clean variant stays in
-    platform).
+  - `wing test` -- `go test ./...`.
   - `wing static-analysis` -- staticcheck (via `go run` so dev
     machines without a global install still pass) plus
     `go mod tidy -diff`.
@@ -563,12 +554,9 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
     GH Releases and multi-arch images to GHCR. Tag pushes are never
     force-pushed (semver invariant for Go module consumers); the
     pipeline hard-refuses a tag that already exists on origin.
-  Cross-module helpers were re-implemented locally (the .sparkwing/
-  tree is a separate Go module, so importing platform's release
-  helpers wasn't an option). The tree is intentionally minimal:
-  release-all orchestration, deploy, consumer bumps, and platform
-  image publish all stay in sparkwing-platform/.sparkwing/.
-- **OSS container images published to GHCR on every `v*` tag (ISS-052).**
+  The tree is intentionally minimal: it covers what builds + tests +
+  releases this OSS module.
+- **OSS container images published to GHCR on every `v*` tag.**
   `.github/workflows/release.yaml` gains a `build-images` job that
   builds multi-arch (linux/amd64 + linux/arm64) images for the five
   cluster-side binaries -- `sparkwing-controller`, `sparkwing-runner`,
@@ -584,7 +572,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ### Fixed
 - **Runs no longer report `status: success` when `logs.append` is
-  silently failing (IMP-002).** Previously, a runner whose token
+  silently failing.** Previously, a runner whose token
   lacked the `logs.write` scope produced a series of per-line
   `WARN logs append dropped` entries in pod stderr while the
   orchestrator still finished the run as `success` -- so
@@ -620,7 +608,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `orchestrator.TestHTTPLogs_5xxRetriesThenCountsDrop`
   (transient-failure retry budget + drop counter).
 - **Warm-runner now ships `.sparkwing/` compile stderr into the
-  run's structured logs (IMP-001).** Previously, when the trigger
+  run's structured logs.** Previously, when the trigger
   loop's `go build` of a consumer's `.sparkwing/` directory failed,
   the operator-facing surface was the wrapper string
   `compile .sparkwing/: exit status 1`; the actual toolchain output
@@ -640,7 +628,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   a failed POST degrades to a warning rather than masking the
   underlying compile failure.
 - **`wing X --explain --skip Y -o json` now honors `--skip` / `--only`
-  identically to the no-`-o` form (CLI-017).** The pipeline binary's
+  identically to the no-`-o` form.** The pipeline binary's
   `--explain` entrypoint forwards the user's full argv into
   `parseTypedFlags` to surface typed pipeline flags (including the
   `SkipFilterArgs` embed exposing `--skip` / `--only`). Wrapper-only
@@ -657,11 +645,11 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   shape of `-o`/`--output`/`--json` against a fixture pipeline that
   consults `Skip` to drop a named node.
 - **Cluster-mode `RunWorker` no longer wires `Backends.Concurrency`
-  through a local SQLite store (RUN-017).** `internal/cluster.RunWorker`
+  through a local SQLite store.** `internal/cluster.RunWorker`
   -- the claim loop powering `sparkwing-runner worker` -- previously
   built `Backends.Concurrency` from a throwaway `LocalBackends` bundle,
   meaning the SQLite-direct `localConcurrency` (which embeds
-  `*store.Store`) sat in the runner-process Backends graph. RUN-016
+  `*store.Store`) sat in the runner-process Backends graph.
   pinned the same invariant for the `HandleClaimedTrigger` path; this
   closes the parallel hole on `RunWorker`. The fix mirrors
   `HandleClaimedTrigger`: `Backends.Concurrency` is now
@@ -672,20 +660,19 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   parallel to `orchestrator/cluster_safety_test.go`. See
   `decisions/0001-open-core-tier-strategy.md` for the open-core trust-
   boundary rationale.
-- **S3-only dashboard mode is fully functional (LOCAL-015).** With
+- **S3-only dashboard mode is fully functional.** With
   `--no-local-store`, the dashboard server now answers `/api/v1/runs`,
   `/api/v1/runs/{id}` (including `?include=nodes`), and
   `/api/v1/capabilities` from the configured `ArtifactStore`, with
   no controller mounted. Mutating routes (`/cancel`, `/paused`,
   `/release`) deliberately stay 404 -- there's no orchestrator to
   satisfy them, so a missing handler is an honest answer. Closes
-  the controller-shaped hole left by LOCAL-011 and makes S3-only
+  the controller-shaped hole left by and makes S3-only
   mode the canonical OSS free-tier read path described in
   `decisions/0001-open-core-tier-strategy.md`.
 
 ### Changed
-- **`/api/v1/capabilities` is now always served by the dashboard server
-  (LOCAL-015).** The controller's handler is gone; the dashboard
+- **`/api/v1/capabilities` is now always served by the dashboard server.** The controller's handler is gone; the dashboard
   answers in every topology (laptop SQLite, cluster controller-proxied,
   S3-only) by querying the configured `Backend.Capabilities()`.
   `Capabilities.Storage` gains a `runs` field (`"sqlite"` | `"s3"` |
@@ -695,7 +682,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ### Removed (BREAKING)
 - **Output-reference surface unified into one `sw.Ref[T]` field type
-  with three named constructors (SDK-037).** Previously: `sw.Ref[T]`
+  with three named constructors.** Previously: `sw.Ref[T]`
   for in-run sibling outputs, `sw.PipelineRef[Out, In]` for
   cross-pipeline reads (with a phantom `In` type parameter that
   carried no runtime weight), and `sw.AwaitPipelineJob[Out, In]` as
@@ -737,8 +724,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `sw.Ref[T]` in the job struct, so an agent reading a struct can
   see the dependency shape without parsing two different generic
   forms.
-- **`Approval.OnTimeout` field renamed to `Approval.OnExpiry`
-  (SDK-036).** The old name read as if it paralleled `Node.Timeout()`
+- **`Approval.OnTimeout` field renamed to `Approval.OnExpiry`.** The old name read as if it paralleled `Node.Timeout()`
   (per-attempt execution budget), but the two fields are unrelated
   concepts: `Approval.OnExpiry` decides how an unanswered gate
   resolves once its `Timeout` elapses; `Node.Timeout()` bounds how
@@ -750,8 +736,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `&sparkwing.Approval{...}` literals — type and constants
   (`ApprovalTimeoutPolicy`, `ApprovalFail` / `Deny` / `Approve`) are
   unchanged.
-- **`sparkwing.JobNode` is gone; replaced by `sparkwing.NewDetachedNode`
-  (SDK-035).** The detached-node primitive (used internally by
+- **`sparkwing.JobNode` is gone; replaced by `sparkwing.NewDetachedNode`.** The detached-node primitive (used internally by
   `JobFanOutDynamic`, `Node.OnFailure`, and the orchestrator's
   `SpawnNode` dispatch path) was exported under the easily-confused
   name `JobNode` — one letter different from the public `Job` verb.
@@ -767,8 +752,8 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   panics at Plan time instead of silently materializing a malformed
   node. Approval gates are now also routed correctly through these
   paths (previously `JobNode` skipped the approval branch).
-- **Every remaining `/api/runs/*` route is gone (LOCAL-016).** The
-  parallel surface that LOCAL-014 started removing is now fully
+- **Every remaining `/api/runs/*` route is gone.** The
+  parallel surface that started removing is now fully
   retired; `/api/v1/*` is the only public dashboard contract. Logs
   live at `/api/v1/runs/{id}/logs[/{node}[/stream]]`, the
   structured event SSE at `/api/v1/runs/{id}/events/stream`, and
@@ -786,14 +771,14 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `pkg/localws/mux_specificity_test.go`.
 
 ### Changed
-- **`internal/backend.Backend` trims to read-only (LOCAL-016).**
+- **`internal/backend.Backend` trims to read-only.**
   `CancelRun`, `ListDebugPauses`, and `ReleaseDebugPause` are gone
   from the interface and from all three implementations
   (`StoreBackend`, `ClientBackend`, `S3Backend`). The dashboard SPA
   hits the controller directly for those state mutations now, so
   the dashboard server no longer needs a write surface.
 - **Dashboard data access unified behind one `internal/backend.Backend`
-  interface (LOCAL-017).** The web handlers used to consume two
+  interface.** The web handlers used to consume two
   parallel interfaces (`web.Reader` for state, `web.LogSource` for
   logs) plus a third type (`web.S3Reader`) for the S3-only mode. Those
   three are now collapsed into `Backend`, with three implementations:
@@ -802,8 +787,8 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   state.ndjson dumps + S3 log objects -- replaces `web.S3Reader`).
   Each impl owns its own log discovery, so the controller stays out
   of the log bandwidth path. Pure refactor: API surface unchanged.
-  Sets up LOCAL-016 (migrating the rest of `/api/runs/*` onto
-  `/api/v1/*`) and LOCAL-015 (S3-only `/api/v1/capabilities`),
+  Sets up (migrating the rest of `/api/runs/*` onto
+  `/api/v1/*`) and (S3-only `/api/v1/capabilities`),
   both of which want a single backend abstraction to dispatch on.
 
 ## [v1.5.4] - 2026-05-04
@@ -961,7 +946,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   events, cancel, debug pause) are unchanged for now and migrate in a
   follow-up. Filter parsing for both the laptop and cluster
   controllers now flows through the shared `store.ParseRunFilter`
-  helper so the two list paths can't drift. Part of LOCAL-014, the
+  helper so the two list paths can't drift. Part of , the
   first ticket landing under the `/api/v1/*`-canonical principle from
   decisions/0001.
 
@@ -975,7 +960,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   Sparkwing's hosted multi-tenant build remains a separate, private
   composition layered on top of this same orchestration core; this
   repo is the authoritative source for both. Design decisions logged:
-  open-core tier strategy and ELv2 licensing rationale (ORG-002).
+  open-core tier strategy and ELv2 licensing rationale.
 
 ### Fixed
 - **`sparkwing run` works on Windows.** `bincache.ExecReplace`
@@ -1063,7 +1048,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   Releases under the same SHA256SUMS manifest. Closes the
   "Windows is not yet covered by prebuilt binaries" gap that
   install.sh used to bail on.
-- **`install.sh` (sparkwing-product) handles windows.** Detects
+- **`install.sh` handles windows.** Detects
   Git Bash via `uname -s` (`mingw*|msys*|cygwin*`), downloads
   `sparkwing-windows-<arch>.exe`, installs it to `~/.local/bin`,
   and lays down a `wing.exe` copy alongside it (a real copy
@@ -1109,9 +1094,8 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `LogStore` still writes one `sparkwing.LogRecord` per line. Clients
   that want the structured envelope (`curl`, log shippers) opt in
   with `Accept: application/x-ndjson`. Non-JSON lines pass through
-  verbatim instead of crashing the renderer. ISS-043.
-- **Dashboard log endpoint now does three-way Accept negotiation**
-  (ISS-044). Default `text/plain` is the safe-by-default path:
+  verbatim instead of crashing the renderer. .
+- **Dashboard log endpoint now does three-way Accept negotiation**. Default `text/plain` is the safe-by-default path:
   pretty pretext with `Msg` ANSI **stripped** so `curl`/agent
   consumers piping into TTY-naive tools don't see escape garbage.
   `Accept: text/x-ansi` opts into the colored variant (renderer
@@ -1124,19 +1108,19 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ### Added
 - `orchestrator.StripANSI(string) string` -- exported from
   `orchestrator/logger.go`, was previously unexported. Reused by
-  `internal/web` for the plain-mode log render path. ISS-044.
+  `internal/web` for the plain-mode log render path. .
 
 ### Added
 - `internal/web.NewStoreReader(*store.Store) Reader` -- canonical
   adapter for the `Reader` interface. Replaces the duplicated
   unexported `storeReader` previously copied into `pkg/localws`.
-  LOCAL-012.
+  .
 - `orchestrator.DumpRunState` (formerly unexported) so the
   `state.ndjson <-> store.Run` round-trip test can pin the dump
   format against the `S3Reader` read path. New test in
   `orchestrator/dumpstate_test.go` fails if a future Run/Node field
   is added without a JSON tag (or with `json:"-"`) and silently
-  dropped from the dashboard's S3 view. LOCAL-013.
+  dropped from the dashboard's S3 view. .
 - **Dashboard S3-only mode** (`sparkwing dashboard start
   --no-local-store`): list runs straight from an artifact-store
   without opening SQLite. A fresh laptop pointed at a CI bucket can
@@ -1146,7 +1130,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   and `--artifact-store` (or an `--on` profile that supplies them).
   The controller (`local.New`) is not mounted in this mode; write
   endpoints are absent because there's no orchestrator on the laptop
-  to satisfy them. LOCAL-011.
+  to satisfy them. .
 - `storage.ArtifactStore.List(ctx, prefix) ([]string, error)` --
   enumerate keys under a prefix. Implemented for `pkg/storage/fs`
   (filepath.WalkDir) and `pkg/storage/s3` (paginated ListObjectsV2).
@@ -1184,28 +1168,25 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   that drifted post-rename). Now follows the GitHub redirect at
   `github.com/sparkwing-dev/sparkwing/releases/latest` instead --
   single source of truth, no API token needed.
-- Sweeping doc + test cleanup of stale `github.com/koreyGambill/*`
-  references that predated ORG-001. `koreyGambill/sparks-core`
-  resolves nowhere; canonical home is `sparkwing-dev/sparks-core`.
+- Sweeping doc + test cleanup of stale module paths from before the
+  current `sparkwing-dev/sparks-core` location.
 - `version.go` SparkPin module-prefix matcher updated to
-  `github.com/sparkwing-dev/sparks-` (was `koreyGambill/sparks-`,
-  silently never matching).
-- `getting-started.md` had a stale SDK import path
-  `sparkwing-platform/pkg/sparkwing`; the canonical SDK import is
-  `github.com/sparkwing-dev/sparkwing/sparkwing`.
+  `github.com/sparkwing-dev/sparks-`.
+- `getting-started.md` had a stale SDK import path; the canonical
+  SDK import is `github.com/sparkwing-dev/sparkwing/sparkwing`.
 
 ### Added
 - `.github/workflows/release.yaml`: cross-compiles + uploads
   sparkwing CLI binaries (linux/amd64, linux/arm64, darwin/amd64,
   darwin/arm64) plus a `SHA256SUMS` manifest on every `v*` tag push.
-  Replaces the manual `gh release upload` scripts. LOCAL-009.
+  Replaces the manual `gh release upload` scripts. .
 
 ## [v0.6.1] - 2026-05-03
 
 ### Fixed
 - **`sparkwing pipeline new` no longer scaffolds a broken go.mod.**
   `fallbackSDKVersion` was pinned to `v0.0.1`, which predates the
-  ORG-001 module rename and still declares its module path as
+  module rename and still declares its module path as
   `github.com/sparkwing-dev/sparkwing-sdk`. `go mod tidy` against a
   freshly-scaffolded project failed immediately with a path-mismatch
   error. Bumped to `v1.3.1`. The `go` directive fallback (used when
@@ -1214,8 +1195,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 - **`docs/getting-started.md`** install instructions: replaced the
   fictional `https://sparkwing.dev/install.sh` with the real GH
   Releases curl URLs (one per platform), and corrected the
-  `go install` path from `sparkwing-platform/cmd/sparkwing` (the
-  private engine) to `sparkwing/cmd/sparkwing` (the public CLI).
+  `go install` path to `sparkwing/cmd/sparkwing` (the public CLI).
   Quick Start now uses `sparkwing run release` so it works without
   the optional `wing` symlink.
 
@@ -1256,7 +1236,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 - `wing run` / `sparkwing run` never auto-upload; the publish
   surface is intentionally explicit so quick local iteration stays
   fast.
-- LOCAL-006.
+- .
 
 ## [v0.5.0] - 2026-05-03
 
@@ -1284,11 +1264,11 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 ### Notes
 - Live tail of in-flight ci-embedded runs is **not** supported; a
   remote dashboard replays the run after the CI VM exits the dump
-  step. Streaming run state to S3 incrementally is LOCAL-005.
+  step. Streaming run state to S3 incrementally is .
 - Exit code mirrors pipeline outcome: `0` if all nodes succeed,
   `1` on any failure -- so the wrapping CI step fails when sparkwing
   fails.
-- LOCAL-004.
+- .
 
 ## [v0.4.0] - 2026-05-03
 
@@ -1325,7 +1305,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
   `ArtifactStore`, `ArtifactStoreLabel`, `ReadOnly`. Default behavior
   unchanged when zero values: filesystem reads under `paths.Root`,
   no read-only restrictions, capabilities reports `fs/fs`.
-- LOCAL-003.
+- .
 
 ## [v0.3.0] - 2026-05-03
 
@@ -1345,7 +1325,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 - **`sparkwing-runner worker --log-store URL --artifact-store URL`**
   flags. `--log-store` is wired end-to-end (logs route through the
   resolved backend); `--artifact-store` is parsed + validated at
-  startup and consumed by future cache paths in LOCAL-003/004.
+  startup and consumed by future cache paths in /004.
 - **`orchestrator.NewLogStoreBackend`** wraps any `storage.LogStore`
   as a `LogBackend`, replacing the HTTP-only `NewHTTPLogs*` path
   for non-HTTP backends.
@@ -1356,15 +1336,15 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 - New transitive deps: `github.com/aws/aws-sdk-go-v2` (core, config,
   s3, credentials) + `github.com/johannesboyne/gofakes3` (test-only
   in-memory S3 server).
-- LOCAL-002.
+- .
 
 ## [v0.2.0] - 2026-05-03
 
 ### Added
 - **`pkg/storage/`** - pluggable storage interfaces (`ArtifactStore`,
   `LogStore`) for the three-mode execution split (local /
-  ci-embedded / distributed). Foundation for LOCAL-002's filesystem
-  + S3 backends and LOCAL-003's storage-aware sparkwing-local.
+  ci-embedded / distributed). Foundation for its filesystem
+  + S3 backends and its storage-aware sparkwing-local.
 - **`pkg/storage/sparkwingcache/`** - `ArtifactStore` adapter over
   the sparkwing-cache HTTP `/bin/<key>` endpoints.
 - **`pkg/storage/sparkwinglogs/`** - `LogStore` adapter over the
@@ -1374,7 +1354,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 - Orchestrator and web consumers (`HTTPLogs`, `JobLogsRemote*`,
   `httpLogSource`) now depend on `storage.LogStore` instead of the
   concrete `*logs.Client`. No behavior change; back-end is still the
-  HTTP logs service. LOCAL-001.
+  HTTP logs service. .
 
 ## [v0.1.0] - 2026-05-03
 
@@ -1404,7 +1384,7 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ## [v0.0.1] - 2026-05-03
 
-Initial extraction from the sparkwing engine repo (SDK-014).
+Initial extraction from the sparkwing engine repo.
 
 ### Added
 - `sparkwing/` package: stable user-facing DSL — `Plan`, `Job`, `Work`,

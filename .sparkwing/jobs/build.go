@@ -27,10 +27,10 @@ var publicBinaries = []string{
 // Actions workflow at `.github/workflows/release.yaml`, which fires
 // on tag push (the tag the `release` pipeline below pushes).
 //
-// This pipeline exists primarily as a cross-ref target for
-// sparkwing-platform/release-all when an operator wants to gate the
-// platform release on a known-good public build before tagging. It
-// does NOT publish artifacts.
+// This pipeline exists primarily as a cross-ref target for an
+// upstream release-all orchestration pipeline that wants to gate
+// a release on a known-good public build before tagging. It does
+// NOT publish artifacts.
 type Build struct{ sparkwing.Base }
 
 func (Build) ShortHelp() string {

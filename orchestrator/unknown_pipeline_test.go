@@ -28,7 +28,7 @@ func registerIMP040Fixtures(t *testing.T) {
 	t.Helper()
 	// Names chosen so "claster-up" is one edit from "cluster-up"
 	// (close), "totallyunrelated" is far from any (no suggestion),
-	// and "helo" / "hello" exercises the kikd-infra repro.
+	// and "helo" / "hello" exercises the typo-suggestion path.
 	for _, n := range []string{"cluster-up", "cluster-down", "hello"} {
 		// Re-register is idempotent if the same name was used in a
 		// previous test run; sparkwing.Register panics on duplicate

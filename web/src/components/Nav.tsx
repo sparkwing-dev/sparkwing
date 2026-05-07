@@ -120,7 +120,7 @@ function ApprovalsBadge({
             <div className="p-3 text-sm text-[var(--muted)]">
               No pending approvals.
             </div>
-          ) : (
+          : (
             <ul>
               {pending.map((a) => (
                 <li
@@ -138,14 +138,14 @@ function ApprovalsBadge({
                     </div>
                     {a.message ? (
                       <div className="text-xs mt-1 truncate">{a.message}</div>
-                    ) : null}
+                    : null}
                   </Link>
                 </li>
               ))}
             </ul>
           )}
         </div>
-      ) : null}
+      : null}
     </div>
   );
 }

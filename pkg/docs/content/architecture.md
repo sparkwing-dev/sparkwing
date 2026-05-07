@@ -32,7 +32,7 @@ Kubernetes. The stack is five pods plus an in-cluster registry.
 │  │ (API + queue  │  │  (git HTTP + │  │  (dashboard) │           │
 │  │  + webhooks   │  │   blob store │  │              │           │
 │  │  + pool mgmt  │  │   + pkg proxy│  │              │           │
-│  │  + dispatcher)│  │   )          │  │              │           │
+│  │  + dispatcher)│  │            │  │              │           │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘           │
 │         │                                                        │
 │  ┌──────┴───────┐  ┌──────────────┐  ┌──────────────┐           │

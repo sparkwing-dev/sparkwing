@@ -18,9 +18,9 @@ func TestRepoNameFromURL(t *testing.T) {
 	}{
 		{"git@github.com:sparkwing-dev/sparkwing.git", "sparkwing"},
 		{"git@github.com:sparkwing-dev/sparkwing", "sparkwing"},
-		{"https://github.com/sparkwing-dev/sparkwing-platform.git", "sparkwing-platform"},
-		{"https://github.com/sparkwing-dev/sparkwing-platform", "sparkwing-platform"},
-		{"https://github.com/sparkwing-dev/sparkwing-platform/", "sparkwing-platform"},
+		{"https://github.com/acme/another-repo.git", "another-repo"},
+		{"https://github.com/acme/another-repo", "another-repo"},
+		{"https://github.com/acme/another-repo/", "another-repo"},
 		{"sparkwing-dev/sparkwing", "sparkwing"},
 		{"sparkwing", "sparkwing"},
 		{"sparkwing.git", "sparkwing"},

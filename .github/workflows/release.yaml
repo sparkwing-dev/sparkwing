@@ -1,13 +1,11 @@
-# LOCAL-009: cross-compile + upload sparkwing binaries to GH Releases
-# on every tag push. Replaces the manual gh release upload scripts
-# under .claude-scratch/.
+# Cross-compile + upload sparkwing binaries to GH Releases on every
+# tag push.
 #
 # Trigger: any tag matching v*. Release notes are auto-generated from
 # PR titles since the previous tag.
 #
-# To cut a release locally:
-#     wing release --version vX.Y.Z   # in sparkwing-platform/.sparkwing
-# That pipeline pushes the tag; this workflow takes it from there.
+# To cut a release: push a v*-prefixed tag (e.g. via `wing release
+# --version vX.Y.Z`). This workflow takes it from there.
 #
 # Shape: matrix-parallel build (one runner per binary × platform),
 # followed by a single release job that downloads every artifact and
