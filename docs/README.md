@@ -42,6 +42,7 @@ docs/
   gitcache.md            sparkwing-cache: git HTTP, blobs, package proxy
   sparks.md              spark library dependency management
   sparks-core.md         the canonical sparks-* helper bundle
+  versioning.md          versioning policy, plugin compatibility, SDK extraction roadmap
   auth.md                principal + scope + argon2 token model
   security.md            transport, rate limiting, secret management
   observability.md       failure reasons, resource metrics, OTel
