@@ -51,8 +51,8 @@ myapp:
 package jobs
 
 import (
-    "github.com/koreyGambill/sparks-core/docker"
-    "github.com/koreyGambill/sparks-core/deploy"
+    "github.com/sparkwing-dev/sparks-core/docker"
+    "github.com/sparkwing-dev/sparks-core/deploy"
 )
 
 func JobMyapp() {
@@ -198,8 +198,8 @@ package jobs
 
 import (
     "github.com/sparkwing-dev/sparkwing/pkg/sparkwing"
-    "github.com/koreyGambill/sparks-core/docker"
-    "github.com/koreyGambill/sparks-core/deploy"
+    "github.com/sparkwing-dev/sparks-core/docker"
+    "github.com/sparkwing-dev/sparks-core/deploy"
 )
 
 func JobMyapp() {
@@ -289,7 +289,7 @@ func JobDeploy() {
 ## Docker build + push
 
 \`\`\`go
-import "github.com/koreyGambill/sparks-core/docker"
+import "github.com/sparkwing-dev/sparks-core/docker"
 
 docker.BuildAndPush(docker.BuildConfig{
     Image:      "myapp",
@@ -302,7 +302,7 @@ docker.BuildAndPush(docker.BuildConfig{
 ## Deploy
 
 \`\`\`go
-import "github.com/koreyGambill/sparks-core/deploy"
+import "github.com/sparkwing-dev/sparks-core/deploy"
 
 deploy.Run(deploy.Config{
     AppName:   "myapp",
@@ -430,8 +430,8 @@ Then use in your job:
 import (
     "github.com/sparkwing-dev/sparkwing/plugins/slack"
     "github.com/sparkwing-dev/sparkwing/plugins/s3"
-    "github.com/koreyGambill/sparks-core/docker"
-    "github.com/koreyGambill/sparks-core/deploy"
+    "github.com/sparkwing-dev/sparks-core/docker"
+    "github.com/sparkwing-dev/sparks-core/deploy"
 )
 
 func JobDeploy() {

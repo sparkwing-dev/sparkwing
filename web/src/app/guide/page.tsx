@@ -410,7 +410,7 @@ docker -H tcp://localhost:9003 info
 ## Test a Docker build job
 
 \`\`\`go
-import "github.com/koreyGambill/sparks-core/docker"
+import "github.com/sparkwing-dev/sparks-core/docker"
 
 func JobDockerTest() {
     docker.BuildAndPush(docker.BuildConfig{
@@ -466,7 +466,7 @@ sparkwing.RunStep(step.DockerRun("test", "node:22", []string{"npm", "test"},
 \`deploy.Run()\` auto-detects the environment. In a K8s cluster it pushes to gitops + syncs ArgoCD. Locally it restarts deployments via kubectl.
 
 \`\`\`go
-import "github.com/koreyGambill/sparks-core/deploy"
+import "github.com/sparkwing-dev/sparks-core/deploy"
 
 deploy.Run(deploy.Config{
     AppName:   "okbot-go",
@@ -979,8 +979,8 @@ curl -s "http://localhost:9001/jobs?limit=50&offset=0" | jq 'length'
 \`\`\`go
 import (
     "github.com/sparkwing-dev/sparkwing/plugins/slack"
-    "github.com/koreyGambill/sparks-core/docker"
-    "github.com/koreyGambill/sparks-core/deploy"
+    "github.com/sparkwing-dev/sparks-core/docker"
+    "github.com/sparkwing-dev/sparks-core/deploy"
 )
 
 func JobDeployWithNotify() {

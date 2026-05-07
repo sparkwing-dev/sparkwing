@@ -116,8 +116,8 @@ export default function FeaturesPage() {
 {`package jobs
 
 import (
-    "github.com/koreyGambill/sparks-core/docker"
-    "github.com/koreyGambill/sparks-core/deploy"
+    "github.com/sparkwing-dev/sparks-core/docker"
+    "github.com/sparkwing-dev/sparks-core/deploy"
 )
 
 func JobMyapp() {
