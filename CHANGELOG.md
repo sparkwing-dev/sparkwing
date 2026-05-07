@@ -6,6 +6,19 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ## [Unreleased]
 
+### Deprecated -- pre-launch artifacts in proxy.golang.org
+
+The Go module proxy permanently caches every version that's ever
+been fetched, even after the corresponding tag is deleted from the
+repo. The following snapshots exist in proxy.golang.org from prior
+to the project's public launch and **should not be used**: `v0.0.1`,
+`v1.0.0`, `v1.1.0`, `v1.2.0`, `v1.2.1`, `v1.3.0`, `v1.3.1`, `v1.3.2`,
+`v1.3.3`, `v1.3.4`, `v1.3.5`, `v1.4.0`, `v1.4.1`, `v1.4.2`, `v1.5.0`,
+`v1.5.1`, `v1.5.2`, `v1.5.3`, `v1.5.4`, `v1.6.0`. The v1 line was a
+misstep; the project is rebaselining on `v0.x.y`. These versions are
+also retracted at the `go.mod` level so `go get @latest` and
+`go mod tidy` will skip / warn against them.
+
 ### Added
 - **Run receipt: identity hashes + per-step observability + simple cost.** `sparkwing runs receipt --run X` and
   `GET /api/v1/runs/{id}/receipt` emit a per-run audit + cost artifact

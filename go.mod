@@ -2,6 +2,16 @@ module github.com/sparkwing-dev/sparkwing
 
 go 1.26.0
 
+// Pre-launch artifacts. The project hadn't shipped publicly when
+// these were tagged; the v1 line in particular was a misstep that
+// committed us to v1+ semver before we wanted that promise. The
+// project is rebaselining on the v0.x.y line. None of these are
+// supported; do not pin to them.
+retract (
+	v0.0.1
+	[v1.0.0, v1.6.0]
+)
+
 require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/pflag v1.0.10
