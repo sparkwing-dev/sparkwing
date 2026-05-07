@@ -13,18 +13,18 @@ export default function Markdown({ content }: { content: string }) {
             <h1 className="text-3xl font-bold mb-6 pb-2 border-b border-[var(--border)]">
               {children}
             </h1>
-         ,
+          ),
           h2: ({ children }) => (
             <h2 className="text-xl font-bold mt-8 mb-4">{children}</h2>
-         ,
+          ),
           h3: ({ children }) => (
             <h3 className="text-lg font-semibold mt-6 mb-3">{children}</h3>
-         ,
+          ),
           p: ({ children }) => (
             <p className="mb-4 leading-relaxed text-[var(--muted)]">
               {children}
             </p>
-         ,
+          ),
           a: ({ href, children }) => (
             <a
               href={href}
@@ -32,7 +32,7 @@ export default function Markdown({ content }: { content: string }) {
             >
               {children}
             </a>
-         ,
+          ),
           code: ({ className, children }) => {
             const isBlock = className?.includes("language-");
             if (isBlock) {
@@ -55,12 +55,12 @@ export default function Markdown({ content }: { content: string }) {
             <ul className="mb-4 ml-4 list-disc text-[var(--muted)]">
               {children}
             </ul>
-         ,
+          ),
           ol: ({ children }) => (
             <ol className="mb-4 ml-4 list-decimal text-[var(--muted)]">
               {children}
             </ol>
-         ,
+          ),
           li: ({ children }) => <li className="mb-1">{children}</li>,
           table: ({ children }) => (
             <div className="overflow-x-auto mb-4">
@@ -68,31 +68,31 @@ export default function Markdown({ content }: { content: string }) {
                 {children}
               </table>
             </div>
-         ,
+          ),
           thead: ({ children }) => (
             <thead className="bg-[var(--surface)]">{children}</thead>
-         ,
+          ),
           th: ({ children }) => (
             <th className="px-3 py-2 text-left font-semibold border border-[var(--border)]">
               {children}
             </th>
-         ,
+          ),
           td: ({ children }) => (
             <td className="px-3 py-2 border border-[var(--border)] text-[var(--muted)]">
               {children}
             </td>
-         ,
+          ),
           blockquote: ({ children }) => (
             <blockquote className="border-l-2 border-indigo-500 pl-4 mb-4 text-[var(--muted)] italic">
               {children}
             </blockquote>
-         ,
+          ),
           hr: () => <hr className="my-8 border-[var(--border)]" />,
           strong: ({ children }) => (
             <strong className="font-semibold text-[var(--foreground)]">
               {children}
             </strong>
-         ,
+          ),
         }}
       >
         {content}

@@ -673,9 +673,9 @@ function InlineCode({ text }: { text: string }) {
           >
             {part.slice(1, -1)}
           </code>
-        : (
+        ) : (
           <span key={i}>{part}</span>
-       ,
+        ),
       )}
     </>
   );

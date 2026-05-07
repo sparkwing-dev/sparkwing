@@ -72,7 +72,7 @@ function formatDuration(ns: number): string {
   return `${s.toFixed(1)}s`;
 }
 
-// : "adopted" nodes (cached + coalesced) share a dashed border
+// RUN-015: "adopted" nodes (cached + coalesced) share a dashed border
 // so operators see at a glance which nodes took output from elsewhere.
 const statusColors: Record<
   string,
@@ -315,11 +315,11 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
           </div>
           {selectedJob.steps && selectedJob.steps.length > 0 ? (
             <StepView steps={selectedJob.steps} />
-          : selectedJob.logs ? (
+          ) : selectedJob.logs ? (
             <pre className="bg-[#0d1117] border border-[var(--border)] rounded-lg p-4 text-xs overflow-x-auto max-h-96 overflow-y-auto font-mono">
               {selectedJob.logs}
             </pre>
-          : (
+          ) : (
             <p className="text-sm text-[var(--muted)]">
               No logs captured for this job.
             </p>

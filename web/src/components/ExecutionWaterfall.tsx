@@ -39,11 +39,11 @@ function outcomeColor(outcome: string, running: boolean): string {
     case "skipped":
       return "bg-slate-400/40";
     case "skipped-concurrent":
-      // OnLimit:Skip. Distinct from skipped so operators can
+      // RUN-015 OnLimit:Skip. Distinct from skipped so operators can
       // see the slot was full, not a SkipIf predicate.
       return "bg-slate-500/40";
     case "superseded":
-      // OnLimit:CancelOthers. Distinct from cancelled so
+      // RUN-015 OnLimit:CancelOthers. Distinct from cancelled so
       // operators can see "evicted by newer run" vs operator cancel.
       return "bg-amber-500/60";
     default:

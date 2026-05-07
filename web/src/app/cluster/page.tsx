@@ -142,12 +142,12 @@ export default function ClusterPage() {
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-6">
         {!loaded ? (
           <div className="text-xs text-[var(--muted)]">Loading...</div>
-        : services.length === 0 ? (
+        ) : services.length === 0 ? (
           <div className="text-xs text-[var(--muted)]">
             No services configured. Pass --controller and --logs to
             sparkwing-web to populate this list.
           </div>
-        : (
+        ) : (
           <div className="space-y-3">
             {services.map((svc) => (
               <ServiceRow key={svc.name} svc={svc} maxLatency={maxLatency} />
@@ -163,11 +163,11 @@ export default function ClusterPage() {
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden mb-6">
         {!loaded ? (
           <div className="text-xs text-[var(--muted)] p-4">Loading...</div>
-        : failures.length === 0 ? (
+        ) : failures.length === 0 ? (
           <div className="text-xs text-[var(--muted)] p-4">
             No failed runs in the latest 50.
           </div>
-        : (
+        ) : (
           <table className="w-full text-xs">
             <thead className="bg-[var(--background)] text-[var(--muted)]">
               <tr>

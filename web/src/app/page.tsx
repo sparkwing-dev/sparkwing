@@ -228,7 +228,7 @@ export default function Dashboard() {
                   ? "no runs yet — click + Run or trigger from CLI"
                   : "no runs match filter"}
               </li>
-            : (
+            ) : (
               filteredRuns.map((r) => (
                 <RunRow
                   key={r.id}
@@ -248,7 +248,7 @@ export default function Dashboard() {
             <div className="flex-1 flex items-center justify-center text-sm text-[var(--muted)]">
               Select a run to inspect its DAG and logs
             </div>
-          : (
+          ) : (
             <RunDetailView
               detail={detail}
               logsNode={logsNode}
@@ -345,7 +345,7 @@ function RunRow({
             : formatDuration(runDurationMs(run))}
         </span>
       </div>
-      {/* TODO: pipeline-tag chips removed with the legacy
+      {/* TODO(LOCAL-014): pipeline-tag chips removed with the legacy
           /api/runs list shape; restore once pipeline metadata is
           plumbed through the canonical /api/v1/runs response. */}
       {venue && (
@@ -801,7 +801,7 @@ function LogDrawer({
       >
         {lines.length === 0 ? (
           <span className="text-[var(--muted)] italic">(no log output)</span>
-        : (
+        ) : (
           <span
             dangerouslySetInnerHTML={{ __html: ansiToHtml(lines.join("\n")) }}
           />
