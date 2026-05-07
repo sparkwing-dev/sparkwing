@@ -4,6 +4,19 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.1] - 2026-05-07
+
+### Fixed
+- **Fresh proxy snapshot of the v0.2.0 fix.** v0.2.0's proxy.golang.org
+  snapshot was cached at the original commit (which had broken web/src
+  JSX from a regex over-match in the OSS-fit audit pass) before the
+  re-tagged fix landed; that snapshot is immutable per Go module
+  rules. v0.2.1 re-tags the fixed commit so consumers doing
+  `go get .../sparkwing@latest` get the working code. Source-level no-op
+  vs v0.2.0 (origin); only the proxy snapshot differs. Validated
+  end-to-end via the moonborn-ws build-test-deploy pipeline running
+  through to a clean ECR image push + gitops state commit.
+
 ## [v0.2.0] - 2026-05-06
 
 ### Deprecated -- pre-launch artifacts in proxy.golang.org
