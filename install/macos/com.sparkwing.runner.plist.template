@@ -6,8 +6,8 @@
   Substitution variables filled in by the installer:
     __BINARY_PATH__       — absolute path to sparkwing-runner
     __RUNNER_NAME__       — human-readable name for this runner
-    __CONTROLLER_URL__    — https://api-sparkwing.rangz.dev
-    __LOGS_URL__          — https://logs-sparkwing.rangz.dev
+    __CONTROLLER_URL__    — https://controller.example.com
+    __LOGS_URL__          — https://logs.example.com
     __API_TOKEN__         — bearer token shared with the controller
     __MAX_CONCURRENT__    — how many jobs this laptop will run in parallel
     __LOG_PATH__          — local path for stdout/stderr of the runner itself

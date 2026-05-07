@@ -6,10 +6,10 @@
 #   bash install/install.sh
 #
 # Usage (non-interactive, e.g. for scripting or team onboarding docs):
-#   SPARKWING_CONTROLLER=https://api-sparkwing.rangz.dev \
-#   SPARKWING_LOGS=https://logs-sparkwing.rangz.dev \
+#   SPARKWING_CONTROLLER=https://controller.example.com \
+#   SPARKWING_LOGS=https://logs.example.com \
 #   SPARKWING_API_TOKEN=... \
-#   RUNNER_NAME=laptop-korey \
+#   RUNNER_NAME=dev-laptop \
 #   MAX_CONCURRENT=2 \
 #   bash install/install.sh --yes
 #
@@ -114,10 +114,10 @@ RUNNER_NAME="${RUNNER_NAME:-}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-}"
 
 if [ -z "$CONTROLLER_URL" ]; then
-  CONTROLLER_URL="$(ask 'Controller URL' 'https://api-sparkwing.rangz.dev')"
+  CONTROLLER_URL="$(ask 'Controller URL (e.g. https://controller.example.com)' '')"
 fi
 if [ -z "$LOGS_URL" ]; then
-  LOGS_URL="$(ask 'Logs service URL' 'https://logs-sparkwing.rangz.dev')"
+  LOGS_URL="$(ask 'Logs service URL (e.g. https://logs.example.com)' '')"
 fi
 if [ -z "$API_TOKEN" ]; then
   API_TOKEN="$(ask_secret 'API token (will not be echoed)')"
