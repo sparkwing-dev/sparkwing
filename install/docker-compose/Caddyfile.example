@@ -1,0 +1,36 @@
+# Example Caddyfile for putting sparkwing behind Caddy with automatic TLS.
+# Caddy handles:
+#   - Let's Encrypt certificate issuance
+#   - HTTPS termination
+#   - Path/host routing to each compose service
+#
+# Copy to /etc/caddy/Caddyfile (or wherever your Caddy instance reads
+# from) and replace the example hostnames with your own.
+#
+# Assumes sparkwing docker-compose is running on localhost with the
+# default port bindings.
+
+sparkwing.example.com {
+    # Dashboard
+    reverse_proxy localhost:3100
+}
+
+api.example.com {
+    # Controller API — remote runners hit this with their bearer token.
+    # The controller's AuthMiddleware gates every endpoint.
+    reverse_proxy localhost:8080
+}
+
+logs.example.com {
+    # sparkwing-logs — runners POST log bytes here, dashboard reads via SSE.
+    # Disable Caddy's buffering so SSE frames flow in real time.
+    reverse_proxy localhost:8091 {
+        flush_interval -1
+    }
+}
+
+webhooks.example.com {
+    # GitHub webhook endpoint. Only /webhooks/github is served by the
+    # DMZ binary; everything else returns 404.
+    reverse_proxy localhost:8092
+}

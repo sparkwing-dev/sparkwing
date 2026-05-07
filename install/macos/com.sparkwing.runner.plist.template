@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  sparkwing-runner LaunchAgent template.
+  Installed by install/install.sh — do not edit directly.
+
+  Substitution variables filled in by the installer:
+    __BINARY_PATH__       — absolute path to sparkwing-runner
+    __RUNNER_NAME__       — human-readable name for this runner
+    __CONTROLLER_URL__    — https://api-sparkwing.rangz.dev
+    __LOGS_URL__          — https://logs-sparkwing.rangz.dev
+    __API_TOKEN__         — bearer token shared with the controller
+    __MAX_CONCURRENT__    — how many jobs this laptop will run in parallel
+    __LOG_PATH__          — local path for stdout/stderr of the runner itself
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.sparkwing.runner</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BINARY_PATH__</string>
+    <string>serve</string>
+    <string>--controller</string>
+    <string>__CONTROLLER_URL__</string>
+    <string>--name</string>
+    <string>__RUNNER_NAME__</string>
+    <string>--max-concurrent</string>
+    <string>__MAX_CONCURRENT__</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SPARKWING_CONTROLLER</key>
+    <string>__CONTROLLER_URL__</string>
+    <key>SPARKWING_LOGS</key>
+    <string>__LOGS_URL__</string>
+    <key>SPARKWING_API_TOKEN</key>
+    <string>__API_TOKEN__</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Run at login and whenever it exits unexpectedly. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+    <key>Crashed</key>
+    <true/>
+  </dict>
+
+  <!-- Exponential backoff on repeated crashes; don't busy-loop. -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- Sleep handling: stop when the machine sleeps, resume on wake. -->
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Log stdout and stderr to a file the user can tail. -->
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_PATH__</string>
+
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>

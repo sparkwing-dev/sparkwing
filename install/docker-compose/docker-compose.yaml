@@ -1,0 +1,115 @@
+# sparkwing server-side for docker-compose.
+#
+# Deploys the trusted-team flavor of sparkwing on a single host:
+# controller + sparkwing-logs + gitcache + web.
+# No Kubernetes, no helm, no operators. Just `docker compose up -d`.
+#
+# Target setup:
+#   - One VPS or always-on machine (e.g. Fly.io, Hetzner, small EC2, home lab)
+#   - Docker + docker-compose installed
+#   - A domain name pointed at the host (for webhooks + public log URL)
+#   - Reverse proxy in front (Caddy, Traefik, or nginx) handling TLS
+#
+# Not included here (bring your own):
+#   - TLS termination — put Caddy or Traefik in front and route to the
+#     service ports below. Example Caddyfile in install/docker-compose/Caddyfile
+#   - Persistent DNS — point your domain at the host
+#   - GitHub webhook secret — set GITHUB_WEBHOOK_SECRET in .env
+#
+# First-run setup:
+#   1. cp .env.example .env
+#   2. Edit .env to set hostnames, secrets, token
+#   3. docker compose up -d
+#   4. docker compose logs -f
+#
+# For runners on laptops, point them at this server's public URL:
+#   SPARKWING_CONTROLLER=https://api.example.com \
+#   SPARKWING_LOGS=https://logs.example.com \
+#   SPARKWING_API_TOKEN=$YOUR_TOKEN \
+#   bash install/install.sh
+
+services:
+  # -------- gitcache --------
+  # In-cluster git server. Caches bare repos, serves tarballs, handles
+  # uploaded tarballs from `wing --from local`. Runners that can't reach
+  # GitHub directly (e.g. behind NAT) go through here.
+  # TODO: SDK-010 pin -- :latest is intentional for install convenience;
+  # pin to a specific release tag for production stability.
+  gitcache:
+    image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-cache:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090" # bind localhost only, reverse proxy exposes publicly
+    volumes:
+      - gitcache-data:/data
+      - ${SSH_KEY_PATH:-./ssh-key}:/etc/ssh-key:ro
+    environment:
+      - PORT=8090
+
+  # -------- sparkwing-logs --------
+  # Streaming log store. Runners write here, dashboard reads via SSE.
+  # Token-gated for public access.
+  # TODO: SDK-010 pin
+  sparkwing-logs:
+    image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-logs:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8091:8091"
+    volumes:
+      - logs-data:/data/logs
+    environment:
+      - SPARKWING_LOGS_DIR=/data/logs
+      - SPARKWING_LOGS_ADDR=:8091
+      - SPARKWING_LOGS_RETENTION=${LOGS_RETENTION:-168h}
+      - SPARKWING_LOGS_TOKEN=${SPARKWING_API_TOKEN:?SPARKWING_API_TOKEN must be set in .env}
+
+  # -------- sparkwing-controller --------
+  # Brain of the system. Queue, dispatcher, job state, webhooks.
+  # TODO: SDK-010 pin
+  controller:
+    image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-controller:latest
+    restart: unless-stopped
+    depends_on:
+      - gitcache
+      - sparkwing-logs
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - controller-data:/data
+    environment:
+      # Shared auth token for the API. Remote runners send this as
+      # Authorization: Bearer <token>.
+      - SPARKWING_API_TOKEN=${SPARKWING_API_TOKEN:?SPARKWING_API_TOKEN must be set in .env}
+      # Internal URLs — controller talks to gitcache + logs over the
+      # compose network. sparkwing-logs gets the public URL for handing
+      # out to clients.
+      - SPARKWING_GITCACHE=http://gitcache:8090
+      - SPARKWING_LOGS=http://sparkwing-logs:8091
+      - SPARKWING_LOGS_PUBLIC_URL=${LOGS_PUBLIC_URL:-https://logs.example.com}
+      - SPARKWING_CONTROLLER_SELF_URL=http://controller:8080
+      - SPARKWING_DB_PATH=/data/sparkwing.db
+      - SPARKWING_DASHBOARD_URL=${DASHBOARD_URL:-https://sparkwing.example.com}
+      - SPARKWING_CORS_ORIGIN=${DASHBOARD_URL:-https://sparkwing.example.com}
+      # GitHub webhook secret for HMAC verification on /webhooks/github.
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET must be set in .env}
+      # Optional: GitHub token for posting status checks back to PRs.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+
+  # -------- sparkwing-web --------
+  # Dashboard. Reads from controller's API and sparkwing-logs directly.
+  # TODO: SDK-010 pin
+  web:
+    image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-web:latest
+    restart: unless-stopped
+    depends_on:
+      - controller
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      - SPARKWING_CONTROLLER_URL=http://controller:8080
+      - SPARKWING_API_TOKEN=${SPARKWING_API_TOKEN}
+
+volumes:
+  gitcache-data:
+  logs-data:
+  controller-data:

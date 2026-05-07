@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Generate tickets/_ACTIVE.md: only tickets that still need doing, bucketed.
+
+Reads frontmatter from every ticket in ready/ + triage/ + blocked/ + in-progress/
+and writes a single markdown file with at-a-glance counts, per-area sections,
+and a flat table at the end. Skips done/ and cancelled/.
+
+Run this after moving tickets between state folders to refresh the view.
+"""
+from __future__ import annotations
+import os
+import re
+import sys
+from collections import defaultdict
+from datetime import date
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TICKETS_DIR = REPO_ROOT / "tickets"
+OUT = TICKETS_DIR / "_ACTIVE.md"
+ACTIVE_STATES = ("ready", "in-progress", "blocked", "triage")
+
+PRIO_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "none": 4, "": 4, None: 4}
+EFFORT_ORDER = {"trivial": 0, "low": 1, "medium": 2, "high": 3, "": 4, None: 4}
+EFFORT_TIERS = ("trivial", "low", "medium", "high")
+
+
+def parse_frontmatter(path: Path) -> dict | None:
+    text = path.read_text()
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end < 0:
+        return None
+    fm_block = text[3:end].strip()
+    fm = {}
+    for line in fm_block.splitlines():
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        fm[k.strip()] = v.strip()
+    return fm
+
+
+def id_sort_key(tid: str) -> tuple[str, int, str]:
+    m = re.match(r"([A-Z]+)-(\d+)([a-z]*)", tid)
+    if not m:
+        return (tid, 0, "")
+    return (m.group(1), int(m.group(2)), m.group(3))
+
+
+def collect() -> list[dict]:
+    tickets = []
+    for state in ACTIVE_STATES:
+        d = TICKETS_DIR / state
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.md")):
+            fm = parse_frontmatter(f)
+            if not fm or "id" not in fm:
+                continue
+            fm["_state"] = state
+            fm["_path"] = str(f.relative_to(REPO_ROOT))
+            tickets.append(fm)
+    return tickets
+
+
+def fmt_area_header(area: str) -> str:
+    return area if area else "misc"
+
+
+def render(tickets: list[dict]) -> str:
+    total = len(tickets)
+    by_state: dict[str, int] = defaultdict(int)
+    by_prio: dict[str, int] = defaultdict(int)
+    by_effort: dict[str, int] = defaultdict(int)
+    by_area: dict[str, list[dict]] = defaultdict(list)
+    for t in tickets:
+        by_state[t["_state"]] += 1
+        by_prio[t.get("priority", "none") or "none"] += 1
+        by_effort[t.get("effort", "") or "unset"] += 1
+        by_area[t.get("area", "misc") or "misc"].append(t)
+
+    lines: list[str] = []
+    lines.append("# Active Tickets")
+    lines.append("")
+    lines.append(
+        f"**Auto-generated {date.today().isoformat()} by `bin/tickets-active`. "
+        "Do not hand-edit — re-run the script after moving tickets. "
+        "Full index (including done/cancelled) is at `_INDEX.md`.**"
+    )
+    lines.append("")
+    lines.append("## At a glance")
+    lines.append("")
+    lines.append(f"- **Total active:** {total}")
+    states_str = ", ".join(
+        f"{by_state.get(s, 0)} {s}" for s in ACTIVE_STATES if by_state.get(s)
+    )
+    lines.append(f"- **By state:** {states_str}")
+    prios = sorted(by_prio.items(), key=lambda kv: PRIO_ORDER.get(kv[0], 4))
+    prios_str = ", ".join(f"{c} {p}" for p, c in prios)
+    lines.append(f"- **By priority:** {prios_str}")
+    efforts = sorted(by_effort.items(), key=lambda kv: EFFORT_ORDER.get(kv[0], 4))
+    efforts_str = ", ".join(f"{c} {e}" for e, c in efforts)
+    lines.append(f"- **By effort:** {efforts_str}")
+    top_areas = sorted(by_area.items(), key=lambda kv: -len(kv[1]))[:5]
+    top_str = ", ".join(f"{fmt_area_header(a)}:{len(ts)}" for a, ts in top_areas)
+    lines.append(f"- **Top areas (by ticket count):** {top_str}")
+    lines.append("")
+
+    # Delegate-ready: trivial + low effort (the agent hand-off list)
+    delegate = [
+        t for t in tickets
+        if (t.get("effort") or "") in ("trivial", "low")
+    ]
+    if delegate:
+        lines.append("## Delegate-ready (trivial + low)")
+        lines.append("")
+        lines.append(
+            f"_{len(delegate)} tickets an agent can pick up cold. "
+            "Sorted by effort then priority then ID._"
+        )
+        lines.append("")
+        for t in sorted(delegate, key=lambda t: (
+            EFFORT_ORDER.get(t.get("effort") or "", 4),
+            PRIO_ORDER.get(t.get("priority") or "none", 4),
+            id_sort_key(t["id"]),
+        )):
+            lines.append(
+                f"- **{t['id']}** [{t.get('priority') or '-'}] "
+                f"[{t['_state']}] [{t.get('effort') or '-'}] "
+                f"{t.get('title', '')} _({t.get('area', 'misc')})_"
+            )
+        lines.append("")
+
+    # Priority summary -- which P0/P1 items are open?
+    p0 = [t for t in tickets if t.get("priority") == "P0"]
+    p1 = [t for t in tickets if t.get("priority") == "P1"]
+    if p0:
+        lines.append("## P0 (ship blockers)")
+        lines.append("")
+        for t in sorted(p0, key=lambda t: id_sort_key(t["id"])):
+            lines.append(
+                f"- **{t['id']}** [{t['_state']}] [{t.get('effort') or '-'}] "
+                f"{t.get('title', '')} _({t.get('area', 'misc')})_"
+            )
+        lines.append("")
+    if p1:
+        lines.append("## P1")
+        lines.append("")
+        for t in sorted(p1, key=lambda t: id_sort_key(t["id"])):
+            lines.append(
+                f"- **{t['id']}** [{t['_state']}] [{t.get('effort') or '-'}] "
+                f"{t.get('title', '')} _({t.get('area', 'misc')})_"
+            )
+        lines.append("")
+
+    # By area
+    lines.append("## By area")
+    lines.append("")
+    for area in sorted(by_area, key=lambda a: (-len(by_area[a]), a)):
+        ts = sorted(by_area[area], key=lambda t: (
+            PRIO_ORDER.get(t.get("priority", "none") or "none", 4),
+            id_sort_key(t["id"]),
+        ))
+        lines.append(f"### {fmt_area_header(area)} ({len(ts)} active)")
+        prio_here: dict[str, int] = defaultdict(int)
+        for t in ts:
+            prio_here[t.get("priority") or "none"] += 1
+        prio_line = ", ".join(
+            f"{c} {p}"
+            for p, c in sorted(prio_here.items(), key=lambda kv: PRIO_ORDER.get(kv[0], 4))
+        )
+        lines.append(f"_{prio_line}_")
+        lines.append("")
+        for t in ts:
+            lines.append(
+                f"- **{t['id']}** [{t.get('priority') or '-'}] "
+                f"[{t['_state']}] [{t.get('effort') or '-'}] "
+                f"{t.get('title', '')}"
+            )
+        lines.append("")
+
+    # Flat table
+    lines.append("## Flat list (sorted by area then priority)")
+    lines.append("")
+    lines.append("| ID | Priority | State | Effort | Area | Title |")
+    lines.append("|---|---|---|---|---|---|")
+    flat_sort = sorted(tickets, key=lambda t: (
+        (t.get("area") or "misc"),
+        PRIO_ORDER.get(t.get("priority") or "none", 4),
+        id_sort_key(t["id"]),
+    ))
+    for t in flat_sort:
+        lines.append(
+            f"| {t['id']} | {t.get('priority') or '-'} | {t['_state']} | "
+            f"{t.get('effort') or '-'} | "
+            f"{t.get('area') or 'misc'} | {t.get('title', '')} |"
+        )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def main() -> int:
+    tickets = collect()
+    if not tickets:
+        print("no active tickets found", file=sys.stderr)
+        return 1
+    out = render(tickets)
+    OUT.write_text(out)
+    print(f"wrote {OUT.relative_to(REPO_ROOT)} ({len(tickets)} active tickets)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
