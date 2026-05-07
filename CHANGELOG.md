@@ -6,6 +6,28 @@ All notable changes to **sparkwing-sdk** are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Run receipt: identity hashes + per-step observability + simple cost
+  (IMP-016).** `sparkwing runs receipt --run X` and
+  `GET /api/v1/runs/{id}/receipt` emit a per-run audit + cost artifact
+  separate from `runs status`. The receipt bundles
+  `identity.{pipeline_version_hash, inputs_hash, plan_hash,
+  outputs_hash}` (canonical-JSON sha256 over the compiled plan
+  snapshot, the resolved Args, the DAG topology, and per-node typed
+  outputs respectively), `steps[]` with per-node duration + outcome
+  (`success | failed | skipped | cancelled`) + `skip_reason`, and a
+  simple compute cost (`compute_cents` = runner-time × profile-rate,
+  `currency: USD`, `rate_source` provenance string, `settled: false`
+  until cloud-billing reconciliation lands as IMP-018). A top-level
+  `receipt_sha` certifies the receipt against the run state it
+  summarizes. Receipts are recomputed on demand from runs+nodes; only
+  four small queryable columns persist on the runs row
+  (`receipt_sha`, `cost_cents`, `cost_currency`, `cost_settled`),
+  added via `ensureColumns` so existing dev DBs migrate cleanly. The
+  rate is set per-profile (`profile.cost_per_runner_hour`, default 0
+  -> `compute_cents: 0`) and per-controller (`Server.WithCostRate`).
+  Output is JSON-only today (`-o json` is the canonical view).
+
 ### Removed (BREAKING)
 - **Unified DAG-builder grammar across Plan and Work layers (SDK-042).**
   Pipeline authors learn one builder pattern and apply it identically to
