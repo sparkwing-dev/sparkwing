@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/logs"
+	"github.com/sparkwing-dev/sparkwing/v2/logs"
 )
 
 // IMP-002: a 403 from the logs service must come back as a typed

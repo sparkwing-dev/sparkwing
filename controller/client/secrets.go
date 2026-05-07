@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // Secret mirrors the wire shape of one secret row. Value is populated

@@ -11,13 +11,13 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/web"
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/otelutil"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/v2/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/v2/internal/web"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/sparkwinglogs"
 )
 
 func main() {

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // webhookBodyLimit caps the raw body size for /webhooks/github. 1 MiB

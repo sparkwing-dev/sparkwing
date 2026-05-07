@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // TestBackendsSeam_DrivesAllInterfaces runs a tiny pipeline through

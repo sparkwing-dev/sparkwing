@@ -12,7 +12,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
 )
 
 // Info is the JSON shape of `sparkwing info`. Stable contract: agents

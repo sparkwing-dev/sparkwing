@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/controller/client"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
 )
 
 // TestReceiptEndpoint_RoundTrip seeds a finished run + two nodes,

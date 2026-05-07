@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // TestJob_ClosureFormSingleStepWork verifies that sparkwing.Job

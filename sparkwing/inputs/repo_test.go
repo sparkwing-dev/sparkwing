@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // repoTest creates a fresh git repo in a temp dir, populates it with

@@ -12,9 +12,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/logs"
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/otelutil"
+	"github.com/sparkwing-dev/sparkwing/v2/logs"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/otelutil"
 )
 
 func main() {

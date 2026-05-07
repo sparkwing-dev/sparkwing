@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
 )
 
 // LogStore writes per-node logs as line-delimited JSON files under

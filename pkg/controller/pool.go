@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller/pool"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"

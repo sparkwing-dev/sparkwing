@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/v2/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/fs"
 )
 
 // putState writes a state.ndjson dump for one run, matching the

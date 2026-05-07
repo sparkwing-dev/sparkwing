@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
 )
 
 // Same cardinality rule as pkg/controller/prom.go: pipeline + outcome

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/git"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/git"
 )
 
 // Git is the run-scoped view of a single git working tree. The same

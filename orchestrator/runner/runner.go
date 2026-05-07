@@ -5,7 +5,7 @@ package runner
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // Runner executes one pipeline node to a terminal outcome.

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/controller/client"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // TestNodeClaim_AuthBlocksUnauthedCaller stands up a controller with

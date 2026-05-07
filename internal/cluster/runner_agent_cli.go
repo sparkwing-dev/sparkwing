@@ -14,7 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // AgentConfig mirrors the on-disk layout of

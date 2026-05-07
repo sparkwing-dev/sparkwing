@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // Backends bundles the infrastructure interfaces the orchestrator

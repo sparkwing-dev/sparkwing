@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // printPipelineRuntimePlan implements `--plan` for the pipeline

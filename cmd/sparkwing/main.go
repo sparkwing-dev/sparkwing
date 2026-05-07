@@ -15,16 +15,16 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/controller/client"
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingconfig"
-	"github.com/sparkwing-dev/sparkwing/profile"
-	"github.com/sparkwing-dev/sparkwing/repos"
+	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/wingconfig"
+	"github.com/sparkwing-dev/sparkwing/v2/profile"
+	"github.com/sparkwing-dev/sparkwing/v2/repos"
 )
 
 func main() {

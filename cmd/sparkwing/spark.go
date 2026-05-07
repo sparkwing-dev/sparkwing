@@ -16,9 +16,9 @@ import (
 	flag "github.com/spf13/pflag"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/v2/bincache"
+	"github.com/sparkwing-dev/sparkwing/v2/internal/sparks"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
 )
 
 // defaultSparkwingDir resolves the --sparkwing-dir flag's default:

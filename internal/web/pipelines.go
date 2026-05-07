@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
 )
 
 // pipelinesPayload mirrors web/src/lib/api.ts:PipelineMeta.

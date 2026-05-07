@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/v2/bincache"
 )
 
 // ErrNotFound is returned by ResolveRepoForPipeline when no

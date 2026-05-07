@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/v2/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/fs"
 )
 
 // TestDumpRunState_RoundTrip pins the bijection between SQLite

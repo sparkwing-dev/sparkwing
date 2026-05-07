@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // SDK-041: an end-to-end run drives a pipeline with typed Inputs and

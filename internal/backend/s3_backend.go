@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
 )
 
 // S3Backend serves the dashboard from runs/<id>/state.ndjson dumps in

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/pipelines"
 )
 
 func TestParse_Minimal(t *testing.T) {

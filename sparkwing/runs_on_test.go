@@ -3,7 +3,7 @@ package sparkwing_test
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 func TestRunsOn_PopulatesLabels(t *testing.T) {

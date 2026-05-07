@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 	"golang.org/x/term"
 )
 

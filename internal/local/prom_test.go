@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	controller "github.com/sparkwing-dev/sparkwing/internal/local"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	controller "github.com/sparkwing-dev/sparkwing/v2/internal/local"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // newAuthedTestServer spins up a Server with EnableAuthFromStore

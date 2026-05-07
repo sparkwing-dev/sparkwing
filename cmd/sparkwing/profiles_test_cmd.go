@@ -19,7 +19,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/v2/profile"
 )
 
 // profileProbeResult is one row in the health report. Kept private to

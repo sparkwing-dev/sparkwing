@@ -3,7 +3,7 @@ package jobs
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // StaticAnalysis runs the heavier static-analysis pass that doesn't

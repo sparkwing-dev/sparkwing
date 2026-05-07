@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // ciEmbeddedHelloPipe is the smallest pipeline that exercises the

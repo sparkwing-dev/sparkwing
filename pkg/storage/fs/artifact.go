@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
 )
 
 // ArtifactStore is a content-addressed blob store under Root. The

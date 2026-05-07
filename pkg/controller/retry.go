@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // handleRetry creates a new run with the same pipeline + args as an

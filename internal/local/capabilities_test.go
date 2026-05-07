@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	controller "github.com/sparkwing-dev/sparkwing/internal/local"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	controller "github.com/sparkwing-dev/sparkwing/v2/internal/local"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
 )
 
 // fakeArtifactStore is a tiny in-memory ArtifactStore for tests.

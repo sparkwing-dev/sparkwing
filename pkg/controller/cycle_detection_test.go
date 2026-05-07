@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
 )
 
 // TestCycleDetect_RejectsSelfCycle: pipeline A's run spawns a trigger

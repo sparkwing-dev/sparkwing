@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 	"golang.org/x/mod/semver"
 )
 
@@ -18,10 +18,14 @@ import (
 // release pipeline. --version is optional: when omitted the
 // pipeline prefers the highest unreleased CHANGELOG.md entry, then
 // falls back to bumping --bump (default minor) off the latest tag.
+//
+// Preview / no-mutation mode is delivered through wing's reserved
+// `--dry-run` flag (IMP-014); each step below either marks itself
+// SafeWithoutDryRun (read-only checks) or provides a .DryRun(...)
+// body (the tag push), so the pipeline doesn't carry its own flag.
 type ReleaseArgs struct {
 	Version string `flag:"version" desc:"Explicit release version (e.g. v1.5.5). When empty, derived from CHANGELOG.md or latest tag + --bump."`
 	Bump    string `flag:"bump" desc:"Auto-bump kind when --version is empty: patch|minor|major. Default: minor"`
-	DryRun  bool   `flag:"dry-run" desc:"Plan without creating or pushing the tag"`
 }
 
 // Release tags and pushes a new public-sparkwing version. The tag
@@ -93,7 +97,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
-		DryRun:  r.args.DryRun,
 	})
 	pushTag.Needs(validate, clean, changelog)
 	return nil
@@ -131,7 +134,7 @@ type resolveVersionJob struct {
 }
 
 func (j *resolveVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", j.run), nil
+	return sparkwing.Step(w, "run", j.run).SafeWithoutDryRun(), nil
 }
 
 func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
@@ -190,7 +193,7 @@ type validateVersionJob struct {
 }
 
 func (j *validateVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
@@ -219,7 +222,7 @@ type checkCleanTreeJob struct {
 }
 
 func (j *checkCleanTreeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
@@ -246,7 +249,7 @@ type checkChangelogJob struct {
 }
 
 func (j *checkChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
@@ -276,25 +279,22 @@ func (j *checkChangelogJob) run(ctx context.Context) error {
 }
 
 // pushTagJob creates the annotated tag and pushes it to origin. The
-// GH-Actions release workflow takes over from this push.
+// GH-Actions release workflow takes over from this push. Under
+// `--dry-run`, the dryRun body runs in place of run -- it logs the
+// planned tag without mutating local refs or origin.
 type pushTagJob struct {
 	sparkwing.Base
 	Version sparkwing.Ref[string]
 	RepoDir string
-	DryRun  bool
 }
 
 func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
 	return nil, nil
 }
 
 func (j *pushTagJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	if j.DryRun {
-		sparkwing.Info(ctx, "dry-run: would push tag %s to origin", version)
-		return nil
-	}
 	exists, err := tagExistsOnRemote(ctx, j.RepoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: re-check remote tags: %w", err)
@@ -309,6 +309,12 @@ func (j *pushTagJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: push tag: %w", err)
 	}
 	sparkwing.Info(ctx, "pushed %s to origin (GH-Actions release.yaml will take over)", version)
+	return nil
+}
+
+func (j *pushTagJob) dryRun(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	sparkwing.Info(ctx, "dry-run: would tag %s and push refs/tags/%s to origin", version, version)
 	return nil
 }
 

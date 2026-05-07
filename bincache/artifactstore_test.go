@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/bincache"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/v2/bincache"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/fs"
 )
 
 func TestArtifactStoreRoundTrip(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/secrets"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/secrets"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // REG-017: end-to-end check that a job calling sparkwing.Secret

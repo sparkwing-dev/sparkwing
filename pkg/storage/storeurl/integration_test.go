@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
 )
 
 // TestRoundTrip_FS_KeyConventions catches divergence in path

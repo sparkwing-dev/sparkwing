@@ -14,7 +14,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
 )
 
 // allCommands lists every Command registered in help_registry.go.

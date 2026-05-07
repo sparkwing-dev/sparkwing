@@ -3,7 +3,7 @@ package jobs
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // Lint runs fast, repo-wide checks: gofmt compliance and go vet

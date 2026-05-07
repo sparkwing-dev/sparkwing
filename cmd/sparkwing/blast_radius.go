@@ -8,8 +8,8 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/profile"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/profile"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // blastRadiusFinding is one marker the gate detected on a specific

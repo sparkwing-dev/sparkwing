@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	controller "github.com/sparkwing-dev/sparkwing/internal/local"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/secrets"
+	controller "github.com/sparkwing-dev/sparkwing/v2/internal/local"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/secrets"
 )
 
 // End-to-end check that the secret POST/GET round-trip with a

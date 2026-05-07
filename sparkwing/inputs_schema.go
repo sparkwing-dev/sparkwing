@@ -15,7 +15,7 @@ import (
 //
 // The convention is to import sparkwing under the short alias `sw`:
 //
-//	import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+//	import sw "github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 //
 //	type Inputs struct {
 //	    SkipTests bool   `flag:"skip-tests" desc:"skip the test suite"`

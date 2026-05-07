@@ -13,9 +13,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/localws"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/localws"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/v2/profile"
 )
 
 func main() {

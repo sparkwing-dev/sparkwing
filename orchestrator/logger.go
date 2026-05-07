@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // nodeLogger persists one node's LogRecords as JSONL and tees to an

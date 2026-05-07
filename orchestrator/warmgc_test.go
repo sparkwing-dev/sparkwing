@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // stubRunLister returns a canned list of runs regardless of filter.

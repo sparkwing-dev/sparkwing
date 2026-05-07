@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/controller/client"
-	controller "github.com/sparkwing-dev/sparkwing/internal/local"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	controller "github.com/sparkwing-dev/sparkwing/v2/internal/local"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // TestClaim_TriggerPersistsThenClaims is the full trigger-queue

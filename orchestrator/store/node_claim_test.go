@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // seedRunAndNode creates a run + a single node in the 'pending'

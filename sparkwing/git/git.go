@@ -29,7 +29,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/planguard"
 )
 
 // ErrTagAlreadyExists is returned by PushTag when the tag already

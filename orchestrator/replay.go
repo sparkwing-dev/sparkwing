@@ -9,10 +9,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/secrets"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/secrets"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // runReplayNodeCLI implements `wing replay-node <runID> <nodeID>`.

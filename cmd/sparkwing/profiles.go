@@ -13,7 +13,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/v2/profile"
 )
 
 func runProfiles(args []string) error {

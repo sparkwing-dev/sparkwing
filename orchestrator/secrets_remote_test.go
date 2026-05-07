@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/v2/secrets"
 )
 
 // REG-017 phase 4: wing --secrets PROF wires through to

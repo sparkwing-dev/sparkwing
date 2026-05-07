@@ -20,9 +20,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/bincache"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/v2/bincache"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/storage/storeurl"
 )
 
 // publishedBinary is one row of the publish output -- one entry per

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing"
 )
 
 // cli017Inputs mirrors the embedded SkipFilterArgs pattern used by

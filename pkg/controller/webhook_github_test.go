@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // expectNoTrigger drains the pending queue and fails if any trigger

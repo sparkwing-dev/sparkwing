@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // requestApprovalReq is the body of POST /api/v1/runs/{run}/approvals/{node}/request.

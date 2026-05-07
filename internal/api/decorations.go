@@ -9,7 +9,7 @@ package api
 import (
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // Decorations is the per-node plan-snapshot-derived render envelope.

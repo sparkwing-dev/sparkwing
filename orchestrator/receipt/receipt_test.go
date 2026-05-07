@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/receipt"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/receipt"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 // fixedRun returns a deterministic store.Run for hash-stability tests.

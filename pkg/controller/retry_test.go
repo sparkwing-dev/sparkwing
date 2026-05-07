@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
 )
 
 func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {

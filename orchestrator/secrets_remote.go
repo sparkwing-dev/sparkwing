@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/controller/client"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/profile"
-	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/v2/controller/client"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/v2/profile"
+	"github.com/sparkwing-dev/sparkwing/v2/secrets"
 )
 
 // remoteSecretSource builds a secrets.Source backed by the named

@@ -3,7 +3,7 @@ package sparkwing
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/v2/sparkwing/planguard"
 )
 
 // Enforces Plan() purity. Pipeline.Plan(ctx, in, rc) is

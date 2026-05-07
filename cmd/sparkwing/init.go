@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/v2/pkg/color"
 )
 
 // fallbackSDKVersion is pinned into a fresh .sparkwing/go.mod when the
@@ -94,7 +94,7 @@ func renderInitGoMod(moduleName string) string {
 
 go %s
 
-require github.com/sparkwing-dev/sparkwing %s
+require github.com/sparkwing-dev/sparkwing/v2 %s
 `, moduleName, goDirective, sdkRequirementVersion())
 }
 
@@ -112,7 +112,7 @@ func renderInitMainGo(moduleName string) string {
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/v2/orchestrator"
 
 	_ %q
 )
