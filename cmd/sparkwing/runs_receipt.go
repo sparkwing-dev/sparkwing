@@ -47,6 +47,7 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	if *runID == "" {
 		return errors.New("runs receipt: --run is required")
 	}
+	*runID = normalizeRunID(*runID)
 
 	if *on != "" {
 		prof, err := resolveProfile(*on)

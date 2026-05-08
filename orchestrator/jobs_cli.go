@@ -1024,12 +1024,32 @@ func formatRunDuration(r *store.Run) string {
 	return "running (" + time.Since(r.StartedAt).Round(100*time.Millisecond).String() + ")"
 }
 
+// staleHeartbeatThreshold is how long a "running" node can go without a
+// heartbeat before status flags it as stale. Local in-process runs
+// don't refresh last_heartbeat after the initial stamp -- the node
+// either completes or the process dies -- so the threshold also
+// covers the "orphaned local run" case where the wing process
+// crashed and left the row hanging in "running". The value is
+// intentionally generous (well above the cluster heartbeat cadence
+// of 5s) so a slow runner pause doesn't false-positive.
+const staleHeartbeatThreshold = 30 * time.Second
+
 func formatNodeDuration(n *store.Node) string {
 	if n.StartedAt != nil && n.FinishedAt != nil {
 		return n.FinishedAt.Sub(*n.StartedAt).Round(time.Millisecond).String()
 	}
 	if n.StartedAt != nil {
-		return "running " + time.Since(*n.StartedAt).Round(100*time.Millisecond).String()
+		base := "running " + time.Since(*n.StartedAt).Round(100*time.Millisecond).String()
+		// Surface staleness for "running" nodes whose last heartbeat
+		// is older than the threshold. Matches the dashboard's
+		// liveness indicator so CLI and UI report the same orphan.
+		if n.LastHeartbeat != nil {
+			since := time.Since(*n.LastHeartbeat)
+			if since > staleHeartbeatThreshold {
+				base += "  (stale: no heartbeat " + since.Round(time.Second).String() + ")"
+			}
+		}
+		return base
 	}
 	if n.Status == "done" {
 		return "—"

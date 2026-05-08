@@ -531,6 +531,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		*runID = normalizeRunID(*runID)
 		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs status")
 		if err != nil {
 			return err
@@ -588,6 +589,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		*runID = normalizeRunID(*runID)
 		if *tree && *on != "" {
 			return errors.New("jobs logs: --tree is local-mode only (cannot combine with --on)")
 		}
@@ -669,6 +671,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		*runID = normalizeRunID(*runID)
 		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs errors")
 		if err != nil {
 			return err
@@ -697,6 +700,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		*runID = normalizeRunID(*runID)
 		prof, err := resolveProfile(*on)
 		if err != nil {
 			return err
@@ -721,6 +725,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		*srcRunIDFlag = normalizeRunID(*srcRunIDFlag)
 		prof, err := resolveProfile(*on)
 		if err != nil {
 			return err
@@ -762,6 +767,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		*oneRun = normalizeRunID(*oneRun)
 		prof, err := resolveProfile(*on)
 		if err != nil {
 			return err
@@ -875,6 +881,18 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 
 func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
+}
+
+// normalizeRunID auto-prefixes "run-" when the operator dropped it
+// from the `--run` value (a frequent friction point: `runs list`
+// shows the full id, but copy-paste of just the timestamp+suffix
+// portion still resolves to the same row). Bare "run-" is left alone
+// so an explicit prefix never gets doubled up.
+func normalizeRunID(id string) string {
+	if id == "" || strings.HasPrefix(id, "run-") {
+		return id
+	}
+	return "run-" + id
 }
 
 // statusExitCode maps run status to the scripted exit contract:
