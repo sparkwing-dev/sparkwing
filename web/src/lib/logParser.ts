@@ -61,6 +61,7 @@ export interface LogRecord {
   node?: string;
   job?: string;
   job_stack?: string[];
+  step?: string;
   event?: string;
   msg?: string;
   attrs?: Record<string, unknown>;
@@ -194,24 +195,54 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
         currentHasContent = false;
         break;
       }
-      case "step": {
+      case "step_start": {
         // Close the currently-open bucket (node-scope setup or the
         // previous phase) and open a new phase bucket. Setup buckets
         // with no content are dropped; phase buckets always render.
-        // error-level steps (from StepErr) open as failed instead of
-        // running; the enclosing Node's outcome is unaffected.
         const stepName = rec.msg || "step";
         closeCurrent(recTS, current?.name !== currentNode, true);
-        const failed = rec.level === "error";
         current = {
           type: "step",
           name: `${currentNode} · ${stepName}`,
-          status: failed ? "failed" : "running",
+          status: "running",
           duration: null,
           lines: [],
         };
         currentStartedAt = recTS;
         currentHasContent = true;
+        break;
+      }
+      case "step_end": {
+        // Close the active step bucket with the explicit outcome from
+        // attrs.outcome. Duration prefers attrs.duration_ms (set by
+        // the SDK) over the timestamp delta so a clock-skewed renderer
+        // doesn't drift away from the engine's measurement.
+        if (current && current.name !== currentNode) {
+          const outcome = (rec.attrs?.outcome as string) || "";
+          if (outcome === "failed") current.status = "failed";
+          else current.status = "passed";
+          const dms = Number(rec.attrs?.duration_ms ?? 0);
+          if (dms > 0) current.duration = formatDuration(dms);
+          closeCurrent(recTS, true, true);
+        }
+        break;
+      }
+      case "step_skipped": {
+        // A skipped step closes the previous bucket (if any) and
+        // pushes a one-line bucket of its own marked passed (skipped
+        // is non-failure). Reason, when present, lands in the bucket
+        // body so the UI can show "[range_skip]" alongside the name.
+        const stepName = rec.msg || "step";
+        closeCurrent(recTS, current?.name !== currentNode, true);
+        const reason = (rec.attrs?.reason as string) || "";
+        sections.push({
+          type: "step",
+          name: `${currentNode} · ${stepName}`,
+          status: "passed",
+          duration: null,
+          lines: reason ? [`[skipped: ${reason}]`] : ["[skipped]"],
+        });
+        lastPhaseIdx = sections.length - 1;
         break;
       }
       case "node_end": {
@@ -272,7 +303,9 @@ function recordToLine(rec: LogRecord): string {
   const crumb = breadcrumbPrefix(rec);
   if (crumb) parts.push(crumb);
   if (rec.event === "retry") parts.push("↻");
-  else if (rec.event === "step") parts.push("●");
+  else if (rec.event === "step_start") parts.push("●");
+  else if (rec.event === "step_end") parts.push("✓");
+  else if (rec.event === "step_skipped") parts.push("⊘");
   if (rec.level === "error") parts.push("ERROR");
   if (rec.msg) parts.push(rec.msg);
   else if (rec.attrs) parts.push(JSON.stringify(rec.attrs));
@@ -290,6 +323,7 @@ function breadcrumbPrefix(rec: LogRecord): string {
   const frames: string[] = [];
   if (rec.job_stack) frames.push(...rec.job_stack);
   if (rec.job) frames.push(rec.job);
+  if (rec.step) frames.push(rec.step);
   if (frames.length === 0) return "";
   return frames.join(" › ") + " │";
 }

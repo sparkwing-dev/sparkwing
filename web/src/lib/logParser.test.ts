@@ -48,8 +48,37 @@ describe("hasStepBanners", () => {
 describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
   const nodeStart = (node: string, ts: string) =>
     JSON.stringify({ ts, level: "info", node, event: "node_start" });
-  const step = (node: string, name: string, ts: string) =>
-    JSON.stringify({ ts, level: "info", node, event: "step", msg: name });
+  const stepStart = (node: string, name: string, ts: string) =>
+    JSON.stringify({ ts, level: "info", node, event: "step_start", msg: name });
+  const stepEnd = (
+    node: string,
+    name: string,
+    outcome: "success" | "failed",
+    duration_ms: number,
+    ts: string,
+  ) =>
+    JSON.stringify({
+      ts,
+      level: outcome === "failed" ? "error" : "info",
+      node,
+      event: "step_end",
+      msg: name,
+      attrs: { outcome, duration_ms },
+    });
+  const stepSkipped = (
+    node: string,
+    name: string,
+    reason: string,
+    ts: string,
+  ) =>
+    JSON.stringify({
+      ts,
+      level: "info",
+      node,
+      event: "step_skipped",
+      msg: name,
+      attrs: { outcome: "skipped", reason },
+    });
   const execLine = (node: string, msg: string, ts: string) =>
     JSON.stringify({ ts, level: "info", node, event: "exec_line", msg });
   const nodeEnd = (
@@ -69,10 +98,12 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
   it("splits a node into one bucket per step", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),
-      step("build", "compile", "2026-04-23T00:00:00.100Z"),
+      stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
       execLine("build", "ok 3 packages", "2026-04-23T00:00:00.200Z"),
-      step("build", "push", "2026-04-23T00:00:01.000Z"),
+      stepEnd("build", "compile", "success", 900, "2026-04-23T00:00:01.000Z"),
+      stepStart("build", "push", "2026-04-23T00:00:01.000Z"),
       execLine("build", "pushing image", "2026-04-23T00:00:01.200Z"),
+      stepEnd("build", "push", "success", 1000, "2026-04-23T00:00:02.000Z"),
       nodeEnd("build", "success", 2000, "2026-04-23T00:00:02.000Z"),
     ];
     const result = parseLogLines(lines);
@@ -84,17 +115,19 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     assert.equal(compile.type, "step");
     assert.equal(compile.name, "build · compile");
     assert.equal(compile.status, "passed");
+    assert.equal(compile.duration, "900ms");
     assert.equal(push.name, "build · push");
     assert.equal(push.status, "passed");
+    assert.equal(push.duration, "1.0s");
     assert.ok(push.lines.some((l) => l.includes("pushing image")));
   });
 
   it("keeps the in-flight step as 'running' until the next step or node_end", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),
-      step("build", "compile", "2026-04-23T00:00:00.100Z"),
+      stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
       execLine("build", "compiling...", "2026-04-23T00:00:00.200Z"),
-      // Stream cut here — no node_end yet.
+      // Stream cut here — no step_end / node_end yet.
     ];
     const result = parseLogLines(lines);
     assert.equal(result.sections.length, 1);
@@ -102,13 +135,15 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     assert.equal(compile.status, "running");
   });
 
-  it("marks the failing step failed on node_end outcome=failed", () => {
+  it("marks step failed when step_end carries outcome=failed", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),
-      step("build", "compile", "2026-04-23T00:00:00.100Z"),
+      stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
       execLine("build", "ok", "2026-04-23T00:00:00.200Z"),
-      step("build", "push", "2026-04-23T00:00:01.000Z"),
+      stepEnd("build", "compile", "success", 900, "2026-04-23T00:00:01.000Z"),
+      stepStart("build", "push", "2026-04-23T00:00:01.000Z"),
       execLine("build", "push rejected", "2026-04-23T00:00:01.500Z"),
+      stepEnd("build", "push", "failed", 1000, "2026-04-23T00:00:02.000Z"),
       nodeEnd("build", "failed", 2000, "2026-04-23T00:00:02.000Z"),
     ];
     const result = parseLogLines(lines);
@@ -116,6 +151,29 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     const push = result.sections[1] as StepSection;
     assert.equal(compile.status, "passed");
     assert.equal(push.status, "failed");
+    assert.equal(push.duration, "1.0s");
+  });
+
+  it("renders step_skipped as a one-line skipped bucket with reason", () => {
+    const lines = [
+      nodeStart("build", "2026-04-23T00:00:00Z"),
+      stepSkipped(
+        "build",
+        "deploy",
+        "downstream of --stop-at=push",
+        "2026-04-23T00:00:00.100Z",
+      ),
+      nodeEnd("build", "success", 100, "2026-04-23T00:00:00.200Z"),
+    ];
+    const result = parseLogLines(lines);
+    const skipped = result.sections.find(
+      (s) => s.type === "step" && s.name === "build · deploy",
+    ) as StepSection | undefined;
+    assert.ok(skipped, "expected a skipped step bucket for deploy");
+    assert.equal(skipped!.status, "passed");
+    assert.ok(
+      skipped!.lines.some((l) => l.includes("downstream of --stop-at=push")),
+    );
   });
 
   it("treats a no-step node as one bucket (backwards compatible)", () => {

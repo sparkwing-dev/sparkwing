@@ -59,6 +59,7 @@ type LogRecord struct {
 	Node     string         `json:"node,omitempty"`  // set by nodeLogger on writes to disk + delegate
 	Job      string         `json:"job,omitempty"`   // innermost Job frame
 	JobStack []string       `json:"job_stack,omitempty"`
+	Step     string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
 	Event    string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
 	Msg      string         `json:"msg,omitempty"`
 	Attrs    map[string]any `json:"attrs,omitempty"`
@@ -94,6 +95,7 @@ const (
 	keyJobStack
 	keySpawnHandler
 	keyInputs
+	keyStep
 )
 
 // WithLogger returns a derived context carrying the given logger.
@@ -154,7 +156,27 @@ func JobStackFromContext(ctx context.Context) []string {
 	return nil
 }
 
+// WithStep installs the active step ID into ctx so the breadcrumb on
+// records emitted *inside* the step body carries it. Pushed by
+// runOneItem after `step_start` fires and removed before `step_end`,
+// so the start/end events themselves render at the node level
+// without duplicating the step name in the breadcrumb.
+func WithStep(ctx context.Context, stepID string) context.Context {
+	return context.WithValue(ctx, keyStep, stepID)
+}
+
+// StepFromContext returns the active step ID, or "" outside a step.
+func StepFromContext(ctx context.Context) string {
+	if s, ok := ctx.Value(keyStep).(string); ok {
+		return s
+	}
+	return ""
+}
+
 func recordEnvelope(ctx context.Context, rec LogRecord) LogRecord {
+	if rec.Step == "" {
+		rec.Step = StepFromContext(ctx)
+	}
 	stack := JobStackFromContext(ctx)
 	if len(stack) == 0 {
 		return rec

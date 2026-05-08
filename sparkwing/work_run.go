@@ -272,14 +272,20 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		emitStepEvent(ctx, it.id, "step_start", 0, nil)
 	}
 
-	out, err := dispatchItem(ctx, it, parentNodeID, handler)
+	// Push the step ID onto ctx for the body's duration so log records
+	// emitted *inside* the step (Info, Exec lines, etc.) carry it in
+	// their breadcrumb. step_start above and step_end below intentionally
+	// fire on the un-stepped ctx so the start/end lines render at the
+	// node level without duplicating the step name in their breadcrumb.
+	stepCtx := WithStep(ctx, it.id)
+	out, err := dispatchItem(stepCtx, it, parentNodeID, handler)
 	elapsed := time.Since(start)
 
 	if err != nil {
 		if !it.isHidden {
 			emitStepEvent(ctx, it.id, "step_end", elapsed, err)
 		}
-		done <- stepResult{id: it.id, err: fmt.Errorf("step %q: %w", it.id, err)}
+		done <- stepResult{id: it.id, err: &StepError{StepID: it.id, Cause: err}}
 		return
 	}
 	it.markDone(out)
@@ -380,6 +386,30 @@ type stepResult struct {
 	id  string
 	out any
 	err error
+}
+
+// StepError wraps a step body's error with the originating step ID.
+// Loggers can use errors.As to pull the StepID off and tag the log
+// record with the step in its breadcrumb -- otherwise the runner-side
+// inline error log would render at the bare node level even though
+// the surrounding step output is in the same step's context.
+type StepError struct {
+	StepID string
+	Cause  error
+}
+
+func (e *StepError) Error() string {
+	if e == nil || e.Cause == nil {
+		return ""
+	}
+	return fmt.Sprintf("step %q: %s", e.StepID, e.Cause.Error())
+}
+
+func (e *StepError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 func emitStepEvent(ctx context.Context, stepID, event string, elapsed time.Duration, err error) {
