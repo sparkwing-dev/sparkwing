@@ -94,6 +94,9 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 		}
 		pr.Emit(rec)
 	}
+	// End-of-stream: drain any buffered node_start / step_end so a
+	// log fetched without a follow-up event still surfaces them.
+	pr.Flush()
 }
 
 // streamPrettySSE re-emits upstream SSE log frames in the chosen render
@@ -145,6 +148,12 @@ func renderSSELogLine(payload []byte, f logFormat) []string {
 		rec.Msg = orchestrator.StripANSI(rec.Msg)
 	}
 	var buf bytes.Buffer
-	orchestrator.NewPrettyRendererTo(&buf, f == formatANSI).Emit(rec)
+	pr := orchestrator.NewPrettyRendererTo(&buf, f == formatANSI)
+	pr.Emit(rec)
+	// SSE renders one record per call with a fresh renderer, so the
+	// buffer-and-collapse logic in Emit has no follow-up event to
+	// merge with. Flush immediately so each record produces its
+	// stand-alone line.
+	pr.Flush()
 	return strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 }

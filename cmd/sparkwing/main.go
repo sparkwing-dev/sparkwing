@@ -230,6 +230,43 @@ func runWing(args []string) error {
 	if wf.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
+	// IMP-015 allow-* gate flags: consumed by the wing wrapper for
+	// the blast-radius pre-flight check, but still surfaced on the
+	// run record for reproducibility (an agent re-invoking needs to
+	// know which gates were authorized). Forwarded as env vars; the
+	// orchestrator reads them in emitRunStart and includes the names
+	// in run_start.attrs.flags.
+	if wf.allowDestructive {
+		env = append(env, "SPARKWING_ALLOW_DESTRUCTIVE=1")
+	}
+	if wf.allowProd {
+		env = append(env, "SPARKWING_ALLOW_PROD=1")
+	}
+	if wf.allowMoney {
+		env = append(env, "SPARKWING_ALLOW_MONEY=1")
+	}
+	// Forward pre-flight wing flags as env vars purely so emitRunStart
+	// can surface them on run_start.attrs.flags. The pipeline binary
+	// itself doesn't read these (--from is consumed before exec via
+	// setupFromRef, --config is resolved into other flags above,
+	// --no-update gates sparks resolve in compile.go) -- they appear
+	// only as reproducibility breadcrumbs in the run record.
+	if wf.from != "" {
+		env = append(env, "SPARKWING_FROM="+wf.from)
+	}
+	if wf.config != "" {
+		env = append(env, "SPARKWING_CONFIG="+wf.config)
+	}
+	if wf.noUpdate {
+		env = append(env, "SPARKWING_NO_UPDATE=1")
+	}
+	if wf.on != "" {
+		// --on routes to dispatchRemote() and we wouldn't reach the
+		// local exec path; this branch only fires when something
+		// upstream silently flipped that. Forward anyway so the run
+		// record reflects the intent.
+		env = append(env, "SPARKWING_ON="+wf.on)
+	}
 	if wf.secrets != "" {
 		env = append(env, "SPARKWING_SECRETS_PROFILE="+wf.secrets)
 	}

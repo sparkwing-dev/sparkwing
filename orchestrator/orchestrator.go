@@ -3,12 +3,14 @@ package orchestrator
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -176,6 +178,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// historical github_owner / github_repo columns the dashboard
 	// reads. New code reads Git.Repo directly.
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
+	// Build the invocation snapshot once and use it for both the
+	// store row (so runs status / runs receipt / dashboards can show
+	// "how was this started" without scanning logs) and the
+	// run_start envelope event (so the live JSONL stream carries the
+	// same shape). Single source of truth.
+	invocation := buildRunInvocation(opts, runID)
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
 		Pipeline:      opts.Pipeline,
@@ -192,6 +200,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		GithubRepo:    repo,
 		Args:          opts.Args,
 		StartedAt:     rc.StartedAt,
+		Invocation:    invocation,
 	}); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
@@ -256,7 +265,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwing.WithDryRun(ctx)
 	}
 
-	emitRunStart(opts.Delegate, runID, opts.Pipeline)
+	emitRunStart(opts.Delegate, invocation)
 	emitRunPlan(opts.Delegate, plan)
 
 	r := opts.Runner
@@ -515,8 +524,67 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 	}
 }
 
-// emitRunStart sends a run_start record with follow-logs/status hints.
-func emitRunStart(delegate sparkwing.Logger, runID, pipeline string) {
+// emitRunStart sends a run_start record with follow-logs/status hints
+// plus enough invocation context (args, flags, trigger-env keys, cwd)
+// for an operator -- or an agent reading the JSONL stream -- to
+// reproduce the run. Values for trigger env are deliberately omitted;
+// only the names are surfaced so secret-bearing variables don't leak
+// into the log/receipt.
+// buildRunInvocation snapshots how this run was started: run-id,
+// pipeline, args, flags, binary_source, cwd, hashes, hints, etc.
+// The same map flows into BOTH the store.Run.Invocation column (so
+// runs status / receipt / dashboards can answer "how was this
+// started") and run_start.attrs (so the live JSONL stream agents
+// read carries the same shape). Adding a new context field is a
+// one-line edit here -- no schema migration, no separate emit-vs-
+// store divergence.
+//
+// Trigger env values are deliberately omitted; only the names are
+// surfaced because the values can carry secrets pipelines pull at
+// runtime via TriggerEnv(...).
+func buildRunInvocation(opts Options, runID string) map[string]any {
+	inv := map[string]any{
+		"run_id":   runID,
+		"pipeline": opts.Pipeline,
+		"hints": map[string]string{
+			"follow_logs": "sparkwing runs logs --run " + runID + " --follow",
+			"status":      "sparkwing runs status --run " + runID,
+		},
+	}
+	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
+		inv["binary_source"] = src
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		inv["cwd"] = cwd
+	}
+	if len(opts.Args) > 0 {
+		args := make(map[string]string, len(opts.Args))
+		for k, v := range opts.Args {
+			args[k] = v
+		}
+		inv["args"] = args
+		inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
+	}
+	if flags := buildRunFlags(opts); len(flags) > 0 {
+		inv["flags"] = flags
+	}
+	if len(opts.Trigger.Env) > 0 {
+		keys := make([]string, 0, len(opts.Trigger.Env))
+		for k := range opts.Trigger.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		inv["trigger_env_keys"] = keys
+	}
+	inv["reproducer"] = buildReproducer(opts, runID)
+	return inv
+}
+
+// emitRunStart sends a run_start record carrying the precomputed
+// invocation snapshot. Caller passes the same map that was stored
+// on store.Run.Invocation so the live stream and the persisted row
+// agree byte-for-byte.
+func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 	if delegate == nil {
 		return
 	}
@@ -524,15 +592,139 @@ func emitRunStart(delegate sparkwing.Logger, runID, pipeline string) {
 		TS:    time.Now(),
 		Level: "info",
 		Event: "run_start",
-		Attrs: map[string]any{
-			"run_id":   runID,
-			"pipeline": pipeline,
-			"hints": map[string]string{
-				"follow_logs": "sparkwing runs logs --run " + runID + " --follow",
-				"status":      "sparkwing runs status --run " + runID,
-			},
-		},
+		Attrs: invocation,
 	})
+}
+
+// buildRunFlags returns the operator-facing wing flags that influenced
+// this run. Empty/zero-valued fields are omitted so the resulting map
+// reads as "what's non-default about this invocation". The shape
+// matches the wing CLI flag names so an agent can echo the map back
+// into a re-invocation.
+//
+// Some flags (allow-destructive, allow-prod, allow-money) are
+// consumed by the wing wrapper itself for the blast-radius gate and
+// never reach Options. We pick those up via the SPARKWING_ALLOW_*
+// env vars the wrapper forwards specifically so they show up here.
+func buildRunFlags(opts Options) map[string]any {
+	flags := map[string]any{}
+	if opts.RetryOf != "" {
+		flags["retry_of"] = opts.RetryOf
+	}
+	if opts.Full {
+		flags["full"] = true
+	}
+	if opts.DryRun {
+		flags["dry_run"] = true
+	}
+	if opts.StartAt != "" {
+		flags["start_at"] = opts.StartAt
+	}
+	if opts.StopAt != "" {
+		flags["stop_at"] = opts.StopAt
+	}
+	if opts.MaxParallel > 0 {
+		flags["max_parallel"] = opts.MaxParallel
+	}
+	if os.Getenv("SPARKWING_ALLOW_DESTRUCTIVE") == "1" {
+		flags["allow_destructive"] = true
+	}
+	if os.Getenv("SPARKWING_ALLOW_PROD") == "1" {
+		flags["allow_prod"] = true
+	}
+	if os.Getenv("SPARKWING_ALLOW_MONEY") == "1" {
+		flags["allow_money"] = true
+	}
+	// Wing-side flags forwarded only for the run-record breadcrumb.
+	// `from` / `config` / `no_update` are consumed by the wing
+	// wrapper before exec, so the pipeline binary never lifts them
+	// onto Options -- but knowing they were set is still load-bearing
+	// for reproducibility.
+	if v := os.Getenv("SPARKWING_FROM"); v != "" {
+		flags["from"] = v
+	}
+	if v := os.Getenv("SPARKWING_CONFIG"); v != "" {
+		flags["config"] = v
+	}
+	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
+		flags["no_update"] = true
+	}
+	if v := os.Getenv("SPARKWING_ON"); v != "" {
+		flags["on"] = v
+	}
+	if v := os.Getenv("SPARKWING_SECRETS_PROFILE"); v != "" {
+		flags["secrets"] = v
+	}
+	if v := os.Getenv("SPARKWING_MODE"); v != "" {
+		flags["mode"] = v
+	}
+	if os.Getenv("SPARKWING_LOG_LEVEL") == "debug" {
+		flags["verbose"] = true
+	}
+	return flags
+}
+
+// hashCanonicalJSON returns sha256:<hex> of v's canonical JSON
+// encoding. encoding/json sorts map keys, so map inputs hash
+// deterministically across invocations. Mirrors the same algorithm
+// the receipt package uses so an agent comparing the run_start's
+// inputs_hash against the post-hoc receipt sees the same value.
+func hashCanonicalJSON(v any) string {
+	buf, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(buf)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// buildReproducer assembles a `wing <pipeline> [flags] [args]` shell
+// command that re-runs this invocation. Args use --key=value form so
+// values containing spaces don't need extra escaping; consumers that
+// need shell-quoting can run the result through their own escaper.
+// The retry-of flag is included only when this run was itself a
+// retry (i.e. opts.RetryOf is set); a fresh agent reproducing should
+// pick whether to retry-of the failed run themselves.
+func buildReproducer(opts Options, _ string) string {
+	parts := []string{"wing", opts.Pipeline}
+	flagKeys := make([]string, 0)
+	flags := buildRunFlags(opts)
+	for k := range flags {
+		flagKeys = append(flagKeys, k)
+	}
+	sort.Strings(flagKeys)
+	for _, k := range flagKeys {
+		// max_parallel maps to --workers (wing flag name); skip
+		// when it equals NumCPU since that's the default and would
+		// make every reproducer noisy with the local machine's CPU
+		// count. Agents wanting a precise replay can read the
+		// structured attrs.flags map.
+		if k == "max_parallel" {
+			continue
+		}
+		flagName := "--" + strings.ReplaceAll(k, "_", "-")
+		switch v := flags[k].(type) {
+		case bool:
+			if v {
+				parts = append(parts, flagName)
+			}
+		case string:
+			if v != "" {
+				parts = append(parts, flagName+"="+v)
+			}
+		default:
+			parts = append(parts, fmt.Sprintf("%s=%v", flagName, v))
+		}
+	}
+	argKeys := make([]string, 0, len(opts.Args))
+	for k := range opts.Args {
+		argKeys = append(argKeys, k)
+	}
+	sort.Strings(argKeys)
+	for _, k := range argKeys {
+		parts = append(parts, "--"+k+"="+opts.Args[k])
+	}
+	return strings.Join(parts, " ")
 }
 
 // emitRunPlan sends a run_plan record carrying the DAG.
@@ -541,7 +733,7 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 		return
 	}
 	nodes := plan.Nodes()
-	if len(nodes) < 2 {
+	if len(nodes) == 0 {
 		return
 	}
 	rows := make([]any, 0, len(nodes))
@@ -573,8 +765,30 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 		TS:    time.Now(),
 		Level: "info",
 		Event: "run_plan",
-		Attrs: map[string]any{"nodes": rows},
+		Attrs: map[string]any{
+			"nodes":     rows,
+			"plan_hash": planTopologyHash(nodes),
+		},
 	})
+}
+
+// planTopologyHash hashes (id, sorted-deps) edges so two plans with
+// the same DAG shape produce the same hash regardless of which run
+// emitted them. Mirrors orchestrator/receipt's plan_hash so an agent
+// can compare a live run_plan record against a post-hoc receipt.
+func planTopologyHash(nodes []*sparkwing.Node) string {
+	type edge struct {
+		ID   string   `json:"id"`
+		Deps []string `json:"deps"`
+	}
+	edges := make([]edge, 0, len(nodes))
+	for _, n := range nodes {
+		deps := append([]string(nil), n.DepIDs()...)
+		sort.Strings(deps)
+		edges = append(edges, edge{ID: n.ID(), Deps: deps})
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
+	return hashCanonicalJSON(edges)
 }
 
 // emitRunSummary sends an end-of-run summary record.
@@ -1081,7 +1295,6 @@ func (s *dispatchState) runOneNode(node *sparkwing.Node) {
 	if _, prerendered := s.getOutcome(node.ID()); prerendered {
 		return
 	}
-	s.markStarted(node.ID())
 	// Recovery nodes wait for parent failure and bypass cache/SkipIf/
 	// Exclusive — the runner gets the job-only path.
 	if parentID, claimed := s.claimedBy[node.ID()]; claimed {
@@ -1101,6 +1314,9 @@ func (s *dispatchState) runOneNode(node *sparkwing.Node) {
 			s.markSkipped(node.ID(), fmt.Sprintf("parent %q did not fail (outcome=%s)", parentID, parentOutcome))
 			return
 		}
+		// Recovery node about to invoke its runner -- this is the
+		// real "started doing work" point.
+		s.markStarted(node.ID())
 		res := s.invokeRecoveryRunner(node)
 		s.applyResult(node.ID(), res)
 		return
@@ -1175,10 +1391,18 @@ func (s *dispatchState) runOneNode(node *sparkwing.Node) {
 			s.markSkipped(node.ID(), reason)
 			return
 		}
+		// Approval gate enters the wait state -- treat that as the
+		// node's start. Approval pause time IS the node's runtime.
+		s.markStarted(node.ID())
 		res := s.runApprovalGate(node)
 		s.applyResult(node.ID(), res)
 		return
 	}
+
+	// Mark started just before the runner dispatch loop so cancelled-
+	// by-upstream and skipped-by-predicate nodes (handled above) don't
+	// inherit a duration from the time they spent waiting on deps.
+	s.markStarted(node.ID())
 
 	activeRunner := s.runner
 	if node.IsInline() {

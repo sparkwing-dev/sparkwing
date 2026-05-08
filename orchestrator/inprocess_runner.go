@@ -225,7 +225,13 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 			timedOut = true
 		}
 		lastTimeout = timedOut
-		nlog.Log("error", lastErr.Error())
+		// IMP-NOTE: we used to also emit a `level=error` log line
+		// here re-stating lastErr.Error(). That duplicated the
+		// structured error already on step_end.attrs.error, doubling
+		// every failure record an agent had to dedupe. The pretty
+		// renderer now surfaces the error message directly under the
+		// merged step_end/node_end line by reading attrs.error from
+		// step_end -- single source of truth, no duplicates.
 	}
 
 done:

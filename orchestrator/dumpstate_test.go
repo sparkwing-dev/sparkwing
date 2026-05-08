@@ -60,6 +60,10 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 		RetrySource:    "manual",
 		ReplayOfRunID:  "replay-src-run",
 		ReplayOfNodeID: "replay-src-node",
+		Invocation: map[string]any{
+			"binary_source": "cached",
+			"reproducer":    "wing build --target=release",
+		},
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

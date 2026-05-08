@@ -46,6 +46,7 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 	// roundtrip entirely -- the tight laptop dev loop.
 	if _, err := os.Stat(binPath); err == nil {
 		ensureDescribeCache(sparkwingDir, binPath)
+		env = append(env, "SPARKWING_BINARY_SOURCE=cached")
 		return bincache.ExecReplace(binPath, args, sparkwingDir, env)
 	}
 
@@ -59,6 +60,7 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 		if as, err := storeurl.OpenArtifactStore(context.Background(), asURL); err == nil {
 			if err := bincache.FetchFromArtifactStore(context.Background(), as, key, binPath); err == nil {
 				ensureDescribeCache(sparkwingDir, binPath)
+				env = append(env, "SPARKWING_BINARY_SOURCE=artifact-store")
 				return bincache.ExecReplace(binPath, args, sparkwingDir, env)
 			} else if !bincache.IsNotFound(err) {
 				slog.Default().Warn("artifact-store fetch failed", "err", err, "hash", key)
@@ -76,6 +78,7 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 	if gcURL := bincache.CacheURL(); gcURL != "" {
 		if err := bincache.TryBinary(gcURL, key, binPath); err == nil {
 			ensureDescribeCache(sparkwingDir, binPath)
+			env = append(env, "SPARKWING_BINARY_SOURCE=gitcache")
 			return bincache.ExecReplace(binPath, args, sparkwingDir, env)
 		}
 	}
@@ -113,6 +116,7 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 	// Warm the describe cache before exec so `wing <pipeline> --<TAB>`
 	// shows typed flags without waiting for a second run.
 	ensureDescribeCache(sparkwingDir, binPath)
+	env = append(env, "SPARKWING_BINARY_SOURCE=compiled")
 	return bincache.ExecReplace(binPath, args, sparkwingDir, env)
 }
 
