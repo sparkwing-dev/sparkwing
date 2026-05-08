@@ -434,7 +434,51 @@ Step modifiers (chainable on `*WorkStep`):
 ```
 step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnHandle, *SpawnGroup, []*WorkStep, string
 step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
+step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under wing X --dry-run
+step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --dry-run
 ```
+
+### Dry-run contract
+
+`wing X --dry-run` (and `pipeline plan --dry-run`) installs
+`sparkwing.WithDryRun(ctx)` on the run-wide ctx. Each step's
+dispatch then picks one of three paths:
+
+- `step.DryRun(fn)` declared -> `fn` runs in place of the apply Fn.
+  The closure must NEVER mutate state; it answers "what *would* the
+  apply do" the way `terraform plan`, `kubectl apply --dry-run=server`,
+  and `helm upgrade --dry-run` do for their tools.
+- `step.SafeWithoutDryRun()` declared -> the apply Fn runs unchanged,
+  on the author's signed contract that it has no side effects.
+  Use for read-only steps (cluster discovery, fetch-only, validation)
+  where authoring a separate dry-run shim would be redundant.
+- Neither declared -> the step soft-skips with `step_skipped` /
+  `skip_reason: no_dry_run_defined`. Existing pipelines keep working
+  under `--dry-run` while the contract gap is visible in run logs;
+  IMP-015 will tighten this to a hard refusal when paired with
+  blast-radius markers (`Destructive()`, `AffectsProduction()`,
+  `CostsMoney()`).
+
+For step bodies that need to branch on the mode (e.g. emit a
+structured "would do X" log line for an op without a native
+dry-run flag), read `sparkwing.IsDryRun(ctx)` directly. The
+`sparkwing.WithDryRun(ctx)` constructor is exported for tests
+and embedders that want to invoke RunWork in dry mode without
+going through the wing CLI.
+
+`PreviewPlan` (the pipeline-binary helper behind
+`sparkwing pipeline plan`) renders one of three decisions per step
+under `--dry-run`: `would_dry_run` (DryRunFn defined),
+`would_run` (SafeWithoutDryRun marker), or `would_skip` with
+`skip_reason: no_dry_run_defined` (neither contract). Runtime
+and preview always agree.
+
+Do NOT add a `flag:"dry-run"` field to your pipeline's typed
+Inputs as a roll-your-own preview mode. `--dry-run` is a reserved
+wing-level flag (see *Typed Inputs > Reserved flag names* below)
+and `Register` panics on the collision. Declare `step.DryRun(fn)`
+on the steps that mutate, and the wing-level `--dry-run` does
+the right thing for free.
 
 `*StepGroup` (returned by `sw.GroupSteps`) is both a `Needs` target
 (a downstream `step.Needs(group)` depends on every member) and a
@@ -685,6 +729,51 @@ type WrapperInputs struct {
     Extra map[string]string `flag:",extra"`
 }
 ```
+
+### Reserved flag names
+
+`sparkwing run` (and the `wing` shortcut) consumes a set of
+wing-owned long flags before the pipeline binary parses anything.
+A pipeline Args struct that declares one of these as a `flag:"..."`
+tag would silently lose the value, so `sparkwing.Register` panics
+at registration time with the colliding flag, the offending Go
+field, and the full reserved list (IMP-003).
+
+Current reserved set, from `sparkwing.ReservedFlagNames()`:
+
+```
+allow-destructive   --allow-destructive  // IMP-015 blast-radius gate
+allow-money         --allow-money        // IMP-015 blast-radius gate
+allow-prod          --allow-prod         // IMP-015 blast-radius gate
+C, change-directory --change-directory   // re-anchor .sparkwing/ discovery
+config              --config             // named preset from config.yaml
+dry-run             --dry-run            // IMP-014 dry-run dispatch
+from                --from               // compile pipeline from a git ref
+full                --full               // with --retry-of: re-run every node
+mode                --mode               // run mode override
+no-update           --no-update          // skip auto-update on invocation
+on                  --on                 // remote-controller dispatch
+retry-of            --retry-of           // re-run, skip-passed by default
+secrets             --secrets            // ad-hoc secret injection
+start-at            --start-at           // skip nodes before this step (IMP-007)
+stop-at             --stop-at            // skip nodes after this step (IMP-007)
+v, verbose          --verbose            // SPARKWING_LOG_LEVEL=debug
+workers             --workers            // local-execution parallelism
+```
+
+Code surface:
+
+```
+sparkwing.ReservedFlagNames() []string   // sorted copy, safe to mutate
+```
+
+If you need a flag with one of these names, rename it on the
+pipeline side (e.g. `--plan-only` for `dry-run`, `--my-from` for
+`from`). For `--dry-run` specifically: declare
+`step.DryRun(fn)` on each mutating step (see *Work - the inner
+DAG > Dry-run contract*) rather than rolling a `flag:"dry-run"`
+input; the wing-level `--dry-run` then dispatches your DryRun
+bodies for free.
 
 ## Cache
 
