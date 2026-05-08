@@ -28,9 +28,14 @@ type Receipt struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	DurationMS int64      `json:"duration_ms"`
 	Identity   Identity   `json:"identity"`
-	Steps      []Step     `json:"steps"`
-	Cost       Cost       `json:"cost"`
-	ReceiptSHA string     `json:"receipt_sha"`
+	// Invocation: how the run was started (flags, args, binary_source,
+	// cwd, reproducer, hints). Sourced from store.Run.Invocation, which
+	// is itself a snapshot of the run_start envelope record's attrs.
+	// Empty for runs that predate the column landing.
+	Invocation map[string]any `json:"invocation,omitempty"`
+	Steps      []Step         `json:"steps"`
+	Cost       Cost           `json:"cost"`
+	ReceiptSHA string         `json:"receipt_sha"`
 }
 
 // Identity carries the four hashes that make two runs comparable
@@ -77,6 +82,7 @@ func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource 
 		Status:     run.Status,
 		StartedAt:  run.StartedAt,
 		FinishedAt: run.FinishedAt,
+		Invocation: run.Invocation,
 	}
 	if run.FinishedAt != nil {
 		r.DurationMS = run.FinishedAt.Sub(run.StartedAt).Milliseconds()

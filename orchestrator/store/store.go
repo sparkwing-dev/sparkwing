@@ -409,6 +409,16 @@ func (s *Store) migrate() error {
 		"cost_cents":    "INTEGER NOT NULL DEFAULT 0",
 		"cost_currency": "TEXT NOT NULL DEFAULT 'USD'",
 		"cost_settled":  "INTEGER NOT NULL DEFAULT 0",
+		// Invocation snapshot: a single BLOB captures the same
+		// shape that flows into run_start.attrs (binary_source, cwd,
+		// flags, args, reproducer, inputs_hash, hints, etc.) so the
+		// dashboard / runs status / runs receipt can show "how was
+		// this run started" without scanning the envelope log.
+		// Stored as a map blob rather than column-per-field so adding
+		// a new flag is a code-only change -- no migration. SQLite
+		// JSON1 (json_extract) handles the rare query case where a
+		// caller wants to filter by a specific key.
+		"invocation_json": "BLOB",
 	}); err != nil {
 		return err
 	}
@@ -516,6 +526,13 @@ type Run struct {
 	// Replay lineage; independent of retry chain.
 	ReplayOfRunID  string `json:"replay_of_run_id,omitempty"`
 	ReplayOfNodeID string `json:"replay_of_node_id,omitempty"`
+	// Invocation snapshots how this run was started: flags, args,
+	// binary_source, cwd, reproducer, hashes, and anything else the
+	// orchestrator chooses to include in run_start.attrs. Stored as
+	// a free-form map so adding a new context field is a one-line
+	// emitter change with no schema migration. Empty/nil for runs
+	// created before the column landed.
+	Invocation map[string]any `json:"invocation,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
@@ -525,6 +542,14 @@ type Run struct {
 // are left untouched so this stays a no-op on retry / replay paths.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	argsJSON, _ := json.Marshal(r.Args)
+	// Invocation snapshot is omitted (NULL) when nil/empty so the
+	// scanner can distinguish "no snapshot recorded" from "explicitly
+	// empty map". Existing rows from before the column landed will
+	// also read NULL.
+	var invocationJSON []byte
+	if len(r.Invocation) > 0 {
+		invocationJSON, _ = json.Marshal(r.Invocation)
+	}
 	// NULL parent so ancestor walks terminate via IS NULL.
 	var parent sql.NullString
 	if r.ParentRunID != "" {
@@ -542,32 +567,34 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	// running. We deliberately do NOT clobber created_at on the
 	// upsert so the trigger-intake timestamp survives.
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
-    pipeline       = excluded.pipeline,
-    status         = excluded.status,
-    trigger_source = excluded.trigger_source,
-    git_branch     = excluded.git_branch,
-    git_sha        = excluded.git_sha,
-    args_json      = excluded.args_json,
-    plan_json      = excluded.plan_json,
-    started_at     = excluded.started_at,
-    parent_run_id  = excluded.parent_run_id,
-    repo           = excluded.repo,
-    repo_url       = excluded.repo_url,
-    github_owner   = excluded.github_owner,
-    github_repo    = excluded.github_repo,
-    retry_of       = excluded.retry_of,
-    retried_as     = excluded.retried_as,
-    retry_source   = excluded.retry_source,
+    pipeline        = excluded.pipeline,
+    status          = excluded.status,
+    trigger_source  = excluded.trigger_source,
+    git_branch      = excluded.git_branch,
+    git_sha         = excluded.git_sha,
+    args_json       = excluded.args_json,
+    plan_json       = excluded.plan_json,
+    started_at      = excluded.started_at,
+    parent_run_id   = excluded.parent_run_id,
+    repo            = excluded.repo,
+    repo_url        = excluded.repo_url,
+    github_owner    = excluded.github_owner,
+    github_repo     = excluded.github_repo,
+    retry_of        = excluded.retry_of,
+    retried_as      = excluded.retried_as,
+    retry_source    = excluded.retry_source,
     replay_of_run_id  = excluded.replay_of_run_id,
-    replay_of_node_id = excluded.replay_of_node_id
+    replay_of_node_id = excluded.replay_of_node_id,
+    invocation_json   = excluded.invocation_json
 WHERE runs.status = 'pending'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.ReplayOfRunID, r.ReplayOfNodeID,
+		invocationJSON,
 	)
 	return err
 }
@@ -598,7 +625,7 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -658,7 +685,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
@@ -702,7 +729,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -760,7 +787,7 @@ type rowScanner interface {
 
 func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
-	var argsJSON, planJSON []byte
+	var argsJSON, planJSON, invocationJSON []byte
 	var createdNS, startedNS int64
 	var finishedNS sql.NullInt64
 	var parent sql.NullString
@@ -769,7 +796,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&createdNS, &startedNS, &finishedNS, &parent,
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
-		&r.ReplayOfRunID, &r.ReplayOfNodeID)
+		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -789,6 +816,9 @@ func scanRun(rs rowScanner) (*Run, error) {
 	}
 	if len(argsJSON) > 0 {
 		_ = json.Unmarshal(argsJSON, &r.Args)
+	}
+	if len(invocationJSON) > 0 {
+		_ = json.Unmarshal(invocationJSON, &r.Invocation)
 	}
 	r.PlanSnapshot = planJSON
 	return &r, nil
