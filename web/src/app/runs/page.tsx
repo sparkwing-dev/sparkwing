@@ -430,11 +430,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
     setSelectedNode(null);
-    // Row body click is treated as single-select: replace the
-    // selection set so the highlight only marks this row. Multi-
-    // select is reached via the checkboxes.
+    // Row body click is single-select: replace the selection set so
+    // only this row is highlighted. When exiting the collapsed view
+    // (id=null), keep the previous selection in checkedRuns so the
+    // user can spot where they came from on the expanded list.
     if (id) setCheckedRuns(new Set([id]));
-    else setCheckedRuns(new Set());
     const params = new URLSearchParams(searchParams.toString());
     if (id) params.set("run", id);
     else params.delete("run");
@@ -1022,6 +1022,24 @@ function fmtClock(ts: string): string {
   });
 }
 
+// fmtDatePrefix returns "M/D" when ts isn't today, "M/D/YY" when it's
+// in a different year, and "" when it's today (clock alone suffices).
+function fmtDatePrefix(ts: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) return "";
+  const md = `${d.getMonth() + 1}/${d.getDate()}`;
+  if (d.getFullYear() !== now.getFullYear())
+    return `${md}/${String(d.getFullYear()).slice(-2)}`;
+  return md;
+}
+
 function fmtAgo(ts: string): string {
   if (!ts) return "—";
   const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
@@ -1164,20 +1182,23 @@ const FullRunRow = memo(function FullRunRow({
           </Tooltip>
         </span>
       ) : (
-        <>
+        <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
+          {fmtDatePrefix(r.started_at) && (
+            <span className="text-[var(--foreground)]">
+              {fmtDatePrefix(r.started_at)}
+            </span>
+          )}
           <FilterableTimestamp
             iso={r.started_at}
             field="started"
             ctx={ctx}
             tooltip={`Started ${fmtFullDate(r.started_at)}`}
           >
-            <span className="text-[var(--muted)] font-mono tabular-nums">
-              started{" "}
-              <span className="text-[var(--foreground)]">
-                {fmtClock(r.started_at)}
-              </span>
+            <span className="text-[var(--foreground)]">
+              {fmtClock(r.started_at)}
             </span>
           </FilterableTimestamp>
+          <span>→</span>
           {r.finished_at ? (
             <FilterableTimestamp
               iso={r.finished_at}
@@ -1185,34 +1206,24 @@ const FullRunRow = memo(function FullRunRow({
               ctx={ctx}
               tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
             >
-              <span className="text-[var(--muted)] font-mono tabular-nums">
-                finished{" "}
-                <span className="text-[var(--foreground)]">
-                  {fmtClock(r.finished_at)}
-                </span>
+              <span className="text-[var(--foreground)]">
+                {fmtClock(r.finished_at)}
               </span>
             </FilterableTimestamp>
           ) : (
             <Tooltip content="Finished">
-              <span className="text-[var(--muted)] font-mono tabular-nums">
-                finished <span className="text-[var(--foreground)]">—</span>
-              </span>
+              <span className="text-[var(--foreground)]">—</span>
             </Tooltip>
           )}
-          <Tooltip content="Duration">
-            <span className="text-[var(--muted)] font-mono tabular-nums">
-              duration{" "}
-              <span className="text-[var(--foreground)]">
-                {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
-              </span>
-            </span>
-          </Tooltip>
+          {elapsedMs > 0 && (
+            <Tooltip content="Duration">
+              <span>({fmtMs(elapsedMs)})</span>
+            </Tooltip>
+          )}
           <Tooltip content={fmtFullDate(sinceTs)}>
-            <span className="text-[var(--muted)] font-mono tabular-nums">
-              {fmtAgo(sinceTs)}
-            </span>
+            <span>· {fmtAgo(sinceTs)}</span>
           </Tooltip>
-        </>
+        </span>
       )}
     </div>
   );
@@ -1304,6 +1315,11 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
         className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap"
         title={`Started ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`}
       >
+        {fmtDatePrefix(r.started_at) && (
+          <span className="text-[var(--foreground)]">
+            {fmtDatePrefix(r.started_at)}
+          </span>
+        )}
         <span className="text-[var(--foreground)]">
           {fmtClock(r.started_at)}
         </span>
