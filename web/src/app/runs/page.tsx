@@ -828,14 +828,16 @@ function FullRunRow({ r }: { r: Run }) {
           {fmtAgo(sinceTs)}
         </span>
       </div>
-      {r.error && (
-        <div
-          className="shrink-0 max-w-[40%] text-[11px] text-red-400 font-mono truncate self-center"
-          title={r.error}
-        >
-          error: {r.error}
-        </div>
-      )}
+      <div
+        className="shrink-0 w-[40%] text-[11px] font-mono truncate self-center text-right"
+        title={r.error || r.status}
+      >
+        {r.error ? (
+          <span className="text-red-400">error: {r.error}</span>
+        ) : (
+          <span className="text-[var(--muted)]">{r.status}</span>
+        )}
+      </div>
     </div>
   );
 }
