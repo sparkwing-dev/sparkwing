@@ -3,7 +3,7 @@
 // SPA templates the token + API URL into window globals at request
 // time -- see pkg/orchestrator/web for the templating side.
 //
-// Public surface (post-LOCAL-016, 2026-05-04):
+// Public surface (2026-05-04):
 //
 //   /api/v1/runs                              -- list runs (shape: {runs: Run[]})
 //   /api/v1/runs/:id?include=nodes            -- run + nodes (shape: {run: Run, nodes: Node[]})
@@ -127,9 +127,9 @@ export function getControllerUrl(): string {
 // {run: store.Run, nodes: store.Node[]} -- the same Run shape this
 // type captures. Snapshot-derived adornments (groups, modifiers,
 // work, dynamic, approval, on_failure_of) come from store.Node and
-// the run's plan_snapshot field; until LOCAL-016 follow-up reattaches
-// them, those node fields render as undefined and the DAG view
-// falls back to flat nodes without group headers / modifier chips.
+// the run's plan_snapshot field; until those are reattached, the
+// node fields render as undefined and the DAG view falls back to
+// flat nodes without group headers / modifier chips.
 export interface Run {
   id: string;
   pipeline: string;
@@ -363,11 +363,20 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
   return res.json();
 }
 
+// Log fetchers ask the server for raw NDJSON so the dashboard's
+// logParser can read the structured event stream (run_start, step_*,
+// exec_line, etc.) rather than re-parsing pretty-rendered text. With
+// the structured shape we get accurate step bucketing in
+// LogBucketView and each view mode (steps / inline) can format the
+// breadcrumb on its own terms.
 export async function getRunLogs(runID: string): Promise<string> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/logs`, {
-    cache: "no-store",
-    headers: { Accept: "text/x-ansi" },
-  });
+  const res = await authFetch(
+    `${API_URL}/api/v1/runs/${runID}/logs?format=ndjson`,
+    {
+      cache: "no-store",
+      headers: { Accept: "application/x-ndjson" },
+    },
+  );
   if (!res.ok) return "";
   return res.text();
 }
@@ -377,8 +386,8 @@ export async function getNodeLogs(
   nodeID: string,
 ): Promise<string> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}`,
-    { cache: "no-store", headers: { Accept: "text/x-ansi" } },
+    `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}?format=ndjson`,
+    { cache: "no-store", headers: { Accept: "application/x-ndjson" } },
   );
   if (!res.ok) return "";
   return res.text();

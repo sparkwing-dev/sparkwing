@@ -294,38 +294,50 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
   return { sections };
 }
 
+// recordToLine produces the in-bucket display text for one log
+// record. Node + step are deliberately omitted from the line itself
+// because the enclosing StepSection already encodes them in its
+// `name` field; repeating them on every line is the "<node> ›
+// <step> │" breadcrumb noise that the user sees in the bucket
+// view. Job-stack frames (reusable Jobs spawned inside a step)
+// are kept since the section name doesn't carry them.
 function recordToLine(rec: LogRecord): string {
-  // Preserve ANSI in msg so the UI can colorize through ansiToHtml.
-  // Job breadcrumb (when a reusable Job emitted the record) comes
-  // first as a dim prefix so viewers can tell which Job a line
-  // belongs to without leaving the node's bucket.
   const parts: string[] = [];
-  const crumb = breadcrumbPrefix(rec);
+  const crumb = jobBreadcrumb(rec);
   if (crumb) parts.push(crumb);
   if (rec.event === "retry") parts.push("↻");
-  else if (rec.event === "step_start") parts.push("●");
-  else if (rec.event === "step_end") parts.push("✓");
-  else if (rec.event === "step_skipped") parts.push("⊘");
   if (rec.level === "error") parts.push("ERROR");
   if (rec.msg) parts.push(rec.msg);
-  else if (rec.attrs) parts.push(JSON.stringify(rec.attrs));
+  else if (
+    rec.attrs &&
+    rec.event !== "step_start" &&
+    rec.event !== "step_end"
+  ) {
+    parts.push(JSON.stringify(rec.attrs));
+  }
   return parts.join(" ");
 }
 
-// breadcrumbPrefix renders the `parentJob › ... › directJob │` crumb
-// that a reusable Job's records carry. Returns empty when the record
-// has no Job (emitted directly from the Node's Run body). Wrapped in
-// a <span class="opacity-60"> via unicode zero-width markers — no,
-// actually we keep it raw text; the UI's LogLines path already runs
-// this through ansiToHtml, and the dim styling comes from the record
-// being in a step bucket (whose CSS tones down non-content).
-function breadcrumbPrefix(rec: LogRecord): string {
+// jobBreadcrumb renders only the Job-stack frames -- the section
+// header takes care of node/step. A line emitted from a deeply
+// spawned Job (Job → SubJob → step) still wants the trace, since
+// the section knows nothing about it.
+function jobBreadcrumb(rec: LogRecord): string {
   const frames: string[] = [];
   if (rec.job_stack) frames.push(...rec.job_stack);
   if (rec.job) frames.push(rec.job);
-  if (rec.step) frames.push(rec.step);
   if (frames.length === 0) return "";
   return frames.join(" › ") + " │";
+}
+
+// stepNameFromSection extracts the bare step name out of a
+// StepSection's `name` field (which is "<node> · <step>" for phase
+// buckets, "<node>" for whole-node buckets). The inline view uses
+// this to prefix each line with `<step> | <line>` so a flat scroll
+// through a multi-step run stays attributable.
+export function stepNameFromSection(section: StepSection): string {
+  const sep = section.name.indexOf(" · ");
+  return sep >= 0 ? section.name.slice(sep + 3) : section.name;
 }
 
 function formatDuration(ms: number): string {

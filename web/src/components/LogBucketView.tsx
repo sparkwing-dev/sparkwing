@@ -8,6 +8,7 @@ import {
   parseLogSections,
   parseLogLines,
   hasStepBanners,
+  stepNameFromSection,
 } from "@/lib/logParser";
 import { ansiToHtml, stripAnsi } from "@/lib/ansi";
 
@@ -125,6 +126,11 @@ function StepBucket({
     section.status === "failed" || section.status === "running",
   );
   const si = statusIcon[section.status] || statusIcon.running;
+  // Section.name is "<node> · <step>" for phase buckets. The node
+  // half is redundant in the bucket view because the DAG selection
+  // already pinned which node we're looking at, so the heading
+  // shows the step name alone.
+  const heading = stepNameFromSection(section);
 
   return (
     <div
@@ -138,7 +144,7 @@ function StepBucket({
           {expanded ? "▾" : "▸"}
         </span>
         <span className={`w-4 text-center ${si.color}`}>{si.icon}</span>
-        <span className="font-mono text-[#c9d1d9]">{section.name}</span>
+        <span className="font-mono text-[#c9d1d9]">{heading}</span>
         <span className="flex items-center gap-2 ml-auto shrink-0">
           {expanded && section.lines.length > 0 && (
             <CopyButton
@@ -233,16 +239,28 @@ function InlineLogView({
 }: {
   sections: (LogSection | StepSection)[];
 }) {
-  // Lines now arrive carrying raw SGR escapes (the SPA opted into the
-  // text/x-ansi). Render every line through ansiToHtml
-  // and fall back to the keyword-based shading only when the line has
-  // no ANSI of its own — otherwise we'd both paint a Tailwind class on
-  // the wrapper and inject conflicting <span> colors from the SGR.
-  const renderLine = (line: string, key: number, fallbackClass: string) => {
-    if (line.trim() === "") return <div key={key} className="h-5" />;
+  // Each line in the inline view is prefixed with the step it
+  // belongs to: `<step> | <line>`. That keeps a flat top-to-bottom
+  // scroll attributable without the banner separators the legacy
+  // STEP-banner format used. Preamble / summary / between sections
+  // get no prefix because they don't belong to any step.
+  const renderLine = (
+    line: string,
+    key: number,
+    fallbackClass: string,
+    stepLabel?: string,
+  ) => {
+    if (line.trim() === "" && !stepLabel)
+      return <div key={key} className="h-5" />;
     const hasAnsi = line.includes("\x1b[");
     return (
       <div key={key} className="flex hover:bg-[#161b22] group">
+        {stepLabel && (
+          <span className="text-[var(--muted)] shrink-0 pr-2">
+            {stepLabel}
+            <span className="px-1">│</span>
+          </span>
+        )}
         {hasAnsi ? (
           <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
         ) : (
@@ -261,35 +279,16 @@ function InlineLogView({
 
         if (section.type === "step") {
           const step = section as StepSection;
-          const si = statusIcon[step.status] || statusIcon.running;
-          const bar = "─".repeat(Math.max(2, 36 - step.name.length));
+          const stepLabel = stepNameFromSection(step);
           return (
             <div key={i}>
-              <div className="text-cyan-400 font-bold mt-2 mb-0.5">
-                {"──────── STEP: " + step.name + " " + bar}
-              </div>
               {step.lines.map((line, j) => {
-                const fallback = line.includes("PASS")
-                  ? "text-green-400"
-                  : line.includes("FAIL") ||
-                      line.includes("ERROR") ||
-                      line.includes("error:")
+                const fallback =
+                  line.includes("FAIL") || line.includes("ERROR")
                     ? "text-red-400"
-                    : line.startsWith(">") ||
-                        line.match(/^(prepare|compile|cache)/)
-                      ? "text-cyan-400"
-                      : "";
-                return renderLine(line, startLine + j, fallback);
+                    : "";
+                return renderLine(line, startLine + j, fallback, stepLabel);
               })}
-              <div
-                className={`${step.status === "failed" ? "text-red-400" : "text-green-400"} font-bold mb-1`}
-              >
-                {si.icon +
-                  " " +
-                  step.name +
-                  (step.duration ? " (" + step.duration + ") " : " ") +
-                  bar}
-              </div>
             </div>
           );
         }
@@ -297,39 +296,25 @@ function InlineLogView({
         if (section.type === "summary") {
           return (
             <div key={i} className="mt-2">
-              <div className="text-cyan-400 font-bold mb-0.5">
-                {"──────── SUMMARY: results ────────"}
-              </div>
               {section.lines.map((line, j) => {
                 const fallback = line.startsWith("✓")
                   ? "text-green-400"
                   : line.startsWith("✗")
                     ? "text-red-400"
-                    : line.startsWith("total")
-                      ? "text-[#c9d1d9]"
-                      : line.includes("─")
-                        ? "text-[#484f58]"
-                        : "";
+                    : "";
                 return renderLine(line, startLine + j, fallback);
               })}
             </div>
           );
         }
 
-        // preamble / between
+        // preamble / between -- no step prefix; these lines aren't
+        // owned by any single step.
         return (
           <div key={i}>
-            {section.lines.map((line, j) => {
-              const fallback =
-                line.startsWith(">") || line.match(/^(prepare|compile|cache)/)
-                  ? "text-cyan-400"
-                  : line.includes("registries:") ||
-                      line.includes("tag:") ||
-                      line.includes("cluster:")
-                    ? "text-[#c9d1d9]"
-                    : "";
-              return renderLine(line, startLine + j, fallback);
-            })}
+            {section.lines.map((line, j) =>
+              renderLine(line, startLine + j, ""),
+            )}
           </div>
         );
       })}
