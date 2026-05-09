@@ -291,144 +291,72 @@ function Pipelines() {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Left: Runs list */}
-      <div
-        className={`${run ? "w-52" : "w-[28rem]"} border-r border-[var(--border)] flex flex-col shrink-0 transition-all`}
-      >
-        {run && (
-          <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-            Runs
-          </div>
-        )}
+      <div className="w-80 border-r border-[var(--border)] flex flex-col shrink-0">
+        <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+          Runs
+        </div>
 
         <div ref={filterRef} className="border-b border-[var(--border)]">
-          {run ? (
-            <CompactFilterBar
-              openDropdown={openDropdown}
-              setOpenDropdown={setOpenDropdown}
-              activeFilterCount={activeFilterCount}
-              clear={() => {
-                setFilterRepo([]);
-                setFilterPipeline([]);
-                setFilterBranch([]);
-                setFilterStatus([]);
-                setFilterTag([]);
-              }}
-              groups={[
-                {
-                  key: "repo",
-                  label: "Repo",
-                  values: filterRepo,
-                  set: setFilterRepo,
-                  options: repos,
-                  activeText: "text-cyan-300",
-                  activeBg: "bg-cyan-500/15",
-                },
-                {
-                  key: "pipeline",
-                  label: "Pipeline",
-                  values: filterPipeline,
-                  set: setFilterPipeline,
-                  options: pipelines,
-                  activeText: "text-violet-300",
-                  activeBg: "bg-violet-500/15",
-                },
-                {
-                  key: "tag",
-                  label: "Tag",
-                  values: filterTag,
-                  set: setFilterTag,
-                  options: allTags,
-                  activeText: "text-pink-300",
-                  activeBg: "bg-pink-500/15",
-                },
-                {
-                  key: "branch",
-                  label: "Branch",
-                  values: filterBranch,
-                  set: setFilterBranch,
-                  options: branches,
-                  activeText: "text-amber-300",
-                  activeBg: "bg-amber-500/15",
-                },
-                {
-                  key: "status",
-                  label: "Status",
-                  values: filterStatus,
-                  set: setFilterStatus,
-                  options: statuses,
-                  activeText: "text-emerald-300",
-                  activeBg: "bg-emerald-500/15",
-                },
-              ]}
-              toggleFilter={toggleFilter}
-            />
-          ) : (
-            <FullFilterBar
-              openDropdown={openDropdown}
-              setOpenDropdown={setOpenDropdown}
-              activeFilterCount={activeFilterCount}
-              clearAll={() => {
-                setFilterRepo([]);
-                setFilterPipeline([]);
-                setFilterBranch([]);
-                setFilterStatus([]);
-                setFilterTag([]);
-              }}
-              groups={[
-                {
-                  key: "repo",
-                  label: "REPO",
-                  values: filterRepo,
-                  set: setFilterRepo,
-                  options: repos,
-                  color: "text-cyan-400",
-                  activeBg: "bg-cyan-500/15",
-                  activeText: "text-cyan-300",
-                },
-                {
-                  key: "pipeline",
-                  label: "PIPELINE",
-                  values: filterPipeline,
-                  set: setFilterPipeline,
-                  options: pipelines,
-                  color: "text-violet-400",
-                  activeBg: "bg-violet-500/15",
-                  activeText: "text-violet-300",
-                },
-                {
-                  key: "tag",
-                  label: "TAG",
-                  values: filterTag,
-                  set: setFilterTag,
-                  options: allTags,
-                  color: "text-pink-400",
-                  activeBg: "bg-pink-500/15",
-                  activeText: "text-pink-300",
-                },
-                {
-                  key: "branch",
-                  label: "BRANCH",
-                  values: filterBranch,
-                  set: setFilterBranch,
-                  options: branches,
-                  color: "text-amber-400",
-                  activeBg: "bg-amber-500/15",
-                  activeText: "text-amber-300",
-                },
-                {
-                  key: "status",
-                  label: "STATUS",
-                  values: filterStatus,
-                  set: setFilterStatus,
-                  options: statuses,
-                  color: "text-emerald-400",
-                  activeBg: "bg-emerald-500/15",
-                  activeText: "text-emerald-300",
-                },
-              ]}
-              toggleFilter={toggleFilter}
-            />
-          )}
+          <CompactFilterBar
+            openDropdown={openDropdown}
+            setOpenDropdown={setOpenDropdown}
+            activeFilterCount={activeFilterCount}
+            clear={() => {
+              setFilterRepo([]);
+              setFilterPipeline([]);
+              setFilterBranch([]);
+              setFilterStatus([]);
+              setFilterTag([]);
+            }}
+            groups={[
+              {
+                key: "repo",
+                label: "Repo",
+                values: filterRepo,
+                set: setFilterRepo,
+                options: repos,
+                activeText: "text-cyan-300",
+                activeBg: "bg-cyan-500/15",
+              },
+              {
+                key: "pipeline",
+                label: "Pipeline",
+                values: filterPipeline,
+                set: setFilterPipeline,
+                options: pipelines,
+                activeText: "text-violet-300",
+                activeBg: "bg-violet-500/15",
+              },
+              {
+                key: "tag",
+                label: "Tag",
+                values: filterTag,
+                set: setFilterTag,
+                options: allTags,
+                activeText: "text-pink-300",
+                activeBg: "bg-pink-500/15",
+              },
+              {
+                key: "branch",
+                label: "Branch",
+                values: filterBranch,
+                set: setFilterBranch,
+                options: branches,
+                activeText: "text-amber-300",
+                activeBg: "bg-amber-500/15",
+              },
+              {
+                key: "status",
+                label: "Status",
+                values: filterStatus,
+                set: setFilterStatus,
+                options: statuses,
+                activeText: "text-emerald-300",
+                activeBg: "bg-emerald-500/15",
+              },
+            ]}
+            toggleFilter={toggleFilter}
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -441,7 +369,7 @@ function Pipelines() {
                 onClick={() => selectRun(isActive ? null : r.id)}
                 className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${isActive ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
               >
-                {run ? <CompactRunRow r={r} /> : <FullRunRow r={r} />}
+                <CompactRunRow r={r} />
               </div>
             );
           })}
@@ -692,51 +620,15 @@ function NodeRow({
   );
 }
 
-// --- run row variants ---
-
-function FullRunRow({ r }: { r: Run }) {
-  return (
-    <>
-      <div className="flex items-center gap-2 mb-0.5">
-        <StatusLabel status={r.status} />
-        <span className="text-cyan-400/70 text-xs">{repoLabel(r)}</span>
-        <span className="text-[var(--muted)] text-xs">/</span>
-        <span className="font-medium text-sm text-violet-300 truncate">
-          {r.pipeline}
-        </span>
-        <span className="ml-auto text-xs font-mono shrink-0">
-          {fmtMs(runDurationMs(r))}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-        {r.git_branch && (
-          <span className="text-amber-400/70">⎇ {r.git_branch}</span>
-        )}
-        {r.git_sha && (
-          <span className="font-mono">{r.git_sha.slice(0, 7)}</span>
-        )}
-        <span className="ml-auto font-mono">
-          {new Date(r.started_at).toLocaleTimeString()}
-        </span>
-        <span>
-          (<TimeAgo ts={r.started_at} />)
-        </span>
-      </div>
-    </>
-  );
-}
-
 function CompactRunRow({ r }: { r: Run }) {
+  const dur = runDurationMs(r);
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0">
       <Tooltip
         content={
           <>
             {r.status}
-            {(() => {
-              const ms = runDurationMs(r);
-              return ms ? ` in ${fmtMs(ms)}` : "";
-            })()}
+            {dur ? ` in ${fmtMs(dur)}` : ""}
           </>
         }
       >
@@ -761,7 +653,12 @@ function CompactRunRow({ r }: { r: Run }) {
       >
         <span className="text-xs text-violet-300 truncate">{r.pipeline}</span>
       </Tooltip>
-      <span className="ml-auto shrink-0 text-[10px] font-mono text-[var(--muted)]">
+      {r.git_branch && (
+        <span className="text-[10px] text-amber-400/70 truncate max-w-[80px] shrink-0">
+          ⎇ {r.git_branch}
+        </span>
+      )}
+      <span className="ml-auto shrink-0 text-[10px] font-mono text-[var(--muted)] tabular-nums">
         <TimeAgo ts={r.started_at} />
       </span>
     </div>
@@ -776,115 +673,8 @@ interface FilterGroup {
   values: string[];
   set: (v: string[]) => void;
   options: string[];
-  color?: string;
   activeBg: string;
   activeText: string;
-}
-
-function FullFilterBar({
-  openDropdown,
-  setOpenDropdown,
-  activeFilterCount,
-  clearAll,
-  groups,
-  toggleFilter,
-}: {
-  openDropdown: string | null;
-  setOpenDropdown: (v: string | null) => void;
-  activeFilterCount: number;
-  clearAll: () => void;
-  groups: FilterGroup[];
-  toggleFilter: (
-    arr: string[],
-    set: (v: string[]) => void,
-    val: string,
-  ) => void;
-}) {
-  return (
-    <>
-      <div className="flex items-center px-2 py-1.5 gap-1 flex-wrap">
-        <span className="text-[var(--muted)] text-xs mr-0.5">Filter:</span>
-        {groups.map((f) => (
-          <div key={f.key} className="relative">
-            <button
-              onClick={() =>
-                setOpenDropdown(openDropdown === f.key ? null : f.key)
-              }
-              className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
-                f.values.length
-                  ? `${f.activeBg} ${f.activeText}`
-                  : `text-[var(--muted)] hover:${f.color || ""}`
-              }`}
-            >
-              {f.label}
-              {f.values.length > 0 ? ` (${f.values.length})` : ""}{" "}
-              <span className="text-[8px]">▾</span>
-            </button>
-            {openDropdown === f.key && (
-              <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[160px] max-h-64 overflow-y-auto">
-                {f.values.length > 0 && (
-                  <button
-                    onClick={() => f.set([])}
-                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] text-[var(--muted)] border-b border-[var(--border)]"
-                  >
-                    Clear all
-                  </button>
-                )}
-                {f.options.map((opt) => {
-                  const isSelected = f.values.includes(opt);
-                  return (
-                    <button
-                      key={opt}
-                      onClick={() => toggleFilter(f.values, f.set, opt)}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] font-mono flex items-center gap-2 ${isSelected ? f.activeText : ""}`}
-                    >
-                      <span
-                        className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${isSelected ? `${f.activeBg} border-current` : "border-[var(--border)]"}`}
-                      >
-                        {isSelected && "✓"}
-                      </span>
-                      {f.key === "branch" ? `⎇ ${opt}` : opt}
-                    </button>
-                  );
-                })}
-                {f.options.length === 0 && (
-                  <div className="px-3 py-2 text-[var(--muted)] text-xs">
-                    no options yet
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      {activeFilterCount > 0 && (
-        <div className="flex items-center gap-1 px-2 pb-1.5 flex-wrap">
-          {groups.flatMap((f) =>
-            f.values.map((v) => (
-              <span
-                key={`${f.key}-${v}`}
-                className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
-              >
-                {f.key === "branch" ? `⎇ ${v}` : v}
-                <button
-                  onClick={() => toggleFilter(f.values, f.set, v)}
-                  className="hover:text-white"
-                >
-                  ×
-                </button>
-              </span>
-            )),
-          )}
-          <button
-            onClick={clearAll}
-            className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-1"
-          >
-            clear all
-          </button>
-        </div>
-      )}
-    </>
-  );
 }
 
 function CompactFilterBar({
