@@ -11,7 +11,6 @@ const tabs: Tab[] = [
   { href: "/", label: "Home" },
   { href: "/runs", label: "Runs" },
   { href: "/pipeline-overview", label: "Pipeline Overview" },
-  { href: "/agents", label: "Agents" },
   { href: "/cluster", label: "Cluster" },
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];

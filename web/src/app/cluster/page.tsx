@@ -1,17 +1,12 @@
 "use client";
 
-// Cluster status view. Consolidates what used to live under the
-// "Service Health" toggle on /, plus a fleet summary and a recent
-// failures list, into one dedicated page.
+// Cluster status: services health, fleet (per-runner detail), and
+// recent failures rolled into one page.
 //
-// Data sources (all existing):
-//   /api/v1/health/services - controller + logs (+ any ExtraServices)
+// Data sources:
+//   /api/v1/health/services - controller + logs (+ ExtraServices)
 //   /api/v1/agents          - runners seen in the last hour
 //   /api/runs?limit=50      - recent runs, filtered to failed here
-//
-// Cache, dind, and pool probes are not wired into ExtraServices today;
-// when sparkwing-web grows a flag for that they'll appear here without
-// any UI change.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -23,6 +18,7 @@ import {
   getRuns,
   getServiceHealth,
 } from "@/lib/api";
+import { HeartbeatLabel } from "@/components/HeartbeatDot";
 
 const POLL_MS = 5000;
 
@@ -73,11 +69,40 @@ function relativeTime(iso: string): string {
   return `${Math.round(age / 86400)}d ago`;
 }
 
+function typeBadge(kind: string): { label: string; cls: string } {
+  switch (kind) {
+    case "agent":
+      return { label: "agent", cls: "bg-indigo-400/15 text-indigo-300" };
+    case "pool":
+      return { label: "pool", cls: "bg-emerald-400/15 text-emerald-300" };
+    case "local":
+      return { label: "local", cls: "bg-slate-400/15 text-slate-300" };
+    default:
+      return { label: kind || "?", cls: "bg-gray-400/15 text-gray-300" };
+  }
+}
+
+// Sort rule: busy agents first, then by type (agent, pool, local,
+// other), then name.
+function sortAgents(a: Agent, b: Agent): number {
+  if (a.status !== b.status) return a.status === "busy" ? -1 : 1;
+  if (a.type !== b.type) {
+    const order = ["agent", "pool", "local"];
+    const ai = order.indexOf(a.type);
+    const bi = order.indexOf(b.type);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  }
+  return a.name.localeCompare(b.name);
+}
+
 export default function ClusterPage() {
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [failures, setFailures] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [expandedAgent, setExpandedAgent] = useState<Record<string, boolean>>(
+    {},
+  );
 
   const refresh = useCallback(async () => {
     const [svc, ag, runs] = await Promise.all([
@@ -98,6 +123,8 @@ export default function ClusterPage() {
     }, POLL_MS);
     return () => window.clearInterval(i);
   }, [refresh]);
+
+  const sortedAgents = useMemo(() => [...agents].sort(sortAgents), [agents]);
 
   const fleetTotals = useMemo(() => {
     const byType: Record<string, number> = {};
@@ -158,6 +185,29 @@ export default function ClusterPage() {
 
       <SectionHeader title="Fleet" hint="/api/v1/agents - last hour" />
       <FleetCards totals={fleetTotals} />
+      <div className="space-y-2 mb-6">
+        {!loaded ? (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 text-xs text-[var(--muted)]">
+            Loading fleet...
+          </div>
+        ) : sortedAgents.length === 0 ? (
+          <FleetEmpty />
+        ) : (
+          sortedAgents.map((a) => {
+            const key = `${a.type}:${a.name}`;
+            return (
+              <AgentRow
+                key={key}
+                agent={a}
+                expanded={!!expandedAgent[key]}
+                onToggle={() =>
+                  setExpandedAgent((e) => ({ ...e, [key]: !e[key] }))
+                }
+              />
+            );
+          })
+        )}
+      </div>
 
       <SectionHeader title="Recent failures" hint="/api/runs status=failed" />
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden mb-6">
@@ -186,7 +236,7 @@ export default function ClusterPage() {
                   <td className="px-3 py-1.5 font-mono">{r.pipeline}</td>
                   <td className="px-3 py-1.5 font-mono">
                     <Link
-                      href={`/#/runs/${r.id}`}
+                      href={`/runs?run=${r.id}`}
                       className="text-[var(--accent)] hover:underline"
                     >
                       {r.id.slice(-8)}
@@ -370,7 +420,7 @@ function FleetCards({
     if (totals.byType[k]) cards.push({ label: k, value: totals.byType[k] });
   }
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-6">
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-3">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {cards.map((c) => (
           <div
@@ -384,13 +434,145 @@ function FleetCards({
           </div>
         ))}
       </div>
-      <div className="mt-3 text-[10px] text-[var(--muted)]">
-        See{" "}
-        <Link href="/agents" className="text-[var(--accent)] hover:underline">
-          /agents
-        </Link>{" "}
-        for per-runner detail.
+    </div>
+  );
+}
+
+function FleetEmpty() {
+  return (
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 text-xs text-[var(--muted)] space-y-2">
+      <p>
+        No runners have claimed a node in the last hour. The controller derives
+        fleet state from claim activity, so idle runners show up only when they
+        take work.
+      </p>
+      <p>
+        Start a laptop agent:{" "}
+        <code className="bg-[var(--background)] px-1 py-0.5 rounded font-mono">
+          sparkwing agent --config agent.yaml
+        </code>
+        , or confirm the cluster pool is running:{" "}
+        <code className="bg-[var(--background)] px-1 py-0.5 rounded font-mono">
+          kubectl -n sparkwing get deploy sparkwing-warm-runner
+        </code>
+        .
+      </p>
+    </div>
+  );
+}
+
+function AgentRow({
+  agent,
+  expanded,
+  onToggle,
+}: {
+  agent: Agent;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const badge = typeBadge(agent.type);
+  const active = agent.active_jobs?.length || 0;
+  const labels = Object.entries(agent.labels || {});
+
+  return (
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--surface-raised)] transition-colors"
+      >
+        <span className="w-4 text-center text-xs text-[var(--muted)]">
+          {expanded ? "-" : "+"}
+        </span>
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${badge.cls}`}
+        >
+          {badge.label}
+        </span>
+        <span className="font-mono text-sm font-medium truncate flex-1">
+          {agent.name || "(anonymous)"}
+        </span>
+        <AgentStatusPill status={agent.status} />
+        <span className="text-xs text-[var(--muted)] font-mono w-32 text-right">
+          {active > 0
+            ? `${active} claim${active === 1 ? "" : "s"}`
+            : "no claims"}
+        </span>
+        <HeartbeatLabel lastHeartbeat={agent.last_seen} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-[var(--border)] px-3 py-3 space-y-3 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <KV label="type" value={agent.type} />
+            <KV label="max concurrent" value={agent.max_concurrent || "-"} />
+            <KV label="last seen" value={relativeTime(agent.last_seen)} />
+            <KV label="status" value={agent.status} />
+          </div>
+          {labels.length > 0 && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                labels
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {labels.map(([k, v]) => (
+                  <span
+                    key={k}
+                    className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--background)] border border-[var(--border)] rounded"
+                  >
+                    {v ? `${k}=${v}` : k}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {active > 0 && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                active claims
+              </div>
+              <div className="space-y-1">
+                {agent.active_jobs!.map((runID) => (
+                  <Link
+                    key={runID}
+                    href={`/runs?run=${runID}`}
+                    className="block font-mono text-xs text-[var(--accent)] hover:underline"
+                  >
+                    {runID}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentStatusPill({ status }: { status: string }) {
+  const cls =
+    status === "busy"
+      ? "bg-indigo-400/15 text-indigo-300"
+      : "bg-slate-400/15 text-slate-300";
+  const dot =
+    status === "busy" ? "bg-indigo-400 animate-pulse" : "bg-slate-500";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${cls}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+      {status || "idle"}
+    </span>
+  );
+}
+
+function KV({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+        {label}
       </div>
+      <div className="font-mono text-xs mt-0.5">{value}</div>
     </div>
   );
 }
