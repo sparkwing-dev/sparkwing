@@ -877,24 +877,28 @@ interface FilterCtx {
 }
 
 // useClickPopup manages an open state that toggles on click, closes
-// on a click outside the wrapping ref, and on Escape.
+// on a click outside the wrapping ref, and on Escape. The outside-
+// click handler runs in the capture phase and swallows the event so
+// the cancelling click doesn't also drill into a run row, open
+// another popup, etc.
 function useClickPopup<T extends HTMLElement>() {
   const [open, setOpen] = useState(false);
   const ref = useRef<T>(null);
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (!ref.current || ref.current.contains(e.target as Node)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("click", onDocClick, true);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("click", onDocClick, true);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
