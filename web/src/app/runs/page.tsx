@@ -474,9 +474,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   onClick={() => selectRun(isActive ? null : r.id)}
                   className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
                     isActive
-                      ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]"
+                      ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                       : isLastViewed
-                        ? "bg-[var(--surface-raised)]/40 border-l-2 border-l-[var(--accent)]/40"
+                        ? "bg-violet-500/[0.07] border-l-4 border-l-violet-400/50"
                         : ""
                   }`}
                 >
