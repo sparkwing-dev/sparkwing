@@ -925,12 +925,12 @@ function FilterableValue({
       }}
     >
       <span
-        className={`cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] underline decoration-dotted underline-offset-4 ${
+        className={`cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4 ${
           incl
-            ? "decoration-2 decoration-current"
+            ? "underline decoration-dotted decoration-2 decoration-current underline-offset-4"
             : excl
               ? "line-through decoration-red-400 opacity-70"
-              : "decoration-[var(--muted)]/40 hover:decoration-[var(--muted)]"
+              : ""
         }`}
       >
         {children}
@@ -994,7 +994,7 @@ function FilterableTimestamp({
         setOpen((o) => !o);
       }}
     >
-      <span className="cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] underline decoration-dotted underline-offset-4 decoration-[var(--muted)]/40 hover:decoration-[var(--muted)]">
+      <span className="cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4">
         {children}
       </span>
       {open && (
