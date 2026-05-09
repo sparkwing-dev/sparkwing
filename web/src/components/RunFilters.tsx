@@ -591,6 +591,7 @@ export function FullFilterBar({
   searchText,
   setSearchText,
   onClearAll,
+  trailingActions,
 }: {
   openDropdown: string | null;
   setOpenDropdown: (v: string | null) => void;
@@ -599,6 +600,7 @@ export function FullFilterBar({
   searchText?: string;
   setSearchText?: (s: string) => void;
   onClearAll: () => void;
+  trailingActions?: React.ReactNode;
 }) {
   const [search, setSearch] = useState<Record<string, string>>({});
   const searchTerms = searchText ? parseSearch(searchText) : [];
@@ -902,6 +904,9 @@ export function FullFilterBar({
           );
         })}
       </div>
+      {trailingActions && (
+        <div className="shrink-0 pt-1 self-start">{trailingActions}</div>
+      )}
     </div>
   );
 }

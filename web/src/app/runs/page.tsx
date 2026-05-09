@@ -212,6 +212,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [selectedRun, setSelectedRun] = useState<string | null>(
     searchParams.get("run"),
   );
+  const [lastViewedRun, setLastViewedRun] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
@@ -398,6 +399,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   };
 
   const selectRun = (id: string | null) => {
+    // Closing the detail pane (id === null) leaves a "last viewed"
+    // highlight on the row so the user doesn't lose their place when
+    // the list expands back to wide rows. Opening a different run
+    // clears the marker since they're focused on a new thing.
+    if (id === null) setLastViewedRun(selectedRun);
+    else setLastViewedRun(null);
     setSelectedRun(id);
     setSelectedNode(null);
     const params = new URLSearchParams(searchParams.toString());
@@ -422,6 +429,31 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           searchText={filterState.filterText}
           setSearchText={filterState.setFilterText}
           onClearAll={() => clearAllFilters(filterState)}
+          trailingActions={
+            <div className="flex items-center gap-1">
+              <button
+                disabled={!selectedRun}
+                onClick={async () => {
+                  if (!selectedRun) return;
+                  await retryRun(selectedRun).catch(() => null);
+                  refresh();
+                }}
+                title={
+                  selectedRun ? `Rerun ${selectedRun}` : "Select a run to rerun"
+                }
+                className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[var(--muted)] disabled:hover:border-[var(--border)] transition-colors"
+              >
+                ↻ Rerun
+              </button>
+              <button
+                disabled
+                title="Delete (not implemented yet)"
+                className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] opacity-40 cursor-not-allowed"
+              >
+                ✕ Delete
+              </button>
+            </div>
+          }
         />
       </div>
 
@@ -434,12 +466,19 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           <div className="flex-1 overflow-y-auto">
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
+              const isLastViewed = !selectedRun && lastViewedRun === r.id;
               return (
                 <div
                   key={r.id}
                   data-run-id={r.id}
                   onClick={() => selectRun(isActive ? null : r.id)}
-                  className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${isActive ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
+                  className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+                    isActive
+                      ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]"
+                      : isLastViewed
+                        ? "bg-[var(--surface-raised)]/40 border-l-2 border-l-[var(--accent)]/40"
+                        : ""
+                  }`}
                 >
                   <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
                 </div>
