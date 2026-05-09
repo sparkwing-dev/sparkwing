@@ -878,6 +878,19 @@ function NodeRow({
 
 // --- run row variants ---
 
+function fmtFullDate(ts: string): string {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function fmtClock(ts: string): string {
   if (!ts) return "—";
   return new Date(ts).toLocaleTimeString([], {
@@ -924,7 +937,7 @@ function FullRunRow({
       >
         {compact ? (
           <span
-            className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
+            className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
           />
         ) : (
           <StatusLabel status={r.status} />
@@ -994,7 +1007,7 @@ function FullRunRow({
             iso={r.started_at}
             field="started"
             ctx={ctx}
-            tooltip="Started"
+            tooltip={`Started ${fmtFullDate(r.started_at)}`}
           >
             <span className="text-[var(--foreground)]">
               {fmtClock(r.started_at)}
@@ -1006,7 +1019,7 @@ function FullRunRow({
               iso={r.finished_at}
               field="finished"
               ctx={ctx}
-              tooltip="Finished"
+              tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
             >
               <span className="text-[var(--foreground)]">
                 {fmtClock(r.finished_at)}
@@ -1022,7 +1035,7 @@ function FullRunRow({
               <span>({fmtMs(elapsedMs)})</span>
             </Tooltip>
           )}
-          <Tooltip content="Time since">
+          <Tooltip content={fmtFullDate(sinceTs)}>
             <span>· {fmtAgo(sinceTs)}</span>
           </Tooltip>
         </span>
@@ -1032,7 +1045,7 @@ function FullRunRow({
             iso={r.started_at}
             field="started"
             ctx={ctx}
-            tooltip="Started"
+            tooltip={`Started ${fmtFullDate(r.started_at)}`}
           >
             <span className="text-[var(--muted)] font-mono tabular-nums">
               started{" "}
@@ -1046,7 +1059,7 @@ function FullRunRow({
               iso={r.finished_at}
               field="finished"
               ctx={ctx}
-              tooltip="Finished"
+              tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
             >
               <span className="text-[var(--muted)] font-mono tabular-nums">
                 finished{" "}
@@ -1070,7 +1083,7 @@ function FullRunRow({
               </span>
             </span>
           </Tooltip>
-          <Tooltip content="Time since">
+          <Tooltip content={fmtFullDate(sinceTs)}>
             <span className="text-[var(--muted)] font-mono tabular-nums">
               {fmtAgo(sinceTs)}
             </span>
