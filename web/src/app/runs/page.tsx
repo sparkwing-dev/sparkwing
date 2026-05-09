@@ -212,7 +212,19 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [selectedRun, setSelectedRun] = useState<string | null>(
     searchParams.get("run"),
   );
-  const [lastViewedRun, setLastViewedRun] = useState<string | null>(null);
+  // checkedRuns is the selection set — what rerun / delete operate
+  // on. The detail pane (selectedRun) is a separate "viewing" state;
+  // opening a detail also adds that run to the selection so the user
+  // sees what's selected, but un-viewing doesn't drop it from the set.
+  const [checkedRuns, setCheckedRuns] = useState<Set<string>>(new Set());
+  const toggleChecked = (id: string) => {
+    setCheckedRuns((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
@@ -399,14 +411,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   };
 
   const selectRun = (id: string | null) => {
-    // Closing the detail pane (id === null) leaves a "last viewed"
-    // highlight on the row so the user doesn't lose their place when
-    // the list expands back to wide rows. Opening a different run
-    // clears the marker since they're focused on a new thing.
-    if (id === null) setLastViewedRun(selectedRun);
-    else setLastViewedRun(null);
     setSelectedRun(id);
     setSelectedNode(null);
+    if (id) {
+      // Viewing a run adds it to the selection so its highlight
+      // persists when the detail pane closes.
+      setCheckedRuns((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    }
     const params = new URLSearchParams(searchParams.toString());
     if (id) params.set("run", id);
     else params.delete("run");
@@ -431,15 +442,25 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           onClearAll={() => clearAllFilters(filterState)}
           trailingActions={
             <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[var(--muted)] mr-1">
+                {checkedRuns.size > 0
+                  ? `${checkedRuns.size} selected`
+                  : "no selection"}
+              </span>
               <button
-                disabled={!selectedRun}
+                disabled={checkedRuns.size !== 1}
                 onClick={async () => {
-                  if (!selectedRun) return;
-                  await retryRun(selectedRun).catch(() => null);
+                  if (checkedRuns.size !== 1) return;
+                  const [id] = checkedRuns;
+                  await retryRun(id).catch(() => null);
                   refresh();
                 }}
                 title={
-                  selectedRun ? `Rerun ${selectedRun}` : "Select a run to rerun"
+                  checkedRuns.size === 0
+                    ? "Select a run to rerun"
+                    : checkedRuns.size > 1
+                      ? "Rerun supports one run at a time"
+                      : `Rerun ${[...checkedRuns][0]}`
                 }
                 className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[var(--muted)] disabled:hover:border-[var(--border)] transition-colors"
               >
@@ -447,7 +468,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               </button>
               <button
                 disabled
-                title="Delete (not implemented yet)"
+                title={
+                  checkedRuns.size > 0
+                    ? `Delete ${checkedRuns.size} run${checkedRuns.size === 1 ? "" : "s"} (not implemented yet)`
+                    : "Delete (not implemented yet)"
+                }
                 className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] opacity-40 cursor-not-allowed"
               >
                 ✕ Delete
@@ -466,21 +491,29 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           <div className="flex-1 overflow-y-auto">
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
-              const isLastViewed = !selectedRun && lastViewedRun === r.id;
+              const isChecked = checkedRuns.has(r.id);
               return (
                 <div
                   key={r.id}
                   data-run-id={r.id}
                   onClick={() => selectRun(isActive ? null : r.id)}
-                  className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
-                    isActive
+                  className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
+                    isChecked
                       ? "bg-violet-500/15 border-l-4 border-l-violet-400"
-                      : isLastViewed
-                        ? "bg-violet-500/[0.07] border-l-4 border-l-violet-400/50"
-                        : ""
+                      : ""
                   }`}
                 >
-                  <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggleChecked(r.id)}
+                    aria-label="select run"
+                    className="mt-1 shrink-0 cursor-pointer accent-violet-500"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
+                  </div>
                 </div>
               );
             })}
