@@ -721,9 +721,20 @@ export function FullFilterBar({
                             className={`flex items-center hover:bg-[var(--surface-raised)] ${isExcluded ? "opacity-70" : ""}`}
                           >
                             <button
-                              onClick={() =>
-                                toggleFilterHelper(f.values, f.set, opt)
-                              }
+                              onClick={() => {
+                                if (isSelected || isExcluded) {
+                                  if (isSelected)
+                                    f.set(f.values.filter((v) => v !== opt));
+                                  if (isExcluded && f.setExclude)
+                                    f.setExclude(
+                                      (f.excludeValues || []).filter(
+                                        (v) => v !== opt,
+                                      ),
+                                    );
+                                } else {
+                                  f.set([...f.values, opt]);
+                                }
+                              }}
                               className={`flex-1 text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 ${
                                 isSelected ? f.activeText : ""
                               } ${isExcluded ? "text-red-300 line-through" : ""}`}
