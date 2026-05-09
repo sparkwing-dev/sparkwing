@@ -216,6 +216,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [filterAfter, setFilterAfter] = useState<string>("");
   const [filterBefore, setFilterBefore] = useState<string>("");
   const [filterText, setFilterText] = useState<string>("");
+  const [excludeStatus, setExcludeStatus] = useState<string[]>([]);
+  const [excludeRepo, setExcludeRepo] = useState<string[]>([]);
+  const [excludePipeline, setExcludePipeline] = useState<string[]>([]);
+  const [excludeBranch, setExcludeBranch] = useState<string[]>([]);
+  const [excludeCommit, setExcludeCommit] = useState<string[]>([]);
+  const [excludeTag, setExcludeTag] = useState<string[]>([]);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [showTrigger, setShowTrigger] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -332,20 +338,24 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const statuses = ["success", "failed", "running", "cancelled"];
 
   const topLevel = runs.filter((r) => {
+    const repo = repoLabel(r);
+    const branch = r.git_branch || "";
+    const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
+    const tags = pipelineMeta[r.pipeline]?.tags || [];
+    if (excludeStatus.includes(r.status)) return false;
+    if (excludeRepo.includes(repo)) return false;
+    if (excludePipeline.includes(r.pipeline)) return false;
+    if (excludeBranch.includes(branch)) return false;
+    if (sha7 && excludeCommit.includes(sha7)) return false;
+    if (excludeTag.some((t) => tags.includes(t))) return false;
     if (filterStatus.length && !filterStatus.includes(r.status)) return false;
-    if (filterRepo.length && !filterRepo.includes(repoLabel(r))) return false;
+    if (filterRepo.length && !filterRepo.includes(repo)) return false;
     if (filterPipeline.length && !filterPipeline.includes(r.pipeline))
       return false;
-    if (filterBranch.length && !filterBranch.includes(r.git_branch || ""))
+    if (filterBranch.length && !filterBranch.includes(branch)) return false;
+    if (filterCommit.length && !filterCommit.includes(sha7)) return false;
+    if (filterTag.length && !filterTag.some((t) => tags.includes(t)))
       return false;
-    if (filterCommit.length) {
-      const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
-      if (!filterCommit.includes(sha7)) return false;
-    }
-    if (filterTag.length) {
-      const tags = pipelineMeta[r.pipeline]?.tags || [];
-      if (!filterTag.some((t) => tags.includes(t))) return false;
-    }
     if (filterAfter || filterBefore) {
       const ts = new Date(r.started_at).getTime();
       if (filterAfter && ts < new Date(filterAfter).getTime()) return false;
@@ -386,12 +396,66 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     filterBranch.length +
     filterCommit.length +
     filterTag.length +
+    excludeStatus.length +
+    excludeRepo.length +
+    excludePipeline.length +
+    excludeBranch.length +
+    excludeCommit.length +
+    excludeTag.length +
     (filterAfter || filterBefore ? 1 : 0) +
     (filterText.trim() ? 1 : 0);
 
   const run = detail?.run || null;
   const nodes = detail?.nodes || [];
   const node = nodes.find((n) => n.id === selectedNode) || null;
+
+  const facetState: Record<
+    FilterFacet,
+    [string[], (v: string[]) => void, string[], (v: string[]) => void]
+  > = {
+    status: [filterStatus, setFilterStatus, excludeStatus, setExcludeStatus],
+    repo: [filterRepo, setFilterRepo, excludeRepo, setExcludeRepo],
+    pipeline: [
+      filterPipeline,
+      setFilterPipeline,
+      excludePipeline,
+      setExcludePipeline,
+    ],
+    branch: [filterBranch, setFilterBranch, excludeBranch, setExcludeBranch],
+    commit: [filterCommit, setFilterCommit, excludeCommit, setExcludeCommit],
+    tag: [filterTag, setFilterTag, excludeTag, setExcludeTag],
+  };
+
+  const isoToLocal = (iso: string) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+  };
+
+  const filterCtx: FilterCtx = {
+    isIncluded: (facet, value) => facetState[facet][0].includes(value),
+    isExcluded: (facet, value) => facetState[facet][2].includes(value),
+    toggle: (facet, value, mode) => {
+      const [inc, setInc, exc, setExc] = facetState[facet];
+      if (mode === "include") {
+        if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
+        else {
+          setInc([...inc, value]);
+          if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
+        }
+      } else {
+        if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
+        else {
+          setExc([...exc, value]);
+          if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
+        }
+      }
+    },
+    setBefore: (iso) => setFilterBefore(isoToLocal(iso)),
+    setAfter: (iso) => setFilterAfter(isoToLocal(iso)),
+  };
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
@@ -420,6 +484,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             setFilterCommit([]);
             setFilterAfter("");
             setFilterBefore("");
+            setFilterText("");
+            setExcludeStatus([]);
+            setExcludeRepo([]);
+            setExcludePipeline([]);
+            setExcludeBranch([]);
+            setExcludeCommit([]);
+            setExcludeTag([]);
           }}
           dateGroup={{
             after: filterAfter,
@@ -442,6 +513,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               label: "STATUS",
               values: filterStatus,
               set: setFilterStatus,
+              excludeValues: excludeStatus,
+              setExclude: setExcludeStatus,
               options: statuses,
               color: "text-emerald-400",
               activeBg: "bg-emerald-500/15",
@@ -452,6 +525,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               label: "REPO",
               values: filterRepo,
               set: setFilterRepo,
+              excludeValues: excludeRepo,
+              setExclude: setExcludeRepo,
               options: repos,
               color: "text-cyan-400",
               activeBg: "bg-cyan-500/15",
@@ -462,6 +537,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               label: "PIPELINE",
               values: filterPipeline,
               set: setFilterPipeline,
+              excludeValues: excludePipeline,
+              setExclude: setExcludePipeline,
               options: pipelines,
               color: "text-violet-400",
               activeBg: "bg-violet-500/15",
@@ -472,6 +549,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               label: "BRANCH",
               values: filterBranch,
               set: setFilterBranch,
+              excludeValues: excludeBranch,
+              setExclude: setExcludeBranch,
               options: branches,
               color: "text-amber-400",
               activeBg: "bg-amber-500/15",
@@ -482,6 +561,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               label: "COMMIT",
               values: filterCommit,
               set: setFilterCommit,
+              excludeValues: excludeCommit,
+              setExclude: setExcludeCommit,
               options: commits,
               color: "text-sky-400",
               activeBg: "bg-sky-500/15",
@@ -492,6 +573,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               label: "TAG",
               values: filterTag,
               set: setFilterTag,
+              excludeValues: excludeTag,
+              setExclude: setExcludeTag,
               options: allTags,
               color: "text-pink-400",
               activeBg: "bg-pink-500/15",
@@ -518,7 +601,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   onClick={() => selectRun(isActive ? null : r.id)}
                   className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${isActive ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
                 >
-                  {run ? <CompactRunRow r={r} /> : <FullRunRow r={r} />}
+                  {run ? (
+                    <CompactRunRow r={r} />
+                  ) : (
+                    <FullRunRow r={r} ctx={filterCtx} />
+                  )}
                 </div>
               );
             })}
@@ -564,6 +651,114 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         )}
       </div>
     </div>
+  );
+}
+
+// --- filter ctx ---
+
+type FilterFacet = "status" | "repo" | "pipeline" | "branch" | "commit" | "tag";
+
+interface FilterCtx {
+  isIncluded: (facet: FilterFacet, value: string) => boolean;
+  isExcluded: (facet: FilterFacet, value: string) => boolean;
+  toggle: (
+    facet: FilterFacet,
+    value: string,
+    mode: "include" | "exclude",
+  ) => void;
+  setBefore: (iso: string) => void;
+  setAfter: (iso: string) => void;
+}
+
+function FilterableValue({
+  facet,
+  value,
+  ctx,
+  children,
+}: {
+  facet: FilterFacet;
+  value: string;
+  ctx: FilterCtx;
+  children: React.ReactNode;
+}) {
+  const incl = ctx.isIncluded(facet, value);
+  const excl = ctx.isExcluded(facet, value);
+  return (
+    <span
+      className="relative group/fv inline-flex items-center"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span
+        className={
+          incl
+            ? "underline decoration-dotted underline-offset-2"
+            : excl
+              ? "line-through opacity-60"
+              : ""
+        }
+      >
+        {children}
+      </span>
+      <span className="absolute bottom-full left-0 mb-1 hidden group-hover/fv:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            ctx.toggle(facet, value, "include");
+          }}
+          className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
+        >
+          {incl ? "✓ included" : "+ filter to"} {value}
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            ctx.toggle(facet, value, "exclude");
+          }}
+          className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
+        >
+          {excl ? "✗ excluded" : "− exclude"} {value}
+        </button>
+      </span>
+    </span>
+  );
+}
+
+function FilterableTimestamp({
+  iso,
+  ctx,
+  children,
+}: {
+  iso: string;
+  ctx: FilterCtx;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className="relative group/ft inline-flex items-center"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+      <span className="absolute bottom-full left-0 mb-1 hidden group-hover/ft:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[160px]">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            ctx.setBefore(iso);
+          }}
+          className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
+        >
+          + set as &apos;before&apos;
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            ctx.setAfter(iso);
+          }}
+          className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
+        >
+          + set as &apos;after&apos;
+        </button>
+      </span>
+    </span>
   );
 }
 
@@ -787,31 +982,41 @@ function fmtAgo(ts: string): string {
   return `${Math.floor(sec / 86_400)}d ago`;
 }
 
-function FullRunRow({ r }: { r: Run }) {
+function FullRunRow({ r, ctx }: { r: Run; ctx: FilterCtx }) {
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
   const elapsedMs = (finishedMs || Date.now()) - startedMs;
-  // "How long since" anchors on finish for completed runs and on
-  // start for in-flight ones — that's the freshness signal.
   const sinceTs = r.finished_at || r.started_at;
+  const repo = repoLabel(r);
+  const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
   return (
     <div className="grid grid-cols-[minmax(20rem,40rem)_minmax(0,1fr)] gap-6 items-start">
       <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <StatusLabel status={r.status} />
-        <span className="text-cyan-400/70 shrink-0">{repoLabel(r)}</span>
+        <FilterableValue facet="status" value={r.status} ctx={ctx}>
+          <StatusLabel status={r.status} />
+        </FilterableValue>
+        <FilterableValue facet="repo" value={repo} ctx={ctx}>
+          <span className="text-cyan-400/70 shrink-0">{repo}</span>
+        </FilterableValue>
         <span className="text-[var(--muted)] shrink-0">/</span>
-        <span className="font-medium text-sm text-violet-300 truncate">
-          {r.pipeline}
-        </span>
+        <FilterableValue facet="pipeline" value={r.pipeline} ctx={ctx}>
+          <span className="font-medium text-sm text-violet-300 truncate">
+            {r.pipeline}
+          </span>
+        </FilterableValue>
         {r.git_branch && (
-          <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
-            ⎇ {r.git_branch}
-          </span>
+          <FilterableValue facet="branch" value={r.git_branch} ctx={ctx}>
+            <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
+              ⎇ {r.git_branch}
+            </span>
+          </FilterableValue>
         )}
-        {r.git_sha && (
-          <span className="font-mono text-[var(--muted)] shrink-0">
-            {r.git_sha.slice(0, 7)}
-          </span>
+        {sha7 && (
+          <FilterableValue facet="commit" value={sha7} ctx={ctx}>
+            <span className="font-mono text-[var(--muted)] shrink-0">
+              {sha7}
+            </span>
+          </FilterableValue>
         )}
         {r.trigger_source && (
           <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
@@ -819,18 +1024,28 @@ function FullRunRow({ r }: { r: Run }) {
           </span>
         )}
         <span className="basis-full" />
-        <span className="text-[var(--muted)] font-mono tabular-nums">
-          started{" "}
-          <span className="text-[var(--foreground)]">
-            {fmtClock(r.started_at)}
+        <FilterableTimestamp iso={r.started_at} ctx={ctx}>
+          <span className="text-[var(--muted)] font-mono tabular-nums">
+            started{" "}
+            <span className="text-[var(--foreground)]">
+              {fmtClock(r.started_at)}
+            </span>
           </span>
-        </span>
-        <span className="text-[var(--muted)] font-mono tabular-nums">
-          finished{" "}
-          <span className="text-[var(--foreground)]">
-            {r.finished_at ? fmtClock(r.finished_at) : "—"}
+        </FilterableTimestamp>
+        {r.finished_at ? (
+          <FilterableTimestamp iso={r.finished_at} ctx={ctx}>
+            <span className="text-[var(--muted)] font-mono tabular-nums">
+              finished{" "}
+              <span className="text-[var(--foreground)]">
+                {fmtClock(r.finished_at)}
+              </span>
+            </span>
+          </FilterableTimestamp>
+        ) : (
+          <span className="text-[var(--muted)] font-mono tabular-nums">
+            finished <span className="text-[var(--foreground)]">—</span>
           </span>
-        </span>
+        )}
         <span className="text-[var(--muted)] font-mono tabular-nums">
           duration{" "}
           <span className="text-[var(--foreground)]">
@@ -908,6 +1123,8 @@ interface FilterGroup {
   color?: string;
   activeBg: string;
   activeText: string;
+  excludeValues?: string[];
+  setExclude?: (v: string[]) => void;
 }
 
 interface DateGroup {
@@ -994,19 +1211,58 @@ function FullFilterBar({
                     )}
                     {filteredOpts.map((opt) => {
                       const isSelected = f.values.includes(opt);
+                      const isExcluded = (f.excludeValues || []).includes(opt);
                       return (
-                        <button
+                        <div
                           key={opt}
-                          onClick={() => toggleFilter(f.values, f.set, opt)}
-                          className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] font-mono flex items-center gap-2 ${isSelected ? f.activeText : ""}`}
+                          className={`flex items-center hover:bg-[var(--surface-raised)] ${isExcluded ? "opacity-70" : ""}`}
                         >
-                          <span
-                            className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${isSelected ? `${f.activeBg} border-current` : "border-[var(--border)]"}`}
+                          <button
+                            onClick={() => toggleFilter(f.values, f.set, opt)}
+                            className={`flex-1 text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 ${
+                              isSelected ? f.activeText : ""
+                            } ${isExcluded ? "text-red-300 line-through" : ""}`}
                           >
-                            {isSelected && "✓"}
-                          </span>
-                          {f.key === "branch" ? `⎇ ${opt}` : opt}
-                        </button>
+                            <span
+                              className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                                isSelected
+                                  ? `${f.activeBg} border-current`
+                                  : isExcluded
+                                    ? "bg-red-500/15 border-red-400 text-red-400"
+                                    : "border-[var(--border)]"
+                              }`}
+                            >
+                              {isSelected ? "✓" : isExcluded ? "−" : ""}
+                            </span>
+                            {f.key === "branch" ? `⎇ ${opt}` : opt}
+                          </button>
+                          {f.setExclude && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!f.setExclude) return;
+                                const exc = f.excludeValues || [];
+                                if (exc.includes(opt)) {
+                                  f.setExclude(exc.filter((v) => v !== opt));
+                                } else {
+                                  f.setExclude([...exc, opt]);
+                                  if (f.values.includes(opt))
+                                    f.set(f.values.filter((v) => v !== opt));
+                                }
+                              }}
+                              title={
+                                isExcluded ? "remove exclusion" : "exclude"
+                              }
+                              className={`px-2 py-1.5 text-[11px] hover:bg-red-500/10 ${
+                                isExcluded
+                                  ? "text-red-300"
+                                  : "text-[var(--muted)] hover:text-red-300"
+                              }`}
+                            >
+                              −
+                            </button>
+                          )}
+                        </div>
                       );
                     })}
                     {filteredOpts.length === 0 && (
@@ -1036,13 +1292,34 @@ function FullFilterBar({
           {groups.flatMap((f) =>
             f.values.map((v) => (
               <span
-                key={`${f.key}-${v}`}
+                key={`${f.key}-inc-${v}`}
                 className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
               >
                 {f.key === "branch" ? `⎇ ${v}` : v}
                 <button
                   onClick={() => toggleFilter(f.values, f.set, v)}
                   className="hover:text-white"
+                >
+                  ×
+                </button>
+              </span>
+            )),
+          )}
+          {groups.flatMap((f) =>
+            (f.excludeValues || []).map((v) => (
+              <span
+                key={`${f.key}-exc-${v}`}
+                className="inline-flex items-center gap-1 bg-red-500/15 text-red-300 px-2 py-0.5 rounded text-xs font-mono line-through"
+              >
+                NOT {f.key === "branch" ? `⎇ ${v}` : v}
+                <button
+                  onClick={() => {
+                    if (!f.setExclude) return;
+                    f.setExclude(
+                      (f.excludeValues || []).filter((x) => x !== v),
+                    );
+                  }}
+                  className="hover:text-white no-underline"
                 >
                   ×
                 </button>
