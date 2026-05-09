@@ -441,11 +441,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   onClick={() => selectRun(isActive ? null : r.id)}
                   className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${isActive ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
                 >
-                  {run ? (
-                    <CompactRunRow r={r} />
-                  ) : (
-                    <FullRunRow r={r} ctx={filterCtx} />
-                  )}
+                  <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
                 </div>
               );
             })}
@@ -896,80 +892,93 @@ function fmtAgo(ts: string): string {
   return `${Math.floor(sec / 86_400)}d ago`;
 }
 
-function FullRunRow({ r, ctx }: { r: Run; ctx: FilterCtx }) {
+function FullRunRow({
+  r,
+  ctx,
+  compact = false,
+}: {
+  r: Run;
+  ctx: FilterCtx;
+  compact?: boolean;
+}) {
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
   const elapsedMs = (finishedMs || Date.now()) - startedMs;
   const sinceTs = r.finished_at || r.started_at;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
-  return (
-    <div className="grid grid-cols-[minmax(20rem,40rem)_minmax(0,1fr)] gap-6 items-start">
-      <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <FilterableValue facet="status" value={r.status} ctx={ctx}>
-          <StatusLabel status={r.status} />
-        </FilterableValue>
-        <FilterableValue facet="repo" value={repo} ctx={ctx}>
-          <span className="text-cyan-400/70 shrink-0">{repo}</span>
-        </FilterableValue>
-        <span className="text-[var(--muted)] shrink-0">/</span>
-        <FilterableValue facet="pipeline" value={r.pipeline} ctx={ctx}>
-          <span className="font-medium text-sm text-violet-300 truncate">
-            {r.pipeline}
+
+  const meta = (
+    <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <FilterableValue facet="status" value={r.status} ctx={ctx}>
+        <StatusLabel status={r.status} />
+      </FilterableValue>
+      <FilterableValue facet="repo" value={repo} ctx={ctx}>
+        <span className="text-cyan-400/70 shrink-0">{repo}</span>
+      </FilterableValue>
+      <span className="text-[var(--muted)] shrink-0">/</span>
+      <FilterableValue facet="pipeline" value={r.pipeline} ctx={ctx}>
+        <span className="font-medium text-sm text-violet-300 truncate">
+          {r.pipeline}
+        </span>
+      </FilterableValue>
+      {r.git_branch && (
+        <FilterableValue facet="branch" value={r.git_branch} ctx={ctx}>
+          <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
+            ⎇ {r.git_branch}
           </span>
         </FilterableValue>
-        {r.git_branch && (
-          <FilterableValue facet="branch" value={r.git_branch} ctx={ctx}>
-            <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
-              ⎇ {r.git_branch}
-            </span>
-          </FilterableValue>
-        )}
-        {sha7 && (
-          <FilterableValue facet="commit" value={sha7} ctx={ctx}>
-            <span className="font-mono text-[var(--muted)] shrink-0">
-              {sha7}
-            </span>
-          </FilterableValue>
-        )}
-        {r.trigger_source && (
-          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
-            {r.trigger_source}
+      )}
+      {sha7 && (
+        <FilterableValue facet="commit" value={sha7} ctx={ctx}>
+          <span className="font-mono text-[var(--muted)] shrink-0">{sha7}</span>
+        </FilterableValue>
+      )}
+      {r.trigger_source && (
+        <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
+          {r.trigger_source}
+        </span>
+      )}
+      <span className="basis-full" />
+      <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
+        <span className="text-[var(--muted)] font-mono tabular-nums">
+          started{" "}
+          <span className="text-[var(--foreground)]">
+            {fmtClock(r.started_at)}
           </span>
-        )}
-        <span className="basis-full" />
-        <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
+        </span>
+      </FilterableTimestamp>
+      {r.finished_at ? (
+        <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
           <span className="text-[var(--muted)] font-mono tabular-nums">
-            started{" "}
+            finished{" "}
             <span className="text-[var(--foreground)]">
-              {fmtClock(r.started_at)}
+              {fmtClock(r.finished_at)}
             </span>
           </span>
         </FilterableTimestamp>
-        {r.finished_at ? (
-          <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
-            <span className="text-[var(--muted)] font-mono tabular-nums">
-              finished{" "}
-              <span className="text-[var(--foreground)]">
-                {fmtClock(r.finished_at)}
-              </span>
-            </span>
-          </FilterableTimestamp>
-        ) : (
-          <span className="text-[var(--muted)] font-mono tabular-nums">
-            finished <span className="text-[var(--foreground)]">—</span>
-          </span>
-        )}
+      ) : (
         <span className="text-[var(--muted)] font-mono tabular-nums">
-          duration{" "}
-          <span className="text-[var(--foreground)]">
-            {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
-          </span>
+          finished <span className="text-[var(--foreground)]">—</span>
         </span>
-        <span className="text-[var(--muted)] font-mono tabular-nums">
-          {fmtAgo(sinceTs)}
+      )}
+      <span className="text-[var(--muted)] font-mono tabular-nums">
+        duration{" "}
+        <span className="text-[var(--foreground)]">
+          {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
         </span>
-      </div>
+      </span>
+      <span className="text-[var(--muted)] font-mono tabular-nums">
+        {fmtAgo(sinceTs)}
+      </span>
+    </div>
+  );
+
+  if (compact) return meta;
+
+  return (
+    <div className="grid grid-cols-[minmax(20rem,40rem)_minmax(0,1fr)] gap-6 items-start">
+      {meta}
       <div
         className="min-w-0 text-[11px] font-mono truncate"
         title={r.error || r.status}
