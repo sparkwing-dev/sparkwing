@@ -14,9 +14,13 @@ export default function StatusLabel({ status }: { status: string }) {
     complete: {
       bg: "bg-green-500/15",
       text: "text-green-400",
-      label: "passed",
+      label: "success",
     },
-    success: { bg: "bg-green-500/15", text: "text-green-400", label: "passed" },
+    success: {
+      bg: "bg-green-500/15",
+      text: "text-green-400",
+      label: "success",
+    },
     failed: { bg: "bg-red-500/15", text: "text-red-400", label: "failed" },
     cached: { bg: "bg-cyan-500/15", text: "text-cyan-400", label: "cached" },
     paused: {
