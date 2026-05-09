@@ -9,7 +9,11 @@ interface TooltipProps {
 
 export default function Tooltip({ content, children }: TooltipProps) {
   const [show, setShow] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number; align: "center" | "left" | "right" }>({ x: 0, y: 0, align: "center" });
+  const [pos, setPos] = useState<{
+    x: number;
+    y: number;
+    align: "center" | "left" | "right";
+  }>({ x: 0, y: 0, align: "center" });
   const ref = useRef<HTMLSpanElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -23,7 +27,7 @@ export default function Tooltip({ content, children }: TooltipProps) {
     // If centered tooltip would clip left edge, anchor to left
     if (cx - tipWidth / 2 < 8) {
       setPos({ x: rect.left, y: rect.top - 6, align: "left" });
-    // If it would clip right edge, anchor to right
+      // If it would clip right edge, anchor to right
     } else if (cx + tipWidth / 2 > window.innerWidth - 8) {
       setPos({ x: rect.right, y: rect.top - 6, align: "right" });
     } else {
@@ -40,17 +44,19 @@ export default function Tooltip({ content, children }: TooltipProps) {
     setShow(false);
   };
 
-  const transform = pos.align === "left"
-    ? "translate(0, -100%)"
-    : pos.align === "right"
-      ? "translate(-100%, -100%)"
-      : "translate(-50%, -100%)";
+  const transform =
+    pos.align === "left"
+      ? "translate(0, -100%)"
+      : pos.align === "right"
+        ? "translate(-100%, -100%)"
+        : "translate(-50%, -100%)";
 
-  const arrowAlign = pos.align === "left"
-    ? "ml-3"
-    : pos.align === "right"
-      ? "mr-3 ml-auto"
-      : "mx-auto";
+  const arrowAlign =
+    pos.align === "left"
+      ? "ml-3"
+      : pos.align === "right"
+        ? "mr-3 ml-auto"
+        : "mx-auto";
 
   return (
     <>
@@ -58,7 +64,6 @@ export default function Tooltip({ content, children }: TooltipProps) {
         ref={ref}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="inline-flex items-center"
       >
         {children}
       </span>
@@ -71,7 +76,9 @@ export default function Tooltip({ content, children }: TooltipProps) {
           <div className="bg-[#1e293b] border border-[var(--border)] rounded-lg px-3 py-2 text-xs shadow-xl max-w-xs">
             {content}
           </div>
-          <div className={`w-2 h-2 bg-[#1e293b] border-b border-r border-[var(--border)] rotate-45 -mt-1 ${arrowAlign}`} />
+          <div
+            className={`w-2 h-2 bg-[#1e293b] border-b border-r border-[var(--border)] rotate-45 -mt-1 ${arrowAlign}`}
+          />
         </div>
       )}
     </>
