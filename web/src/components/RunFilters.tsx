@@ -648,7 +648,7 @@ export function FullFilterBar({
             const excCount = (f.excludeValues || []).length;
             const anyActive = incCount + excCount > 0;
             return (
-              <div key={f.key} className="relative">
+              <div key={f.key} className="relative" data-dropdown-region>
                 <button
                   onClick={() =>
                     setOpenDropdown(openDropdown === f.key ? null : f.key)
@@ -1088,7 +1088,7 @@ function DateFilterButton({
     (group.finishedAfter || group.finishedBefore ? 1 : 0);
   const active = activeCount > 0;
   return (
-    <div className="relative">
+    <div className="relative" data-dropdown-region>
       <button
         onClick={onToggle}
         className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
@@ -1177,10 +1177,19 @@ export function useFilterDropdownState() {
   useEffect(() => {
     if (!openDropdown) return;
     const handler = (e: MouseEvent) => {
-      if (!filterRef.current || filterRef.current.contains(e.target as Node))
-        return;
-      e.stopPropagation();
-      e.preventDefault();
+      if (!filterRef.current) return;
+      const target = e.target as Element;
+      // Click landed inside a dropdown trigger or panel — let it
+      // handle itself (toggle, switch to another dropdown, etc.).
+      if (target.closest("[data-dropdown-region]")) return;
+      // Click outside the filter bar entirely — swallow so the
+      // hidden detail row underneath doesn't also get hit.
+      if (!filterRef.current.contains(target)) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+      // Empty space inside the filter bar — close without swallowing
+      // so other inline controls (chips, search input) still react.
       setOpenDropdown(null);
     };
     const onKey = (e: KeyboardEvent) => {
