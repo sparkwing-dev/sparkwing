@@ -883,7 +883,7 @@ export function FullFilterBar({
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
                 inc
                   ? "bg-slate-500/15 text-slate-200"
-                  : "bg-red-500/15 text-red-300 line-through"
+                  : "bg-red-500/15 text-red-300"
               }`}
             >
               <button
@@ -893,7 +893,7 @@ export function FullFilterBar({
               >
                 {inc ? "+" : "−"}
               </button>
-              {inc ? t.text : `-${t.text}`}
+              {t.text}
               <button
                 onClick={() => removeSearchTerm(i)}
                 className="hover:text-white no-underline"
