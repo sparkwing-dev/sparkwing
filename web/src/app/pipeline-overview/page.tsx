@@ -393,7 +393,7 @@ function RecentRuns({ runs }: { runs: Run[] }) {
               className={`w-1.5 h-1.5 rounded-full ${sparkColor(r.status)}`}
             />
             <a
-              href={`/#/runs/${r.id}`}
+              href={`/runs?run=${r.id}`}
               className="font-mono text-xs text-[var(--accent)] hover:underline truncate flex-1"
             >
               {r.id}
