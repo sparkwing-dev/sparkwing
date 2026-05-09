@@ -147,12 +147,8 @@ function Pipelines() {
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState<string[]>([]);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [showTrigger, setShowTrigger] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
-
-  const toggle = (key: string) =>
-    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const toggleFilter = (
     arr: string[],
@@ -482,8 +478,6 @@ function Pipelines() {
             run={run}
             nodes={nodes}
             node={node}
-            collapsed={collapsed}
-            toggle={toggle}
             showTrigger={showTrigger}
             setShowTrigger={setShowTrigger}
             onSelectNode={setSelectedNode}
@@ -976,8 +970,6 @@ function RunDetailPane({
   run,
   nodes,
   node,
-  collapsed,
-  toggle,
   showTrigger,
   setShowTrigger,
   onSelectNode,
@@ -986,8 +978,6 @@ function RunDetailPane({
   run: Run;
   nodes: RunNode[];
   node: RunNode | null;
-  collapsed: Record<string, boolean>;
-  toggle: (key: string) => void;
   showTrigger: boolean;
   setShowTrigger: (v: boolean) => void;
   onSelectNode: (id: string) => void;
@@ -997,6 +987,89 @@ function RunDetailPane({
   const selectedIsRunning =
     !!selected && !selected.finished_at && selected.status !== "pending";
   const runIsActive = run.status === "running";
+  const isTerminal =
+    run.status === "success" ||
+    run.status === "failed" ||
+    run.status === "cancelled";
+  const hasWork = !!(selected && (selected.work || selected.modifiers));
+
+  type TabKey =
+    | "logs"
+    | "work"
+    | "resources"
+    | "dag"
+    | "timeline"
+    | "summary"
+    | "setup";
+
+  const tabs: {
+    key: TabKey;
+    label: string;
+    count?: string;
+    visible: boolean;
+  }[] = [
+    { key: "logs", label: "Logs", visible: !!selected },
+    {
+      key: "work",
+      label: "Work",
+      count: hasWork ? `${selected?.work?.steps?.length ?? 0}` : undefined,
+      visible: hasWork,
+    },
+    { key: "resources", label: "Resources", visible: !!selected },
+    {
+      key: "dag",
+      label: "DAG",
+      count: nodes.length ? `${nodes.length}` : undefined,
+      visible: nodes.length > 0,
+    },
+    { key: "timeline", label: "Timeline", visible: nodes.length > 0 },
+    { key: "summary", label: "Summary", visible: isTerminal },
+    { key: "setup", label: "Setup", visible: true },
+  ];
+  const visibleTabs = tabs.filter((t) => t.visible);
+
+  const selectedId = selected?.id ?? null;
+  const [tab, setTab] = useState<TabKey>(
+    selected
+      ? "logs"
+      : isTerminal
+        ? "summary"
+        : nodes.length > 0
+          ? "dag"
+          : "setup",
+  );
+  const tabRef = useRef<TabKey>(tab);
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
+  const prevSelectedRef = useRef<string | null>(selectedId);
+
+  // Selection-driven tab routing: clicking a node should pull the
+  // detail pane to that node's logs, but only when there's a reason
+  // to switch — either we had no selection before, or the user is on
+  // a run-scoped tab where node-level info isn't visible. If they're
+  // already on a node-scoped tab (logs/work/resources), preserve it
+  // when bouncing between nodes.
+  useEffect(() => {
+    const prev = prevSelectedRef.current;
+    prevSelectedRef.current = selectedId;
+    if (!selectedId) return;
+    const t = tabRef.current;
+    if (
+      !prev ||
+      t === "dag" ||
+      t === "timeline" ||
+      t === "summary" ||
+      t === "setup"
+    ) {
+      setTab("logs");
+    }
+  }, [selectedId]);
+
+  const effectiveTab: TabKey =
+    visibleTabs.find((t) => t.key === tab)?.key ??
+    visibleTabs[0]?.key ??
+    "logs";
 
   return (
     <>
@@ -1040,20 +1113,6 @@ function RunDetailPane({
         />
       </div>
 
-      <SetupPanel
-        run={run}
-        collapsed={!!collapsed.setup}
-        onToggle={() => toggle("setup")}
-        onOpenRun={(id) => {
-          // Mirror the existing RetryLink behavior: click the
-          // sidebar row if present, otherwise navigate via query
-          // string. Keeps filter state intact in the common case.
-          const el = document.querySelector(`[data-run-id="${id}"]`);
-          if (el) (el as HTMLElement).click();
-          else window.location.assign(`?run=${id}`);
-        }}
-      />
-
       {selected && <SelectedNodePanel node={selected} />}
 
       {showTrigger && (
@@ -1069,120 +1128,83 @@ function RunDetailPane({
         </div>
       )}
 
-      {nodes.length > 0 && (
-        <div className="border-b border-[var(--border)] shrink-0">
+      <div className="border-b border-[var(--border)] shrink-0 flex items-center gap-1 px-2 bg-[var(--surface)] overflow-x-auto">
+        {visibleTabs.map((t) => (
           <button
-            onClick={() => toggle("dag")}
-            className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px whitespace-nowrap ${
+              effectiveTab === t.key
+                ? "border-cyan-400 text-[var(--foreground)]"
+                : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
           >
-            <span className="w-4 text-center">{collapsed.dag ? "▸" : "▾"}</span>
-            <span className="font-semibold text-[var(--foreground)]">DAG</span>
-            <span className="font-mono">{nodes.length} nodes</span>
+            <span className="font-semibold">{t.label}</span>
+            {t.count && (
+              <span className="ml-1.5 font-mono text-[var(--muted)]">
+                {t.count}
+              </span>
+            )}
           </button>
-          {!collapsed.dag && (
-            <div className="px-4 pb-3">
-              <DAG
-                nodes={nodes}
-                selected={selected?.id || null}
-                onSelect={onSelectNode}
-              />
-            </div>
-          )}
-        </div>
-      )}
+        ))}
+      </div>
 
-      {/* SummaryPanel: post-run rollup. Visible whenever the run has
-          reached a terminal status, mirroring the CLI's `--- Summary
-          ---` block (status, jobs table, errors, tips). Hidden while
-          the run is still running -- live progress is the DAG /
-          Logs view's job. */}
-      {(run.status === "success" ||
-        run.status === "failed" ||
-        run.status === "cancelled") && (
-        <SummaryPanel
-          run={run}
-          nodes={nodes}
-          collapsed={!!collapsed.summary}
-          onToggle={() => toggle("summary")}
-        />
-      )}
-
-      <div className="border-b border-[var(--border)] shrink-0">
-        <button
-          onClick={() => toggle("timeline")}
-          className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-        >
-          <span className="w-4 text-center">
-            {collapsed.timeline ? "▸" : "▾"}
-          </span>
-          <span className="font-semibold text-[var(--foreground)]">
-            Timeline
-          </span>
-          <span className="font-mono">{nodes.length} nodes</span>
-        </button>
-        {!collapsed.timeline && (
-          <div className="px-4 pb-3">
+      <div className="flex-1 overflow-y-auto bg-[#0d1117] relative">
+        {effectiveTab === "logs" && (
+          <div className="p-4">
+            <LogsPane run={run} node={selected} />
+          </div>
+        )}
+        {effectiveTab === "work" && selected && (
+          <div className="p-4">
+            <NodeWorkView node={selected} />
+          </div>
+        )}
+        {effectiveTab === "resources" && selected && (
+          <div className="p-4">
+            <ResourceChart
+              runID={run.id}
+              nodeID={selected.id}
+              isRunning={selectedIsRunning}
+            />
+          </div>
+        )}
+        {effectiveTab === "dag" && (
+          <div className="p-4">
+            <DAG
+              nodes={nodes}
+              selected={selected?.id || null}
+              onSelect={onSelectNode}
+            />
+          </div>
+        )}
+        {effectiveTab === "timeline" && (
+          <div className="p-4">
             <ExecutionWaterfall run={run} nodes={nodes} />
           </div>
         )}
-      </div>
-
-      {selected && (
-        <div className="border-b border-[var(--border)] shrink-0">
-          <button
-            onClick={() => toggle("resources")}
-            className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-          >
-            <span className="w-4 text-center">
-              {collapsed.resources ? "▸" : "▾"}
-            </span>
-            <span className="font-semibold text-[var(--foreground)]">
-              Resources
-            </span>
-          </button>
-          {!collapsed.resources && (
-            <div className="px-4 pb-3">
-              <ResourceChart
-                runID={run.id}
-                nodeID={selected.id}
-                isRunning={selectedIsRunning}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {selected && (selected.work || selected.modifiers) && (
-        <div className="border-b border-[var(--border)] shrink-0">
-          <button
-            onClick={() => toggle("work")}
-            className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-          >
-            <span className="w-4 text-center">
-              {collapsed.work ? "▸" : "▾"}
-            </span>
-            <span className="font-semibold text-[var(--foreground)]">Work</span>
-            <span className="font-mono">
-              {selected.work?.steps?.length ?? 0} steps
-              {(selected.work?.spawns?.length ?? 0) +
-                (selected.work?.spawn_each?.length ?? 0) >
-                0 &&
-                ` · ${
-                  (selected.work?.spawns?.length ?? 0) +
-                  (selected.work?.spawn_each?.length ?? 0)
-                } spawn`}
-            </span>
-          </button>
-          {!collapsed.work && (
-            <div className="px-4 pb-3">
-              <NodeWorkView node={selected} />
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto bg-[#0d1117] p-4 relative">
-        <LogsPane run={run} node={selected} />
+        {effectiveTab === "summary" && (
+          <SummaryPanel
+            run={run}
+            nodes={nodes}
+            collapsed={false}
+            onToggle={() => {}}
+            inline
+          />
+        )}
+        {effectiveTab === "setup" && (
+          <SetupPanel
+            run={run}
+            collapsed={false}
+            onToggle={() => {}}
+            inline
+            onOpenRun={(id) => {
+              const el = document.querySelector(`[data-run-id="${id}"]`);
+              if (el) (el as HTMLElement).click();
+              else window.location.assign(`?run=${id}`);
+            }}
+          />
+        )}
       </div>
     </>
   );

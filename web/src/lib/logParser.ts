@@ -26,6 +26,7 @@ export interface StepSection extends LogSection {
   name: string;
   status: "passed" | "failed" | "running";
   duration: string | null;
+  durationMs: number | null;
 }
 
 export interface ParsedLog {
@@ -152,7 +153,9 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
       return;
     }
     if (currentStartedAt != null && nextTS != null) {
-      current.duration = formatDuration(nextTS - currentStartedAt);
+      const ms = nextTS - currentStartedAt;
+      current.duration = formatDuration(ms);
+      current.durationMs = ms;
     }
     if (done && current.status === "running") current.status = "passed";
     sections.push(current);
@@ -189,6 +192,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           name: currentNode,
           status: "running",
           duration: null,
+          durationMs: null,
           lines: [],
         };
         currentStartedAt = recTS;
@@ -206,6 +210,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           name: `${currentNode} · ${stepName}`,
           status: "running",
           duration: null,
+          durationMs: null,
           lines: [],
         };
         currentStartedAt = recTS;
@@ -222,7 +227,10 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           if (outcome === "failed") current.status = "failed";
           else current.status = "passed";
           const dms = Number(rec.attrs?.duration_ms ?? 0);
-          if (dms > 0) current.duration = formatDuration(dms);
+          if (dms > 0) {
+            current.duration = formatDuration(dms);
+            current.durationMs = dms;
+          }
           closeCurrent(recTS, true, true);
         }
         break;
@@ -240,6 +248,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           name: `${currentNode} · ${stepName}`,
           status: "passed",
           duration: null,
+          durationMs: null,
           lines: reason ? [`[skipped: ${reason}]`] : ["[skipped]"],
         });
         lastPhaseIdx = sections.length - 1;
@@ -407,6 +416,7 @@ export function parseLogLines(lines: string[]): ParsedLog {
         name: stepMatch[1],
         status: "running",
         duration: null,
+        durationMs: null,
         lines: [],
       } as StepSection;
       continue;

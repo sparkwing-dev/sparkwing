@@ -157,6 +157,7 @@ export default function SetupPanel({
   collapsed,
   onToggle,
   onOpenRun,
+  inline = false,
 }: {
   run: Run;
   collapsed: boolean;
@@ -166,6 +167,10 @@ export default function SetupPanel({
   // Pipelines page wires this to its sidebar-click behavior so the
   // jump preserves filter state.
   onOpenRun?: (id: string) => void;
+  // When true, render body without the collapsible header chevron —
+  // the panel is being embedded somewhere (e.g., a tab) where the
+  // surrounding UI already names it.
+  inline?: boolean;
 }) {
   const inv: RunInvocation = run.invocation ?? {};
   const flags = inv.flags ?? {};
@@ -184,20 +189,22 @@ export default function SetupPanel({
       : null;
 
   return (
-    <div className="border-b border-[var(--border)] shrink-0">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-      >
-        <span className="w-4 text-center">{collapsed ? "▸" : "▾"}</span>
-        <span className="font-semibold text-[var(--foreground)]">Setup</span>
-        {inv.binary_source && (
-          <span className="text-[10px] uppercase tracking-wider font-mono text-[var(--muted)]">
-            {inv.binary_source}
-          </span>
-        )}
-      </button>
-      {!collapsed && (
+    <div className={inline ? "" : "border-b border-[var(--border)] shrink-0"}>
+      {!inline && (
+        <button
+          onClick={onToggle}
+          className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          <span className="w-4 text-center">{collapsed ? "▸" : "▾"}</span>
+          <span className="font-semibold text-[var(--foreground)]">Setup</span>
+          {inv.binary_source && (
+            <span className="text-[10px] uppercase tracking-wider font-mono text-[var(--muted)]">
+              {inv.binary_source}
+            </span>
+          )}
+        </button>
+      )}
+      {(inline || !collapsed) && (
         <div className="px-4 pb-3 space-y-1">
           <LabelRow label="run">
             <span

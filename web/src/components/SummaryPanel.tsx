@@ -139,11 +139,13 @@ export default function SummaryPanel({
   nodes,
   collapsed,
   onToggle,
+  inline = false,
 }: {
   run: Run;
   nodes: RunNode[];
   collapsed: boolean;
   onToggle: () => void;
+  inline?: boolean;
 }) {
   const tally = useMemo(() => buildTally(nodes), [nodes]);
   const failed = useMemo(
@@ -179,21 +181,27 @@ export default function SummaryPanel({
   const dur = durationMs(run);
 
   return (
-    <div className="border-b border-[var(--border)] shrink-0">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-      >
-        <span className="w-4 text-center">{collapsed ? "▸" : "▾"}</span>
-        <span className="font-semibold text-[var(--foreground)]">Summary</span>
-        <span className={`font-mono ${statusG.cls}`}>
-          {statusG.glyph} {run.status}
-        </span>
-        {dur > 0 && (
-          <span className="text-[var(--muted)] font-mono">({fmtMs(dur)})</span>
-        )}
-      </button>
-      {!collapsed && (
+    <div className={inline ? "" : "border-b border-[var(--border)] shrink-0"}>
+      {!inline && (
+        <button
+          onClick={onToggle}
+          className="w-full flex items-center gap-2 px-4 py-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          <span className="w-4 text-center">{collapsed ? "▸" : "▾"}</span>
+          <span className="font-semibold text-[var(--foreground)]">
+            Summary
+          </span>
+          <span className={`font-mono ${statusG.cls}`}>
+            {statusG.glyph} {run.status}
+          </span>
+          {dur > 0 && (
+            <span className="text-[var(--muted)] font-mono">
+              ({fmtMs(dur)})
+            </span>
+          )}
+        </button>
+      )}
+      {(inline || !collapsed) && (
         <div className="px-4 pb-3 space-y-3">
           {tally.total > 1 && (
             <div className="text-xs font-mono text-[var(--muted)]">

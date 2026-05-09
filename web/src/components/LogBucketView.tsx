@@ -77,7 +77,7 @@ function LogLines({
   startLine: number;
 }) {
   return (
-    <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9] max-h-80 overflow-y-auto">
+    <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9]">
       {lines.map((line, j) => {
         // ANSI-colored child-process output (buildx, go test, etc.)
         // gets converted to styled spans. Lines without ANSI fall
@@ -118,19 +118,28 @@ function LogLines({
 function StepBucket({
   section,
   lineOffset,
+  maxDurationMs,
 }: {
   section: StepSection;
   lineOffset: number;
+  maxDurationMs: number;
 }) {
   const [expanded, setExpanded] = useState(
     section.status === "failed" || section.status === "running",
   );
   const si = statusIcon[section.status] || statusIcon.running;
-  // Section.name is "<node> · <step>" for phase buckets. The node
-  // half is redundant in the bucket view because the DAG selection
-  // already pinned which node we're looking at, so the heading
-  // shows the step name alone.
   const heading = stepNameFromSection(section);
+
+  const barPct =
+    maxDurationMs > 0 && section.durationMs
+      ? Math.max(2, Math.round((section.durationMs / maxDurationMs) * 100))
+      : 0;
+  const barColor =
+    section.status === "failed"
+      ? "bg-red-400/60"
+      : section.status === "running"
+        ? "bg-indigo-400/60"
+        : "bg-[#30363d]";
 
   return (
     <div
@@ -144,7 +153,7 @@ function StepBucket({
           {expanded ? "▾" : "▸"}
         </span>
         <span className={`w-4 text-center ${si.color}`}>{si.icon}</span>
-        <span className="font-mono text-[#c9d1d9]">{heading}</span>
+        <span className="font-mono text-[#c9d1d9] truncate">{heading}</span>
         <span className="flex items-center gap-2 ml-auto shrink-0">
           {expanded && section.lines.length > 0 && (
             <CopyButton
@@ -152,7 +161,15 @@ function StepBucket({
               label={`Copy ${section.name} logs`}
             />
           )}
-          <span className="font-mono text-[var(--muted)]">
+          {barPct > 0 && (
+            <span className="hidden sm:inline-block w-16 h-1.5 bg-[#161b22] rounded overflow-hidden">
+              <span
+                className={`block h-full ${barColor}`}
+                style={{ width: `${barPct}%` }}
+              />
+            </span>
+          )}
+          <span className="font-mono text-[var(--muted)] tabular-nums w-14 text-right">
             {section.duration || (section.status === "running" ? "..." : "")}
           </span>
         </span>
@@ -338,7 +355,17 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
     [parsed],
   );
 
-  // Track cumulative line offset for line numbers
+  const maxDurationMs = useMemo(() => {
+    let max = 0;
+    for (const s of parsed.sections) {
+      if (s.type === "step") {
+        const d = (s as StepSection).durationMs ?? 0;
+        if (d > max) max = d;
+      }
+    }
+    return max;
+  }, [parsed]);
+
   let lineOffset = 1;
 
   return (
@@ -385,6 +412,7 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
                 key={i}
                 section={section as StepSection}
                 lineOffset={offset}
+                maxDurationMs={maxDurationMs}
               />
             );
           }
