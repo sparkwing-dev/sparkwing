@@ -930,6 +930,13 @@ function FullRunRow({
           <StatusLabel status={r.status} />
         )}
       </FilterableValue>
+      {compact && r.trigger_source && (
+        <Tooltip content={`Trigger: ${r.trigger_source}`}>
+          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
+            {r.trigger_source.charAt(0).toLowerCase()}
+          </span>
+        </Tooltip>
+      )}
       <FilterableValue
         facet="repo"
         value={repo}
@@ -973,12 +980,10 @@ function FullRunRow({
           <span className="font-mono text-[var(--muted)] shrink-0">{sha7}</span>
         </FilterableValue>
       )}
-      {r.trigger_source && (
+      {!compact && r.trigger_source && (
         <Tooltip content={`Trigger: ${r.trigger_source}`}>
           <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
-            {compact
-              ? r.trigger_source.charAt(0).toLowerCase()
-              : r.trigger_source}
+            {r.trigger_source}
           </span>
         </Tooltip>
       )}
