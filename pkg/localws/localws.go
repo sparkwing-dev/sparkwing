@@ -181,6 +181,19 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		root.Handle("/api/v1/", ctrlHandler)
 		root.Handle("/webhooks/", ctrlHandler)
+	} else {
+		// Local-only mode has no controller and therefore no
+		// pipelines.yaml registry. The dashboard polls
+		// /api/v1/pipelines for tag-filter options and registry-only
+		// rows; without a stub the requests 404 every poll cycle.
+		// Empty body is the right answer — the UI degrades gracefully
+		// (no tag options, no unrun pipelines) and the controller's
+		// real handler wins when present via Go 1.22 mux specificity.
+		root.Handle("GET /api/v1/pipelines",
+			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"pipelines":{}}`))
+			}))
 	}
 	root.Handle("/", webHandler)
 
