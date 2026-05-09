@@ -64,9 +64,23 @@ export default function Nav() {
                 href={tab.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={className}
+                className={`${className} inline-flex items-center gap-1`}
               >
                 {tab.label}
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 12 12"
+                  className="w-3 h-3 opacity-70"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 3H3v6h6V7" />
+                  <path d="M7 2h3v3" />
+                  <path d="M10 2 6 6" />
+                </svg>
               </a>
             );
           }
