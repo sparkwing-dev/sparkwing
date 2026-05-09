@@ -413,11 +413,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
     setSelectedNode(null);
-    if (id) {
-      // Viewing a run adds it to the selection so its highlight
-      // persists when the detail pane closes.
-      setCheckedRuns((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-    }
+    // Row body click is treated as single-select: replace the
+    // selection set so the highlight only marks this row. Multi-
+    // select is reached via the checkboxes.
+    if (id) setCheckedRuns(new Set([id]));
+    else setCheckedRuns(new Set());
     const params = new URLSearchParams(searchParams.toString());
     if (id) params.set("run", id);
     else params.delete("run");
@@ -489,6 +489,38 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
         >
           <div className="flex-1 overflow-y-auto">
+            {topLevel.length > 0 && (
+              <div className="px-3 py-1.5 border-b border-[var(--border)] flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                <input
+                  type="checkbox"
+                  ref={(el) => {
+                    if (!el) return;
+                    const some =
+                      topLevel.some((r) => checkedRuns.has(r.id)) &&
+                      !topLevel.every((r) => checkedRuns.has(r.id));
+                    el.indeterminate = some;
+                  }}
+                  checked={
+                    topLevel.length > 0 &&
+                    topLevel.every((r) => checkedRuns.has(r.id))
+                  }
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setCheckedRuns(new Set(topLevel.map((r) => r.id)));
+                    } else {
+                      setCheckedRuns(new Set());
+                    }
+                  }}
+                  aria-label="select all"
+                  className="shrink-0 cursor-pointer accent-violet-500"
+                />
+                <span>
+                  {checkedRuns.size > 0
+                    ? `${checkedRuns.size} of ${topLevel.length} selected`
+                    : `${topLevel.length} runs`}
+                </span>
+              </div>
+            )}
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
