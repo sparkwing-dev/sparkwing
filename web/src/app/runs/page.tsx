@@ -680,6 +680,33 @@ interface FilterCtx {
   setAfter: (iso: string) => void;
 }
 
+// Hover open/close delays. Open delay keeps the popup from flashing
+// when you sweep the cursor across rows. Close delay covers the gap
+// while the cursor moves from trigger to popup buttons.
+const HOVER_OPEN_MS = 250;
+const HOVER_CLOSE_MS = 150;
+
+function useHoverPopup() {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancel = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  const scheduleOpen = () => {
+    cancel();
+    timerRef.current = setTimeout(() => setOpen(true), HOVER_OPEN_MS);
+  };
+  const scheduleClose = () => {
+    cancel();
+    timerRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
+  };
+  useEffect(() => cancel, []);
+  return { open, scheduleOpen, scheduleClose, cancel };
+}
+
 function FilterableValue({
   facet,
   value,
@@ -693,10 +720,13 @@ function FilterableValue({
 }) {
   const incl = ctx.isIncluded(facet, value);
   const excl = ctx.isExcluded(facet, value);
+  const { open, scheduleOpen, scheduleClose, cancel } = useHoverPopup();
   return (
     <span
-      className="relative group/fv inline-flex items-center"
+      className="relative inline-flex items-center"
       onClick={(e) => e.stopPropagation()}
+      onMouseEnter={scheduleOpen}
+      onMouseLeave={scheduleClose}
     >
       <span
         className={
@@ -709,26 +739,32 @@ function FilterableValue({
       >
         {children}
       </span>
-      <span className="absolute bottom-full left-0 pt-2 -mt-2 hidden group-hover/fv:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            ctx.toggle(facet, value, "include");
-          }}
-          className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
+      {open && (
+        <span
+          className="absolute top-full left-0 pt-2 -mt-2 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]"
+          onMouseEnter={cancel}
+          onMouseLeave={scheduleClose}
         >
-          {incl ? "✓ included" : "+ filter to"} {value}
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            ctx.toggle(facet, value, "exclude");
-          }}
-          className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
-        >
-          {excl ? "✗ excluded" : "− exclude"} {value}
-        </button>
-      </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.toggle(facet, value, "include");
+            }}
+            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
+          >
+            {incl ? "✓ included" : "+ filter to"} {value}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.toggle(facet, value, "exclude");
+            }}
+            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
+          >
+            {excl ? "✗ excluded" : "− exclude"} {value}
+          </button>
+        </span>
+      )}
     </span>
   );
 }
@@ -742,32 +778,41 @@ function FilterableTimestamp({
   ctx: FilterCtx;
   children: React.ReactNode;
 }) {
+  const { open, scheduleOpen, scheduleClose, cancel } = useHoverPopup();
   return (
     <span
-      className="relative group/ft inline-flex items-center"
+      className="relative inline-flex items-center"
       onClick={(e) => e.stopPropagation()}
+      onMouseEnter={scheduleOpen}
+      onMouseLeave={scheduleClose}
     >
       {children}
-      <span className="absolute bottom-full left-0 pt-2 -mt-2 hidden group-hover/ft:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[160px]">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            ctx.setBefore(iso);
-          }}
-          className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
+      {open && (
+        <span
+          className="absolute top-full left-0 pt-2 -mt-2 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[160px]"
+          onMouseEnter={cancel}
+          onMouseLeave={scheduleClose}
         >
-          + set as &apos;before&apos;
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            ctx.setAfter(iso);
-          }}
-          className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
-        >
-          + set as &apos;after&apos;
-        </button>
-      </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.setBefore(iso);
+            }}
+            className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
+          >
+            + set as &apos;before&apos;
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.setAfter(iso);
+            }}
+            className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
+          >
+            + set as &apos;after&apos;
+          </button>
+        </span>
+      )}
     </span>
   );
 }
