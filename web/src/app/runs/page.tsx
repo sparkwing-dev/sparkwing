@@ -1120,8 +1120,8 @@ const FullRunRow = memo(function FullRunRow({
           ctx={ctx}
           tooltip={`Branch: ${r.git_branch}`}
         >
-          <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
-            ⎇ {r.git_branch}
+          <span className="text-amber-400/70 shrink-0">
+            ⎇ {truncate(r.git_branch, 40)}
           </span>
         </FilterableValue>
       )}
@@ -1296,10 +1296,10 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
       </span>
       {r.git_branch && (
         <span
-          className={`text-amber-400/70 shrink-0 truncate max-w-[160px] ${styleFor("branch", r.git_branch)}`}
+          className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch)}`}
           title={`Branch: ${r.git_branch}`}
         >
-          ⎇ {r.git_branch}
+          ⎇ {truncate(r.git_branch, 40)}
         </span>
       )}
       {sha7 && (
