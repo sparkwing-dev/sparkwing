@@ -893,7 +893,7 @@ export function FullFilterBar({
               >
                 {inc ? "+" : "−"}
               </button>
-              {inc ? t.text : `NOT ${t.text}`}
+              {inc ? t.text : `-${t.text}`}
               <button
                 onClick={() => removeSearchTerm(i)}
                 className="hover:text-white no-underline"
