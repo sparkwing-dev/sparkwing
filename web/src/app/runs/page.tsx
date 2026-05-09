@@ -14,7 +14,15 @@
 // plumbing sessions can re-introduce them when the backend stores
 // them.
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import PipelineOverview from "@/components/PipelineOverview";
 import {
@@ -319,8 +327,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const topLevel = runs.filter((r) =>
-    runMatchesFilter(r, filterState, pipelineMeta),
+  const topLevel = useMemo(
+    () => runs.filter((r) => runMatchesFilter(r, filterState, pipelineMeta)),
+    [runs, filterState, pipelineMeta],
   );
   const activeCount = activeFilterCount(filterState);
 
@@ -370,45 +379,53 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     ],
   };
 
-  const isoToLocal = (iso: string) => {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
-  };
+  const facetStateRef = useRef(facetState);
+  facetStateRef.current = facetState;
+  const filterStateRef = useRef(filterState);
+  filterStateRef.current = filterState;
 
-  const filterCtx: FilterCtx = {
-    isIncluded: (facet, value) => facetState[facet][0].includes(value),
-    isExcluded: (facet, value) => facetState[facet][2].includes(value),
-    toggle: (facet, value, mode) => {
-      const [inc, setInc, exc, setExc] = facetState[facet];
-      if (mode === "include") {
-        if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
-        else {
-          setInc([...inc, value]);
-          if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
-        }
-      } else {
-        if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
-        else {
-          setExc([...exc, value]);
+  const filterCtx = useMemo<FilterCtx>(
+    () => ({
+      isIncluded: (facet, value) =>
+        facetStateRef.current[facet][0].includes(value),
+      isExcluded: (facet, value) =>
+        facetStateRef.current[facet][2].includes(value),
+      toggle: (facet, value, mode) => {
+        const [inc, setInc, exc, setExc] = facetStateRef.current[facet];
+        if (mode === "include") {
           if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
+          else {
+            setInc([...inc, value]);
+            if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
+          }
+        } else {
+          if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
+          else {
+            setExc([...exc, value]);
+            if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
+          }
         }
-      }
-    },
-    setDateBound: (field, bound, iso) => {
-      const local = isoToLocal(iso);
-      if (field === "started" && bound === "before")
-        filterState.setStartedBefore(local);
-      else if (field === "started" && bound === "after")
-        filterState.setStartedAfter(local);
-      else if (field === "finished" && bound === "before")
-        filterState.setFinishedBefore(local);
-      else if (field === "finished" && bound === "after")
-        filterState.setFinishedAfter(local);
-    },
-  };
+      },
+      setDateBound: (field, bound, iso) => {
+        const d = new Date(iso);
+        const local = isNaN(d.getTime())
+          ? ""
+          : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+              .toISOString()
+              .slice(0, 16);
+        const fs = filterStateRef.current;
+        if (field === "started" && bound === "before")
+          fs.setStartedBefore(local);
+        else if (field === "started" && bound === "after")
+          fs.setStartedAfter(local);
+        else if (field === "finished" && bound === "before")
+          fs.setFinishedBefore(local);
+        else if (field === "finished" && bound === "after")
+          fs.setFinishedAfter(local);
+      },
+    }),
+    [],
+  );
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
@@ -489,7 +506,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
         >
           <div className="flex-1 overflow-y-auto">
-            {topLevel.length > 0 && (
+            {topLevel.length > 0 && !run && (
               <div className="px-3 py-1.5 border-b border-[var(--border)] flex items-center gap-2 text-[10px] text-[var(--muted)]">
                 <input
                   type="checkbox"
@@ -535,14 +552,16 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       : ""
                   }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => toggleChecked(r.id)}
-                    aria-label="select run"
-                    className="mt-1 shrink-0 cursor-pointer accent-violet-500"
-                  />
+                  {!run && (
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleChecked(r.id)}
+                      aria-label="select run"
+                      className="mt-1 shrink-0 cursor-pointer accent-violet-500"
+                    />
+                  )}
                   <div className="flex-1 min-w-0">
                     <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
                   </div>
@@ -1013,7 +1032,7 @@ function fmtAgo(ts: string): string {
   return `${Math.floor(sec / 86_400)}d ago`;
 }
 
-function FullRunRow({
+const FullRunRow = memo(function FullRunRow({
   r,
   ctx,
   compact = false,
@@ -1022,6 +1041,7 @@ function FullRunRow({
   ctx: FilterCtx;
   compact?: boolean;
 }) {
+  if (compact) return <CompactFullRunRow r={r} ctx={ctx} />;
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
   const elapsedMs = (finishedMs || Date.now()) - startedMs;
@@ -1197,8 +1217,6 @@ function FullRunRow({
     </div>
   );
 
-  if (compact) return meta;
-
   return (
     <div className="grid grid-cols-[minmax(20rem,40rem)_minmax(0,1fr)] gap-6 items-start">
       {meta}
@@ -1214,7 +1232,91 @@ function FullRunRow({
       </div>
     </div>
   );
-}
+});
+
+const CompactFullRunRow = memo(function CompactFullRunRow({
+  r,
+  ctx,
+}: {
+  r: Run;
+  ctx: FilterCtx;
+}) {
+  const startedMs = new Date(r.started_at).getTime();
+  const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
+  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const sinceTs = r.finished_at || r.started_at;
+  const repo = repoLabel(r);
+  const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
+
+  const styleFor = (facet: FilterFacet, value: string) => {
+    if (ctx.isIncluded(facet, value))
+      return "underline decoration-dotted decoration-2 decoration-current underline-offset-4";
+    if (ctx.isExcluded(facet, value))
+      return "line-through decoration-red-400 opacity-70";
+    return "";
+  };
+
+  return (
+    <div className="min-w-0 flex flex-wrap items-center gap-y-1 gap-x-1.5 text-[11px]">
+      <span
+        className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
+        title={`Status: ${r.status}`}
+      />
+      {r.trigger_source && (
+        <span
+          className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]"
+          title={`Trigger: ${r.trigger_source}`}
+        >
+          {r.trigger_source.charAt(0).toLowerCase()}
+        </span>
+      )}
+      <span
+        className={`text-cyan-400/70 shrink-0 ${styleFor("repo", repo)}`}
+        title={`Repo: ${repo}`}
+      >
+        {repo}
+      </span>
+      <span className="text-[var(--muted)] shrink-0">/</span>
+      <span
+        className={`font-medium text-violet-300 truncate ${styleFor("pipeline", r.pipeline)}`}
+        title={`Pipeline: ${r.pipeline}`}
+      >
+        {r.pipeline}
+      </span>
+      {r.git_branch && (
+        <span
+          className={`text-amber-400/70 shrink-0 truncate max-w-[160px] ${styleFor("branch", r.git_branch)}`}
+          title={`Branch: ${r.git_branch}`}
+        >
+          ⎇ {r.git_branch}
+        </span>
+      )}
+      {sha7 && (
+        <span
+          className={`font-mono text-[var(--muted)] shrink-0 ${styleFor("commit", sha7)}`}
+          title={`Commit: ${sha7}`}
+        >
+          {sha7}
+        </span>
+      )}
+      <span className="basis-full" />
+      <span
+        className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap"
+        title={`Started ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`}
+      >
+        <span className="text-[var(--foreground)]">
+          {fmtClock(r.started_at)}
+        </span>
+        <span>→</span>
+        <span className="text-[var(--foreground)]">
+          {r.finished_at ? fmtClock(r.finished_at) : "—"}
+        </span>
+        {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
+        <span>· {fmtAgo(sinceTs)}</span>
+      </span>
+    </div>
+  );
+});
 
 function CompactRunRow({ r }: { r: Run }) {
   return (
