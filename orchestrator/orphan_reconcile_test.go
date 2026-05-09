@@ -41,7 +41,7 @@ func TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 
-	n, err := reconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestReconcileOrphanedLocalRuns_FreshRunUntouched(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	n, err := reconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -100,6 +100,65 @@ func TestReconcileOrphanedLocalRuns_FreshRunUntouched(t *testing.T) {
 	}
 	if got.Status != "running" {
 		t.Errorf("run status: got %q, want running", got.Status)
+	}
+}
+
+// TestReconcileOrphanedLocalRuns_CascadesToPendingNodes confirms that
+// when an orphaned run is reconciled, downstream nodes that never had
+// a chance to run (status='pending', waiting on the dead upstream)
+// are marked cancelled rather than left dangling as pending. Matches
+// the in-process dispatcher's "upstream-failed" cascade so readers
+// see consistent shape regardless of how the failure happened.
+func TestReconcileOrphanedLocalRuns_CascadesToPendingNodes(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	old := time.Now().Add(-10 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-cascade", Pipeline: "p", Status: "running", StartedAt: old,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "run-cascade", NodeID: "build", Status: "running",
+	}); err != nil {
+		t.Fatalf("CreateNode build: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "run-cascade", NodeID: "test", Status: "pending", Deps: []string{"build"},
+	}); err != nil {
+		t.Fatalf("CreateNode test: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "run-cascade", NodeID: "deploy", Status: "pending", Deps: []string{"test"},
+	}); err != nil {
+		t.Fatalf("CreateNode deploy: %v", err)
+	}
+
+	if _, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	nodes, err := st.ListNodes(ctx, "run-cascade")
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	byID := map[string]*store.Node{}
+	for _, n := range nodes {
+		byID[n.NodeID] = n
+	}
+	if got := byID["build"].Outcome; got != "failed" {
+		t.Errorf("build outcome: got %q, want failed", got)
+	}
+	if got := byID["test"].Outcome; got != "cancelled" {
+		t.Errorf("test outcome: got %q, want cancelled", got)
+	}
+	if got := byID["deploy"].Outcome; got != "cancelled" {
+		t.Errorf("deploy outcome: got %q, want cancelled", got)
+	}
+	for _, id := range []string{"test", "deploy"} {
+		if got := byID[id].Status; got != "done" {
+			t.Errorf("%s status: got %q, want done", id, got)
+		}
 	}
 }
 
@@ -128,7 +187,7 @@ func TestReconcileOrphanedLocalRuns_RecentHeartbeatUntouched(t *testing.T) {
 		t.Fatalf("stamp heartbeat: %v", err)
 	}
 
-	n, err := reconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

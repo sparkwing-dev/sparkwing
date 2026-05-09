@@ -18,19 +18,27 @@ import (
 // here.
 const localOrphanThreshold = 60 * time.Second
 
-// reconcileOrphanedLocalRuns sweeps "running" rows whose latest node
+// ReconcileOrphanedLocalRuns sweeps "running" rows whose latest node
 // heartbeat is older than threshold and atomically transitions them
 // to "failed" so subsequent reads see the truth instead of a zombie
-// "running" status.
+// "running" status. Pending nodes downstream of an orphaned run get
+// flipped to cancelled (matching the in-process dispatcher's
+// upstream-failed cascade), so a single run-level reconciliation
+// produces a fully-consistent set of node rows.
 //
 // Designed to be cheap enough to run lazily on every status / list
 // read: it only scans rows that are status='running', and the SQL
 // uses indexes already in place on (status, started_at, last_heartbeat).
+// Both the CLI (runs status / runs list) and the web dashboard's HTTP
+// handlers call this before reading so each surface sees the same
+// reconciled state.
 //
 // Failures are non-fatal -- the caller's read shouldn't break because
 // reconciliation hit a transient DB error. The function returns the
 // count reconciled for logging / test assertions.
-func reconcileOrphanedLocalRuns(ctx context.Context, st *store.Store, threshold time.Duration) (int, error) {
+//
+// Pass threshold=0 to use the package default (localOrphanThreshold).
+func ReconcileOrphanedLocalRuns(ctx context.Context, st *store.Store, threshold time.Duration) (int, error) {
 	if threshold <= 0 {
 		threshold = localOrphanThreshold
 	}
@@ -71,10 +79,16 @@ SELECT r.id
 	}
 
 	for _, id := range orphanIDs {
-		// Transition any "running" nodes to "failed" first so
-		// node-level views match. Then close out the run row.
-		// Both UPDATEs are idempotent: replaying after a partial
-		// success is a no-op.
+		// Two node transitions: "running" nodes were actively
+		// executing when the orchestrator died, so they're "failed"
+		// (they reached the runner, just never finished). "pending"
+		// nodes never ran at all -- they were waiting on upstream
+		// deps that will never complete -- so they're "cancelled"
+		// with the orphan-cascade reason. This matches the
+		// in-process dispatch path's "upstream-failed" semantics so
+		// readers don't have to special-case orphan vs. real
+		// upstream failure.
+		now := time.Now().UnixNano()
 		errMsg := fmt.Sprintf("orphaned: no heartbeat for >%s; orchestrator process is no longer running", threshold)
 		if _, err := st.DB().ExecContext(ctx, `
 UPDATE nodes
@@ -84,12 +98,43 @@ UPDATE nodes
        failure_reason = 'orphaned',
        finished_at    = ?
  WHERE run_id = ? AND status = 'running'`,
-			errMsg, time.Now().UnixNano(), id); err != nil {
+			errMsg, now, id); err != nil {
+			return 0, err
+		}
+		if _, err := st.DB().ExecContext(ctx, `
+UPDATE nodes
+   SET status         = 'done',
+       outcome        = 'cancelled',
+       error          = 'orphaned: orchestrator process exited before this node ran',
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = 'pending'`,
+			now, id); err != nil {
 			return 0, err
 		}
 		if err := st.FinishRun(ctx, id, "failed", errMsg); err != nil {
 			return 0, err
 		}
 	}
+
+	// Invariant fixup: any pending node attached to an already-
+	// terminal run (failed/success/cancelled) should be cancelled,
+	// not left in pending. Catches leftover state from earlier
+	// reconciliation passes that didn't cascade pending nodes,
+	// plus any future code path that forgets the cascade. Cheap:
+	// the indexed status column scopes the scan tightly.
+	if _, err := st.DB().ExecContext(ctx, `
+UPDATE nodes
+   SET status         = 'done',
+       outcome        = 'cancelled',
+       error          = COALESCE(NULLIF(error, ''), 'orphaned: run terminated before this node ran'),
+       failure_reason = COALESCE(NULLIF(failure_reason, ''), 'orphaned'),
+       finished_at    = ?
+ WHERE status = 'pending'
+   AND run_id IN (SELECT id FROM runs WHERE status IN ('failed', 'success', 'cancelled'))`,
+		time.Now().UnixNano()); err != nil {
+		return len(orphanIDs), err
+	}
+
 	return len(orphanIDs), nil
 }

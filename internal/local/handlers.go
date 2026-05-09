@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/otelutil"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -161,6 +162,11 @@ func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request
 // handleListRuns serves the dashboard/CLI read path. Filter parsing
 // shared with the cluster controller via store.ParseRunFilter.
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
+	// Reconcile orphaned runs before reading so the dashboard never
+	// shows a "running" row whose orchestrator process is dead. Same
+	// sweep the CLI runs from runs status / runs list -- both
+	// surfaces are kept in lockstep.
+	_, _ = orchestrator.ReconcileOrphanedLocalRuns(r.Context(), s.store, 0)
 	filter := store.ParseRunFilter(r.URL.Query())
 	runs, err := s.store.ListRuns(r.Context(), filter)
 	if err != nil {
@@ -176,6 +182,8 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 // handleGetRun serves a single run by id. Default response is the raw
 // store.Run JSON. With ?include=nodes it returns {run, nodes}.
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
+	// Reconcile orphaned runs before reading -- see handleListRuns.
+	_, _ = orchestrator.ReconcileOrphanedLocalRuns(r.Context(), s.store, 0)
 	runID := r.PathValue("id")
 	run, err := s.store.GetRun(r.Context(), runID)
 	if err != nil {
