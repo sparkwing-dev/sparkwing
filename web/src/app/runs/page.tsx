@@ -362,7 +362,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       if (filterBefore && ts > new Date(filterBefore).getTime()) return false;
     }
     if (filterText.trim()) {
-      const q = filterText.toLowerCase();
       const startedMs = new Date(r.started_at).getTime();
       const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
       const elapsedMs = (finishedMs || Date.now()) - startedMs;
@@ -384,7 +383,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      if (!hay.includes(q)) return false;
+      const terms = filterText.trim().split(/\s+/).filter(Boolean);
+      const incl = terms
+        .filter((t) => !t.startsWith("-"))
+        .map((t) => t.toLowerCase());
+      const excl = terms
+        .filter((t) => t.startsWith("-") && t.length > 1)
+        .map((t) => t.slice(1).toLowerCase());
+      if (incl.some((t) => !hay.includes(t))) return false;
+      if (excl.some((t) => hay.includes(t))) return false;
     }
     return true;
   });
@@ -503,7 +510,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               type="search"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              placeholder="search runs (id, error, branch, ...)"
+              placeholder='search runs · prefix term with "-" to exclude'
               className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-72"
             />
           }
