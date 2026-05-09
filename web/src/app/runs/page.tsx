@@ -515,15 +515,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             setAfter: setFilterAfter,
             setBefore: setFilterBefore,
           }}
-          trailingSlot={
-            <input
-              type="search"
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-              placeholder='search runs · prefix term with "-" to exclude'
-              className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-72"
-            />
-          }
+          searchText={filterText}
+          setSearchText={setFilterText}
           groups={[
             {
               key: "status",
@@ -1151,6 +1144,37 @@ interface DateGroup {
   setBefore: (v: string) => void;
 }
 
+interface SearchTerm {
+  text: string;
+  mode: "include" | "exclude";
+}
+
+function parseSearch(s: string): SearchTerm[] {
+  const tokens = s.trim().split(/\s+/).filter(Boolean);
+  const out: SearchTerm[] = [];
+  let pendingNot = false;
+  for (const t of tokens) {
+    if (t === "-") {
+      pendingNot = true;
+      continue;
+    }
+    const attached = t.startsWith("-") && t.length > 1;
+    const text = attached ? t.slice(1) : t;
+    out.push({
+      text,
+      mode: pendingNot || attached ? "exclude" : "include",
+    });
+    pendingNot = false;
+  }
+  return out;
+}
+
+function serializeSearch(terms: SearchTerm[]): string {
+  return terms
+    .map((t) => (t.mode === "exclude" ? `-${t.text}` : t.text))
+    .join(" ");
+}
+
 function FullFilterBar({
   openDropdown,
   setOpenDropdown,
@@ -1159,7 +1183,8 @@ function FullFilterBar({
   groups,
   toggleFilter,
   dateGroup,
-  trailingSlot,
+  searchText,
+  setSearchText,
 }: {
   openDropdown: string | null;
   setOpenDropdown: (v: string | null) => void;
@@ -1172,8 +1197,26 @@ function FullFilterBar({
     val: string,
   ) => void;
   dateGroup?: DateGroup;
-  trailingSlot?: React.ReactNode;
+  searchText?: string;
+  setSearchText?: (s: string) => void;
 }) {
+  const searchTerms = searchText ? parseSearch(searchText) : [];
+  const removeSearchTerm = (idx: number) => {
+    if (!setSearchText) return;
+    setSearchText(serializeSearch(searchTerms.filter((_, i) => i !== idx)));
+  };
+  const toggleSearchTerm = (idx: number) => {
+    if (!setSearchText) return;
+    setSearchText(
+      serializeSearch(
+        searchTerms.map((t, i) =>
+          i === idx
+            ? { ...t, mode: t.mode === "include" ? "exclude" : "include" }
+            : t,
+        ),
+      ),
+    );
+  };
   const [search, setSearch] = useState<Record<string, string>>({});
   return (
     <>
@@ -1302,7 +1345,15 @@ function FullFilterBar({
             }
           />
         )}
-        {trailingSlot && <div className="ml-auto">{trailingSlot}</div>}
+        {setSearchText && (
+          <input
+            type="search"
+            value={searchText || ""}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder='search runs · prefix term with "-" to exclude'
+            className="ml-auto bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-72"
+          />
+        )}
       </div>
       {activeFilterCount > 0 && (
         <div className="flex items-center gap-1 px-2 pb-1.5 flex-wrap">
@@ -1359,6 +1410,34 @@ function FullFilterBar({
               </button>
             </span>
           )}
+          {searchTerms.map((t, i) => {
+            const inc = t.mode === "include";
+            return (
+              <span
+                key={`search-${i}-${t.text}`}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
+                  inc
+                    ? "bg-slate-500/15 text-slate-200"
+                    : "bg-red-500/15 text-red-300 line-through"
+                }`}
+              >
+                <button
+                  onClick={() => toggleSearchTerm(i)}
+                  title={`flip to ${inc ? "exclude" : "include"}`}
+                  className="hover:text-white no-underline opacity-70 hover:opacity-100"
+                >
+                  {inc ? "+" : "−"}
+                </button>
+                {inc ? t.text : `NOT ${t.text}`}
+                <button
+                  onClick={() => removeSearchTerm(i)}
+                  className="hover:text-white no-underline"
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
           <button
             onClick={clearAll}
             className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-1"
