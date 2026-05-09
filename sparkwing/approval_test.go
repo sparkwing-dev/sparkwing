@@ -100,7 +100,7 @@ func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
 	}
 }
 
-// SDK-040: ApprovalGate exposes only the gate-appropriate modifiers.
+// ApprovalGate exposes only the gate-appropriate modifiers.
 // .Inline() / .Retry() / .Timeout() / .Cache() / .RunsOn() are not
 // methods on *ApprovalGate -- the type system makes that class of
 // mistake a compile error rather than a runtime panic / silent

@@ -192,7 +192,7 @@ jobs:
           gh release upload "$tag" --clobber dist/*
           gh release view "$tag"
 
-  # ISS-052: publish multi-arch container images for the cluster-side
+  # publish multi-arch container images for the cluster-side
   # binaries to GHCR on every v* tag push. Independent of the binary
   # build matrix above -- they share the trigger but not artifacts;
   # buildx compiles from source inside the Docker stage. Sibling job

@@ -13,11 +13,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// RUN-015 end-to-end coverage through the in-process orchestrator.
-// Exercises .Cache(CacheOptions{...}) with the four policies most
-// likely to surface wiring bugs: Queue, Skip, Fail, and the cache-
-// hit short-circuit. CancelOthers is covered by the store-level
-// unit tests (signaling + cross-run timing is its own ticket).
+// End-to-end coverage through the in-process orchestrator. Exercises
+// .Cache(CacheOptions{...}) with the four policies most likely to
+// surface wiring bugs: Queue, Skip, Fail, and the cache-hit short-
+// circuit. CancelOthers is covered by the store-level unit tests
+// (signaling + cross-run timing is its own concern).
 
 var cacheCounter struct {
 	inflight atomic.Int32

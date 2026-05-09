@@ -27,7 +27,7 @@ type planSnapshotDoc struct {
 	Pipeline string `json:"pipeline"`
 	RunID    string `json:"run_id"`
 	// Venue mirrors orchestrator.planSnapshot.Venue: the author-
-	// declared dispatch constraint, "" for pre-IMP-011 binaries.
+	// declared dispatch constraint, "" for older binaries.
 	Venue string             `json:"venue,omitempty"`
 	Nodes []planSnapshotNode `json:"nodes"`
 }
@@ -81,7 +81,7 @@ type planSnapshotStep struct {
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
 	// BlastRadius mirrors orchestrator.snapshotStep.BlastRadius:
-	// the author-declared marker set, "" for pre-IMP-015 binaries.
+	// the author-declared marker set, "" for older binaries.
 	BlastRadius []string `json:"blast_radius,omitempty"`
 }
 
@@ -372,9 +372,9 @@ func printPlanSnapshot(snap *planSnapshotDoc) {
 	if snap.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", snap.Pipeline)
 	}
-	// IMP-011: surface the dispatch constraint near the top so an
-	// operator scanning the explain output sees the gate before
-	// reading the DAG. Suppressed for the permissive default.
+	// Surface the dispatch constraint near the top so an operator
+	// scanning the explain output sees the gate before reading the
+	// DAG. Suppressed for the permissive default.
 	if snap.Venue != "" && snap.Venue != "either" {
 		fmt.Printf("Venue: %s\n", snap.Venue)
 	}
@@ -492,10 +492,10 @@ func printWork(w *planSnapshotWork, indent string) {
 		if s.HasSkipIf {
 			marker += " [skip_if]"
 		}
-		// IMP-015: surface blast-radius markers next to the step id
-		// so a reader scanning explain output sees the contract
-		// before reading the deps. Suppressed when no marker is
-		// declared (the common case).
+		// Surface blast-radius markers next to the step id so a
+		// reader scanning explain output sees the contract before
+		// reading the deps. Suppressed when no marker is declared
+		// (the common case).
 		if len(s.BlastRadius) > 0 {
 			marker += " [" + strings.Join(s.BlastRadius, ",") + "]"
 		}

@@ -81,7 +81,7 @@ func TestBuildReceipt_SuccessRun(t *testing.T) {
 		t.Fatalf("compute_cents = %d, expected >= 0", r.Cost.ComputeCents)
 	}
 	if r.Cost.Settled {
-		t.Fatalf("settled should default false until IMP-018")
+		t.Fatalf("settled should default false until cloud-billing reconciliation")
 	}
 	if !strings.HasPrefix(r.ReceiptSHA, "sha256:") {
 		t.Fatalf("receipt_sha empty / wrong prefix: %q", r.ReceiptSHA)

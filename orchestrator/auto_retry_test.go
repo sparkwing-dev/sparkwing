@@ -13,11 +13,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TOD-073 / SDK-019: Retry(n, RetryAuto(), ...) re-dispatches the
-// whole runner up to n additional times on Failed outcomes. Without
-// RetryAuto() the same Retry(n) loops the step body in a single
-// runner invocation. The two modes share one verb but exercise
-// different code paths in the orchestrator.
+// Retry(n, RetryAuto(), ...) re-dispatches the whole runner up to n
+// additional times on Failed outcomes. Without RetryAuto() the same
+// Retry(n) loops the step body in a single runner invocation. The two
+// modes share one verb but exercise different code paths in the
+// orchestrator.
 
 var autoRetryCount atomic.Int32
 

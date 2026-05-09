@@ -70,7 +70,7 @@ type httpNodeLog struct {
 	delegate sparkwing.Logger
 	closed   bool
 
-	// IMP-002: track sticky auth fatal + per-line drop count so the
+	// Track sticky auth fatal + per-line drop count so the
 	// orchestrator can hard-fail the node on auth misconfig and so a
 	// 5xx-driven loss of lines surfaces on the run summary instead of
 	// disappearing into per-line WARN logs.

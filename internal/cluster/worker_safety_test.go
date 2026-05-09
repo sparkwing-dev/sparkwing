@@ -2,8 +2,6 @@ package cluster
 
 // Cluster-mode RunWorker safety: HTTP-only Backends invariant.
 //
-// WHY THIS TEST EXISTS (RUN-017)
-// ------------------------------
 // orchestrator/cluster_safety_test.go pins the runner-pod path that
 // HandleClaimedTrigger constructs. RunWorker (this package) takes a
 // parallel path: it claims triggers from the controller AND, in the
@@ -15,19 +13,14 @@ package cluster
 //   Backends.State       -> *client.Client  (controller HTTP API)
 //   Backends.Concurrency -> *HTTPConcurrency (controller HTTP API)
 //
-// It MUST NEVER receive a *store.Store directly.
-//
-// Pre-RUN-017, RunWorker wired Concurrency from a throwaway local
-// SQLite store opened just to satisfy LocalBackends. That was a
-// privilege-escalation regression in waiting: the moment the
-// sparkwing-runner image (or any future binary linking
-// internal/cluster) bakes user pipelines in, .inline() jobs would
-// have direct SQLite access via Backends.Concurrency. RUN-017 fixed
-// the wiring; this test pins it so a future "simplification" can't
-// silently re-introduce the regression.
-//
-// See: RUN-016 (parent invariant), RUN-017 (this audit + fix),
-// decisions/0001-open-core-tier-strategy.md.
+// It MUST NEVER receive a *store.Store directly. If RunWorker wired
+// Concurrency from a throwaway local SQLite store (e.g. opened just
+// to satisfy LocalBackends), that would be a privilege-escalation
+// regression in waiting: the moment the sparkwing-runner image (or
+// any future binary linking internal/cluster) bakes user pipelines
+// in, .inline() jobs would have direct SQLite access via
+// Backends.Concurrency. This test pins the HTTP-only wiring so a
+// future "simplification" can't silently re-introduce that regression.
 
 import (
 	"reflect"
@@ -40,7 +33,7 @@ import (
 )
 
 // buildRunWorkerBackends mirrors the Backends construction inside
-// internal/cluster/worker.go's RunWorker (post-RUN-017 wiring). If
+// internal/cluster/worker.go's RunWorker (current wiring). If
 // that block changes shape, update this fixture in lockstep -- the
 // assertions below pin the *types*, not the construction syntax, so
 // the static fixture is a faithful stand-in for the live constructor.
@@ -68,17 +61,17 @@ func TestRunWorkerBackends_StateMustBeHTTP(t *testing.T) {
 		t.Fatalf(`RunWorker Backends.State must be HTTP-backed for cluster
 mode; got *store.Store. This is a PRIVILEGE-ESCALATION REGRESSION --
 .inline() pipeline code in the worker process would gain controller-
-level write access to the state DB. See RUN-017 and RUN-016.`)
+level write access to the state DB.`)
 	}
 	if !strings.Contains(stateType, "client.Client") {
 		t.Fatalf(`RunWorker Backends.State must be HTTP-backed
-(*client.Client); got %s. See RUN-017 and RUN-016.`, stateType)
+(*client.Client); got %s.`, stateType)
 	}
 }
 
 // TestRunWorkerBackends_ConcurrencyMustBeHTTP rejects the SQLite-
 // direct localConcurrency on Backends.Concurrency. This is the exact
-// regression RUN-017 fixed.
+// privilege-escalation regression the HTTP-only invariant prevents.
 func TestRunWorkerBackends_ConcurrencyMustBeHTTP(t *testing.T) {
 	backends := buildRunWorkerBackends()
 
@@ -92,11 +85,11 @@ func TestRunWorkerBackends_ConcurrencyMustBeHTTP(t *testing.T) {
 cluster mode; got %s (SQLite-direct). This is a PRIVILEGE-
 ESCALATION REGRESSION -- .inline() pipeline code in the worker
 process would gain direct write access to the controller's
-concurrency tables. See RUN-017 and RUN-016.`, concType)
+concurrency tables.`, concType)
 	}
 	if !strings.Contains(concType, "HTTPConcurrency") {
 		t.Fatalf(`RunWorker Backends.Concurrency must be
-*HTTPConcurrency; got %s. See RUN-017 and RUN-016.`, concType)
+*HTTPConcurrency; got %s.`, concType)
 	}
 }
 
@@ -110,12 +103,11 @@ func TestRunWorkerBackends_NoStoreReachable(t *testing.T) {
 		t.Fatalf(`RunWorker Backends.State has a reachable *store.Store
 at %s. Even an embedded / lazy direct-store reference collapses the
 worker process's trust boundary -- .inline() pipeline code could
-reach it via reflection or a hybrid backend's fallback path. See
-RUN-017 and RUN-016.`, found)
+reach it via reflection or a hybrid backend's fallback path.`, found)
 	}
 	if found := findStoreType(reflect.ValueOf(backends.Concurrency), 0); found != "" {
 		t.Fatalf(`RunWorker Backends.Concurrency has a reachable
-*store.Store at %s. See RUN-017 and RUN-016.`, found)
+*store.Store at %s.`, found)
 	}
 }
 

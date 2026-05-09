@@ -8,8 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// SDK-012 sentinel basics. Helper-specific guard coverage lives next to
-// each helper (exec_test.go, docker package tests, git package tests).
+// Plan-time guard sentinel basics. Helper-specific guard coverage lives
+// next to each helper (exec_test.go, docker package tests, git package
+// tests).
 
 // guardingPipe deliberately calls a side-effect helper inside Plan().
 // Used to exercise the runtime sentinel via Registration.Invoke (the

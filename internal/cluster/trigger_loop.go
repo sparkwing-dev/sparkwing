@@ -20,8 +20,8 @@ import (
 
 // CompileLogNode is the synthetic node id used to attribute the
 // trigger loop's `go build` stdout + stderr to the run's structured
-// logs when the .sparkwing/ compile fails (IMP-001). The compile
-// step happens before any pipeline binary runs, so there's no real
+// logs when the .sparkwing/ compile fails. The compile step happens
+// before any pipeline binary runs, so there's no real
 // orchestrator node to attach the output to; this fixed id lets
 // `sparkwing runs logs --run <id>` surface the toolchain error
 // without operators having to kubectl-log the warm-runner pod.
@@ -103,7 +103,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		if err != nil {
 			logger.Error("trigger loop: trigger failed",
 				"run_id", trigger.ID, "err", err)
-			// IMP-004: pre-orchestrator failures (fetch / compile /
+			// Pre-orchestrator failures (fetch / compile /
 			// no-baked-binary) never reach orchestrator.Run, which is
 			// where FinishRun would normally fire. Mark the
 			// controller-pre-allocated Run row failed here so the
@@ -259,8 +259,7 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 // trigger whose .sparkwing/ compile failed into a synthetic
 // CompileLogNode log on the controller's logs service. Best-effort:
 // we already have a wrapper error to return, so a failed POST
-// degrades silently to a warning -- IMP-002 tracks the broader
-// "logs.append silent-success" hardening.
+// degrades silently to a warning.
 func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID string, buildErr error, logger *slog.Logger) {
 	if opts.LogsURL == "" {
 		return
@@ -288,7 +287,7 @@ var fetchSourceFn = bincache.FetchPipelineSource
 
 // Vars (not consts) so tests can shrink the retry surface.
 //
-// IMP-005: the warm-runner's source fetch races the gitcache's 30s
+// The warm-runner's source fetch races the gitcache's 30s
 // background-fetch loop on the `git push && wing X --on prod` path.
 // 3 attempts spaced ~10s apart (so total wall time ≤ 30s, the
 // background-fetch period) recovers the residual case where the

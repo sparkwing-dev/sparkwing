@@ -2,7 +2,7 @@ package logs
 
 import "testing"
 
-// IMP-022: parseMissingScope is the chokepoint for AuthError.Scope.
+// parseMissingScope is the chokepoint for AuthError.Scope.
 // Pin all three input shapes here so a future tweak to either the
 // JSON parsing or the string-match fallback gets caught immediately.
 func TestParseMissingScope(t *testing.T) {
@@ -27,7 +27,7 @@ func TestParseMissingScope(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "plain string fallback (pre-IMP-022 server)",
+			name: "plain string fallback (older server)",
 			body: "token lacks required scope: logs.write",
 			want: "logs.write",
 		},

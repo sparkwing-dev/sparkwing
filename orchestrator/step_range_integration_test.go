@@ -35,16 +35,16 @@ func (stepRangeIntegPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 	return nil
 }
 
-// IMP-007: full slice through Options.StartAt -> validation -> ctx
-// install -> RunWork skip. If any seam is wrong the run still
-// reports success but the wrong steps execute.
+// Full slice through Options.StartAt -> validation -> ctx install ->
+// RunWork skip. If any seam is wrong the run still reports success
+// but the wrong steps execute.
 func TestRunLocal_StartAtSkipsUpstreamSteps(t *testing.T) {
-	register("orch-imp007-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
+	register("orch-step-range-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
 	stepRangeFlags = stepRangeRanFlags{}
 
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "orch-imp007-ok",
+		Pipeline: "orch-step-range-ok",
 		StartAt:  "compile",
 	})
 	if err != nil {
@@ -65,12 +65,12 @@ func TestRunLocal_StartAtSkipsUpstreamSteps(t *testing.T) {
 // Unknown --start-at fails the run BEFORE any node dispatches; the
 // run-level Error carries the Levenshtein-suggesting message.
 func TestRunLocal_StartAtUnknownFailsRunBeforeDispatch(t *testing.T) {
-	register("orch-imp007-typo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
+	register("orch-step-range-typo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
 	stepRangeFlags = stepRangeRanFlags{}
 
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "orch-imp007-typo",
+		Pipeline: "orch-step-range-typo",
 		StartAt:  "fetchh",
 	})
 	if err != nil {

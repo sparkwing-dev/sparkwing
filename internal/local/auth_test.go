@@ -161,7 +161,7 @@ func TestRequireScope_NoPrincipalPassesThrough(t *testing.T) {
 	}
 }
 
-// IMP-022: same wire-shape pin as pkg/controller's auth_test.go --
+// Same wire-shape pin as pkg/controller's auth_test.go --
 // laptop-local controller emits the same 401/403 JSON body so a
 // single client parser handles either origin.
 func TestRequireScope_ForbiddenBodyShape(t *testing.T) {

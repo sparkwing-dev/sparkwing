@@ -101,7 +101,7 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		}
 	}
 
-	// IMP-007: resolve --start-at / --stop-at against this Work's
+	// Resolve --start-at / --stop-at against this Work's
 	// items. The orchestrator already validated the strings exist
 	// somewhere in the Plan; here we apply the range only if at least
 	// one bound matches a local item, so the same range plumbed
@@ -212,7 +212,7 @@ type workItem struct {
 	// rangeSkipReason, when non-empty, short-circuits the item with a
 	// `step_skipped` event whose Attrs.reason carries this string.
 	// Populated by RunWork when --start-at / --stop-at puts the item
-	// outside the selected range (IMP-007).
+	// outside the selected range.
 	rangeSkipReason string
 }
 
@@ -227,7 +227,7 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		}
 	}()
 
-	// IMP-007: range skip wins over user-authored SkipIf predicates so
+	// Range skip wins over user-authored SkipIf predicates so
 	// `step_skipped` events carry the operator's intent ("outside
 	// --start-at..--stop-at range") rather than whatever predicate
 	// happened to match. Hidden synthetic items (SpawnNodeForEach
@@ -252,7 +252,7 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		}
 	}
 
-	// IMP-014: under --dry-run, a step that declared neither a
+	// Under --dry-run, a step that declared neither a
 	// dry-run body nor an explicit SafeWithoutDryRun marker is
 	// soft-skipped with reason `no_dry_run_defined`. The dispatch
 	// path below selects DryRunFn vs Fn for the cases that DO have
@@ -298,7 +298,7 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 func dispatchItem(ctx context.Context, it *workItem, parentNodeID string, handler SpawnHandler) (any, error) {
 	switch it.kind {
 	case itemStep:
-		// IMP-014: dispatch under --dry-run prefers DryRunFn over
+		// Dispatch under --dry-run prefers DryRunFn over
 		// the apply Fn. The "step has neither" case is handled
 		// upstream in runOneItem before step_start fires; by the
 		// time we reach dispatchItem the step is guaranteed to

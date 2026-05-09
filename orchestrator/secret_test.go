@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// REG-017: end-to-end check that a job calling sparkwing.Secret
-// resolves through the per-run resolver wired from
+// End-to-end check that a job calling sparkwing.Secret resolves
+// through the per-run resolver wired from
 // Options.SecretSource. Uses a dotenv source seeded in TempDir so the
 // test never touches the user's real ~/.config/sparkwing.
 

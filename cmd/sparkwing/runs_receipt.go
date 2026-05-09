@@ -1,6 +1,6 @@
-// IMP-016: `sparkwing runs receipt --run X` -- recompute and emit
-// the per-run audit + cost receipt as JSON. Local mode reads the
-// SQLite store directly and uses the resolved profile's
+// `sparkwing runs receipt --run X` -- recompute and emit the
+// per-run audit + cost receipt as JSON. Local mode reads the SQLite
+// store directly and uses the resolved profile's
 // cost_per_runner_hour; cluster mode (--on NAME) defers cost to the
 // controller's configured rate.
 package main

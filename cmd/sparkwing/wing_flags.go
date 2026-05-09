@@ -56,24 +56,24 @@ type wingFlags struct {
 	mode string
 	// workers caps concurrent nodes in ci-embedded mode; 0 = NumCPU.
 	workers int
-	// IMP-007: --start-at / --stop-at name an inclusive WorkStep window
-	// the orchestrator runs; ids outside the resulting reachability
-	// set are skipped with `step_skipped`. Either bound can be empty
-	// to leave that side open. Unknown ids fail the run with a
-	// "did you mean X?" suggestion at registration time.
+	// --start-at / --stop-at name an inclusive WorkStep window the
+	// orchestrator runs; ids outside the resulting reachability set
+	// are skipped with `step_skipped`. Either bound can be empty to
+	// leave that side open. Unknown ids fail the run with a "did you
+	// mean X?" suggestion at registration time.
 	startAt string
 	stopAt  string
-	// IMP-014: --dry-run runs each step's DryRunFn instead of its
-	// apply Fn. No mutation; safe to run from agents and CI gates
-	// before destructive operations. Steps without a DryRunFn (and
-	// without an explicit SafeWithoutDryRun marker) soft-skip with
-	// reason `no_dry_run_defined` so the contract gap is visible.
+	// --dry-run runs each step's DryRunFn instead of its apply Fn.
+	// No mutation; safe to run from agents and CI gates before
+	// destructive operations. Steps without a DryRunFn (and without
+	// an explicit SafeWithoutDryRun marker) soft-skip with reason
+	// `no_dry_run_defined` so the contract gap is visible.
 	dryRun bool
-	// IMP-015: per-marker escape hatches for the blast-radius gate.
-	// Each authorizes dispatch when the matching marker is declared
-	// on any step. --dry-run bypasses all three regardless. The gate
-	// degrades gracefully (no marker = no block) so pipelines built
-	// before IMP-015 keep working untouched.
+	// Per-marker escape hatches for the blast-radius gate. Each
+	// authorizes dispatch when the matching marker is declared on
+	// any step. --dry-run bypasses all three regardless. The gate
+	// degrades gracefully (no marker = no block) so pipelines that
+	// predate the gate keep working untouched.
 	allowDestructive bool
 	allowProd        bool
 	allowMoney       bool
@@ -170,7 +170,7 @@ func classifyWingFlag(tok string) (wingTokenSpec, bool) {
 // position by parseWingFlags so existing `wing build --on prod`
 // muscle memory keeps working; the strict-order set is the subset
 // where ambiguity vs the positional is the actual bug -- `-C` whose
-// long form `--change-directory` is the original IMP-006 repro.
+// long form is `--change-directory`.
 // Adding more flags here is a one-line change and immediately
 // covered by the existing test matrix.
 var strictOrderFlags = map[string]bool{
@@ -190,8 +190,8 @@ func isStrictOrderFlagToken(tok string) bool {
 	return false
 }
 
-// extractPipelineName implements the IMP-006 strict-ordering contract
-// for `wing <name>` and `sparkwing run <name>`. The rule is narrow:
+// extractPipelineName implements the strict-ordering contract for
+// `wing <name>` and `sparkwing run <name>`. The rule is narrow:
 // only the strict-order flag set (currently just `-C` /
 // `--change-directory`) must appear BEFORE the pipeline-name
 // positional. Other wing-owned flags (`--on`, `--from`, `--start-at`,
@@ -507,8 +507,8 @@ func dispatchRemote(pipelineName string, wf wingFlags, passthrough []string) err
 	if repoSlug != "" {
 		envMap["GITHUB_REPOSITORY"] = repoSlug
 	}
-	// IMP-007: --start-at / --stop-at are wing-level on the local CLI;
-	// the remote runner reads them as SPARKWING_START_AT /
+	// --start-at / --stop-at are wing-level on the local CLI; the
+	// remote runner reads them as SPARKWING_START_AT /
 	// SPARKWING_STOP_AT from trigger env. Same env-var protocol the
 	// laptop-local exec path uses, so behavior is identical across
 	// venues.
@@ -518,10 +518,10 @@ func dispatchRemote(pipelineName string, wf wingFlags, passthrough []string) err
 	if wf.stopAt != "" {
 		envMap["SPARKWING_STOP_AT"] = wf.stopAt
 	}
-	// IMP-014: forward --dry-run to the remote runner via the same
-	// env-var protocol the local-exec path uses. Behavior is
-	// identical across venues so `wing X --on prod --dry-run`
-	// previews the same way it does locally.
+	// Forward --dry-run to the remote runner via the same env-var
+	// protocol the local-exec path uses. Behavior is identical
+	// across venues so `wing X --on prod --dry-run` previews the
+	// same way it does locally.
 	if wf.dryRun {
 		envMap["SPARKWING_DRY_RUN"] = "1"
 	}
@@ -559,7 +559,7 @@ func dispatchRemote(pipelineName string, wf wingFlags, passthrough []string) err
 		fmt.Fprintln(os.Stderr, "wing: --full is local-only; remote retry always skips passed nodes (ignoring --full)")
 	}
 
-	// IMP-005: best-effort eager refresh closes the
+	// Best-effort eager refresh closes the
 	// `git push && wing X --on prod` race where the gitcache
 	// hasn't yet mirrored the just-pushed SHA. The retry in the
 	// runner's trigger loop catches the residual race; this just

@@ -536,7 +536,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// IMP-004: every accepted trigger gets a Run row up front so
+	// every accepted trigger gets a Run row up front so
 	// `runs list` / `runs status` surface it before the runner has
 	// even claimed the trigger. The orchestrator's CreateRun upserts
 	// the status from 'pending' -> 'running' once it actually starts;

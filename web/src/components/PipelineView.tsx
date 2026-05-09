@@ -72,7 +72,7 @@ function formatDuration(ns: number): string {
   return `${s.toFixed(1)}s`;
 }
 
-// RUN-015: "adopted" nodes (cached + coalesced) share a dashed border
+// "adopted" nodes (cached + coalesced) share a dashed border
 // so operators see at a glance which nodes took output from elsewhere.
 const statusColors: Record<
   string,

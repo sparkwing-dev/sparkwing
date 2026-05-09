@@ -76,11 +76,11 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // the logs service. Callers (esp. the orchestrator's per-node log
 // sink) treat this as fatal -- a token whose scope set is wrong is
 // a deploy-time misconfig that won't fix itself by retrying, and
-// silently dropping log lines under that misconfig produced the
-// "status: success but no logs" black hole that IMP-002 closes.
+// silently dropping log lines under that misconfig produces a
+// "status: success but no logs" black hole.
 //
 // Scope is parsed structured-first from the JSON body's
-// "missing_scope" field (IMP-022). Pre-IMP-022 servers emit a plain
+// "missing_scope" field. Older servers emit a plain
 // string of the form "token lacks required scope: <name>"; the
 // parser falls back to a regex on that exact phrasing.
 // Empty when neither shape matches.
@@ -137,8 +137,8 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 }
 
 // parseMissingScope extracts the scope name from a 401/403 response
-// body. Tries the IMP-022 JSON shape first (`missing_scope` field);
-// falls back to the pre-IMP-022 plain-text phrasing
+// body. Tries the JSON shape first (`missing_scope` field); falls
+// back to the older plain-text phrasing
 // "token lacks required scope: <name>" so mid-rollout we don't
 // degrade against an older logs service / non-controller proxy.
 // Returns "" when neither shape matches.
@@ -146,7 +146,7 @@ func parseMissingScope(body string) string {
 	if body == "" {
 		return ""
 	}
-	// JSON shape (IMP-022). Decode permissively: a body with
+	// JSON shape. Decode permissively: a body with
 	// `missing_scope` but unexpected siblings still parses.
 	if trimmed := strings.TrimLeft(body, " \t\n\r"); strings.HasPrefix(trimmed, "{") {
 		var b AuthErrorBody

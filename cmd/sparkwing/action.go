@@ -37,24 +37,19 @@ type Pipeline struct {
 	Examples   []sparkwing.Example     `json:"examples,omitempty"`
 	// Venue is the pipeline's author-declared dispatch constraint
 	// ("either" / "local-only" / "cluster-only"). Sourced from the
-	// describe cache; empty when the pipeline binary predates
-	// IMP-011 or hasn't been re-described since the field was
-	// added. Treated as "either" (the safe permissive default) by
-	// the dispatcher gate.
+	// describe cache; empty when the pipeline binary predates the
+	// field or hasn't been re-described since it was added. Treated
+	// as "either" (the safe permissive default) by the dispatcher
+	// gate.
 	Venue string `json:"venue,omitempty"`
 	// BlastRadius is the union of per-step blast-radius markers
 	// declared anywhere in the pipeline's plan, stringified to the
 	// canonical wire tokens ("destructive" / "production" / "money").
-	// Mirrors sparkwing.DescribePipeline.BlastRadius -- IMP-036:
-	// previously the local Pipeline struct dropped this field when
-	// copying from the describe cache, so `pipeline list -o json` /
-	// `pipeline describe -o json` returned no blast-radius info even
-	// when the pipeline declared markers. omitempty keeps the wire
-	// format quiet for pipelines without markers.
+	// Mirrors sparkwing.DescribePipeline.BlastRadius. omitempty keeps
+	// the wire format quiet for pipelines without markers.
 	BlastRadius []string `json:"blast_radius,omitempty"`
 	// BlastRadiusBySteps is the per-step breakdown of declared
-	// markers. Mirrors sparkwing.DescribePipeline.BlastRadiusBySteps
-	// -- IMP-036, see BlastRadius above.
+	// markers. Mirrors sparkwing.DescribePipeline.BlastRadiusBySteps.
 	BlastRadiusBySteps []sparkwing.DescribeStepBlastRadius `json:"blast_radius_by_step,omitempty"`
 }
 
@@ -318,9 +313,9 @@ func runPipelineDescribe(args []string) error {
 		}
 	}
 	if found == nil {
-		// IMP-040: surface a "did you mean X?" suggestion when the
-		// typo is close to a registered name, mirroring IMP-008.
-		// Source the candidate set from the catalog we just gathered
+		// Surface a "did you mean X?" suggestion when the typo is
+		// close to a registered name. Source the candidate set from
+		// the catalog we just gathered
 		// (rather than sparkwing.Registered() — this CLI verb runs in
 		// the wing process, not the inner pipeline binary, so the
 		// in-process registry is empty here). Far typos fall through
@@ -392,10 +387,8 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Args = dp.Args
 				a.Examples = dp.Examples
 				a.Venue = dp.Venue
-				// IMP-036: surface blast-radius markers in
-				// `pipeline list / describe -o json`. Previously
-				// dropped here even though the SDK side populated
-				// them on DescribePipeline.
+				// Surface blast-radius markers in
+				// `pipeline list / describe -o json`.
 				a.BlastRadius = dp.BlastRadius
 				a.BlastRadiusBySteps = dp.BlastRadiusBySteps
 			}
@@ -482,8 +475,8 @@ func printPipelineTable(pipelineList []Pipeline) {
 			if short == "" {
 				short = a.Help
 			}
-			// IMP-011: prepend a venue tag for pipelines that
-			// declared a non-default dispatch constraint. Keeps the
+			// Prepend a venue tag for pipelines that declared a
+			// non-default dispatch constraint. Keeps the
 			// `wing <TAB>` companion view honest about which
 			// pipelines refuse `--on` / require it.
 			if a.Venue != "" && a.Venue != "either" {
@@ -505,11 +498,11 @@ func printPipelineDetail(a *Pipeline) {
 	if a.Entrypoint != "" {
 		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
 	}
-	// IMP-011: surface the author-declared dispatch constraint near
-	// the top so an operator considering `--on PROFILE` sees the
-	// gate before reading the rest of the entry. "either" is the
-	// permissive default; we suppress it to keep the surface quiet
-	// for pipelines that didn't opt in.
+	// Surface the author-declared dispatch constraint near the top
+	// so an operator considering `--on PROFILE` sees the gate before
+	// reading the rest of the entry. "either" is the permissive
+	// default; we suppress it to keep the surface quiet for
+	// pipelines that didn't opt in.
 	if a.Venue != "" && a.Venue != "either" {
 		fmt.Printf("venue: %s\n", a.Venue)
 	}

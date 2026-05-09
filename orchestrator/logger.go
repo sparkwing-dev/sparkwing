@@ -1202,8 +1202,8 @@ func (j *JSONRenderer) Emit(rec sparkwing.LogRecord) {
 }
 
 // envelopeLogger persists run-level envelope events as JSONL and
-// tees to the user-facing delegate. IMP-010: envelope events
-// (run_start, run_plan, run_finish, plan_warn, validation warnings,
+// tees to the user-facing delegate. Envelope events (run_start,
+// run_plan, run_finish, plan_warn, validation warnings,
 // the run_summary, etc.) used to live only on the dispatcher's
 // stdout; this tee is the storage half that lets `sparkwing runs
 // logs --follow` reconstruct the same event stream a remote operator

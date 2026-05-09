@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// REG-018: nested-spawn retry_of propagation. When a parent run is
+// Nested-spawn retry_of propagation. When a parent run is
 // retried, child runs spawned via RunAndAwait during the retry
 // must carry retry_of pointing to the prior run's child spawned at
 // the same node + pipeline. Without that chain, the new child's own

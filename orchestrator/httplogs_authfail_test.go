@@ -19,18 +19,18 @@ type authFailPipe struct{ sparkwing.Base }
 func (authFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "only", func(ctx context.Context) error {
 		// User code "succeeds" but every Emit silently fails on 403
-		// in the unfixed world; with IMP-002 the run still ends up
-		// failed because the auth error is fatal.
+		// in the unfixed world; with the auth-fatal path wired in the
+		// run still ends up failed because the auth error is fatal.
 		sparkwing.Info(ctx, "doing the work")
 		return nil
 	})
 	return nil
 }
 
-// IMP-002: when logs.append returns 403 to the runner, the run must
-// hard-fail with a structured error rather than report
-// status=success with empty logs. This is the single most important
-// behavioral guarantee the ticket asks for.
+// When logs.append returns 403 to the runner, the run must hard-fail
+// with a structured error rather than report status=success with
+// empty logs. This is the single most important behavioral
+// guarantee.
 func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 	register("authfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return authFailPipe{} })
 

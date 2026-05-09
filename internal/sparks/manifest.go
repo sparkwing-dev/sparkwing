@@ -7,8 +7,6 @@
 // package. Callers feed it the consumer sparkwing dir (the directory that
 // contains go.mod + pipelines.yaml + main.go) and receive an overlay that
 // the compile step can point at.
-//
-// See regression_fixes.md REG-011b for the full design.
 package sparks
 
 import (

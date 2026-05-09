@@ -200,7 +200,7 @@ func TestRunWork_TypedResultRecordsOnStep(t *testing.T) {
 // resolution path: a downstream step calling sw.StepGet[T](ctx, step)
 // on its upstream gets the typed value back once MarkDone has fired.
 // This is the canonical fixture for typed inter-step composition under
-// the SDK-042 single-Step grammar.
+// the single-Step grammar.
 func TestRunWork_StepGetResolvesInDownstream(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()

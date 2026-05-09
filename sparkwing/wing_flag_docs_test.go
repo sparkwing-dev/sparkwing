@@ -33,22 +33,22 @@ func TestWingFlagDocs_OrderAndUniqueness(t *testing.T) {
 	}
 }
 
-// TestWingFlagDocs_CoversIMPArcFlags pins the IMP-007/014/015 flag
-// set the doc list MUST include. IMP-039 surfaced these flags in
-// per-pipeline help; a future cleanup that removes one should fail
-// loud here so the help drift doesn't regress.
-func TestWingFlagDocs_CoversIMPArcFlags(t *testing.T) {
+// TestWingFlagDocs_CoversSafetyFlags pins the range-resume, dry-run,
+// and blast-radius flag set the doc list MUST include. A future
+// cleanup that removes one should fail loud here so the help drift
+// doesn't regress.
+func TestWingFlagDocs_CoversSafetyFlags(t *testing.T) {
 	docs := WingFlagDocs()
 	have := map[string]bool{}
 	for _, d := range docs {
 		have[d.Name] = true
 	}
 	mustHave := []string{
-		// IMP-007: range-resume.
+		// Range-resume.
 		"start-at", "stop-at",
-		// IMP-014: dry-run.
+		// Dry-run.
 		"dry-run",
-		// IMP-015: blast-radius escape hatches.
+		// Blast-radius escape hatches.
 		"allow-destructive", "allow-prod", "allow-money",
 	}
 	for _, f := range mustHave {
@@ -60,8 +60,8 @@ func TestWingFlagDocs_CoversIMPArcFlags(t *testing.T) {
 
 // TestWingFlagDocs_SubsetOfReservedFlags pins the contract that every
 // documented wing flag is also reserved -- so an Args struct with
-// `flag:"start-at"` would still get rejected at Register time (IMP-003)
-// and the documented surface is also the protected surface. The
+// `flag:"start-at"` would still get rejected at Register time and
+// the documented surface is also the protected surface. The
 // converse is not required: reservedFlagNames includes infra-only
 // flags (--secrets, --mode, --workers, --no-update) that are
 // intentionally absent from public help.

@@ -11,8 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-002: 5xx responses must be retried up to the per-line cap;
-// after exhausting retries the runner records the drop count + the
+// 5xx responses must be retried up to the per-line cap; after
+// exhausting retries the runner records the drop count + the
 // first-seen reason rather than failing the node.
 func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	var posts atomic.Int64
@@ -79,9 +79,9 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	}
 }
 
-// IMP-002: a 401/403 response latches Fatal immediately so subsequent
-// emits short-circuit. Lets the orchestrator stop wasting cycles
-// once the deploy-time auth misconfig is detected.
+// A 401/403 response latches Fatal immediately so subsequent emits
+// short-circuit. Lets the orchestrator stop wasting cycles once the
+// deploy-time auth misconfig is detected.
 func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 	var posts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -8,12 +8,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// SDK-013 introduced the Produces[T] marker; SDK-032 promoted it to a
-// hard plan-time contract: a typed job MUST embed Produces[T] AND its
-// Work() MUST call SetResult on a step of type T. Either piece alone
-// is a Plan-time panic so the contract is visible at the type level
-// AND honored at runtime. sw.RefTo[T] then validates against the
-// marker and never falls back to inference.
+// The Produces[T] marker is a hard plan-time contract: a typed job
+// MUST embed Produces[T] AND its Work() MUST call SetResult on a step
+// of type T. Either piece alone is a Plan-time panic so the contract
+// is visible at the type level AND honored at runtime. sw.RefTo[T]
+// then validates against the marker and never falls back to inference.
 
 type producedJob struct {
 	sparkwing.Base
@@ -130,10 +129,9 @@ func TestProduces_MismatchPanics(t *testing.T) {
 	sparkwing.Job(plan, "mismatch", &mismatchJob{})
 }
 
-// SDK-035: the same Produces/SetResult contract that Job enforces
-// must also fire on the detached-node paths -- OnFailure recovery
-// nodes, JobFanOutDynamic children, orchestrator SpawnNode dispatch.
-// Before SDK-035 these silently skipped the check.
+// The same Produces/SetResult contract that Job enforces must also
+// fire on the detached-node paths -- OnFailure recovery nodes,
+// JobFanOutDynamic children, orchestrator SpawnNode dispatch.
 func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	parent := sparkwing.Job(plan, "parent", jobFnNoop())
@@ -205,8 +203,8 @@ func TestOutput_PanicsOnTypeMismatch(t *testing.T) {
 	_ = sparkwing.RefTo[otherOut](n)
 }
 
-// LintWarnings used to flag missing Produces / missing SetResult; under
-// SDK-032 those are hard panics, so an aligned plan should produce no
+// LintWarnings used to flag missing Produces / missing SetResult;
+// these are now hard panics, so an aligned plan should produce no
 // warnings.
 func TestLintWarning_NoneWhenAligned(t *testing.T) {
 	plan := sparkwing.NewPlan()

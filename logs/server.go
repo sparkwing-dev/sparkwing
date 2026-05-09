@@ -240,9 +240,9 @@ func (p *logsPrincipal) label() string {
 }
 
 // writeAuthErrorJSON serializes an AuthErrorBody to the response with
-// Content-Type: application/json. IMP-022 makes auth-error parsing
-// structured-first so callers (logs client, dashboard, MCP) don't
-// scrape the human message.
+// Content-Type: application/json. Auth-error parsing is structured-
+// first so callers (logs client, dashboard, MCP) don't scrape the
+// human message.
 func writeAuthErrorJSON(w http.ResponseWriter, status int, body AuthErrorBody) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

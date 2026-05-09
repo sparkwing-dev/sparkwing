@@ -12,8 +12,7 @@ import (
 // TestJob_ClosureFormSingleStepWork verifies that sparkwing.Job
 // accepts a func(ctx) error closure directly and wraps it as a Job
 // whose Work has exactly one Step (id "run") and no typed result.
-// This replaces the pre-SDK-042 sparkwing.JobFn explicit-wrapper
-// path.
+// This replaces the older sparkwing.JobFn explicit-wrapper path.
 func TestJob_ClosureFormSingleStepWork(t *testing.T) {
 	called := false
 	plan := sparkwing.NewPlan()
@@ -116,8 +115,8 @@ func TestWork_StepNeeds(t *testing.T) {
 	}
 }
 
-// TestWork_NeedsChainAndGroupSteps verifies the post-SDK-042 DAG
-// shape: sequential deps via direct .Needs chains and fan-in via
+// TestWork_NeedsChainAndGroupSteps verifies the DAG shape:
+// sequential deps via direct .Needs chains and fan-in via
 // sparkwing.GroupSteps. Sequence/Parallel sugar verbs were dropped;
 // this exercises the canonical primitive.
 func TestWork_NeedsChainAndGroupSteps(t *testing.T) {
@@ -392,7 +391,7 @@ func TestWork_StepFnReturnsError(t *testing.T) {
 	}
 }
 
-// SDK-039: SpawnNodeForEach validates fn signature at Plan time so
+// SpawnNodeForEach validates fn signature at Plan time so
 // a wrong-shaped fn panics during plan construction rather than
 // during dispatch (which previously surfaced as a runtime spawn
 // error after the parent's Needs cleared, much later than the

@@ -1,13 +1,13 @@
 package orchestrator
 
-// CLI-017: `wing X --explain --skip Y -o json` must produce a Plan
-// snapshot identical (modulo formatting) to `wing X --explain --skip Y`.
-// The bug was that explain-output flags (-o / --output / --json)
-// were forwarded into parseTypedFlags, which rejected them as
-// unknown and silently dropped *every* parsed flag (including
-// --skip / --only) into an empty argsMap. The Plan was then built
-// without any SkipFilter applied -- diverging from the no-`-o`
-// invocation, where parsing succeeded and SkipFilter ran.
+// `wing X --explain --skip Y -o json` must produce a Plan snapshot
+// identical (modulo formatting) to `wing X --explain --skip Y`. The
+// bug was that explain-output flags (-o / --output / --json) were
+// forwarded into parseTypedFlags, which rejected them as unknown and
+// silently dropped *every* parsed flag (including --skip / --only)
+// into an empty argsMap. The Plan was then built without any
+// SkipFilter applied -- diverging from the no-`-o` invocation, where
+// parsing succeeded and SkipFilter ran.
 
 import (
 	"context"
@@ -21,19 +21,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// cli017Inputs mirrors the embedded SkipFilterArgs pattern used by
+// explainSkipInputs mirrors the embedded SkipFilterArgs pattern used by
 // the platform's release pipelines: --skip and --only become
 // first-class typed flags on the pipeline. The test pipeline below
 // consults Skip in its own Plan() to drop a named node, mimicking
 // how SkipFilter actually reshapes the DAG at Plan-construction
 // time.
-type cli017Inputs struct {
+type explainSkipInputs struct {
 	Skip string `flag:"skip" desc:"comma-separated step names to skip"`
 }
 
-type cli017Pipe struct{}
+type explainSkipPipe struct{}
 
-func (cli017Pipe) Plan(_ context.Context, plan *sparkwing.Plan, in cli017Inputs, _ sparkwing.RunContext) error {
+func (explainSkipPipe) Plan(_ context.Context, plan *sparkwing.Plan, in explainSkipInputs, _ sparkwing.RunContext) error {
 	skip := map[string]struct{}{}
 	for _, s := range strings.Split(in.Skip, ",") {
 		s = strings.TrimSpace(s)
@@ -54,8 +54,8 @@ func (cli017Pipe) Plan(_ context.Context, plan *sparkwing.Plan, in cli017Inputs,
 }
 
 func init() {
-	sparkwing.Register[cli017Inputs]("cli017-explain-skip", func() sparkwing.Pipeline[cli017Inputs] {
-		return cli017Pipe{}
+	sparkwing.Register[explainSkipInputs]("explain-skip-test", func() sparkwing.Pipeline[explainSkipInputs] {
+		return explainSkipPipe{}
 	})
 }
 
@@ -105,9 +105,9 @@ func nodeIDsFromSnapshot(t *testing.T, raw []byte) []string {
 }
 
 // TestPrintPipelinePlan_SkipParityAcrossOutputFlags is the load-bearing
-// CLI-017 regression: invoking the explain entrypoint with --skip
-// alone vs. --skip alongside -o json must produce the exact same
-// node set. The fix lives in printPipelinePlan / stripExplainOutputFlags
+// regression: invoking the explain entrypoint with --skip alone vs.
+// --skip alongside -o json must produce the exact same node set. The
+// fix lives in printPipelinePlan / stripExplainOutputFlags
 // (orchestrator/main.go).
 func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 	cases := []struct {
@@ -124,7 +124,7 @@ func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 	var baseline []string
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := captureExplainStdout(t, "cli017-explain-skip", tc.rest)
+			out := captureExplainStdout(t, "explain-skip-test", tc.rest)
 			ids := nodeIDsFromSnapshot(t, out)
 			// "artifact" must NOT appear -- the SkipFilter dropped it.
 			for _, id := range ids {

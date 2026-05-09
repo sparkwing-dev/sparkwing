@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// IMP-022: pin the wire shape that the logs service emits on 403.
+// Pin the wire shape that the logs service emits on 403.
 // White-box test: drives requireScope directly with a logsPrincipal
 // in context, so we don't have to spin up a fake controller for
 // whoami auth.

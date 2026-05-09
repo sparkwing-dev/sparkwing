@@ -62,24 +62,24 @@ type DescribePipeline struct {
 	// `flag:",extra"` bag; in that mode unknown flags don't error.
 	Extra bool `json:"extra,omitempty"`
 	// Venue is the author-declared dispatch constraint
-	// ("either" / "local-only" / "cluster-only"). IMP-011: the wing
+	// ("either" / "local-only" / "cluster-only"). The wing
 	// dispatcher gates `--on PROFILE` against this so a pipeline
 	// that needs laptop-local credentials (terraform / aws SSO) can
 	// refuse remote dispatch at CLI time. Empty string means "venue
 	// metadata not present in this cache file" — older binaries
-	// pre-IMP-011 omit the field entirely; the dispatcher treats
-	// absent + "either" as the same permissive default.
+	// omit the field entirely; the dispatcher treats absent +
+	// "either" as the same permissive default.
 	Venue string `json:"venue,omitempty"`
 	// BlastRadius is the union of per-step blast-radius markers
 	// declared anywhere in this pipeline's plan, stringified to the
 	// canonical wire tokens ("destructive" / "production" / "money").
-	// IMP-015: the wing dispatcher walks this set against the
-	// matching --allow-* escape flags so an agent or operator
-	// dispatching a pipeline that calls a destructive Step gets a
-	// hard refusal until they pass the explicit acknowledgment (or
-	// --dry-run). A pre-IMP-015 cache file omits the field entirely;
-	// the dispatcher treats absent as "no markers declared" and the
-	// gate stays silent -- the next --describe refresh populates it.
+	// The wing dispatcher walks this set against the matching
+	// --allow-* escape flags so an agent or operator dispatching a
+	// pipeline that calls a destructive Step gets a hard refusal
+	// until they pass the explicit acknowledgment (or --dry-run).
+	// An older cache file omits the field entirely; the dispatcher
+	// treats absent as "no markers declared" and the gate stays
+	// silent -- the next --describe refresh populates it.
 	//
 	// The marker set is collapsed to one entry per unique value so a
 	// pipeline with many destructive steps doesn't blow up the
@@ -176,7 +176,7 @@ func DescribePipelineByName(name string) (DescribePipeline, bool, error) {
 			Secret:   f.Secret,
 		})
 	}
-	// IMP-015: best-effort blast-radius union + per-step breakdown.
+	// Best-effort blast-radius union + per-step breakdown.
 	// We invoke Plan() with empty args to walk the DAG; pipelines
 	// with required Inputs (or that panic at Plan-time without args)
 	// gracefully degrade to empty markers. The wing dispatcher
@@ -197,8 +197,8 @@ func DescribePipelineByName(name string) (DescribePipeline, bool, error) {
 // collectBlastRadius best-effort invokes the pipeline's Plan() with
 // an empty args map, walks every reachable WorkStep, and returns
 // the union of declared markers + the per-step breakdown. Failures
-// (panics, required-Inputs errors) are swallowed so a pre-IMP-015
-// or required-flag pipeline doesn't break --describe -- the
+// (panics, required-Inputs errors) are swallowed so an older or
+// required-flag pipeline doesn't break --describe -- the
 // dispatcher's gate degrades gracefully when markers are absent.
 func collectBlastRadius(reg *Registration) (union []string, perStep []DescribeStepBlastRadius, ok bool) {
 	if reg == nil || reg.Invoke == nil {

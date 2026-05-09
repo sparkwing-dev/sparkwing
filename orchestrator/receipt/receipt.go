@@ -1,10 +1,10 @@
 // Package receipt computes the per-run audit + cost summary
 // surfaced by `sparkwing runs receipt` and GET /api/v1/runs/{id}/receipt.
 //
-// The receipt is recomputed from runs+nodes on demand (IMP-016
-// Storage approach). Only the small queryable fields (receipt_sha,
-// cost_*) live on the runs row; the full JSON is regenerated each
-// read so the receipt always reflects the current store contents.
+// The receipt is recomputed from runs+nodes on demand. Only the
+// small queryable fields (receipt_sha, cost_*) live on the runs row;
+// the full JSON is regenerated each read so the receipt always
+// reflects the current store contents.
 package receipt
 
 import (
@@ -18,7 +18,7 @@ import (
 )
 
 // Receipt is the per-run audit + cost artifact. JSON shape is the
-// public contract documented in IMP-016 / docs.
+// public contract documented in the docs.
 type Receipt struct {
 	RunID      string     `json:"run_id"`
 	Pipeline   string     `json:"pipeline"`
@@ -58,7 +58,7 @@ type Step struct {
 }
 
 // Cost is the runner-time × profile-rate compute cost. Cloud-billing
-// reconciliation (IMP-018) flips Settled to true.
+// reconciliation flips Settled to true.
 type Cost struct {
 	Currency     string `json:"currency"`
 	ComputeCents int64  `json:"compute_cents"`

@@ -455,7 +455,7 @@ dispatch then picks one of three paths:
 - Neither declared -> the step soft-skips with `step_skipped` /
   `skip_reason: no_dry_run_defined`. Existing pipelines keep working
   under `--dry-run` while the contract gap is visible in run logs;
-  IMP-015 will tighten this to a hard refusal when paired with
+  A future change will tighten this to a hard refusal when paired with
   blast-radius markers (`Destructive()`, `AffectsProduction()`,
   `CostsMoney()`).
 
@@ -737,17 +737,17 @@ wing-owned long flags before the pipeline binary parses anything.
 A pipeline Args struct that declares one of these as a `flag:"..."`
 tag would silently lose the value, so `sparkwing.Register` panics
 at registration time with the colliding flag, the offending Go
-field, and the full reserved list (IMP-003).
+field, and the full reserved list.
 
 Current reserved set, from `sparkwing.ReservedFlagNames()`:
 
 ```
-allow-destructive   --allow-destructive  // IMP-015 blast-radius gate
-allow-money         --allow-money        // IMP-015 blast-radius gate
-allow-prod          --allow-prod         // IMP-015 blast-radius gate
+allow-destructive   --allow-destructive  // blast-radius gate
+allow-money         --allow-money        // blast-radius gate
+allow-prod          --allow-prod         // blast-radius gate
 C, change-directory --change-directory   // re-anchor .sparkwing/ discovery
 config              --config             // named preset from config.yaml
-dry-run             --dry-run            // IMP-014 dry-run dispatch
+dry-run             --dry-run            // dry-run dispatch
 from                --from               // compile pipeline from a git ref
 full                --full               // with --retry-of: re-run every node
 mode                --mode               // run mode override
@@ -755,8 +755,8 @@ no-update           --no-update          // skip auto-update on invocation
 on                  --on                 // remote-controller dispatch
 retry-of            --retry-of           // re-run, skip-passed by default
 secrets             --secrets            // ad-hoc secret injection
-start-at            --start-at           // skip nodes before this step (IMP-007)
-stop-at             --stop-at            // skip nodes after this step (IMP-007)
+start-at            --start-at           // skip nodes before this step
+stop-at             --stop-at            // skip nodes after this step
 v, verbose          --verbose            // SPARKWING_LOG_LEVEL=debug
 workers             --workers            // local-execution parallelism
 ```

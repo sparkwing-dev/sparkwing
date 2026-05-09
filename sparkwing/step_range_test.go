@@ -9,8 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-007: --start-at on a linear DAG runs the named step + every
-// downstream step; everything upstream is skipped.
+// --start-at on a linear DAG runs the named step + every downstream
+// step; everything upstream is skipped.
 func TestStepRange_LinearDAG_StartAt(t *testing.T) {
 	var ranA, ranB, ranC atomic.Bool
 	w := sparkwing.NewWork()
@@ -187,12 +187,12 @@ func (stepRangePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 }
 
 // Unknown --start-at is rejected with a Levenshtein suggestion,
-// reusing the IMP-008 phrasing.
+// reusing the typo-detector phrasing.
 func TestValidateStepRange_UnknownIDSuggests(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp007-validate",
+	sparkwing.Register[sparkwing.NoInputs]("step-range-validate",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })
-	reg, _ := sparkwing.Lookup("imp007-validate")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp007-validate"})
+	reg, _ := sparkwing.Lookup("step-range-validate")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "step-range-validate"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -209,10 +209,10 @@ func TestValidateStepRange_UnknownIDSuggests(t *testing.T) {
 
 // Known ids on both bounds → nil.
 func TestValidateStepRange_KnownIDsOK(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp007-validate-ok",
+	sparkwing.Register[sparkwing.NoInputs]("step-range-validate-ok",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })
-	reg, _ := sparkwing.Lookup("imp007-validate-ok")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp007-validate-ok"})
+	reg, _ := sparkwing.Lookup("step-range-validate-ok")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "step-range-validate-ok"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -224,10 +224,10 @@ func TestValidateStepRange_KnownIDsOK(t *testing.T) {
 // Empty bounds = no-op. Pin the contract so we don't accidentally
 // require both bounds in the future.
 func TestValidateStepRange_EmptyBoundsNoOp(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp007-validate-empty",
+	sparkwing.Register[sparkwing.NoInputs]("step-range-validate-empty",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })
-	reg, _ := sparkwing.Lookup("imp007-validate-empty")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp007-validate-empty"})
+	reg, _ := sparkwing.Lookup("step-range-validate-empty")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "step-range-validate-empty"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}

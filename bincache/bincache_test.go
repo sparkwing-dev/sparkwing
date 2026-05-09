@@ -169,10 +169,10 @@ func installFailingGo(t *testing.T, stderrLine, stdoutLine string) {
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// IMP-001: a failed compile must surface the toolchain's stdout +
-// stderr via *CompileError so the trigger loop can ship them into
-// the run's structured logs (instead of operators having to
-// `kubectl logs` the warm-runner pod).
+// A failed compile must surface the toolchain's stdout + stderr via
+// *CompileError so the trigger loop can ship them into the run's
+// structured logs (instead of operators having to `kubectl logs` the
+// warm-runner pod).
 func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	const wantStderr = "go: go.mod requires go >= 9.99.0"
 	const wantStdout = "./pipeline.go:7:2: undefined: Foo"

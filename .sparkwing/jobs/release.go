@@ -18,7 +18,7 @@ import (
 // falls back to bumping --bump (default minor) off the latest tag.
 //
 // Preview / no-mutation mode is delivered through wing's reserved
-// `--dry-run` flag (IMP-014); each step below either marks itself
+// `--dry-run` flag; each step below either marks itself
 // SafeWithoutDryRun (read-only checks) or provides a .DryRun(...)
 // body (the tag push), so the pipeline doesn't carry its own flag.
 type ReleaseArgs struct {
@@ -66,7 +66,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		return fmt.Errorf("release: locate repo root: %w", err)
 	}
 
-	// All git/changelog probing happens inside Jobs (SDK-012). The
+	// All git/changelog probing happens inside Jobs. The
 	// version-resolve probe is small enough to inline; the rest are
 	// regular nodes so retries work cleanly on a transient origin.
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{

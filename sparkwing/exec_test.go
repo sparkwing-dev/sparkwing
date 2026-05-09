@@ -134,7 +134,7 @@ func TestBash_EnvInjects(t *testing.T) {
 	}
 }
 
-// ISS-035: when the dir does not exist, the renderer must NOT claim
+// When the dir does not exist, the renderer must NOT claim
 // "exit 0". The cause must be visible in the human string.
 func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
 	ctx := sparkwing.WithLogger(context.Background(), &recordingLogger{})
@@ -162,7 +162,7 @@ func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
 	}
 }
 
-// ISS-035: missing-binary path (Exec with a name that's not on PATH)
+// Missing-binary path (Exec with a name that's not on PATH)
 // must surface the ENOENT cause, not "exit 0".
 func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
 	ctx := sparkwing.WithLogger(context.Background(), &recordingLogger{})
@@ -186,7 +186,7 @@ func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
 	}
 }
 
-// ISS-036: a relative dir is resolved against WorkDir(), not the
+// A relative dir is resolved against WorkDir(), not the
 // runner-process cwd. .Dir("sub") from a pipeline rooted at /tmp/foo
 // must run in /tmp/foo/sub.
 func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
@@ -212,7 +212,7 @@ func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
 	}
 }
 
-// ISS-036: an absolute dir is used as-is (not joined onto WorkDir()).
+// An absolute dir is used as-is (not joined onto WorkDir()).
 func TestCmd_AbsoluteDirPassesThrough(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()

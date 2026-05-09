@@ -10,9 +10,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-014: under WithDryRun(ctx), a step's DryRunFn must run in
-// place of its apply Fn. Pin both with separate counters so a
-// regression that calls both (or the wrong one) is obvious.
+// Under WithDryRun(ctx), a step's DryRunFn must run in place of its
+// apply Fn. Pin both with separate counters so a regression that
+// calls both (or the wrong one) is obvious.
 func TestDryRun_StepWithDryRunFn_DryRunCalledApplySkipped(t *testing.T) {
 	var applyCount, dryCount atomic.Int64
 	w := sparkwing.NewWork()
@@ -59,8 +59,7 @@ func TestDryRun_SafeWithoutDryRun_ApplyRunsUnchanged(t *testing.T) {
 // A step with neither DryRunFn nor SafeWithoutDryRun marker is
 // soft-skipped under --dry-run with reason `no_dry_run_defined`.
 // Soft-skip (not panic) is the v1 behavior so existing pipelines
-// keep working under --dry-run; IMP-015 will tighten this when
-// blast-radius markers ship.
+// keep working under --dry-run.
 func TestDryRun_StepWithoutDryRunOrSafeMarker_SoftSkipped(t *testing.T) {
 	var count atomic.Int64
 	w := sparkwing.NewWork()
@@ -123,7 +122,7 @@ func TestDryRun_DryRunFnFailure_PropagatedAsStepError(t *testing.T) {
 	}
 }
 
-// IMP-014 + IMP-013 integration: PreviewPlan(opts.DryRun=true)
+// Dry-run + preview integration: PreviewPlan(opts.DryRun=true)
 // renders Decision according to the dry-run lens. Three cases on
 // one Work pin the contract:
 //   - DryRunFn declared    -> would_dry_run
@@ -148,15 +147,15 @@ func (previewDryRunPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spark
 }
 
 func TestPreviewPlan_DryRunRendersThreeDecisions(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp014-preview",
+	sparkwing.Register[sparkwing.NoInputs]("dry-run-preview",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewDryRunPipe{} })
-	reg, _ := sparkwing.Lookup("imp014-preview")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp014-preview"})
+	reg, _ := sparkwing.Lookup("dry-run-preview")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "dry-run-preview"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
-	preview, err := sparkwing.PreviewPlan(plan, "imp014-preview", nil, sparkwing.PreviewOptions{DryRun: true})
+	preview, err := sparkwing.PreviewPlan(plan, "dry-run-preview", nil, sparkwing.PreviewOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}

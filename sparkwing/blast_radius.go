@@ -3,7 +3,7 @@ package sparkwing
 import "fmt"
 
 // BlastRadius is a typed marker an author attaches to a WorkStep to
-// declare the consequences of running it. IMP-015: today every step
+// declare the consequences of running it. Without markers every step
 // is equally trusted -- `wing cluster-down` and `wing format` look
 // identical from the dispatcher's POV. Agents make mistakes humans
 // wouldn't ("wait, this would destroy production" is an instinct),
@@ -17,8 +17,7 @@ import "fmt"
 // dispatcher walks the per-step set against the wing-level escape
 // flags (--allow-destructive / --allow-prod / --allow-money) plus
 // --dry-run; `wing X --dry-run` always proceeds regardless of the
-// markers, because dry-run is the safe-mode preview path declared
-// by IMP-014.
+// markers, because dry-run is the safe-mode preview path.
 //
 // Mirrors the Venue contract (sparkwing/venue.go): typed values
 // flow through DescribePipeline + PlanPreview + planSnapshot as
@@ -52,7 +51,7 @@ const (
 func (b BlastRadius) String() string { return string(b) }
 
 // IsValid reports whether b is one of the canonical declared
-// markers. Used by the wire-decoder so a stale or pre-IMP-015
+// markers. Used by the wire-decoder so a stale or older
 // describe cache file with garbage values silently degrades to
 // "no marker" rather than misclassifying a step.
 func (b BlastRadius) IsValid() bool {
@@ -83,7 +82,7 @@ func AllBlastRadii() []BlastRadius {
 // that JSON consumers (agents, dashboard) can pattern-match without
 // parsing the message.
 //
-// Mirrors VenueMismatchError's role for IMP-011's gate.
+// Mirrors VenueMismatchError's role for the venue gate.
 type BlastRadiusBlockedError struct {
 	Pipeline string
 	StepID   string
@@ -102,13 +101,11 @@ func (e *BlastRadiusBlockedError) Error() string {
 // state mutation that's hard or impossible to undo. The dispatcher
 // refuses to run a pipeline containing a destructive step unless
 // the operator passes --allow-destructive (or --dry-run, which
-// bypasses every blast-radius gate by IMP-014's contract).
+// bypasses every blast-radius gate by contract).
 //
 //	sparkwing.Step(w, "destroy-eks", j.destroyEKS).
 //	    Destructive().
 //	    AffectsProduction()
-//
-// IMP-015.
 func (s *WorkStep) Destructive() *WorkStep {
 	s.addBlastRadius(BlastRadiusDestructive)
 	return s
@@ -122,8 +119,6 @@ func (s *WorkStep) Destructive() *WorkStep {
 // Independent of Destructive: a prod read may be reversible but
 // still merits an explicit gate so a laptop-side typo can't leak
 // data or burn credentials silently.
-//
-// IMP-015.
 func (s *WorkStep) AffectsProduction() *WorkStep {
 	s.addBlastRadius(BlastRadiusAffectsProduction)
 	return s
@@ -134,8 +129,6 @@ func (s *WorkStep) AffectsProduction() *WorkStep {
 // calling a paid API, running a long distributed job. The
 // dispatcher refuses to run a pipeline containing such a step
 // unless the operator passes --allow-money (or --dry-run).
-//
-// IMP-015.
 func (s *WorkStep) CostsMoney() *WorkStep {
 	s.addBlastRadius(BlastRadiusCostsMoney)
 	return s

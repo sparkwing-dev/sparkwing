@@ -2,8 +2,8 @@ package orchestrator_test
 
 // Cluster-mode orchestrator safety: HTTP-only Backends invariant.
 //
-// WHY THIS TEST EXISTS (RUN-016)
-// ------------------------------
+// WHY THIS TEST EXISTS
+// --------------------
 // The orchestrator running inside a runner pod -- the binary that
 // executes user-authored pipeline code, including .inline() jobs --
 // MUST always receive HTTP-backed Backends:
@@ -37,7 +37,7 @@ package orchestrator_test
 // CORRECT there and the LocalBackends() helper is the canonical
 // laptop path. This test only pins the cluster-runner-pod path.
 //
-// See: RUN-016, decisions/0001-open-core-tier-strategy.md.
+// See: decisions/0001-open-core-tier-strategy.md.
 
 import (
 	"reflect"
@@ -84,7 +84,7 @@ func TestClusterBackends_StateMustBeHTTP(t *testing.T) {
 		t.Fatalf(`cluster orchestrator Backends.State must be HTTP-backed for cluster
 mode; got *store.Store. This is a PRIVILEGE-ESCALATION REGRESSION --
 pipeline code running .inline() in a runner pod would gain
-controller-level write access to the state DB. See RUN-016 and
+controller-level write access to the state DB. See
 decisions/0001-open-core-tier-strategy.md for the security rationale.`)
 	}
 
@@ -94,7 +94,7 @@ decisions/0001-open-core-tier-strategy.md for the security rationale.`)
 	if !strings.Contains(stateType, "client.Client") {
 		t.Fatalf(`cluster orchestrator Backends.State must be HTTP-backed
 (*client.Client); got %s. Any non-HTTP StateBackend in the runner
-pod is a privilege-escalation regression. See RUN-016 and
+pod is a privilege-escalation regression. See
 decisions/0001-open-core-tier-strategy.md.`, stateType)
 	}
 }
@@ -121,15 +121,15 @@ func TestClusterBackends_ConcurrencyMustBeHTTP(t *testing.T) {
 for cluster mode; got %s (SQLite-direct). This is a
 PRIVILEGE-ESCALATION REGRESSION -- pipeline code running .inline()
 in a runner pod would gain direct write access to the controller's
-concurrency tables. See RUN-016 and decisions/0001-open-core-tier-
-strategy.md for the security rationale.`, concType)
+concurrency tables. See decisions/0001-open-core-tier-strategy.md
+for the security rationale.`, concType)
 	}
 
 	// Positive assertion: it IS the HTTP variant.
 	if !strings.Contains(concType, "HTTPConcurrency") {
 		t.Fatalf(`cluster orchestrator Backends.Concurrency must be
 *HTTPConcurrency; got %s. Any non-HTTP ConcurrencyBackend in the
-runner pod is a privilege-escalation regression. See RUN-016 and
+runner pod is a privilege-escalation regression. See
 decisions/0001-open-core-tier-strategy.md.`, concType)
 	}
 }
@@ -149,13 +149,13 @@ func TestClusterBackends_NoStoreReachable(t *testing.T) {
 *store.Store at %s. Even an embedded / lazy direct-store reference
 collapses the runner-pod trust boundary -- .inline() pipeline code
 could reach it via reflection or via a hybrid backend's fallback
-path. See RUN-016 and decisions/0001-open-core-tier-strategy.md.`,
+path. See decisions/0001-open-core-tier-strategy.md.`,
 			found)
 	}
 	if found := findStoreType(reflect.ValueOf(backends.Concurrency), 0); found != "" {
 		t.Fatalf(`cluster orchestrator Backends.Concurrency has a
-reachable *store.Store at %s. See RUN-016 and decisions/0001-open-
-core-tier-strategy.md.`, found)
+reachable *store.Store at %s. See decisions/0001-open-core-tier-
+strategy.md.`, found)
 	}
 }
 

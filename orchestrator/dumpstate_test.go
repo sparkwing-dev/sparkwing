@@ -15,9 +15,9 @@ import (
 
 // TestDumpRunState_RoundTrip pins the bijection between SQLite
 // run/node rows (orchestrator write surface) and the
-// runs/<id>/state.ndjson dump that S3-only dashboards read back
-// (LOCAL-011). A new exported store.Run / store.Node field added
-// without a JSON tag would silently disappear from the dashboard's S3
+// runs/<id>/state.ndjson dump that S3-only dashboards read back. A
+// new exported store.Run / store.Node field added without a JSON tag
+// would silently disappear from the dashboard's S3
 // view -- no compile error, no integration failure. This test makes
 // that drift loud.
 //

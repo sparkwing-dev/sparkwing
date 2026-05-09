@@ -13,7 +13,7 @@ import (
 
 // TestEnvelopeLog_PersistsRunStartFinish verifies the envelope tee
 // writes run_start + run_finish records (and node_start/node_end) to
-// <runDir>/_envelope.ndjson during a local dispatch. IMP-010.
+// <runDir>/_envelope.ndjson during a local dispatch.
 func TestEnvelopeLog_PersistsRunStartFinish(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -108,7 +108,7 @@ func TestJobLogs_NoEventsMatchesLegacy(t *testing.T) {
 
 // TestJobLogs_DefaultIsMergedStream confirms the new default mode
 // includes both bracket events and body output -- the canonical
-// "watch this run" surface IMP-010 ships.
+// "watch this run" surface.
 func TestJobLogs_DefaultIsMergedStream(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,

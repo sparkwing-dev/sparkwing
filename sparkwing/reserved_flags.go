@@ -9,9 +9,9 @@ import (
 // reservedFlagNames is the canonical list of wing-owned long flag names
 // that the cmd/sparkwing wing-flag parser consumes before any pipeline
 // flag parsing happens. A pipeline Args struct that declares one of
-// these as a `flag:"..."` tag would silently lose the value to wing
-// (the underlying IMP-003 collision bug), so Register panics at
-// registration time when a collision is detected.
+// these as a `flag:"..."` tag would silently lose the value to wing,
+// so Register panics at registration time when a collision is
+// detected.
 //
 // This list is the single source of truth; cmd/sparkwing/wing_flags.go
 // imports it via ReservedFlagNames() so the two surfaces can never

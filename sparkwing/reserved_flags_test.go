@@ -11,9 +11,8 @@ import (
 // TestReservedFlagNames pins the canonical wing-owned flag set so a
 // drift between the SDK list and cmd/sparkwing/wing_flags.go shows up
 // as a test failure rather than a silent collision-bug regression.
-// IMP-007 added --start-at / --stop-at; if a future ticket adds
-// another wing flag, both this test and wingTokenSpecs must update
-// in lockstep.
+// When a new wing flag is added, both this test and wingTokenSpecs
+// must update in lockstep.
 func TestReservedFlagNames(t *testing.T) {
 	got := ReservedFlagNames()
 	want := []string{
@@ -55,10 +54,10 @@ func TestReservedFlagNamesIsCopy(t *testing.T) {
 	}
 }
 
-// IMP-003: Register must panic when an Args struct declares a flag
-// tag that collides with a wing-reserved name. The panic message
-// must name the pipeline, the field, the colliding flag, and the
-// full reserved list so the author doesn't have to re-discover it.
+// Register must panic when an Args struct declares a flag tag that
+// collides with a wing-reserved name. The panic message must name
+// the pipeline, the field, the colliding flag, and the full reserved
+// list so the author doesn't have to re-discover it.
 func TestRegister_PanicsOnReservedFlagCollision(t *testing.T) {
 	type args struct {
 		From string `flag:"from" desc:"oops collides with wing --from"`
@@ -82,7 +81,7 @@ func TestRegister_PanicsOnReservedFlagCollision(t *testing.T) {
 			"--from",                    // colliding flag
 			"From",                      // Go field name
 			"Reserved wing flags:",      // reserved list header
-			"start-at",                  // proves IMP-007 entries are present
+			"start-at",                  // proves range-resume entries are present
 			"stop-at",
 			"change-directory",
 		}
@@ -96,8 +95,8 @@ func TestRegister_PanicsOnReservedFlagCollision(t *testing.T) {
 	_ = pipe{} // keep imported
 }
 
-// IMP-003: Register accepts non-colliding flag names; sanity check
-// that the validator doesn't over-reject (e.g. `target` is fine).
+// Register accepts non-colliding flag names; sanity check that the
+// validator doesn't over-reject (e.g. `target` is fine).
 func TestRegister_AllowsNonReservedFlags(t *testing.T) {
 	type args struct {
 		Target string `flag:"target" desc:"fine"`

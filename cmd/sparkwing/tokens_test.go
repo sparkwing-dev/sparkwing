@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// IMP-024: `cluster tokens list` surfaces token scopes (canonical
-// diagnostic for the IMP-002 root cause: warm-runner's mounted token
-// missed `logs.write`). These tests pin the formatter +
+// `cluster tokens list` surfaces token scopes (canonical diagnostic
+// for warm-runner-style failures where a mounted token is missing a
+// scope like `logs.write`). These tests pin the formatter +
 // table/JSON renderers so a future refactor can't silently drop the
 // SCOPES column or the admin "*" collapse.
 

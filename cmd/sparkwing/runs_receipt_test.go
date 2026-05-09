@@ -18,7 +18,7 @@ import (
 // path end-to-end: seed a finished run + node, invoke runJobsReceipt,
 // confirm valid receipt JSON lands on stdout. Mirrors the no-test
 // pattern of runJobsGet -- the verb is small but the contract (CLI
-// = canonical receipt shape) is load-bearing for IMP-016 acceptance.
+// = canonical receipt shape) is load-bearing.
 func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
 	dir := t.TempDir()
 	paths := orchestrator.PathsAt(dir)

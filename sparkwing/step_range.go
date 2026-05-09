@@ -24,9 +24,9 @@ type stepRange struct {
 // actually contain the named bound, so multi-Job pipelines that
 // pass the range globally degrade gracefully on Works that don't.
 //
-// IMP-007: lets `wing <pipeline> --start-at STEP` skip every step
-// upstream of STEP and resume from there without authors having to
-// hand-roll a stepOrder slice + skipBefore predicate per pipeline.
+// Lets `wing <pipeline> --start-at STEP` skip every step upstream
+// of STEP and resume from there without authors having to hand-roll
+// a stepOrder slice + skipBefore predicate per pipeline.
 func WithStepRange(ctx context.Context, startAt, stopAt string) context.Context {
 	if startAt == "" && stopAt == "" {
 		return ctx
@@ -53,8 +53,7 @@ func stepRangeFromContext(ctx context.Context) (stepRange, bool) {
 
 // computeStepRangeSkips returns the set of work-item IDs that should
 // be skipped given the requested range, plus a human-readable
-// reason for the `step_skipped` event. The semantics intentionally
-// mirror the ticket's prose:
+// reason for the `step_skipped` event. The semantics:
 //
 //   - --start-at X: skip every item NOT in {X} ∪ descendants(X).
 //   - --stop-at  Y: skip every item NOT in {Y} ∪ ancestors(Y).
@@ -121,10 +120,9 @@ func computeStepRangeSkips(items map[string]*workItem, children map[string][]str
 // skip set this Work would apply under the given --start-at /
 // --stop-at bounds, WITHOUT executing any step body. Empty bounds
 // (or bounds that don't match any item in this Work) return an
-// empty map. IMP-013 calls this from `pipeline plan` so the
-// renderer can show "would skip: outside --start-at..--stop-at
-// range" alongside the static DAG -- terraform-style plan output
-// for sparkwing.
+// empty map. Called from `pipeline plan` so the renderer can show
+// "would skip: outside --start-at..--stop-at range" alongside the
+// static DAG -- terraform-style plan output for sparkwing.
 func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string {
 	if w == nil || (startAt == "" && stopAt == "") {
 		return nil

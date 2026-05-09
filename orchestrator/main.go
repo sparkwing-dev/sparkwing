@@ -87,10 +87,10 @@ func Main() {
 		}
 	}
 
-	// IMP-013: --plan emits the runtime-resolved plan preview --
-	// same DAG as --explain plus per-step would-run / would-skip
-	// decisions evaluated against the supplied args + --start-at /
-	// --stop-at bounds. NO step bodies execute.
+	// --plan emits the runtime-resolved plan preview -- same DAG as
+	// --explain plus per-step would-run / would-skip decisions
+	// evaluated against the supplied args + --start-at / --stop-at
+	// bounds. NO step bodies execute.
 	for _, tok := range rest {
 		if tok == "--plan" {
 			if err := printPipelineRuntimePlan(pipeline, filterTok(rest, "--plan")); err != nil {
@@ -146,8 +146,8 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)
 	}
-	// IMP-010: run_finish is emitted inside Run() so the envelope
-	// tee captures it. The previous outer emission here happened
+	// run_finish is emitted inside Run() so the envelope tee
+	// captures it. The previous outer emission here happened
 	// after RunLocal had already closed the envelope file, leaving
 	// `runs logs --follow` without a terminal event. Keep the
 	// non-zero exit so wrapper scripts still see the failure.
@@ -281,8 +281,8 @@ func printPipelineHelp(pipeline string) error {
 		}
 		fmt.Fprintln(w)
 	}
-	// IMP-039: enumerate wing-owned flags from sparkwing.WingFlagDocs()
-	// so this footer stays in lockstep with `wing --help` /
+	// Enumerate wing-owned flags from sparkwing.WingFlagDocs() so
+	// this footer stays in lockstep with `wing --help` /
 	// `sparkwing run --help`. The previous hand-coded line
 	// (`-- only --on, --from, --config`) silently drifted whenever a
 	// new wing flag landed (--start-at, --dry-run, --allow-* were all
@@ -335,8 +335,8 @@ func printWingFlagsSection(w io.Writer) {
 // required args are non-fatal; a best-effort plan is more useful for
 // inspection.
 //
-// CLI-017: the inner pipeline binary is invoked with the user's full
-// argv (e.g. `wing X --explain --skip Y -o json`). `-o` / `--output` /
+// The inner pipeline binary is invoked with the user's full argv
+// (e.g. `wing X --explain --skip Y -o json`). `-o` / `--output` /
 // `--json` are explain-output formatting flags owned by the wrapper,
 // not pipeline args -- they must be stripped before parseTypedFlags
 // sees them. Otherwise an unknown-flag error in parseTypedFlags falls
@@ -390,7 +390,7 @@ func filterTok(args []string, drop string) []string {
 // builder. Stripping them keeps parseTypedFlags from rejecting them
 // as unknown -- which used to drop *all* typed flags (including
 // --skip / --only) into an empty map and silently disable
-// SkipFilter. CLI-017.
+// SkipFilter.
 func stripExplainOutputFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {

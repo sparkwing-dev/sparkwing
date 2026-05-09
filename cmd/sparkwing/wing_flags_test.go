@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// IMP-007: --start-at / --stop-at are wing-owned and must be
-// stripped from the passthrough so the pipeline binary doesn't see
-// them as unknown pipeline flags.
+// --start-at / --stop-at are wing-owned and must be stripped from
+// the passthrough so the pipeline binary doesn't see them as unknown
+// pipeline flags.
 func TestParseWingFlags_StartAtStopAt(t *testing.T) {
 	cases := []struct {
 		name      string

@@ -210,7 +210,7 @@ func requireScope(scope string, next http.Handler) http.Handler {
 	})
 }
 
-// label renders the principal as "<kind>:<name>" for the IMP-022
+// label renders the principal as "<kind>:<name>" for the
 // auth-error response body.
 func (p *Principal) label() string {
 	if p == nil {
@@ -222,7 +222,7 @@ func (p *Principal) label() string {
 	return p.Kind + ":" + p.Name
 }
 
-// authErrorBody is the IMP-022 wire shape for 401/403 responses
+// authErrorBody is the wire shape for 401/403 responses
 // emitted by the controller's auth middleware. Mirrors the
 // logs.AuthErrorBody fields so a single client-side parser handles
 // either origin without a string match on the human message.

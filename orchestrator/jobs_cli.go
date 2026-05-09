@@ -258,8 +258,8 @@ type LogsOpts struct {
 	EventsOnly bool
 
 	// NoEvents filters output to per-node body output only -- the
-	// pre-IMP-010 behavior of `runs logs`. Useful as an explicit opt-
-	// out when scripts depend on the legacy shape.
+	// legacy behavior of `runs logs`. Useful as an explicit opt-out
+	// when scripts depend on the legacy shape.
 	NoEvents bool
 }
 
@@ -382,13 +382,13 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return writeLogsTreeLocal(paths, runID, opts, out)
 	}
 
-	// IMP-010: when the envelope file exists (post-rewrite runs) and
-	// the user hasn't asked for the legacy body-only view or pinned
-	// to a single node, the envelope file IS the merged stream --
-	// the dispatcher tees every run-wide event into it, including
-	// exec_line body lines. Read it directly. Pre-IMP-010 runs (no
-	// envelope file) fall back to the per-node path so historical
-	// runs stay readable.
+	// When the envelope file exists (post-rewrite runs) and the user
+	// hasn't asked for the legacy body-only view or pinned to a
+	// single node, the envelope file IS the merged stream -- the
+	// dispatcher tees every run-wide event into it, including
+	// exec_line body lines. Read it directly. Older runs without an
+	// envelope file fall back to the per-node path so historical runs
+	// stay readable.
 	if !opts.NoEvents && opts.Node == "" && envelopeExists(paths, runID) {
 		if !opts.Follow {
 			return writeLogsFromEnvelope(paths, runID, opts, out)
@@ -396,7 +396,7 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return followFromEnvelope(ctx, st, paths, runID, opts, out)
 	}
 	if opts.EventsOnly {
-		// Envelope file missing on a pre-IMP-010 run; nothing to show.
+		// Envelope file missing on an older run; nothing to show.
 		return nil
 	}
 
@@ -406,9 +406,8 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	return followLogs(ctx, st, paths, runID, target, opts, out)
 }
 
-// envelopeExists returns true when the run has an envelope file
-// (post-IMP-010). Old runs predating the tee fall back to per-node
-// reads.
+// envelopeExists returns true when the run has an envelope file. Old
+// runs predating the tee fall back to per-node reads.
 func envelopeExists(paths Paths, runID string) bool {
 	_, err := os.Stat(paths.EnvelopeLog(runID))
 	return err == nil

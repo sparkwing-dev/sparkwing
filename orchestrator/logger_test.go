@@ -10,7 +10,7 @@ import (
 )
 
 // TestPrettyRenderer_StepEvents asserts the renderer recognizes the
-// post-SDK-042 step event names (`step_start`, `step_end`,
+// current step event names (`step_start`, `step_end`,
 // `step_skipped`). Before this fix the switch only matched a literal
 // `"step"` event, so the new names fell through to the default branch
 // and rendered as plain breadcrumb lines -- losing both the step

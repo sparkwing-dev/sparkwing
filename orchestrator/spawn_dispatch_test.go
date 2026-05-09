@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestSpawnDispatch_* tests SDK-002 PR3: a node's Work declares
+// TestSpawnDispatch_* covers spawn dispatch: a node's Work declares
 // SpawnNode / SpawnNodeForEach; the orchestrator-side handler fires
 // each spawn as a fresh Plan node (namespaced "{parent}/{spawnID}"),
 // dispatches it through the regular scheduling loop, and blocks the

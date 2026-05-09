@@ -240,10 +240,10 @@ done:
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
 
-	// IMP-002: a sticky logs-append auth failure must fail the node
-	// even if the user job body returned success, since the run's
-	// observable logs are gone. Auth wins over a transient
-	// timeout/error since fixing the user code can't unblock it.
+	// A sticky logs-append auth failure must fail the node even if
+	// the user job body returned success, since the run's observable
+	// logs are gone. Auth wins over a transient timeout/error since
+	// fixing the user code can't unblock it.
 	if fatal := nodeLogFatal(nlog); fatal != nil {
 		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
 		emitNodeEnd(sparkwing.Failed, wrapped.Error())
@@ -286,9 +286,9 @@ done:
 }
 
 // nodeLogFatal returns the sticky auth error from a NodeLog that
-// implements the optional Fataler interface (IMP-002). NodeLog
-// impls without auth-aware retry (localLogs, fakes) return nil
-// here, matching the no-fatal-state default.
+// implements the optional Fataler interface. NodeLog impls without
+// auth-aware retry (localLogs, fakes) return nil here, matching the
+// no-fatal-state default.
 func nodeLogFatal(nlog NodeLog) error {
 	if f, ok := nlog.(interface{ Fatal() error }); ok {
 		return f.Fatal()
@@ -297,7 +297,7 @@ func nodeLogFatal(nlog NodeLog) error {
 }
 
 // nodeLogDrops returns the (count, first-reason) tuple from a
-// NodeLog that implements the optional Dropper interface (IMP-002).
+// NodeLog that implements the optional Dropper interface.
 func nodeLogDrops(nlog NodeLog) (int, string) {
 	if d, ok := nlog.(interface{ Drops() (int, string) }); ok {
 		return d.Drops()

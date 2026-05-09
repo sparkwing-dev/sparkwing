@@ -8,9 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-008: every test in this file exercises the post-Plan() ref
-// validation pass. Validation runs once per Registration.Invoke,
-// so each test registers its own pipeline and triggers Invoke.
+// Every test in this file exercises the post-Plan() ref validation
+// pass. Validation runs once per Registration.Invoke, so each test
+// registers its own pipeline and triggers Invoke.
 
 // expectPanic captures a panic message and runs assertions against
 // it. Fatal if the body returns without panicking.
@@ -48,12 +48,12 @@ func (typoCloseJobPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 }
 
 func TestPlanValidate_WorkStepNeedsTypo_Suggests(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-step-typo-close",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-step-typo-close",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return typoCloseJobPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-step-typo-close")
+	reg, _ := sparkwing.Lookup("plan-validate-step-typo-close")
 
 	expectPanic(t, func() {
-		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-step-typo-close"})
+		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-step-typo-close"})
 	}, func(msg string) {
 		for _, want := range []string{`"fetchh"`, `did you mean "fetch"`, `WorkStep "compile"`, `node "build"`} {
 			if !strings.Contains(msg, want) {
@@ -79,12 +79,12 @@ func (typoFarJobPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 }
 
 func TestPlanValidate_WorkStepNeedsTypo_NoCloseMatchListsAvailable(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-step-typo-far",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-step-typo-far",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return typoFarJobPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-step-typo-far")
+	reg, _ := sparkwing.Lookup("plan-validate-step-typo-far")
 
 	expectPanic(t, func() {
-		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-step-typo-far"})
+		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-step-typo-far"})
 	}, func(msg string) {
 		if !strings.Contains(msg, `"totallyunrelated"`) {
 			t.Errorf("panic should quote the offending ref, got: %s", msg)
@@ -117,10 +117,10 @@ func (handleNeedsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 }
 
 func TestPlanValidate_HandleNeedsUnaffected(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-handle-needs",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-handle-needs",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return handleNeedsPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-handle-needs")
-	if _, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-handle-needs"}); err != nil {
+	reg, _ := sparkwing.Lookup("plan-validate-handle-needs")
+	if _, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-handle-needs"}); err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 }
@@ -142,10 +142,10 @@ func (stringExactPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 }
 
 func TestPlanValidate_StringMatchingExistingStep_NoPanic(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-string-exact",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-string-exact",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stringExactPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-string-exact")
-	if _, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-string-exact"}); err != nil {
+	reg, _ := sparkwing.Lookup("plan-validate-string-exact")
+	if _, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-string-exact"}); err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 }
@@ -161,12 +161,12 @@ func (planTypoPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 }
 
 func TestPlanValidate_NodeNeedsTypo_Suggests(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-node-typo",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-node-typo",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return planTypoPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-node-typo")
+	reg, _ := sparkwing.Lookup("plan-validate-node-typo")
 
 	expectPanic(t, func() {
-		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-node-typo"})
+		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-node-typo"})
 	}, func(msg string) {
 		for _, want := range []string{`Node "compile"`, `"fetchh"`, `did you mean "fetch"`} {
 			if !strings.Contains(msg, want) {
@@ -194,12 +194,12 @@ func (spawnTypoPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 }
 
 func TestPlanValidate_StringRefToMissingSpawn_Suggests(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-spawn-typo",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-spawn-typo",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return spawnTypoPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-spawn-typo")
+	reg, _ := sparkwing.Lookup("plan-validate-spawn-typo")
 
 	expectPanic(t, func() {
-		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-spawn-typo"})
+		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-spawn-typo"})
 	}, func(msg string) {
 		if !strings.Contains(msg, `did you mean "seed"`) {
 			t.Errorf("expected suggestion of 'seed' for typo 'seedd', got: %s", msg)
@@ -225,10 +225,10 @@ func (spawnStringExactPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sp
 }
 
 func TestPlanValidate_StringRefToExistingSpawn_NoPanic(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp008-spawn-exact",
+	sparkwing.Register[sparkwing.NoInputs]("plan-validate-spawn-exact",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return spawnStringExactPipe{} })
-	reg, _ := sparkwing.Lookup("imp008-spawn-exact")
-	if _, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp008-spawn-exact"}); err != nil {
+	reg, _ := sparkwing.Lookup("plan-validate-spawn-exact")
+	if _, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-spawn-exact"}); err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 }

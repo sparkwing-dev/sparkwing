@@ -96,7 +96,7 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 	if err != nil {
 		panic(fmt.Sprintf("sparkwing.Register(%q): invalid Inputs schema on %s: %v", name, t, err))
 	}
-	// IMP-003: reject `flag:"X"` tags that collide with wing-owned
+	// Reject `flag:"X"` tags that collide with wing-owned
 	// flag names (--from, --on, --start-at, etc.). The wing-flag
 	// parser consumes these before pipeline-flag parsing, so a
 	// collision would silently strip the value from the pipeline's
@@ -121,17 +121,16 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		// Capture the parsed Inputs on the Plan so the orchestrator
 		// can install them on dispatch ctx -- step bodies then read
 		// the same value via sparkwing.Inputs[T](ctx) without closure
-		// threading. (SDK-041.)
+		// threading.
 		plan.setInputs(in)
 		if err := p.Plan(withPlanTime(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
-		// IMP-008: catch typo'd string-keyed Needs("...") references
-		// once the DAG is fully materialized but before the
-		// orchestrator can dispatch. Mirrors SDK-002's pattern of
-		// failing loud at Plan time so authors discover misspellings
-		// at registration, not at first dispatch when the typo would
-		// silently make the dependency edge a no-op.
+		// Catch typo'd string-keyed Needs("...") references once the
+		// DAG is fully materialized but before the orchestrator can
+		// dispatch. Fail loud at Plan time so authors discover
+		// misspellings at registration, not at first dispatch when the
+		// typo would silently make the dependency edge a no-op.
 		validateRefs(plan)
 		return plan, nil
 	}

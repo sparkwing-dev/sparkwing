@@ -3,7 +3,6 @@
 // preview JSON without dispatching any step body. Mirrors action_
 // explain.go's wrapper shape: pipeline binary owns the JSON
 // production, this wrapper owns flag parsing + pretty-printing.
-// IMP-013.
 package main
 
 import (
@@ -23,7 +22,7 @@ type planPreviewDoc struct {
 	Pipeline string `json:"pipeline"`
 	// Venue mirrors sparkwing.PlanPreview.Venue: the author-declared
 	// dispatch constraint surfaced on the runtime-resolved view.
-	// Empty for pre-IMP-011 pipeline binaries.
+	// Empty for older pipeline binaries.
 	Venue        string               `json:"venue,omitempty"`
 	ResolvedArgs map[string]string    `json:"resolved_args,omitempty"`
 	StartAt      string               `json:"start_at,omitempty"`
@@ -63,7 +62,6 @@ type planPreviewItemDoc struct {
 	CardinalitySource string   `json:"cardinality_source,omitempty"`
 	// BlastRadius mirrors sparkwing.PreviewItem.BlastRadius:
 	// canonical wire tokens for the author-declared marker set.
-	// IMP-015.
 	BlastRadius []string `json:"blast_radius,omitempty"`
 }
 
@@ -79,7 +77,7 @@ type pipelinePlanArgs struct {
 
 // parsePipelinePlanArgs is parsePipelineExplainArgs's twin: the
 // same hand-parsed wrapper flags plus --start-at / --stop-at since
-// those are part of the runtime-resolved view IMP-013 surfaces.
+// those are part of the runtime-resolved view this verb surfaces.
 // Mirrors the explain parser's `--` separator handling exactly.
 func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 	var parsed pipelinePlanArgs
@@ -151,7 +149,7 @@ func runPipelinePlan(args []string) error {
 	}
 	// Hand-parsed: parsed.output is the empty string when -o/--output
 	// was not provided, otherwise the user-supplied value. Use that to
-	// drive the explicit-set bit the resolver wants (IMP-038).
+	// drive the explicit-set bit the resolver wants.
 	format, err := resolveOutputFormat(parsed.output, parsed.output != "", parsed.asJSON, cmdPipelinePlan.Path)
 	if err != nil {
 		return err
@@ -166,8 +164,8 @@ func runPipelinePlan(args []string) error {
 	}
 
 	// Plumb --start-at / --stop-at via the same env-var contract
-	// IMP-007 uses for the run path so the inner --plan handler
-	// reads them identically to a real run.
+	// the run path uses so the inner --plan handler reads them
+	// identically to a real run.
 	cmd := exec.Command(binary, pipelineArgs...)
 	cmd.Env = os.Environ()
 	if parsed.startAt != "" {
@@ -204,9 +202,9 @@ func printPlanPreview(doc *planPreviewDoc) {
 	if doc.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", doc.Pipeline)
 	}
-	// IMP-011: surface the dispatch constraint right after the name
-	// so a `pipeline plan` reader sees "venue: local-only" before
-	// reading the DAG. Suppressed for the permissive default.
+	// Surface the dispatch constraint right after the name so a
+	// `pipeline plan` reader sees "venue: local-only" before reading
+	// the DAG. Suppressed for the permissive default.
 	if doc.Venue != "" && doc.Venue != "either" {
 		fmt.Printf("Venue: %s\n", doc.Venue)
 	}
@@ -251,9 +249,9 @@ func printPlanPreviewNode(n *planPreviewNodeDoc, indent string) {
 	if n.SkipReason != "" {
 		decision += " (" + n.SkipReason + ")"
 	}
-	// IMP-029: surface the recovery attachment so a `pipeline plan`
-	// reader sees which parent's failure dispatches this node, not
-	// just that the node is a recovery in the abstract.
+	// Surface the recovery attachment so a `pipeline plan` reader
+	// sees which parent's failure dispatches this node, not just
+	// that the node is a recovery in the abstract.
 	if n.OnFailureOf != "" {
 		decision += " [OnFailure: " + n.OnFailureOf + "]"
 	}
@@ -280,12 +278,11 @@ func printPlanPreviewItem(kind string, it *planPreviewItemDoc, indent string) {
 	if it.SkipReason != "" {
 		decision += " (" + it.SkipReason + ")"
 	}
-	// IMP-015: append the blast-radius set inline so a `pipeline
-	// plan` reader sees both the runtime decision and the contract
-	// before drilling into needs / cardinality. Format mirrors
-	// IMP-011's `Venue: <kind>` placement: tucked into the same
-	// header line so the renderer stays compact for the common
-	// no-marker case.
+	// Append the blast-radius set inline so a `pipeline plan` reader
+	// sees both the runtime decision and the contract before drilling
+	// into needs / cardinality. Format mirrors the `Venue: <kind>`
+	// placement: tucked into the same header line so the renderer
+	// stays compact for the common no-marker case.
 	if len(it.BlastRadius) > 0 {
 		decision += " blast=" + strings.Join(it.BlastRadius, ",")
 	}

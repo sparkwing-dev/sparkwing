@@ -238,7 +238,7 @@ func TestJobLogs_UnknownNode(t *testing.T) {
 func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
 	// Whole-run logs on a pipeline with a cancelled-downstream node
 	// should summarize the cancelled node, not dump an empty log file
-	// banner. With IMP-010 the default reads the envelope stream
+	// banner. The default reads the envelope stream
 	// (which includes the run_summary event listing the cancelled
 	// node); the legacy per-node "did not execute" banner only
 	// surfaces under --no-events.

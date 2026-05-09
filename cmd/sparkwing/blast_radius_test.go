@@ -8,10 +8,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-015: enforce the dispatch gate from the wing CLI's
-// perspective. The unit-level coverage (BlastRadius.String,
-// BlastRadiusBlockedError contract) lives in pkg/sparkwing; here we
-// pin the wing-level escape-flag and profile-auto-allow behavior.
+// Enforce the dispatch gate from the wing CLI's perspective. The
+// unit-level coverage (BlastRadius.String, BlastRadiusBlockedError
+// contract) lives in pkg/sparkwing; here we pin the wing-level
+// escape-flag and profile-auto-allow behavior.
 
 // destructiveFinding is a fixture for "any pipeline with a
 // destructive step" so the table tests below stay short.
@@ -58,8 +58,8 @@ func TestEnforceBlastRadius_AllowDestructivePasses(t *testing.T) {
 }
 
 func TestEnforceBlastRadius_DryRunBypassesEverything(t *testing.T) {
-	// IMP-014 contract: --dry-run is the always-safe escape hatch
-	// regardless of which marker is declared.
+	// --dry-run is the always-safe escape hatch regardless of which
+	// marker is declared.
 	cases := [][]blastRadiusFinding{
 		destructiveFinding(),
 		prodFinding(),
@@ -145,8 +145,8 @@ func TestEnforceBlastRadius_ProfileAutoAllowDoesNotLeak(t *testing.T) {
 
 func TestEnforceBlastRadius_NoFindings(t *testing.T) {
 	// Empty findings is the "no markers detected" state and must
-	// pass cleanly so a cold cache or pre-IMP-015 binary doesn't
-	// block dispatch.
+	// pass cleanly so a cold cache or older binary doesn't block
+	// dispatch.
 	if err := enforceBlastRadius("plain", nil, wingFlags{}, nil); err != nil {
 		t.Fatalf("no findings should pass: %v", err)
 	}
@@ -174,8 +174,8 @@ func TestEnforceBlastRadius_FirstFindingSurfaces(t *testing.T) {
 }
 
 // TestLookupCachedBlastRadius_DegradesGracefully confirms the gate
-// returns nil when no describe cache is present, matching IMP-011's
-// degrade-gracefully shape.
+// returns nil when no describe cache is present, matching the venue
+// gate's degrade-gracefully shape.
 func TestLookupCachedBlastRadius_DegradesGracefully(t *testing.T) {
 	// Point at a directory with no cache; lookup must return nil
 	// without panic so the dispatcher proceeds unblocked.

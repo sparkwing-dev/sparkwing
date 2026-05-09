@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/secrets"
 )
 
-// REG-017 phase 4: wing --secrets PROF wires through to
-// remoteSecretSource which reads the profile from
+// wing --secrets PROF wires through to remoteSecretSource which
+// reads the profile from
 // ~/.config/sparkwing/profiles.yaml and builds an HTTP-backed
 // secrets.Source. We verify both the happy path and the
 // "name not found" -> ErrSecretMissing translation.

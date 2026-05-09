@@ -119,10 +119,10 @@ func TestExtractPipelineName_StrictOrderC(t *testing.T) {
 	}
 }
 
-// IMP-006: extractPipelineName + parseWingFlags must compose so that
-// the wing flags surface unchanged regardless of token position
-// (subject to the strict-order rule for -C). This pins the
-// integration so a refactor of either side is caught.
+// extractPipelineName + parseWingFlags must compose so that the wing
+// flags surface unchanged regardless of token position (subject to
+// the strict-order rule for -C). This pins the integration so a
+// refactor of either side is caught.
 func TestExtractPipelineName_ComposesWithParseWingFlags(t *testing.T) {
 	args := []string{"-C", "/path", "--on", "prod", "deploy", "--target", "v1"}
 	name, rest, err := extractPipelineName(args)

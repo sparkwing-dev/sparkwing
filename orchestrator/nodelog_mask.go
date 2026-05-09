@@ -31,9 +31,9 @@ func (l *maskingNodeLog) Emit(rec sparkwing.LogRecord) {
 
 func (l *maskingNodeLog) Close() error { return l.inner.Close() }
 
-// Fatal forwards the inner sink's sticky auth error (IMP-002).
-// Non-http NodeLog impls won't satisfy the optional interface; they
-// return nil here, matching the no-fatal-state default.
+// Fatal forwards the inner sink's sticky auth error. Non-http
+// NodeLog impls won't satisfy the optional interface; they return
+// nil here, matching the no-fatal-state default.
 func (l *maskingNodeLog) Fatal() error {
 	if f, ok := l.inner.(interface{ Fatal() error }); ok {
 		return f.Fatal()
@@ -41,7 +41,7 @@ func (l *maskingNodeLog) Fatal() error {
 	return nil
 }
 
-// Drops forwards the inner sink's drop counter (IMP-002).
+// Drops forwards the inner sink's drop counter.
 func (l *maskingNodeLog) Drops() (int, string) {
 	if d, ok := l.inner.(interface{ Drops() (int, string) }); ok {
 		return d.Drops()

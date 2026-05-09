@@ -33,7 +33,7 @@ services:
   # In-cluster git server. Caches bare repos, serves tarballs, handles
   # uploaded tarballs from `wing --from local`. Runners that can't reach
   # GitHub directly (e.g. behind NAT) go through here.
-  # TODO: SDK-010 pin -- :latest is intentional for install convenience;
+  # TODO: pin -- :latest is intentional for install convenience;
   # pin to a specific release tag for production stability.
   gitcache:
     image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-cache:latest
@@ -49,7 +49,7 @@ services:
   # -------- sparkwing-logs --------
   # Streaming log store. Runners write here, dashboard reads via SSE.
   # Token-gated for public access.
-  # TODO: SDK-010 pin
+  # TODO: pin
   sparkwing-logs:
     image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-logs:latest
     restart: unless-stopped
@@ -65,7 +65,7 @@ services:
 
   # -------- sparkwing-controller --------
   # Brain of the system. Queue, dispatcher, job state, webhooks.
-  # TODO: SDK-010 pin
+  # TODO: pin
   controller:
     image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-controller:latest
     restart: unless-stopped
@@ -97,7 +97,7 @@ services:
 
   # -------- sparkwing-web --------
   # Dashboard. Reads from controller's API and sparkwing-logs directly.
-  # TODO: SDK-010 pin
+  # TODO: pin
   web:
     image: 633280902600.dkr.ecr.us-west-2.amazonaws.com/sparkwing-web:latest
     restart: unless-stopped

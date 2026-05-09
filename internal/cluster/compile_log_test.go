@@ -14,10 +14,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/bincache"
 )
 
-// TestShipCompileOutput_PostsToLogsServer verifies IMP-001's wiring:
-// when the warm-runner's .sparkwing/ compile fails, the captured
-// `go build` stdout + stderr are POSTed to the synthetic
-// CompileLogNode log on the configured logs service.
+// TestShipCompileOutput_PostsToLogsServer verifies that when the
+// warm-runner's .sparkwing/ compile fails, the captured `go build`
+// stdout + stderr are POSTed to the synthetic CompileLogNode log on
+// the configured logs service.
 func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
 	const runID = "run-test-imp-001"
 	const want = "go: go.mod requires go >= 9.99.0\n./pipeline.go:7:2: undefined: Foo"

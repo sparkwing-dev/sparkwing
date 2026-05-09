@@ -618,12 +618,11 @@ continuously.`,
 // wingFlagSpecs is shared between cmdWing (the `wing <pipeline>` help
 // page) and cmdPipelineRun (the `sparkwing pipeline run` help page),
 // since the two invocation surfaces are the same execution path
-// under different names. IMP-039: derived from
-// sparkwing.WingFlagDocs() so the per-pipeline footer
-// (orchestrator/main.go's printPipelineHelp) and the top-level
-// `wing --help` enumerate from the same source. Adding a flag in
-// sparkwing/wing_flag_docs.go surfaces it in every wing help page
-// simultaneously.
+// under different names. Derived from sparkwing.WingFlagDocs() so
+// the per-pipeline footer (orchestrator/main.go's printPipelineHelp)
+// and the top-level `wing --help` enumerate from the same source.
+// Adding a flag in sparkwing/wing_flag_docs.go surfaces it in every
+// wing help page simultaneously.
 var wingFlagSpecs = wingFlagSpecsFromDocs()
 
 func wingFlagSpecsFromDocs() []FlagSpec {
@@ -682,12 +681,12 @@ the preset.`,
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
 	},
 	Flags: wingFlagSpecs,
-	// Source: which ref / config / cwd. Range: --start-at/--stop-at
-	// (IMP-007). Safety: --dry-run, --allow-* (IMP-014/015). System:
-	// where it runs (--on). The Range + Safety sections are absent
-	// from per-leaf help in much of the rest of the registry; here
-	// they're load-bearing because IMP-007/014/015 added wing-level
-	// flags users encounter on every invocation. IMP-039.
+	// Source: which ref / config / cwd. Range: --start-at/--stop-at.
+	// Safety: --dry-run, --allow-*. System: where it runs (--on).
+	// The Range + Safety sections are absent from per-leaf help in
+	// much of the rest of the registry; here they're load-bearing
+	// because the wing-level flags are encountered on every
+	// invocation.
 	GroupOrder:  []string{"Pipeline Args", "Source", "Range", "Safety", "System", "Other"},
 	UsageSuffix: "[-- extra args]",
 	Examples: []Example{
@@ -932,12 +931,12 @@ pipeline ever runs.`,
 	},
 }
 
-// cmdPipelinePlan is the IMP-013 verb: same DAG as `explain` plus
-// per-step would-run / would-skip decisions evaluated against the
-// supplied args + --start-at / --stop-at bounds. NO step bodies
-// execute. Designed as the canonical pre-flight verb -- agents and
-// humans inspect the runtime-resolved plan before destructive
-// operations, terraform-style.
+// cmdPipelinePlan: same DAG as `explain` plus per-step would-run /
+// would-skip decisions evaluated against the supplied args +
+// --start-at / --stop-at bounds. NO step bodies execute. Designed
+// as the canonical pre-flight verb -- agents and humans inspect the
+// runtime-resolved plan before destructive operations,
+// terraform-style.
 var cmdPipelinePlan = Command{
 	Path:     "sparkwing pipeline plan",
 	Synopsis: "Render the runtime-resolved DAG without dispatching any jobs",
@@ -1511,7 +1510,7 @@ prune) require a profile; 'jobs logs' supports both.`,
 		{"last", "Show the most recent run; --watch tails new runs"},
 		{"tree", "ASCII tree of a run and every descendant run"},
 		{"get", "Emit one run's raw JSON (run + nodes)"},
-		{"receipt", "Emit a run's IMP-016 audit + cost receipt as JSON"},
+		{"receipt", "Emit a run's audit + cost receipt as JSON"},
 		{"retry", "Trigger a fresh run copying pipeline + args from an old one"},
 		{"cancel", "Request cancellation of an in-flight run"},
 		{"prune", "Delete finished runs older than a threshold"},
@@ -1718,7 +1717,7 @@ var cmdJobsGet = Command{
 
 var cmdJobsReceipt = Command{
 	Path:     "sparkwing runs receipt",
-	Synopsis: "Emit a run's IMP-016 audit + cost receipt as JSON",
+	Synopsis: "Emit a run's audit + cost receipt as JSON",
 	Description: `Recomputes the per-run receipt from the run + nodes
 rows on demand and prints it as JSON. The receipt bundles identity
 hashes (pipeline_version_hash, inputs_hash, plan_hash, per-node

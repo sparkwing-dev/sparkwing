@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/logs"
 )
 
-// IMP-002: a 403 from the logs service must come back as a typed
+// A 403 from the logs service must come back as a typed
 // *AuthError with the missing scope parsed out, so the runner can
 // distinguish auth misconfig (fatal) from transient transport
 // errors (retryable).
@@ -66,7 +66,7 @@ func TestAppend_401ReturnsAuthError(t *testing.T) {
 	}
 }
 
-// IMP-022: when the server emits the structured JSON body, the
+// When the server emits the structured JSON body, the
 // client extracts missing_scope from the JSON without depending on
 // the human-readable phrasing. Pinning this so a future reword of
 // the message field can't silently degrade AuthError.Scope.
@@ -97,8 +97,8 @@ func TestAppend_403JSONBodyExtractsScope(t *testing.T) {
 	}
 }
 
-// IMP-022: a JSON body without missing_scope must not crash the
-// parser; Scope stays empty.
+// A JSON body without missing_scope must not crash the parser;
+// Scope stays empty.
 func TestAppend_403JSONBodyNoScope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

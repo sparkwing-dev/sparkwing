@@ -49,11 +49,11 @@ type Profile struct {
 	// CostPerRunnerHour feeds the simple compute-time × rate cost
 	// shown on `sparkwing runs receipt`. USD; default 0 reports
 	// compute_cents=0 instead of a misleading cost. Cloud-billing
-	// reconciliation (IMP-018) layers on top.
+	// reconciliation layers on top.
 	CostPerRunnerHour float64 `yaml:"cost_per_runner_hour,omitempty"`
 
 	// AutoAllow pre-authorizes per-marker blast-radius gates for
-	// this profile. IMP-015: a low-stakes environment (laptop, kind
+	// this profile. A low-stakes environment (laptop, kind
 	// cluster) can declare `auto_allow: { destructive: true }` so an
 	// operator running `wing destroy-cluster --on laptop` doesn't
 	// have to pass --allow-destructive every time. Production
@@ -66,7 +66,6 @@ type Profile struct {
 // inside a Profile. Each field maps to one BlastRadius marker:
 // destructive (BlastRadiusDestructive), production
 // (BlastRadiusAffectsProduction), money (BlastRadiusCostsMoney).
-// IMP-015.
 type AutoAllow struct {
 	Destructive bool `yaml:"destructive,omitempty"`
 	Production  bool `yaml:"production,omitempty"`

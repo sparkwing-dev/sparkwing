@@ -116,8 +116,7 @@ func TestBlastRadius_IsValid(t *testing.T) {
 }
 
 // TestBlastRadiusBlockedError_Message confirms the canonical error
-// text matches the contract documented in the IMP-015 ticket so
-// agents and humans see identical guidance.
+// text so agents and humans see identical guidance.
 func TestBlastRadiusBlockedError_Message(t *testing.T) {
 	cases := []struct {
 		marker BlastRadius

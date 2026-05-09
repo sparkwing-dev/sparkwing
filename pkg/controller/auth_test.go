@@ -161,7 +161,7 @@ func TestRequireScope_NoPrincipalPassesThrough(t *testing.T) {
 	}
 }
 
-// IMP-022: 403 body for a missing-scope rejection is structured JSON
+// 403 body for a missing-scope rejection is structured JSON
 // with code, missing_scope, principal, and a human message. Pinned
 // here so a future reword of the message can't silently break the
 // logs-client parser (or any third-party SDK consuming the shape).
@@ -195,7 +195,7 @@ func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
 	}
 }
 
-// IMP-022: 401 body (no token / invalid token) carries the
+// 401 body (no token / invalid token) carries the
 // "unauthenticated" code and a non-empty message but no scope or
 // principal -- auth never resolved.
 func TestMiddleware_UnauthenticatedBodyShape(t *testing.T) {

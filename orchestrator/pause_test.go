@@ -176,8 +176,7 @@ func TestPause_After_HoldsAfterSuccess(t *testing.T) {
 }
 
 // TestPause_OnFailure_PausesOnError verifies that a Run-errored node
-// triggers --pause-on-failure. (REG-013b cross-check; the wire-up
-// landed together with 013a so the test lives here.)
+// triggers --pause-on-failure.
 func TestPause_OnFailure_PausesOnError(t *testing.T) {
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{

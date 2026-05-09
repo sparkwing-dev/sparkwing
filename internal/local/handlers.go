@@ -544,9 +544,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// IMP-004: pre-allocate the Run row at trigger-intake so it shows
-	// up in `runs list` even if the runner crashes or fails before
-	// the orchestrator's CreateRun runs. See pkg/controller/handlers.go.
+	// Pre-allocate the Run row at trigger-intake so it shows up in
+	// `runs list` even if the runner crashes or fails before the
+	// orchestrator's CreateRun runs. See pkg/controller/handlers.go.
 	if err := s.store.CreateRun(r.Context(), store.Run{
 		ID:            runID,
 		Pipeline:      body.Pipeline,

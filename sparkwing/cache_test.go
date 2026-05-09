@@ -17,7 +17,7 @@ func TestCacheOptions_EmptyIsNoop(t *testing.T) {
 	}
 }
 
-// SDK-038: a CacheOptions with Max / OnLimit / CacheKey / CacheTTL /
+// A CacheOptions with Max / OnLimit / CacheKey / CacheTTL /
 // CancelTimeout set but Key empty is almost certainly a typo (the
 // author meant to enable coordination but forgot the key). Reject
 // at Plan time so the silent-no-op footgun fails loud.

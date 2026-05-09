@@ -226,12 +226,11 @@ func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, op
 // JobLogsRemoteWithTokens adds a bearer token to JobLogsRemote.
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	if opts.EventsOnly {
-		// IMP-010 ships envelope-event persistence + reader for local
-		// mode only; the remote logs service ingests per-node body
-		// output today, not run-level envelope events. Filing as a
-		// follow-up; failing loudly here is better than silently
-		// returning an empty stream.
-		return errors.New("--events-only is local-mode only today (remote envelope ingestion is a follow-up; see CHANGELOG IMP-010)")
+		// Envelope-event persistence + reader is local-mode only; the
+		// remote logs service ingests per-node body output today, not
+		// run-level envelope events. Failing loudly here is better
+		// than silently returning an empty stream.
+		return errors.New("--events-only is local-mode only today (remote envelope ingestion is a follow-up)")
 	}
 	ctrl := client.NewWithToken(controllerURL, nil, token)
 	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token)

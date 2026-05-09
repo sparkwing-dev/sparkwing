@@ -10,8 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// SDK-041: an end-to-end run drives a pipeline with typed Inputs and
-// asserts a step body deep in the DAG sees the same values via
+// An end-to-end run drives a pipeline with typed Inputs and asserts
+// a step body deep in the DAG sees the same values via
 // sparkwing.Inputs[T](ctx) -- no closure threading, no struct field.
 
 type inputsArgs struct {

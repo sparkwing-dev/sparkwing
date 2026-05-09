@@ -795,7 +795,7 @@ func (n *Node) OnFailureNode() *Node { return n.onFailure }
 // the identifier so plan-introspection callers (PreviewPlan, the
 // orchestrator's snapshot encoder, dashboard renderers) can surface
 // the failure-branch attachment without dereferencing the unexported
-// onFailure field. IMP-029.
+// onFailure field.
 func (n *Node) OnFailureNodeID() string {
 	if n.onFailure == nil {
 		return ""

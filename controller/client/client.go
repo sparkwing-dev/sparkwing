@@ -152,8 +152,8 @@ func (c *Client) GetRun(ctx context.Context, runID string) (*store.Run, error) {
 	}
 }
 
-// GetRunReceipt fetches the IMP-016 receipt JSON for a run. Returned
-// as raw bytes so callers can pretty-print or pipe without round-trip
+// GetRunReceipt fetches the receipt JSON for a run. Returned as raw
+// bytes so callers can pretty-print or pipe without round-trip
 // re-encoding (the receipt's hashes commit to canonical bytes).
 func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error) {
 	u := fmt.Sprintf("%s/api/v1/runs/%s/receipt", c.baseURL, url.PathEscape(runID))

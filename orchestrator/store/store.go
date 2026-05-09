@@ -26,7 +26,7 @@ const (
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403
 	// against the controller's auth surface. The run's structured
 	// logs are unrecoverable; better to fail loud than report
-	// status=success with no observable output. (IMP-002.)
+	// status=success with no observable output.
 	FailureLogsAuth = "logs_auth"
 )
 
@@ -79,8 +79,8 @@ CREATE TABLE IF NOT EXISTS runs (
     plan_json       BLOB,
     error           TEXT NOT NULL DEFAULT '',
     -- created_at: when the controller first saw the trigger; matches
-    -- triggers.created_at for trigger-originated runs. IMP-004 added
-    -- this so pre-claim "pending" runs have a wall-clock anchor
+    -- triggers.created_at for trigger-originated runs. Lets pre-claim
+    -- "pending" runs have a wall-clock anchor
     -- distinct from started_at (which becomes non-NULL only when the
     -- orchestrator actually starts executing).
     created_at      INTEGER NOT NULL DEFAULT 0,
@@ -398,13 +398,13 @@ func (s *Store) migrate() error {
 		"retry_source":      "TEXT NOT NULL DEFAULT ''",
 		"replay_of_run_id":  "TEXT NOT NULL DEFAULT ''",
 		"replay_of_node_id": "TEXT NOT NULL DEFAULT ''",
-		// IMP-004: created_at lets pending (pre-orchestrator) runs
-		// carry a real timestamp without lying about started_at.
+		// created_at lets pending (pre-orchestrator) runs carry a real
+		// timestamp without lying about started_at.
 		"created_at": "INTEGER NOT NULL DEFAULT 0",
-		// IMP-016: receipt + cost queryable summary. Full receipt
-		// JSON is recomputed on demand from runs+nodes; only these
-		// queryable fields persist. cost_settled flips to 1 when
-		// IMP-018's cloud-billing reconciliation lands.
+		// Receipt + cost queryable summary. Full receipt JSON is
+		// recomputed on demand from runs+nodes; only these queryable
+		// fields persist. cost_settled flips to 1 when cloud-billing
+		// reconciliation lands.
 		"receipt_sha":   "TEXT NOT NULL DEFAULT ''",
 		"cost_cents":    "INTEGER NOT NULL DEFAULT 0",
 		"cost_currency": "TEXT NOT NULL DEFAULT 'USD'",
@@ -434,19 +434,19 @@ func (s *Store) migrate() error {
 	}); err != nil {
 		return err
 	}
-	// RUN-015: concurrency_waiters gained a holder_id column after the
-	// initial landing so caller identity survives promotion. Old rows
-	// default to "" which the promotion path treats as "synthesize
-	// runID/nodeID" (the pre-fix behavior).
+	// concurrency_waiters gained a holder_id column after the
+	// initial landing so caller identity survives promotion. Old
+	// rows default to "" which the promotion path treats as
+	// "synthesize runID/nodeID" (the pre-fix behavior).
 	if err := s.ensureColumns("concurrency_waiters", map[string]string{
 		"holder_id": "TEXT NOT NULL DEFAULT ''",
 	}); err != nil {
 		return err
 	}
-	// REG-019: per-entry mask flag for secrets. Existing rows
-	// default to masked=1 so behavior matches pre-REG-019 (treat
-	// every entry as sensitive). Newer writes can opt in to
-	// masked=0 for non-secret config values.
+	// Per-entry mask flag for secrets. Existing rows default to
+	// masked=1 so behavior matches the prior treat-every-entry-as-
+	// sensitive default. Newer writes can opt in to masked=0 for
+	// non-secret config values.
 	if err := s.ensureColumns("secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",
 	}); err != nil {
@@ -504,8 +504,8 @@ type Run struct {
 	Error         string            `json:"error,omitempty"`
 	// CreatedAt is when the controller first persisted the run row
 	// (trigger-intake time for trigger-originated runs, or CreateRun
-	// time for direct CreateRun callers). IMP-004 added this so
-	// "pending" runs have a wall-clock anchor distinct from StartedAt.
+	// time for direct CreateRun callers). Lets "pending" runs have a
+	// wall-clock anchor distinct from StartedAt.
 	CreatedAt  time.Time  `json:"created_at,omitempty"`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -536,7 +536,7 @@ type Run struct {
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
-// (controller-pre-allocated at trigger-intake; IMP-004) to the
+// (controller-pre-allocated at trigger-intake) to the
 // caller's status. Idempotent for the (pending -> running) transition
 // the orchestrator performs at start-of-run; non-pending existing rows
 // are left untouched so this stays a no-op on retry / replay paths.
@@ -1456,7 +1456,7 @@ VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, time.Now().UnixNano(), payload)
 // ErrNotFound is returned when a lookup misses.
 var ErrNotFound = errors.New("not found")
 
-// --- Debug pauses (REG-013) ---
+// --- Debug pauses ---
 
 // Pause reasons; exported wire values.
 const (

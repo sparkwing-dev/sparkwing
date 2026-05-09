@@ -489,7 +489,7 @@ func TestRegister_SchemaCarriesSecretBit(t *testing.T) {
 	}
 }
 
-// --- Anonymous embedded structs (SDK-034) ---
+// --- Anonymous embedded structs ---
 //
 // Pipelines that share a flag bundle via embedding should see the
 // embedded struct's flags surface as first-class CLI flags. The

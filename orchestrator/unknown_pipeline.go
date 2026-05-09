@@ -9,16 +9,15 @@ import (
 
 // unknownPipelineErr formats the canonical "unknown pipeline X"
 // error with a "did you mean Y?" Levenshtein suggestion sourced from
-// the live registration set. Reuses sparkwing.SuggestClosest (the
-// IMP-008 helper) so the typo threshold matches the rest of the
-// SDK's string-id surfaces.
+// the live registration set. Reuses sparkwing.SuggestClosest so the
+// typo threshold matches the rest of the SDK's string-id surfaces.
 //
-// IMP-040: previously every "unknown pipeline" site returned a flat
-// error and forced the operator to re-read `sparkwing pipeline list`
-// for the right spelling. Now `wing claster-up` suggests
-// "cluster-up" inline, mirroring IMP-008's `Needs("X")` typo
-// suggestion. Far typos ("totallyunrelated") fall through to the
-// existing message without a misleading suggestion.
+// Previously every "unknown pipeline" site returned a flat error and
+// forced the operator to re-read `sparkwing pipeline list` for the
+// right spelling. Now `wing claster-up` suggests "cluster-up"
+// inline, mirroring the `Needs("X")` typo suggestion. Far typos
+// ("totallyunrelated") fall through to the existing message without
+// a misleading suggestion.
 func unknownPipelineErr(pipeline string) error {
 	return fmt.Errorf("%s", unknownPipelineMessage(pipeline))
 }

@@ -9,8 +9,8 @@ import (
 )
 
 // Release+promote is atomic — covers the "controller crashed between
-// release tx and promote tx" window from Q4 of the RUN-015 self-
-// testing pass. Even if the test stops the run between store calls,
+// release tx and promote tx" window. Even if the test stops the run
+// between store calls,
 // the DB state is consistent: either the release is committed and
 // the next waiter is already promoted, or nothing happened.
 func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {

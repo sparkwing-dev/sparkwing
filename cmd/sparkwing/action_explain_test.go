@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// CLI-016: `sparkwing pipeline explain --name X -- <flags>` must
-// forward <flags> to the inner pipeline binary so a sliced Plan
-// (e.g. --skip artifact, --only build) renders the same DAG as
+// `sparkwing pipeline explain --name X -- <flags>` must forward
+// <flags> to the inner pipeline binary so a sliced Plan (e.g.
+// --skip artifact, --only build) renders the same DAG as
 // `wing X --explain --skip artifact`.
 //
 // The literal "--" separator must be CONSUMED, not forwarded:

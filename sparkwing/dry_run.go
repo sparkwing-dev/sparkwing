@@ -7,16 +7,13 @@ type dryRunKey struct{}
 
 // WithDryRun marks ctx so RunWork dispatches each step's DryRunFn
 // (or its apply Fn when the step is explicitly marked
-// SafeWithoutDryRun) instead of the apply Fn. IMP-014: the wing-
-// level `--dry-run` flag installs this on the run-wide ctx so every
-// Work executed under it goes through the no-mutation path.
+// SafeWithoutDryRun) instead of the apply Fn. The wing-level
+// `--dry-run` flag installs this on the run-wide ctx so every Work
+// executed under it goes through the no-mutation path.
 //
 // Steps that declare neither DryRunFn nor SafeWithoutDryRun emit a
 // `step_skipped` event with reason `no_dry_run_defined` so the
-// operator's run logs make the contract gap visible. (IMP-015 will
-// tighten this to a hard refusal at dispatch time when paired with
-// blast-radius markers; for now the soft path keeps existing
-// pipelines working unmodified.)
+// operator's run logs make the contract gap visible.
 func WithDryRun(ctx context.Context) context.Context {
 	return context.WithValue(ctx, dryRunKey{}, true)
 }
@@ -39,8 +36,6 @@ func IsDryRun(ctx context.Context) bool {
 //
 //	sparkwing.Step(w, "apply-eks", j.applyEKS).
 //	    DryRun(j.dryApplyEKS)
-//
-// IMP-014.
 func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep {
 	if fn != nil {
 		s.dryRunFn = fn
@@ -57,8 +52,6 @@ func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep {
 //
 //	sparkwing.Step(w, "read-cluster-state", j.readState).
 //	    SafeWithoutDryRun()
-//
-// IMP-014.
 func (s *WorkStep) SafeWithoutDryRun() *WorkStep {
 	s.safeWithoutDryRun = true
 	return s

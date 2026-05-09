@@ -1455,8 +1455,8 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 //
 // Synchronously runs `git fetch` on the named bare repo so a freshly
 // pushed SHA shows up before the next dispatch tries to fetch it.
-// Closes the gitcache-lag race window in IMP-005. Best-effort: callers
-// pass a short timeout and continue on failure.
+// Closes the gitcache-lag race window. Best-effort: callers pass a
+// short timeout and continue on failure.
 //
 // Either `name` (preferred — already registered) or `repo` (full URL,
 // auto-resolves via repoHash) works. Returns 404 if neither resolves

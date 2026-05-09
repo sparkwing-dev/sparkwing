@@ -1,10 +1,10 @@
-// IMP-015: blast-radius dispatch gate. Reads the author-declared
-// per-step markers from the per-repo describe cache and refuses
-// dispatch when a Destructive / AffectsProduction / CostsMoney step
-// is reachable without the matching --allow-* escape (or --dry-run).
-// Stale or missing cache silently degrades to "no markers detected,
-// no gate fires" so the gate is purely additive and never blocks a
-// dispatch the cache hasn't seen -- mirrors IMP-011's venue gate.
+// blast-radius dispatch gate. Reads the author-declared per-step
+// markers from the per-repo describe cache and refuses dispatch when
+// a Destructive / AffectsProduction / CostsMoney step is reachable
+// without the matching --allow-* escape (or --dry-run). Stale or
+// missing cache silently degrades to "no markers detected, no gate
+// fires" so the gate is purely additive and never blocks a dispatch
+// the cache hasn't seen -- mirrors the venue gate.
 package main
 
 import (
@@ -26,8 +26,7 @@ type blastRadiusFinding struct {
 // named pipeline as stored in the describe cache. Returns nil when
 // the pipeline isn't in the cache or when reading fails -- callers
 // treat empty as "no constraint declared" and proceed without
-// gating, matching the behavior pre-IMP-015 and matching IMP-011's
-// degrade-gracefully shape.
+// gating, matching the venue gate's degrade-gracefully shape.
 func lookupCachedBlastRadius(sparkwingDir, pipelineName string) []blastRadiusFinding {
 	schemas, err := readDescribeCache(sparkwingDir)
 	if err != nil || schemas == nil {
@@ -77,7 +76,7 @@ func lookupCachedBlastRadius(sparkwingDir, pipelineName string) []blastRadiusFin
 // enforceBlastRadius is the dispatcher's gate: refuse the run when
 // any reachable step declares a marker the operator hasn't
 // authorized via the matching --allow-* flag. --dry-run bypasses
-// every gate (IMP-014's safe-mode contract), and a profile-level
+// every gate (the safe-mode contract), and a profile-level
 // auto-allow (laptop / kind cluster) can pre-authorize specific
 // markers so a known-safe environment doesn't pester the user.
 //
@@ -90,7 +89,7 @@ func enforceBlastRadius(
 	wf wingFlags,
 	prof *profile.Profile,
 ) error {
-	// IMP-014 contract: dry-run is the always-safe escape hatch.
+	// dry-run is the always-safe escape hatch.
 	// Authors declare a DryRunFn (or SafeWithoutDryRun) and the
 	// orchestrator runs the no-mutation body in place of the apply
 	// Fn. Bypassing the gate here matches that contract.

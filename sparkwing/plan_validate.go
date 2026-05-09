@@ -10,9 +10,9 @@ import (
 // every Work materialized in p. Returns a non-nil error when a
 // non-empty bound doesn't match any WorkStep / SpawnNode /
 // SpawnNodeForEach id reachable from the Plan. The error message
-// reuses the same `did you mean X?` formatting as IMP-008 so the
-// operator sees one consistent class of typo error from every
-// string-keyed flag (IMP-007).
+// reuses the same `did you mean X?` formatting as the typo-detector
+// so the operator sees one consistent class of typo error from every
+// string-keyed flag.
 //
 // Empty bounds are no-ops (return nil). nil Plan returns nil.
 func ValidateStepRange(p *Plan, startAt, stopAt string) error {
@@ -44,8 +44,8 @@ func ValidateStepRange(p *Plan, startAt, stopAt string) error {
 }
 
 // planStepIDs returns the set of every step / spawn / spawnGen id
-// registered on every Work in p. The same registry IMP-008 walks
-// for typo detection.
+// registered on every Work in p. The same registry the typo
+// detector walks.
 func planStepIDs(p *Plan) map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, n := range p.Nodes() {
@@ -67,7 +67,7 @@ func planStepIDs(p *Plan) map[string]struct{} {
 // typo'd Needs("...") strings at pipeline registration time -- not
 // at first dispatch, when the typo would silently make the edge a
 // no-op and the step would run immediately instead of after its
-// intended predecessor (IMP-008).
+// intended predecessor.
 //
 // What gets validated:
 //   - Plan-level: every Node's Needs string IDs must match a node
@@ -77,8 +77,7 @@ func planStepIDs(p *Plan) map[string]struct{} {
 //     Work.
 //
 // Out of scope (intentional): SkipPredicate closures (their bodies
-// can't be introspected without ast walking; tracked in IMP-008's
-// "out of scope" list).
+// can't be introspected without ast walking).
 func validateRefs(p *Plan) {
 	if p == nil {
 		return
@@ -206,9 +205,9 @@ func unknownRefMessage(site, kind, missing string, known map[string]struct{}) st
 // SuggestClosest is the public projection of closestMatch for callers
 // outside the sparkwing package (orchestrator main, cmd/sparkwing). It
 // returns the candidate with the smallest Levenshtein distance to
-// target, or "" if no candidate is close enough. Used by IMP-040 to
-// share IMP-008's typo-suggestion threshold across "unknown pipeline"
-// sites without duplicating the helper.
+// target, or "" if no candidate is close enough. Used to share the
+// typo-suggestion threshold across "unknown pipeline" sites without
+// duplicating the helper.
 func SuggestClosest(target string, candidates []string) string {
 	return closestMatch(target, candidates)
 }

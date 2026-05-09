@@ -29,7 +29,7 @@ type Pipeline struct {
 	On         Triggers `yaml:"on"`
 	// Secrets is preserved for backward-compat parsing of existing
 	// pipelines.yaml files that still list a `secrets:` field. The
-	// REG-017 lazy resolver makes this declaration unnecessary --
+	// lazy resolver makes this declaration unnecessary --
 	// jobs call sparkwing.Secret(ctx, name) on demand. Treated as a
 	// pure no-op; new pipelines should omit the field.
 	Secrets []string `yaml:"secrets"`

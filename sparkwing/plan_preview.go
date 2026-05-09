@@ -8,7 +8,7 @@ import (
 // PlanPreview is the runtime-resolved view of a Plan: the same DAG
 // `pipeline explain` shows, plus per-step "would run / would skip
 // <reason>" annotations evaluated against the supplied args +
-// --start-at / --stop-at bounds. IMP-013: this is the structured
+// --start-at / --stop-at bounds. This is the structured
 // "what would happen if you ran this" object agents inspect before
 // destructive operations -- terraform plan for sparkwing.
 //
@@ -18,10 +18,10 @@ import (
 type PlanPreview struct {
 	Pipeline string `json:"pipeline"`
 	// Venue is the pipeline's author-declared dispatch constraint
-	// ("either" / "local-only" / "cluster-only"). IMP-011: pre-flight
-	// consumers see venue alongside the DAG so a `pipeline plan`
-	// renderer can warn an operator that this pipeline can't be
-	// `--on`'d without going through the dispatcher first.
+	// ("either" / "local-only" / "cluster-only"). Pre-flight consumers
+	// see venue alongside the DAG so a `pipeline plan` renderer can
+	// warn an operator that this pipeline can't be `--on`'d without
+	// going through the dispatcher first.
 	Venue string `json:"venue,omitempty"`
 	// ResolvedArgs are the typed Inputs values after default
 	// resolution + flag parsing. Plain map for JSON-friendliness.
@@ -80,13 +80,13 @@ type PreviewItem struct {
 	// Decision: "would_run" | "would_dry_run" | "would_skip".
 	// "would_dry_run" only appears under PreviewOptions.DryRun and
 	// indicates the step has a DryRunFn that would execute in place
-	// of the apply Fn (IMP-014).
+	// of the apply Fn.
 	Decision string `json:"decision"`
 	// SkipReason categorizes a "would_skip":
 	//   - "user_skipif"        : a SkipIf predicate matched
 	//   - "range_skip"         : outside --start-at..--stop-at window
 	//   - "no_dry_run_defined" : --dry-run + no DryRunFn + no
-	//                            SafeWithoutDryRun marker (IMP-014)
+	//                            SafeWithoutDryRun marker
 	//   - "synthetic"          : hidden generator items
 	// Empty for "would_run" / "would_dry_run".
 	SkipReason string `json:"skip_reason,omitempty"`
@@ -101,9 +101,9 @@ type PreviewItem struct {
 	// CardinalitySource names the item whose runtime output
 	// determines the count, when applicable.
 	CardinalitySource string `json:"cardinality_source,omitempty"`
-	// BlastRadius is the author-declared marker set on this step
-	// (IMP-015): "destructive" / "production" / "money". Empty when
-	// no marker was declared. Surfaced on PreviewItem so
+	// BlastRadius is the author-declared marker set on this step:
+	// "destructive" / "production" / "money". Empty when no marker
+	// was declared. Surfaced on PreviewItem so
 	// `pipeline plan` consumers and agents see the contract
 	// alongside the runtime decision rather than fetching it from
 	// a separate describe round-trip.
@@ -122,17 +122,17 @@ type PreviewOptions struct {
 	// SafeWithoutDryRun keep "would_run" (their apply body is
 	// read-only by author contract), and steps with neither become
 	// "would_skip" + reason "no_dry_run_defined" so the contract
-	// gap is visible in the preview output. IMP-014.
+	// gap is visible in the preview output.
 	DryRun bool
 }
 
 // PreviewPlan walks an already-built Plan and returns the runtime-
 // resolved view. The Plan must come from Registration.Invoke(args)
-// so IMP-008's Plan-time validation has already run; PreviewPlan
-// itself does NOT execute step bodies. SkipIf predicates are
-// evaluated against a synthetic plan-only ctx (the same one Plan()
-// itself runs under, so the SDK-012 guard catches any side-effect
-// helper a predicate accidentally invokes).
+// so Plan-time ref validation has already run; PreviewPlan itself
+// does NOT execute step bodies. SkipIf predicates are evaluated
+// against a synthetic plan-only ctx (the same one Plan() itself
+// runs under, so the side-effect guard catches any helper a
+// predicate accidentally invokes).
 //
 // Caller threads the wire-format args map back through
 // ResolvedArgs so renderers can show the operator the inputs that
@@ -142,13 +142,13 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 	if plan == nil {
 		return nil, fmt.Errorf("PreviewPlan: plan is nil")
 	}
-	// IMP-037: a typo in --start-at / --stop-at must surface as a
-	// "did you mean X?" error before any preview is rendered, matching
-	// the orchestrator's dispatch-time validation
-	// (orchestrator/orchestrator.go ValidateStepRange call). Without
-	// this, an unknown id silently no-ops the range filter and every
-	// step shows would_run -- exactly the iteration footgun IMP-007's
-	// acceptance committed to preventing.
+	// A typo in --start-at / --stop-at must surface as a "did you mean
+	// X?" error before any preview is rendered, matching the
+	// orchestrator's dispatch-time validation (orchestrator/
+	// orchestrator.go ValidateStepRange call). Without this, an
+	// unknown id silently no-ops the range filter and every step shows
+	// would_run -- exactly the iteration footgun the range-resume
+	// flags must prevent.
 	if err := ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 		StartAt:      opts.StartAt,
 		StopAt:       opts.StopAt,
 	}
-	// IMP-011: surface the registered venue as plan-level metadata so
+	// Surface the registered venue as plan-level metadata so
 	// `sparkwing pipeline plan` consumers can render the dispatch
 	// constraint above the DAG. Lookup is best-effort -- a Plan built
 	// against an unregistered name (synthetic test fixtures) just
@@ -173,7 +173,7 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 		})
 	}
 
-	// Plan-only ctx so SkipIf predicates that touch SDK-012-guarded
+	// Plan-only ctx so SkipIf predicates that touch side-effect-guarded
 	// helpers panic with the canonical "Plan() must be pure-
 	// declarative" message rather than silently shelling out.
 	planCtx := withPlanTime(context.Background())
@@ -186,7 +186,7 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 		out.Nodes = append(out.Nodes, previewNode(planCtx, n, "", opts))
 		seen[n.ID()] = true
 	}
-	// IMP-029: surface .OnFailure(id, job) recovery nodes. They're
+	// Surface .OnFailure(id, job) recovery nodes. They're
 	// constructed detached and live on the parent's onFailure pointer,
 	// so plan.Nodes() doesn't return them. Emit a PreviewNode for each
 	// unseen recovery with OnFailureOf pointing back to the parent so
@@ -213,9 +213,9 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 // that's outside plan-time visibility).
 //
 // onFailureOf is the parent ID when n is a .OnFailure(id, job)
-// recovery target; "" for ordinary plan nodes. IMP-029: PreviewPlan
-// threads this in from its own walk rather than reaching into n,
-// matching how marshalPlanSnapshot encodes recovery nodes.
+// recovery target; "" for ordinary plan nodes. PreviewPlan threads
+// this in from its own walk rather than reaching into n, matching
+// how marshalPlanSnapshot encodes recovery nodes.
 func previewNode(ctx context.Context, n *Node, onFailureOf string, opts PreviewOptions) PreviewNode {
 	pn := PreviewNode{
 		ID:          n.ID(),
@@ -265,7 +265,7 @@ func previewWork(ctx context.Context, w *Work, opts PreviewOptions) *PreviewWork
 	pw := &PreviewWork{}
 	for _, s := range w.Steps() {
 		item := previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates())
-		// IMP-015: surface the author-declared blast-radius set on
+		// Surface the author-declared blast-radius set on
 		// the preview item so agents reading `pipeline plan --json`
 		// see the contract alongside the runtime decision. Stringify
 		// at the wire layer so JSON consumers don't need the typed
@@ -277,7 +277,7 @@ func previewWork(ctx context.Context, w *Work, opts PreviewOptions) *PreviewWork
 			}
 			item.BlastRadius = strs
 		}
-		// IMP-014: refine the per-step decision through the dry-run
+		// Refine the per-step decision through the dry-run
 		// lens AFTER the skip precedence (range / user-skipif) is
 		// computed -- a step that's already going to be skipped
 		// keeps that reason regardless of dry-run mode.
@@ -343,7 +343,7 @@ func previewItem(ctx context.Context, id string, needs []string, rangeSkips map[
 		match, panicMsg := safeEvalPredicate(ctx, p)
 		if panicMsg != "" {
 			// Predicate panicked under the plan-only ctx (likely an
-			// SDK-012 guard fired on a side-effect helper). Mark the
+			// side-effect guard fired on a helper). Mark the
 			// item as "would_skip user_skipif" with the panic
 			// message attached so the operator sees the contract
 			// violation rather than guessing.

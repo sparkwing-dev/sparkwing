@@ -11,8 +11,8 @@ import (
 )
 
 // TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures models
-// the IMP-005 happy path: the cache's background-fetch loop hasn't
-// caught up on attempt 1 or 2, but the SHA is present by attempt 3.
+// the happy path: the cache's background-fetch loop hasn't caught
+// up on attempt 1 or 2, but the SHA is present by attempt 3.
 // The retry loop must NOT surface the cryptic git error — it should
 // return the eventually-good sparkwingDir.
 func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {

@@ -1,9 +1,9 @@
 package sparkwing
 
 // Venue is the pipeline-level declaration of where the pipeline is
-// allowed to run. IMP-011: today every pipeline is implicitly
-// dispatchable anywhere — `wing X` runs locally and `wing X --on
-// prod` ships the trigger to a remote runner. Some pipelines aren't
+// allowed to run. Without an explicit declaration every pipeline is
+// implicitly dispatchable anywhere — `wing X` runs locally and `wing
+// X --on prod` ships the trigger to a remote runner. Some pipelines aren't
 // safe to dispatch remotely (cluster-up shells out to terraform / aws
 // against the operator's laptop credentials; the cluster doesn't have
 // those). Some pipelines, symmetrically, only make sense in-cluster

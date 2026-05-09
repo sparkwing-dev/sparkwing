@@ -13,8 +13,8 @@ type deployArgs struct {
 	Env     string
 }
 
-// SDK-041: sw.Inputs[T](ctx) round-trips the typed value the
-// orchestrator (or a test) installs via sw.WithInputs.
+// sw.Inputs[T](ctx) round-trips the typed value the orchestrator
+// (or a test) installs via sw.WithInputs.
 func TestInputs_RoundTrip(t *testing.T) {
 	want := deployArgs{Service: "api", Env: "prod"}
 	ctx := sparkwing.WithInputs(context.Background(), want)

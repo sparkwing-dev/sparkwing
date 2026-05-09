@@ -82,12 +82,12 @@ func TestBindFlagsDefaults(t *testing.T) {
 	}
 }
 
-// TestWingHelpListsIMPArcFlags pins IMP-039: `wing --help` and
-// `sparkwing run --help` must enumerate the IMP-007/014/015 wing
-// flags. The wing-flag list is sourced from sparkwing.WingFlagDocs()
-// so adding a flag in the SDK surfaces it here automatically; this
-// test is the regression guard.
-func TestWingHelpListsIMPArcFlags(t *testing.T) {
+// TestWingHelpListsArcFlags pins that `wing --help` and `sparkwing
+// run --help` must enumerate the wing-level flags. The wing-flag
+// list is sourced from sparkwing.WingFlagDocs() so adding a flag in
+// the SDK surfaces it here automatically; this test is the
+// regression guard.
+func TestWingHelpListsArcFlags(t *testing.T) {
 	cases := []struct {
 		name string
 		cmd  Command
@@ -97,11 +97,11 @@ func TestWingHelpListsIMPArcFlags(t *testing.T) {
 		{"sparkwing pipeline run", cmdPipelineRun},
 	}
 	mustContain := []string{
-		// IMP-007: range-resume.
+		// Range-resume.
 		"--start-at", "--stop-at",
-		// IMP-014: dry-run.
+		// Dry-run.
 		"--dry-run",
-		// IMP-015: blast-radius escape hatches.
+		// Blast-radius escape hatches.
 		"--allow-destructive", "--allow-prod", "--allow-money",
 		// Pre-existing staples (regression guard).
 		"--from", "--config", "--retry-of", "--on",

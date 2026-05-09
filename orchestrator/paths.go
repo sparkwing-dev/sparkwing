@@ -51,7 +51,7 @@ func (p Paths) NodeLog(runID, nodeID string) string {
 // EnvelopeLog returns the path to the run-level envelope event log
 // (run_start, run_plan, run_finish, plan_warn, etc). This is the
 // canonical persisted source for `sparkwing runs logs --follow`'s
-// merged event stream (IMP-010). Per-node body output keeps living
+// merged event stream. Per-node body output keeps living
 // at NodeLog(); envelope events live at EnvelopeLog() so the reader
 // can interleave them by timestamp without scanning every node file
 // for needles. Filename starts with `_` to keep it sorted ahead of

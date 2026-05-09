@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-040: every "unknown pipeline X" surface in the orchestrator
+// Every "unknown pipeline X" surface in the orchestrator
 // (printPipelineHelp, printPipelinePlan, parseTypedFlags,
 // printPipelineRuntimePlan) routes through unknownPipelineErr,
 // which composes a Levenshtein "did you mean Y?" suggestion when
@@ -16,15 +16,15 @@ import (
 // suggestion behavior so a future helper edit can't silently
 // regress to the flat error.
 
-// imp040FixturePipe is a minimal registered pipeline used to
+// suggestFixturePipe is a minimal registered pipeline used to
 // populate sparkwing.Registered() for the suggestion tests.
-type imp040FixturePipe struct{ sparkwing.Base }
+type suggestFixturePipe struct{ sparkwing.Base }
 
-func (imp040FixturePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+func (suggestFixturePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	return nil
 }
 
-func registerIMP040Fixtures(t *testing.T) {
+func registerSuggestFixtures(t *testing.T) {
 	t.Helper()
 	// Names chosen so "claster-up" is one edit from "cluster-up"
 	// (close), "totallyunrelated" is far from any (no suggestion),
@@ -37,12 +37,12 @@ func registerIMP040Fixtures(t *testing.T) {
 			continue
 		}
 		sparkwing.Register[sparkwing.NoInputs](n,
-			func() sparkwing.Pipeline[sparkwing.NoInputs] { return imp040FixturePipe{} })
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return suggestFixturePipe{} })
 	}
 }
 
 func TestUnknownPipelineErr_SuggestsCloseMatch(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	err := unknownPipelineErr("claster-up")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -59,7 +59,7 @@ func TestUnknownPipelineErr_SuggestsCloseMatch(t *testing.T) {
 }
 
 func TestUnknownPipelineErr_TypoOfHello(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	err := unknownPipelineErr("helo")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -71,7 +71,7 @@ func TestUnknownPipelineErr_TypoOfHello(t *testing.T) {
 }
 
 func TestUnknownPipelineErr_FarTypoNoSuggestion(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	err := unknownPipelineErr("totallyunrelated")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -85,54 +85,54 @@ func TestUnknownPipelineErr_FarTypoNoSuggestion(t *testing.T) {
 	}
 }
 
-// IMP-040: parseTypedFlags is one of the four orchestrator call
-// sites; verify it routes through unknownPipelineErr.
+// parseTypedFlags is one of the four orchestrator call sites;
+// verify it routes through unknownPipelineErr.
 func TestParseTypedFlags_UnknownPipelineSuggests(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	_, err := parseTypedFlags("claster-up", nil)
 	if err == nil {
 		t.Fatal("expected error for typo'd pipeline")
 	}
 	if !strings.Contains(err.Error(), `did you mean "cluster-up"`) {
-		t.Errorf("parseTypedFlags should surface IMP-040 suggestion, got: %s", err)
+		t.Errorf("parseTypedFlags should surface unknown-pipeline suggestion, got: %s", err)
 	}
 }
 
-// IMP-040: printPipelineHelp is the second call site. The function
-// writes to stdout on success; on the unknown-pipeline path it
-// returns an error before any output.
+// printPipelineHelp is the second call site. The function writes to
+// stdout on success; on the unknown-pipeline path it returns an
+// error before any output.
 func TestPrintPipelineHelp_UnknownPipelineSuggests(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	err := printPipelineHelp("claster-up")
 	if err == nil {
 		t.Fatal("expected error for typo'd pipeline")
 	}
 	if !strings.Contains(err.Error(), `did you mean "cluster-up"`) {
-		t.Errorf("printPipelineHelp should surface IMP-040 suggestion, got: %s", err)
+		t.Errorf("printPipelineHelp should surface unknown-pipeline suggestion, got: %s", err)
 	}
 }
 
-// IMP-040: printPipelinePlan (--explain) is the third call site.
+// printPipelinePlan (--explain) is the third call site.
 func TestPrintPipelinePlan_UnknownPipelineSuggests(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	err := printPipelinePlan("claster-up", nil)
 	if err == nil {
 		t.Fatal("expected error for typo'd pipeline")
 	}
 	if !strings.Contains(err.Error(), `did you mean "cluster-up"`) {
-		t.Errorf("printPipelinePlan should surface IMP-040 suggestion, got: %s", err)
+		t.Errorf("printPipelinePlan should surface unknown-pipeline suggestion, got: %s", err)
 	}
 }
 
-// IMP-040: printPipelineRuntimePlan (--plan) is the fourth call
-// site. Lives in printpipelineplan.go.
+// printPipelineRuntimePlan (--plan) is the fourth call site. Lives
+// in printpipelineplan.go.
 func TestPrintPipelineRuntimePlan_UnknownPipelineSuggests(t *testing.T) {
-	registerIMP040Fixtures(t)
+	registerSuggestFixtures(t)
 	err := printPipelineRuntimePlan("claster-up", nil)
 	if err == nil {
 		t.Fatal("expected error for typo'd pipeline")
 	}
 	if !strings.Contains(err.Error(), `did you mean "cluster-up"`) {
-		t.Errorf("printPipelineRuntimePlan should surface IMP-040 suggestion, got: %s", err)
+		t.Errorf("printPipelineRuntimePlan should surface unknown-pipeline suggestion, got: %s", err)
 	}
 }

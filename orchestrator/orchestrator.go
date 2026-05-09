@@ -73,7 +73,7 @@ type Options struct {
 	// range". Empty values disable the bound. The orchestrator
 	// validates the strings against every Work's registered ids
 	// before dispatching; unknown ids fail the run with a
-	// Levenshtein-suggesting "did you mean X?" message (IMP-007).
+	// Levenshtein-suggesting "did you mean X?" message.
 	StartAt string
 	StopAt  string
 
@@ -83,7 +83,7 @@ type Options struct {
 	// declared neither are soft-skipped with reason
 	// `no_dry_run_defined` so existing pipelines keep working under
 	// `--dry-run` while making the contract gap visible in the run
-	// logs. IMP-014.
+	// logs.
 	DryRun bool
 
 	// Debug carries pause directives populated by `sparkwing debug run`.
@@ -245,8 +245,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	validatePlanModifiers(opts.Delegate, plan)
 
-	// IMP-007: --start-at / --stop-at must reference a real WorkStep
-	// id; reject with a Levenshtein-suggesting message before the
+	// --start-at / --stop-at must reference a real WorkStep id;
+	// reject with a Levenshtein-suggesting message before the
 	// orchestrator even emits run_start, so the operator's iteration
 	// loop is "save -> wing X -> see typo error" not "save -> dispatch
 	// -> watch run finish silently doing nothing useful."
@@ -257,8 +257,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		ctx = sparkwing.WithStepRange(ctx, opts.StartAt, opts.StopAt)
 	}
-	// IMP-014: install the dry-run mode flag on the run-wide ctx so
-	// every Work executed under it routes through DryRunFn instead
+	// Install the dry-run mode flag on the run-wide ctx so every
+	// Work executed under it routes through DryRunFn instead
 	// of the apply Fn. Steps without a dry-run body soft-skip with
 	// reason `no_dry_run_defined`.
 	if opts.DryRun {
@@ -300,7 +300,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	_ = backends.State.FinishRun(ctx, runID, finalStatus, errMsg)
 
-	// IMP-010: emit run_finish here so the envelope tee (installed by
+	// Emit run_finish here so the envelope tee (installed by
 	// RunLocal around opts.Delegate) captures it. Previously the
 	// outer Main() in this package emitted run_finish AFTER RunLocal
 	// returned -- which meant the envelope log closed before the
@@ -360,8 +360,8 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)
 	}
-	// IMP-010: wrap the user-facing delegate with an envelope tee so
-	// every run-wide event (run_start, run_plan, node_start, node_end,
+	// Wrap the user-facing delegate with an envelope tee so every
+	// run-wide event (run_start, run_plan, node_start, node_end,
 	// run_summary, run_finish, plan_warn, exec_line, ...) is also
 	// persisted to <runDir>/_envelope.ndjson. The merged-stream reader
 	// in JobLogs replays this file alongside per-node body output so
@@ -942,8 +942,8 @@ func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, r
 	s.resolverCtx = sparkwing.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwing.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
 	s.resolverCtx = sparkwing.WithPipelineAwaiter(s.resolverCtx, s.pipelineAwaiter())
-	// SDK-041: install the typed Inputs the registration parsed so
-	// step bodies can read the value via sparkwing.Inputs[T](ctx).
+	// Install the typed Inputs the registration parsed so step
+	// bodies can read the value via sparkwing.Inputs[T](ctx).
 	if in := plan.Inputs(); in != nil {
 		s.resolverCtx = sparkwing.WithInputs(s.resolverCtx, in)
 	}
@@ -956,7 +956,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
 		currentNode := sparkwing.NodeFromContext(ctx)
 
-		// REG-018 retry-lineage chain. When this run is itself a retry
+		// Retry-lineage chain. When this run is itself a retry
 		// (s.retryOf != ""), look up the prior run's child trigger
 		// spawned at the same node + pipeline. If found, thread its
 		// id as the new child's retry_of so the child gets skip-
@@ -1894,9 +1894,9 @@ type planSnapshot struct {
 	Pipeline string `json:"pipeline"`
 	RunID    string `json:"run_id"`
 	// Venue is the author-declared dispatch constraint surfaced at
-	// the top of the plan snapshot. IMP-011: agents reading
-	// --explain JSON see the venue alongside the DAG so they can
-	// honor it without a separate `--describe` round-trip.
+	// the top of the plan snapshot. Agents reading --explain JSON
+	// see the venue alongside the DAG so they can honor it without
+	// a separate `--describe` round-trip.
 	Venue string         `json:"venue,omitempty"`
 	Nodes []snapshotNode `json:"nodes"`
 }
@@ -1959,8 +1959,8 @@ type snapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
-	// BlastRadius is the author-declared marker set on this step
-	// (IMP-015), stringified to canonical wire tokens. Empty when
+	// BlastRadius is the author-declared marker set on this step,
+	// stringified to canonical wire tokens. Empty when
 	// no marker was declared. Surfaced in the plan snapshot so
 	// `pipeline explain --json` consumers (agents, dashboard) see
 	// the contract alongside the static DAG.
@@ -1988,8 +1988,8 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
 	}
-	// IMP-011: surface the registered venue at the snapshot top so
-	// agents reading --explain JSON honor the dispatch constraint
+	// Surface the registered venue at the snapshot top so agents
+	// reading --explain JSON honor the dispatch constraint
 	// without a separate --describe round-trip. Best-effort lookup --
 	// synthetic test fixtures with a Plan but no Registration just
 	// emit no venue field (json:"omitempty").

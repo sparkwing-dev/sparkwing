@@ -263,7 +263,7 @@ func registerRepoWithCache(gcURL, name, repoURL string) error {
 //
 // race that surfaces as "fatal: remote error: upload-pack: not our
 // ref <sha>" when the cache's 30s background-fetch loop hasn't
-// caught up yet. See IMP-005.
+// caught up yet.
 func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	if gcURL == "" {
 		return fmt.Errorf("RefreshRepo: gitcache URL required")

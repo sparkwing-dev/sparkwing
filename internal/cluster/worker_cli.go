@@ -32,10 +32,10 @@ func runWorkerCLI(args []string) error {
 	logsURL := fs.String("logs", "", "logs service URL (optional; local files if empty)")
 	logStoreURL := fs.String("log-store", "",
 		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. "+
-			"When set, takes precedence over --logs. (LOCAL-002)")
+			"When set, takes precedence over --logs.")
 	artifactStoreURL := fs.String("artifact-store", "",
 		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix. "+
-			"Validated at startup; consumed by future cache paths (LOCAL-003/004).")
+			"Validated at startup; consumed by future cache paths.")
 	poll := fs.Duration("poll", time.Second, "poll interval when queue is empty")
 	heartbeat := fs.Duration("heartbeat", 0, "heartbeat cadence (default: lease/3 = 10s)")
 	runnerKind := fs.String("runner", "inprocess", "node runner: inprocess | k8s | warm")
@@ -102,7 +102,7 @@ func runWorkerCLI(args []string) error {
 			return fmt.Errorf("--artifact-store: %w", err)
 		}
 		logger.Info("artifact store", "url", *artifactStoreURL,
-			"note", "validated; not yet consumed by worker (LOCAL-003/004)")
+			"note", "validated; not yet consumed by worker")
 	}
 
 	switch *runnerKind {

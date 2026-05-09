@@ -63,7 +63,7 @@ func TestSecret_PropagatesResolverError(t *testing.T) {
 	}
 }
 
-// REG-019: Secret refuses to read entries that were stored as plain
+// Secret refuses to read entries that were stored as plain
 // (masked=false). The mismatch keeps the call-site signal honest --
 // a future operator who flips an entry from masked=true to false
 // gets a loud failure instead of a silent log leak.
@@ -81,9 +81,9 @@ func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
 	}
 }
 
-// REG-019: Config refuses entries stored as masked=true, mirroring
-// Secret's rejection. Symmetric strictness avoids "I called Config
-// but my secret got returned anyway" footguns.
+// Config refuses entries stored as masked=true, mirroring Secret's
+// rejection. Symmetric strictness avoids "I called Config but my
+// secret got returned anyway" footguns.
 func TestConfig_RejectsMaskedEntry(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {

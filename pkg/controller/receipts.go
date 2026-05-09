@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
 
-// handleGetRunReceipt computes the IMP-016 receipt for one run on
+// handleGetRunReceipt computes the receipt for one run on
 // demand from the run + nodes rows. The full receipt JSON is not
 // stored; the queryable receipt_sha + cost_* columns hold the small
 // summary. Recompute is the canonical path so the receipt always

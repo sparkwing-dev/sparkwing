@@ -9,12 +9,10 @@ package sparkwing
 //     (the "wing-owned flags" enumeration the user sees alongside
 //     PIPELINE FLAGS).
 //
-// IMP-039 made this canonical: the per-pipeline footer used to hand-
-// code "(--on, --from, --config)" and silently drifted every time a
-// new wing flag landed (--start-at / --stop-at / --dry-run /
-// --allow-* were all invisible in per-pipeline help even though they
-// worked end-to-end). Sourcing from one list keeps the surfaces in
-// lockstep.
+// This list is the canonical source: the per-pipeline footer used to
+// hand-code "(--on, --from, --config)" and silently drifted every
+// time a new wing flag landed. Sourcing from one list keeps the
+// surfaces in lockstep.
 //
 // The flag NAME set is pinned to ReservedFlagNames() via
 // TestWingFlagDocsCoverReservedFlags so a future wing flag added to
@@ -56,13 +54,13 @@ var wingFlagDocs = []WingFlagDoc{
 	{Name: "full", Desc: "With --retry-of, disable skip-passed so every node re-runs from scratch", Group: "Source"},
 	{Name: "verbose", Short: "v", Desc: "Enable debug logging from the orchestrator (equivalent to SPARKWING_LOG_LEVEL=debug)", Group: "Source"},
 	// Range: which subset of the DAG runs.
-	{Name: "start-at", Argument: "STEP", Desc: "Start the run at STEP, skipping every step before it (IMP-007)", Group: "Range"},
-	{Name: "stop-at", Argument: "STEP", Desc: "Stop the run after STEP, skipping every step beyond it (IMP-007)", Group: "Range"},
+	{Name: "start-at", Argument: "STEP", Desc: "Start the run at STEP, skipping every step before it", Group: "Range"},
+	{Name: "stop-at", Argument: "STEP", Desc: "Stop the run after STEP, skipping every step beyond it", Group: "Range"},
 	// Safety: blast-radius gates + dry-run.
-	{Name: "dry-run", Desc: "Run each step's dry-run probe instead of its apply Fn; no mutation (IMP-014)", Group: "Safety"},
-	{Name: "allow-destructive", Desc: "Authorize dispatch when the plan reaches a Destructive-marked step (IMP-015)", Group: "Safety"},
-	{Name: "allow-prod", Desc: "Authorize dispatch when the plan reaches a AffectsProduction-marked step (IMP-015)", Group: "Safety"},
-	{Name: "allow-money", Desc: "Authorize dispatch when the plan reaches a CostsMoney-marked step (IMP-015)", Group: "Safety"},
+	{Name: "dry-run", Desc: "Run each step's dry-run probe instead of its apply Fn; no mutation", Group: "Safety"},
+	{Name: "allow-destructive", Desc: "Authorize dispatch when the plan reaches a Destructive-marked step", Group: "Safety"},
+	{Name: "allow-prod", Desc: "Authorize dispatch when the plan reaches a AffectsProduction-marked step", Group: "Safety"},
+	{Name: "allow-money", Desc: "Authorize dispatch when the plan reaches a CostsMoney-marked step", Group: "Safety"},
 	// System: where the work runs.
 	{Name: "on", Argument: "NAME", Desc: "Dispatch on a remote controller instead of running locally", Group: "System"},
 }

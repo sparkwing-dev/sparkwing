@@ -9,9 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-013: PreviewPlan must NOT execute step bodies. The canary
-// counters in this file's test pipelines must remain zero after
-// every call.
+// PreviewPlan must NOT execute step bodies. The canary counters in
+// this file's test pipelines must remain zero after every call.
 var previewExecCounter atomic.Int64
 
 func nopStep(ctx context.Context) error {
@@ -29,16 +28,16 @@ func (previewSinglePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spark
 }
 
 func TestPreviewPlan_SingleStepWouldRun(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp013-single",
+	sparkwing.Register[sparkwing.NoInputs]("plan-preview-single",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewSinglePipe{} })
-	reg, _ := sparkwing.Lookup("imp013-single")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp013-single"})
+	reg, _ := sparkwing.Lookup("plan-preview-single")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-preview-single"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp013-single", nil, sparkwing.PreviewOptions{})
+	preview, err := sparkwing.PreviewPlan(plan, "plan-preview-single", nil, sparkwing.PreviewOptions{})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}
@@ -71,16 +70,16 @@ func (previewSkipPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 }
 
 func TestPreviewPlan_UserSkipIfReportedAsUserSkipIf(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp013-skipif",
+	sparkwing.Register[sparkwing.NoInputs]("plan-preview-skipif",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewSkipPipe{} })
-	reg, _ := sparkwing.Lookup("imp013-skipif")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp013-skipif"})
+	reg, _ := sparkwing.Lookup("plan-preview-skipif")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-preview-skipif"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp013-skipif", nil, sparkwing.PreviewOptions{})
+	preview, err := sparkwing.PreviewPlan(plan, "plan-preview-skipif", nil, sparkwing.PreviewOptions{})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}
@@ -122,16 +121,16 @@ func (previewRangePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 }
 
 func TestPreviewPlan_StartAtRangeSkipReported(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp013-range",
+	sparkwing.Register[sparkwing.NoInputs]("plan-preview-range",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangePipe{} })
-	reg, _ := sparkwing.Lookup("imp013-range")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp013-range"})
+	reg, _ := sparkwing.Lookup("plan-preview-range")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-preview-range"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp013-range", nil, sparkwing.PreviewOptions{StartAt: "b"})
+	preview, err := sparkwing.PreviewPlan(plan, "plan-preview-range", nil, sparkwing.PreviewOptions{StartAt: "b"})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}
@@ -157,11 +156,11 @@ func TestPreviewPlan_StartAtRangeSkipReported(t *testing.T) {
 	}
 }
 
-// --- IMP-037: PreviewPlan rejects unknown --start-at / --stop-at with
-// the same Levenshtein-suggesting error as the orchestrator's dispatch
-// path. Without this, a typo silently no-ops the filter and every step
-// renders would_run -- the footgun IMP-007's acceptance committed to
-// preventing but didn't ship for the plan-preview surface.
+// --- PreviewPlan rejects unknown --start-at / --stop-at with the same
+// Levenshtein-suggesting error as the orchestrator's dispatch path.
+// Without this, a typo silently no-ops the filter and every step
+// renders would_run -- the same footgun the dispatch path already
+// guards against.
 
 type previewRangeValidatePipe struct{ sparkwing.Base }
 
@@ -179,16 +178,16 @@ func (previewRangeValidatePipe) Plan(ctx context.Context, plan *sparkwing.Plan, 
 }
 
 func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp037-near-miss",
+	sparkwing.Register[sparkwing.NoInputs]("preview-near-miss",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
-	reg, _ := sparkwing.Lookup("imp037-near-miss")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp037-near-miss"})
+	reg, _ := sparkwing.Lookup("preview-near-miss")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "preview-near-miss"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp037-near-miss", nil, sparkwing.PreviewOptions{StartAt: "instal-argocd"})
+	preview, err := sparkwing.PreviewPlan(plan, "preview-near-miss", nil, sparkwing.PreviewOptions{StartAt: "instal-argocd"})
 	if err == nil {
 		t.Fatalf("expected error for typo'd --start-at, got nil (preview = %+v)", preview)
 	}
@@ -206,16 +205,16 @@ func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
 }
 
 func TestPreviewPlan_UnknownStartAtFarMissListsAvailable(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp037-far-miss",
+	sparkwing.Register[sparkwing.NoInputs]("preview-far-miss",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
-	reg, _ := sparkwing.Lookup("imp037-far-miss")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp037-far-miss"})
+	reg, _ := sparkwing.Lookup("preview-far-miss")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "preview-far-miss"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp037-far-miss", nil, sparkwing.PreviewOptions{StartAt: "completely-unrelated-name"})
+	preview, err := sparkwing.PreviewPlan(plan, "preview-far-miss", nil, sparkwing.PreviewOptions{StartAt: "completely-unrelated-name"})
 	if err == nil {
 		t.Fatalf("expected error for far-miss --start-at, got nil")
 	}
@@ -238,16 +237,16 @@ func TestPreviewPlan_UnknownStartAtFarMissListsAvailable(t *testing.T) {
 }
 
 func TestPreviewPlan_KnownStartAtSucceeds(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp037-known",
+	sparkwing.Register[sparkwing.NoInputs]("preview-known",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
-	reg, _ := sparkwing.Lookup("imp037-known")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp037-known"})
+	reg, _ := sparkwing.Lookup("preview-known")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "preview-known"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp037-known", nil, sparkwing.PreviewOptions{StartAt: "install-argocd"})
+	preview, err := sparkwing.PreviewPlan(plan, "preview-known", nil, sparkwing.PreviewOptions{StartAt: "install-argocd"})
 	if err != nil {
 		t.Fatalf("PreviewPlan with valid --start-at: unexpected error %v", err)
 	}
@@ -283,16 +282,16 @@ func (previewFanOutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spark
 }
 
 func TestPreviewPlan_DynamicFanOutCardinalityUnresolved(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp013-fanout",
+	sparkwing.Register[sparkwing.NoInputs]("plan-preview-fanout",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewFanOutPipe{} })
-	reg, _ := sparkwing.Lookup("imp013-fanout")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp013-fanout"})
+	reg, _ := sparkwing.Lookup("plan-preview-fanout")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-preview-fanout"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp013-fanout", nil, sparkwing.PreviewOptions{})
+	preview, err := sparkwing.PreviewPlan(plan, "plan-preview-fanout", nil, sparkwing.PreviewOptions{})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}
@@ -325,7 +324,7 @@ func (previewArgsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ preview
 }
 
 // --- OnFailure recovery node surfaces with on_failure_of pointing
-// back at the parent. IMP-029.
+// back at the parent.
 
 type previewOnFailurePipe struct{ sparkwing.Base }
 
@@ -336,16 +335,16 @@ func (previewOnFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sp
 }
 
 func TestPreviewPlan_OnFailureRecoverySurfaced(t *testing.T) {
-	sparkwing.Register[sparkwing.NoInputs]("imp029-onfailure",
+	sparkwing.Register[sparkwing.NoInputs]("plan-onfailure",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewOnFailurePipe{} })
-	reg, _ := sparkwing.Lookup("imp029-onfailure")
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "imp029-onfailure"})
+	reg, _ := sparkwing.Lookup("plan-onfailure")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-onfailure"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp029-onfailure", nil, sparkwing.PreviewOptions{})
+	preview, err := sparkwing.PreviewPlan(plan, "plan-onfailure", nil, sparkwing.PreviewOptions{})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}
@@ -377,7 +376,7 @@ func TestPreviewPlan_OnFailureRecoverySurfaced(t *testing.T) {
 }
 
 // TestNodeOnFailureNodeID covers the public accessor: returns the
-// recovery node's id when set, "" when not. IMP-029.
+// recovery node's id when set, "" when not.
 func TestNodeOnFailureNodeID(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	bare := sparkwing.Job(plan, "bare", nopStep)
@@ -392,17 +391,17 @@ func TestNodeOnFailureNodeID(t *testing.T) {
 }
 
 func TestPreviewPlan_ResolvedArgsRoundtrip(t *testing.T) {
-	sparkwing.Register[previewArgsInputs]("imp013-args",
+	sparkwing.Register[previewArgsInputs]("plan-preview-args",
 		func() sparkwing.Pipeline[previewArgsInputs] { return previewArgsPipe{} })
-	reg, _ := sparkwing.Lookup("imp013-args")
+	reg, _ := sparkwing.Lookup("plan-preview-args")
 	args := map[string]string{"tag": "v1.2.3"}
-	plan, err := reg.Invoke(context.Background(), args, sparkwing.RunContext{Pipeline: "imp013-args"})
+	plan, err := reg.Invoke(context.Background(), args, sparkwing.RunContext{Pipeline: "plan-preview-args"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwing.PreviewPlan(plan, "imp013-args", args, sparkwing.PreviewOptions{})
+	preview, err := sparkwing.PreviewPlan(plan, "plan-preview-args", args, sparkwing.PreviewOptions{})
 	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}

@@ -14,9 +14,8 @@ import (
 )
 
 // These tests cover the orchestrator's runtime fan-out machinery via
-// the SDK-029 JobFanOutDynamic surface (renamed from NodeForEach in
-// SDK-029, originally introduced in SDK-002 as the replacement for
-// ExpandFrom).
+// the JobFanOutDynamic surface (formerly NodeForEach, originally the
+// replacement for ExpandFrom).
 
 type discoverJob struct {
 	sparkwing.Base

@@ -198,7 +198,7 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	}
 }
 
-// IMP-004: every accepted trigger creates a pending Run row so
+// every accepted trigger creates a pending Run row so
 // `runs list` / `runs status` show it before the runner has even
 // claimed it. Without this, dispatches that fail at fetch / compile
 // would never surface in the CLI.
@@ -265,10 +265,10 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	}
 }
 
-// IMP-004: a controller-pre-allocated pending row gets transitioned
+// a controller-pre-allocated pending row gets transitioned
 // to running when the orchestrator's CreateRun fires. This is the
-// claimed -> running edge in the ticket. The upsert deliberately
-// preserves the original CreatedAt so receipt fields (IMP-016) can
+// claimed -> running edge. The upsert deliberately
+// preserves the original CreatedAt so receipt fields can
 // reason about queue latency = StartedAt - CreatedAt.
 func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	dir := t.TempDir()

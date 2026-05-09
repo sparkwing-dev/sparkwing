@@ -101,10 +101,10 @@ func runWing(args []string) error {
 		return nil
 	}
 
-	// IMP-006: wing-owned flags must precede the pipeline-name
-	// positional. extractPipelineName enforces that; previously the
-	// parser took args[0] as the pipeline name unconditionally, so
-	// `sparkwing run -C /path foo` silently treated `-C` as the
+	// Wing-owned flags must precede the pipeline-name positional.
+	// extractPipelineName enforces that; without it the parser would
+	// take args[0] as the pipeline name unconditionally, so
+	// `sparkwing run -C /path foo` would silently treat `-C` as the
 	// pipeline name and `/path` as a pipeline arg.
 	pipelineName, rest, err := extractPipelineName(args)
 	if err != nil {
@@ -144,8 +144,8 @@ func runWing(args []string) error {
 		}
 	}
 
-	// IMP-011: gate dispatch against the pipeline's author-declared
-	// venue. LocalOnly pipelines refuse `--on PROFILE` (cluster-up
+	// Gate dispatch against the pipeline's author-declared venue.
+	// LocalOnly pipelines refuse `--on PROFILE` (cluster-up
 	// shells out to terraform / aws against laptop credentials);
 	// ClusterOnly pipelines refuse bare invocation (in-cluster
 	// state-touching chores). Venue is resolved from the describe
@@ -159,15 +159,15 @@ func runWing(args []string) error {
 		}
 	}
 
-	// IMP-015: blast-radius gate. Walk per-step markers via the
-	// describe cache and refuse dispatch when a Destructive /
+	// Blast-radius gate. Walk per-step markers via the describe
+	// cache and refuse dispatch when a Destructive /
 	// AffectsProduction / CostsMoney step is reachable without the
 	// matching --allow-* escape (or --dry-run, which bypasses every
-	// gate per IMP-014's safe-mode contract). A profile-level
-	// auto_allow can pre-authorize specific markers for a low-stakes
-	// environment. A cold cache or pre-IMP-015 binary silently
-	// degrades to "no markers detected, no gate fires" -- the next
-	// --describe refresh populates the cache.
+	// gate per the safe-mode contract). A profile-level auto_allow
+	// can pre-authorize specific markers for a low-stakes
+	// environment. A cold cache or older binary silently degrades
+	// to "no markers detected, no gate fires" -- the next --describe
+	// refresh populates the cache.
 	if findings := lookupCachedBlastRadius(dir, pipelineName); len(findings) > 0 {
 		var prof *profile.Profile
 		if wf.on != "" {
@@ -215,23 +215,23 @@ func runWing(args []string) error {
 			env = append(env, "SPARKWING_RETRY_FULL=1")
 		}
 	}
-	// IMP-007: forward --start-at / --stop-at via env so the pipeline
-	// binary's orchestrator/main.go can lift them onto Options
-	// alongside the existing --retry-of plumbing.
+	// Forward --start-at / --stop-at via env so the pipeline binary's
+	// orchestrator/main.go can lift them onto Options alongside the
+	// existing --retry-of plumbing.
 	if wf.startAt != "" {
 		env = append(env, "SPARKWING_START_AT="+wf.startAt)
 	}
 	if wf.stopAt != "" {
 		env = append(env, "SPARKWING_STOP_AT="+wf.stopAt)
 	}
-	// IMP-014: same env-var protocol for --dry-run; the pipeline
-	// binary lifts SPARKWING_DRY_RUN onto Options.DryRun and the
-	// orchestrator installs WithDryRun(ctx) on the run.
+	// Same env-var protocol for --dry-run; the pipeline binary lifts
+	// SPARKWING_DRY_RUN onto Options.DryRun and the orchestrator
+	// installs WithDryRun(ctx) on the run.
 	if wf.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
-	// IMP-015 allow-* gate flags: consumed by the wing wrapper for
-	// the blast-radius pre-flight check, but still surfaced on the
+	// allow-* gate flags: consumed by the wing wrapper for the
+	// blast-radius pre-flight check, but still surfaced on the
 	// run record for reproducibility (an agent re-invoking needs to
 	// know which gates were authorized). Forwarded as env vars; the
 	// orchestrator reads them in emitRunStart and includes the names
@@ -581,8 +581,8 @@ func runJobs(args []string) error {
 		format := fs.String("format", "", "DEPRECATED alias for -o/--output")
 		_ = fs.MarkHidden("format")
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
-		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout (IMP-010)")
-		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- the pre-IMP-010 default; useful when scripts depend on the legacy shape")
+		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout")
+		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- useful when scripts depend on the legacy shape")
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -859,8 +859,8 @@ func runJobs(args []string) error {
 // "table" pflag default a leaf may register) must not collide with a
 // user-set --json: --json is documented as an alias for --output=json
 // and "default + --json" should resolve to JSON, not error. Only when
-// BOTH flags are user-set AND disagree do we surface a conflict
-// (IMP-038). Mirrors the kubectl / gh / aws CLI convention.
+// BOTH flags are user-set AND disagree do we surface a conflict.
+// Mirrors the kubectl / gh / aws CLI convention.
 func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "table", "json", "plain":

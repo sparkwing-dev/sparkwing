@@ -9,12 +9,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-036: the local Pipeline struct used as the wire shape for
-// `pipeline list -o json` and `pipeline describe -o json` must
-// surface blast_radius (union) and blast_radius_by_step (per-step
-// breakdown) when the underlying DescribePipeline declares them.
-// Previously these fields were dropped during the catalog copy,
-// leaving JSON consumers blind to which pipelines need
+// The local Pipeline struct used as the wire shape for `pipeline
+// list -o json` and `pipeline describe -o json` must surface
+// blast_radius (union) and blast_radius_by_step (per-step breakdown)
+// when the underlying DescribePipeline declares them. JSON consumers
+// rely on these fields to know which pipelines need
 // --allow-destructive / --allow-production / --allow-money.
 func TestPipelineJSON_SurfacesBlastRadius(t *testing.T) {
 	p := Pipeline{
@@ -44,10 +43,10 @@ func TestPipelineJSON_SurfacesBlastRadius(t *testing.T) {
 	}
 }
 
-// IMP-036: pipelines without blast-radius markers must omit both
-// fields entirely (omitempty contract). Catalog readers depend on
-// the absent-field signal to mean "no markers declared", not "old
-// CLI version".
+// Pipelines without blast-radius markers must omit both fields
+// entirely (omitempty contract). Catalog readers depend on the
+// absent-field signal to mean "no markers declared", not "old CLI
+// version".
 func TestPipelineJSON_OmitsEmptyBlastRadius(t *testing.T) {
 	p := Pipeline{
 		Name:  "hello",
@@ -63,11 +62,11 @@ func TestPipelineJSON_OmitsEmptyBlastRadius(t *testing.T) {
 	}
 }
 
-// IMP-036: the catalog copy in gatherPipelinesCatalog is the
-// load-bearing site -- it copies Short / Help / Args / Examples /
-// Venue from the cached DescribePipeline schema and was previously
-// dropping the two blast-radius fields. This test fakes the inner
-// copy to assert the union + per-step both round-trip.
+// The catalog copy in gatherPipelinesCatalog is the load-bearing
+// site -- it copies Short / Help / Args / Examples / Venue from the
+// cached DescribePipeline schema along with the two blast-radius
+// fields. This test fakes the inner copy to assert the union +
+// per-step both round-trip.
 func TestCatalogCopy_PreservesBlastRadius(t *testing.T) {
 	dp := sparkwing.DescribePipeline{
 		Name:        "cluster-down",
@@ -80,8 +79,8 @@ func TestCatalogCopy_PreservesBlastRadius(t *testing.T) {
 	}
 	a := Pipeline{Name: dp.Name}
 	// Mirror the copy block in gatherPipelinesCatalog. If a future
-	// edit drops one of these assignments, this test fails -- the
-	// IMP-036 regression we want to prevent.
+	// edit drops one of these assignments, this test fails -- that
+	// is the regression we want to prevent.
 	a.Short = dp.Short
 	a.Help = dp.Help
 	a.Args = dp.Args
@@ -102,12 +101,12 @@ func TestCatalogCopy_PreservesBlastRadius(t *testing.T) {
 	}
 }
 
-// IMP-040: `sparkwing pipeline describe --name X` returns a
-// "no pipeline named X" error when X isn't in the catalog.
-// Previously that error gave no hint; now it appends a "did you
-// mean Y?" suggestion when the typo is close enough, matching the
-// orchestrator-side "unknown pipeline" surface. This test pins the
-// suggestion-composition logic from action.go's runPipelineDescribe.
+// `sparkwing pipeline describe --name X` returns a "no pipeline
+// named X" error when X isn't in the catalog, appended with a "did
+// you mean Y?" suggestion when the typo is close enough, matching
+// the orchestrator-side "unknown pipeline" surface. This test pins
+// the suggestion-composition logic from action.go's
+// runPipelineDescribe.
 func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	// Mirror the catalog-search fragment in runPipelineDescribe.
 	catalog := []Pipeline{
@@ -139,9 +138,9 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	}
 }
 
-// IMP-040: far typos must NOT produce a misleading suggestion.
-// The describe verb falls through to the original message body
-// when no candidate is close enough.
+// Far typos must NOT produce a misleading suggestion. The describe
+// verb falls through to the original message body when no candidate
+// is close enough.
 func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
 	catalog := []Pipeline{
 		{Name: "cluster-up"},

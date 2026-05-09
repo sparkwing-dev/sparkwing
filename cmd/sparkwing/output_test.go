@@ -5,14 +5,14 @@ import (
 	"testing"
 )
 
-// TestResolveOutputFormat covers the four-quadrant matrix that IMP-038
-// pinned: --json on its own, --output=json on its own, both set in
-// agreement, and both set in disagreement. The pre-IMP-038 resolver
-// errored on quadrant (1) when a leaf registered "table" as the pflag
-// default ("--json and -o table disagree"), because the resolver
-// couldn't distinguish "user typed -o table" from "table was the
-// default and the user never touched -o." Tracking outputChanged
-// explicitly fixes that asymmetry.
+// TestResolveOutputFormat covers the four-quadrant matrix: --json on
+// its own, --output=json on its own, both set in agreement, and both
+// set in disagreement. An earlier resolver errored on quadrant (1)
+// when a leaf registered "table" as the pflag default ("--json and
+// -o table disagree"), because the resolver couldn't distinguish
+// "user typed -o table" from "table was the default and the user
+// never touched -o." Tracking outputChanged explicitly fixes that
+// asymmetry.
 func TestResolveOutputFormat(t *testing.T) {
 	tests := []struct {
 		name string
@@ -75,8 +75,8 @@ func TestResolveOutputFormat(t *testing.T) {
 			jsonAlias:     true,
 			wantErr:       "--json and -o plain disagree",
 		},
-		// Defaults: nothing set on either side -> "table". Mirrors
-		// pre-IMP-038 behavior; regression check.
+		// Defaults: nothing set on either side -> "table". Regression
+		// check.
 		{
 			name:          "nothing set (default empty)",
 			outFmt:        "",

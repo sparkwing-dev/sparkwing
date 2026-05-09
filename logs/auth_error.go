@@ -5,7 +5,7 @@ package logs
 // auth surfaces — pkg/controller/auth.go, internal/local/auth.go).
 //
 // Pinning a structured shape decouples client-side scope parsing
-// from the human-readable message phrasing. Pre-IMP-022 callers
+// from the human-readable message phrasing. Older callers
 // (older controllers, non-controller proxies) emit a plain-text
 // body; the client falls back to a string match on Message.
 //
@@ -25,6 +25,6 @@ type AuthErrorBody struct {
 	Principal string `json:"principal,omitempty"`
 
 	// Message is the human-readable string. Stays compatible with
-	// the pre-IMP-022 plain-text body so log readers don't degrade.
+	// the older plain-text body so log readers don't degrade.
 	Message string `json:"message"`
 }

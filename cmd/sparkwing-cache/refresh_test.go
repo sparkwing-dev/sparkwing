@@ -9,13 +9,13 @@ import (
 	"testing"
 )
 
-// TestHandleGitRefresh_RunsFetchOnCachedRepo simulates IMP-005's
-// dispatch-time eager refresh: a registered repo with a local bare
-// mirror exists, the operator just pushed a new commit, and the
-// dispatcher POSTs /git/refresh?repo=... before creating a trigger.
-// We verify the handler runs git fetch (by pointing origin at a
-// throwaway upstream and confirming refs propagate), returns 200,
-// and writes a JSON ack.
+// TestHandleGitRefresh_RunsFetchOnCachedRepo simulates dispatch-time
+// eager refresh: a registered repo with a local bare mirror exists,
+// the operator just pushed a new commit, and the dispatcher POSTs
+// /git/refresh?repo=... before creating a trigger. We verify the
+// handler runs git fetch (by pointing origin at a throwaway upstream
+// and confirming refs propagate), returns 200, and writes a JSON
+// ack.
 func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

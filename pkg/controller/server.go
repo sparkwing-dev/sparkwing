@@ -51,7 +51,7 @@ type Server struct {
 	secretsCipher *secrets.Cipher
 
 	// costPerRunnerHour is the USD rate fed into receipt cost
-	// computation (IMP-016). Zero = unconfigured -> compute_cents=0
+	// computation. Zero = unconfigured -> compute_cents=0
 	// in receipts. costRateSource is the human-readable provenance
 	// string the receipt echoes back (e.g. "controller config").
 	costPerRunnerHour float64
@@ -91,7 +91,7 @@ func (s *Server) WithQueueTimeout(d time.Duration) *Server {
 }
 
 // WithCostRate sets the USD-per-runner-hour rate the receipt builder
-// uses to compute compute_cents (IMP-016). source is echoed into the
+// uses to compute compute_cents. source is echoed into the
 // receipt's rate_source field for provenance. Zero rate = receipts
 // report compute_cents:0, matching unconfigured-profile semantics.
 func (s *Server) WithCostRate(rate float64, source string) *Server {
@@ -219,7 +219,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRun)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
-	// IMP-016: per-run audit + cost receipt; recomputed on demand.
+	// per-run audit + cost receipt; recomputed on demand.
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishRun)))
 	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdatePlanSnapshot)))

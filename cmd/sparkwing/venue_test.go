@@ -7,9 +7,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// IMP-011: enforce the dispatch gate from the wing CLI's perspective.
-// The unit-level coverage (Venue.String, EnforceVenue contract) lives
-// in pkg/sparkwing; here we pin the wire-format venue-string mapping
+// Enforce the dispatch gate from the wing CLI's perspective. The
+// unit-level coverage (Venue.String, EnforceVenue contract) lives in
+// pkg/sparkwing; here we pin the wire-format venue-string mapping
 // the CLI uses to read from the describe cache.
 
 func TestParseVenue(t *testing.T) {

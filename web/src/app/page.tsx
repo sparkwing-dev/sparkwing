@@ -345,7 +345,7 @@ function RunRow({
             : formatDuration(runDurationMs(run))}
         </span>
       </div>
-      {/* TODO(LOCAL-014): pipeline-tag chips removed with the legacy
+      {/* TODO: pipeline-tag chips removed with the legacy
           /api/runs list shape; restore once pipeline metadata is
           plumbed through the canonical /api/v1/runs response. */}
       {venue && (

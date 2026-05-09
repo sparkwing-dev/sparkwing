@@ -91,14 +91,14 @@ func TestGroup_RetryAndTimeoutApplyToEveryMember(t *testing.T) {
 	}
 }
 
-// TestGroupModifiersMirrorNode is the drift-protection guard required
-// by SDK-029. Every chainable *Node modifier (one returning *Node)
-// should have a *NodeGroup counterpart returning *NodeGroup, applied uniformly
-// to every member. OnFailure is intentionally exempt: recovery handlers
+// TestGroupModifiersMirrorNode is the drift-protection guard.
+// Every chainable *Node modifier (one returning *Node) should have a
+// *NodeGroup counterpart returning *NodeGroup, applied uniformly to
+// every member. OnFailure is intentionally exempt: recovery handlers
 // are per-node by intent.
 func TestGroupModifiersMirrorNode(t *testing.T) {
 	exempt := map[string]bool{
-		// Recovery handlers are per-node by intent (SDK-029).
+		// Recovery handlers are per-node by intent.
 		"OnFailure": true,
 		// Dynamic() hand-marks a Node for renderer purposes; Group
 		// dynamism is already a structural property (JobFanOutDynamic

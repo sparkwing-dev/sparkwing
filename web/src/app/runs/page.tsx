@@ -1958,13 +1958,13 @@ function dagNodeColors(
       border = "rgba(100,116,139,0.3)";
       break;
     case "skipped-concurrent":
-      // RUN-015 OnLimit:Skip. A darker slate than plain skipped so
+      // OnLimit:Skip. A darker slate than plain skipped so
       // operators can spot "slot was full" in the DAG.
       fill = "rgba(71,85,105,0.14)";
       border = "rgba(100,116,139,0.5)";
       break;
     case "superseded":
-      // RUN-015 CancelOthers eviction. Amber (distinct from
+      // CancelOthers eviction. Amber (distinct from
       // cancelled's slate) signals "replaced by newer run."
       fill = "rgba(245,158,11,0.14)";
       border = "rgba(251,191,36,0.7)";
