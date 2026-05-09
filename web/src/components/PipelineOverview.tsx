@@ -113,7 +113,11 @@ function sortRows(a: PipelineRow, b: PipelineRow): number {
   return a.key.localeCompare(b.key);
 }
 
-export default function PipelineOverview() {
+export default function PipelineOverview({
+  pivotTabs,
+}: {
+  pivotTabs?: React.ReactNode;
+} = {}) {
   const [registry, setRegistry] = useState<Record<string, PipelineMeta>>({});
   const [runs, setRuns] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -175,64 +179,88 @@ export default function PipelineOverview() {
   }, [rows, registry, runs]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
-      <div className="flex items-baseline justify-between mb-4">
-        <h1 className="text-xl font-bold">Pipelines</h1>
-        <span className="text-[10px] font-mono text-[var(--muted)]">
-          /api/v1/pipelines + /api/runs - refresh every {POLL_MS / 1000}s
-        </span>
-      </div>
-
-      <SummaryCards totals={totals} />
-
-      <div className="flex items-center gap-2 mb-3">
-        <input
-          type="search"
-          placeholder="filter by pipeline or tag"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm"
-        />
-        <button
-          onClick={() => refresh()}
-          className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1.5"
-          title="refresh"
-        >
-          refresh
-        </button>
-      </div>
-
-      {!loaded ? (
-        <Panel>Loading pipelines...</Panel>
-      ) : filtered.length === 0 ? (
-        <EmptyPanel
-          hasFilter={!!filter.trim()}
-          hasRegistry={totals.registered > 0}
-        />
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((row) => (
-            <PipelineCard
-              key={row.key}
-              row={row}
-              expanded={expanded === row.key}
-              onToggle={() =>
-                setExpanded((cur) => (cur === row.key ? null : row.key))
-              }
-              triggerOpen={triggerOpen === row.key}
-              onTrigger={() =>
-                setTriggerOpen((cur) => (cur === row.key ? null : row.key))
-              }
-              onTriggered={() => {
-                setTriggerOpen(null);
-                refresh();
-              }}
-            />
-          ))}
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {pivotTabs && (
+        <div className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0 px-2 py-1.5 gap-2">
+          {pivotTabs}
+          <input
+            type="search"
+            placeholder="filter by pipeline or tag"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1 text-xs"
+          />
+          <button
+            onClick={() => refresh()}
+            className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1"
+            title="refresh"
+          >
+            refresh
+          </button>
         </div>
       )}
 
-      <Footer />
+      <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
+        <div className="flex items-baseline justify-between mb-4">
+          <h1 className="text-xl font-bold">Pipelines</h1>
+          <span className="text-[10px] font-mono text-[var(--muted)]">
+            /api/v1/pipelines + /api/runs - refresh every {POLL_MS / 1000}s
+          </span>
+        </div>
+
+        <SummaryCards totals={totals} />
+
+        {!pivotTabs && (
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              type="search"
+              placeholder="filter by pipeline or tag"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm"
+            />
+            <button
+              onClick={() => refresh()}
+              className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1.5"
+              title="refresh"
+            >
+              refresh
+            </button>
+          </div>
+        )}
+
+        {!loaded ? (
+          <Panel>Loading pipelines...</Panel>
+        ) : filtered.length === 0 ? (
+          <EmptyPanel
+            hasFilter={!!filter.trim()}
+            hasRegistry={totals.registered > 0}
+          />
+        ) : (
+          <div className="space-y-2">
+            {filtered.map((row) => (
+              <PipelineCard
+                key={row.key}
+                row={row}
+                expanded={expanded === row.key}
+                onToggle={() =>
+                  setExpanded((cur) => (cur === row.key ? null : row.key))
+                }
+                triggerOpen={triggerOpen === row.key}
+                onTrigger={() =>
+                  setTriggerOpen((cur) => (cur === row.key ? null : row.key))
+                }
+                onTriggered={() => {
+                  setTriggerOpen(null);
+                  refresh();
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        <Footer />
+      </div>
     </div>
   );
 }
