@@ -756,8 +756,21 @@ function NodeRow({
 
 // --- run row variants ---
 
+function fmtClock(ts: string): string {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function FullRunRow({ r }: { r: Run }) {
-  const dur = runDurationMs(r);
+  const startedMs = new Date(r.started_at).getTime();
+  const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
+  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  // "How long since" anchors on finish for completed runs and on
+  // start for in-flight ones — that's the freshness signal.
+  const sinceTs = r.finished_at || r.started_at;
   return (
     <>
       <div className="flex items-center gap-3 text-xs min-w-0">
@@ -782,14 +795,25 @@ function FullRunRow({ r }: { r: Run }) {
             {r.trigger_source}
           </span>
         )}
-        <span className="ml-auto font-mono shrink-0 tabular-nums">
-          {fmtMs(dur)}
-        </span>
-        <span className="font-mono text-[var(--muted)] shrink-0 tabular-nums">
-          {new Date(r.started_at).toLocaleTimeString()}
-        </span>
-        <span className="text-[var(--muted)] shrink-0">
-          (<TimeAgo ts={r.started_at} />)
+        <span className="ml-auto flex items-center gap-3 shrink-0 font-mono tabular-nums">
+          <span className="text-[var(--muted)]">
+            started{" "}
+            <span className="text-[var(--foreground)]">
+              {fmtClock(r.started_at)}
+            </span>
+          </span>
+          <span className="text-[var(--muted)]">
+            finished{" "}
+            <span className="text-[var(--foreground)]">
+              {r.finished_at ? fmtClock(r.finished_at) : "—"}
+            </span>
+          </span>
+          <span className="text-[var(--muted)]">
+            {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
+          </span>
+          <span className="text-[var(--muted)]">
+            <TimeAgo ts={sinceTs} />
+          </span>
         </span>
       </div>
       {r.error && (
