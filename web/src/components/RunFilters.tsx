@@ -45,7 +45,15 @@ export function useUrlFilterState() {
 
   const setParams = useCallback(
     (updates: Record<string, string | string[]>) => {
-      const next = new URLSearchParams(searchParams.toString());
+      // Read from window.location so rapid back-to-back calls (e.g.
+      // a date-preset that writes 4 keys) compose — searchParams from
+      // useSearchParams reflects the last render and doesn't update
+      // between synchronous calls.
+      const base =
+        typeof window === "undefined"
+          ? searchParams.toString()
+          : window.location.search.replace(/^\?/, "");
+      const next = new URLSearchParams(base);
       for (const [key, val] of Object.entries(updates)) {
         const empty = val === "" || (Array.isArray(val) && val.length === 0);
         if (empty) next.delete(key);
