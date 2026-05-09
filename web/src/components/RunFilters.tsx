@@ -802,8 +802,8 @@ export function FullFilterBar({
         )}
       </div>
       <div className="flex-1 min-w-0 flex flex-wrap gap-1 items-start content-start">
-        {groups.flatMap((f) =>
-          f.values.map((v) => (
+        {groups.flatMap((f) => [
+          ...f.values.map((v) => (
             <span
               key={`${f.key}-inc-${v}`}
               className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
@@ -818,9 +818,7 @@ export function FullFilterBar({
               </button>
             </span>
           )),
-        )}
-        {groups.flatMap((f) =>
-          (f.excludeValues || []).map((v) => (
+          ...(f.excludeValues || []).map((v) => (
             <span
               key={`${f.key}-exc-${v}`}
               className={`inline-flex items-center gap-1 ${f.activeBg} text-red-300 px-2 py-0.5 rounded text-xs font-mono`}
@@ -838,7 +836,7 @@ export function FullFilterBar({
               </button>
             </span>
           )),
-        )}
+        ])}
         {dateGroup && (dateGroup.startedAfter || dateGroup.startedBefore) && (
           <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
             started{" "}
