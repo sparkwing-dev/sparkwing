@@ -702,9 +702,13 @@ export function FullFilterBar({
                       />
                     </div>
                     <div className="overflow-y-auto">
-                      {f.values.length > 0 && (
+                      {(f.values.length > 0 ||
+                        (f.excludeValues || []).length > 0) && (
                         <button
-                          onClick={() => f.set([])}
+                          onClick={() => {
+                            f.set([]);
+                            if (f.setExclude) f.setExclude([]);
+                          }}
                           className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] text-[var(--muted)] border-b border-[var(--border)]"
                         >
                           Clear all
