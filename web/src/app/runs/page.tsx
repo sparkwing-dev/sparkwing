@@ -764,6 +764,16 @@ function fmtClock(ts: string): string {
   });
 }
 
+function fmtAgo(ts: string): string {
+  if (!ts) return "—";
+  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (sec < 0) return "—";
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86_400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86_400)}d ago`;
+}
+
 function FullRunRow({ r }: { r: Run }) {
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
@@ -795,7 +805,7 @@ function FullRunRow({ r }: { r: Run }) {
             {r.trigger_source}
           </span>
         )}
-        <span className="ml-auto flex items-center gap-3 shrink-0 font-mono tabular-nums">
+        <span className="ml-auto flex items-center gap-4 shrink-0 font-mono tabular-nums">
           <span className="text-[var(--muted)]">
             started{" "}
             <span className="text-[var(--foreground)]">
@@ -809,11 +819,12 @@ function FullRunRow({ r }: { r: Run }) {
             </span>
           </span>
           <span className="text-[var(--muted)]">
-            {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
+            duration{" "}
+            <span className="text-[var(--foreground)]">
+              {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
+            </span>
           </span>
-          <span className="text-[var(--muted)]">
-            <TimeAgo ts={sinceTs} />
-          </span>
+          <span className="text-[var(--muted)]">{fmtAgo(sinceTs)}</span>
         </span>
       </div>
       {r.error && (
