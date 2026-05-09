@@ -17,6 +17,15 @@ import {
   runDurationMs,
 } from "@/lib/api";
 import TriggerForm from "@/components/TriggerForm";
+import {
+  FullFilterBar,
+  buildGroupsFromState,
+  clearAllFilters,
+  computeOptions,
+  runMatchesFilter,
+  useFilterDropdownState,
+  useUrlFilterState,
+} from "@/components/RunFilters";
 
 const POLL_MS = 5000;
 const RUNS_WINDOW = 200;
@@ -121,9 +130,10 @@ export default function PipelineOverview({
   const [registry, setRegistry] = useState<Record<string, PipelineMeta>>({});
   const [runs, setRuns] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [triggerOpen, setTriggerOpen] = useState<string | null>(null);
+  const filterState = useUrlFilterState();
+  const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
 
   const refresh = useCallback(async () => {
     const [reg, rs] = await Promise.all([
@@ -143,21 +153,35 @@ export default function PipelineOverview({
     return () => window.clearInterval(i);
   }, [refresh]);
 
-  const rows = useMemo(
-    () => buildRows(registry, runs).sort(sortRows),
-    [registry, runs],
+  // Filter the underlying runs first, then build rows from what's
+  // left so per-pipeline stats reflect only matching runs.
+  const filteredRuns = useMemo(
+    () => runs.filter((r) => runMatchesFilter(r, filterState, registry)),
+    [runs, filterState, registry],
   );
 
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return rows;
-    const q = filter.toLowerCase();
-    return rows.filter(
-      (row) =>
-        row.pipeline.toLowerCase().includes(q) ||
-        (row.repo?.toLowerCase().includes(q) ?? false) ||
-        (row.meta?.tags || []).some((t) => t.toLowerCase().includes(q)),
-    );
-  }, [rows, filter]);
+  const rows = useMemo(
+    () => buildRows(registry, filteredRuns).sort(sortRows),
+    [registry, filteredRuns],
+  );
+
+  const options = useMemo(
+    () => computeOptions(runs, registry),
+    [runs, registry],
+  );
+  const groups = buildGroupsFromState(filterState, options);
+  const dateGroup = {
+    startedAfter: filterState.startedAfter,
+    startedBefore: filterState.startedBefore,
+    finishedAfter: filterState.finishedAfter,
+    finishedBefore: filterState.finishedBefore,
+    setStartedAfter: filterState.setStartedAfter,
+    setStartedBefore: filterState.setStartedBefore,
+    setFinishedAfter: filterState.setFinishedAfter,
+    setFinishedBefore: filterState.setFinishedBefore,
+  };
+
+  const filtered = rows;
 
   const totals = useMemo(() => {
     let passed = 0;
@@ -180,25 +204,21 @@ export default function PipelineOverview({
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      {pivotTabs && (
-        <div className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0 px-2 py-1.5 gap-2">
-          {pivotTabs}
-          <input
-            type="search"
-            placeholder="filter by pipeline or tag"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1 text-xs"
-          />
-          <button
-            onClick={() => refresh()}
-            className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1"
-            title="refresh"
-          >
-            refresh
-          </button>
-        </div>
-      )}
+      <div
+        ref={filterRef}
+        className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
+      >
+        {pivotTabs}
+        <FullFilterBar
+          openDropdown={openDropdown}
+          setOpenDropdown={setOpenDropdown}
+          groups={groups}
+          dateGroup={dateGroup}
+          searchText={filterState.filterText}
+          setSearchText={filterState.setFilterText}
+          onClearAll={() => clearAllFilters(filterState)}
+        />
+      </div>
 
       <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
         <div className="flex items-baseline justify-between mb-4">
@@ -210,30 +230,11 @@ export default function PipelineOverview({
 
         <SummaryCards totals={totals} />
 
-        {!pivotTabs && (
-          <div className="flex items-center gap-2 mb-3">
-            <input
-              type="search"
-              placeholder="filter by pipeline or tag"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm"
-            />
-            <button
-              onClick={() => refresh()}
-              className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1.5"
-              title="refresh"
-            >
-              refresh
-            </button>
-          </div>
-        )}
-
         {!loaded ? (
           <Panel>Loading pipelines...</Panel>
         ) : filtered.length === 0 ? (
           <EmptyPanel
-            hasFilter={!!filter.trim()}
+            hasFilter={filterState.filterText.trim().length > 0}
             hasRegistry={totals.registered > 0}
           />
         ) : (

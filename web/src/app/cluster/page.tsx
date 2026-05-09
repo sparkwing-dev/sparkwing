@@ -1,21 +1,17 @@
 "use client";
 
-// Cluster status: services health, fleet (per-runner detail), and
-// recent failures rolled into one page.
+// Cluster status: services health + fleet (per-runner detail).
 //
 // Data sources:
 //   /api/v1/health/services - controller + logs (+ ExtraServices)
 //   /api/v1/agents          - runners seen in the last hour
-//   /api/runs?limit=50      - recent runs, filtered to failed here
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   type Agent,
-  type Run,
   type ServiceStatus,
   getAgents,
-  getRuns,
   getServiceHealth,
 } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
@@ -98,21 +94,15 @@ function sortAgents(a: Agent, b: Agent): number {
 export default function ClusterPage() {
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [failures, setFailures] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<Record<string, boolean>>(
     {},
   );
 
   const refresh = useCallback(async () => {
-    const [svc, ag, runs] = await Promise.all([
-      getServiceHealth(),
-      getAgents(),
-      getRuns({ limit: 50 }),
-    ]);
+    const [svc, ag] = await Promise.all([getServiceHealth(), getAgents()]);
     setServices(svc);
     setAgents(ag);
-    setFailures(runs.filter((r) => r.status === "failed").slice(0, 15));
     setLoaded(true);
   }, []);
 
@@ -162,7 +152,6 @@ export default function ClusterPage() {
         services={services.length}
         fleet={fleetTotals.total}
         busy={fleetTotals.busy}
-        recentFailures={failures.length}
       />
 
       <SectionHeader title="Services" hint="/api/v1/health/services" />
@@ -208,52 +197,6 @@ export default function ClusterPage() {
           })
         )}
       </div>
-
-      <SectionHeader title="Recent failures" hint="/api/runs status=failed" />
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden mb-6">
-        {!loaded ? (
-          <div className="text-xs text-[var(--muted)] p-4">Loading...</div>
-        ) : failures.length === 0 ? (
-          <div className="text-xs text-[var(--muted)] p-4">
-            No failed runs in the latest 50.
-          </div>
-        ) : (
-          <table className="w-full text-xs">
-            <thead className="bg-[var(--background)] text-[var(--muted)]">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium">Pipeline</th>
-                <th className="text-left px-3 py-2 font-medium">Run</th>
-                <th className="text-left px-3 py-2 font-medium">When</th>
-                <th className="text-left px-3 py-2 font-medium">Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {failures.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-t border-[var(--border)] hover:bg-[var(--surface-raised)]"
-                >
-                  <td className="px-3 py-1.5 font-mono">{r.pipeline}</td>
-                  <td className="px-3 py-1.5 font-mono">
-                    <Link
-                      href={`/runs?run=${r.id}`}
-                      className="text-[var(--accent)] hover:underline"
-                    >
-                      {r.id.slice(-8)}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-1.5 text-[var(--muted)]">
-                    {relativeTime(r.finished_at || r.started_at)}
-                  </td>
-                  <td className="px-3 py-1.5 text-red-400 truncate max-w-md">
-                    {r.error || "(no message)"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
     </div>
   );
 }
@@ -274,13 +217,11 @@ function OverallCard({
   services,
   fleet,
   busy,
-  recentFailures,
 }: {
   status: string;
   services: number;
   fleet: number;
   busy: number;
-  recentFailures: number;
 }) {
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-4">
@@ -300,15 +241,10 @@ function OverallCard({
                 : "Status unknown"}
         </span>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Stat label="Services probed" value={services} />
         <Stat label="Runners (1h)" value={fleet} />
         <Stat label="Busy runners" value={busy} />
-        <Stat
-          label="Recent failures"
-          value={recentFailures}
-          warn={recentFailures > 0}
-        />
       </div>
     </div>
   );
