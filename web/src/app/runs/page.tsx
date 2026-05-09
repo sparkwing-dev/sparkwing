@@ -542,11 +542,13 @@ function FilterableValue({
   facet,
   value,
   ctx,
+  tooltip,
   children,
 }: {
   facet: FilterFacet;
   value: string;
   ctx: FilterCtx;
+  tooltip?: string;
   children: React.ReactNode;
 }) {
   const incl = ctx.isIncluded(facet, value);
@@ -570,7 +572,7 @@ function FilterableValue({
               : ""
         }`}
       >
-        {children}
+        {tooltip ? <Tooltip content={tooltip}>{children}</Tooltip> : children}
       </span>
       {open && (
         <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
@@ -614,11 +616,13 @@ function FilterableTimestamp({
   iso,
   field,
   ctx,
+  tooltip,
   children,
 }: {
   iso: string;
   field: "started" | "finished";
   ctx: FilterCtx;
+  tooltip?: string;
   children: React.ReactNode;
 }) {
   const { open, setOpen, ref } = useClickPopup<HTMLSpanElement>();
@@ -632,7 +636,7 @@ function FilterableTimestamp({
       }}
     >
       <span className="cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4">
-        {children}
+        {tooltip ? <Tooltip content={tooltip}>{children}</Tooltip> : children}
       </span>
       {open && (
         <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[160px]">
@@ -912,22 +916,35 @@ function FullRunRow({
     <div
       className={`min-w-0 flex flex-wrap items-center gap-y-1 ${compact ? "gap-x-1.5 text-[11px]" : "gap-x-2 text-xs"}`}
     >
-      <FilterableValue facet="status" value={r.status} ctx={ctx}>
+      <FilterableValue
+        facet="status"
+        value={r.status}
+        ctx={ctx}
+        tooltip={`Status: ${r.status}`}
+      >
         {compact ? (
-          <Tooltip content={r.status}>
-            <span
-              className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
-            />
-          </Tooltip>
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
+          />
         ) : (
           <StatusLabel status={r.status} />
         )}
       </FilterableValue>
-      <FilterableValue facet="repo" value={repo} ctx={ctx}>
+      <FilterableValue
+        facet="repo"
+        value={repo}
+        ctx={ctx}
+        tooltip={`Repo: ${repo}`}
+      >
         <span className="text-cyan-400/70 shrink-0">{repo}</span>
       </FilterableValue>
       <span className="text-[var(--muted)] shrink-0">/</span>
-      <FilterableValue facet="pipeline" value={r.pipeline} ctx={ctx}>
+      <FilterableValue
+        facet="pipeline"
+        value={r.pipeline}
+        ctx={ctx}
+        tooltip={`Pipeline: ${r.pipeline}`}
+      >
         <span
           className={`font-medium text-violet-300 truncate ${compact ? "" : "text-sm"}`}
         >
@@ -935,46 +952,83 @@ function FullRunRow({
         </span>
       </FilterableValue>
       {r.git_branch && (
-        <FilterableValue facet="branch" value={r.git_branch} ctx={ctx}>
+        <FilterableValue
+          facet="branch"
+          value={r.git_branch}
+          ctx={ctx}
+          tooltip={`Branch: ${r.git_branch}`}
+        >
           <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
             ⎇ {r.git_branch}
           </span>
         </FilterableValue>
       )}
       {sha7 && (
-        <FilterableValue facet="commit" value={sha7} ctx={ctx}>
+        <FilterableValue
+          facet="commit"
+          value={sha7}
+          ctx={ctx}
+          tooltip={`Commit: ${sha7}`}
+        >
           <span className="font-mono text-[var(--muted)] shrink-0">{sha7}</span>
         </FilterableValue>
       )}
       {r.trigger_source && (
-        <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
-          {r.trigger_source}
-        </span>
+        <Tooltip content={`Trigger: ${r.trigger_source}`}>
+          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
+            {compact
+              ? r.trigger_source.charAt(0).toLowerCase()
+              : r.trigger_source}
+          </span>
+        </Tooltip>
       )}
       <span className="basis-full" />
       {compact ? (
         <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
-          <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
+          <FilterableTimestamp
+            iso={r.started_at}
+            field="started"
+            ctx={ctx}
+            tooltip="Started"
+          >
             <span className="text-[var(--foreground)]">
               {fmtClock(r.started_at)}
             </span>
           </FilterableTimestamp>
           <span>→</span>
           {r.finished_at ? (
-            <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
+            <FilterableTimestamp
+              iso={r.finished_at}
+              field="finished"
+              ctx={ctx}
+              tooltip="Finished"
+            >
               <span className="text-[var(--foreground)]">
                 {fmtClock(r.finished_at)}
               </span>
             </FilterableTimestamp>
           ) : (
-            <span className="text-[var(--foreground)]">—</span>
+            <Tooltip content="Finished">
+              <span className="text-[var(--foreground)]">—</span>
+            </Tooltip>
           )}
-          {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
-          <span>· {fmtAgo(sinceTs)}</span>
+          {elapsedMs > 0 && (
+            <Tooltip content="Duration">
+              <span>({fmtMs(elapsedMs)})</span>
+            </Tooltip>
+          )}
+          <Tooltip content="Time since">
+            <span>· {fmtAgo(sinceTs)}</span>
+          </Tooltip>
         </span>
       ) : (
         <>
-          <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
+          <FilterableTimestamp
+            iso={r.started_at}
+            field="started"
+            ctx={ctx}
+            tooltip="Started"
+          >
             <span className="text-[var(--muted)] font-mono tabular-nums">
               started{" "}
               <span className="text-[var(--foreground)]">
@@ -983,7 +1037,12 @@ function FullRunRow({
             </span>
           </FilterableTimestamp>
           {r.finished_at ? (
-            <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
+            <FilterableTimestamp
+              iso={r.finished_at}
+              field="finished"
+              ctx={ctx}
+              tooltip="Finished"
+            >
               <span className="text-[var(--muted)] font-mono tabular-nums">
                 finished{" "}
                 <span className="text-[var(--foreground)]">
@@ -992,19 +1051,25 @@ function FullRunRow({
               </span>
             </FilterableTimestamp>
           ) : (
-            <span className="text-[var(--muted)] font-mono tabular-nums">
-              finished <span className="text-[var(--foreground)]">—</span>
-            </span>
+            <Tooltip content="Finished">
+              <span className="text-[var(--muted)] font-mono tabular-nums">
+                finished <span className="text-[var(--foreground)]">—</span>
+              </span>
+            </Tooltip>
           )}
-          <span className="text-[var(--muted)] font-mono tabular-nums">
-            duration{" "}
-            <span className="text-[var(--foreground)]">
-              {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
+          <Tooltip content="Duration">
+            <span className="text-[var(--muted)] font-mono tabular-nums">
+              duration{" "}
+              <span className="text-[var(--foreground)]">
+                {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
+              </span>
             </span>
-          </span>
-          <span className="text-[var(--muted)] font-mono tabular-nums">
-            {fmtAgo(sinceTs)}
-          </span>
+          </Tooltip>
+          <Tooltip content="Time since">
+            <span className="text-[var(--muted)] font-mono tabular-nums">
+              {fmtAgo(sinceTs)}
+            </span>
+          </Tooltip>
         </>
       )}
     </div>
