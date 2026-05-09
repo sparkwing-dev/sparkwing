@@ -43,24 +43,37 @@ export function useUrlFilterState() {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Batch sync setParams calls in a microtask so multi-key updates
+  // (date-preset writing 4 keys, etc.) merge into one router.replace.
+  // Next 16's router.replace doesn't synchronously update
+  // window.location, so reading it back between rapid calls is stale.
+  const pendingRef = useRef<Record<string, string | string[]> | null>(null);
   const setParams = useCallback(
     (updates: Record<string, string | string[]>) => {
-      // Read from window.location so rapid back-to-back calls (e.g.
-      // a date-preset that writes 4 keys) compose — searchParams from
-      // useSearchParams reflects the last render and doesn't update
-      // between synchronous calls.
-      const base =
-        typeof window === "undefined"
-          ? searchParams.toString()
-          : window.location.search.replace(/^\?/, "");
-      const next = new URLSearchParams(base);
-      for (const [key, val] of Object.entries(updates)) {
-        const empty = val === "" || (Array.isArray(val) && val.length === 0);
-        if (empty) next.delete(key);
-        else next.set(key, Array.isArray(val) ? val.join(",") : val);
+      if (pendingRef.current === null) {
+        pendingRef.current = { ...updates };
+        queueMicrotask(() => {
+          const merged = pendingRef.current;
+          pendingRef.current = null;
+          if (!merged) return;
+          const base =
+            typeof window === "undefined"
+              ? searchParams.toString()
+              : window.location.search.replace(/^\?/, "");
+          const next = new URLSearchParams(base);
+          for (const [k, v] of Object.entries(merged)) {
+            const empty = v === "" || (Array.isArray(v) && v.length === 0);
+            if (empty) next.delete(k);
+            else next.set(k, Array.isArray(v) ? v.join(",") : v);
+          }
+          const qs = next.toString();
+          router.replace(qs ? `${pathname}?${qs}` : pathname, {
+            scroll: false,
+          });
+        });
+      } else {
+        Object.assign(pendingRef.current, updates);
       }
-      const qs = next.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [searchParams, router, pathname],
   );
