@@ -926,6 +926,66 @@ function DateInput({
   );
 }
 
+// Common time-range shortcuts. Each preset writes started-axis
+// boundaries and clears the finished-axis so the result is unambiguous.
+// "Today" sets startedAfter to local midnight today, leaves before
+// open; "Yesterday" pins to the full local day; "Last N" presets are
+// rolling windows ending now.
+const DATE_PRESETS: { label: string; apply: (g: DateGroup) => void }[] = [
+  {
+    label: "Today",
+    apply: (g) => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      g.setStartedAfter(msToUrlString(d.getTime()));
+      g.setStartedBefore("");
+      g.setFinishedAfter("");
+      g.setFinishedBefore("");
+    },
+  },
+  {
+    label: "Yesterday",
+    apply: (g) => {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - 1);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      g.setStartedAfter(msToUrlString(start.getTime()));
+      g.setStartedBefore(msToUrlString(end.getTime()));
+      g.setFinishedAfter("");
+      g.setFinishedBefore("");
+    },
+  },
+  {
+    label: "Last 24h",
+    apply: (g) => {
+      g.setStartedAfter(msToUrlString(Date.now() - 24 * 3600 * 1000));
+      g.setStartedBefore("");
+      g.setFinishedAfter("");
+      g.setFinishedBefore("");
+    },
+  },
+  {
+    label: "Last 7d",
+    apply: (g) => {
+      g.setStartedAfter(msToUrlString(Date.now() - 7 * 24 * 3600 * 1000));
+      g.setStartedBefore("");
+      g.setFinishedAfter("");
+      g.setFinishedBefore("");
+    },
+  },
+  {
+    label: "Last 30d",
+    apply: (g) => {
+      g.setStartedAfter(msToUrlString(Date.now() - 30 * 24 * 3600 * 1000));
+      g.setStartedBefore("");
+      g.setFinishedAfter("");
+      g.setFinishedBefore("");
+    },
+  },
+];
+
 function DateFilterButton({
   group,
   open,
@@ -954,6 +1014,17 @@ function DateFilterButton({
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[280px] p-3 space-y-3">
+          <div className="flex flex-wrap gap-1">
+            {DATE_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => p.apply(group)}
+                className="text-[10px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-orange-300 hover:border-orange-400 transition-colors"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <div className="text-[9px] text-[var(--muted)]">
             accepts partial dates, times, or both — e.g. <code>2026-05-09</code>
             , <code>14:30</code>, or <code>5/9 14:30</code>. Times shown in your
