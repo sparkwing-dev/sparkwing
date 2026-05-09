@@ -909,16 +909,28 @@ function FullRunRow({
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
 
   const meta = (
-    <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+    <div
+      className={`min-w-0 flex flex-wrap items-center gap-y-1 ${compact ? "gap-x-1.5 text-[11px]" : "gap-x-2 text-xs"}`}
+    >
       <FilterableValue facet="status" value={r.status} ctx={ctx}>
-        <StatusLabel status={r.status} />
+        {compact ? (
+          <Tooltip content={r.status}>
+            <span
+              className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
+            />
+          </Tooltip>
+        ) : (
+          <StatusLabel status={r.status} />
+        )}
       </FilterableValue>
       <FilterableValue facet="repo" value={repo} ctx={ctx}>
         <span className="text-cyan-400/70 shrink-0">{repo}</span>
       </FilterableValue>
       <span className="text-[var(--muted)] shrink-0">/</span>
       <FilterableValue facet="pipeline" value={r.pipeline} ctx={ctx}>
-        <span className="font-medium text-sm text-violet-300 truncate">
+        <span
+          className={`font-medium text-violet-300 truncate ${compact ? "" : "text-sm"}`}
+        >
           {r.pipeline}
         </span>
       </FilterableValue>
@@ -940,37 +952,61 @@ function FullRunRow({
         </span>
       )}
       <span className="basis-full" />
-      <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
-        <span className="text-[var(--muted)] font-mono tabular-nums">
-          started{" "}
-          <span className="text-[var(--foreground)]">
-            {fmtClock(r.started_at)}
-          </span>
-        </span>
-      </FilterableTimestamp>
-      {r.finished_at ? (
-        <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
-          <span className="text-[var(--muted)] font-mono tabular-nums">
-            finished{" "}
+      {compact ? (
+        <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
+          <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
             <span className="text-[var(--foreground)]">
-              {fmtClock(r.finished_at)}
+              {fmtClock(r.started_at)}
+            </span>
+          </FilterableTimestamp>
+          <span>→</span>
+          {r.finished_at ? (
+            <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
+              <span className="text-[var(--foreground)]">
+                {fmtClock(r.finished_at)}
+              </span>
+            </FilterableTimestamp>
+          ) : (
+            <span className="text-[var(--foreground)]">—</span>
+          )}
+          {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
+          <span>· {fmtAgo(sinceTs)}</span>
+        </span>
+      ) : (
+        <>
+          <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
+            <span className="text-[var(--muted)] font-mono tabular-nums">
+              started{" "}
+              <span className="text-[var(--foreground)]">
+                {fmtClock(r.started_at)}
+              </span>
+            </span>
+          </FilterableTimestamp>
+          {r.finished_at ? (
+            <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
+              <span className="text-[var(--muted)] font-mono tabular-nums">
+                finished{" "}
+                <span className="text-[var(--foreground)]">
+                  {fmtClock(r.finished_at)}
+                </span>
+              </span>
+            </FilterableTimestamp>
+          ) : (
+            <span className="text-[var(--muted)] font-mono tabular-nums">
+              finished <span className="text-[var(--foreground)]">—</span>
+            </span>
+          )}
+          <span className="text-[var(--muted)] font-mono tabular-nums">
+            duration{" "}
+            <span className="text-[var(--foreground)]">
+              {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
             </span>
           </span>
-        </FilterableTimestamp>
-      ) : (
-        <span className="text-[var(--muted)] font-mono tabular-nums">
-          finished <span className="text-[var(--foreground)]">—</span>
-        </span>
+          <span className="text-[var(--muted)] font-mono tabular-nums">
+            {fmtAgo(sinceTs)}
+          </span>
+        </>
       )}
-      <span className="text-[var(--muted)] font-mono tabular-nums">
-        duration{" "}
-        <span className="text-[var(--foreground)]">
-          {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
-        </span>
-      </span>
-      <span className="text-[var(--muted)] font-mono tabular-nums">
-        {fmtAgo(sinceTs)}
-      </span>
     </div>
   );
 
