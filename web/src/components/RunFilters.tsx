@@ -171,17 +171,41 @@ export function parseLooseDate(s: string): number | null {
     const d = new Date(t.replace(" ", "T"));
     return isNaN(d.getTime()) ? null : d.getTime();
   }
+  // Slash form: M/D, M/D/YYYY, M/D HH:MM, M/D/YYYY HH:MM. Year-less
+  // forms default to current year (local). 2-digit years map into
+  // 2000-2099 since older years aren't a useful date filter target
+  // for a CI dashboard.
+  const slash = t.match(
+    /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (slash) {
+    const m = parseInt(slash[1], 10);
+    const d = parseInt(slash[2], 10);
+    let y = slash[3] ? parseInt(slash[3], 10) : new Date().getFullYear();
+    if (y < 100) y += 2000;
+    const h = slash[4] ? parseInt(slash[4], 10) : 0;
+    const mm = slash[5] ? parseInt(slash[5], 10) : 0;
+    const ss = slash[6] ? parseInt(slash[6], 10) : 0;
+    const dt = new Date(y, m - 1, d, h, mm, ss);
+    return isNaN(dt.getTime()) ? null : dt.getTime();
+  }
   const d = new Date(t);
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
 export function fmtDateChip(local: string): string {
   if (!local) return "";
-  const d = new Date(local);
-  if (isNaN(d.getTime())) return local;
+  // Parse via parseLooseDate so the chip matches what the filter
+  // actually uses — otherwise "5/11" displays a misleading year-2001
+  // date here but the filter sees a different (also wrong) year.
+  const ms = parseLooseDate(local);
+  if (ms === null) return local;
+  const d = new Date(ms);
+  const showYear = d.getFullYear() !== new Date().getFullYear();
   return d.toLocaleString([], {
     month: "short",
     day: "numeric",
+    year: showYear ? "numeric" : undefined,
     hour: "numeric",
     minute: "2-digit",
   });
