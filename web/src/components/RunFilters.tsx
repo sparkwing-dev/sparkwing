@@ -822,7 +822,7 @@ export function FullFilterBar({
           (f.excludeValues || []).map((v) => (
             <span
               key={`${f.key}-exc-${v}`}
-              className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono line-through`}
+              className={`inline-flex items-center gap-1 ${f.activeBg} text-red-300 px-2 py-0.5 rounded text-xs font-mono`}
             >
               {f.key === "branch" ? `⎇ ${v}` : v}
               <button
@@ -830,7 +830,7 @@ export function FullFilterBar({
                   if (!f.setExclude) return;
                   f.setExclude((f.excludeValues || []).filter((x) => x !== v));
                 }}
-                className="text-red-400 hover:text-red-300 no-underline font-bold"
+                className="hover:text-white"
               >
                 ×
               </button>
@@ -880,10 +880,8 @@ export function FullFilterBar({
           return (
             <span
               key={`search-${i}-${t.text}`}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
-                inc
-                  ? "bg-slate-500/15 text-slate-200"
-                  : "bg-red-500/15 text-red-300"
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-slate-500/15 ${
+                inc ? "text-slate-200" : "text-red-300"
               }`}
             >
               <button
