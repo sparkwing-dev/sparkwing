@@ -782,8 +782,8 @@ function FullRunRow({ r }: { r: Run }) {
   // start for in-flight ones — that's the freshness signal.
   const sinceTs = r.finished_at || r.started_at;
   return (
-    <>
-      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs min-w-0">
+    <div className="flex items-start gap-6">
+      <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <StatusLabel status={r.status} />
         <span className="text-cyan-400/70 shrink-0">{repoLabel(r)}</span>
         <span className="text-[var(--muted)] shrink-0">/</span>
@@ -805,37 +805,38 @@ function FullRunRow({ r }: { r: Run }) {
             {r.trigger_source}
           </span>
         )}
-        <span className="ml-auto flex items-center gap-4 shrink-0 font-mono tabular-nums">
-          <span className="text-[var(--muted)]">
-            started{" "}
-            <span className="text-[var(--foreground)]">
-              {fmtClock(r.started_at)}
-            </span>
+        <span className="basis-full" />
+        <span className="text-[var(--muted)] font-mono tabular-nums">
+          started{" "}
+          <span className="text-[var(--foreground)]">
+            {fmtClock(r.started_at)}
           </span>
-          <span className="text-[var(--muted)]">
-            finished{" "}
-            <span className="text-[var(--foreground)]">
-              {r.finished_at ? fmtClock(r.finished_at) : "—"}
-            </span>
+        </span>
+        <span className="text-[var(--muted)] font-mono tabular-nums">
+          finished{" "}
+          <span className="text-[var(--foreground)]">
+            {r.finished_at ? fmtClock(r.finished_at) : "—"}
           </span>
-          <span className="text-[var(--muted)]">
-            duration{" "}
-            <span className="text-[var(--foreground)]">
-              {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
-            </span>
+        </span>
+        <span className="text-[var(--muted)] font-mono tabular-nums">
+          duration{" "}
+          <span className="text-[var(--foreground)]">
+            {elapsedMs > 0 ? fmtMs(elapsedMs) : "—"}
           </span>
-          <span className="text-[var(--muted)]">{fmtAgo(sinceTs)}</span>
+        </span>
+        <span className="text-[var(--muted)] font-mono tabular-nums">
+          {fmtAgo(sinceTs)}
         </span>
       </div>
       {r.error && (
         <div
-          className="mt-1 text-[11px] text-red-400 font-mono truncate"
+          className="shrink-0 max-w-[40%] text-[11px] text-red-400 font-mono truncate self-center"
           title={r.error}
         >
           error: {r.error}
         </div>
       )}
-    </>
+    </div>
   );
 }
 
