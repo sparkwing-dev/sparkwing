@@ -15,8 +15,19 @@
 // them.
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import PipelineOverview from "@/components/PipelineOverview";
+import {
+  FullFilterBar,
+  activeFilterCount,
+  buildGroupsFromState,
+  clearAllFilters,
+  computeOptions,
+  repoLabel,
+  runMatchesFilter,
+  useFilterDropdownState,
+  useUrlFilterState,
+} from "@/components/RunFilters";
 import {
   type Node as RunNode,
   type PipelineMeta,
@@ -66,12 +77,6 @@ function fmtMs(ms: number): string {
   const m = Math.floor(ms / 60_000);
   const s = Math.round((ms - m * 60_000) / 1000);
   return `${m}m ${s}s`;
-}
-
-function repoLabel(r: Run): string {
-  const raw = r.repo || r.github_repo || "unknown";
-  const slash = raw.lastIndexOf("/");
-  return slash >= 0 ? raw.slice(slash + 1) : raw;
 }
 
 function statusDot(status: string): string {
@@ -196,148 +201,6 @@ function PivotTab({
   );
 }
 
-// useUrlFilterState makes every filter live in the URL so a filtered
-// view is shareable, survives a reload, and persists across the
-// Activity ↔ By pipeline pivot. Empty values are omitted from the URL
-// to keep it tidy. Multi-select facets are encoded as comma-joined
-// strings (status=running,failed); excludes get an `n` prefix
-// (nstatus=cancelled).
-//
-// Session restore: filters are mirrored into sessionStorage on every
-// URL change. When /runs loads with no filter params (e.g. from a
-// fresh nav after visiting another page) and there's a saved value,
-// the URL is re-hydrated. URL stays the source of truth — shared
-// links with filter params bypass the restore.
-const FILTER_URL_KEYS = [
-  "status",
-  "nstatus",
-  "repo",
-  "nrepo",
-  "pipeline",
-  "npipeline",
-  "branch",
-  "nbranch",
-  "commit",
-  "ncommit",
-  "tag",
-  "ntag",
-  "startedAfter",
-  "startedBefore",
-  "finishedAfter",
-  "finishedBefore",
-  "q",
-];
-const FILTER_STORAGE_KEY = "sparkwing.runFilters";
-
-function useUrlFilterState() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
-
-  const setParams = useCallback(
-    (updates: Record<string, string | string[]>) => {
-      const next = new URLSearchParams(searchParams.toString());
-      for (const [key, val] of Object.entries(updates)) {
-        const empty = val === "" || (Array.isArray(val) && val.length === 0);
-        if (empty) next.delete(key);
-        else next.set(key, Array.isArray(val) ? val.join(",") : val);
-      }
-      const qs = next.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    },
-    [searchParams, router, pathname],
-  );
-
-  // Restore once on mount when URL has no filter params.
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    const hasAny = FILTER_URL_KEYS.some((k) => searchParams.get(k));
-    if (hasAny) return;
-    const saved = sessionStorage.getItem(FILTER_STORAGE_KEY);
-    if (!saved) return;
-    const savedParams = new URLSearchParams(saved);
-    const next = new URLSearchParams(searchParams.toString());
-    let added = false;
-    for (const k of FILTER_URL_KEYS) {
-      const v = savedParams.get(k);
-      if (v) {
-        next.set(k, v);
-        added = true;
-      }
-    }
-    if (!added) return;
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Mirror current filter URL params into sessionStorage. Cleared
-  // automatically when no filters are set so a "clear all" leaves no
-  // ghost state.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const filterOnly = new URLSearchParams();
-    for (const k of FILTER_URL_KEYS) {
-      const v = searchParams.get(k);
-      if (v) filterOnly.set(k, v);
-    }
-    const qs = filterOnly.toString();
-    if (qs) sessionStorage.setItem(FILTER_STORAGE_KEY, qs);
-    else sessionStorage.removeItem(FILTER_STORAGE_KEY);
-  }, [searchParams]);
-
-  const getList = (key: string): string[] => {
-    const v = searchParams.get(key);
-    return v ? v.split(",").filter(Boolean) : [];
-  };
-  const getStr = (key: string): string => searchParams.get(key) || "";
-
-  return {
-    filterStatus: getList("status"),
-    setFilterStatus: (v: string[]) => setParams({ status: v }),
-    excludeStatus: getList("nstatus"),
-    setExcludeStatus: (v: string[]) => setParams({ nstatus: v }),
-
-    filterRepo: getList("repo"),
-    setFilterRepo: (v: string[]) => setParams({ repo: v }),
-    excludeRepo: getList("nrepo"),
-    setExcludeRepo: (v: string[]) => setParams({ nrepo: v }),
-
-    filterPipeline: getList("pipeline"),
-    setFilterPipeline: (v: string[]) => setParams({ pipeline: v }),
-    excludePipeline: getList("npipeline"),
-    setExcludePipeline: (v: string[]) => setParams({ npipeline: v }),
-
-    filterBranch: getList("branch"),
-    setFilterBranch: (v: string[]) => setParams({ branch: v }),
-    excludeBranch: getList("nbranch"),
-    setExcludeBranch: (v: string[]) => setParams({ nbranch: v }),
-
-    filterCommit: getList("commit"),
-    setFilterCommit: (v: string[]) => setParams({ commit: v }),
-    excludeCommit: getList("ncommit"),
-    setExcludeCommit: (v: string[]) => setParams({ ncommit: v }),
-
-    filterTag: getList("tag"),
-    setFilterTag: (v: string[]) => setParams({ tag: v }),
-    excludeTag: getList("ntag"),
-    setExcludeTag: (v: string[]) => setParams({ ntag: v }),
-
-    startedAfter: getStr("startedAfter"),
-    setStartedAfter: (v: string) => setParams({ startedAfter: v }),
-    startedBefore: getStr("startedBefore"),
-    setStartedBefore: (v: string) => setParams({ startedBefore: v }),
-    finishedAfter: getStr("finishedAfter"),
-    setFinishedAfter: (v: string) => setParams({ finishedAfter: v }),
-    finishedBefore: getStr("finishedBefore"),
-    setFinishedBefore: (v: string) => setParams({ finishedBefore: v }),
-
-    filterText: getStr("q"),
-    setFilterText: (v: string) => setParams({ q: v }),
-  };
-}
-
 function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -350,73 +213,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     searchParams.get("run"),
   );
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const {
-    filterStatus,
-    setFilterStatus,
-    excludeStatus,
-    setExcludeStatus,
-    filterRepo,
-    setFilterRepo,
-    excludeRepo,
-    setExcludeRepo,
-    filterPipeline,
-    setFilterPipeline,
-    excludePipeline,
-    setExcludePipeline,
-    filterBranch,
-    setFilterBranch,
-    excludeBranch,
-    setExcludeBranch,
-    filterCommit,
-    setFilterCommit,
-    excludeCommit,
-    setExcludeCommit,
-    filterTag,
-    setFilterTag,
-    excludeTag,
-    setExcludeTag,
-    startedAfter,
-    setStartedAfter,
-    startedBefore,
-    setStartedBefore,
-    finishedAfter,
-    setFinishedAfter,
-    finishedBefore,
-    setFinishedBefore,
-    filterText,
-    setFilterText,
-  } = useUrlFilterState();
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const filterState = useUrlFilterState();
+  const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
-  const filterRef = useRef<HTMLDivElement>(null);
-
-  const toggleFilter = (
-    arr: string[],
-    set: (v: string[]) => void,
-    val: string,
-  ) => {
-    set(arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]);
-  };
-
-  useEffect(() => {
-    if (!openDropdown) return;
-    const handler = (e: MouseEvent) => {
-      if (!filterRef.current || filterRef.current.contains(e.target as Node))
-        return;
-      e.stopPropagation();
-      e.preventDefault();
-      setOpenDropdown(null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpenDropdown(null);
-    };
-    document.addEventListener("click", handler, true);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("click", handler, true);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [openDropdown]);
 
   const refresh = useCallback(async () => {
     const [runList, meta] = await Promise.all([
@@ -495,118 +294,22 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     },
   });
 
-  const repos = [...new Set(runs.map(repoLabel))].sort();
-  const pipelines = [...new Set(runs.map((r) => r.pipeline))].sort();
-  const branches = [
-    ...new Set(runs.map((r) => r.git_branch || "").filter(Boolean)),
-  ].sort();
-  const commits = [
-    ...new Set(
-      runs.map((r) => (r.git_sha ? r.git_sha.slice(0, 7) : "")).filter(Boolean),
-    ),
-  ].sort();
-  const allTags = [
-    ...new Set(Object.values(pipelineMeta).flatMap((m) => m.tags || [])),
-  ].sort();
-  const statuses = ["success", "failed", "running", "cancelled"];
-
-  const topLevel = runs.filter((r) => {
-    const repo = repoLabel(r);
-    const branch = r.git_branch || "";
-    const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
-    const tags = pipelineMeta[r.pipeline]?.tags || [];
-    if (excludeStatus.includes(r.status)) return false;
-    if (excludeRepo.includes(repo)) return false;
-    if (excludePipeline.includes(r.pipeline)) return false;
-    if (excludeBranch.includes(branch)) return false;
-    if (sha7 && excludeCommit.includes(sha7)) return false;
-    if (excludeTag.some((t) => tags.includes(t))) return false;
-    if (filterStatus.length && !filterStatus.includes(r.status)) return false;
-    if (filterRepo.length && !filterRepo.includes(repo)) return false;
-    if (filterPipeline.length && !filterPipeline.includes(r.pipeline))
-      return false;
-    if (filterBranch.length && !filterBranch.includes(branch)) return false;
-    if (filterCommit.length && !filterCommit.includes(sha7)) return false;
-    if (filterTag.length && !filterTag.some((t) => tags.includes(t)))
-      return false;
-    {
-      const startedTs = new Date(r.started_at).getTime();
-      const sa = parseLooseDate(startedAfter);
-      const sb = parseLooseDate(startedBefore);
-      if (sa !== null && startedTs < sa) return false;
-      if (sb !== null && startedTs > sb) return false;
-    }
-    {
-      const fa = parseLooseDate(finishedAfter);
-      const fb = parseLooseDate(finishedBefore);
-      if (fa !== null || fb !== null) {
-        if (!r.finished_at) return false;
-        const finishedTs = new Date(r.finished_at).getTime();
-        if (fa !== null && finishedTs < fa) return false;
-        if (fb !== null && finishedTs > fb) return false;
-      }
-    }
-    if (filterText.trim()) {
-      const startedMs = new Date(r.started_at).getTime();
-      const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-      const elapsedMs = (finishedMs || Date.now()) - startedMs;
-      const sinceTs = r.finished_at || r.started_at;
-      const hay = [
-        r.id,
-        r.pipeline,
-        repoLabel(r),
-        r.git_branch,
-        r.git_sha,
-        r.error,
-        r.trigger_source,
-        r.status,
-        `started ${fmtClock(r.started_at)}`,
-        r.finished_at ? `finished ${fmtClock(r.finished_at)}` : "",
-        elapsedMs > 0 ? `duration ${fmtMs(elapsedMs)}` : "",
-        fmtAgo(sinceTs),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      const terms = filterText.trim().split(/\s+/).filter(Boolean);
-      const incl: string[] = [];
-      const excl: string[] = [];
-      // `pendingNot` lets a standalone "-" exclude the next term so
-      // both `-foo` and `- foo` mean "exclude foo".
-      let pendingNot = false;
-      for (const t of terms) {
-        if (t === "-") {
-          pendingNot = true;
-          continue;
-        }
-        const attached = t.startsWith("-") && t.length > 1;
-        const term = (attached ? t.slice(1) : t).toLowerCase();
-        if (pendingNot || attached) excl.push(term);
-        else incl.push(term);
-        pendingNot = false;
-      }
-      if (incl.some((t) => !hay.includes(t))) return false;
-      if (excl.some((t) => hay.includes(t))) return false;
-    }
-    return true;
-  });
-
-  const activeFilterCount =
-    filterStatus.length +
-    filterRepo.length +
-    filterPipeline.length +
-    filterBranch.length +
-    filterCommit.length +
-    filterTag.length +
-    excludeStatus.length +
-    excludeRepo.length +
-    excludePipeline.length +
-    excludeBranch.length +
-    excludeCommit.length +
-    excludeTag.length +
-    (startedAfter || startedBefore ? 1 : 0) +
-    (finishedAfter || finishedBefore ? 1 : 0) +
-    (filterText.trim() ? 1 : 0);
+  const options = computeOptions(runs, pipelineMeta);
+  const groups = buildGroupsFromState(filterState, options);
+  const dateGroup = {
+    startedAfter: filterState.startedAfter,
+    startedBefore: filterState.startedBefore,
+    finishedAfter: filterState.finishedAfter,
+    finishedBefore: filterState.finishedBefore,
+    setStartedAfter: filterState.setStartedAfter,
+    setStartedBefore: filterState.setStartedBefore,
+    setFinishedAfter: filterState.setFinishedAfter,
+    setFinishedBefore: filterState.setFinishedBefore,
+  };
+  const topLevel = runs.filter((r) =>
+    runMatchesFilter(r, filterState, pipelineMeta),
+  );
+  const activeCount = activeFilterCount(filterState);
 
   const run = detail?.run || null;
   const nodes = detail?.nodes || [];
@@ -616,17 +319,42 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     FilterFacet,
     [string[], (v: string[]) => void, string[], (v: string[]) => void]
   > = {
-    status: [filterStatus, setFilterStatus, excludeStatus, setExcludeStatus],
-    repo: [filterRepo, setFilterRepo, excludeRepo, setExcludeRepo],
-    pipeline: [
-      filterPipeline,
-      setFilterPipeline,
-      excludePipeline,
-      setExcludePipeline,
+    status: [
+      filterState.filterStatus,
+      filterState.setFilterStatus,
+      filterState.excludeStatus,
+      filterState.setExcludeStatus,
     ],
-    branch: [filterBranch, setFilterBranch, excludeBranch, setExcludeBranch],
-    commit: [filterCommit, setFilterCommit, excludeCommit, setExcludeCommit],
-    tag: [filterTag, setFilterTag, excludeTag, setExcludeTag],
+    repo: [
+      filterState.filterRepo,
+      filterState.setFilterRepo,
+      filterState.excludeRepo,
+      filterState.setExcludeRepo,
+    ],
+    pipeline: [
+      filterState.filterPipeline,
+      filterState.setFilterPipeline,
+      filterState.excludePipeline,
+      filterState.setExcludePipeline,
+    ],
+    branch: [
+      filterState.filterBranch,
+      filterState.setFilterBranch,
+      filterState.excludeBranch,
+      filterState.setExcludeBranch,
+    ],
+    commit: [
+      filterState.filterCommit,
+      filterState.setFilterCommit,
+      filterState.excludeCommit,
+      filterState.setExcludeCommit,
+    ],
+    tag: [
+      filterState.filterTag,
+      filterState.setFilterTag,
+      filterState.excludeTag,
+      filterState.setExcludeTag,
+    ],
   };
 
   const isoToLocal = (iso: string) => {
@@ -658,12 +386,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     },
     setDateBound: (field, bound, iso) => {
       const local = isoToLocal(iso);
-      if (field === "started" && bound === "before") setStartedBefore(local);
-      else if (field === "started" && bound === "after") setStartedAfter(local);
+      if (field === "started" && bound === "before")
+        filterState.setStartedBefore(local);
+      else if (field === "started" && bound === "after")
+        filterState.setStartedAfter(local);
       else if (field === "finished" && bound === "before")
-        setFinishedBefore(local);
+        filterState.setFinishedBefore(local);
       else if (field === "finished" && bound === "after")
-        setFinishedAfter(local);
+        filterState.setFinishedAfter(local);
     },
   };
 
@@ -687,113 +417,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         <FullFilterBar
           openDropdown={openDropdown}
           setOpenDropdown={setOpenDropdown}
-          activeFilterCount={activeFilterCount}
-          clearAll={() => {
-            setFilterRepo([]);
-            setFilterPipeline([]);
-            setFilterBranch([]);
-            setFilterStatus([]);
-            setFilterTag([]);
-            setFilterCommit([]);
-            setStartedAfter("");
-            setStartedBefore("");
-            setFinishedAfter("");
-            setFinishedBefore("");
-            setFilterText("");
-            setExcludeStatus([]);
-            setExcludeRepo([]);
-            setExcludePipeline([]);
-            setExcludeBranch([]);
-            setExcludeCommit([]);
-            setExcludeTag([]);
-          }}
-          dateGroup={{
-            startedAfter,
-            startedBefore,
-            finishedAfter,
-            finishedBefore,
-            setStartedAfter,
-            setStartedBefore,
-            setFinishedAfter,
-            setFinishedBefore,
-          }}
-          searchText={filterText}
-          setSearchText={setFilterText}
-          groups={[
-            {
-              key: "status",
-              label: "STATUS",
-              values: filterStatus,
-              set: setFilterStatus,
-              excludeValues: excludeStatus,
-              setExclude: setExcludeStatus,
-              options: statuses,
-              color: "text-emerald-400",
-              activeBg: "bg-emerald-500/15",
-              activeText: "text-emerald-300",
-            },
-            {
-              key: "repo",
-              label: "REPO",
-              values: filterRepo,
-              set: setFilterRepo,
-              excludeValues: excludeRepo,
-              setExclude: setExcludeRepo,
-              options: repos,
-              color: "text-cyan-400",
-              activeBg: "bg-cyan-500/15",
-              activeText: "text-cyan-300",
-            },
-            {
-              key: "pipeline",
-              label: "PIPELINE",
-              values: filterPipeline,
-              set: setFilterPipeline,
-              excludeValues: excludePipeline,
-              setExclude: setExcludePipeline,
-              options: pipelines,
-              color: "text-violet-400",
-              activeBg: "bg-violet-500/15",
-              activeText: "text-violet-300",
-            },
-            {
-              key: "branch",
-              label: "BRANCH",
-              values: filterBranch,
-              set: setFilterBranch,
-              excludeValues: excludeBranch,
-              setExclude: setExcludeBranch,
-              options: branches,
-              color: "text-amber-400",
-              activeBg: "bg-amber-500/15",
-              activeText: "text-amber-300",
-            },
-            {
-              key: "commit",
-              label: "COMMIT",
-              values: filterCommit,
-              set: setFilterCommit,
-              excludeValues: excludeCommit,
-              setExclude: setExcludeCommit,
-              options: commits,
-              color: "text-sky-400",
-              activeBg: "bg-sky-500/15",
-              activeText: "text-sky-300",
-            },
-            {
-              key: "tag",
-              label: "TAG",
-              values: filterTag,
-              set: setFilterTag,
-              excludeValues: excludeTag,
-              setExclude: setExcludeTag,
-              options: allTags,
-              color: "text-pink-400",
-              activeBg: "bg-pink-500/15",
-              activeText: "text-pink-300",
-            },
-          ]}
-          toggleFilter={toggleFilter}
+          groups={groups}
+          dateGroup={dateGroup}
+          searchText={filterState.filterText}
+          setSearchText={filterState.setFilterText}
+          onClearAll={() => clearAllFilters(filterState)}
         />
       </div>
 
@@ -823,7 +451,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             })}
             {topLevel.length === 0 && (
               <div className="p-8 text-center text-[var(--muted)] text-sm">
-                {activeFilterCount > 0 ? "No matching runs" : "No runs yet"}
+                {activeCount > 0 ? "No matching runs" : "No runs yet"}
               </div>
             )}
           </div>
@@ -1394,596 +1022,6 @@ function CompactRunRow({ r }: { r: Run }) {
       <span className="ml-auto shrink-0 text-[10px] font-mono text-[var(--muted)]">
         <TimeAgo ts={r.started_at} />
       </span>
-    </div>
-  );
-}
-
-// --- filter bars ---
-
-interface FilterGroup {
-  key: string;
-  label: string;
-  values: string[];
-  set: (v: string[]) => void;
-  options: string[];
-  color?: string;
-  activeBg: string;
-  activeText: string;
-  excludeValues?: string[];
-  setExclude?: (v: string[]) => void;
-}
-
-interface DateGroup {
-  startedAfter: string;
-  startedBefore: string;
-  finishedAfter: string;
-  finishedBefore: string;
-  setStartedAfter: (v: string) => void;
-  setStartedBefore: (v: string) => void;
-  setFinishedAfter: (v: string) => void;
-  setFinishedBefore: (v: string) => void;
-}
-
-// parseLooseDate accepts (all interpreted in local time):
-//   YYYY-MM-DD            → midnight that day
-//   HH:MM (or H:MM)       → that time TODAY
-//   YYYY-MM-DD HH:MM      → exact date+time
-//   YYYY-MM-DDTHH:MM      → exact date+time (datetime-local format)
-//   anything new Date(s) can parse, as a fallback
-function parseLooseDate(s: string): number | null {
-  const t = s.trim();
-  if (!t) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
-    const d = new Date(t + "T00:00");
-    return isNaN(d.getTime()) ? null : d.getTime();
-  }
-  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) {
-    const today = new Date();
-    const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    const hhmm = t.length === 4 || t.length === 5 ? t.padStart(5, "0") : t;
-    const d = new Date(`${ymd}T${hhmm}`);
-    return isNaN(d.getTime()) ? null : d.getTime();
-  }
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2})?$/.test(t)) {
-    const d = new Date(t.replace(" ", "T"));
-    return isNaN(d.getTime()) ? null : d.getTime();
-  }
-  const d = new Date(t);
-  return isNaN(d.getTime()) ? null : d.getTime();
-}
-
-interface SearchTerm {
-  text: string;
-  mode: "include" | "exclude";
-}
-
-function parseSearch(s: string): SearchTerm[] {
-  const tokens = s.trim().split(/\s+/).filter(Boolean);
-  const out: SearchTerm[] = [];
-  let pendingNot = false;
-  for (const t of tokens) {
-    if (t === "-") {
-      pendingNot = true;
-      continue;
-    }
-    const attached = t.startsWith("-") && t.length > 1;
-    const text = attached ? t.slice(1) : t;
-    out.push({
-      text,
-      mode: pendingNot || attached ? "exclude" : "include",
-    });
-    pendingNot = false;
-  }
-  return out;
-}
-
-function serializeSearch(terms: SearchTerm[]): string {
-  return terms
-    .map((t) => (t.mode === "exclude" ? `-${t.text}` : t.text))
-    .join(" ");
-}
-
-function FullFilterBar({
-  openDropdown,
-  setOpenDropdown,
-  activeFilterCount,
-  clearAll,
-  groups,
-  toggleFilter,
-  dateGroup,
-  searchText,
-  setSearchText,
-}: {
-  openDropdown: string | null;
-  setOpenDropdown: (v: string | null) => void;
-  activeFilterCount: number;
-  clearAll: () => void;
-  groups: FilterGroup[];
-  toggleFilter: (
-    arr: string[],
-    set: (v: string[]) => void,
-    val: string,
-  ) => void;
-  dateGroup?: DateGroup;
-  searchText?: string;
-  setSearchText?: (s: string) => void;
-}) {
-  const searchTerms = searchText ? parseSearch(searchText) : [];
-  const removeSearchTerm = (idx: number) => {
-    if (!setSearchText) return;
-    setSearchText(serializeSearch(searchTerms.filter((_, i) => i !== idx)));
-  };
-  const toggleSearchTerm = (idx: number) => {
-    if (!setSearchText) return;
-    setSearchText(
-      serializeSearch(
-        searchTerms.map((t, i) =>
-          i === idx
-            ? { ...t, mode: t.mode === "include" ? "exclude" : "include" }
-            : t,
-        ),
-      ),
-    );
-  };
-  const [search, setSearch] = useState<Record<string, string>>({});
-  return (
-    <>
-      <div className="flex items-center px-2 py-1.5 gap-1 flex-wrap">
-        <span className="text-[var(--muted)] text-xs mr-0.5">Filter:</span>
-        {groups.map((f) => {
-          const q = (search[f.key] || "").toLowerCase();
-          const filteredOpts = q
-            ? f.options.filter((opt) => opt.toLowerCase().includes(q))
-            : f.options;
-          const incCount = f.values.length;
-          const excCount = (f.excludeValues || []).length;
-          const anyActive = incCount + excCount > 0;
-          return (
-            <div key={f.key} className="relative">
-              <button
-                onClick={() =>
-                  setOpenDropdown(openDropdown === f.key ? null : f.key)
-                }
-                className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
-                  anyActive
-                    ? `${f.activeBg} ${f.activeText}`
-                    : `text-[var(--muted)] hover:${f.color || ""}`
-                }`}
-              >
-                {f.label}
-                {anyActive && (
-                  <>
-                    {" ("}
-                    {incCount > 0 && <span>{incCount}</span>}
-                    {incCount > 0 && excCount > 0 && (
-                      <span className="text-[var(--muted)]">, </span>
-                    )}
-                    {excCount > 0 && (
-                      <span className="text-red-300">−{excCount}</span>
-                    )}
-                    {")"}
-                  </>
-                )}{" "}
-                <span className="text-[8px]">▾</span>
-              </button>
-              {openDropdown === f.key && (
-                <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[200px] max-h-72 flex flex-col">
-                  <div className="p-2 border-b border-[var(--border)] shrink-0">
-                    <input
-                      type="search"
-                      autoFocus
-                      placeholder={`search ${f.label.toLowerCase()}...`}
-                      value={search[f.key] || ""}
-                      onChange={(e) =>
-                        setSearch((prev) => ({
-                          ...prev,
-                          [f.key]: e.target.value,
-                        }))
-                      }
-                      className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs"
-                    />
-                  </div>
-                  <div className="overflow-y-auto">
-                    {f.values.length > 0 && (
-                      <button
-                        onClick={() => f.set([])}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] text-[var(--muted)] border-b border-[var(--border)]"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                    {filteredOpts.map((opt) => {
-                      const isSelected = f.values.includes(opt);
-                      const isExcluded = (f.excludeValues || []).includes(opt);
-                      return (
-                        <div
-                          key={opt}
-                          className={`flex items-center hover:bg-[var(--surface-raised)] ${isExcluded ? "opacity-70" : ""}`}
-                        >
-                          <button
-                            onClick={() => toggleFilter(f.values, f.set, opt)}
-                            className={`flex-1 text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 ${
-                              isSelected ? f.activeText : ""
-                            } ${isExcluded ? "text-red-300 line-through" : ""}`}
-                          >
-                            <span
-                              className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
-                                isSelected
-                                  ? `${f.activeBg} border-current`
-                                  : isExcluded
-                                    ? "bg-red-500/15 border-red-400 text-red-400"
-                                    : "border-[var(--border)]"
-                              }`}
-                            >
-                              {isSelected ? "✓" : isExcluded ? "−" : ""}
-                            </span>
-                            {f.key === "branch" ? `⎇ ${opt}` : opt}
-                          </button>
-                          {f.setExclude && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!f.setExclude) return;
-                                const exc = f.excludeValues || [];
-                                if (exc.includes(opt)) {
-                                  f.setExclude(exc.filter((v) => v !== opt));
-                                } else {
-                                  f.setExclude([...exc, opt]);
-                                  if (f.values.includes(opt))
-                                    f.set(f.values.filter((v) => v !== opt));
-                                }
-                              }}
-                              title={
-                                isExcluded ? "remove exclusion" : "exclude"
-                              }
-                              className={`px-2 py-1.5 text-[11px] hover:bg-red-500/10 ${
-                                isExcluded
-                                  ? "text-red-300"
-                                  : "text-[var(--muted)] hover:text-red-300"
-                              }`}
-                            >
-                              −
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {filteredOpts.length === 0 && (
-                      <div className="px-3 py-2 text-[var(--muted)] text-xs">
-                        {q ? "no matches" : "no options yet"}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {dateGroup && (
-          <DateFilterButton
-            group={dateGroup}
-            open={openDropdown === "date"}
-            onToggle={() =>
-              setOpenDropdown(openDropdown === "date" ? null : "date")
-            }
-          />
-        )}
-        {setSearchText && (
-          <input
-            type="search"
-            value={searchText || ""}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search: space between filters. Use prefix - to negate."
-            className="ml-auto bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-[28rem]"
-          />
-        )}
-      </div>
-      {activeFilterCount > 0 && (
-        <div className="flex items-center gap-1 px-2 pb-1.5 flex-wrap">
-          {groups.flatMap((f) =>
-            f.values.map((v) => (
-              <span
-                key={`${f.key}-inc-${v}`}
-                className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
-              >
-                {f.key === "branch" ? `⎇ ${v}` : v}
-                <button
-                  onClick={() => toggleFilter(f.values, f.set, v)}
-                  className="hover:text-white"
-                >
-                  ×
-                </button>
-              </span>
-            )),
-          )}
-          {groups.flatMap((f) =>
-            (f.excludeValues || []).map((v) => (
-              <span
-                key={`${f.key}-exc-${v}`}
-                className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono line-through`}
-              >
-                {f.key === "branch" ? `⎇ ${v}` : v}
-                <button
-                  onClick={() => {
-                    if (!f.setExclude) return;
-                    f.setExclude(
-                      (f.excludeValues || []).filter((x) => x !== v),
-                    );
-                  }}
-                  className="text-red-400 hover:text-red-300 no-underline font-bold"
-                >
-                  ×
-                </button>
-              </span>
-            )),
-          )}
-          {dateGroup && (dateGroup.startedAfter || dateGroup.startedBefore) && (
-            <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
-              started{" "}
-              {dateGroup.startedAfter &&
-                `after ${fmtDateChip(dateGroup.startedAfter)}`}
-              {dateGroup.startedAfter && dateGroup.startedBefore && " · "}
-              {dateGroup.startedBefore &&
-                `before ${fmtDateChip(dateGroup.startedBefore)}`}
-              <button
-                onClick={() => {
-                  dateGroup.setStartedAfter("");
-                  dateGroup.setStartedBefore("");
-                }}
-                className="hover:text-white"
-              >
-                ×
-              </button>
-            </span>
-          )}
-          {dateGroup &&
-            (dateGroup.finishedAfter || dateGroup.finishedBefore) && (
-              <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
-                finished{" "}
-                {dateGroup.finishedAfter &&
-                  `after ${fmtDateChip(dateGroup.finishedAfter)}`}
-                {dateGroup.finishedAfter && dateGroup.finishedBefore && " · "}
-                {dateGroup.finishedBefore &&
-                  `before ${fmtDateChip(dateGroup.finishedBefore)}`}
-                <button
-                  onClick={() => {
-                    dateGroup.setFinishedAfter("");
-                    dateGroup.setFinishedBefore("");
-                  }}
-                  className="hover:text-white"
-                >
-                  ×
-                </button>
-              </span>
-            )}
-          {searchTerms.map((t, i) => {
-            const inc = t.mode === "include";
-            return (
-              <span
-                key={`search-${i}-${t.text}`}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
-                  inc
-                    ? "bg-slate-500/15 text-slate-200"
-                    : "bg-red-500/15 text-red-300 line-through"
-                }`}
-              >
-                <button
-                  onClick={() => toggleSearchTerm(i)}
-                  title={`flip to ${inc ? "exclude" : "include"}`}
-                  className="hover:text-white no-underline opacity-70 hover:opacity-100"
-                >
-                  {inc ? "+" : "−"}
-                </button>
-                {inc ? t.text : `NOT ${t.text}`}
-                <button
-                  onClick={() => removeSearchTerm(i)}
-                  className="hover:text-white no-underline"
-                >
-                  ×
-                </button>
-              </span>
-            );
-          })}
-          <button
-            onClick={clearAll}
-            className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-1"
-          >
-            clear all
-          </button>
-        </div>
-      )}
-    </>
-  );
-}
-
-function fmtDateChip(local: string): string {
-  if (!local) return "";
-  const d = new Date(local);
-  if (isNaN(d.getTime())) return local;
-  return d.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function DateFilterButton({
-  group,
-  open,
-  onToggle,
-}: {
-  group: DateGroup;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const activeCount =
-    (group.startedAfter || group.startedBefore ? 1 : 0) +
-    (group.finishedAfter || group.finishedBefore ? 1 : 0);
-  const active = activeCount > 0;
-  const inputCls =
-    "mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]";
-  return (
-    <div className="relative">
-      <button
-        onClick={onToggle}
-        className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
-          active
-            ? "bg-orange-500/15 text-orange-300"
-            : "text-[var(--muted)] hover:text-orange-400"
-        }`}
-      >
-        DATE{active ? ` (${activeCount})` : ""}{" "}
-        <span className="text-[8px]">▾</span>
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[280px] p-3 space-y-3">
-          <div className="text-[9px] text-[var(--muted)]">
-            accepts partial dates, times, or both — e.g. <code>2026-05-09</code>
-            , <code>14:30</code>, or <code>2026-05-09 14:30</code>
-          </div>
-          <div className="space-y-2">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-              Started
-            </div>
-            <label className="block text-[10px] text-[var(--muted)]">
-              after
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.startedAfter}
-                onChange={(e) => group.setStartedAfter(e.target.value)}
-                className={inputCls}
-              />
-            </label>
-            <label className="block text-[10px] text-[var(--muted)]">
-              before
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.startedBefore}
-                onChange={(e) => group.setStartedBefore(e.target.value)}
-                className={inputCls}
-              />
-            </label>
-          </div>
-          <div className="space-y-2 pt-2 border-t border-[var(--border)]">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-              Finished
-            </div>
-            <label className="block text-[10px] text-[var(--muted)]">
-              after
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.finishedAfter}
-                onChange={(e) => group.setFinishedAfter(e.target.value)}
-                className={inputCls}
-              />
-            </label>
-            <label className="block text-[10px] text-[var(--muted)]">
-              before
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.finishedBefore}
-                onChange={(e) => group.setFinishedBefore(e.target.value)}
-                className={inputCls}
-              />
-            </label>
-          </div>
-          {active && (
-            <button
-              onClick={() => {
-                group.setStartedAfter("");
-                group.setStartedBefore("");
-                group.setFinishedAfter("");
-                group.setFinishedBefore("");
-              }}
-              className="w-full text-left text-xs text-[var(--muted)] hover:text-[var(--foreground)] pt-2 border-t border-[var(--border)]"
-            >
-              clear all
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CompactFilterBar({
-  openDropdown,
-  setOpenDropdown,
-  activeFilterCount,
-  clear,
-  groups,
-  toggleFilter,
-}: {
-  openDropdown: string | null;
-  setOpenDropdown: (v: string | null) => void;
-  activeFilterCount: number;
-  clear: () => void;
-  groups: FilterGroup[];
-  toggleFilter: (
-    arr: string[],
-    set: (v: string[]) => void,
-    val: string,
-  ) => void;
-}) {
-  return (
-    <div className="relative flex items-center px-2 py-1.5 gap-1">
-      <button
-        onClick={() =>
-          setOpenDropdown(
-            openDropdown === "compact-filter" ? null : "compact-filter",
-          )
-        }
-        className={`text-[10px] transition-colors ${activeFilterCount > 0 ? "text-[var(--foreground)]" : "text-[var(--muted)] hover:text-[var(--foreground)]"}`}
-      >
-        Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}{" "}
-        <span className="text-[8px]">▾</span>
-      </button>
-      {activeFilterCount > 0 && (
-        <button
-          onClick={clear}
-          className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-auto"
-        >
-          clear
-        </button>
-      )}
-      {openDropdown === "compact-filter" && (
-        <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[220px] p-2 space-y-2 max-h-[70vh] overflow-y-auto">
-          {groups.map((f) => (
-            <div key={f.key}>
-              <div className="text-[10px] text-[var(--muted)] font-bold uppercase tracking-wider mb-1">
-                {f.label}
-              </div>
-              {f.options.map((opt) => {
-                const isChecked = f.values.includes(opt);
-                return (
-                  <button
-                    key={opt}
-                    onClick={() => toggleFilter(f.values, f.set, opt)}
-                    className={`w-full text-left px-2 py-1 text-xs hover:bg-[var(--surface-raised)] font-mono flex items-center gap-2 rounded ${isChecked ? f.activeText : ""}`}
-                  >
-                    <span
-                      className={`w-3 h-3 rounded border flex items-center justify-center text-[9px] ${isChecked ? `${f.activeBg} border-current` : "border-[var(--border)]"}`}
-                    >
-                      {isChecked && "✓"}
-                    </span>
-                    {f.key === "branch" ? `⎇ ${opt}` : opt}
-                  </button>
-                );
-              })}
-              {f.options.length === 0 && (
-                <div className="px-2 py-1 text-[var(--muted)] text-[10px]">
-                  no options
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

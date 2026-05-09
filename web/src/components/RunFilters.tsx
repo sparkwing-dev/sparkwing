@@ -541,274 +541,275 @@ export function FullFilterBar({
     ((searchText || "").trim() ? 1 : 0);
 
   return (
-    <>
-      <div className="flex items-center px-2 py-1.5 gap-1 flex-wrap">
-        <span className="text-[var(--muted)] text-xs mr-0.5">Filter:</span>
-        {groups.map((f) => {
-          const q = (search[f.key] || "").toLowerCase();
-          const filteredOpts = q
-            ? f.options.filter((opt) => opt.toLowerCase().includes(q))
-            : f.options;
-          const incCount = f.values.length;
-          const excCount = (f.excludeValues || []).length;
-          const anyActive = incCount + excCount > 0;
-          return (
-            <div key={f.key} className="relative">
-              <button
-                onClick={() =>
-                  setOpenDropdown(openDropdown === f.key ? null : f.key)
-                }
-                className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
-                  anyActive
-                    ? `${f.activeBg} ${f.activeText}`
-                    : `text-[var(--muted)] hover:${f.color || ""}`
-                }`}
-              >
-                {f.label}
-                {anyActive && (
-                  <>
-                    {" ("}
-                    {incCount > 0 && <span>{incCount}</span>}
-                    {incCount > 0 && excCount > 0 && (
-                      <span className="text-[var(--muted)]">, </span>
-                    )}
-                    {excCount > 0 && (
-                      <span className="text-red-300">−{excCount}</span>
-                    )}
-                    {")"}
-                  </>
-                )}{" "}
-                <span className="text-[8px]">▾</span>
-              </button>
-              {openDropdown === f.key && (
-                <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[200px] max-h-72 flex flex-col">
-                  <div className="p-2 border-b border-[var(--border)] shrink-0">
-                    <input
-                      type="search"
-                      autoFocus
-                      placeholder={`search ${f.label.toLowerCase()}...`}
-                      value={search[f.key] || ""}
-                      onChange={(e) =>
-                        setSearch((prev) => ({
-                          ...prev,
-                          [f.key]: e.target.value,
-                        }))
-                      }
-                      className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs"
-                    />
-                  </div>
-                  <div className="overflow-y-auto">
-                    {f.values.length > 0 && (
-                      <button
-                        onClick={() => f.set([])}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] text-[var(--muted)] border-b border-[var(--border)]"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                    {filteredOpts.map((opt) => {
-                      const isSelected = f.values.includes(opt);
-                      const isExcluded = (f.excludeValues || []).includes(opt);
-                      return (
-                        <div
-                          key={opt}
-                          className={`flex items-center hover:bg-[var(--surface-raised)] ${isExcluded ? "opacity-70" : ""}`}
+    <div className="px-2 py-1.5 flex items-start gap-2 w-full">
+      {activeCount > 0 && (
+        <button
+          onClick={onClearAll}
+          title="clear all filters"
+          className="text-[var(--muted)] hover:text-red-400 text-base leading-none shrink-0 pt-1.5 px-1"
+        >
+          ×
+        </button>
+      )}
+      <div className="flex flex-col gap-1.5 shrink-0 min-w-[32rem]">
+        <div className="flex items-center gap-1 flex-wrap">
+          {groups.map((f) => {
+            const q = (search[f.key] || "").toLowerCase();
+            const filteredOpts = q
+              ? f.options.filter((opt) => opt.toLowerCase().includes(q))
+              : f.options;
+            const incCount = f.values.length;
+            const excCount = (f.excludeValues || []).length;
+            const anyActive = incCount + excCount > 0;
+            return (
+              <div key={f.key} className="relative">
+                <button
+                  onClick={() =>
+                    setOpenDropdown(openDropdown === f.key ? null : f.key)
+                  }
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
+                    anyActive
+                      ? `${f.activeBg} ${f.activeText}`
+                      : `text-[var(--muted)] hover:${f.color || ""}`
+                  }`}
+                >
+                  {f.label}
+                  {anyActive && (
+                    <>
+                      {" ("}
+                      {incCount > 0 && <span>{incCount}</span>}
+                      {incCount > 0 && excCount > 0 && (
+                        <span className="text-[var(--muted)]">, </span>
+                      )}
+                      {excCount > 0 && (
+                        <span className="text-red-300">−{excCount}</span>
+                      )}
+                      {")"}
+                    </>
+                  )}{" "}
+                  <span className="text-[8px]">▾</span>
+                </button>
+                {openDropdown === f.key && (
+                  <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[200px] max-h-72 flex flex-col">
+                    <div className="p-2 border-b border-[var(--border)] shrink-0">
+                      <input
+                        type="search"
+                        autoFocus
+                        placeholder={`search ${f.label.toLowerCase()}...`}
+                        value={search[f.key] || ""}
+                        onChange={(e) =>
+                          setSearch((prev) => ({
+                            ...prev,
+                            [f.key]: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs"
+                      />
+                    </div>
+                    <div className="overflow-y-auto">
+                      {f.values.length > 0 && (
+                        <button
+                          onClick={() => f.set([])}
+                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-raised)] text-[var(--muted)] border-b border-[var(--border)]"
                         >
-                          <button
-                            onClick={() =>
-                              toggleFilterHelper(f.values, f.set, opt)
-                            }
-                            className={`flex-1 text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 ${
-                              isSelected ? f.activeText : ""
-                            } ${isExcluded ? "text-red-300 line-through" : ""}`}
+                          Clear all
+                        </button>
+                      )}
+                      {filteredOpts.map((opt) => {
+                        const isSelected = f.values.includes(opt);
+                        const isExcluded = (f.excludeValues || []).includes(
+                          opt,
+                        );
+                        return (
+                          <div
+                            key={opt}
+                            className={`flex items-center hover:bg-[var(--surface-raised)] ${isExcluded ? "opacity-70" : ""}`}
                           >
-                            <span
-                              className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
-                                isSelected
-                                  ? `${f.activeBg} border-current`
-                                  : isExcluded
-                                    ? "bg-red-500/15 border-red-400 text-red-400"
-                                    : "border-[var(--border)]"
-                              }`}
-                            >
-                              {isSelected ? "✓" : isExcluded ? "−" : ""}
-                            </span>
-                            {f.key === "branch" ? `⎇ ${opt}` : opt}
-                          </button>
-                          {f.setExclude && (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!f.setExclude) return;
-                                const exc = f.excludeValues || [];
-                                if (exc.includes(opt)) {
-                                  f.setExclude(exc.filter((v) => v !== opt));
-                                } else {
-                                  f.setExclude([...exc, opt]);
-                                  if (f.values.includes(opt))
-                                    f.set(f.values.filter((v) => v !== opt));
-                                }
-                              }}
-                              title={
-                                isExcluded ? "remove exclusion" : "exclude"
+                              onClick={() =>
+                                toggleFilterHelper(f.values, f.set, opt)
                               }
-                              className={`px-2 py-1.5 text-[11px] hover:bg-red-500/10 ${
-                                isExcluded
-                                  ? "text-red-300"
-                                  : "text-[var(--muted)] hover:text-red-300"
-                              }`}
+                              className={`flex-1 text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 ${
+                                isSelected ? f.activeText : ""
+                              } ${isExcluded ? "text-red-300 line-through" : ""}`}
                             >
-                              −
+                              <span
+                                className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                                  isSelected
+                                    ? `${f.activeBg} border-current`
+                                    : isExcluded
+                                      ? "bg-red-500/15 border-red-400 text-red-400"
+                                      : "border-[var(--border)]"
+                                }`}
+                              >
+                                {isSelected ? "✓" : isExcluded ? "−" : ""}
+                              </span>
+                              {f.key === "branch" ? `⎇ ${opt}` : opt}
                             </button>
-                          )}
+                            {f.setExclude && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!f.setExclude) return;
+                                  const exc = f.excludeValues || [];
+                                  if (exc.includes(opt)) {
+                                    f.setExclude(exc.filter((v) => v !== opt));
+                                  } else {
+                                    f.setExclude([...exc, opt]);
+                                    if (f.values.includes(opt))
+                                      f.set(f.values.filter((v) => v !== opt));
+                                  }
+                                }}
+                                title={
+                                  isExcluded ? "remove exclusion" : "exclude"
+                                }
+                                className={`px-2 py-1.5 text-[11px] hover:bg-red-500/10 ${
+                                  isExcluded
+                                    ? "text-red-300"
+                                    : "text-[var(--muted)] hover:text-red-300"
+                                }`}
+                              >
+                                −
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {filteredOpts.length === 0 && (
+                        <div className="px-3 py-2 text-[var(--muted)] text-xs">
+                          {q ? "no matches" : "no options yet"}
                         </div>
-                      );
-                    })}
-                    {filteredOpts.length === 0 && (
-                      <div className="px-3 py-2 text-[var(--muted)] text-xs">
-                        {q ? "no matches" : "no options yet"}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {dateGroup && (
-          <DateFilterButton
-            group={dateGroup}
-            open={openDropdown === "date"}
-            onToggle={() =>
-              setOpenDropdown(openDropdown === "date" ? null : "date")
-            }
-          />
-        )}
+                )}
+              </div>
+            );
+          })}
+          {dateGroup && (
+            <DateFilterButton
+              group={dateGroup}
+              open={openDropdown === "date"}
+              onToggle={() =>
+                setOpenDropdown(openDropdown === "date" ? null : "date")
+              }
+            />
+          )}
+        </div>
         {setSearchText && (
           <input
             type="search"
             value={searchText || ""}
             onChange={(e) => setSearchText(e.target.value)}
             placeholder="Search: space between filters. Use prefix - to negate."
-            className="ml-auto bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-[28rem]"
+            className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-full"
           />
         )}
       </div>
-      {activeCount > 0 && (
-        <div className="flex items-center gap-1 px-2 pb-1.5 flex-wrap">
-          {groups.flatMap((f) =>
-            f.values.map((v) => (
-              <span
-                key={`${f.key}-inc-${v}`}
-                className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
-              >
-                {f.key === "branch" ? `⎇ ${v}` : v}
-                <button
-                  onClick={() => toggleFilterHelper(f.values, f.set, v)}
-                  className="hover:text-white"
-                >
-                  ×
-                </button>
-              </span>
-            )),
-          )}
-          {groups.flatMap((f) =>
-            (f.excludeValues || []).map((v) => (
-              <span
-                key={`${f.key}-exc-${v}`}
-                className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono line-through`}
-              >
-                {f.key === "branch" ? `⎇ ${v}` : v}
-                <button
-                  onClick={() => {
-                    if (!f.setExclude) return;
-                    f.setExclude(
-                      (f.excludeValues || []).filter((x) => x !== v),
-                    );
-                  }}
-                  className="text-red-400 hover:text-red-300 no-underline font-bold"
-                >
-                  ×
-                </button>
-              </span>
-            )),
-          )}
-          {dateGroup && (dateGroup.startedAfter || dateGroup.startedBefore) && (
-            <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
-              started{" "}
-              {dateGroup.startedAfter &&
-                `after ${fmtDateChip(dateGroup.startedAfter)}`}
-              {dateGroup.startedAfter && dateGroup.startedBefore && " · "}
-              {dateGroup.startedBefore &&
-                `before ${fmtDateChip(dateGroup.startedBefore)}`}
+      <div className="flex-1 min-w-0 flex flex-wrap gap-1 items-start content-start">
+        {groups.flatMap((f) =>
+          f.values.map((v) => (
+            <span
+              key={`${f.key}-inc-${v}`}
+              className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
+            >
+              {f.key === "branch" ? `⎇ ${v}` : v}
               <button
-                onClick={() => {
-                  dateGroup.setStartedAfter("");
-                  dateGroup.setStartedBefore("");
-                }}
+                onClick={() => toggleFilterHelper(f.values, f.set, v)}
                 className="hover:text-white"
               >
                 ×
               </button>
             </span>
-          )}
-          {dateGroup &&
-            (dateGroup.finishedAfter || dateGroup.finishedBefore) && (
-              <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
-                finished{" "}
-                {dateGroup.finishedAfter &&
-                  `after ${fmtDateChip(dateGroup.finishedAfter)}`}
-                {dateGroup.finishedAfter && dateGroup.finishedBefore && " · "}
-                {dateGroup.finishedBefore &&
-                  `before ${fmtDateChip(dateGroup.finishedBefore)}`}
-                <button
-                  onClick={() => {
-                    dateGroup.setFinishedAfter("");
-                    dateGroup.setFinishedBefore("");
-                  }}
-                  className="hover:text-white"
-                >
-                  ×
-                </button>
-              </span>
-            )}
-          {searchTerms.map((t, i) => {
-            const inc = t.mode === "include";
-            return (
-              <span
-                key={`search-${i}-${t.text}`}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
-                  inc
-                    ? "bg-slate-500/15 text-slate-200"
-                    : "bg-red-500/15 text-red-300 line-through"
-                }`}
+          )),
+        )}
+        {groups.flatMap((f) =>
+          (f.excludeValues || []).map((v) => (
+            <span
+              key={`${f.key}-exc-${v}`}
+              className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono line-through`}
+            >
+              {f.key === "branch" ? `⎇ ${v}` : v}
+              <button
+                onClick={() => {
+                  if (!f.setExclude) return;
+                  f.setExclude((f.excludeValues || []).filter((x) => x !== v));
+                }}
+                className="text-red-400 hover:text-red-300 no-underline font-bold"
               >
-                <button
-                  onClick={() => toggleSearchTerm(i)}
-                  title={`flip to ${inc ? "exclude" : "include"}`}
-                  className="hover:text-white no-underline opacity-70 hover:opacity-100"
-                >
-                  {inc ? "+" : "−"}
-                </button>
-                {inc ? t.text : `NOT ${t.text}`}
-                <button
-                  onClick={() => removeSearchTerm(i)}
-                  className="hover:text-white no-underline"
-                >
-                  ×
-                </button>
-              </span>
-            );
-          })}
-          <button
-            onClick={onClearAll}
-            className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-1"
-          >
-            clear all
-          </button>
-        </div>
-      )}
-    </>
+                ×
+              </button>
+            </span>
+          )),
+        )}
+        {dateGroup && (dateGroup.startedAfter || dateGroup.startedBefore) && (
+          <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
+            started{" "}
+            {dateGroup.startedAfter &&
+              `after ${fmtDateChip(dateGroup.startedAfter)}`}
+            {dateGroup.startedAfter && dateGroup.startedBefore && " · "}
+            {dateGroup.startedBefore &&
+              `before ${fmtDateChip(dateGroup.startedBefore)}`}
+            <button
+              onClick={() => {
+                dateGroup.setStartedAfter("");
+                dateGroup.setStartedBefore("");
+              }}
+              className="hover:text-white"
+            >
+              ×
+            </button>
+          </span>
+        )}
+        {dateGroup && (dateGroup.finishedAfter || dateGroup.finishedBefore) && (
+          <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
+            finished{" "}
+            {dateGroup.finishedAfter &&
+              `after ${fmtDateChip(dateGroup.finishedAfter)}`}
+            {dateGroup.finishedAfter && dateGroup.finishedBefore && " · "}
+            {dateGroup.finishedBefore &&
+              `before ${fmtDateChip(dateGroup.finishedBefore)}`}
+            <button
+              onClick={() => {
+                dateGroup.setFinishedAfter("");
+                dateGroup.setFinishedBefore("");
+              }}
+              className="hover:text-white"
+            >
+              ×
+            </button>
+          </span>
+        )}
+        {searchTerms.map((t, i) => {
+          const inc = t.mode === "include";
+          return (
+            <span
+              key={`search-${i}-${t.text}`}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
+                inc
+                  ? "bg-slate-500/15 text-slate-200"
+                  : "bg-red-500/15 text-red-300 line-through"
+              }`}
+            >
+              <button
+                onClick={() => toggleSearchTerm(i)}
+                title={`flip to ${inc ? "exclude" : "include"}`}
+                className="hover:text-white no-underline opacity-70 hover:opacity-100"
+              >
+                {inc ? "+" : "−"}
+              </button>
+              {inc ? t.text : `NOT ${t.text}`}
+              <button
+                onClick={() => removeSearchTerm(i)}
+                className="hover:text-white no-underline"
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
