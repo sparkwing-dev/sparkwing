@@ -782,7 +782,7 @@ function FullRunRow({ r }: { r: Run }) {
   // start for in-flight ones — that's the freshness signal.
   const sinceTs = r.finished_at || r.started_at;
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,40%)] gap-6 items-center">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,40%)] gap-6 items-start">
       <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <StatusLabel status={r.status} />
         <span className="text-cyan-400/70 shrink-0">{repoLabel(r)}</span>
@@ -829,7 +829,7 @@ function FullRunRow({ r }: { r: Run }) {
         </span>
       </div>
       <div
-        className="min-w-0 text-[11px] font-mono truncate text-right"
+        className="min-w-0 text-[11px] font-mono truncate"
         title={r.error || r.status}
       >
         {r.error ? (
