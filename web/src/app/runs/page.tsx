@@ -353,6 +353,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     }
     if (filterText.trim()) {
       const q = filterText.toLowerCase();
+      const startedMs = new Date(r.started_at).getTime();
+      const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
+      const elapsedMs = (finishedMs || Date.now()) - startedMs;
+      const sinceTs = r.finished_at || r.started_at;
       const hay = [
         r.id,
         r.pipeline,
@@ -362,6 +366,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         r.error,
         r.trigger_source,
         r.status,
+        `started ${fmtClock(r.started_at)}`,
+        r.finished_at ? `finished ${fmtClock(r.finished_at)}` : "",
+        elapsedMs > 0 ? `duration ${fmtMs(elapsedMs)}` : "",
+        fmtAgo(sinceTs),
       ]
         .filter(Boolean)
         .join(" ")
