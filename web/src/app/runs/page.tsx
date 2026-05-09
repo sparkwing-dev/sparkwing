@@ -1350,8 +1350,8 @@ function FullFilterBar({
             type="search"
             value={searchText || ""}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder='search runs · prefix term with "-" to exclude'
-            className="ml-auto bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-72"
+            placeholder="Search: space between filters. Use prefix - to negate."
+            className="ml-auto bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-[28rem]"
           />
         )}
       </div>
