@@ -202,6 +202,33 @@ function PivotTab({
 // to keep it tidy. Multi-select facets are encoded as comma-joined
 // strings (status=running,failed); excludes get an `n` prefix
 // (nstatus=cancelled).
+//
+// Session restore: filters are mirrored into sessionStorage on every
+// URL change. When /runs loads with no filter params (e.g. from a
+// fresh nav after visiting another page) and there's a saved value,
+// the URL is re-hydrated. URL stays the source of truth — shared
+// links with filter params bypass the restore.
+const FILTER_URL_KEYS = [
+  "status",
+  "nstatus",
+  "repo",
+  "nrepo",
+  "pipeline",
+  "npipeline",
+  "branch",
+  "nbranch",
+  "commit",
+  "ncommit",
+  "tag",
+  "ntag",
+  "startedAfter",
+  "startedBefore",
+  "finishedAfter",
+  "finishedBefore",
+  "q",
+];
+const FILTER_STORAGE_KEY = "sparkwing.runFilters";
+
 function useUrlFilterState() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -220,6 +247,45 @@ function useUrlFilterState() {
     },
     [searchParams, router, pathname],
   );
+
+  // Restore once on mount when URL has no filter params.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const hasAny = FILTER_URL_KEYS.some((k) => searchParams.get(k));
+    if (hasAny) return;
+    const saved = sessionStorage.getItem(FILTER_STORAGE_KEY);
+    if (!saved) return;
+    const savedParams = new URLSearchParams(saved);
+    const next = new URLSearchParams(searchParams.toString());
+    let added = false;
+    for (const k of FILTER_URL_KEYS) {
+      const v = savedParams.get(k);
+      if (v) {
+        next.set(k, v);
+        added = true;
+      }
+    }
+    if (!added) return;
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror current filter URL params into sessionStorage. Cleared
+  // automatically when no filters are set so a "clear all" leaves no
+  // ghost state.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const filterOnly = new URLSearchParams();
+    for (const k of FILTER_URL_KEYS) {
+      const v = searchParams.get(k);
+      if (v) filterOnly.set(k, v);
+    }
+    const qs = filterOnly.toString();
+    if (qs) sessionStorage.setItem(FILTER_STORAGE_KEY, qs);
+    else sessionStorage.removeItem(FILTER_STORAGE_KEY);
+  }, [searchParams]);
 
   const getList = (key: string): string[] => {
     const v = searchParams.get(key);
