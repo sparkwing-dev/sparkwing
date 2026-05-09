@@ -38,10 +38,11 @@ import DebugPausePanel from "@/components/DebugPausePanel";
 import Tooltip from "@/components/Tooltip";
 import ExecutionWaterfall from "@/components/ExecutionWaterfall";
 import ResourceChart from "@/components/ResourceChart";
-import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import LogBucketView from "@/components/LogBucketView";
+import SetupPanel from "@/components/SetupPanel";
+import SummaryPanel from "@/components/SummaryPanel";
+import SelectedNodePanel from "@/components/SelectedNodePanel";
 import { parseLogLines } from "@/lib/logParser";
-import FailureReasonBadge from "@/components/FailureReasonBadge";
 import ApprovalPane from "@/components/ApprovalPane";
 import NodeWorkView from "@/components/NodeWorkView";
 
@@ -996,33 +997,19 @@ function RunDetailPane({
   const selectedIsRunning =
     !!selected && !selected.finished_at && selected.status !== "pending";
   const runIsActive = run.status === "running";
-  const commitUrl =
-    run.github_owner && run.github_repo && run.git_sha
-      ? `https://github.com/${run.github_owner}/${run.github_repo}/commit/${run.git_sha}`
-      : null;
-  const branchUrl =
-    run.github_owner && run.github_repo && run.git_branch
-      ? `https://github.com/${run.github_owner}/${run.github_repo}/tree/${run.git_branch}`
-      : null;
 
   return (
     <>
       <div className="border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-2 px-4 py-2 text-xs">
-          <button
-            onClick={() => toggle("summary")}
-            className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-          >
-            <span className="w-4 text-center">
-              {collapsed.summary ? "▸" : "▾"}
-            </span>
+          <div className="flex items-center gap-2">
             <StatusLabel status={run.status} />
             <span className="text-cyan-400">{repoLabel(run)}</span>
             <span className="text-[var(--muted)]">/</span>
             <span className="font-bold text-sm text-violet-300">
               {run.pipeline}
             </span>
-          </button>
+          </div>
           <span
             className="font-mono text-[var(--muted)] cursor-pointer hover:text-[var(--foreground)]"
             onClick={() => navigator.clipboard.writeText(run.id)}
@@ -1051,164 +1038,23 @@ function RunDetailPane({
           nodes={nodes}
           onSelectNode={onSelectNode}
         />
-
-        {!collapsed.summary && (
-          <div className="px-4 pb-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
-            {run.git_sha && (
-              <div className="text-[var(--muted)]">
-                Commit:{" "}
-                {commitUrl ? (
-                  <a
-                    href={commitUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-cyan-400 font-mono hover:underline"
-                  >
-                    {run.git_sha.slice(0, 7)}
-                  </a>
-                ) : (
-                  <span className="text-[var(--foreground)] font-mono">
-                    {run.git_sha.slice(0, 7)}
-                  </span>
-                )}
-              </div>
-            )}
-            {run.git_branch && (
-              <div className="text-[var(--muted)]">
-                Branch:{" "}
-                {branchUrl ? (
-                  <a
-                    href={branchUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-amber-400 font-mono hover:underline"
-                  >
-                    ⎇ {run.git_branch}
-                  </a>
-                ) : (
-                  <span className="text-amber-400 font-mono">
-                    ⎇ {run.git_branch}
-                  </span>
-                )}
-              </div>
-            )}
-            {run.trigger_source && (
-              <div className="text-[var(--muted)]">
-                Trigger:{" "}
-                <span className="text-[var(--foreground)] font-mono">
-                  {run.trigger_source}
-                </span>
-              </div>
-            )}
-            <div className="text-[var(--muted)]">
-              Started:{" "}
-              <span className="text-[var(--foreground)] font-mono">
-                {new Date(run.started_at).toLocaleTimeString()}
-              </span>{" "}
-              <span className="text-[var(--muted)]">
-                (<TimeAgo ts={run.started_at} />)
-              </span>
-            </div>
-            {run.finished_at && (
-              <div className="text-[var(--muted)]">
-                Duration:{" "}
-                <span className="text-[var(--foreground)] font-mono">
-                  {fmtMs(runDurationMs(run))}
-                </span>
-              </div>
-            )}
-            {run.retry_of && (
-              <div className="text-[var(--muted)]">
-                Retry of:{" "}
-                <RetryLink runID={run.retry_of} className="text-cyan-400" />
-              </div>
-            )}
-            {run.retried_as && (
-              <div className="text-[var(--muted)]">
-                Retried as:{" "}
-                <RetryLink runID={run.retried_as} className="text-yellow-400" />
-              </div>
-            )}
-            {selected && (
-              <>
-                <div className="text-[var(--muted)]">
-                  Node:{" "}
-                  <span className="text-[var(--foreground)] font-mono">
-                    {selected.id}
-                  </span>
-                </div>
-                <div className="text-[var(--muted)]">
-                  Runner:{" "}
-                  <span className="text-[var(--foreground)] font-mono">
-                    {parseHolder(selected.claimed_by).label}
-                  </span>
-                </div>
-                {selected.status_detail && (
-                  <div className="text-[var(--muted)]">
-                    Activity:{" "}
-                    <span className="text-[var(--foreground)] font-mono">
-                      {selected.status_detail}
-                    </span>
-                  </div>
-                )}
-                {selectedIsRunning && selected.last_heartbeat && (
-                  <div className="text-[var(--muted)]">
-                    Heartbeat:{" "}
-                    <HeartbeatLabel lastHeartbeat={selected.last_heartbeat} />
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {run.error && (
-          <div className="mx-4 mb-3 px-3 py-2 rounded border text-xs font-mono bg-red-500/10 border-red-500/30 text-red-300">
-            {run.error}
-          </div>
-        )}
-        {selected?.failure_reason && (
-          <div
-            className={`mx-4 mb-3 px-3 py-2 rounded border text-xs font-mono ${
-              selected.failure_reason === "oom_killed"
-                ? "bg-orange-500/10 border-orange-500/30 text-orange-300"
-                : "bg-red-500/10 border-red-500/30 text-red-300"
-            }`}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <FailureReasonBadge
-                reason={selected.failure_reason}
-                exitCode={selected.exit_code}
-              />
-            </div>
-            {selected.failure_reason === "oom_killed" && (
-              <div className="text-[11px] opacity-80 mt-1">
-                The container exceeded its memory limit and was killed by the
-                kernel. Check the resource usage chart below or increase the
-                memory limit.
-              </div>
-            )}
-            {selected.failure_reason === "agent_lost" && (
-              <div className="text-[11px] opacity-80 mt-1">
-                The runner stopped sending heartbeats. The pod may have crashed,
-                been evicted, or lost network connectivity.
-              </div>
-            )}
-            {selected.failure_reason === "timeout" && (
-              <div className="text-[11px] opacity-80 mt-1">
-                The job exceeded its configured execution timeout. Consider
-                increasing the timeout or optimizing the pipeline.
-              </div>
-            )}
-            {selected.failure_reason === "queue_timeout" && (
-              <div className="text-[11px] opacity-80 mt-1">
-                No agent claimed this job in time. Check that agents are running
-                and match the pipeline&apos;s scheduling constraints.
-              </div>
-            )}
-          </div>
-        )}
       </div>
+
+      <SetupPanel
+        run={run}
+        collapsed={!!collapsed.setup}
+        onToggle={() => toggle("setup")}
+        onOpenRun={(id) => {
+          // Mirror the existing RetryLink behavior: click the
+          // sidebar row if present, otherwise navigate via query
+          // string. Keeps filter state intact in the common case.
+          const el = document.querySelector(`[data-run-id="${id}"]`);
+          if (el) (el as HTMLElement).click();
+          else window.location.assign(`?run=${id}`);
+        }}
+      />
+
+      {selected && <SelectedNodePanel node={selected} />}
 
       {showTrigger && (
         <div className="border-b border-[var(--border)] shrink-0 p-4">
@@ -1243,6 +1089,22 @@ function RunDetailPane({
             </div>
           )}
         </div>
+      )}
+
+      {/* SummaryPanel: post-run rollup. Visible whenever the run has
+          reached a terminal status, mirroring the CLI's `--- Summary
+          ---` block (status, jobs table, errors, tips). Hidden while
+          the run is still running -- live progress is the DAG /
+          Logs view's job. */}
+      {(run.status === "success" ||
+        run.status === "failed" ||
+        run.status === "cancelled") && (
+        <SummaryPanel
+          run={run}
+          nodes={nodes}
+          collapsed={!!collapsed.summary}
+          onToggle={() => toggle("summary")}
+        />
       )}
 
       <div className="border-b border-[var(--border)] shrink-0">
@@ -2189,30 +2051,6 @@ function RetryButton({ runId, onDone }: { runId: string; onDone: () => void }) {
       className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-indigo-500/30 transition-colors"
     >
       {loading ? "..." : "Rerun"}
-    </button>
-  );
-}
-
-// RetryLink hops to another run in the list by clicking the sidebar
-// row with matching data-run-id. Keeps the filter state intact so the
-// whole chain stays visible in one view.
-function RetryLink({
-  runID,
-  className,
-}: {
-  runID: string;
-  className?: string;
-}) {
-  return (
-    <button
-      onClick={() => {
-        const el = document.querySelector(`[data-run-id="${runID}"]`);
-        if (el) (el as HTMLElement).click();
-        else window.location.assign(`?run=${runID}`);
-      }}
-      className={`font-mono hover:underline ${className || "text-[var(--foreground)]"}`}
-    >
-      #{runID}
     </button>
   );
 }

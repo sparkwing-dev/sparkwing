@@ -151,6 +151,33 @@ export interface Run {
   error?: string;
   started_at: string;
   finished_at?: string;
+  // Invocation: snapshot of how the run was started, persisted on the
+  // run row at CreateRun time. Mirrors the orchestrator's
+  // run_start.attrs payload (see orchestrator/orchestrator.go's
+  // buildRunInvocation). Free-form map so the dashboard can surface
+  // new fields without a TS schema bump every time the orchestrator
+  // adds one.
+  invocation?: RunInvocation;
+}
+
+// RunInvocation snapshots how a run was started: flags, args, the
+// reproducer command, binary cache hit, hashes, hints, etc. Every
+// field is optional -- early/partial runs may carry only a subset.
+// New context fields land here automatically via the orchestrator's
+// buildRunInvocation; consumers that don't recognize them should
+// ignore unknown keys gracefully.
+export interface RunInvocation {
+  run_id?: string;
+  pipeline?: string;
+  binary_source?: string; // cached | compiled | artifact-store | gitcache
+  cwd?: string;
+  args?: Record<string, string>;
+  flags?: Record<string, unknown>;
+  inputs_hash?: string;
+  plan_hash?: string;
+  reproducer?: string;
+  trigger_env_keys?: string[];
+  hints?: Record<string, string>;
 }
 
 // runDurationMs computes a wall-clock duration from a Run's
