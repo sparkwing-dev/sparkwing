@@ -274,6 +274,7 @@ function useUrlFilterState() {
 
 function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
   const [pipelineMeta, setPipelineMeta] = useState<
     Record<string, PipelineMeta>
@@ -594,8 +595,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
     setSelectedNode(null);
-    if (id) window.history.replaceState(null, "", `?run=${id}`);
-    else window.history.replaceState(null, "", "/runs");
+    const params = new URLSearchParams(searchParams.toString());
+    if (id) params.set("run", id);
+    else params.delete("run");
+    const qs = params.toString();
+    router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
   };
 
   return (
