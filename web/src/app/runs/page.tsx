@@ -709,7 +709,7 @@ function FilterableValue({
       >
         {children}
       </span>
-      <span className="absolute bottom-full left-0 mb-1 hidden group-hover/fv:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
+      <span className="absolute bottom-full left-0 pt-2 -mt-2 hidden group-hover/fv:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -748,7 +748,7 @@ function FilterableTimestamp({
       onClick={(e) => e.stopPropagation()}
     >
       {children}
-      <span className="absolute bottom-full left-0 mb-1 hidden group-hover/ft:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[160px]">
+      <span className="absolute bottom-full left-0 pt-2 -mt-2 hidden group-hover/ft:flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[160px]">
         <button
           onClick={(e) => {
             e.stopPropagation();
