@@ -796,6 +796,14 @@ export function FullFilterBar({
               }
             />
           )}
+          <button
+            onClick={onClearAll}
+            disabled={activeCount === 0}
+            title="clear all filters"
+            className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-red-400 hover:border-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[var(--muted)] disabled:hover:border-[var(--border)] transition-colors"
+          >
+            Clear all
+          </button>
         </div>
         {setSearchText && (
           <input
@@ -908,17 +916,6 @@ export function FullFilterBar({
           );
         })}
       </div>
-      {activeCount > 0 && (
-        <div className="shrink-0 pt-1 self-start">
-          <button
-            onClick={onClearAll}
-            title="clear all filters"
-            className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-red-400 hover:border-red-400 transition-colors"
-          >
-            Clear all
-          </button>
-        </div>
-      )}
       {trailingActions && (
         <div className="shrink-0 pt-1 self-start">{trailingActions}</div>
       )}
