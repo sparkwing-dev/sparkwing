@@ -40,6 +40,12 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	}
 	defer st.Close()
 
+	// Lazy orphan reconciliation: any "running" rows whose orchestrator
+	// process is dead get transitioned to "failed" before we read.
+	// Errors are swallowed -- a stale-heartbeat sweep failing mustn't
+	// break the list itself.
+	_, _ = reconcileOrphanedLocalRuns(ctx, st, 0)
+
 	filter := store.RunFilter{
 		Limit:     opts.Limit,
 		Pipelines: opts.Pipelines,
@@ -110,6 +116,9 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		return err
 	}
 	defer st.Close()
+
+	// Lazy orphan reconciliation -- see ListJobs.
+	_, _ = reconcileOrphanedLocalRuns(ctx, st, 0)
 
 	if opts.JSON {
 		return writeRunDetailJSON(ctx, st, runID, out)
