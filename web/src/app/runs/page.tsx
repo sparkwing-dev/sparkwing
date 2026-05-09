@@ -291,7 +291,9 @@ function Pipelines() {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Left: Runs list */}
-      <div className="w-80 border-r border-[var(--border)] flex flex-col shrink-0">
+      <div
+        className={`${run ? "w-72" : "w-[34rem]"} border-r border-[var(--border)] flex flex-col shrink-0 transition-[width] duration-150`}
+      >
         <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
           Runs
         </div>
@@ -369,7 +371,7 @@ function Pipelines() {
                 onClick={() => selectRun(isActive ? null : r.id)}
                 className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${isActive ? "bg-[var(--surface-raised)] border-l-2 border-l-[var(--accent)]" : ""}`}
               >
-                <CompactRunRow r={r} />
+                <RunRow r={r} wide={!run} />
               </div>
             );
           })}
@@ -620,7 +622,7 @@ function NodeRow({
   );
 }
 
-function CompactRunRow({ r }: { r: Run }) {
+function RunRow({ r, wide }: { r: Run; wide: boolean }) {
   const dur = runDurationMs(r);
   return (
     <div className="flex items-center gap-2 min-w-0">
@@ -636,6 +638,12 @@ function CompactRunRow({ r }: { r: Run }) {
           className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
         />
       </Tooltip>
+      {wide && (
+        <span className="text-[10px] text-cyan-400/70 truncate max-w-[110px] shrink-0">
+          {repoLabel(r)}
+          <span className="text-[var(--muted)] mx-1">/</span>
+        </span>
+      )}
       <Tooltip
         content={
           <>
@@ -651,14 +659,28 @@ function CompactRunRow({ r }: { r: Run }) {
           </>
         }
       >
-        <span className="text-xs text-violet-300 truncate">{r.pipeline}</span>
+        <span className="text-xs text-violet-300 truncate min-w-0 flex-1">
+          {r.pipeline}
+        </span>
       </Tooltip>
       {r.git_branch && (
-        <span className="text-[10px] text-amber-400/70 truncate max-w-[80px] shrink-0">
+        <span
+          className={`text-[10px] text-amber-400/70 truncate shrink-0 ${wide ? "max-w-[140px]" : "max-w-[80px]"}`}
+        >
           ⎇ {r.git_branch}
         </span>
       )}
-      <span className="ml-auto shrink-0 text-[10px] font-mono text-[var(--muted)] tabular-nums">
+      {wide && r.git_sha && (
+        <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
+          {r.git_sha.slice(0, 7)}
+        </span>
+      )}
+      {wide && dur > 0 && (
+        <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
+          {fmtMs(dur)}
+        </span>
+      )}
+      <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
         <TimeAgo ts={r.started_at} />
       </span>
     </div>
