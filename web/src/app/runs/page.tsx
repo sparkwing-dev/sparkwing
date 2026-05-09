@@ -401,12 +401,21 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   useEffect(() => {
     if (!openDropdown) return;
     const handler = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
-        setOpenDropdown(null);
-      }
+      if (!filterRef.current || filterRef.current.contains(e.target as Node))
+        return;
+      e.stopPropagation();
+      e.preventDefault();
+      setOpenDropdown(null);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenDropdown(null);
+    };
+    document.addEventListener("click", handler, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", handler, true);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [openDropdown]);
 
   const refresh = useCallback(async () => {
