@@ -213,8 +213,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState<string[]>([]);
   const [filterCommit, setFilterCommit] = useState<string[]>([]);
-  const [filterAfter, setFilterAfter] = useState<string>("");
-  const [filterBefore, setFilterBefore] = useState<string>("");
+  const [startedAfter, setStartedAfter] = useState<string>("");
+  const [startedBefore, setStartedBefore] = useState<string>("");
+  const [finishedAfter, setFinishedAfter] = useState<string>("");
+  const [finishedBefore, setFinishedBefore] = useState<string>("");
   const [filterText, setFilterText] = useState<string>("");
   const [excludeStatus, setExcludeStatus] = useState<string[]>([]);
   const [excludeRepo, setExcludeRepo] = useState<string[]>([]);
@@ -356,10 +358,22 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     if (filterCommit.length && !filterCommit.includes(sha7)) return false;
     if (filterTag.length && !filterTag.some((t) => tags.includes(t)))
       return false;
-    if (filterAfter || filterBefore) {
-      const ts = new Date(r.started_at).getTime();
-      if (filterAfter && ts < new Date(filterAfter).getTime()) return false;
-      if (filterBefore && ts > new Date(filterBefore).getTime()) return false;
+    {
+      const startedTs = new Date(r.started_at).getTime();
+      const sa = parseLooseDate(startedAfter);
+      const sb = parseLooseDate(startedBefore);
+      if (sa !== null && startedTs < sa) return false;
+      if (sb !== null && startedTs > sb) return false;
+    }
+    {
+      const fa = parseLooseDate(finishedAfter);
+      const fb = parseLooseDate(finishedBefore);
+      if (fa !== null || fb !== null) {
+        if (!r.finished_at) return false;
+        const finishedTs = new Date(r.finished_at).getTime();
+        if (fa !== null && finishedTs < fa) return false;
+        if (fb !== null && finishedTs > fb) return false;
+      }
     }
     if (filterText.trim()) {
       const startedMs = new Date(r.started_at).getTime();
@@ -419,7 +433,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     excludeBranch.length +
     excludeCommit.length +
     excludeTag.length +
-    (filterAfter || filterBefore ? 1 : 0) +
+    (startedAfter || startedBefore ? 1 : 0) +
+    (finishedAfter || finishedBefore ? 1 : 0) +
     (filterText.trim() ? 1 : 0);
 
   const run = detail?.run || null;
@@ -470,8 +485,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         }
       }
     },
-    setBefore: (iso) => setFilterBefore(isoToLocal(iso)),
-    setAfter: (iso) => setFilterAfter(isoToLocal(iso)),
+    setDateBound: (field, bound, iso) => {
+      const local = isoToLocal(iso);
+      if (field === "started" && bound === "before") setStartedBefore(local);
+      else if (field === "started" && bound === "after") setStartedAfter(local);
+      else if (field === "finished" && bound === "before")
+        setFinishedBefore(local);
+      else if (field === "finished" && bound === "after")
+        setFinishedAfter(local);
+    },
   };
 
   const selectRun = (id: string | null) => {
@@ -499,8 +521,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             setFilterStatus([]);
             setFilterTag([]);
             setFilterCommit([]);
-            setFilterAfter("");
-            setFilterBefore("");
+            setStartedAfter("");
+            setStartedBefore("");
+            setFinishedAfter("");
+            setFinishedBefore("");
             setFilterText("");
             setExcludeStatus([]);
             setExcludeRepo([]);
@@ -510,10 +534,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             setExcludeTag([]);
           }}
           dateGroup={{
-            after: filterAfter,
-            before: filterBefore,
-            setAfter: setFilterAfter,
-            setBefore: setFilterBefore,
+            startedAfter,
+            startedBefore,
+            finishedAfter,
+            finishedBefore,
+            setStartedAfter,
+            setStartedBefore,
+            setFinishedAfter,
+            setFinishedBefore,
           }}
           searchText={filterText}
           setSearchText={setFilterText}
@@ -676,8 +704,11 @@ interface FilterCtx {
     value: string,
     mode: "include" | "exclude",
   ) => void;
-  setBefore: (iso: string) => void;
-  setAfter: (iso: string) => void;
+  setDateBound: (
+    field: "started" | "finished",
+    bound: "before" | "after",
+    iso: string,
+  ) => void;
 }
 
 // Hover open/close delays. Open delay keeps the popup from flashing
@@ -771,10 +802,12 @@ function FilterableValue({
 
 function FilterableTimestamp({
   iso,
+  field,
   ctx,
   children,
 }: {
   iso: string;
+  field: "started" | "finished";
   ctx: FilterCtx;
   children: React.ReactNode;
 }) {
@@ -796,20 +829,20 @@ function FilterableTimestamp({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              ctx.setBefore(iso);
+              ctx.setDateBound(field, "before", iso);
             }}
             className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
           >
-            + set as &apos;before&apos;
+            + set as &apos;{field} before&apos;
           </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
-              ctx.setAfter(iso);
+              ctx.setDateBound(field, "after", iso);
             }}
             className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
           >
-            + set as &apos;after&apos;
+            + set as &apos;{field} after&apos;
           </button>
         </span>
       )}
@@ -1079,7 +1112,7 @@ function FullRunRow({ r, ctx }: { r: Run; ctx: FilterCtx }) {
           </span>
         )}
         <span className="basis-full" />
-        <FilterableTimestamp iso={r.started_at} ctx={ctx}>
+        <FilterableTimestamp iso={r.started_at} field="started" ctx={ctx}>
           <span className="text-[var(--muted)] font-mono tabular-nums">
             started{" "}
             <span className="text-[var(--foreground)]">
@@ -1088,7 +1121,7 @@ function FullRunRow({ r, ctx }: { r: Run; ctx: FilterCtx }) {
           </span>
         </FilterableTimestamp>
         {r.finished_at ? (
-          <FilterableTimestamp iso={r.finished_at} ctx={ctx}>
+          <FilterableTimestamp iso={r.finished_at} field="finished" ctx={ctx}>
             <span className="text-[var(--muted)] font-mono tabular-nums">
               finished{" "}
               <span className="text-[var(--foreground)]">
@@ -1183,10 +1216,42 @@ interface FilterGroup {
 }
 
 interface DateGroup {
-  after: string;
-  before: string;
-  setAfter: (v: string) => void;
-  setBefore: (v: string) => void;
+  startedAfter: string;
+  startedBefore: string;
+  finishedAfter: string;
+  finishedBefore: string;
+  setStartedAfter: (v: string) => void;
+  setStartedBefore: (v: string) => void;
+  setFinishedAfter: (v: string) => void;
+  setFinishedBefore: (v: string) => void;
+}
+
+// parseLooseDate accepts (all interpreted in local time):
+//   YYYY-MM-DD            → midnight that day
+//   HH:MM (or H:MM)       → that time TODAY
+//   YYYY-MM-DD HH:MM      → exact date+time
+//   YYYY-MM-DDTHH:MM      → exact date+time (datetime-local format)
+//   anything new Date(s) can parse, as a fallback
+function parseLooseDate(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    const d = new Date(t + "T00:00");
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) {
+    const today = new Date();
+    const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const hhmm = t.length === 4 || t.length === 5 ? t.padStart(5, "0") : t;
+    const d = new Date(`${ymd}T${hhmm}`);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2})?$/.test(t)) {
+    const d = new Date(t.replace(" ", "T"));
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  const d = new Date(t);
+  return isNaN(d.getTime()) ? null : d.getTime();
 }
 
 interface SearchTerm {
@@ -1272,6 +1337,9 @@ function FullFilterBar({
           const filteredOpts = q
             ? f.options.filter((opt) => opt.toLowerCase().includes(q))
             : f.options;
+          const incCount = f.values.length;
+          const excCount = (f.excludeValues || []).length;
+          const anyActive = incCount + excCount > 0;
           return (
             <div key={f.key} className="relative">
               <button
@@ -1279,13 +1347,25 @@ function FullFilterBar({
                   setOpenDropdown(openDropdown === f.key ? null : f.key)
                 }
                 className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
-                  f.values.length
+                  anyActive
                     ? `${f.activeBg} ${f.activeText}`
                     : `text-[var(--muted)] hover:${f.color || ""}`
                 }`}
               >
                 {f.label}
-                {f.values.length > 0 ? ` (${f.values.length})` : ""}{" "}
+                {anyActive && (
+                  <>
+                    {" ("}
+                    {incCount > 0 && <span>{incCount}</span>}
+                    {incCount > 0 && excCount > 0 && (
+                      <span className="text-[var(--muted)]">, </span>
+                    )}
+                    {excCount > 0 && (
+                      <span className="text-red-300">−{excCount}</span>
+                    )}
+                    {")"}
+                  </>
+                )}{" "}
                 <span className="text-[8px]">▾</span>
               </button>
               {openDropdown === f.key && (
@@ -1422,9 +1502,9 @@ function FullFilterBar({
             (f.excludeValues || []).map((v) => (
               <span
                 key={`${f.key}-exc-${v}`}
-                className="inline-flex items-center gap-1 bg-red-500/15 text-red-300 px-2 py-0.5 rounded text-xs font-mono line-through"
+                className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono line-through`}
               >
-                NOT {f.key === "branch" ? `⎇ ${v}` : v}
+                {f.key === "branch" ? `⎇ ${v}` : v}
                 <button
                   onClick={() => {
                     if (!f.setExclude) return;
@@ -1432,22 +1512,25 @@ function FullFilterBar({
                       (f.excludeValues || []).filter((x) => x !== v),
                     );
                   }}
-                  className="hover:text-white no-underline"
+                  className="text-red-400 hover:text-red-300 no-underline font-bold"
                 >
                   ×
                 </button>
               </span>
             )),
           )}
-          {dateGroup && (dateGroup.after || dateGroup.before) && (
+          {dateGroup && (dateGroup.startedAfter || dateGroup.startedBefore) && (
             <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
-              {dateGroup.after && `after ${fmtDateChip(dateGroup.after)}`}
-              {dateGroup.after && dateGroup.before && " · "}
-              {dateGroup.before && `before ${fmtDateChip(dateGroup.before)}`}
+              started{" "}
+              {dateGroup.startedAfter &&
+                `after ${fmtDateChip(dateGroup.startedAfter)}`}
+              {dateGroup.startedAfter && dateGroup.startedBefore && " · "}
+              {dateGroup.startedBefore &&
+                `before ${fmtDateChip(dateGroup.startedBefore)}`}
               <button
                 onClick={() => {
-                  dateGroup.setAfter("");
-                  dateGroup.setBefore("");
+                  dateGroup.setStartedAfter("");
+                  dateGroup.setStartedBefore("");
                 }}
                 className="hover:text-white"
               >
@@ -1455,6 +1538,26 @@ function FullFilterBar({
               </button>
             </span>
           )}
+          {dateGroup &&
+            (dateGroup.finishedAfter || dateGroup.finishedBefore) && (
+              <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
+                finished{" "}
+                {dateGroup.finishedAfter &&
+                  `after ${fmtDateChip(dateGroup.finishedAfter)}`}
+                {dateGroup.finishedAfter && dateGroup.finishedBefore && " · "}
+                {dateGroup.finishedBefore &&
+                  `before ${fmtDateChip(dateGroup.finishedBefore)}`}
+                <button
+                  onClick={() => {
+                    dateGroup.setFinishedAfter("");
+                    dateGroup.setFinishedBefore("");
+                  }}
+                  className="hover:text-white"
+                >
+                  ×
+                </button>
+              </span>
+            )}
           {searchTerms.map((t, i) => {
             const inc = t.mode === "include";
             return (
@@ -1516,7 +1619,12 @@ function DateFilterButton({
   open: boolean;
   onToggle: () => void;
 }) {
-  const active = !!(group.after || group.before);
+  const activeCount =
+    (group.startedAfter || group.startedBefore ? 1 : 0) +
+    (group.finishedAfter || group.finishedBefore ? 1 : 0);
+  const active = activeCount > 0;
+  const inputCls =
+    "mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]";
   return (
     <div className="relative">
       <button
@@ -1527,37 +1635,76 @@ function DateFilterButton({
             : "text-[var(--muted)] hover:text-orange-400"
         }`}
       >
-        DATE{active ? " (1)" : ""} <span className="text-[8px]">▾</span>
+        DATE{active ? ` (${activeCount})` : ""}{" "}
+        <span className="text-[8px]">▾</span>
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[260px] p-3 space-y-2">
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-            after
-            <input
-              type="datetime-local"
-              value={group.after}
-              onChange={(e) => group.setAfter(e.target.value)}
-              className="mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]"
-            />
-          </label>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-            before
-            <input
-              type="datetime-local"
-              value={group.before}
-              onChange={(e) => group.setBefore(e.target.value)}
-              className="mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]"
-            />
-          </label>
+        <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[280px] p-3 space-y-3">
+          <div className="text-[9px] text-[var(--muted)]">
+            accepts partial dates, times, or both — e.g. <code>2026-05-09</code>
+            , <code>14:30</code>, or <code>2026-05-09 14:30</code>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+              Started
+            </div>
+            <label className="block text-[10px] text-[var(--muted)]">
+              after
+              <input
+                type="text"
+                placeholder="YYYY-MM-DD [HH:MM]"
+                value={group.startedAfter}
+                onChange={(e) => group.setStartedAfter(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+            <label className="block text-[10px] text-[var(--muted)]">
+              before
+              <input
+                type="text"
+                placeholder="YYYY-MM-DD [HH:MM]"
+                value={group.startedBefore}
+                onChange={(e) => group.setStartedBefore(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+          </div>
+          <div className="space-y-2 pt-2 border-t border-[var(--border)]">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+              Finished
+            </div>
+            <label className="block text-[10px] text-[var(--muted)]">
+              after
+              <input
+                type="text"
+                placeholder="YYYY-MM-DD [HH:MM]"
+                value={group.finishedAfter}
+                onChange={(e) => group.setFinishedAfter(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+            <label className="block text-[10px] text-[var(--muted)]">
+              before
+              <input
+                type="text"
+                placeholder="YYYY-MM-DD [HH:MM]"
+                value={group.finishedBefore}
+                onChange={(e) => group.setFinishedBefore(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+          </div>
           {active && (
             <button
               onClick={() => {
-                group.setAfter("");
-                group.setBefore("");
+                group.setStartedAfter("");
+                group.setStartedBefore("");
+                group.setFinishedAfter("");
+                group.setFinishedBefore("");
               }}
-              className="w-full text-left text-xs text-[var(--muted)] hover:text-[var(--foreground)] pt-1 border-t border-[var(--border)]"
+              className="w-full text-left text-xs text-[var(--muted)] hover:text-[var(--foreground)] pt-2 border-t border-[var(--border)]"
             >
-              clear
+              clear all
             </button>
           )}
         </div>
