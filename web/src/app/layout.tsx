@@ -48,6 +48,10 @@ export default function RootLayout({
               'window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";' +
               'window.__SPARKWING_API_URL__="__SPARKWING_API_URL_MARKER__";',
           }}
+          // Ad-blocker extensions sometimes rewrite scripts in the
+          // head before React hydrates; suppress the hydration warning
+          // since we set the content explicitly.
+          suppressHydrationWarning
         />
       </head>
       <body className="h-full flex flex-col">

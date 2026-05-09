@@ -485,11 +485,22 @@ export interface PipelineMeta {
   tags?: string[];
 }
 
+// Stops polling /api/v1/pipelines after the first 404 — the local
+// dev server (sparkwing-local-ws) doesn't expose the pipeline
+// registry, only the controller does, and the empty fallback is fine
+// in both cases.
+let _pipelinesUnavailable = false;
 export async function getPipelines(): Promise<Record<string, PipelineMeta>> {
+  if (_pipelinesUnavailable) return {};
   const res = await authFetch(`${API_URL}/api/v1/pipelines`, {
     cache: "no-store",
   }).catch(() => null);
-  if (!res || !res.ok) return {};
+  if (!res) return {};
+  if (res.status === 404) {
+    _pipelinesUnavailable = true;
+    return {};
+  }
+  if (!res.ok) return {};
   const data = await res.json();
   return data.pipelines || {};
 }
