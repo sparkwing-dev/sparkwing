@@ -637,15 +637,6 @@ export function FullFilterBar({
 
   return (
     <div className="px-2 py-1.5 flex items-start gap-2 w-full">
-      {activeCount > 0 && (
-        <button
-          onClick={onClearAll}
-          title="clear all filters"
-          className="text-[var(--muted)] hover:text-red-400 text-base leading-none shrink-0 pt-1.5 px-1"
-        >
-          ×
-        </button>
-      )}
       <div className="flex flex-col gap-1.5 shrink-0 min-w-[32rem]">
         <div className="flex items-center gap-1 flex-wrap">
           {groups.map((f) => {
@@ -917,6 +908,17 @@ export function FullFilterBar({
           );
         })}
       </div>
+      {activeCount > 0 && (
+        <div className="shrink-0 pt-1 self-start">
+          <button
+            onClick={onClearAll}
+            title="clear all filters"
+            className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-red-400 hover:border-red-400 transition-colors"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
       {trailingActions && (
         <div className="shrink-0 pt-1 self-start">{trailingActions}</div>
       )}
