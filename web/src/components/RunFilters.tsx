@@ -193,6 +193,54 @@ export function parseLooseDate(s: string): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
+// msToUrlString encodes an absolute timestamp as an ISO-8601 string
+// with explicit local offset, e.g. 2026-05-07T00:00-07:00. Stored in
+// URL so shared links round-trip to the same absolute instant
+// regardless of recipient's timezone.
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+function msToUrlString(ms: number): string {
+  const d = new Date(ms);
+  const tz = -d.getTimezoneOffset();
+  const sign = tz >= 0 ? "+" : "-";
+  const tzh = pad2(Math.floor(Math.abs(tz) / 60));
+  const tzm = pad2(Math.abs(tz) % 60);
+  return (
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` +
+    `T${pad2(d.getHours())}:${pad2(d.getMinutes())}${sign}${tzh}:${tzm}`
+  );
+}
+
+// urlToInputString turns a stored URL value back into a tidy local
+// form suitable for displaying in the input field. The offset, if
+// any, is stripped from the display since the user shouldn't have to
+// reason about it.
+export function urlToInputString(s: string): string {
+  if (!s) return "";
+  const ms = parseLooseDate(s);
+  if (ms === null) return s;
+  const d = new Date(ms);
+  return (
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ` +
+    `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  );
+}
+
+// onDateInputChange parses a user-typed value, converts it to the
+// canonical URL form when parseable, and passes that to `setter`.
+// Unparseable strings are passed through verbatim so the filter
+// no-ops while the user is still typing.
+export function commitDateInput(value: string, setter: (v: string) => void) {
+  if (!value.trim()) {
+    setter("");
+    return;
+  }
+  const ms = parseLooseDate(value);
+  if (ms === null) setter(value);
+  else setter(msToUrlString(ms));
+}
+
 export function fmtDateChip(local: string): string {
   if (!local) return "";
   // Parse via parseLooseDate so the chip matches what the filter
@@ -837,6 +885,47 @@ export function FullFilterBar({
   );
 }
 
+function DateInput({
+  label,
+  urlValue,
+  setUrl,
+}: {
+  label: string;
+  urlValue: string;
+  setUrl: (v: string) => void;
+}) {
+  const [local, setLocal] = useState(() => urlToInputString(urlValue));
+  const focusedRef = useRef(false);
+  // Sync local from URL when it changes externally and the field
+  // isn't being typed in. Keeps round-trips from share-links clean.
+  useEffect(() => {
+    if (focusedRef.current) return;
+    setLocal(urlToInputString(urlValue));
+  }, [urlValue]);
+  return (
+    <label className="block text-[10px] text-[var(--muted)]">
+      {label}
+      <input
+        type="text"
+        placeholder="YYYY-MM-DD [HH:MM]"
+        value={local}
+        onFocus={() => {
+          focusedRef.current = true;
+        }}
+        onBlur={() => {
+          focusedRef.current = false;
+          setLocal(urlToInputString(urlValue));
+        }}
+        onChange={(e) => {
+          setLocal(e.target.value);
+          commitDateInput(e.target.value, setUrl);
+        }}
+        className="mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]"
+      />
+    </label>
+  );
+}
+
 function DateFilterButton({
   group,
   open,
@@ -850,8 +939,6 @@ function DateFilterButton({
     (group.startedAfter || group.startedBefore ? 1 : 0) +
     (group.finishedAfter || group.finishedBefore ? 1 : 0);
   const active = activeCount > 0;
-  const inputCls =
-    "mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]";
   return (
     <div className="relative">
       <button
@@ -869,57 +956,38 @@ function DateFilterButton({
         <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[280px] p-3 space-y-3">
           <div className="text-[9px] text-[var(--muted)]">
             accepts partial dates, times, or both — e.g. <code>2026-05-09</code>
-            , <code>14:30</code>, or <code>2026-05-09 14:30</code>
+            , <code>14:30</code>, or <code>5/9 14:30</code>. Times shown in your
+            local timezone; URL preserves the absolute instant.
           </div>
           <div className="space-y-2">
             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
               Started
             </div>
-            <label className="block text-[10px] text-[var(--muted)]">
-              after
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.startedAfter}
-                onChange={(e) => group.setStartedAfter(e.target.value)}
-                className={inputCls}
-              />
-            </label>
-            <label className="block text-[10px] text-[var(--muted)]">
-              before
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.startedBefore}
-                onChange={(e) => group.setStartedBefore(e.target.value)}
-                className={inputCls}
-              />
-            </label>
+            <DateInput
+              label="after"
+              urlValue={group.startedAfter}
+              setUrl={group.setStartedAfter}
+            />
+            <DateInput
+              label="before"
+              urlValue={group.startedBefore}
+              setUrl={group.setStartedBefore}
+            />
           </div>
           <div className="space-y-2 pt-2 border-t border-[var(--border)]">
             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
               Finished
             </div>
-            <label className="block text-[10px] text-[var(--muted)]">
-              after
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.finishedAfter}
-                onChange={(e) => group.setFinishedAfter(e.target.value)}
-                className={inputCls}
-              />
-            </label>
-            <label className="block text-[10px] text-[var(--muted)]">
-              before
-              <input
-                type="text"
-                placeholder="YYYY-MM-DD [HH:MM]"
-                value={group.finishedBefore}
-                onChange={(e) => group.setFinishedBefore(e.target.value)}
-                className={inputCls}
-              />
-            </label>
+            <DateInput
+              label="after"
+              urlValue={group.finishedAfter}
+              setUrl={group.setFinishedAfter}
+            />
+            <DateInput
+              label="before"
+              urlValue={group.finishedBefore}
+              setUrl={group.setFinishedBefore}
+            />
           </div>
           {active && (
             <button
