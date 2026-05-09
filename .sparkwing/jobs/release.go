@@ -1,13 +1,11 @@
 package jobs
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -88,17 +86,11 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
-	changelog := sparkwing.Job(plan, "check-changelog", &checkChangelogJob{
-		Version: versionRef,
-		RepoDir: repoDir,
-	})
-	changelog.Needs(discover)
-
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog)
+	pushTag.Needs(validate, clean)
 	return nil
 }
 
@@ -118,12 +110,12 @@ func repoRoot() (string, error) {
 
 // resolveVersionJob picks the version to release, in order:
 //  1. explicit --version  -> use it.
-//  2. CHANGELOG-driven    -> highest version present in CHANGELOG.md
-//     that doesn't yet have a tag on origin.
-//  3. tag + bump          -> bump kind off the latest semver tag.
+//  2. tag + bump          -> bump kind off the highest origin tag.
 //
-// First-ever release (no tags AND no CHANGELOG entries) yields
-// v0.1.0 from the bump fallback.
+// First-ever release (no tags) yields v0.1.0 from the bump fallback.
+// Release notes are produced by the GH-Actions workflow's
+// `gh release create --generate-notes` (commit-history walk), so we
+// no longer maintain CHANGELOG.md here.
 type resolveVersionJob struct {
 	sparkwing.Base
 	sparkwing.Produces[string]
@@ -144,15 +136,6 @@ func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
 		}
 		sparkwing.Info(ctx, "using explicit version: %s", s)
 		return s, nil
-	}
-	if v, err := highestUnreleasedFromChangelog(ctx, j.RepoDir); err != nil {
-		fmt.Fprintf(os.Stderr, "release: changelog scan failed (using tag-bump fallback): %v\n", err)
-	} else if v != "" {
-		if err := validateReleaseVersion(v); err != nil {
-			return "", fmt.Errorf("release: CHANGELOG points at %s but that's not valid semver: %w", v, err)
-		}
-		sparkwing.Info(ctx, "resolved from CHANGELOG.md: %s", v)
-		return v, nil
 	}
 	bump := strings.TrimSpace(j.Bump)
 	if bump == "" {
@@ -236,46 +219,6 @@ func (j *checkCleanTreeJob) run(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "working tree is clean")
 	return nil
-}
-
-// checkChangelogJob refuses to release a version without a matching
-// entry in CHANGELOG.md. Forces release authorship to include user-
-// facing notes -- silent releases turn into "what changed?" support
-// questions later.
-type checkChangelogJob struct {
-	sparkwing.Base
-	Version sparkwing.Ref[string]
-	RepoDir string
-}
-
-func (j *checkChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
-	return nil, nil
-}
-
-func (j *checkChangelogJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("changelog: open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	if found, headingLine := scanForVersion(f, version); found {
-		sparkwing.Info(ctx, "changelog entry present: %s -> %s", version, strings.TrimSpace(headingLine))
-		return nil
-	}
-
-	return fmt.Errorf(
-		"changelog: no entry for %s in CHANGELOG.md\n"+
-			"  add a section like:\n\n"+
-			"    ## [%s] - YYYY-MM-DD\n\n"+
-			"    ### Added\n"+
-			"    - what's new for users\n\n"+
-			"  then re-run the release. The pipeline refuses to ship a\n"+
-			"  version without user-facing notes.",
-		version, version)
 }
 
 // pushTagJob creates the annotated tag and pushes it to origin. The
@@ -362,15 +305,35 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 	return res.Stdout, nil
 }
 
+// latestSemverTagIn returns the highest stable-semver tag visible on
+// origin. Reads via `ls-remote --tags` rather than `git tag --list` so
+// stale local tags (orphans from before an OSS scrub, force-deleted
+// upstream refs, etc.) can't bias the bump fallback. The release
+// pipeline's "what's the next version" decision is fundamentally a
+// statement about what the world has seen -- not what this checkout
+// happens to remember.
 func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
-	out, err := runGitIn(ctx, repoDir, "tag", "--list")
+	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
 	if err != nil {
 		return "", err
 	}
 	var best string
 	for _, line := range strings.Split(out, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" || !semver.IsValid(t) {
+		// Each line: "<sha>\trefs/tags/<tag>" or
+		// "<sha>\trefs/tags/<tag>^{}" for the dereferenced peel of an
+		// annotated tag. The peeled entry duplicates the name; either
+		// form works for our compare so we just strip both suffixes.
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		ref := fields[1]
+		const prefix = "refs/tags/"
+		if !strings.HasPrefix(ref, prefix) {
+			continue
+		}
+		t := strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "^{}")
+		if !semver.IsValid(t) {
 			continue
 		}
 		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
@@ -415,91 +378,6 @@ func bumpVersion(v, kind string) (string, error) {
 		return "", fmt.Errorf("bump kind %q not in patch|minor|major", kind)
 	}
 	return fmt.Sprintf("v%d.%d.%d", major, minor, patch), nil
-}
-
-func highestUnreleasedFromChangelog(ctx context.Context, repoDir string) (string, error) {
-	versions, err := changelogVersions(repoDir)
-	if err != nil {
-		return "", err
-	}
-	if len(versions) == 0 {
-		return "", nil
-	}
-	sort.SliceStable(versions, func(i, j int) bool {
-		return semver.Compare(versions[i], versions[j]) > 0
-	})
-	top := versions[0]
-	exists, err := tagExistsOnRemote(ctx, repoDir, top)
-	if err != nil {
-		return "", fmt.Errorf("check remote tag %s: %w", top, err)
-	}
-	if exists {
-		return "", nil
-	}
-	return top, nil
-}
-
-func changelogVersions(repoDir string) ([]string, error) {
-	path := filepath.Join(repoDir, "CHANGELOG.md")
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	var out []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		trim := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(trim, "#") {
-			continue
-		}
-		body := strings.TrimSpace(strings.TrimLeft(trim, "#"))
-		for _, tok := range strings.Fields(body) {
-			cleaned := strings.Trim(tok, "[]()*_`,;:.")
-			if !semver.IsValid(cleaned) {
-				continue
-			}
-			if semver.Prerelease(cleaned) != "" || semver.Build(cleaned) != "" {
-				continue
-			}
-			parts := strings.Split(strings.TrimPrefix(cleaned, "v"), ".")
-			if len(parts) != 3 {
-				continue
-			}
-			out = append(out, cleaned)
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan %s: %w", path, err)
-	}
-	return out, nil
-}
-
-func scanForVersion(r *os.File, version string) (bool, string) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		trim := strings.TrimSpace(line)
-		if !strings.HasPrefix(trim, "#") {
-			continue
-		}
-		body := strings.TrimLeft(trim, "#")
-		body = strings.TrimSpace(body)
-		for _, tok := range strings.Fields(body) {
-			cleaned := strings.Trim(tok, "[]()*_`,;:.")
-			if cleaned == version {
-				return true, line
-			}
-		}
-	}
-	return false, ""
 }
 
 func init() {

@@ -31,8 +31,9 @@ pipelines:
   # push to publish binaries to GH Releases and multi-arch images to
   # GHCR (see ISS-046 / ISS-052). This pipeline deliberately does
   # NOT duplicate that work -- its job is just to validate the
-  # release shape (clean tree, free tag, CHANGELOG entry) and push
-  # the tag.
+  # release shape (clean tree, free tag) and push the tag. Release
+  # notes come from the GH-Actions workflow's `gh release create
+  # --generate-notes`, not a hand-curated CHANGELOG.
   - name: release
     entrypoint: Release
     group: Release
