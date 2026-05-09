@@ -925,12 +925,12 @@ function FilterableValue({
       }}
     >
       <span
-        className={`cursor-pointer rounded px-1 -mx-1 hover:bg-[var(--surface-raised)] transition-colors ${
+        className={`cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] underline decoration-dotted underline-offset-4 ${
           incl
-            ? "underline decoration-dotted underline-offset-2"
+            ? "decoration-2 decoration-current"
             : excl
-              ? "line-through opacity-60"
-              : ""
+              ? "line-through decoration-red-400 opacity-70"
+              : "decoration-[var(--muted)]/40 hover:decoration-[var(--muted)]"
         }`}
       >
         {children}
@@ -956,6 +956,16 @@ function FilterableValue({
             className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
           >
             {excl ? "✗ excluded" : "− exclude"} {value}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(value);
+              setOpen(false);
+            }}
+            className="px-2 py-0.5 rounded text-left text-[var(--muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] border-t border-[var(--border)] mt-0.5 pt-1"
+          >
+            ⧉ copy
           </button>
         </span>
       )}
@@ -984,7 +994,7 @@ function FilterableTimestamp({
         setOpen((o) => !o);
       }}
     >
-      <span className="cursor-pointer rounded px-1 -mx-1 hover:bg-[var(--surface-raised)] transition-colors">
+      <span className="cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] underline decoration-dotted underline-offset-4 decoration-[var(--muted)]/40 hover:decoration-[var(--muted)]">
         {children}
       </span>
       {open && (
@@ -1008,6 +1018,16 @@ function FilterableTimestamp({
             className="px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] text-[var(--muted)] hover:text-orange-300"
           >
             + set as &apos;{field} after&apos;
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(iso);
+              setOpen(false);
+            }}
+            className="px-2 py-0.5 rounded text-left text-[var(--muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] border-t border-[var(--border)] mt-0.5 pt-1"
+          >
+            ⧉ copy
           </button>
         </span>
       )}
