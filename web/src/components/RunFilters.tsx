@@ -806,12 +806,9 @@ export function FullFilterBar({
           </button>
         </div>
         {setSearchText && (
-          <input
-            type="search"
+          <DebouncedSearchInput
             value={searchText || ""}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search: space between filters. Use prefix - to negate."
-            className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-full"
+            onCommit={setSearchText}
           />
         )}
       </div>
@@ -920,6 +917,59 @@ export function FullFilterBar({
         <div className="shrink-0 pt-1 self-start">{trailingActions}</div>
       )}
     </div>
+  );
+}
+
+// DebouncedSearchInput keeps the visible value in local state for
+// snappy typing, then commits upstream (URL/router) after a brief
+// idle so each keystroke doesn't trigger a full filter rerun.
+function DebouncedSearchInput({
+  value,
+  onCommit,
+  delayMs = 180,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+  delayMs?: number;
+}) {
+  const [local, setLocal] = useState(value);
+  const focusedRef = useRef(false);
+  const lastCommittedRef = useRef(value);
+
+  useEffect(() => {
+    if (focusedRef.current) return;
+    if (value !== local) setLocal(value);
+    lastCommittedRef.current = value;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  useEffect(() => {
+    if (local === lastCommittedRef.current) return;
+    const id = setTimeout(() => {
+      lastCommittedRef.current = local;
+      onCommit(local);
+    }, delayMs);
+    return () => clearTimeout(id);
+  }, [local, delayMs, onCommit]);
+
+  return (
+    <input
+      type="search"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onBlur={() => {
+        focusedRef.current = false;
+        if (local !== lastCommittedRef.current) {
+          lastCommittedRef.current = local;
+          onCommit(local);
+        }
+      }}
+      placeholder="Search: space between filters. Use prefix - to negate."
+      className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-full"
+    />
   );
 }
 
