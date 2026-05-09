@@ -783,7 +783,7 @@ function FullRunRow({ r }: { r: Run }) {
   const sinceTs = r.finished_at || r.started_at;
   return (
     <>
-      <div className="flex items-center gap-3 text-xs min-w-0">
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs min-w-0">
         <StatusLabel status={r.status} />
         <span className="text-cyan-400/70 shrink-0">{repoLabel(r)}</span>
         <span className="text-[var(--muted)] shrink-0">/</span>
