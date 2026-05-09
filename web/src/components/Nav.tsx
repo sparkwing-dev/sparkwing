@@ -10,8 +10,8 @@ type Tab = { href: string; label: string; external?: boolean };
 const tabs: Tab[] = [
   { href: "/", label: "Home" },
   { href: "/runs", label: "Runs" },
-  { href: "/pipeline-overview", label: "Pipeline Overview" },
   { href: "/cluster", label: "Cluster" },
+  { href: "/analytics", label: "Analytics" },
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];
 

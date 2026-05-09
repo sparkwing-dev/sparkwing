@@ -15,7 +15,8 @@
 // them.
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import PipelineOverview from "@/components/PipelineOverview";
 import {
   type Node as RunNode,
   type PipelineMeta,
@@ -125,8 +126,69 @@ function nodeDuration(n: RunNode): number {
 export default function PipelinesPage() {
   return (
     <Suspense>
-      <Pipelines />
+      <RunsRoute />
     </Suspense>
+  );
+}
+
+function RunsRoute() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const view: "activity" | "pipelines" =
+    searchParams.get("view") === "pipelines" ? "pipelines" : "activity";
+
+  const setView = (next: "activity" | "pipelines") => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "pipelines") {
+      params.set("view", "pipelines");
+      params.delete("run");
+      params.delete("node");
+    } else {
+      params.delete("view");
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/runs?${qs}` : "/runs");
+  };
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="border-b border-[var(--border)] flex items-center gap-1 px-2 bg-[var(--surface)] shrink-0">
+        <PivotTab
+          label="Activity"
+          active={view === "activity"}
+          onClick={() => setView("activity")}
+        />
+        <PivotTab
+          label="By pipeline"
+          active={view === "pipelines"}
+          onClick={() => setView("pipelines")}
+        />
+      </div>
+      {view === "pipelines" ? <PipelineOverview /> : <Pipelines />}
+    </div>
+  );
+}
+
+function PivotTab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px ${
+        active
+          ? "border-cyan-400 text-[var(--foreground)] font-semibold"
+          : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
