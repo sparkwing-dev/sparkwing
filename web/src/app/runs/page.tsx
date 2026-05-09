@@ -1068,30 +1068,15 @@ const FullRunRow = memo(function FullRunRow({
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
 
   const meta = (
-    <div
-      className={`min-w-0 flex flex-wrap items-center gap-y-1 ${compact ? "gap-x-1.5 text-[11px]" : "gap-x-2 text-xs"}`}
-    >
+    <div className="min-w-0 flex flex-wrap items-center gap-y-1 gap-x-2 text-xs">
       <FilterableValue
         facet="status"
         value={r.status}
         ctx={ctx}
         tooltip={`Status: ${r.status}`}
       >
-        {compact ? (
-          <span
-            className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
-          />
-        ) : (
-          <StatusLabel status={r.status} />
-        )}
+        <StatusLabel status={r.status} />
       </FilterableValue>
-      {compact && r.trigger_source && (
-        <Tooltip content={`Trigger: ${r.trigger_source}`}>
-          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
-            {r.trigger_source.charAt(0).toLowerCase()}
-          </span>
-        </Tooltip>
-      )}
       <FilterableValue
         facet="repo"
         value={repo}
@@ -1107,9 +1092,7 @@ const FullRunRow = memo(function FullRunRow({
         ctx={ctx}
         tooltip={`Pipeline: ${r.pipeline}`}
       >
-        <span
-          className={`font-medium text-violet-300 truncate ${compact ? "" : "text-sm"}`}
-        >
+        <span className="font-medium text-violet-300 truncate text-sm">
           {r.pipeline}
         </span>
       </FilterableValue>
@@ -1135,7 +1118,7 @@ const FullRunRow = memo(function FullRunRow({
           <span className="font-mono text-[var(--muted)] shrink-0">{sha7}</span>
         </FilterableValue>
       )}
-      {!compact && r.trigger_source && (
+      {r.trigger_source && (
         <Tooltip content={`Trigger: ${r.trigger_source}`}>
           <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
             {r.trigger_source}
@@ -1143,20 +1126,31 @@ const FullRunRow = memo(function FullRunRow({
         </Tooltip>
       )}
       <span className="basis-full" />
-      {compact ? (
-        <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
-          <FilterableTimestamp
-            iso={r.started_at}
-            field="started"
-            ctx={ctx}
-            tooltip={`Started ${fmtFullDate(r.started_at)}`}
-          >
-            <span className="text-[var(--foreground)]">
-              {fmtClock(r.started_at)}
-            </span>
-          </FilterableTimestamp>
-          <span>→</span>
-          {r.finished_at ? (
+      <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
+        {fmtDatePrefix(r.started_at) && (
+          <span className="text-[var(--foreground)]">
+            {fmtDatePrefix(r.started_at)}
+          </span>
+        )}
+        <FilterableTimestamp
+          iso={r.started_at}
+          field="started"
+          ctx={ctx}
+          tooltip={`Started ${fmtFullDate(r.started_at)}`}
+        >
+          <span className="text-[var(--foreground)]">
+            {fmtClock(r.started_at)}
+          </span>
+        </FilterableTimestamp>
+        <span>→</span>
+        {r.finished_at ? (
+          <>
+            {fmtDatePrefix(r.finished_at) &&
+              fmtDatePrefix(r.finished_at) !== fmtDatePrefix(r.started_at) && (
+                <span className="text-[var(--foreground)]">
+                  {fmtDatePrefix(r.finished_at)}
+                </span>
+              )}
             <FilterableTimestamp
               iso={r.finished_at}
               field="finished"
@@ -1167,64 +1161,21 @@ const FullRunRow = memo(function FullRunRow({
                 {fmtClock(r.finished_at)}
               </span>
             </FilterableTimestamp>
-          ) : (
-            <Tooltip content="Finished">
-              <span className="text-[var(--foreground)]">—</span>
-            </Tooltip>
-          )}
-          {elapsedMs > 0 && (
-            <Tooltip content="Duration">
-              <span>({fmtMs(elapsedMs)})</span>
-            </Tooltip>
-          )}
-          <Tooltip content={fmtFullDate(sinceTs)}>
-            <span>· {fmtAgo(sinceTs)}</span>
+          </>
+        ) : (
+          <Tooltip content="Finished">
+            <span className="text-[var(--foreground)]">—</span>
           </Tooltip>
-        </span>
-      ) : (
-        <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
-          {fmtDatePrefix(r.started_at) && (
-            <span className="text-[var(--foreground)]">
-              {fmtDatePrefix(r.started_at)}
-            </span>
-          )}
-          <FilterableTimestamp
-            iso={r.started_at}
-            field="started"
-            ctx={ctx}
-            tooltip={`Started ${fmtFullDate(r.started_at)}`}
-          >
-            <span className="text-[var(--foreground)]">
-              {fmtClock(r.started_at)}
-            </span>
-          </FilterableTimestamp>
-          <span>→</span>
-          {r.finished_at ? (
-            <FilterableTimestamp
-              iso={r.finished_at}
-              field="finished"
-              ctx={ctx}
-              tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
-            >
-              <span className="text-[var(--foreground)]">
-                {fmtClock(r.finished_at)}
-              </span>
-            </FilterableTimestamp>
-          ) : (
-            <Tooltip content="Finished">
-              <span className="text-[var(--foreground)]">—</span>
-            </Tooltip>
-          )}
-          {elapsedMs > 0 && (
-            <Tooltip content="Duration">
-              <span>({fmtMs(elapsedMs)})</span>
-            </Tooltip>
-          )}
-          <Tooltip content={fmtFullDate(sinceTs)}>
-            <span>· {fmtAgo(sinceTs)}</span>
+        )}
+        {elapsedMs > 0 && (
+          <Tooltip content="Duration">
+            <span>({fmtMs(elapsedMs)})</span>
           </Tooltip>
-        </span>
-      )}
+        )}
+        <Tooltip content={fmtFullDate(sinceTs)}>
+          <span>· {fmtAgo(sinceTs)}</span>
+        </Tooltip>
+      </span>
     </div>
   );
 
@@ -1324,6 +1275,13 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
           {fmtClock(r.started_at)}
         </span>
         <span>→</span>
+        {r.finished_at &&
+          fmtDatePrefix(r.finished_at) &&
+          fmtDatePrefix(r.finished_at) !== fmtDatePrefix(r.started_at) && (
+            <span className="text-[var(--foreground)]">
+              {fmtDatePrefix(r.finished_at)}
+            </span>
+          )}
         <span className="text-[var(--foreground)]">
           {r.finished_at ? fmtClock(r.finished_at) : "—"}
         </span>
