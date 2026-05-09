@@ -15,7 +15,7 @@
 // them.
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import PipelineOverview from "@/components/PipelineOverview";
 import {
   type Node as RunNode,
@@ -196,6 +196,82 @@ function PivotTab({
   );
 }
 
+// useUrlFilterState makes every filter live in the URL so a filtered
+// view is shareable, survives a reload, and persists across the
+// Activity ↔ By pipeline pivot. Empty values are omitted from the URL
+// to keep it tidy. Multi-select facets are encoded as comma-joined
+// strings (status=running,failed); excludes get an `n` prefix
+// (nstatus=cancelled).
+function useUrlFilterState() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const setParams = useCallback(
+    (updates: Record<string, string | string[]>) => {
+      const next = new URLSearchParams(searchParams.toString());
+      for (const [key, val] of Object.entries(updates)) {
+        const empty = val === "" || (Array.isArray(val) && val.length === 0);
+        if (empty) next.delete(key);
+        else next.set(key, Array.isArray(val) ? val.join(",") : val);
+      }
+      const qs = next.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [searchParams, router, pathname],
+  );
+
+  const getList = (key: string): string[] => {
+    const v = searchParams.get(key);
+    return v ? v.split(",").filter(Boolean) : [];
+  };
+  const getStr = (key: string): string => searchParams.get(key) || "";
+
+  return {
+    filterStatus: getList("status"),
+    setFilterStatus: (v: string[]) => setParams({ status: v }),
+    excludeStatus: getList("nstatus"),
+    setExcludeStatus: (v: string[]) => setParams({ nstatus: v }),
+
+    filterRepo: getList("repo"),
+    setFilterRepo: (v: string[]) => setParams({ repo: v }),
+    excludeRepo: getList("nrepo"),
+    setExcludeRepo: (v: string[]) => setParams({ nrepo: v }),
+
+    filterPipeline: getList("pipeline"),
+    setFilterPipeline: (v: string[]) => setParams({ pipeline: v }),
+    excludePipeline: getList("npipeline"),
+    setExcludePipeline: (v: string[]) => setParams({ npipeline: v }),
+
+    filterBranch: getList("branch"),
+    setFilterBranch: (v: string[]) => setParams({ branch: v }),
+    excludeBranch: getList("nbranch"),
+    setExcludeBranch: (v: string[]) => setParams({ nbranch: v }),
+
+    filterCommit: getList("commit"),
+    setFilterCommit: (v: string[]) => setParams({ commit: v }),
+    excludeCommit: getList("ncommit"),
+    setExcludeCommit: (v: string[]) => setParams({ ncommit: v }),
+
+    filterTag: getList("tag"),
+    setFilterTag: (v: string[]) => setParams({ tag: v }),
+    excludeTag: getList("ntag"),
+    setExcludeTag: (v: string[]) => setParams({ ntag: v }),
+
+    startedAfter: getStr("startedAfter"),
+    setStartedAfter: (v: string) => setParams({ startedAfter: v }),
+    startedBefore: getStr("startedBefore"),
+    setStartedBefore: (v: string) => setParams({ startedBefore: v }),
+    finishedAfter: getStr("finishedAfter"),
+    setFinishedAfter: (v: string) => setParams({ finishedAfter: v }),
+    finishedBefore: getStr("finishedBefore"),
+    setFinishedBefore: (v: string) => setParams({ finishedBefore: v }),
+
+    filterText: getStr("q"),
+    setFilterText: (v: string) => setParams({ q: v }),
+  };
+}
+
 function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const searchParams = useSearchParams();
   const [runs, setRuns] = useState<Run[]>([]);
@@ -207,23 +283,42 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     searchParams.get("run"),
   );
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [filterRepo, setFilterRepo] = useState<string[]>([]);
-  const [filterPipeline, setFilterPipeline] = useState<string[]>([]);
-  const [filterBranch, setFilterBranch] = useState<string[]>([]);
-  const [filterStatus, setFilterStatus] = useState<string[]>([]);
-  const [filterTag, setFilterTag] = useState<string[]>([]);
-  const [filterCommit, setFilterCommit] = useState<string[]>([]);
-  const [startedAfter, setStartedAfter] = useState<string>("");
-  const [startedBefore, setStartedBefore] = useState<string>("");
-  const [finishedAfter, setFinishedAfter] = useState<string>("");
-  const [finishedBefore, setFinishedBefore] = useState<string>("");
-  const [filterText, setFilterText] = useState<string>("");
-  const [excludeStatus, setExcludeStatus] = useState<string[]>([]);
-  const [excludeRepo, setExcludeRepo] = useState<string[]>([]);
-  const [excludePipeline, setExcludePipeline] = useState<string[]>([]);
-  const [excludeBranch, setExcludeBranch] = useState<string[]>([]);
-  const [excludeCommit, setExcludeCommit] = useState<string[]>([]);
-  const [excludeTag, setExcludeTag] = useState<string[]>([]);
+  const {
+    filterStatus,
+    setFilterStatus,
+    excludeStatus,
+    setExcludeStatus,
+    filterRepo,
+    setFilterRepo,
+    excludeRepo,
+    setExcludeRepo,
+    filterPipeline,
+    setFilterPipeline,
+    excludePipeline,
+    setExcludePipeline,
+    filterBranch,
+    setFilterBranch,
+    excludeBranch,
+    setExcludeBranch,
+    filterCommit,
+    setFilterCommit,
+    excludeCommit,
+    setExcludeCommit,
+    filterTag,
+    setFilterTag,
+    excludeTag,
+    setExcludeTag,
+    startedAfter,
+    setStartedAfter,
+    startedBefore,
+    setStartedBefore,
+    finishedAfter,
+    setFinishedAfter,
+    finishedBefore,
+    setFinishedBefore,
+    filterText,
+    setFilterText,
+  } = useUrlFilterState();
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [showTrigger, setShowTrigger] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
