@@ -290,9 +290,12 @@ function Pipelines() {
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      {/* Left: Runs list */}
+      {/* Left: Runs list. Collapses to a sidebar when a run is
+          selected; expands to fill the screen otherwise so the dense
+          row view has room for status + repo / pipeline + branch + sha
+          + duration + timestamps + an inline error preview. */}
       <div
-        className={`${run ? "w-52" : "w-[28rem]"} border-r border-[var(--border)] flex flex-col shrink-0 transition-all`}
+        className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
       >
         {run && (
           <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
@@ -467,13 +470,10 @@ function Pipelines() {
         </div>
       )}
 
-      {/* Right: detail + logs */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {!run ? (
-          <div className="flex-1 flex items-center justify-center text-[var(--muted)] text-sm">
-            ← Select a run to view its nodes and logs
-          </div>
-        ) : (
+      {/* Right: detail + logs. Hidden until a run is selected so the
+          runs list above can spread across the full viewport. */}
+      {run && (
+        <div className="flex-1 flex flex-col overflow-hidden">
           <RunDetailPane
             run={run}
             nodes={nodes}
@@ -486,8 +486,8 @@ function Pipelines() {
               if (selectedRun) loadDetail(selectedRun);
             }}
           />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -695,33 +695,49 @@ function NodeRow({
 // --- run row variants ---
 
 function FullRunRow({ r }: { r: Run }) {
+  const dur = runDurationMs(r);
   return (
     <>
-      <div className="flex items-center gap-2 mb-0.5">
+      <div className="flex items-center gap-3 text-xs min-w-0">
         <StatusLabel status={r.status} />
-        <span className="text-cyan-400/70 text-xs">{repoLabel(r)}</span>
-        <span className="text-[var(--muted)] text-xs">/</span>
+        <span className="text-cyan-400/70 shrink-0">{repoLabel(r)}</span>
+        <span className="text-[var(--muted)] shrink-0">/</span>
         <span className="font-medium text-sm text-violet-300 truncate">
           {r.pipeline}
         </span>
-        <span className="ml-auto text-xs font-mono shrink-0">
-          {fmtMs(runDurationMs(r))}
-        </span>
-      </div>
-      <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
         {r.git_branch && (
-          <span className="text-amber-400/70">⎇ {r.git_branch}</span>
+          <span className="text-amber-400/70 shrink-0 truncate max-w-[160px]">
+            ⎇ {r.git_branch}
+          </span>
         )}
         {r.git_sha && (
-          <span className="font-mono">{r.git_sha.slice(0, 7)}</span>
+          <span className="font-mono text-[var(--muted)] shrink-0">
+            {r.git_sha.slice(0, 7)}
+          </span>
         )}
-        <span className="ml-auto font-mono">
+        {r.trigger_source && (
+          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
+            {r.trigger_source}
+          </span>
+        )}
+        <span className="ml-auto font-mono shrink-0 tabular-nums">
+          {fmtMs(dur)}
+        </span>
+        <span className="font-mono text-[var(--muted)] shrink-0 tabular-nums">
           {new Date(r.started_at).toLocaleTimeString()}
         </span>
-        <span>
+        <span className="text-[var(--muted)] shrink-0">
           (<TimeAgo ts={r.started_at} />)
         </span>
       </div>
+      {r.error && (
+        <div
+          className="mt-1 text-[11px] text-red-400 font-mono truncate"
+          title={r.error}
+        >
+          error: {r.error}
+        </div>
+      )}
     </>
   );
 }

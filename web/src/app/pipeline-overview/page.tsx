@@ -22,7 +22,13 @@ const RUNS_WINDOW = 200;
 const SPARK_SIZE = 12;
 
 interface PipelineRow {
-  name: string;
+  // Composite identity: `repo/pipeline` when run history attaches a
+  // repo, bare pipeline name for registry-only entries. Used as the
+  // expand/trigger state key so two pipelines that share a name across
+  // different repos don't collide.
+  key: string;
+  pipeline: string;
+  repo: string | null;
   meta: PipelineMeta | null;
   runs: Run[];
   lastRun: Run | null;
@@ -30,23 +36,31 @@ interface PipelineRow {
   avgDurMs: number;
 }
 
+function repoLabel(r: Run): string | null {
+  const raw = r.repo || r.github_repo;
+  if (!raw) return null;
+  const slash = raw.lastIndexOf("/");
+  return slash >= 0 ? raw.slice(slash + 1) : raw;
+}
+
 function buildRows(
   registry: Record<string, PipelineMeta>,
   runs: Run[],
 ): PipelineRow[] {
-  const runsByPipeline = new Map<string, Run[]>();
+  const runsByKey = new Map<
+    string,
+    { pipeline: string; repo: string | null; runs: Run[] }
+  >();
   for (const r of runs) {
-    const arr = runsByPipeline.get(r.pipeline) || [];
-    arr.push(r);
-    runsByPipeline.set(r.pipeline, arr);
+    const repo = repoLabel(r);
+    const key = repo ? `${repo}/${r.pipeline}` : r.pipeline;
+    const bucket = runsByKey.get(key);
+    if (bucket) bucket.runs.push(r);
+    else runsByKey.set(key, { pipeline: r.pipeline, repo, runs: [r] });
   }
-  const names = new Set<string>([
-    ...Object.keys(registry),
-    ...runsByPipeline.keys(),
-  ]);
+
   const out: PipelineRow[] = [];
-  for (const name of names) {
-    const pipelineRuns = runsByPipeline.get(name) || [];
+  for (const [key, { pipeline, repo, runs: pipelineRuns }] of runsByKey) {
     const passed = pipelineRuns.filter((r) => r.status === "success").length;
     const failed = pipelineRuns.filter((r) => r.status === "failed").length;
     const running = pipelineRuns.filter((r) => r.status === "running").length;
@@ -57,23 +71,45 @@ function buildRows(
       ? finished.reduce((a, r) => a + runDurationMs(r), 0) / finished.length
       : 0;
     out.push({
-      name,
-      meta: registry[name] || null,
+      key,
+      pipeline,
+      repo,
+      meta: registry[pipeline] || null,
       runs: pipelineRuns,
       lastRun: pipelineRuns[0] || null,
       stats: { total: pipelineRuns.length, passed, failed, running },
       avgDurMs,
     });
   }
+
+  // Registry-only rows: pipelines registered in pipelines.yaml that
+  // haven't been run yet in any repo we've seen. The registry doesn't
+  // carry repo info, so these render with no repo prefix.
+  const seenPipelines = new Set(
+    Array.from(runsByKey.values()).map((v) => v.pipeline),
+  );
+  for (const name of Object.keys(registry)) {
+    if (seenPipelines.has(name)) continue;
+    out.push({
+      key: name,
+      pipeline: name,
+      repo: null,
+      meta: registry[name],
+      runs: [],
+      lastRun: null,
+      stats: { total: 0, passed: 0, failed: 0, running: 0 },
+      avgDurMs: 0,
+    });
+  }
+
   return out;
 }
 
 function sortRows(a: PipelineRow, b: PipelineRow): number {
-  // Most recently active first; then by name for registered-but-unused.
   const at = a.lastRun ? new Date(a.lastRun.started_at).getTime() : 0;
   const bt = b.lastRun ? new Date(b.lastRun.started_at).getTime() : 0;
   if (at !== bt) return bt - at;
-  return a.name.localeCompare(b.name);
+  return a.key.localeCompare(b.key);
 }
 
 export default function PipelinesPage() {
@@ -112,7 +148,8 @@ export default function PipelinesPage() {
     const q = filter.toLowerCase();
     return rows.filter(
       (row) =>
-        row.name.toLowerCase().includes(q) ||
+        row.pipeline.toLowerCase().includes(q) ||
+        (row.repo?.toLowerCase().includes(q) ?? false) ||
         (row.meta?.tags || []).some((t) => t.toLowerCase().includes(q)),
     );
   }, [rows, filter]);
@@ -175,15 +212,15 @@ export default function PipelinesPage() {
         <div className="space-y-2">
           {filtered.map((row) => (
             <PipelineCard
-              key={row.name}
+              key={row.key}
               row={row}
-              expanded={expanded === row.name}
+              expanded={expanded === row.key}
               onToggle={() =>
-                setExpanded((cur) => (cur === row.name ? null : row.name))
+                setExpanded((cur) => (cur === row.key ? null : row.key))
               }
-              triggerOpen={triggerOpen === row.name}
+              triggerOpen={triggerOpen === row.key}
               onTrigger={() =>
-                setTriggerOpen((cur) => (cur === row.name ? null : row.name))
+                setTriggerOpen((cur) => (cur === row.key ? null : row.key))
               }
               onTriggered={() => {
                 setTriggerOpen(null);
@@ -268,8 +305,14 @@ function PipelineCard({
         <span className="w-4 text-center text-xs text-[var(--muted)]">
           {expanded ? "-" : "+"}
         </span>
-        <span className="font-mono text-sm font-medium truncate flex-1">
-          {row.name}
+        <span className="font-mono text-sm font-medium truncate flex-1 min-w-0">
+          {row.repo && (
+            <>
+              <span className="text-cyan-400/80">{row.repo}</span>
+              <span className="text-[var(--muted)] mx-1">/</span>
+            </>
+          )}
+          <span className="text-violet-300">{row.pipeline}</span>
         </span>
         {!row.meta && (
           <span
@@ -322,7 +365,7 @@ function PipelineCard({
 
           {triggerOpen && (
             <TriggerForm
-              pipeline={row.name}
+              pipeline={row.pipeline}
               onTriggered={onTriggered}
               onClose={() => onTrigger()}
             />
@@ -390,21 +433,31 @@ function RecentRuns({ runs }: { runs: Run[] }) {
         {runs.map((r) => (
           <li key={r.id} className="px-2 py-1.5 flex items-center gap-2">
             <span
-              className={`w-1.5 h-1.5 rounded-full ${sparkColor(r.status)}`}
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${sparkColor(r.status)}`}
             />
             <a
               href={`/runs?run=${r.id}`}
-              className="font-mono text-xs text-[var(--accent)] hover:underline truncate flex-1"
+              className="font-mono text-xs text-[var(--accent)] hover:underline truncate min-w-0 flex-1"
             >
               {r.id}
             </a>
+            {r.git_branch && (
+              <span className="text-[11px] text-amber-400/70 font-mono shrink-0 truncate max-w-[160px]">
+                ⎇ {r.git_branch}
+              </span>
+            )}
+            {r.git_sha && (
+              <span className="text-[11px] text-[var(--muted)] font-mono shrink-0">
+                {r.git_sha.slice(0, 7)}
+              </span>
+            )}
             <StatusPill status={r.status} />
-            <span className="text-[11px] text-[var(--muted)] font-mono w-20 text-right">
+            <span className="text-[11px] text-[var(--muted)] font-mono w-20 text-right shrink-0 tabular-nums">
               {r.status === "running"
                 ? "running"
                 : formatDuration(runDurationMs(r))}
             </span>
-            <span className="text-[11px] text-[var(--muted)] font-mono w-24 text-right">
+            <span className="text-[11px] text-[var(--muted)] font-mono w-24 text-right shrink-0">
               <TimeAgo ts={r.started_at} />
             </span>
           </li>
