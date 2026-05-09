@@ -212,6 +212,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [filterBranch, setFilterBranch] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState<string[]>([]);
+  const [filterCommit, setFilterCommit] = useState<string[]>([]);
+  const [filterAfter, setFilterAfter] = useState<string>("");
+  const [filterBefore, setFilterBefore] = useState<string>("");
+  const [filterText, setFilterText] = useState<string>("");
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [showTrigger, setShowTrigger] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -317,31 +321,65 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const branches = [
     ...new Set(runs.map((r) => r.git_branch || "").filter(Boolean)),
   ].sort();
+  const commits = [
+    ...new Set(
+      runs.map((r) => (r.git_sha ? r.git_sha.slice(0, 7) : "")).filter(Boolean),
+    ),
+  ].sort();
   const allTags = [
     ...new Set(Object.values(pipelineMeta).flatMap((m) => m.tags || [])),
   ].sort();
   const statuses = ["success", "failed", "running", "cancelled"];
 
   const topLevel = runs.filter((r) => {
+    if (filterStatus.length && !filterStatus.includes(r.status)) return false;
     if (filterRepo.length && !filterRepo.includes(repoLabel(r))) return false;
     if (filterPipeline.length && !filterPipeline.includes(r.pipeline))
       return false;
     if (filterBranch.length && !filterBranch.includes(r.git_branch || ""))
       return false;
-    if (filterStatus.length && !filterStatus.includes(r.status)) return false;
+    if (filterCommit.length) {
+      const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
+      if (!filterCommit.includes(sha7)) return false;
+    }
     if (filterTag.length) {
       const tags = pipelineMeta[r.pipeline]?.tags || [];
       if (!filterTag.some((t) => tags.includes(t))) return false;
+    }
+    if (filterAfter || filterBefore) {
+      const ts = new Date(r.started_at).getTime();
+      if (filterAfter && ts < new Date(filterAfter).getTime()) return false;
+      if (filterBefore && ts > new Date(filterBefore).getTime()) return false;
+    }
+    if (filterText.trim()) {
+      const q = filterText.toLowerCase();
+      const hay = [
+        r.id,
+        r.pipeline,
+        repoLabel(r),
+        r.git_branch,
+        r.git_sha,
+        r.error,
+        r.trigger_source,
+        r.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
     }
     return true;
   });
 
   const activeFilterCount =
+    filterStatus.length +
     filterRepo.length +
     filterPipeline.length +
     filterBranch.length +
-    filterStatus.length +
-    filterTag.length;
+    filterCommit.length +
+    filterTag.length +
+    (filterAfter || filterBefore ? 1 : 0) +
+    (filterText.trim() ? 1 : 0);
 
   const run = detail?.run || null;
   const nodes = detail?.nodes || [];
@@ -371,8 +409,36 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             setFilterBranch([]);
             setFilterStatus([]);
             setFilterTag([]);
+            setFilterCommit([]);
+            setFilterAfter("");
+            setFilterBefore("");
           }}
+          dateGroup={{
+            after: filterAfter,
+            before: filterBefore,
+            setAfter: setFilterAfter,
+            setBefore: setFilterBefore,
+          }}
+          trailingSlot={
+            <input
+              type="search"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="search runs (id, error, branch, ...)"
+              className="bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs w-72"
+            />
+          }
           groups={[
+            {
+              key: "status",
+              label: "STATUS",
+              values: filterStatus,
+              set: setFilterStatus,
+              options: statuses,
+              color: "text-emerald-400",
+              activeBg: "bg-emerald-500/15",
+              activeText: "text-emerald-300",
+            },
             {
               key: "repo",
               label: "REPO",
@@ -394,16 +460,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               activeText: "text-violet-300",
             },
             {
-              key: "tag",
-              label: "TAG",
-              values: filterTag,
-              set: setFilterTag,
-              options: allTags,
-              color: "text-pink-400",
-              activeBg: "bg-pink-500/15",
-              activeText: "text-pink-300",
-            },
-            {
               key: "branch",
               label: "BRANCH",
               values: filterBranch,
@@ -414,14 +470,24 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               activeText: "text-amber-300",
             },
             {
-              key: "status",
-              label: "STATUS",
-              values: filterStatus,
-              set: setFilterStatus,
-              options: statuses,
-              color: "text-emerald-400",
-              activeBg: "bg-emerald-500/15",
-              activeText: "text-emerald-300",
+              key: "commit",
+              label: "COMMIT",
+              values: filterCommit,
+              set: setFilterCommit,
+              options: commits,
+              color: "text-sky-400",
+              activeBg: "bg-sky-500/15",
+              activeText: "text-sky-300",
+            },
+            {
+              key: "tag",
+              label: "TAG",
+              values: filterTag,
+              set: setFilterTag,
+              options: allTags,
+              color: "text-pink-400",
+              activeBg: "bg-pink-500/15",
+              activeText: "text-pink-300",
             },
           ]}
           toggleFilter={toggleFilter}
@@ -836,6 +902,13 @@ interface FilterGroup {
   activeText: string;
 }
 
+interface DateGroup {
+  after: string;
+  before: string;
+  setAfter: (v: string) => void;
+  setBefore: (v: string) => void;
+}
+
 function FullFilterBar({
   openDropdown,
   setOpenDropdown,
@@ -843,6 +916,8 @@ function FullFilterBar({
   clearAll,
   groups,
   toggleFilter,
+  dateGroup,
+  trailingSlot,
 }: {
   openDropdown: string | null;
   setOpenDropdown: (v: string | null) => void;
@@ -854,6 +929,8 @@ function FullFilterBar({
     set: (v: string[]) => void,
     val: string,
   ) => void;
+  dateGroup?: DateGroup;
+  trailingSlot?: React.ReactNode;
 }) {
   const [search, setSearch] = useState<Record<string, string>>({});
   return (
@@ -935,6 +1012,16 @@ function FullFilterBar({
             </div>
           );
         })}
+        {dateGroup && (
+          <DateFilterButton
+            group={dateGroup}
+            open={openDropdown === "date"}
+            onToggle={() =>
+              setOpenDropdown(openDropdown === "date" ? null : "date")
+            }
+          />
+        )}
+        {trailingSlot && <div className="ml-auto">{trailingSlot}</div>}
       </div>
       {activeFilterCount > 0 && (
         <div className="flex items-center gap-1 px-2 pb-1.5 flex-wrap">
@@ -954,6 +1041,22 @@ function FullFilterBar({
               </span>
             )),
           )}
+          {dateGroup && (dateGroup.after || dateGroup.before) && (
+            <span className="inline-flex items-center gap-1 bg-orange-500/15 text-orange-300 px-2 py-0.5 rounded text-xs font-mono">
+              {dateGroup.after && `after ${fmtDateChip(dateGroup.after)}`}
+              {dateGroup.after && dateGroup.before && " · "}
+              {dateGroup.before && `before ${fmtDateChip(dateGroup.before)}`}
+              <button
+                onClick={() => {
+                  dateGroup.setAfter("");
+                  dateGroup.setBefore("");
+                }}
+                className="hover:text-white"
+              >
+                ×
+              </button>
+            </span>
+          )}
           <button
             onClick={clearAll}
             className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] ml-1"
@@ -963,6 +1066,77 @@ function FullFilterBar({
         </div>
       )}
     </>
+  );
+}
+
+function fmtDateChip(local: string): string {
+  if (!local) return "";
+  const d = new Date(local);
+  if (isNaN(d.getTime())) return local;
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function DateFilterButton({
+  group,
+  open,
+  onToggle,
+}: {
+  group: DateGroup;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const active = !!(group.after || group.before);
+  return (
+    <div className="relative">
+      <button
+        onClick={onToggle}
+        className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider transition-colors ${
+          active
+            ? "bg-orange-500/15 text-orange-300"
+            : "text-[var(--muted)] hover:text-orange-400"
+        }`}
+      >
+        DATE{active ? " (1)" : ""} <span className="text-[8px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[260px] p-3 space-y-2">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            after
+            <input
+              type="datetime-local"
+              value={group.after}
+              onChange={(e) => group.setAfter(e.target.value)}
+              className="mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]"
+            />
+          </label>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            before
+            <input
+              type="datetime-local"
+              value={group.before}
+              onChange={(e) => group.setBefore(e.target.value)}
+              className="mt-1 w-full bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]"
+            />
+          </label>
+          {active && (
+            <button
+              onClick={() => {
+                group.setAfter("");
+                group.setBefore("");
+              }}
+              className="w-full text-left text-xs text-[var(--muted)] hover:text-[var(--foreground)] pt-1 border-t border-[var(--border)]"
+            >
+              clear
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
