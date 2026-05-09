@@ -808,6 +808,7 @@ export function FullFilterBar({
               key={`${f.key}-inc-${v}`}
               className={`inline-flex items-center gap-1 ${f.activeBg} ${f.activeText} px-2 py-0.5 rounded text-xs font-mono`}
             >
+              <span className="opacity-70">+</span>
               {f.key === "branch" ? `⎇ ${v}` : v}
               <button
                 onClick={() => toggleFilterHelper(f.values, f.set, v)}
@@ -824,6 +825,7 @@ export function FullFilterBar({
               key={`${f.key}-exc-${v}`}
               className={`inline-flex items-center gap-1 ${f.activeBg} text-red-300 px-2 py-0.5 rounded text-xs font-mono`}
             >
+              <span className="opacity-70">−</span>
               {f.key === "branch" ? `⎇ ${v}` : v}
               <button
                 onClick={() => {
