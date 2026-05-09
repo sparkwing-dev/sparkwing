@@ -384,12 +384,22 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         .join(" ")
         .toLowerCase();
       const terms = filterText.trim().split(/\s+/).filter(Boolean);
-      const incl = terms
-        .filter((t) => !t.startsWith("-"))
-        .map((t) => t.toLowerCase());
-      const excl = terms
-        .filter((t) => t.startsWith("-") && t.length > 1)
-        .map((t) => t.slice(1).toLowerCase());
+      const incl: string[] = [];
+      const excl: string[] = [];
+      // `pendingNot` lets a standalone "-" exclude the next term so
+      // both `-foo` and `- foo` mean "exclude foo".
+      let pendingNot = false;
+      for (const t of terms) {
+        if (t === "-") {
+          pendingNot = true;
+          continue;
+        }
+        const attached = t.startsWith("-") && t.length > 1;
+        const term = (attached ? t.slice(1) : t).toLowerCase();
+        if (pendingNot || attached) excl.push(term);
+        else incl.push(term);
+        pendingNot = false;
+      }
       if (incl.some((t) => !hay.includes(t))) return false;
       if (excl.some((t) => hay.includes(t))) return false;
     }
