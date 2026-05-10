@@ -673,7 +673,7 @@ function RecentRuns({
             <li
               key={r.id}
               onClick={() => onHighlightRun(r.id)}
-              className={`px-2 py-1.5 grid items-center gap-x-1 gap-y-0 grid-cols-[0.5rem_11.5rem_3.5rem_9rem_minmax(0,1fr)_4.5rem_auto] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+              className={`px-2 py-1.5 grid items-center gap-x-1 gap-y-0 grid-cols-[0.5rem_11.5rem_fit-content(3.5rem)_fit-content(9rem)_minmax(0,1fr)_4.5rem_auto] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
                 isSelected
                   ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
