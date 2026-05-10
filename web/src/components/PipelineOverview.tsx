@@ -671,12 +671,11 @@ function RecentRuns({
 function RunSummary({ run }: { run: Run }) {
   const text = run.error || run.status;
   if (!text) return <span />;
-  const truncated = text.length > 60 ? text.slice(0, 59) + "…" : text;
   const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
   return (
     <Tooltip content={text}>
-      <span className={`font-mono text-[11px] truncate ${tone}`}>
-        {truncated}
+      <span className={`font-mono text-[11px] truncate min-w-0 ${tone}`}>
+        {text}
       </span>
     </Tooltip>
   );
