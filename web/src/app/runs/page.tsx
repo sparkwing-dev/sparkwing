@@ -1388,7 +1388,7 @@ function RunDetailPane({
       visible: nodes.length > 0,
     },
     { key: "timeline", label: "Timeline", visible: nodes.length > 0 },
-    { key: "summary", label: "Summary", visible: isTerminal },
+    { key: "summary", label: "Summary", visible: true },
     { key: "setup", label: "Setup", visible: true },
   ];
   const visibleTabs = tabs.filter((t) => t.visible);
@@ -1464,8 +1464,6 @@ function RunDetailPane({
         />
       </div>
 
-      {selected && <SelectedNodePanel node={selected} />}
-
       {showTrigger && (
         <div className="border-b border-[var(--border)] shrink-0 p-4">
           <TriggerForm
@@ -1540,13 +1538,16 @@ function RunDetailPane({
           </div>
         )}
         {effectiveTab === "summary" && (
-          <SummaryPanel
-            run={run}
-            nodes={nodes}
-            collapsed={false}
-            onToggle={() => {}}
-            inline
-          />
+          <div className="flex flex-col gap-3">
+            {selected && <SelectedNodePanel node={selected} />}
+            <SummaryPanel
+              run={run}
+              nodes={nodes}
+              collapsed={false}
+              onToggle={() => {}}
+              inline
+            />
+          </div>
         )}
         {effectiveTab === "setup" && (
           <SetupPanel
