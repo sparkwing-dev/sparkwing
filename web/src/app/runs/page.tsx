@@ -1035,12 +1035,11 @@ function NodeRow({
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
         />
-        <span className="text-[11px] truncate">{label}</span>
-      </div>
-      <div className="flex items-center gap-1.5 pl-3.5 text-[10px] font-mono text-[var(--muted)]">
-        <span className="truncate">{statusLabel}</span>
+        <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
         {nodeDuration(n) > 0 && (
-          <span className="ml-auto shrink-0">{fmtMs(nodeDuration(n))}</span>
+          <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
+            {fmtMs(nodeDuration(n))}
+          </span>
         )}
       </div>
     </div>
