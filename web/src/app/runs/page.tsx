@@ -848,7 +848,7 @@ const FullRunRow = memo(function FullRunRow({
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
 
   const meta = (
-    <div className="min-w-0 flex flex-col gap-0.5 text-xs">
+    <div className="min-w-0 flex flex-col gap-0.5 text-[11px]">
       <div className="flex items-center gap-2 min-w-0">
         <FilterableValue
           facet="status"
@@ -873,7 +873,7 @@ const FullRunRow = memo(function FullRunRow({
           ctx={ctx}
           tooltip={`Pipeline: ${r.pipeline}`}
         >
-          <span className="font-medium text-violet-300 truncate text-sm">
+          <span className="font-medium text-violet-300 truncate">
             {r.pipeline}
           </span>
         </FilterableValue>
