@@ -673,11 +673,11 @@ function RunSummary({ run }: { run: Run }) {
   if (!text) return <span />;
   const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
   return (
-    <Tooltip content={text}>
-      <span className={`font-mono text-[11px] truncate min-w-0 ${tone}`}>
-        {text}
-      </span>
-    </Tooltip>
+    <div className={`min-w-0 truncate font-mono text-[11px] ${tone}`}>
+      <Tooltip content={text}>
+        <span>{text}</span>
+      </Tooltip>
+    </div>
   );
 }
 
