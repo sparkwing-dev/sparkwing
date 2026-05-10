@@ -677,7 +677,11 @@ export function FullFilterBar({
                   <span className="text-[8px]">▾</span>
                 </button>
                 {openDropdown === f.key && (
-                  <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 min-w-[200px] max-h-72 flex flex-col">
+                  <div
+                    className={`absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-lg z-50 max-h-72 flex flex-col ${
+                      f.key === "branch" ? "min-w-[20rem]" : "min-w-[200px]"
+                    }`}
+                  >
                     <div className="p-2 border-b border-[var(--border)] shrink-0">
                       <input
                         type="search"
@@ -731,12 +735,12 @@ export function FullFilterBar({
                                   f.set([...f.values, opt]);
                                 }
                               }}
-                              className={`flex-1 text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 ${
+                              className={`flex-1 text-left px-3 py-1.5 text-xs font-mono grid grid-cols-[0.875rem_minmax(0,1fr)] gap-2 items-start ${
                                 isSelected ? f.activeText : ""
                               } ${isExcluded ? "text-red-300 line-through" : ""}`}
                             >
                               <span
-                                className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                                className={`w-3.5 h-3.5 mt-0.5 shrink-0 rounded border flex items-center justify-center text-[10px] ${
                                   isSelected
                                     ? `${f.activeBg} border-current`
                                     : isExcluded
@@ -746,7 +750,9 @@ export function FullFilterBar({
                               >
                                 {isSelected ? "✓" : isExcluded ? "−" : ""}
                               </span>
-                              {f.key === "branch" ? `⎇ ${opt}` : opt}
+                              <span className="break-all">
+                                {f.key === "branch" ? `⎇ ${opt}` : opt}
+                              </span>
                             </button>
                             {f.setExclude && (
                               <button
