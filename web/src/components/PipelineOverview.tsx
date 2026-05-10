@@ -18,6 +18,7 @@ import {
   runDurationMs,
 } from "@/lib/api";
 import TriggerForm from "@/components/TriggerForm";
+import Tooltip from "@/components/Tooltip";
 import {
   FullFilterBar,
   buildGroupsFromState,
@@ -27,10 +28,17 @@ import {
   useFilterDropdownState,
   useUrlFilterState,
 } from "@/components/RunFilters";
+import {
+  fmtAgo,
+  fmtClock,
+  fmtDatePrefix,
+  fmtFullDate,
+  fmtMs,
+} from "@/lib/timeFormat";
 
 const POLL_MS = 5000;
 const RUNS_WINDOW = 200;
-const SPARK_SIZE = 12;
+const SPARK_SIZE = 30;
 
 interface PipelineRow {
   // Composite identity: `repo/pipeline` when run history attaches a
@@ -458,12 +466,44 @@ function Sparkline({ runs }: { runs: Run[] }) {
         />
       ))}
       {ordered.map((r) => (
-        <span
-          key={r.id}
-          title={`${r.status} - ${r.id}`}
-          className={`block w-1.5 h-3 rounded-sm ${sparkColor(r.status)}`}
-        />
+        <Tooltip key={r.id} content={<RunSummaryTip run={r} />}>
+          <span
+            className={`inline-block align-middle w-1.5 h-3 rounded-sm ${sparkColor(r.status)}`}
+          />
+        </Tooltip>
       ))}
+    </div>
+  );
+}
+
+function RunSummaryTip({ run }: { run: Run }) {
+  const dur = runDurationMs(run);
+  return (
+    <div className="flex flex-col gap-0.5 font-mono">
+      <div className="text-[var(--foreground)]">{run.id}</div>
+      <div>
+        <span className="text-[var(--muted)]">status </span>
+        <span>{run.status}</span>
+      </div>
+      <div>
+        <span className="text-[var(--muted)]">started </span>
+        <span>{fmtFullDate(run.started_at)}</span>
+      </div>
+      {run.finished_at && (
+        <div>
+          <span className="text-[var(--muted)]">finished </span>
+          <span>{fmtFullDate(run.finished_at)}</span>
+        </div>
+      )}
+      {dur > 0 && (
+        <div>
+          <span className="text-[var(--muted)]">duration </span>
+          <span>{fmtMs(dur)}</span>
+        </div>
+      )}
+      <div>
+        <span className="text-[var(--muted)]">{fmtAgo(run.started_at)}</span>
+      </div>
     </div>
   );
 }
@@ -540,19 +580,47 @@ function RecentRuns({
                 </span>
               )}
               <StatusPill status={r.status} />
-              <span className="text-[11px] text-[var(--muted)] font-mono w-20 text-right shrink-0 tabular-nums">
-                {r.status === "running"
-                  ? "running"
-                  : formatDuration(runDurationMs(r))}
-              </span>
-              <span className="text-[11px] text-[var(--muted)] font-mono w-24 text-right shrink-0">
-                <TimeAgo ts={r.started_at} />
-              </span>
+              <RunTimestampBlock run={r} />
             </li>
           );
         })}
       </ul>
     </div>
+  );
+}
+
+function RunTimestampBlock({ run }: { run: Run }) {
+  const startedMs = new Date(run.started_at).getTime();
+  const finishedMs = run.finished_at ? new Date(run.finished_at).getTime() : 0;
+  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const sinceTs = run.finished_at || run.started_at;
+  return (
+    <span
+      className="font-mono tabular-nums text-[11px] text-[var(--muted)] flex items-center gap-1 shrink-0"
+      title={`Started ${fmtFullDate(run.started_at)}${run.finished_at ? ` · Finished ${fmtFullDate(run.finished_at)}` : ""}`}
+    >
+      {fmtDatePrefix(run.started_at) && (
+        <span className="text-[var(--foreground)]">
+          {fmtDatePrefix(run.started_at)}
+        </span>
+      )}
+      <span className="text-[var(--foreground)]">
+        {fmtClock(run.started_at)}
+      </span>
+      <span>→</span>
+      {run.finished_at &&
+        fmtDatePrefix(run.finished_at) &&
+        fmtDatePrefix(run.finished_at) !== fmtDatePrefix(run.started_at) && (
+          <span className="text-[var(--foreground)]">
+            {fmtDatePrefix(run.finished_at)}
+          </span>
+        )}
+      <span className="text-[var(--foreground)]">
+        {run.finished_at ? fmtClock(run.finished_at) : "—"}
+      </span>
+      {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
+      <span>· {fmtAgo(sinceTs)}</span>
+    </span>
   );
 }
 

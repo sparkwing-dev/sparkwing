@@ -52,6 +52,13 @@ import {
   runDurationMs,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
+import {
+  fmtAgo,
+  fmtClock,
+  fmtDatePrefix,
+  fmtFullDate,
+  fmtMs,
+} from "@/lib/timeFormat";
 import TriggerForm from "@/components/TriggerForm";
 import StatusLabel from "@/components/StatusLabel";
 import DebugPausePanel from "@/components/DebugPausePanel";
@@ -77,15 +84,6 @@ const POLL_MS = 2000;
 // it's belt-and-suspenders, not the primary signal.
 const DETAIL_FALLBACK_POLL_MS = 8000;
 const RUNS_WINDOW = 200;
-
-function fmtMs(ms: number): string {
-  if (!ms) return "-";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms - m * 60_000) / 1000);
-  return `${m}m ${s}s`;
-}
 
 function statusDot(status: string): string {
   switch (status) {
@@ -999,55 +997,6 @@ function NodeRow({
 }
 
 // --- run row variants ---
-
-function fmtFullDate(ts: string): string {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return ts;
-  return d.toLocaleString([], {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function fmtClock(ts: string): string {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-// fmtDatePrefix returns "M/D" when ts isn't today, "M/D/YY" when it's
-// in a different year, and "" when it's today (clock alone suffices).
-function fmtDatePrefix(ts: string): string {
-  if (!ts) return "";
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return "";
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) return "";
-  const md = `${d.getMonth() + 1}/${d.getDate()}`;
-  if (d.getFullYear() !== now.getFullYear())
-    return `${md}/${String(d.getFullYear()).slice(-2)}`;
-  return md;
-}
-
-function fmtAgo(ts: string): string {
-  if (!ts) return "—";
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (sec < 0) return "—";
-  if (sec < 60) return `${sec}s ago`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-  if (sec < 86_400) return `${Math.floor(sec / 3600)}h ago`;
-  return `${Math.floor(sec / 86_400)}d ago`;
-}
 
 const FullRunRow = memo(function FullRunRow({
   r,
