@@ -316,25 +316,48 @@ function SummaryCards({
   };
 }) {
   const cards = [
-    { label: "pipelines", value: totals.pipelines },
-    { label: "registered", value: totals.registered },
-    { label: `runs (last ${RUNS_WINDOW})`, value: totals.runs },
-    { label: "passed", value: totals.passed },
-    { label: "failed", value: totals.failed },
-    { label: "running", value: totals.running },
+    {
+      label: "pipelines",
+      value: totals.pipelines,
+      tip: "Pipelines that match the current filters",
+    },
+    {
+      label: "registered",
+      value: totals.registered,
+      tip: "Pipelines declared in pipelines.yaml",
+    },
+    {
+      label: `runs (last ${RUNS_WINDOW})`,
+      value: totals.runs,
+      tip: `Most recent ${RUNS_WINDOW} runs are loaded; filters apply within that window`,
+    },
+    {
+      label: "passed",
+      value: totals.passed,
+      tip: "Runs that finished successfully",
+    },
+    {
+      label: "failed",
+      value: totals.failed,
+      tip: "Runs that finished with a failure or cancellation",
+    },
+    {
+      label: "running",
+      value: totals.running,
+      tip: "Runs currently in flight",
+    },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
       {cards.map((c) => (
-        <div
-          key={c.label}
-          className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2"
-        >
-          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-            {c.label}
+        <Tooltip key={c.label} content={c.tip}>
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 cursor-help">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+              {c.label}
+            </div>
+            <div className="text-lg font-mono mt-0.5">{c.value}</div>
           </div>
-          <div className="text-lg font-mono mt-0.5">{c.value}</div>
-        </div>
+        </Tooltip>
       ))}
     </div>
   );
@@ -379,49 +402,88 @@ function PipelineCard({
         <span className="font-mono text-sm font-medium truncate flex-1 min-w-0">
           {row.repo && (
             <>
-              <span className="text-cyan-400/80">{row.repo}</span>
+              <Tooltip content={`Repo: ${row.repo}`}>
+                <span className="text-cyan-400/80">{row.repo}</span>
+              </Tooltip>
               <span className="text-[var(--muted)] mx-1">/</span>
             </>
           )}
-          <span className="text-violet-300">{row.pipeline}</span>
+          <Tooltip content={`Pipeline: ${row.pipeline}`}>
+            <span className="text-violet-300">{row.pipeline}</span>
+          </Tooltip>
         </span>
         {!row.meta && (
-          <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300"
-            title="not in the local pipelines.yaml registry"
-          >
-            runs-only
-          </span>
+          <Tooltip content="Run history exists but pipeline is not in the local pipelines.yaml registry">
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300">
+              runs-only
+            </span>
+          </Tooltip>
         )}
         {tags.map((t) => (
-          <span
-            key={t}
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--background)] text-[var(--muted)]"
-          >
-            {t}
-          </span>
+          <Tooltip key={t} content={`Tag: ${t}`}>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--background)] text-[var(--muted)]">
+              {t}
+            </span>
+          </Tooltip>
         ))}
         <Sparkline runs={recent} />
-        <span className="text-xs text-[var(--muted)] font-mono w-20 text-right">
-          {successRate === null ? "-" : `${successRate}%`}
-        </span>
-        <span className="text-xs text-[var(--muted)] font-mono w-24 text-right">
-          {stats.total} run{stats.total === 1 ? "" : "s"}
-        </span>
-        <span className="text-xs text-[var(--muted)] font-mono w-24 text-right">
-          {row.lastRun ? <TimeAgo ts={row.lastRun.started_at} /> : "never run"}
-        </span>
+        <Tooltip
+          content={
+            successRate === null
+              ? "No completed runs in window"
+              : `${stats.passed} passed out of ${stats.total} runs`
+          }
+        >
+          <span className="text-xs text-[var(--muted)] font-mono w-20 text-right inline-block">
+            {successRate === null ? "-" : `${successRate}%`}
+          </span>
+        </Tooltip>
+        <Tooltip
+          content={`${stats.total} total · ${stats.passed} passed · ${stats.failed} failed · ${stats.running} running`}
+        >
+          <span className="text-xs text-[var(--muted)] font-mono w-24 text-right inline-block">
+            {stats.total} run{stats.total === 1 ? "" : "s"}
+          </span>
+        </Tooltip>
+        <Tooltip
+          content={
+            row.lastRun
+              ? `Last run ${fmtFullDate(row.lastRun.started_at)}`
+              : "No runs yet in window"
+          }
+        >
+          <span className="text-xs text-[var(--muted)] font-mono w-24 text-right inline-block">
+            {row.lastRun ? (
+              <TimeAgo ts={row.lastRun.started_at} />
+            ) : (
+              "never run"
+            )}
+          </span>
+        </Tooltip>
       </button>
 
       {expanded && (
         <div className="border-t border-[var(--border)] px-3 py-3 space-y-3 text-xs">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KV label="passed" value={stats.passed} />
-            <KV label="failed" value={stats.failed} />
-            <KV label="running" value={stats.running} />
+            <KV
+              label="passed"
+              value={stats.passed}
+              tip="Runs that finished successfully"
+            />
+            <KV
+              label="failed"
+              value={stats.failed}
+              tip="Runs that finished with failure or cancellation"
+            />
+            <KV
+              label="running"
+              value={stats.running}
+              tip="Runs currently in flight"
+            />
             <KV
               label="avg duration"
               value={row.avgDurMs ? formatDuration(row.avgDurMs) : "-"}
+              tip="Average duration across completed runs in window"
             />
           </div>
 
@@ -557,29 +619,42 @@ function RecentRuns({
                   : "border-l-4 border-l-transparent"
               }`}
             >
-              <span
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${sparkColor(r.status)}`}
-              />
-              <span
-                className={`font-mono text-xs truncate min-w-0 flex-1 ${
-                  isSelected
-                    ? "text-violet-200"
-                    : "text-[var(--accent)] hover:underline"
-                }`}
-              >
-                {r.id}
-              </span>
-              {r.git_branch && (
-                <span className="text-[11px] text-amber-400/70 font-mono shrink-0 truncate max-w-[160px]">
-                  ⎇ {r.git_branch}
+              <Tooltip content={<RunSummaryTip run={r} />}>
+                <span
+                  className={`inline-block align-middle w-1.5 h-1.5 rounded-full shrink-0 ${sparkColor(r.status)}`}
+                />
+              </Tooltip>
+              <Tooltip content={`Run: ${r.id}`}>
+                <span
+                  className={`font-mono text-xs truncate min-w-0 flex-1 ${
+                    isSelected
+                      ? "text-violet-200"
+                      : "text-[var(--accent)] hover:underline"
+                  }`}
+                >
+                  {r.id}
                 </span>
+              </Tooltip>
+              <RunSummary run={r} />
+              {r.git_branch && (
+                <Tooltip content={`Branch: ${r.git_branch}`}>
+                  <span className="text-[11px] text-amber-400/70 font-mono shrink-0 truncate max-w-[160px]">
+                    ⎇ {r.git_branch}
+                  </span>
+                </Tooltip>
               )}
               {r.git_sha && (
-                <span className="text-[11px] text-[var(--muted)] font-mono shrink-0">
-                  {r.git_sha.slice(0, 7)}
-                </span>
+                <Tooltip content={`Commit: ${r.git_sha}`}>
+                  <span className="text-[11px] text-[var(--muted)] font-mono shrink-0">
+                    {r.git_sha.slice(0, 7)}
+                  </span>
+                </Tooltip>
               )}
-              <StatusPill status={r.status} />
+              <Tooltip content={`Status: ${r.status}`}>
+                <span className="shrink-0">
+                  <StatusPill status={r.status} />
+                </span>
+              </Tooltip>
               <RunTimestampBlock run={r} />
             </li>
           );
@@ -589,38 +664,53 @@ function RecentRuns({
   );
 }
 
+function RunSummary({ run }: { run: Run }) {
+  const text = run.error || run.status;
+  if (!text) return null;
+  const truncated = text.length > 30 ? text.slice(0, 29) + "…" : text;
+  const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
+  return (
+    <Tooltip content={text}>
+      <span
+        className={`font-mono text-[11px] shrink-0 truncate max-w-[16rem] ${tone}`}
+      >
+        {truncated}
+      </span>
+    </Tooltip>
+  );
+}
+
 function RunTimestampBlock({ run }: { run: Run }) {
   const startedMs = new Date(run.started_at).getTime();
   const finishedMs = run.finished_at ? new Date(run.finished_at).getTime() : 0;
   const elapsedMs = (finishedMs || Date.now()) - startedMs;
   const sinceTs = run.finished_at || run.started_at;
   return (
-    <span
-      className="font-mono tabular-nums text-[11px] text-[var(--muted)] flex items-center gap-1 shrink-0"
-      title={`Started ${fmtFullDate(run.started_at)}${run.finished_at ? ` · Finished ${fmtFullDate(run.finished_at)}` : ""}`}
-    >
-      {fmtDatePrefix(run.started_at) && (
-        <span className="text-[var(--foreground)]">
-          {fmtDatePrefix(run.started_at)}
-        </span>
-      )}
-      <span className="text-[var(--foreground)]">
-        {fmtClock(run.started_at)}
-      </span>
-      <span>→</span>
-      {run.finished_at &&
-        fmtDatePrefix(run.finished_at) &&
-        fmtDatePrefix(run.finished_at) !== fmtDatePrefix(run.started_at) && (
+    <Tooltip content={<RunSummaryTip run={run} />}>
+      <span className="font-mono tabular-nums text-[11px] text-[var(--muted)] inline-flex items-center gap-1 shrink-0">
+        {fmtDatePrefix(run.started_at) && (
           <span className="text-[var(--foreground)]">
-            {fmtDatePrefix(run.finished_at)}
+            {fmtDatePrefix(run.started_at)}
           </span>
         )}
-      <span className="text-[var(--foreground)]">
-        {run.finished_at ? fmtClock(run.finished_at) : "—"}
+        <span className="text-[var(--foreground)]">
+          {fmtClock(run.started_at)}
+        </span>
+        <span>→</span>
+        {run.finished_at &&
+          fmtDatePrefix(run.finished_at) &&
+          fmtDatePrefix(run.finished_at) !== fmtDatePrefix(run.started_at) && (
+            <span className="text-[var(--foreground)]">
+              {fmtDatePrefix(run.finished_at)}
+            </span>
+          )}
+        <span className="text-[var(--foreground)]">
+          {run.finished_at ? fmtClock(run.finished_at) : "—"}
+        </span>
+        {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
+        <span>· {fmtAgo(sinceTs)}</span>
       </span>
-      {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
-      <span>· {fmtAgo(sinceTs)}</span>
-    </span>
+    </Tooltip>
   );
 }
 
@@ -650,15 +740,24 @@ function statusClass(status: string): string {
   }
 }
 
-function KV({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div>
+function KV({
+  label,
+  value,
+  tip,
+}: {
+  label: string;
+  value: string | number;
+  tip?: string;
+}) {
+  const body = (
+    <div className={tip ? "cursor-help" : undefined}>
       <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
         {label}
       </div>
       <div className="font-mono text-xs mt-0.5">{value}</div>
     </div>
   );
+  return tip ? <Tooltip content={tip}>{body}</Tooltip> : body;
 }
 
 function Panel({ children }: { children: React.ReactNode }) {
