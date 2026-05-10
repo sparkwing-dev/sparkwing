@@ -613,20 +613,20 @@ function RecentRuns({
             <li
               key={r.id}
               onClick={() => onSelectRun(isSelected ? null : r.id)}
-              className={`px-2 py-1.5 flex items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.375rem_minmax(0,1fr)_minmax(0,16rem)_10rem_4.5rem_5rem_minmax(15rem,auto)] ${
                 isSelected
-                  ? "bg-violet-500/15 border-l-4 border-l-violet-400"
+                  ? "bg-violet-500/15 border-l-4 border-l-violet-400 pl-1"
                   : "border-l-4 border-l-transparent"
               }`}
             >
               <Tooltip content={<RunSummaryTip run={r} />}>
                 <span
-                  className={`inline-block align-middle w-1.5 h-1.5 rounded-full shrink-0 ${sparkColor(r.status)}`}
+                  className={`inline-block align-middle w-1.5 h-1.5 rounded-full ${sparkColor(r.status)}`}
                 />
               </Tooltip>
               <Tooltip content={`Run: ${r.id}`}>
                 <span
-                  className={`font-mono text-xs truncate min-w-0 flex-1 ${
+                  className={`font-mono text-xs truncate min-w-0 ${
                     isSelected
                       ? "text-violet-200"
                       : "text-[var(--accent)] hover:underline"
@@ -636,26 +636,32 @@ function RecentRuns({
                 </span>
               </Tooltip>
               <RunSummary run={r} />
-              {r.git_branch && (
+              {r.git_branch ? (
                 <Tooltip content={`Branch: ${r.git_branch}`}>
-                  <span className="text-[11px] text-amber-400/70 font-mono shrink-0 truncate max-w-[160px]">
+                  <span className="text-[11px] text-amber-400/70 font-mono truncate">
                     ⎇ {r.git_branch}
                   </span>
                 </Tooltip>
+              ) : (
+                <span />
               )}
-              {r.git_sha && (
+              {r.git_sha ? (
                 <Tooltip content={`Commit: ${r.git_sha}`}>
-                  <span className="text-[11px] text-[var(--muted)] font-mono shrink-0">
+                  <span className="text-[11px] text-[var(--muted)] font-mono truncate">
                     {r.git_sha.slice(0, 7)}
                   </span>
                 </Tooltip>
+              ) : (
+                <span />
               )}
               <Tooltip content={`Status: ${r.status}`}>
-                <span className="shrink-0">
+                <span>
                   <StatusPill status={r.status} />
                 </span>
               </Tooltip>
-              <RunTimestampBlock run={r} />
+              <div className="justify-self-end">
+                <RunTimestampBlock run={r} />
+              </div>
             </li>
           );
         })}
@@ -666,14 +672,12 @@ function RecentRuns({
 
 function RunSummary({ run }: { run: Run }) {
   const text = run.error || run.status;
-  if (!text) return null;
+  if (!text) return <span />;
   const truncated = text.length > 30 ? text.slice(0, 29) + "…" : text;
   const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
   return (
     <Tooltip content={text}>
-      <span
-        className={`font-mono text-[11px] shrink-0 truncate max-w-[16rem] ${tone}`}
-      >
+      <span className={`font-mono text-[11px] truncate ${tone}`}>
         {truncated}
       </span>
     </Tooltip>
