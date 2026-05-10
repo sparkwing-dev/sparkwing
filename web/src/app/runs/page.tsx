@@ -636,7 +636,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 <div
                   key={r.id}
                   data-run-id={r.id}
-                  onClick={() => selectRun(isActive ? null : r.id)}
+                  onClick={() => {
+                    setFocusedRun(r.id);
+                    setFocusedColumn("runs");
+                    selectRun(isActive ? null : r.id);
+                  }}
                   className={`px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
@@ -694,7 +698,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               selectedNode={selectedNode}
               focusedNode={focusedNode}
               focusedColumnActive={focusedColumn === "nodes"}
-              onSelect={setSelectedNode}
+              onSelect={(id) => {
+                setFocusedNode(id);
+                setFocusedColumn("nodes");
+                setSelectedNode(selectedNode === id ? null : id);
+              }}
             />
           </div>
         )}
