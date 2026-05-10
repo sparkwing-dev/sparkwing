@@ -1013,14 +1013,10 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
 
   const fullTitle = `${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
   const datePrefix = fmtDatePrefix(r.started_at);
-  const repoShort = repo.length > 7 ? repo.slice(0, 6) + "…" : repo;
-  const pipelineShort =
-    r.pipeline.length > 10 ? r.pipeline.slice(0, 9) + "…" : r.pipeline;
-  const branchShort = r.git_branch
-    ? r.git_branch.length > 7
-      ? r.git_branch.slice(0, 6) + "…"
-      : r.git_branch
-    : "";
+  const [repoShort, pipelineShort, branchShort] = waterFill(
+    [repo, r.pipeline, r.git_branch || ""],
+    24,
+  );
   return (
     <Tooltip
       content={
@@ -2082,6 +2078,40 @@ function CachedPill({ nodeW }: { nodeW: number }) {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+// waterFill distributes a total character budget across `items` so
+// short strings stay intact and the slack goes to longer ones. Each
+// returned string is the original truncated with an ellipsis when it
+// got squeezed, or untouched when it fit within its share.
+function waterFill(items: string[], total: number): string[] {
+  const n = items.length;
+  const lengths = items.map((s) => s.length);
+  const assigned = new Array<number>(n).fill(0);
+  let active = lengths.map((_, i) => i).filter((i) => lengths[i] > 0);
+  let remaining = total;
+  // Each pass: split remaining budget evenly among items still under
+  // their natural length. Items that hit their full length drop out;
+  // their unused portion gets redistributed in the next pass.
+  while (active.length > 0 && remaining > 0) {
+    const share = remaining / active.length;
+    const stillActive: number[] = [];
+    let used = 0;
+    for (const i of active) {
+      const want = lengths[i] - assigned[i];
+      const give = Math.min(want, share);
+      assigned[i] += give;
+      used += give;
+      if (assigned[i] < lengths[i]) stillActive.push(i);
+    }
+    remaining -= used;
+    if (stillActive.length === active.length) break;
+    active = stillActive;
+  }
+  return items.map((s, i) => {
+    const cap = Math.max(1, Math.floor(assigned[i]));
+    return s.length <= cap ? s : s.slice(0, cap - 1) + "…";
+  });
 }
 
 function dagEdgeColor(dst?: RunNode): string {
