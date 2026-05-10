@@ -613,7 +613,7 @@ function RecentRuns({
             <li
               key={r.id}
               onClick={() => onSelectRun(isSelected ? null : r.id)}
-              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_18rem_14rem_10rem_4.5rem_5rem_1fr] ${
+              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_13rem_4.5rem_10rem_minmax(0,1fr)_auto] ${
                 isSelected
                   ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
@@ -635,16 +635,6 @@ function RecentRuns({
                   {r.id}
                 </span>
               </Tooltip>
-              <RunSummary run={r} />
-              {r.git_branch ? (
-                <Tooltip content={`Branch: ${r.git_branch}`}>
-                  <span className="text-[11px] text-amber-400/70 font-mono truncate">
-                    ⎇ {r.git_branch}
-                  </span>
-                </Tooltip>
-              ) : (
-                <span />
-              )}
               {r.git_sha ? (
                 <Tooltip content={`Commit: ${r.git_sha}`}>
                   <span className="text-[11px] text-[var(--muted)] font-mono truncate">
@@ -654,11 +644,16 @@ function RecentRuns({
               ) : (
                 <span />
               )}
-              <Tooltip content={`Status: ${r.status}`}>
-                <span>
-                  <StatusPill status={r.status} />
-                </span>
-              </Tooltip>
+              {r.git_branch ? (
+                <Tooltip content={`Branch: ${r.git_branch}`}>
+                  <span className="text-[11px] text-amber-400/70 font-mono truncate">
+                    ⎇ {r.git_branch}
+                  </span>
+                </Tooltip>
+              ) : (
+                <span />
+              )}
+              <RunSummary run={r} />
               <div className="justify-self-end">
                 <RunTimestampBlock run={r} />
               </div>
