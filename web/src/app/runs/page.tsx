@@ -1044,11 +1044,14 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
             {pipelineShort}
           </span>
           {branchShort && (
-            <span
-              className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch!)}`}
-            >
-              {branchShort}
-            </span>
+            <>
+              <span className="text-[var(--muted)] shrink-0">/</span>
+              <span
+                className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch!)}`}
+              >
+                {branchShort}
+              </span>
+            </>
           )}
         </div>
         <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">

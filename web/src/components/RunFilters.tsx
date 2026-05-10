@@ -12,6 +12,7 @@
 //   q → free-text search (space = AND, "-" prefix = exclude)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Run, PipelineMeta } from "@/lib/api";
 import Tooltip from "@/components/Tooltip";
@@ -1335,10 +1336,16 @@ export function useFilterCtx(filterState: RunFilterState): FilterCtx {
 function useClickPopup<T extends HTMLElement>() {
   const [open, setOpen] = useState(false);
   const ref = useRef<T>(null);
+  // Popup body is rendered via portal at document.body so overflow
+  // ancestors don't clip it; we still need outside-click detection,
+  // so the consumer wires `popupRef` to the portal's root node.
+  const popupRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (!ref.current || ref.current.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      if (ref.current && ref.current.contains(target)) return;
+      if (popupRef.current && popupRef.current.contains(target)) return;
       e.stopPropagation();
       e.preventDefault();
       setOpen(false);
@@ -1353,7 +1360,7 @@ function useClickPopup<T extends HTMLElement>() {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  return { open, setOpen, ref };
+  return { open, setOpen, ref, popupRef };
 }
 
 export function FilterableValue({
@@ -1371,7 +1378,20 @@ export function FilterableValue({
 }) {
   const incl = ctx.isIncluded(facet, value);
   const excl = ctx.isExcluded(facet, value);
-  const { open, setOpen, ref } = useClickPopup<HTMLSpanElement>();
+  const { open, setOpen, ref, popupRef } = useClickPopup<HTMLSpanElement>();
+  const [popupPos, setPopupPos] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!open || !ref.current) {
+      setPopupPos(null);
+      return;
+    }
+    const rect = ref.current.getBoundingClientRect();
+    setPopupPos({ left: rect.left, top: rect.bottom + 4 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   return (
     <span
       ref={ref}
@@ -1392,40 +1412,51 @@ export function FilterableValue({
       >
         {tooltip ? <Tooltip content={tooltip}>{children}</Tooltip> : children}
       </span>
-      {open && (
-        <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-[1000] bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              ctx.toggle(facet, value, "include");
-              setOpen(false);
+      {open &&
+        popupPos &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <span
+            ref={(el) => {
+              popupRef.current = el;
             }}
-            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
+            style={{ left: popupPos.left, top: popupPos.top }}
+            className="fixed flex flex-col gap-0.5 z-[1000] bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]"
+            onClick={(e) => e.stopPropagation()}
           >
-            {incl ? "✓ included" : "+ filter to"} {value}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              ctx.toggle(facet, value, "exclude");
-              setOpen(false);
-            }}
-            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
-          >
-            {excl ? "✗ excluded" : "− exclude"} {value}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(value);
-              setOpen(false);
-            }}
-            className="px-2 py-0.5 rounded text-left text-[var(--muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] border-t border-[var(--border)] mt-0.5 pt-1"
-          >
-            ⧉ copy
-          </button>
-        </span>
-      )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                ctx.toggle(facet, value, "include");
+                setOpen(false);
+              }}
+              className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
+            >
+              {incl ? "✓ included" : "+ filter to"} {value}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                ctx.toggle(facet, value, "exclude");
+                setOpen(false);
+              }}
+              className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
+            >
+              {excl ? "✗ excluded" : "− exclude"} {value}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(value);
+                setOpen(false);
+              }}
+              className="px-2 py-0.5 rounded text-left text-[var(--muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] border-t border-[var(--border)] mt-0.5 pt-1"
+            >
+              ⧉ copy
+            </button>
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }
