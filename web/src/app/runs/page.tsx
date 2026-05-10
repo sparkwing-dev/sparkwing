@@ -408,7 +408,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   // every keystroke.
   const [focusedRun, setFocusedRun] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
-  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes">("runs");
+  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes" | "tabs">(
+    "runs",
+  );
+  const [tab, setTab] = useState<TabKey>("summary");
+  const [focusedTab, setFocusedTab] = useState<TabKey | null>(null);
   const topLevelRef = useRef(topLevel);
   topLevelRef.current = topLevel;
   const nodesRef = useRef(nodes);
@@ -419,6 +423,16 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   focusedNodeRef.current = focusedNode;
   const focusedColumnRef = useRef(focusedColumn);
   focusedColumnRef.current = focusedColumn;
+  const focusedTabRef = useRef(focusedTab);
+  focusedTabRef.current = focusedTab;
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const visibleTabs = useMemo(
+    () => buildVisibleTabs(nodes, node),
+    [nodes, node],
+  );
+  const visibleTabsRef = useRef(visibleTabs);
+  visibleTabsRef.current = visibleTabs;
   const selectedRunRef = useRef(selectedRun);
   selectedRunRef.current = selectedRun;
   const selectedNodeRef = useRef(selectedNode);
@@ -437,16 +451,70 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const runs = topLevelRef.current;
       const ns = nodesRef.current;
       const col = focusedColumnRef.current;
+      const tabs = visibleTabsRef.current;
+      // ── Column transitions ──────────────────────────────────────
       if (e.key === "h" || e.key === "ArrowLeft") {
         e.preventDefault();
-        setFocusedColumn("runs");
+        if (col === "tabs") {
+          const ft = focusedTabRef.current;
+          const idx = ft ? tabs.findIndex((t) => t.key === ft) : -1;
+          if (idx > 0) {
+            setFocusedTab(tabs[idx - 1].key);
+            return;
+          }
+          // At first tab → step left into nodes column.
+          setFocusedColumn(ns.length > 0 ? "nodes" : "runs");
+          setFocusedTab(null);
+          return;
+        }
+        if (col === "nodes") {
+          setFocusedColumn("runs");
+          return;
+        }
+        // Already in runs column — no-op.
         return;
       }
       if (e.key === "l" || e.key === "ArrowRight") {
-        if (!selectedRunRef.current || ns.length === 0) return;
+        if (!selectedRunRef.current) return;
         e.preventDefault();
-        setFocusedColumn("nodes");
-        if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
+        if (col === "tabs") {
+          const ft = focusedTabRef.current;
+          const idx = ft ? tabs.findIndex((t) => t.key === ft) : -1;
+          if (idx < tabs.length - 1)
+            setFocusedTab(tabs[idx + 1]?.key ?? tabs[0]?.key ?? null);
+          return;
+        }
+        if (col === "runs") {
+          if (ns.length > 0) {
+            setFocusedColumn("nodes");
+            if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
+          } else if (tabs.length > 0) {
+            setFocusedColumn("tabs");
+            setFocusedTab(tabs[0].key);
+          }
+          return;
+        }
+        if (col === "nodes") {
+          if (tabs.length > 0) {
+            setFocusedColumn("tabs");
+            setFocusedTab(tabs[0].key);
+          }
+          return;
+        }
+      }
+      // ── Per-column j/k/Enter/Escape ─────────────────────────────
+      if (col === "tabs" && tabs.length > 0) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (focusedTabRef.current) setTab(focusedTabRef.current);
+          return;
+        }
+        if (e.key === "Escape") {
+          setFocusedColumn(ns.length > 0 ? "nodes" : "runs");
+          setFocusedTab(null);
+          return;
+        }
+        // j/k are no-ops in tabs column.
         return;
       }
       if (col === "nodes" && ns.length > 0) {
@@ -534,6 +602,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     if (!el) return;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedNode]);
+
+  // Scroll focused tab into view.
+  useEffect(() => {
+    if (!focusedTab) return;
+    const el = document.querySelector(
+      `[data-tab-key="${focusedTab}"]`,
+    ) as HTMLElement | null;
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [focusedTab]);
 
   // When a node selection clears, drop the keyboard focus off any
   // specific node so the cursor parks on the Nodes header instead of
@@ -760,6 +837,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               showTrigger={showTrigger}
               setShowTrigger={setShowTrigger}
               onSelectNode={setSelectedNode}
+              tab={tab}
+              setTab={setTab}
+              focusedTab={focusedColumn === "tabs" ? focusedTab : null}
               onRefresh={() => {
                 refresh();
                 if (selectedRun) loadDetail(selectedRun);
@@ -1372,6 +1452,60 @@ function CompactRunRow({ r }: { r: Run }) {
 
 // --- detail pane ---
 
+type TabKey =
+  | "logs"
+  | "work"
+  | "resources"
+  | "dag"
+  | "timeline"
+  | "summary"
+  | "setup";
+
+interface TabDescriptor {
+  key: TabKey;
+  label: string;
+  count?: string;
+  visible: boolean;
+}
+
+function buildVisibleTabs(
+  nodes: RunNode[],
+  selected: RunNode | null,
+): TabDescriptor[] {
+  const hasWork = !!(selected && (selected.work || selected.modifiers));
+  const nodesWithWork = nodes.filter((n) => n.work || n.modifiers);
+  const hasAnyWork = nodesWithWork.length > 0;
+  return (
+    [
+      { key: "summary" as const, label: "Summary", visible: true },
+      { key: "setup" as const, label: "Setup", visible: true },
+      {
+        key: "dag" as const,
+        label: "DAG",
+        count: nodes.length ? `${nodes.length}` : undefined,
+        visible: nodes.length > 0,
+      },
+      { key: "logs" as const, label: "Logs", visible: true },
+      {
+        key: "timeline" as const,
+        label: "Timeline",
+        visible: nodes.length > 0,
+      },
+      {
+        key: "work" as const,
+        label: "Work",
+        count: hasWork
+          ? `${selected?.work?.steps?.length ?? 0}`
+          : hasAnyWork
+            ? `${nodesWithWork.length}`
+            : undefined,
+        visible: hasAnyWork,
+      },
+      { key: "resources" as const, label: "Resources", visible: true },
+    ] as TabDescriptor[]
+  ).filter((t) => t.visible);
+}
+
 function RunDetailPane({
   run,
   nodes,
@@ -1380,6 +1514,9 @@ function RunDetailPane({
   setShowTrigger,
   onSelectNode,
   onRefresh,
+  tab,
+  setTab,
+  focusedTab,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -1388,6 +1525,9 @@ function RunDetailPane({
   setShowTrigger: (v: boolean) => void;
   onSelectNode: (id: string) => void;
   onRefresh: () => void;
+  tab: TabKey;
+  setTab: (k: TabKey) => void;
+  focusedTab: TabKey | null;
 }) {
   const selected = node;
   const selectedIsRunning =
@@ -1397,55 +1537,11 @@ function RunDetailPane({
     run.status === "success" ||
     run.status === "failed" ||
     run.status === "cancelled";
-  const hasWork = !!(selected && (selected.work || selected.modifiers));
+  const visibleTabs = buildVisibleTabs(nodes, selected);
   const nodesWithWork = nodes.filter((n) => n.work || n.modifiers);
   const hasAnyWork = nodesWithWork.length > 0;
 
-  type TabKey =
-    | "logs"
-    | "work"
-    | "resources"
-    | "dag"
-    | "timeline"
-    | "summary"
-    | "setup";
-
-  const tabs: {
-    key: TabKey;
-    label: string;
-    count?: string;
-    visible: boolean;
-  }[] = [
-    { key: "summary", label: "Summary", visible: true },
-    { key: "setup", label: "Setup", visible: true },
-    {
-      key: "dag",
-      label: "DAG",
-      count: nodes.length ? `${nodes.length}` : undefined,
-      visible: nodes.length > 0,
-    },
-    { key: "logs", label: "Logs", visible: true },
-    { key: "timeline", label: "Timeline", visible: nodes.length > 0 },
-    {
-      key: "work",
-      label: "Work",
-      count: hasWork
-        ? `${selected?.work?.steps?.length ?? 0}`
-        : hasAnyWork
-          ? `${nodesWithWork.length}`
-          : undefined,
-      visible: hasAnyWork,
-    },
-    { key: "resources", label: "Resources", visible: true },
-  ];
-  const visibleTabs = tabs.filter((t) => t.visible);
-
   const selectedId = selected?.id ?? null;
-  const [tab, setTab] = useState<TabKey>("summary");
-  const tabRef = useRef<TabKey>(tab);
-  useEffect(() => {
-    tabRef.current = tab;
-  }, [tab]);
   const prevSelectedRef = useRef<string | null>(selectedId);
 
   // The previous-selection ref is kept so future routing decisions
@@ -1520,11 +1616,16 @@ function RunDetailPane({
         {visibleTabs.map((t) => (
           <button
             key={t.key}
+            data-tab-key={t.key}
             onClick={() => setTab(t.key)}
-            className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px whitespace-nowrap ${
+            className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px whitespace-nowrap rounded-t ${
               effectiveTab === t.key
                 ? "border-cyan-400 text-[var(--foreground)]"
                 : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+            } ${
+              focusedTab === t.key
+                ? "ring-2 ring-inset ring-cyan-300 bg-cyan-500/10"
+                : ""
             }`}
           >
             <span className="font-semibold">{t.label}</span>
