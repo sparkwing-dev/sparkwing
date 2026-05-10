@@ -1000,7 +1000,11 @@ function NodeRow({
   return (
     <div
       data-node-id={n.id}
-      className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selected ? "bg-[var(--surface-raised)] border-l-2 border-l-indigo-400" : ""} ${
+      className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+        selected
+          ? "bg-violet-500/15 border-l-violet-400"
+          : "border-l-transparent"
+      } ${
         focused && focusedColumnActive
           ? "ring-2 ring-inset ring-indigo-300 bg-indigo-500/10"
           : focused
