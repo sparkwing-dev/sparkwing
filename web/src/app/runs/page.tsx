@@ -848,67 +848,70 @@ const FullRunRow = memo(function FullRunRow({
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
 
   const meta = (
-    <div className="min-w-0 flex flex-wrap items-center gap-y-1 gap-x-2 text-xs">
-      <FilterableValue
-        facet="status"
-        value={r.status}
-        ctx={ctx}
-        tooltip={`Status: ${r.status}`}
-      >
-        <StatusLabel status={r.status} />
-      </FilterableValue>
-      <FilterableValue
-        facet="repo"
-        value={repo}
-        ctx={ctx}
-        tooltip={`Repo: ${repo}`}
-      >
-        <span className="text-cyan-400/70 shrink-0">{repo}</span>
-      </FilterableValue>
-      <span className="text-[var(--muted)] shrink-0">/</span>
-      <FilterableValue
-        facet="pipeline"
-        value={r.pipeline}
-        ctx={ctx}
-        tooltip={`Pipeline: ${r.pipeline}`}
-      >
-        <span className="font-medium text-violet-300 truncate text-sm">
-          {r.pipeline}
-        </span>
-      </FilterableValue>
-      {r.git_branch && (
+    <div className="min-w-0 flex flex-col gap-0.5 text-xs">
+      <div className="flex items-center gap-2 min-w-0">
         <FilterableValue
-          facet="branch"
-          value={r.git_branch}
+          facet="status"
+          value={r.status}
           ctx={ctx}
-          tooltip={`Branch: ${r.git_branch}`}
+          tooltip={`Status: ${r.status}`}
         >
-          <span className="text-amber-400/70 shrink-0">
-            ⎇ {truncate(r.git_branch, 40)}
+          <StatusLabel status={r.status} />
+        </FilterableValue>
+        <FilterableValue
+          facet="repo"
+          value={repo}
+          ctx={ctx}
+          tooltip={`Repo: ${repo}`}
+        >
+          <span className="text-cyan-400/70 shrink-0">{repo}</span>
+        </FilterableValue>
+        <span className="text-[var(--muted)] shrink-0">/</span>
+        <FilterableValue
+          facet="pipeline"
+          value={r.pipeline}
+          ctx={ctx}
+          tooltip={`Pipeline: ${r.pipeline}`}
+        >
+          <span className="font-medium text-violet-300 truncate text-sm">
+            {r.pipeline}
           </span>
         </FilterableValue>
-      )}
-      {sha7 && (
-        <FilterableValue
-          facet="commit"
-          value={sha7}
-          ctx={ctx}
-          tooltip={`Commit: ${sha7}`}
-        >
-          <span className="font-mono text-[var(--muted)] shrink-0">{sha7}</span>
-        </FilterableValue>
-      )}
-      {r.trigger_source && (
-        <Tooltip content={`Trigger: ${r.trigger_source}`}>
-          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
-            {r.trigger_source}
-          </span>
-        </Tooltip>
-      )}
-      <span className="basis-full" />
-      <span className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap">
+        {r.git_branch && (
+          <FilterableValue
+            facet="branch"
+            value={r.git_branch}
+            ctx={ctx}
+            tooltip={`Branch: ${r.git_branch}`}
+          >
+            <span className="text-amber-400/70 shrink-0">
+              ⎇ {truncate(r.git_branch, 40)}
+            </span>
+          </FilterableValue>
+        )}
+        {sha7 && (
+          <FilterableValue
+            facet="commit"
+            value={sha7}
+            ctx={ctx}
+            tooltip={`Commit: ${sha7}`}
+          >
+            <span className="font-mono text-[var(--muted)] shrink-0">
+              {sha7}
+            </span>
+          </FilterableValue>
+        )}
+        {r.trigger_source && (
+          <Tooltip content={`Trigger: ${r.trigger_source}`}>
+            <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
+              {r.trigger_source}
+            </span>
+          </Tooltip>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
         {fmtDatePrefix(r.started_at) && (
-          <span className="text-[var(--foreground)]">
+          <span className="text-[var(--foreground)] shrink-0">
             {fmtDatePrefix(r.started_at)}
           </span>
         )}
@@ -918,16 +921,16 @@ const FullRunRow = memo(function FullRunRow({
           ctx={ctx}
           tooltip={`Started ${fmtFullDate(r.started_at)}`}
         >
-          <span className="text-[var(--foreground)]">
+          <span className="text-[var(--foreground)] shrink-0">
             {fmtClock(r.started_at)}
           </span>
         </FilterableTimestamp>
-        <span>→</span>
+        <span className="shrink-0">→</span>
         {r.finished_at ? (
           <>
             {fmtDatePrefix(r.finished_at) &&
               fmtDatePrefix(r.finished_at) !== fmtDatePrefix(r.started_at) && (
-                <span className="text-[var(--foreground)]">
+                <span className="text-[var(--foreground)] shrink-0">
                   {fmtDatePrefix(r.finished_at)}
                 </span>
               )}
@@ -937,25 +940,25 @@ const FullRunRow = memo(function FullRunRow({
               ctx={ctx}
               tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
             >
-              <span className="text-[var(--foreground)]">
+              <span className="text-[var(--foreground)] shrink-0">
                 {fmtClock(r.finished_at)}
               </span>
             </FilterableTimestamp>
           </>
         ) : (
           <Tooltip content="Finished">
-            <span className="text-[var(--foreground)]">—</span>
+            <span className="text-[var(--foreground)] shrink-0">—</span>
           </Tooltip>
         )}
         {elapsedMs > 0 && (
           <Tooltip content="Duration">
-            <span>({fmtMs(elapsedMs)})</span>
+            <span className="shrink-0">({fmtMs(elapsedMs)})</span>
           </Tooltip>
         )}
         <Tooltip content={fmtFullDate(sinceTs)}>
-          <span>· {fmtAgo(sinceTs)}</span>
+          <span className="shrink-0">· {fmtAgo(sinceTs)}</span>
         </Tooltip>
-      </span>
+      </div>
     </div>
   );
 
