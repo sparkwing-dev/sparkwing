@@ -455,16 +455,24 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         const idx = ns.findIndex((n) => n.id === cur);
         if (e.key === "j" || e.key === "ArrowDown") {
           e.preventDefault();
-          const next = ns[Math.min(ns.length - 1, Math.max(0, idx) + 1)];
-          if (next) setFocusedNode(next.id);
+          // Cycle: header → first → ... → last → header
+          if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
+          else if (idx >= ns.length - 1) setFocusedNode(null);
+          else setFocusedNode(ns[idx + 1].id);
         } else if (e.key === "k" || e.key === "ArrowUp") {
           e.preventDefault();
-          const next = ns[Math.max(0, Math.max(0, idx) - 1)];
-          if (next) setFocusedNode(next.id);
+          // Cycle: header → last → ... → first → header
+          if (!focusedNodeRef.current) setFocusedNode(ns[ns.length - 1].id);
+          else if (idx <= 0) setFocusedNode(null);
+          else setFocusedNode(ns[idx - 1].id);
         } else if (e.key === "Enter") {
           e.preventDefault();
-          const target = focusedNodeRef.current ?? ns[0].id;
-          if (!target) return;
+          // Header parked (no node focus): Enter clears selection.
+          if (!focusedNodeRef.current) {
+            setSelectedNode(null);
+            return;
+          }
+          const target = focusedNodeRef.current;
           if (selectedNodeRef.current === target) setSelectedNode(null);
           else setSelectedNode(target);
         } else if (e.key === "Escape") {
@@ -485,12 +493,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const idx = runs.findIndex((r) => r.id === cur);
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
-        const next = runs[Math.min(runs.length - 1, Math.max(0, idx) + 1)];
-        if (next) setFocusedRun(next.id);
+        const i = idx < 0 ? 0 : (idx + 1) % runs.length;
+        setFocusedRun(runs[i].id);
       } else if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
-        const next = runs[Math.max(0, Math.max(0, idx) - 1)];
-        if (next) setFocusedRun(next.id);
+        const i =
+          idx < 0 ? runs.length - 1 : (idx - 1 + runs.length) % runs.length;
+        setFocusedRun(runs[i].id);
       } else if (e.key === "Enter") {
         e.preventDefault();
         const target = focusedRunRef.current ?? runs[0].id;
@@ -525,6 +534,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     if (!el) return;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedNode]);
+
+  // When a node selection clears, drop the keyboard focus off any
+  // specific node so the cursor parks on the Nodes header instead of
+  // staying on whatever was just deselected.
+  const prevSelectedNodeRef = useRef(selectedNode);
+  useEffect(() => {
+    if (prevSelectedNodeRef.current && !selectedNode) setFocusedNode(null);
+    prevSelectedNodeRef.current = selectedNode;
+  }, [selectedNode]);
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
@@ -690,11 +708,26 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {/* Middle: RunNodes in run */}
         {run && detail && (
           <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
-            <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            <div
+              onClick={() => {
+                setFocusedColumn("nodes");
+                setFocusedNode(null);
+                setSelectedNode(null);
+              }}
+              className={`px-3 py-2 border-b border-[var(--border)] flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+                focusedColumn === "nodes" && !focusedNode
+                  ? "ring-2 ring-inset ring-indigo-300 bg-indigo-500/10"
+                  : ""
+              }`}
+              title="click to deselect node"
+            >
               <span>Nodes ({nodes.length})</span>
               {selectedNode && (
                 <button
-                  onClick={() => setSelectedNode(null)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedNode(null);
+                  }}
                   className="text-[var(--muted)] hover:text-red-400 normal-case font-normal tracking-normal"
                   title="clear node selection"
                 >
