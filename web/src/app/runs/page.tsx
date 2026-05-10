@@ -1394,15 +1394,7 @@ function RunDetailPane({
   const visibleTabs = tabs.filter((t) => t.visible);
 
   const selectedId = selected?.id ?? null;
-  const [tab, setTab] = useState<TabKey>(
-    selected
-      ? "logs"
-      : isTerminal
-        ? "summary"
-        : nodes.length > 0
-          ? "dag"
-          : "setup",
-  );
+  const [tab, setTab] = useState<TabKey>("summary");
   const tabRef = useRef<TabKey>(tab);
   useEffect(() => {
     tabRef.current = tab;
