@@ -1562,17 +1562,19 @@ function RunDetailPane({
           </div>
         )}
         {effectiveTab === "setup" && (
-          <SetupPanel
-            run={run}
-            collapsed={false}
-            onToggle={() => {}}
-            inline
-            onOpenRun={(id) => {
-              const el = document.querySelector(`[data-run-id="${id}"]`);
-              if (el) (el as HTMLElement).click();
-              else window.location.assign(`?run=${id}`);
-            }}
-          />
+          <div className="p-4">
+            <SetupPanel
+              run={run}
+              collapsed={false}
+              onToggle={() => {}}
+              inline
+              onOpenRun={(id) => {
+                const el = document.querySelector(`[data-run-id="${id}"]`);
+                if (el) (el as HTMLElement).click();
+                else window.location.assign(`?run=${id}`);
+              }}
+            />
+          </div>
         )}
       </div>
     </>
@@ -1759,14 +1761,17 @@ function AllNodesLogs({
 // existing NodeWorkView underneath.
 // AllNodesSummary renders one collapsible block per node with the
 // same SelectedNodePanel that single-node selection shows. Clicking
-// a node header jumps into the single-node view (filter).
+// a node header toggles the section open/closed — page-level filter
+// stays on the runs list's clicks; this view is for browsing.
 function AllNodesSummary({
   nodes,
   onSelectNode,
 }: {
   nodes: RunNode[];
+  // accepted but unused — kept for parity with sibling AllNodes* components
   onSelectNode?: (id: string) => void;
 }) {
+  void onSelectNode;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -1785,7 +1790,7 @@ function AllNodesSummary({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
-        <span>All nodes — click a name to filter the page to that node</span>
+        <span>All nodes — click a row to expand</span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
@@ -1809,23 +1814,19 @@ function AllNodesSummary({
             key={n.id}
             className="border border-[var(--border)] rounded bg-[#0d1117]"
           >
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <button
-                onClick={() => toggle(n.id)}
-                className="text-[var(--muted)] w-3 text-center text-xs"
-              >
+            <button
+              onClick={() => toggle(n.id)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-[var(--surface-raised)] transition-colors"
+            >
+              <span className="text-[var(--muted)] w-3 text-center text-xs">
                 {open ? "▾" : "▸"}
-              </button>
+              </span>
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
               />
-              <button
-                onClick={() => onSelectNode?.(n.id)}
-                className="font-mono text-xs text-left truncate flex-1 hover:underline"
-                title={`filter to ${n.id}`}
-              >
+              <span className="font-mono text-xs truncate flex-1" title={n.id}>
                 {n.id}
-              </button>
+              </span>
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -1834,7 +1835,7 @@ function AllNodesSummary({
                   {fmtMs(dur)}
                 </span>
               )}
-            </div>
+            </button>
             {open && (
               <div className="border-t border-[var(--border)] p-2">
                 <SelectedNodePanel node={n} />
