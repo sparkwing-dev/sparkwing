@@ -1373,7 +1373,7 @@ function RunDetailPane({
     count?: string;
     visible: boolean;
   }[] = [
-    { key: "logs", label: "Logs", visible: !!selected },
+    { key: "logs", label: "Logs", visible: true },
     {
       key: "work",
       label: "Work",
@@ -1409,26 +1409,12 @@ function RunDetailPane({
   }, [tab]);
   const prevSelectedRef = useRef<string | null>(selectedId);
 
-  // Selection-driven tab routing: clicking a node should pull the
-  // detail pane to that node's logs, but only when there's a reason
-  // to switch — either we had no selection before, or the user is on
-  // a run-scoped tab where node-level info isn't visible. If they're
-  // already on a node-scoped tab (logs/work/resources), preserve it
-  // when bouncing between nodes.
+  // The previous-selection ref is kept so future routing decisions
+  // could compare against it, but we intentionally do NOT auto-switch
+  // the tab on selection changes — the user's tab choice persists
+  // when flipping nodes or deselecting.
   useEffect(() => {
-    const prev = prevSelectedRef.current;
     prevSelectedRef.current = selectedId;
-    if (!selectedId) return;
-    const t = tabRef.current;
-    if (
-      !prev ||
-      t === "dag" ||
-      t === "timeline" ||
-      t === "summary" ||
-      t === "setup"
-    ) {
-      setTab("logs");
-    }
   }, [selectedId]);
 
   const effectiveTab: TabKey =
