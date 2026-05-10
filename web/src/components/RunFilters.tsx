@@ -1393,7 +1393,7 @@ export function FilterableValue({
         {tooltip ? <Tooltip content={tooltip}>{children}</Tooltip> : children}
       </span>
       {open && (
-        <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
+        <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-[1000] bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
           <button
             onClick={(e) => {
               e.stopPropagation();
