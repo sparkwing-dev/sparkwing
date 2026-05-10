@@ -163,7 +163,7 @@ function RunsRoute() {
       params.delete("view");
     }
     const qs = params.toString();
-    router.replace(qs ? `/runs?${qs}` : "/runs");
+    router.push(qs ? `/runs?${qs}` : "/runs");
   };
 
   const pivotTabs = (

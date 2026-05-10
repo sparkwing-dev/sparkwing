@@ -160,7 +160,7 @@ export default function PipelineOverview({
       params.delete("view");
       params.set("run", id);
       const qs = params.toString();
-      router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+      router.push(qs ? `/runs?${qs}` : "/runs", { scroll: false });
     },
     [router, searchParams],
   );
@@ -226,6 +226,20 @@ export default function PipelineOverview({
       return next;
     });
   }, [selectedRun, rows]);
+
+  // Scroll the selected run into view once the row is expanded and
+  // rendered. Tracked per-id so polls don't keep re-scrolling.
+  const scrolledForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedRun) return;
+    if (scrolledForRef.current === selectedRun) return;
+    const el = document.querySelector(
+      `[data-run-id="${selectedRun}"]`,
+    ) as HTMLElement | null;
+    if (!el) return;
+    scrolledForRef.current = selectedRun;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedRun, expanded, rows]);
 
   const options = useMemo(
     () => computeOptions(runs, registry),
@@ -672,6 +686,7 @@ function RecentRuns({
           return (
             <li
               key={r.id}
+              data-run-id={r.id}
               onClick={() => onHighlightRun(r.id)}
               className={`px-2 py-1.5 grid items-center gap-x-1 gap-y-0 grid-cols-[0.5rem_11.5rem_3.5rem_9rem_minmax(0,1fr)_4.5rem_auto] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
                 isSelected
