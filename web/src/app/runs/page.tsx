@@ -856,7 +856,9 @@ const FullRunRow = memo(function FullRunRow({
           ctx={ctx}
           tooltip={`Status: ${r.status}`}
         >
-          <StatusLabel status={r.status} />
+          <span
+            className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
+          />
         </FilterableValue>
         <FilterableValue
           facet="repo"
@@ -903,7 +905,7 @@ const FullRunRow = memo(function FullRunRow({
         )}
         {r.trigger_source && (
           <Tooltip content={`Trigger: ${r.trigger_source}`}>
-            <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]">
+            <span className="font-mono text-[10px] text-[var(--muted)] shrink-0">
               {r.trigger_source}
             </span>
           </Tooltip>
