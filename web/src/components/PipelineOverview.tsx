@@ -142,7 +142,6 @@ export default function PipelineOverview({
   const [registry, setRegistry] = useState<Record<string, PipelineMeta>>({});
   const [runs, setRuns] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [triggerOpen, setTriggerOpen] = useState<string | null>(null);
   const filterState = useUrlFilterState();
   const filterCtx = useFilterCtx(filterState);
@@ -150,6 +149,27 @@ export default function PipelineOverview({
   const searchParams = useSearchParams();
   const router = useRouter();
   const selectedRun = searchParams.get("run");
+  // Expanded card keys live in the URL so deep links + reloads
+  // restore the same view. Local mirror keeps interactions snappy.
+  const expandedFromUrl = useMemo(() => {
+    const raw = searchParams.get("exp");
+    if (!raw) return new Set<string>();
+    return new Set(raw.split(",").filter(Boolean));
+  }, [searchParams]);
+  const [expanded, setExpanded] = useState<Set<string>>(expandedFromUrl);
+  const lastWrittenExpRef = useRef<string>(
+    [...expandedFromUrl].sort().join(","),
+  );
+  useEffect(() => {
+    const next = [...expanded].sort().join(",");
+    if (next === lastWrittenExpRef.current) return;
+    lastWrittenExpRef.current = next;
+    const params = new URLSearchParams(searchParams.toString());
+    if (next) params.set("exp", next);
+    else params.delete("exp");
+    const qs = params.toString();
+    router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+  }, [expanded, searchParams, router]);
   // Click on a run in the by-pipeline view jumps to the Activity
   // pivot with that run selected so the user can dive into the detail
   // panel + scroll context. The runs page picks the row id up from

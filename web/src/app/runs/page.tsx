@@ -264,6 +264,42 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     return () => clearInterval(i);
   }, [refresh]);
 
+  // Live progress for running runs. Fetches detail for each running
+  // run on every poll cycle and caches node counts so the list can
+  // show "3/8" badges without opening the detail pane. Skipped when
+  // there are no running runs to keep network quiet.
+  const [runProgress, setRunProgress] = useState<
+    Record<string, { done: number; total: number }>
+  >({});
+  useEffect(() => {
+    let cancelled = false;
+    const running = runs.filter((r) => r.status === "running");
+    if (running.length === 0) return;
+    const fetchAll = async () => {
+      const updates = await Promise.all(
+        running.map(async (r) => {
+          const d = await getRun(r.id);
+          if (!d) return null;
+          const total = d.nodes.length;
+          const done = d.nodes.filter((n) =>
+            ["success", "complete", "failed", "cancelled"].includes(n.status),
+          ).length;
+          return [r.id, { done, total }] as const;
+        }),
+      );
+      if (cancelled) return;
+      setRunProgress((prev) => {
+        const next = { ...prev };
+        for (const u of updates) if (u) next[u[0]] = u[1];
+        return next;
+      });
+    };
+    fetchAll();
+    return () => {
+      cancelled = true;
+    };
+  }, [runs]);
+
   // Kick an initial detail fetch when a run is selected so the UI
   // has a baseline to mutate against. Subsequent updates come from
   // the SSE event stream (see the useRunEvents block just below) —
@@ -464,17 +500,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     ref={(el) => {
                       if (!el) return;
                       el.indeterminate =
-                        topLevel.some((r) => checkedRuns.has(r.id)) &&
+                        checkedRuns.size > 0 &&
                         !topLevel.every((r) => checkedRuns.has(r.id));
                     }}
-                    checked={
-                      topLevel.length > 0 &&
-                      topLevel.every((r) => checkedRuns.has(r.id))
-                    }
-                    onChange={(e) => {
-                      if (e.target.checked)
-                        setCheckedRuns(new Set(topLevel.map((r) => r.id)));
-                      else setCheckedRuns(new Set());
+                    checked={checkedRuns.size > 0}
+                    onChange={() => {
+                      if (checkedRuns.size > 0) setCheckedRuns(new Set());
+                      else setCheckedRuns(new Set(topLevel.map((r) => r.id)));
                     }}
                     aria-label="select all"
                     className="cursor-pointer accent-violet-500"
@@ -559,7 +591,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     </label>
                   )}
                   <div className="flex-1 min-w-0">
-                    <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
+                    <FullRunRow
+                      r={r}
+                      ctx={filterCtx}
+                      compact={!!run}
+                      progress={runProgress[r.id]}
+                    />
                   </div>
                 </div>
               );
@@ -903,12 +940,14 @@ const FullRunRow = memo(function FullRunRow({
   r,
   ctx,
   compact = false,
+  progress,
 }: {
   r: Run;
   ctx: FilterCtx;
   compact?: boolean;
+  progress?: { done: number; total: number };
 }) {
-  if (compact) return <CompactFullRunRow r={r} ctx={ctx} />;
+  if (compact) return <CompactFullRunRow r={r} ctx={ctx} progress={progress} />;
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
   const elapsedMs = (finishedMs || Date.now()) - startedMs;
@@ -1053,9 +1092,11 @@ const FullRunRow = memo(function FullRunRow({
 const CompactFullRunRow = memo(function CompactFullRunRow({
   r,
   ctx,
+  progress,
 }: {
   r: Run;
   ctx: FilterCtx;
+  progress?: { done: number; total: number };
 }) {
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
@@ -1129,6 +1170,11 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
           </span>
           {elapsedMs > 0 && (
             <span className="shrink-0">({fmtMsCompact(elapsedMs)})</span>
+          )}
+          {progress && r.status === "running" && (
+            <span className="shrink-0 text-indigo-300">
+              {progress.done}/{progress.total}
+            </span>
           )}
           <span className="shrink-0">{fmtAgoShort(sinceTs)}</span>
         </div>
