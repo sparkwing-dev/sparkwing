@@ -365,6 +365,64 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   const filterCtx = useFilterCtx(filterState);
 
+  // Keyboard cursor: j/down moves to next row, k/up to previous,
+  // Enter opens the focused run, Esc closes the detail (or clears
+  // focus when nothing is open). Cursor is separate from selectedRun
+  // so the user can scroll through rows without fetching detail on
+  // every keystroke.
+  const [focusedRun, setFocusedRun] = useState<string | null>(null);
+  const topLevelRef = useRef(topLevel);
+  topLevelRef.current = topLevel;
+  const focusedRunRef = useRef(focusedRun);
+  focusedRunRef.current = focusedRun;
+  const selectedRunRef = useRef(selectedRun);
+  selectedRunRef.current = selectedRun;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        t?.isContentEditable
+      )
+        return;
+      const list = topLevelRef.current;
+      if (list.length === 0) return;
+      const cur = focusedRunRef.current ?? selectedRunRef.current ?? list[0].id;
+      const idx = list.findIndex((r) => r.id === cur);
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = list[Math.min(list.length - 1, Math.max(0, idx) + 1)];
+        if (next) setFocusedRun(next.id);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = list[Math.max(0, Math.max(0, idx) - 1)];
+        if (next) setFocusedRun(next.id);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const target = focusedRunRef.current ?? list[0].id;
+        if (target) selectRunRef.current(target);
+      } else if (e.key === "Escape") {
+        if (selectedRunRef.current) selectRunRef.current(null);
+        else setFocusedRun(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Scroll focused row into view when it changes via keyboard.
+  useEffect(() => {
+    if (!focusedRun) return;
+    const el = document.querySelector(
+      `[data-run-id="${focusedRun}"]`,
+    ) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focusedRun]);
+
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
     setSelectedNode(null);
@@ -379,6 +437,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     const qs = params.toString();
     router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
   };
+  const selectRunRef = useRef(selectRun);
+  selectRunRef.current = selectRun;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -471,6 +531,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
+              const isFocused = focusedRun === r.id;
               return (
                 <div
                   key={r.id}
@@ -480,17 +541,22 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
                       : "border-l-transparent"
-                  }`}
+                  } ${isFocused ? "ring-1 ring-inset ring-violet-400/60" : ""}`}
                 >
                   {!run && (
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
+                    <label
                       onClick={(e) => e.stopPropagation()}
-                      onChange={() => toggleChecked(r.id)}
-                      aria-label="select run"
-                      className="mt-1 shrink-0 cursor-pointer accent-violet-500"
-                    />
+                      className="-m-2 p-2 shrink-0 cursor-pointer flex items-start"
+                      title="select run"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleChecked(r.id)}
+                        aria-label="select run"
+                        className="mt-1 cursor-pointer accent-violet-500"
+                      />
+                    </label>
                   )}
                   <div className="flex-1 min-w-0">
                     <FullRunRow r={r} ctx={filterCtx} compact={!!run} />
