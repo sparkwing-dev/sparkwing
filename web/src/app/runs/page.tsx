@@ -387,35 +387,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
       >
         {pivotTabs}
-        {topLevel.length > 0 && (
-          <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted)] mr-3 cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              ref={(el) => {
-                if (!el) return;
-                el.indeterminate =
-                  topLevel.some((r) => checkedRuns.has(r.id)) &&
-                  !topLevel.every((r) => checkedRuns.has(r.id));
-              }}
-              checked={
-                topLevel.length > 0 &&
-                topLevel.every((r) => checkedRuns.has(r.id))
-              }
-              onChange={(e) => {
-                if (e.target.checked)
-                  setCheckedRuns(new Set(topLevel.map((r) => r.id)));
-                else setCheckedRuns(new Set());
-              }}
-              aria-label="select all"
-              className="cursor-pointer accent-violet-500"
-            />
-            <span>
-              {checkedRuns.size > 0
-                ? `${checkedRuns.size} of ${topLevel.length} selected`
-                : `${topLevel.length} runs`}
-            </span>
-          </label>
-        )}
         <FullFilterBar
           openDropdown={openDropdown}
           setOpenDropdown={setOpenDropdown}
@@ -425,12 +396,36 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           setSearchText={filterState.setFilterText}
           onClearAll={() => clearAllFilters(filterState)}
           trailingActions={
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-[var(--muted)] mr-1">
-                {checkedRuns.size > 0
-                  ? `${checkedRuns.size} selected`
-                  : "no selection"}
-              </span>
+            <div className="flex items-center gap-2">
+              {topLevel.length > 0 && (
+                <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted)] cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    ref={(el) => {
+                      if (!el) return;
+                      el.indeterminate =
+                        topLevel.some((r) => checkedRuns.has(r.id)) &&
+                        !topLevel.every((r) => checkedRuns.has(r.id));
+                    }}
+                    checked={
+                      topLevel.length > 0 &&
+                      topLevel.every((r) => checkedRuns.has(r.id))
+                    }
+                    onChange={(e) => {
+                      if (e.target.checked)
+                        setCheckedRuns(new Set(topLevel.map((r) => r.id)));
+                      else setCheckedRuns(new Set());
+                    }}
+                    aria-label="select all"
+                    className="cursor-pointer accent-violet-500"
+                  />
+                  <span>
+                    {checkedRuns.size > 0
+                      ? `${checkedRuns.size} of ${topLevel.length} selected`
+                      : `${topLevel.length} runs`}
+                  </span>
+                </label>
+              )}
               <button
                 disabled={checkedRuns.size !== 1}
                 onClick={async () => {
