@@ -613,7 +613,7 @@ function RecentRuns({
             <li
               key={r.id}
               onClick={() => onSelectRun(isSelected ? null : r.id)}
-              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_13rem_4.5rem_10rem_minmax(0,1fr)_auto] ${
+              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_13rem_4.5rem_10rem_minmax(0,1fr)_4.5rem_auto] ${
                 isSelected
                   ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
@@ -655,6 +655,9 @@ function RecentRuns({
               )}
               <RunSummary run={r} />
               <div className="justify-self-end">
+                <RunDurationCell run={r} />
+              </div>
+              <div className="justify-self-end">
                 <RunTimestampBlock run={r} />
               </div>
             </li>
@@ -668,7 +671,7 @@ function RecentRuns({
 function RunSummary({ run }: { run: Run }) {
   const text = run.error || run.status;
   if (!text) return <span />;
-  const truncated = text.length > 30 ? text.slice(0, 29) + "…" : text;
+  const truncated = text.length > 60 ? text.slice(0, 59) + "…" : text;
   const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
   return (
     <Tooltip content={text}>
@@ -680,9 +683,6 @@ function RunSummary({ run }: { run: Run }) {
 }
 
 function RunTimestampBlock({ run }: { run: Run }) {
-  const startedMs = new Date(run.started_at).getTime();
-  const finishedMs = run.finished_at ? new Date(run.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || Date.now()) - startedMs;
   const sinceTs = run.finished_at || run.started_at;
   return (
     <Tooltip content={<RunSummaryTip run={run} />}>
@@ -706,8 +706,27 @@ function RunTimestampBlock({ run }: { run: Run }) {
         <span className="text-[var(--foreground)]">
           {run.finished_at ? fmtClock(run.finished_at) : "—"}
         </span>
-        {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
         <span>· {fmtAgo(sinceTs)}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
+function RunDurationCell({ run }: { run: Run }) {
+  const startedMs = new Date(run.started_at).getTime();
+  const finishedMs = run.finished_at ? new Date(run.finished_at).getTime() : 0;
+  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  if (elapsedMs <= 0) return <span />;
+  return (
+    <Tooltip
+      content={
+        run.finished_at
+          ? `Duration: ${fmtMs(elapsedMs)}`
+          : `Running for ${fmtMs(elapsedMs)}`
+      }
+    >
+      <span className="font-mono tabular-nums text-[11px] text-[var(--muted)] truncate">
+        {fmtMs(elapsedMs)}
       </span>
     </Tooltip>
   );
