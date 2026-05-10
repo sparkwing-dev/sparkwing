@@ -1595,11 +1595,7 @@ function RunDetailPane({
               onToggle={() => {}}
               inline
             />
-            {selected ? (
-              <SelectedNodePanel node={selected} />
-            ) : (
-              <AllNodesSummary nodes={nodes} onSelectNode={onSelectNode} />
-            )}
+            {selected && <SelectedNodePanel node={selected} />}
           </div>
         )}
         {effectiveTab === "setup" && (
@@ -1800,94 +1796,6 @@ function AllNodesLogs({
 // AllNodesWork renders one collapsible block per node that carries
 // work/modifiers data. Collapsed by default; expanding mounts the
 // existing NodeWorkView underneath.
-// AllNodesSummary renders one collapsible block per node with the
-// same SelectedNodePanel that single-node selection shows. Clicking
-// a node header toggles the section open/closed — page-level filter
-// stays on the runs list's clicks; this view is for browsing.
-function AllNodesSummary({
-  nodes,
-  onSelectNode,
-}: {
-  nodes: RunNode[];
-  // accepted but unused — kept for parity with sibling AllNodes* components
-  onSelectNode?: (id: string) => void;
-}) {
-  void onSelectNode;
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  if (nodes.length === 0) {
-    return (
-      <div className="text-sm text-[var(--muted)]">
-        No nodes for this run yet.
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
-        <span>All nodes — click a row to expand</span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
-            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
-          >
-            expand all
-          </button>
-          <button
-            onClick={() => setExpanded(new Set())}
-            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
-          >
-            collapse all
-          </button>
-        </div>
-      </div>
-      {nodes.map((n) => {
-        const open = expanded.has(n.id);
-        const dur = nodeDuration(n);
-        return (
-          <div
-            key={n.id}
-            className="border border-[var(--border)] rounded bg-[#0d1117]"
-          >
-            <button
-              onClick={() => toggle(n.id)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-[var(--surface-raised)] transition-colors"
-            >
-              <span className="text-[var(--muted)] w-3 text-center text-xs">
-                {open ? "▾" : "▸"}
-              </span>
-              <span
-                className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
-              />
-              <span className="font-mono text-xs truncate flex-1" title={n.id}>
-                {n.id}
-              </span>
-              <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
-                {n.outcome || n.status}
-              </span>
-              {dur > 0 && (
-                <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
-                  {fmtMs(dur)}
-                </span>
-              )}
-            </button>
-            {open && (
-              <div className="border-t border-[var(--border)] p-2">
-                <SelectedNodePanel node={n} />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function AllNodesWork({
   nodes,
