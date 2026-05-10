@@ -643,7 +643,7 @@ function RecentRuns({
             <li
               key={r.id}
               onClick={() => onSelectRun(r.id)}
-              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_13rem_4.5rem_10rem_minmax(0,1fr)_4.5rem_auto] ${
+              className={`px-2 py-1.5 grid items-center gap-x-1 gap-y-0 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_11.5rem_3.5rem_9rem_minmax(0,1fr)_4.5rem_auto] ${
                 isSelected
                   ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
@@ -692,7 +692,10 @@ function RecentRuns({
                   tooltip={`Branch: ${r.git_branch}`}
                 >
                   <span className="text-[11px] text-amber-400/70 font-mono truncate">
-                    ⎇ {r.git_branch}
+                    ⎇{" "}
+                    {r.git_branch.length > 40
+                      ? r.git_branch.slice(0, 39) + "…"
+                      : r.git_branch}
                   </span>
                 </FilterableValue>
               ) : (
