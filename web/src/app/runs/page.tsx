@@ -480,10 +480,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   key={r.id}
                   data-run-id={r.id}
                   onClick={() => selectRun(isActive ? null : r.id)}
-                  className={`px-3 py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
+                  className={`px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
                     isChecked
-                      ? "bg-violet-500/15 border-l-4 border-l-violet-400"
-                      : ""
+                      ? "bg-violet-500/15 border-l-violet-400"
+                      : "border-l-transparent"
                   }`}
                 >
                   {!run && (
