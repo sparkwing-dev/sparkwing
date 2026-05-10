@@ -631,6 +631,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
               const isFocused = focusedRun === r.id;
+              const isActiveFocus = isFocused && focusedColumn === "runs";
               return (
                 <div
                   key={r.id}
@@ -640,7 +641,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
                       : "border-l-transparent"
-                  } ${isFocused ? "ring-1 ring-inset ring-violet-400/60" : ""}`}
+                  } ${
+                    isActiveFocus
+                      ? "ring-2 ring-inset ring-violet-300 bg-violet-500/10"
+                      : isFocused
+                        ? "ring-1 ring-inset ring-violet-400/30"
+                        : ""
+                  }`}
                 >
                   {!run && (
                     <label
@@ -686,6 +693,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               nodes={nodes}
               selectedNode={selectedNode}
               focusedNode={focusedNode}
+              focusedColumnActive={focusedColumn === "nodes"}
               onSelect={setSelectedNode}
             />
           </div>
@@ -866,11 +874,13 @@ function NodesList({
   nodes,
   selectedNode,
   focusedNode,
+  focusedColumnActive,
   onSelect,
 }: {
   nodes: RunNode[];
   selectedNode: string | null;
   focusedNode?: string | null;
+  focusedColumnActive?: boolean;
   onSelect: (id: string) => void;
 }) {
   const groups = partitionByGroup(nodes);
@@ -902,6 +912,7 @@ function NodesList({
               n={n}
               selected={selectedNode === n.id}
               focused={focusedNode === n.id}
+              focusedColumnActive={focusedColumnActive}
               onSelect={onSelect}
             />
           ));
@@ -925,6 +936,7 @@ function NodesList({
                   n={n}
                   selected={selectedNode === n.id}
                   focused={focusedNode === n.id}
+                  focusedColumnActive={focusedColumnActive}
                   indent
                   onSelect={onSelect}
                 />
@@ -972,12 +984,14 @@ function NodeRow({
   n,
   selected,
   focused,
+  focusedColumnActive,
   indent,
   onSelect,
 }: {
   n: RunNode;
   selected: boolean;
   focused?: boolean;
+  focusedColumnActive?: boolean;
   indent?: boolean;
   onSelect: (id: string) => void;
 }) {
@@ -986,7 +1000,13 @@ function NodeRow({
   return (
     <div
       data-node-id={n.id}
-      className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selected ? "bg-[var(--surface-raised)] border-l-2 border-l-indigo-400" : ""} ${focused ? "ring-1 ring-inset ring-indigo-400/60" : ""}`}
+      className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selected ? "bg-[var(--surface-raised)] border-l-2 border-l-indigo-400" : ""} ${
+        focused && focusedColumnActive
+          ? "ring-2 ring-inset ring-indigo-300 bg-indigo-500/10"
+          : focused
+            ? "ring-1 ring-inset ring-indigo-400/30"
+            : ""
+      }`}
       onClick={() => onSelect(n.id)}
       title={`${n.id} · ${statusLabel}${nodeDuration(n) ? ` · ${fmtMs(nodeDuration(n))}` : ""}`}
     >
