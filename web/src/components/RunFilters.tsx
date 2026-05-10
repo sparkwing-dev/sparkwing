@@ -11,9 +11,10 @@
 //   startedAfter, startedBefore, finishedAfter, finishedBefore → loose date strings
 //   q → free-text search (space = AND, "-" prefix = exclude)
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Run, PipelineMeta } from "@/lib/api";
+import Tooltip from "@/components/Tooltip";
 
 // ─── URL state hook ────────────────────────────────────────────────────────
 
@@ -1203,4 +1204,222 @@ export function useFilterDropdownState() {
     };
   }, [openDropdown]);
   return { openDropdown, setOpenDropdown, filterRef };
+}
+
+// ─── Filterable value (click-to-filter pill) ──────────────────────────────
+
+export type FilterFacet =
+  | "status"
+  | "repo"
+  | "pipeline"
+  | "branch"
+  | "commit"
+  | "tag";
+
+export interface FilterCtx {
+  isIncluded: (facet: FilterFacet, value: string) => boolean;
+  isExcluded: (facet: FilterFacet, value: string) => boolean;
+  toggle: (
+    facet: FilterFacet,
+    value: string,
+    mode: "include" | "exclude",
+  ) => void;
+  setDateBound: (
+    field: "started" | "finished",
+    bound: "before" | "after",
+    iso: string,
+  ) => void;
+}
+
+// useFilterCtx returns a stable FilterCtx bound to the given filter
+// state. Reads/writes pass through to the URL via a ref so the ctx
+// identity stays constant — consumers can pass it through memoized
+// components without busting them.
+export function useFilterCtx(filterState: RunFilterState): FilterCtx {
+  const ref = useRef(filterState);
+  ref.current = filterState;
+  return useMemo<FilterCtx>(() => {
+    const facet = (f: FilterFacet) => {
+      const s = ref.current;
+      switch (f) {
+        case "status":
+          return [
+            s.filterStatus,
+            s.setFilterStatus,
+            s.excludeStatus,
+            s.setExcludeStatus,
+          ] as const;
+        case "repo":
+          return [
+            s.filterRepo,
+            s.setFilterRepo,
+            s.excludeRepo,
+            s.setExcludeRepo,
+          ] as const;
+        case "pipeline":
+          return [
+            s.filterPipeline,
+            s.setFilterPipeline,
+            s.excludePipeline,
+            s.setExcludePipeline,
+          ] as const;
+        case "branch":
+          return [
+            s.filterBranch,
+            s.setFilterBranch,
+            s.excludeBranch,
+            s.setExcludeBranch,
+          ] as const;
+        case "commit":
+          return [
+            s.filterCommit,
+            s.setFilterCommit,
+            s.excludeCommit,
+            s.setExcludeCommit,
+          ] as const;
+        case "tag":
+          return [
+            s.filterTag,
+            s.setFilterTag,
+            s.excludeTag,
+            s.setExcludeTag,
+          ] as const;
+      }
+    };
+    return {
+      isIncluded: (f, v) => facet(f)[0].includes(v),
+      isExcluded: (f, v) => facet(f)[2].includes(v),
+      toggle: (f, v, mode) => {
+        const [inc, setInc, exc, setExc] = facet(f);
+        if (mode === "include") {
+          if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
+          else {
+            setInc([...inc, v]);
+            if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
+          }
+        } else {
+          if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
+          else {
+            setExc([...exc, v]);
+            if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
+          }
+        }
+      },
+      setDateBound: (field, bound, iso) => {
+        const d = new Date(iso);
+        const local = isNaN(d.getTime())
+          ? ""
+          : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+              .toISOString()
+              .slice(0, 16);
+        const s = ref.current;
+        if (field === "started" && bound === "before")
+          s.setStartedBefore(local);
+        else if (field === "started" && bound === "after")
+          s.setStartedAfter(local);
+        else if (field === "finished" && bound === "before")
+          s.setFinishedBefore(local);
+        else if (field === "finished" && bound === "after")
+          s.setFinishedAfter(local);
+      },
+    };
+  }, []);
+}
+
+function useClickPopup<T extends HTMLElement>() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current || ref.current.contains(e.target as Node)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("click", onDocClick, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", onDocClick, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return { open, setOpen, ref };
+}
+
+export function FilterableValue({
+  facet,
+  value,
+  ctx,
+  tooltip,
+  children,
+}: {
+  facet: FilterFacet;
+  value: string;
+  ctx: FilterCtx;
+  tooltip?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const incl = ctx.isIncluded(facet, value);
+  const excl = ctx.isExcluded(facet, value);
+  const { open, setOpen, ref } = useClickPopup<HTMLSpanElement>();
+  return (
+    <span
+      ref={ref}
+      className="relative inline-flex items-center"
+      onClick={(e) => {
+        e.stopPropagation();
+        setOpen((o) => !o);
+      }}
+    >
+      <span
+        className={`cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4 ${
+          incl
+            ? "underline decoration-dotted decoration-2 decoration-current underline-offset-4"
+            : excl
+              ? "line-through decoration-red-400 opacity-70"
+              : ""
+        }`}
+      >
+        {tooltip ? <Tooltip content={tooltip}>{children}</Tooltip> : children}
+      </span>
+      {open && (
+        <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.toggle(facet, value, "include");
+              setOpen(false);
+            }}
+            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
+          >
+            {incl ? "✓ included" : "+ filter to"} {value}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.toggle(facet, value, "exclude");
+              setOpen(false);
+            }}
+            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
+          >
+            {excl ? "✗ excluded" : "− exclude"} {value}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(value);
+              setOpen(false);
+            }}
+            className="px-2 py-0.5 rounded text-left text-[var(--muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] border-t border-[var(--border)] mt-0.5 pt-1"
+          >
+            ⧉ copy
+          </button>
+        </span>
+      )}
+    </span>
+  );
 }

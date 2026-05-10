@@ -26,6 +26,9 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import PipelineOverview from "@/components/PipelineOverview";
 import {
+  type FilterCtx,
+  type FilterFacet,
+  FilterableValue,
   FullFilterBar,
   activeFilterCount,
   buildGroupsFromState,
@@ -33,6 +36,7 @@ import {
   computeOptions,
   repoLabel,
   runMatchesFilter,
+  useFilterCtx,
   useFilterDropdownState,
   useUrlFilterState,
 } from "@/components/RunFilters";
@@ -330,99 +334,27 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   );
   const activeCount = activeFilterCount(filterState);
 
+  // When a run is selected via URL (typically arriving from the By
+  // pipeline view) and the row mounts in topLevel, scroll it into
+  // view once. Tracked per-id so polls don't keep re-scrolling.
+  const scrolledForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedRun) return;
+    if (scrolledForRef.current === selectedRun) return;
+    if (!topLevel.some((r) => r.id === selectedRun)) return;
+    const el = document.querySelector(
+      `[data-run-id="${selectedRun}"]`,
+    ) as HTMLElement | null;
+    if (!el) return;
+    scrolledForRef.current = selectedRun;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [selectedRun, topLevel]);
+
   const run = detail?.run || null;
   const nodes = detail?.nodes || [];
   const node = nodes.find((n) => n.id === selectedNode) || null;
 
-  const facetState: Record<
-    FilterFacet,
-    [string[], (v: string[]) => void, string[], (v: string[]) => void]
-  > = {
-    status: [
-      filterState.filterStatus,
-      filterState.setFilterStatus,
-      filterState.excludeStatus,
-      filterState.setExcludeStatus,
-    ],
-    repo: [
-      filterState.filterRepo,
-      filterState.setFilterRepo,
-      filterState.excludeRepo,
-      filterState.setExcludeRepo,
-    ],
-    pipeline: [
-      filterState.filterPipeline,
-      filterState.setFilterPipeline,
-      filterState.excludePipeline,
-      filterState.setExcludePipeline,
-    ],
-    branch: [
-      filterState.filterBranch,
-      filterState.setFilterBranch,
-      filterState.excludeBranch,
-      filterState.setExcludeBranch,
-    ],
-    commit: [
-      filterState.filterCommit,
-      filterState.setFilterCommit,
-      filterState.excludeCommit,
-      filterState.setExcludeCommit,
-    ],
-    tag: [
-      filterState.filterTag,
-      filterState.setFilterTag,
-      filterState.excludeTag,
-      filterState.setExcludeTag,
-    ],
-  };
-
-  const facetStateRef = useRef(facetState);
-  facetStateRef.current = facetState;
-  const filterStateRef = useRef(filterState);
-  filterStateRef.current = filterState;
-
-  const filterCtx = useMemo<FilterCtx>(
-    () => ({
-      isIncluded: (facet, value) =>
-        facetStateRef.current[facet][0].includes(value),
-      isExcluded: (facet, value) =>
-        facetStateRef.current[facet][2].includes(value),
-      toggle: (facet, value, mode) => {
-        const [inc, setInc, exc, setExc] = facetStateRef.current[facet];
-        if (mode === "include") {
-          if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
-          else {
-            setInc([...inc, value]);
-            if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
-          }
-        } else {
-          if (exc.includes(value)) setExc(exc.filter((v) => v !== value));
-          else {
-            setExc([...exc, value]);
-            if (inc.includes(value)) setInc(inc.filter((v) => v !== value));
-          }
-        }
-      },
-      setDateBound: (field, bound, iso) => {
-        const d = new Date(iso);
-        const local = isNaN(d.getTime())
-          ? ""
-          : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-              .toISOString()
-              .slice(0, 16);
-        const fs = filterStateRef.current;
-        if (field === "started" && bound === "before")
-          fs.setStartedBefore(local);
-        else if (field === "started" && bound === "after")
-          fs.setStartedAfter(local);
-        else if (field === "finished" && bound === "before")
-          fs.setFinishedBefore(local);
-        else if (field === "finished" && bound === "after")
-          fs.setFinishedAfter(local);
-      },
-    }),
-    [],
-  );
+  const filterCtx = useFilterCtx(filterState);
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
@@ -610,30 +542,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   );
 }
 
-// --- filter ctx ---
-
-type FilterFacet = "status" | "repo" | "pipeline" | "branch" | "commit" | "tag";
-
-interface FilterCtx {
-  isIncluded: (facet: FilterFacet, value: string) => boolean;
-  isExcluded: (facet: FilterFacet, value: string) => boolean;
-  toggle: (
-    facet: FilterFacet,
-    value: string,
-    mode: "include" | "exclude",
-  ) => void;
-  setDateBound: (
-    field: "started" | "finished",
-    bound: "before" | "after",
-    iso: string,
-  ) => void;
-}
-
-// useClickPopup manages an open state that toggles on click, closes
-// on a click outside the wrapping ref, and on Escape. The outside-
-// click handler runs in the capture phase and swallows the event so
-// the cancelling click doesn't also drill into a run row, open
-// another popup, etc.
 function useClickPopup<T extends HTMLElement>() {
   const [open, setOpen] = useState(false);
   const ref = useRef<T>(null);
@@ -656,80 +564,6 @@ function useClickPopup<T extends HTMLElement>() {
     };
   }, [open]);
   return { open, setOpen, ref };
-}
-
-function FilterableValue({
-  facet,
-  value,
-  ctx,
-  tooltip,
-  children,
-}: {
-  facet: FilterFacet;
-  value: string;
-  ctx: FilterCtx;
-  tooltip?: string;
-  children: React.ReactNode;
-}) {
-  const incl = ctx.isIncluded(facet, value);
-  const excl = ctx.isExcluded(facet, value);
-  const { open, setOpen, ref } = useClickPopup<HTMLSpanElement>();
-  return (
-    <span
-      ref={ref}
-      className="relative inline-flex items-center"
-      onClick={(e) => {
-        e.stopPropagation();
-        setOpen((o) => !o);
-      }}
-    >
-      <span
-        className={`cursor-pointer rounded px-1 -mx-1 transition-colors hover:bg-[var(--surface-raised)] hover:underline hover:decoration-dotted hover:decoration-[var(--muted)] hover:underline-offset-4 ${
-          incl
-            ? "underline decoration-dotted decoration-2 decoration-current underline-offset-4"
-            : excl
-              ? "line-through decoration-red-400 opacity-70"
-              : ""
-        }`}
-      >
-        {tooltip ? <Tooltip content={tooltip}>{children}</Tooltip> : children}
-      </span>
-      {open && (
-        <span className="absolute top-full left-0 mt-1 flex flex-col gap-0.5 z-50 bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              ctx.toggle(facet, value, "include");
-              setOpen(false);
-            }}
-            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${incl ? "text-green-300" : "text-[var(--muted)] hover:text-green-300"}`}
-          >
-            {incl ? "✓ included" : "+ filter to"} {value}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              ctx.toggle(facet, value, "exclude");
-              setOpen(false);
-            }}
-            className={`px-2 py-0.5 rounded text-left hover:bg-[var(--surface-raised)] ${excl ? "text-red-300" : "text-[var(--muted)] hover:text-red-300"}`}
-          >
-            {excl ? "✗ excluded" : "− exclude"} {value}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(value);
-              setOpen(false);
-            }}
-            className="px-2 py-0.5 rounded text-left text-[var(--muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--foreground)] border-t border-[var(--border)] mt-0.5 pt-1"
-          >
-            ⧉ copy
-          </button>
-        </span>
-      )}
-    </span>
-  );
 }
 
 function FilterableTimestamp({

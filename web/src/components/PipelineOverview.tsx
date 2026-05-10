@@ -20,11 +20,14 @@ import {
 import TriggerForm from "@/components/TriggerForm";
 import Tooltip from "@/components/Tooltip";
 import {
+  type FilterCtx,
+  FilterableValue,
   FullFilterBar,
   buildGroupsFromState,
   clearAllFilters,
   computeOptions,
   runMatchesFilter,
+  useFilterCtx,
   useFilterDropdownState,
   useUrlFilterState,
 } from "@/components/RunFilters";
@@ -142,15 +145,20 @@ export default function PipelineOverview({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [triggerOpen, setTriggerOpen] = useState<string | null>(null);
   const filterState = useUrlFilterState();
+  const filterCtx = useFilterCtx(filterState);
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const searchParams = useSearchParams();
   const router = useRouter();
   const selectedRun = searchParams.get("run");
-  const selectRun = useCallback(
-    (id: string | null) => {
+  // Click on a run in the by-pipeline view jumps to the Activity
+  // pivot with that run selected so the user can dive into the detail
+  // panel + scroll context. The runs page picks the row id up from
+  // the URL and scrolls it into view on mount.
+  const openRunInActivity = useCallback(
+    (id: string) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (id) params.set("run", id);
-      else params.delete("run");
+      params.delete("view");
+      params.set("run", id);
       const qs = params.toString();
       router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
     },
@@ -291,7 +299,8 @@ export default function PipelineOverview({
                   refresh();
                 }}
                 selectedRun={selectedRun}
-                onSelectRun={selectRun}
+                onSelectRun={openRunInActivity}
+                ctx={filterCtx}
               />
             ))}
           </div>
@@ -372,6 +381,7 @@ function PipelineCard({
   onTriggered,
   selectedRun,
   onSelectRun,
+  ctx,
 }: {
   row: PipelineRow;
   expanded: boolean;
@@ -380,7 +390,8 @@ function PipelineCard({
   onTrigger: () => void;
   onTriggered: () => void;
   selectedRun: string | null;
-  onSelectRun: (id: string | null) => void;
+  onSelectRun: (id: string) => void;
+  ctx: FilterCtx;
 }) {
   const { stats } = row;
   const successRate =
@@ -402,15 +413,25 @@ function PipelineCard({
         <span className="font-mono text-sm font-medium truncate flex-1 min-w-0">
           {row.repo && (
             <>
-              <Tooltip content={`Repo: ${row.repo}`}>
+              <FilterableValue
+                facet="repo"
+                value={row.repo}
+                ctx={ctx}
+                tooltip={`Repo: ${row.repo}`}
+              >
                 <span className="text-cyan-400/80">{row.repo}</span>
-              </Tooltip>
+              </FilterableValue>
               <span className="text-[var(--muted)] mx-1">/</span>
             </>
           )}
-          <Tooltip content={`Pipeline: ${row.pipeline}`}>
+          <FilterableValue
+            facet="pipeline"
+            value={row.pipeline}
+            ctx={ctx}
+            tooltip={`Pipeline: ${row.pipeline}`}
+          >
             <span className="text-violet-300">{row.pipeline}</span>
-          </Tooltip>
+          </FilterableValue>
         </span>
         {!row.meta && (
           <Tooltip content="Run history exists but pipeline is not in the local pipelines.yaml registry">
@@ -420,11 +441,17 @@ function PipelineCard({
           </Tooltip>
         )}
         {tags.map((t) => (
-          <Tooltip key={t} content={`Tag: ${t}`}>
+          <FilterableValue
+            key={t}
+            facet="tag"
+            value={t}
+            ctx={ctx}
+            tooltip={`Tag: ${t}`}
+          >
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--background)] text-[var(--muted)]">
               {t}
             </span>
-          </Tooltip>
+          </FilterableValue>
         ))}
         <Sparkline runs={recent} />
         <Tooltip
@@ -508,6 +535,7 @@ function PipelineCard({
             runs={row.runs.slice(0, 15)}
             selectedRun={selectedRun}
             onSelectRun={onSelectRun}
+            ctx={ctx}
           />
         </div>
       )}
@@ -589,10 +617,12 @@ function RecentRuns({
   runs,
   selectedRun,
   onSelectRun,
+  ctx,
 }: {
   runs: Run[];
   selectedRun: string | null;
-  onSelectRun: (id: string | null) => void;
+  onSelectRun: (id: string) => void;
+  ctx: FilterCtx;
 }) {
   if (runs.length === 0) {
     return (
@@ -612,18 +642,23 @@ function RecentRuns({
           return (
             <li
               key={r.id}
-              onClick={() => onSelectRun(isSelected ? null : r.id)}
+              onClick={() => onSelectRun(r.id)}
               className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_13rem_4.5rem_10rem_minmax(0,1fr)_4.5rem_auto] ${
                 isSelected
                   ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
               }`}
             >
-              <Tooltip content={<RunSummaryTip run={r} />}>
+              <FilterableValue
+                facet="status"
+                value={r.status}
+                ctx={ctx}
+                tooltip={<RunSummaryTip run={r} />}
+              >
                 <span
                   className={`inline-block align-middle w-1.5 h-1.5 rounded-full ${sparkColor(r.status)}`}
                 />
-              </Tooltip>
+              </FilterableValue>
               <Tooltip content={`Run: ${r.id}`}>
                 <span
                   className={`font-mono text-xs truncate min-w-0 ${
@@ -636,20 +671,30 @@ function RecentRuns({
                 </span>
               </Tooltip>
               {r.git_sha ? (
-                <Tooltip content={`Commit: ${r.git_sha}`}>
+                <FilterableValue
+                  facet="commit"
+                  value={r.git_sha.slice(0, 7)}
+                  ctx={ctx}
+                  tooltip={`Commit: ${r.git_sha}`}
+                >
                   <span className="text-[11px] text-[var(--muted)] font-mono truncate">
                     {r.git_sha.slice(0, 7)}
                   </span>
-                </Tooltip>
+                </FilterableValue>
               ) : (
                 <span />
               )}
               {r.git_branch ? (
-                <Tooltip content={`Branch: ${r.git_branch}`}>
+                <FilterableValue
+                  facet="branch"
+                  value={r.git_branch}
+                  ctx={ctx}
+                  tooltip={`Branch: ${r.git_branch}`}
+                >
                   <span className="text-[11px] text-amber-400/70 font-mono truncate">
                     ⎇ {r.git_branch}
                   </span>
-                </Tooltip>
+                </FilterableValue>
               ) : (
                 <span />
               )}
