@@ -1004,7 +1004,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
     return "";
   };
 
-  const fullTitle = `${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
+  const fullTitle = `${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
   const datePrefix = fmtDatePrefix(r.started_at);
   const repoShort = repo.length > 7 ? repo.slice(0, 6) + "…" : repo;
   const pipelineShort =
