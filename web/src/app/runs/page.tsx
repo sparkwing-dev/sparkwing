@@ -63,6 +63,7 @@ import {
   fmtDatePrefix,
   fmtFullDate,
   fmtMs,
+  fmtMsCompact,
 } from "@/lib/timeFormat";
 import TriggerForm from "@/components/TriggerForm";
 import StatusLabel from "@/components/StatusLabel";
@@ -1060,7 +1061,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
             {fmtClock(r.started_at)}
           </span>
           {elapsedMs > 0 && (
-            <span className="shrink-0">({fmtMs(elapsedMs)})</span>
+            <span className="shrink-0">({fmtMsCompact(elapsedMs)})</span>
           )}
           <span className="shrink-0">{fmtAgoShort(sinceTs)}</span>
         </div>

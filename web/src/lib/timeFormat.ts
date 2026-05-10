@@ -11,6 +11,17 @@ export function fmtMs(ms: number): string {
   return `${m}m ${s}s`;
 }
 
+// fmtMsCompact collapses to the largest unit only — "12m" instead of
+// "12m 32s", "1h" instead of "1h 37m". Used in narrow contexts where
+// space is at a premium.
+export function fmtMsCompact(ms: number): string {
+  if (!ms) return "-";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  return `${Math.floor(ms / 3_600_000)}h`;
+}
+
 export function fmtFullDate(ts: string): string {
   if (!ts) return "—";
   const d = new Date(ts);
