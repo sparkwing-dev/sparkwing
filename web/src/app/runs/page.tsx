@@ -690,8 +690,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {/* Middle: RunNodes in run */}
         {run && detail && (
           <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
-            <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-              Nodes ({nodes.length})
+            <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+              <span>Nodes ({nodes.length})</span>
+              {selectedNode && (
+                <button
+                  onClick={() => setSelectedNode(null)}
+                  className="text-[var(--muted)] hover:text-red-400 normal-case font-normal tracking-normal"
+                  title="clear node selection"
+                >
+                  deselect ×
+                </button>
+              )}
             </div>
             <NodesList
               nodes={nodes}
