@@ -220,14 +220,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     Record<string, PipelineMeta>
   >({});
   const [detail, setDetail] = useState<RunDetail | null>(null);
-  const [selectedRun, setSelectedRun] = useState<string | null>(
-    searchParams.get("run"),
-  );
+  const initialRun = searchParams.get("run");
+  const [selectedRun, setSelectedRun] = useState<string | null>(initialRun);
   // checkedRuns is the selection set — what rerun / delete operate
   // on. The detail pane (selectedRun) is a separate "viewing" state;
   // opening a detail also adds that run to the selection so the user
   // sees what's selected, but un-viewing doesn't drop it from the set.
-  const [checkedRuns, setCheckedRuns] = useState<Set<string>>(new Set());
+  const [checkedRuns, setCheckedRuns] = useState<Set<string>>(() =>
+    initialRun ? new Set([initialRun]) : new Set(),
+  );
   const toggleChecked = (id: string) => {
     setCheckedRuns((prev) => {
       const next = new Set(prev);
