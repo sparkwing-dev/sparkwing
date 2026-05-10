@@ -165,6 +165,20 @@ export default function PipelineOverview({
     [router, searchParams],
   );
 
+  // toggleRunHighlight just flips the ?run= param without changing
+  // pivot, so the user can click blank space on a row to mark it as
+  // the focused run and click again to clear.
+  const toggleRunHighlight = useCallback(
+    (id: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (params.get("run") === id) params.delete("run");
+      else params.set("run", id);
+      const qs = params.toString();
+      router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+    },
+    [router, searchParams],
+  );
+
   const refresh = useCallback(async () => {
     const [reg, rs] = await Promise.all([
       getPipelines(),
@@ -310,6 +324,7 @@ export default function PipelineOverview({
                 }}
                 selectedRun={selectedRun}
                 onSelectRun={openRunInActivity}
+                onHighlightRun={toggleRunHighlight}
                 ctx={filterCtx}
               />
             ))}
@@ -391,6 +406,7 @@ function PipelineCard({
   onTriggered,
   selectedRun,
   onSelectRun,
+  onHighlightRun,
   ctx,
 }: {
   row: PipelineRow;
@@ -401,6 +417,7 @@ function PipelineCard({
   onTriggered: () => void;
   selectedRun: string | null;
   onSelectRun: (id: string) => void;
+  onHighlightRun: (id: string) => void;
   ctx: FilterCtx;
 }) {
   const { stats } = row;
@@ -545,6 +562,7 @@ function PipelineCard({
             runs={row.runs.slice(0, 15)}
             selectedRun={selectedRun}
             onSelectRun={onSelectRun}
+            onHighlightRun={onHighlightRun}
             ctx={ctx}
           />
         </div>
@@ -627,11 +645,13 @@ function RecentRuns({
   runs,
   selectedRun,
   onSelectRun,
+  onHighlightRun,
   ctx,
 }: {
   runs: Run[];
   selectedRun: string | null;
   onSelectRun: (id: string) => void;
+  onHighlightRun: (id: string) => void;
   ctx: FilterCtx;
 }) {
   if (runs.length === 0) {
@@ -652,7 +672,8 @@ function RecentRuns({
           return (
             <li
               key={r.id}
-              className={`px-2 py-1.5 grid items-center gap-x-1 gap-y-0 grid-cols-[0.5rem_11.5rem_3.5rem_9rem_minmax(0,1fr)_4.5rem_auto] ${
+              onClick={() => onHighlightRun(r.id)}
+              className={`px-2 py-1.5 grid items-center gap-x-1 gap-y-0 grid-cols-[0.5rem_11.5rem_3.5rem_9rem_minmax(0,1fr)_4.5rem_auto] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
                 isSelected
                   ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
@@ -670,7 +691,10 @@ function RecentRuns({
               </FilterableValue>
               <Tooltip content={`Run: ${r.id}`}>
                 <button
-                  onClick={() => onSelectRun(r.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectRun(r.id);
+                  }}
                   className={`font-mono text-xs truncate min-w-0 text-left cursor-pointer hover:underline ${
                     isSelected ? "text-violet-200" : "text-[var(--accent)]"
                   }`}
