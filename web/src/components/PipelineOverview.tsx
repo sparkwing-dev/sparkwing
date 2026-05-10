@@ -691,8 +691,8 @@ function RecentRuns({
                 >
                   <span className="text-[11px] text-amber-400/70 font-mono truncate">
                     ⎇{" "}
-                    {r.git_branch.length > 40
-                      ? r.git_branch.slice(0, 39) + "…"
+                    {r.git_branch.length > 20
+                      ? r.git_branch.slice(0, 19) + "…"
                       : r.git_branch}
                   </span>
                 </FilterableValue>
@@ -719,7 +719,7 @@ function RunSummary({ run }: { run: Run }) {
   if (!text) return <span />;
   const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
   return (
-    <div className={`min-w-0 truncate font-mono text-[11px] ${tone}`}>
+    <div className={`min-w-0 truncate pl-4 font-mono text-[11px] ${tone}`}>
       <Tooltip content={text}>
         <span>{text}</span>
       </Tooltip>
