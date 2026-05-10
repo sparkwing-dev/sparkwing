@@ -8,7 +8,8 @@
 // a row to expand recent runs + trigger form. Used as a tab on /runs
 // and as the body of /pipeline-overview (which is a redirect alias).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   type PipelineMeta,
   type Run,
@@ -134,6 +135,19 @@ export default function PipelineOverview({
   const [triggerOpen, setTriggerOpen] = useState<string | null>(null);
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const selectedRun = searchParams.get("run");
+  const selectRun = useCallback(
+    (id: string | null) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (id) params.set("run", id);
+      else params.delete("run");
+      const qs = params.toString();
+      router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+    },
+    [router, searchParams],
+  );
 
   const refresh = useCallback(async () => {
     const [reg, rs] = await Promise.all([
@@ -164,6 +178,19 @@ export default function PipelineOverview({
     () => buildRows(registry, filteredRuns).sort(sortRows),
     [registry, filteredRuns],
   );
+
+  // Auto-expand the row containing the selected run on entry / when
+  // the selection changes. Only fires once per selectedRun value so
+  // poll-driven row rebuilds don't re-open a card the user closed.
+  const autoExpandedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedRun) return;
+    if (autoExpandedForRef.current === selectedRun) return;
+    const row = rows.find((r) => r.runs.some((rr) => rr.id === selectedRun));
+    if (!row) return;
+    autoExpandedForRef.current = selectedRun;
+    setExpanded(row.key);
+  }, [selectedRun, rows]);
 
   const options = useMemo(
     () => computeOptions(runs, registry),
@@ -255,6 +282,8 @@ export default function PipelineOverview({
                   setTriggerOpen(null);
                   refresh();
                 }}
+                selectedRun={selectedRun}
+                onSelectRun={selectRun}
               />
             ))}
           </div>
@@ -310,6 +339,8 @@ function PipelineCard({
   triggerOpen,
   onTrigger,
   onTriggered,
+  selectedRun,
+  onSelectRun,
 }: {
   row: PipelineRow;
   expanded: boolean;
@@ -317,6 +348,8 @@ function PipelineCard({
   triggerOpen: boolean;
   onTrigger: () => void;
   onTriggered: () => void;
+  selectedRun: string | null;
+  onSelectRun: (id: string | null) => void;
 }) {
   const { stats } = row;
   const successRate =
@@ -401,7 +434,11 @@ function PipelineCard({
             />
           )}
 
-          <RecentRuns runs={row.runs.slice(0, 15)} />
+          <RecentRuns
+            runs={row.runs.slice(0, 15)}
+            selectedRun={selectedRun}
+            onSelectRun={onSelectRun}
+          />
         </div>
       )}
     </div>
@@ -446,7 +483,15 @@ function sparkColor(status: string): string {
   }
 }
 
-function RecentRuns({ runs }: { runs: Run[] }) {
+function RecentRuns({
+  runs,
+  selectedRun,
+  onSelectRun,
+}: {
+  runs: Run[];
+  selectedRun: string | null;
+  onSelectRun: (id: string | null) => void;
+}) {
   if (runs.length === 0) {
     return (
       <div className="text-[var(--muted)]">
@@ -460,38 +505,52 @@ function RecentRuns({ runs }: { runs: Run[] }) {
         recent runs
       </div>
       <ul className="divide-y divide-[var(--border)] border border-[var(--border)] rounded">
-        {runs.map((r) => (
-          <li key={r.id} className="px-2 py-1.5 flex items-center gap-2">
-            <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${sparkColor(r.status)}`}
-            />
-            <a
-              href={`/runs?run=${r.id}`}
-              className="font-mono text-xs text-[var(--accent)] hover:underline truncate min-w-0 flex-1"
+        {runs.map((r) => {
+          const isSelected = selectedRun === r.id;
+          return (
+            <li
+              key={r.id}
+              onClick={() => onSelectRun(isSelected ? null : r.id)}
+              className={`px-2 py-1.5 flex items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+                isSelected
+                  ? "bg-violet-500/15 border-l-4 border-l-violet-400"
+                  : "border-l-4 border-l-transparent"
+              }`}
             >
-              {r.id}
-            </a>
-            {r.git_branch && (
-              <span className="text-[11px] text-amber-400/70 font-mono shrink-0 truncate max-w-[160px]">
-                ⎇ {r.git_branch}
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${sparkColor(r.status)}`}
+              />
+              <span
+                className={`font-mono text-xs truncate min-w-0 flex-1 ${
+                  isSelected
+                    ? "text-violet-200"
+                    : "text-[var(--accent)] hover:underline"
+                }`}
+              >
+                {r.id}
               </span>
-            )}
-            {r.git_sha && (
-              <span className="text-[11px] text-[var(--muted)] font-mono shrink-0">
-                {r.git_sha.slice(0, 7)}
+              {r.git_branch && (
+                <span className="text-[11px] text-amber-400/70 font-mono shrink-0 truncate max-w-[160px]">
+                  ⎇ {r.git_branch}
+                </span>
+              )}
+              {r.git_sha && (
+                <span className="text-[11px] text-[var(--muted)] font-mono shrink-0">
+                  {r.git_sha.slice(0, 7)}
+                </span>
+              )}
+              <StatusPill status={r.status} />
+              <span className="text-[11px] text-[var(--muted)] font-mono w-20 text-right shrink-0 tabular-nums">
+                {r.status === "running"
+                  ? "running"
+                  : formatDuration(runDurationMs(r))}
               </span>
-            )}
-            <StatusPill status={r.status} />
-            <span className="text-[11px] text-[var(--muted)] font-mono w-20 text-right shrink-0 tabular-nums">
-              {r.status === "running"
-                ? "running"
-                : formatDuration(runDurationMs(r))}
-            </span>
-            <span className="text-[11px] text-[var(--muted)] font-mono w-24 text-right shrink-0">
-              <TimeAgo ts={r.started_at} />
-            </span>
-          </li>
-        ))}
+              <span className="text-[11px] text-[var(--muted)] font-mono w-24 text-right shrink-0">
+                <TimeAgo ts={r.started_at} />
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

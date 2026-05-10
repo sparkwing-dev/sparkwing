@@ -154,7 +154,6 @@ function RunsRoute() {
     const params = new URLSearchParams(searchParams.toString());
     if (next === "pipelines") {
       params.set("view", "pipelines");
-      params.delete("run");
       params.delete("node");
     } else {
       params.delete("view");
