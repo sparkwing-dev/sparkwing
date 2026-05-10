@@ -331,7 +331,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedBefore: filterState.setFinishedBefore,
   };
   const topLevel = useMemo(
-    () => runs.filter((r) => runMatchesFilter(r, filterState, pipelineMeta)),
+    () =>
+      runs
+        .filter((r) => runMatchesFilter(r, filterState, pipelineMeta))
+        .sort(
+          (a, b) =>
+            new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+        ),
     [runs, filterState, pipelineMeta],
   );
   const activeCount = activeFilterCount(filterState);
