@@ -1373,7 +1373,16 @@ function RunDetailPane({
     count?: string;
     visible: boolean;
   }[] = [
+    { key: "summary", label: "Summary", visible: true },
+    { key: "setup", label: "Setup", visible: true },
+    {
+      key: "dag",
+      label: "DAG",
+      count: nodes.length ? `${nodes.length}` : undefined,
+      visible: nodes.length > 0,
+    },
     { key: "logs", label: "Logs", visible: true },
+    { key: "timeline", label: "Timeline", visible: nodes.length > 0 },
     {
       key: "work",
       label: "Work",
@@ -1381,15 +1390,6 @@ function RunDetailPane({
       visible: hasWork,
     },
     { key: "resources", label: "Resources", visible: true },
-    {
-      key: "dag",
-      label: "DAG",
-      count: nodes.length ? `${nodes.length}` : undefined,
-      visible: nodes.length > 0,
-    },
-    { key: "timeline", label: "Timeline", visible: nodes.length > 0 },
-    { key: "summary", label: "Summary", visible: true },
-    { key: "setup", label: "Setup", visible: true },
   ];
   const visibleTabs = tabs.filter((t) => t.visible);
 
