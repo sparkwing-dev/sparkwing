@@ -36,7 +36,7 @@ export default function Tooltip({ content, children }: TooltipProps) {
   }, [show]);
 
   const handleMouseEnter = () => {
-    timerRef.current = setTimeout(() => setShow(true), 500);
+    timerRef.current = setTimeout(() => setShow(true), 150);
   };
 
   const handleMouseLeave = () => {
