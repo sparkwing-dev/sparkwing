@@ -58,6 +58,7 @@ import {
 import { useRunEvents } from "@/lib/useRunEvents";
 import {
   fmtAgo,
+  fmtAgoShort,
   fmtClock,
   fmtDatePrefix,
   fmtFullDate,
@@ -378,6 +379,35 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
       >
         {pivotTabs}
+        {topLevel.length > 0 && (
+          <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted)] mr-3 cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              ref={(el) => {
+                if (!el) return;
+                el.indeterminate =
+                  topLevel.some((r) => checkedRuns.has(r.id)) &&
+                  !topLevel.every((r) => checkedRuns.has(r.id));
+              }}
+              checked={
+                topLevel.length > 0 &&
+                topLevel.every((r) => checkedRuns.has(r.id))
+              }
+              onChange={(e) => {
+                if (e.target.checked)
+                  setCheckedRuns(new Set(topLevel.map((r) => r.id)));
+                else setCheckedRuns(new Set());
+              }}
+              aria-label="select all"
+              className="cursor-pointer accent-violet-500"
+            />
+            <span>
+              {checkedRuns.size > 0
+                ? `${checkedRuns.size} of ${topLevel.length} selected`
+                : `${topLevel.length} runs`}
+            </span>
+          </label>
+        )}
         <FullFilterBar
           openDropdown={openDropdown}
           setOpenDropdown={setOpenDropdown}
@@ -435,38 +465,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
         >
           <div className="flex-1 overflow-y-auto">
-            {topLevel.length > 0 && !run && (
-              <div className="px-3 py-1.5 border-b border-[var(--border)] flex items-center gap-2 text-[10px] text-[var(--muted)]">
-                <input
-                  type="checkbox"
-                  ref={(el) => {
-                    if (!el) return;
-                    const some =
-                      topLevel.some((r) => checkedRuns.has(r.id)) &&
-                      !topLevel.every((r) => checkedRuns.has(r.id));
-                    el.indeterminate = some;
-                  }}
-                  checked={
-                    topLevel.length > 0 &&
-                    topLevel.every((r) => checkedRuns.has(r.id))
-                  }
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setCheckedRuns(new Set(topLevel.map((r) => r.id)));
-                    } else {
-                      setCheckedRuns(new Set());
-                    }
-                  }}
-                  aria-label="select all"
-                  className="shrink-0 cursor-pointer accent-violet-500"
-                />
-                <span>
-                  {checkedRuns.size > 0
-                    ? `${checkedRuns.size} of ${topLevel.length} selected`
-                    : `${topLevel.length} runs`}
-                </span>
-              </div>
-            )}
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
@@ -1001,28 +999,64 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
   };
 
   const fullTitle = `${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
+  const datePrefix = fmtDatePrefix(r.started_at);
+  const repoShort = repo.length > 7 ? repo.slice(0, 6) + "…" : repo;
+  const pipelineShort =
+    r.pipeline.length > 10 ? r.pipeline.slice(0, 9) + "…" : r.pipeline;
+  const branchShort = r.git_branch
+    ? r.git_branch.length > 7
+      ? r.git_branch.slice(0, 6) + "…"
+      : r.git_branch
+    : "";
   return (
     <div
       className="min-w-0 flex flex-col gap-0.5 text-[11px]"
       title={fullTitle}
     >
-      <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1 min-w-0">
         <span
           className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
         />
-        <span
-          className={`font-medium text-violet-300 truncate min-w-0 ${styleFor("pipeline", r.pipeline)}`}
-        >
-          {r.pipeline}
+        <span className={`text-cyan-400/70 shrink-0 ${styleFor("repo", repo)}`}>
+          {repoShort}
         </span>
-      </div>
-      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] pl-4 min-w-0">
-        {elapsedMs > 0 && (
-          <span className="text-[var(--foreground)] shrink-0">
-            {fmtMs(elapsedMs)}
+        <span className="text-[var(--muted)] shrink-0">/</span>
+        <span
+          className={`font-medium text-violet-300 shrink-0 ${styleFor("pipeline", r.pipeline)}`}
+        >
+          {pipelineShort}
+        </span>
+        {branchShort && (
+          <span
+            className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch!)}`}
+          >
+            {branchShort}
           </span>
         )}
-        <span className="truncate">· {fmtAgo(sinceTs)}</span>
+      </div>
+      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
+        {r.trigger_source ? (
+          <span
+            className="text-[10px] text-[var(--muted)] shrink-0 w-2.5 text-center uppercase"
+            title={`Trigger: ${r.trigger_source}`}
+          >
+            {r.trigger_source.charAt(0)}
+          </span>
+        ) : (
+          <span className="w-2.5 shrink-0" />
+        )}
+        {datePrefix && (
+          <span className="text-[var(--foreground)] shrink-0">
+            {datePrefix}
+          </span>
+        )}
+        <span className="text-[var(--foreground)] shrink-0">
+          {fmtClock(r.started_at)}
+        </span>
+        {elapsedMs > 0 && (
+          <span className="shrink-0">({fmtMs(elapsedMs)})</span>
+        )}
+        <span className="shrink-0">{fmtAgoShort(sinceTs)}</span>
       </div>
     </div>
   );

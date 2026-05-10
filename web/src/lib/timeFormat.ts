@@ -50,6 +50,19 @@ export function fmtDatePrefix(ts: string): string {
   return md;
 }
 
+// fmtAgoShort returns the same magnitude as fmtAgo but as a signed
+// offset string ("-2d", "-5m") without the trailing "ago". Useful in
+// narrow columns where every character counts.
+export function fmtAgoShort(ts: string): string {
+  if (!ts) return "—";
+  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (sec < 0) return "—";
+  if (sec < 60) return `-${sec}s`;
+  if (sec < 3600) return `-${Math.floor(sec / 60)}m`;
+  if (sec < 86_400) return `-${Math.floor(sec / 3600)}h`;
+  return `-${Math.floor(sec / 86_400)}d`;
+}
+
 export function fmtAgo(ts: string): string {
   if (!ts) return "—";
   const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
