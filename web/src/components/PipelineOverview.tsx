@@ -613,9 +613,9 @@ function RecentRuns({
             <li
               key={r.id}
               onClick={() => onSelectRun(isSelected ? null : r.id)}
-              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.375rem_minmax(0,1fr)_minmax(0,16rem)_10rem_4.5rem_5rem_minmax(15rem,auto)] ${
+              className={`px-2 py-1.5 grid items-center gap-2 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors grid-cols-[0.5rem_18rem_14rem_10rem_4.5rem_5rem_1fr] ${
                 isSelected
-                  ? "bg-violet-500/15 border-l-4 border-l-violet-400 pl-1"
+                  ? "bg-violet-500/15 border-l-4 border-l-violet-400"
                   : "border-l-4 border-l-transparent"
               }`}
             >
