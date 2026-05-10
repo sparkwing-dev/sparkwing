@@ -1000,76 +1000,30 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
     return "";
   };
 
+  const fullTitle = `${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
   return (
-    <div className="min-w-0 flex flex-wrap items-center gap-y-1 gap-x-1.5 text-[11px]">
-      <span
-        className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
-        title={`Status: ${r.status}`}
-      />
-      {r.trigger_source && (
+    <div
+      className="min-w-0 flex flex-col gap-0.5 text-[11px]"
+      title={fullTitle}
+    >
+      <div className="flex items-center gap-1.5 min-w-0">
         <span
-          className="font-mono text-[10px] text-[var(--muted)] shrink-0 px-1.5 py-0.5 rounded bg-[var(--background)]"
-          title={`Trigger: ${r.trigger_source}`}
-        >
-          {r.trigger_source.charAt(0).toLowerCase()}
-        </span>
-      )}
-      <span
-        className={`text-cyan-400/70 shrink-0 ${styleFor("repo", repo)}`}
-        title={`Repo: ${repo}`}
-      >
-        {repo}
-      </span>
-      <span className="text-[var(--muted)] shrink-0">/</span>
-      <span
-        className={`font-medium text-violet-300 truncate ${styleFor("pipeline", r.pipeline)}`}
-        title={`Pipeline: ${r.pipeline}`}
-      >
-        {r.pipeline}
-      </span>
-      {r.git_branch && (
+          className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
+        />
         <span
-          className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch)}`}
-          title={`Branch: ${r.git_branch}`}
+          className={`font-medium text-violet-300 truncate min-w-0 ${styleFor("pipeline", r.pipeline)}`}
         >
-          ⎇ {truncate(r.git_branch, 40)}
+          {r.pipeline}
         </span>
-      )}
-      {sha7 && (
-        <span
-          className={`font-mono text-[var(--muted)] shrink-0 ${styleFor("commit", sha7)}`}
-          title={`Commit: ${sha7}`}
-        >
-          {sha7}
-        </span>
-      )}
-      <span className="basis-full" />
-      <span
-        className="font-mono tabular-nums text-[var(--muted)] flex items-center gap-1.5 flex-wrap"
-        title={`Started ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`}
-      >
-        {fmtDatePrefix(r.started_at) && (
-          <span className="text-[var(--foreground)]">
-            {fmtDatePrefix(r.started_at)}
+      </div>
+      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] pl-4 min-w-0">
+        {elapsedMs > 0 && (
+          <span className="text-[var(--foreground)] shrink-0">
+            {fmtMs(elapsedMs)}
           </span>
         )}
-        <span className="text-[var(--foreground)]">
-          {fmtClock(r.started_at)}
-        </span>
-        <span>→</span>
-        {r.finished_at &&
-          fmtDatePrefix(r.finished_at) &&
-          fmtDatePrefix(r.finished_at) !== fmtDatePrefix(r.started_at) && (
-            <span className="text-[var(--foreground)]">
-              {fmtDatePrefix(r.finished_at)}
-            </span>
-          )}
-        <span className="text-[var(--foreground)]">
-          {r.finished_at ? fmtClock(r.finished_at) : "—"}
-        </span>
-        {elapsedMs > 0 && <span>({fmtMs(elapsedMs)})</span>}
-        <span>· {fmtAgo(sinceTs)}</span>
-      </span>
+        <span className="truncate">· {fmtAgo(sinceTs)}</span>
+      </div>
     </div>
   );
 });
