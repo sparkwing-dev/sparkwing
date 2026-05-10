@@ -1517,7 +1517,12 @@ function RunDetailPane({
       <div className="flex-1 overflow-y-auto bg-[#0d1117] relative">
         {effectiveTab === "logs" && (
           <div className="p-4">
-            <LogsPane run={run} node={selected} />
+            <LogsPane
+              run={run}
+              node={selected}
+              nodes={nodes}
+              onSelectNode={onSelectNode}
+            />
           </div>
         )}
         {effectiveTab === "work" && selected && (
@@ -1612,12 +1617,20 @@ function PendingApprovalsBanner({
 
 // --- logs ---
 
-function LogsPane({ run, node }: { run: Run; node: RunNode | null }) {
+function LogsPane({
+  run,
+  node,
+  nodes,
+  onSelectNode,
+}: {
+  run: Run;
+  node: RunNode | null;
+  nodes?: RunNode[];
+  onSelectNode?: (id: string) => void;
+}) {
   if (!node) {
     return (
-      <div className="text-sm text-[var(--muted)]">
-        ← Select a node to view its logs
-      </div>
+      <AllNodesLogs run={run} nodes={nodes || []} onSelectNode={onSelectNode} />
     );
   }
   if (node.status === "pending") {
@@ -1638,6 +1651,108 @@ function LogsPane({ run, node }: { run: Run; node: RunNode | null }) {
     return <StreamingLogs runID={run.id} nodeID={node.id} />;
   }
   return <StoredLogs runID={run.id} nodeID={node.id} />;
+}
+
+// AllNodesLogs renders one collapsible block per node. Expanding a
+// block lazy-mounts the existing single-node LogsPane underneath
+// (StreamingLogs for live nodes, StoredLogs for finished ones, both
+// of which use LogBucketView with step-level collapses inside).
+function AllNodesLogs({
+  run,
+  nodes,
+  onSelectNode,
+}: {
+  run: Run;
+  nodes: RunNode[];
+  onSelectNode?: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  if (nodes.length === 0) {
+    return (
+      <div className="text-sm text-[var(--muted)]">
+        No nodes for this run yet.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
+        <span>All nodes — expand a node to load its logs</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
+            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
+          >
+            expand all
+          </button>
+          <button
+            onClick={() => setExpanded(new Set())}
+            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
+          >
+            collapse all
+          </button>
+        </div>
+      </div>
+      {nodes.map((n) => {
+        const open = expanded.has(n.id);
+        const dur = nodeDuration(n);
+        return (
+          <div
+            key={n.id}
+            className="border border-[var(--border)] rounded bg-[#0d1117]"
+          >
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <button
+                onClick={() => toggle(n.id)}
+                className="text-[var(--muted)] w-3 text-center text-xs"
+              >
+                {open ? "▾" : "▸"}
+              </button>
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+              />
+              <button
+                onClick={() => toggle(n.id)}
+                className="font-mono text-xs text-left truncate flex-1 hover:underline"
+                title={n.id}
+              >
+                {n.id}
+              </button>
+              <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
+                {n.outcome || n.status}
+              </span>
+              {dur > 0 && (
+                <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
+                  {fmtMs(dur)}
+                </span>
+              )}
+              {onSelectNode && (
+                <button
+                  onClick={() => onSelectNode(n.id)}
+                  title="open this node"
+                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] underline-offset-2 hover:underline shrink-0"
+                >
+                  open
+                </button>
+              )}
+            </div>
+            {open && (
+              <div className="border-t border-[var(--border)] p-2">
+                <LogsPane run={run} node={n} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function StreamingLogs({ runID, nodeID }: { runID: string; nodeID: string }) {
