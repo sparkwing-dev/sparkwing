@@ -142,7 +142,7 @@ export default function PipelineOverview({
   const [registry, setRegistry] = useState<Record<string, PipelineMeta>>({});
   const [runs, setRuns] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [triggerOpen, setTriggerOpen] = useState<string | null>(null);
   const filterState = useUrlFilterState();
   const filterCtx = useFilterCtx(filterState);
@@ -205,7 +205,12 @@ export default function PipelineOverview({
     const row = rows.find((r) => r.runs.some((rr) => rr.id === selectedRun));
     if (!row) return;
     autoExpandedForRef.current = selectedRun;
-    setExpanded(row.key);
+    setExpanded((cur) => {
+      if (cur.has(row.key)) return cur;
+      const next = new Set(cur);
+      next.add(row.key);
+      return next;
+    });
   }, [selectedRun, rows]);
 
   const options = useMemo(
@@ -286,9 +291,14 @@ export default function PipelineOverview({
               <PipelineCard
                 key={row.key}
                 row={row}
-                expanded={expanded === row.key}
+                expanded={expanded.has(row.key)}
                 onToggle={() =>
-                  setExpanded((cur) => (cur === row.key ? null : row.key))
+                  setExpanded((cur) => {
+                    const next = new Set(cur);
+                    if (next.has(row.key)) next.delete(row.key);
+                    else next.add(row.key);
+                    return next;
+                  })
                 }
                 triggerOpen={triggerOpen === row.key}
                 onTrigger={() =>
