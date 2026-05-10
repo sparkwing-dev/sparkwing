@@ -1009,56 +1009,58 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
       : r.git_branch
     : "";
   return (
-    <div
-      className="min-w-0 flex flex-col gap-0.5 text-[11px]"
-      title={fullTitle}
+    <Tooltip
+      content={
+        <span className="whitespace-pre-wrap font-mono">{fullTitle}</span>
+      }
     >
-      <div className="flex items-center gap-1 min-w-0">
-        <span
-          className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
-        />
-        <span className={`text-cyan-400/70 shrink-0 ${styleFor("repo", repo)}`}>
-          {repoShort}
-        </span>
-        <span className="text-[var(--muted)] shrink-0">/</span>
-        <span
-          className={`font-medium text-violet-300 shrink-0 ${styleFor("pipeline", r.pipeline)}`}
-        >
-          {pipelineShort}
-        </span>
-        {branchShort && (
+      <div className="min-w-0 flex flex-col gap-0.5 text-[11px]">
+        <div className="flex items-center gap-1 min-w-0">
           <span
-            className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch!)}`}
-          >
-            {branchShort}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
-        {r.trigger_source ? (
+            className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
+          />
           <span
-            className="text-[10px] text-[var(--muted)] shrink-0 w-2.5 text-center uppercase"
-            title={`Trigger: ${r.trigger_source}`}
+            className={`text-cyan-400/70 shrink-0 ${styleFor("repo", repo)}`}
           >
-            {r.trigger_source.charAt(0)}
+            {repoShort}
           </span>
-        ) : (
-          <span className="w-2.5 shrink-0" />
-        )}
-        {datePrefix && (
+          <span className="text-[var(--muted)] shrink-0">/</span>
+          <span
+            className={`font-medium text-violet-300 shrink-0 ${styleFor("pipeline", r.pipeline)}`}
+          >
+            {pipelineShort}
+          </span>
+          {branchShort && (
+            <span
+              className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch!)}`}
+            >
+              {branchShort}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
+          {r.trigger_source ? (
+            <span className="text-[10px] text-[var(--muted)] shrink-0 w-2.5 text-center uppercase">
+              {r.trigger_source.charAt(0)}
+            </span>
+          ) : (
+            <span className="w-2.5 shrink-0" />
+          )}
+          {datePrefix && (
+            <span className="text-[var(--foreground)] shrink-0">
+              {datePrefix}
+            </span>
+          )}
           <span className="text-[var(--foreground)] shrink-0">
-            {datePrefix}
+            {fmtClock(r.started_at)}
           </span>
-        )}
-        <span className="text-[var(--foreground)] shrink-0">
-          {fmtClock(r.started_at)}
-        </span>
-        {elapsedMs > 0 && (
-          <span className="shrink-0">({fmtMs(elapsedMs)})</span>
-        )}
-        <span className="shrink-0">{fmtAgoShort(sinceTs)}</span>
+          {elapsedMs > 0 && (
+            <span className="shrink-0">({fmtMs(elapsedMs)})</span>
+          )}
+          <span className="shrink-0">{fmtAgoShort(sinceTs)}</span>
+        </div>
       </div>
-    </div>
+    </Tooltip>
   );
 });
 
