@@ -1357,6 +1357,8 @@ function RunDetailPane({
     run.status === "failed" ||
     run.status === "cancelled";
   const hasWork = !!(selected && (selected.work || selected.modifiers));
+  const nodesWithWork = nodes.filter((n) => n.work || n.modifiers);
+  const hasAnyWork = nodesWithWork.length > 0;
 
   type TabKey =
     | "logs"
@@ -1386,8 +1388,12 @@ function RunDetailPane({
     {
       key: "work",
       label: "Work",
-      count: hasWork ? `${selected?.work?.steps?.length ?? 0}` : undefined,
-      visible: hasWork,
+      count: hasWork
+        ? `${selected?.work?.steps?.length ?? 0}`
+        : hasAnyWork
+          ? `${nodesWithWork.length}`
+          : undefined,
+      visible: hasAnyWork,
     },
     { key: "resources", label: "Resources", visible: true },
   ];
@@ -1501,11 +1507,16 @@ function RunDetailPane({
             />
           </div>
         )}
-        {effectiveTab === "work" && selected && (
-          <div className="p-4">
-            <NodeWorkView node={selected} />
-          </div>
-        )}
+        {effectiveTab === "work" &&
+          (selected && (selected.work || selected.modifiers) ? (
+            <div className="p-4">
+              <NodeWorkView node={selected} />
+            </div>
+          ) : (
+            <div className="p-4">
+              <AllNodesWork nodes={nodesWithWork} onSelectNode={onSelectNode} />
+            </div>
+          ))}
         {effectiveTab === "resources" &&
           (selected ? (
             <div className="p-4">
@@ -1730,6 +1741,102 @@ function AllNodesLogs({
             {open && (
               <div className="border-t border-[var(--border)] p-2">
                 <LogsPane run={run} node={n} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// AllNodesWork renders one collapsible block per node that carries
+// work/modifiers data. Collapsed by default; expanding mounts the
+// existing NodeWorkView underneath.
+function AllNodesWork({
+  nodes,
+  onSelectNode,
+}: {
+  nodes: RunNode[];
+  onSelectNode?: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  if (nodes.length === 0) {
+    return (
+      <div className="text-sm text-[var(--muted)]">
+        No nodes with work definitions for this run.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
+        <span>All nodes — expand to view their work definitions</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
+            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
+          >
+            expand all
+          </button>
+          <button
+            onClick={() => setExpanded(new Set())}
+            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
+          >
+            collapse all
+          </button>
+        </div>
+      </div>
+      {nodes.map((n) => {
+        const open = expanded.has(n.id);
+        const stepCount = n.work?.steps?.length ?? 0;
+        return (
+          <div
+            key={n.id}
+            className="border border-[var(--border)] rounded bg-[#0d1117]"
+          >
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <button
+                onClick={() => toggle(n.id)}
+                className="text-[var(--muted)] w-3 text-center text-xs"
+              >
+                {open ? "▾" : "▸"}
+              </button>
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+              />
+              <button
+                onClick={() => toggle(n.id)}
+                className="font-mono text-xs text-left truncate flex-1 hover:underline"
+                title={n.id}
+              >
+                {n.id}
+              </button>
+              {stepCount > 0 && (
+                <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
+                  {stepCount} step{stepCount === 1 ? "" : "s"}
+                </span>
+              )}
+              {onSelectNode && (
+                <button
+                  onClick={() => onSelectNode(n.id)}
+                  title="open this node"
+                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] underline-offset-2 hover:underline shrink-0"
+                >
+                  open
+                </button>
+              )}
+            </div>
+            {open && (
+              <div className="border-t border-[var(--border)] p-2">
+                <NodeWorkView node={n} />
               </div>
             )}
           </div>
