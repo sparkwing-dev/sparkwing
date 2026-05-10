@@ -1380,7 +1380,7 @@ function RunDetailPane({
       count: hasWork ? `${selected?.work?.steps?.length ?? 0}` : undefined,
       visible: hasWork,
     },
-    { key: "resources", label: "Resources", visible: !!selected },
+    { key: "resources", label: "Resources", visible: true },
     {
       key: "dag",
       label: "DAG",
@@ -1514,15 +1514,20 @@ function RunDetailPane({
             <NodeWorkView node={selected} />
           </div>
         )}
-        {effectiveTab === "resources" && selected && (
-          <div className="p-4">
-            <ResourceChart
-              runID={run.id}
-              nodeID={selected.id}
-              isRunning={selectedIsRunning}
-            />
-          </div>
-        )}
+        {effectiveTab === "resources" &&
+          (selected ? (
+            <div className="p-4">
+              <ResourceChart
+                runID={run.id}
+                nodeID={selected.id}
+                isRunning={selectedIsRunning}
+              />
+            </div>
+          ) : (
+            <div className="p-4 text-sm text-[var(--muted)]">
+              Select a node to view its CPU / memory usage over time.
+            </div>
+          ))}
         {effectiveTab === "dag" && (
           <div className="p-4">
             <DAG
