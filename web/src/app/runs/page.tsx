@@ -407,12 +407,22 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   // so the user can scroll through rows without fetching detail on
   // every keystroke.
   const [focusedRun, setFocusedRun] = useState<string | null>(null);
+  const [focusedNode, setFocusedNode] = useState<string | null>(null);
+  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes">("runs");
   const topLevelRef = useRef(topLevel);
   topLevelRef.current = topLevel;
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
   const focusedRunRef = useRef(focusedRun);
   focusedRunRef.current = focusedRun;
+  const focusedNodeRef = useRef(focusedNode);
+  focusedNodeRef.current = focusedNode;
+  const focusedColumnRef = useRef(focusedColumn);
+  focusedColumnRef.current = focusedColumn;
   const selectedRunRef = useRef(selectedRun);
   selectedRunRef.current = selectedRun;
+  const selectedNodeRef = useRef(selectedNode);
+  selectedNodeRef.current = selectedNode;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -424,22 +434,69 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         t?.isContentEditable
       )
         return;
-      const list = topLevelRef.current;
-      if (list.length === 0) return;
-      const cur = focusedRunRef.current ?? selectedRunRef.current ?? list[0].id;
-      const idx = list.findIndex((r) => r.id === cur);
+      const runs = topLevelRef.current;
+      const ns = nodesRef.current;
+      const col = focusedColumnRef.current;
+      if (e.key === "h" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        setFocusedColumn("runs");
+        return;
+      }
+      if (e.key === "l" || e.key === "ArrowRight") {
+        if (!selectedRunRef.current || ns.length === 0) return;
+        e.preventDefault();
+        setFocusedColumn("nodes");
+        if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
+        return;
+      }
+      if (col === "nodes" && ns.length > 0) {
+        const cur =
+          focusedNodeRef.current ?? selectedNodeRef.current ?? ns[0].id;
+        const idx = ns.findIndex((n) => n.id === cur);
+        if (e.key === "j" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const next = ns[Math.min(ns.length - 1, Math.max(0, idx) + 1)];
+          if (next) setFocusedNode(next.id);
+        } else if (e.key === "k" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const next = ns[Math.max(0, Math.max(0, idx) - 1)];
+          if (next) setFocusedNode(next.id);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          const target = focusedNodeRef.current ?? ns[0].id;
+          if (!target) return;
+          if (selectedNodeRef.current === target) setSelectedNode(null);
+          else setSelectedNode(target);
+        } else if (e.key === "Escape") {
+          if (selectedNodeRef.current) {
+            setSelectedNode(null);
+          } else if (selectedRunRef.current) {
+            setFocusedColumn("runs");
+            selectRunRef.current(null);
+          } else {
+            setFocusedColumn("runs");
+            setFocusedNode(null);
+          }
+        }
+        return;
+      }
+      if (runs.length === 0) return;
+      const cur = focusedRunRef.current ?? selectedRunRef.current ?? runs[0].id;
+      const idx = runs.findIndex((r) => r.id === cur);
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
-        const next = list[Math.min(list.length - 1, Math.max(0, idx) + 1)];
+        const next = runs[Math.min(runs.length - 1, Math.max(0, idx) + 1)];
         if (next) setFocusedRun(next.id);
       } else if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
-        const next = list[Math.max(0, Math.max(0, idx) - 1)];
+        const next = runs[Math.max(0, Math.max(0, idx) - 1)];
         if (next) setFocusedRun(next.id);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        const target = focusedRunRef.current ?? list[0].id;
-        if (target) selectRunRef.current(target);
+        const target = focusedRunRef.current ?? runs[0].id;
+        if (!target) return;
+        if (selectedRunRef.current === target) selectRunRef.current(null);
+        else selectRunRef.current(target);
       } else if (e.key === "Escape") {
         if (selectedRunRef.current) selectRunRef.current(null);
         else setFocusedRun(null);
@@ -458,6 +515,16 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     if (!el) return;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedRun]);
+
+  // Same for focused node.
+  useEffect(() => {
+    if (!focusedNode) return;
+    const el = document.querySelector(
+      `[data-node-id="${focusedNode}"]`,
+    ) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focusedNode]);
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
@@ -611,13 +678,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
         {/* Middle: RunNodes in run */}
         {run && detail && (
-          <div className="w-56 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
+          <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
             <div className="px-3 py-2 border-b border-[var(--border)] text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
               Nodes ({nodes.length})
             </div>
             <NodesList
               nodes={nodes}
               selectedNode={selectedNode}
+              focusedNode={focusedNode}
               onSelect={setSelectedNode}
             />
           </div>
@@ -797,10 +865,12 @@ function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
 function NodesList({
   nodes,
   selectedNode,
+  focusedNode,
   onSelect,
 }: {
   nodes: RunNode[];
   selectedNode: string | null;
+  focusedNode?: string | null;
   onSelect: (id: string) => void;
 }) {
   const groups = partitionByGroup(nodes);
@@ -831,6 +901,7 @@ function NodesList({
               key={n.id}
               n={n}
               selected={selectedNode === n.id}
+              focused={focusedNode === n.id}
               onSelect={onSelect}
             />
           ));
@@ -853,6 +924,7 @@ function NodesList({
                   key={n.id}
                   n={n}
                   selected={selectedNode === n.id}
+                  focused={focusedNode === n.id}
                   indent
                   onSelect={onSelect}
                 />
@@ -899,36 +971,36 @@ function GroupHeader({
 function NodeRow({
   n,
   selected,
+  focused,
   indent,
   onSelect,
 }: {
   n: RunNode;
   selected: boolean;
+  focused?: boolean;
   indent?: boolean;
   onSelect: (id: string) => void;
 }) {
+  const label = n.id.length > 20 ? n.id.slice(0, 19) + "…" : n.id;
+  const statusLabel = n.outcome || n.status;
   return (
     <div
-      className={`${indent ? "pl-6 pr-3" : "px-3"} py-2 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selected ? "bg-[var(--surface-raised)] border-l-2 border-l-indigo-400" : ""}`}
+      data-node-id={n.id}
+      className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selected ? "bg-[var(--surface-raised)] border-l-2 border-l-indigo-400" : ""} ${focused ? "ring-1 ring-inset ring-indigo-400/60" : ""}`}
       onClick={() => onSelect(n.id)}
+      title={`${n.id} · ${statusLabel}${nodeDuration(n) ? ` · ${fmtMs(nodeDuration(n))}` : ""}`}
     >
-      <div className="flex items-center gap-2">
-        <Tooltip
-          content={
-            <>
-              {n.outcome || n.status}
-              {nodeDuration(n) ? ` in ${fmtMs(nodeDuration(n))}` : ""}
-            </>
-          }
-        >
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
-          />
-        </Tooltip>
-        <span className="text-xs truncate">{n.id}</span>
-        <span className="ml-auto text-[10px] font-mono text-[var(--muted)] shrink-0">
-          {fmtMs(nodeDuration(n))}
-        </span>
+      <div className="flex items-center gap-1.5">
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+        />
+        <span className="text-[11px] truncate">{label}</span>
+      </div>
+      <div className="flex items-center gap-1.5 pl-3.5 text-[10px] font-mono text-[var(--muted)]">
+        <span className="truncate">{statusLabel}</span>
+        {nodeDuration(n) > 0 && (
+          <span className="ml-auto shrink-0">{fmtMs(nodeDuration(n))}</span>
+        )}
       </div>
     </div>
   );
