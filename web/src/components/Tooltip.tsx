@@ -73,7 +73,7 @@ export default function Tooltip({ content, children }: TooltipProps) {
           className="fixed z-[100] pointer-events-none"
           style={{ left: pos.x, top: pos.y, transform }}
         >
-          <div className="bg-[#1e293b] border border-[var(--border)] rounded-lg px-3 py-2 text-xs shadow-xl max-w-xs">
+          <div className="bg-[#1e293b] border border-[var(--border)] rounded-lg px-3 py-2 text-xs shadow-xl whitespace-pre-wrap break-words max-w-[min(90vw,40rem)] w-max">
             {content}
           </div>
           <div
