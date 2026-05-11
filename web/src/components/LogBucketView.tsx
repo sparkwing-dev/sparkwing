@@ -163,6 +163,11 @@ function StepBucket({
         </span>
         <span className={`w-4 text-center ${si.color}`}>{si.icon}</span>
         <span className="font-mono text-[#c9d1d9] truncate">{heading}</span>
+        {(section.duration || section.status === "running") && (
+          <span className="font-mono text-[var(--muted)] tabular-nums text-[10px] shrink-0">
+            {section.duration || "..."}
+          </span>
+        )}
         <span className="flex items-center gap-2 ml-auto shrink-0">
           {expanded && section.lines.length > 0 && (
             <CopyButton
@@ -178,9 +183,6 @@ function StepBucket({
               />
             </span>
           )}
-          <span className="font-mono text-[var(--muted)] tabular-nums w-14 text-right">
-            {section.duration || (section.status === "running" ? "..." : "")}
-          </span>
         </span>
       </button>
       {expanded && (
