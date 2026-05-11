@@ -17,6 +17,7 @@ import (
 //	  Job (single closure)               .................. configure, notify
 //	  Job (multi-step, typed output)     .................. build (Produces[BuildOut])
 //	  JobFanOut -> NodeGroup             .................. checks, publish-images
+//	  GroupJobs -> NodeGroup             .................. post-deploy-verify
 //	  JobApproval (auto-approve in 2s)   .................. approve-deploy
 //	  modifiers: Retry · Timeout         .................. build, deploy
 //	  modifiers: BeforeRun · AfterRun    .................. configure, notify
@@ -118,9 +119,19 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 		Timeout(10*time.Second).
 		OnFailure("deploy-rollback", rollbackFn)
 
+	// GroupJobs: the Plan-layer analogue of GroupSteps. Takes
+	// already-constructed sibling Nodes and folds them into a single
+	// NodeGroup for collapsible dashboard rendering + one .Needs()
+	// target downstream. Distinct from JobFanOut, which synthesizes
+	// the members from a slice. Here we hand-write two heterogeneous
+	// post-deploy verifications and cluster them.
+	smokeTest := sparkwing.Job(plan, "smoke-test", smokeTestFn).Needs(deploy)
+	metricsCheck := sparkwing.Job(plan, "metrics-check", metricsCheckFn).Needs(deploy)
+	verify := sparkwing.GroupJobs(plan, "post-deploy-verify", smokeTest, metricsCheck)
+
 	// Plan-layer SkipIf: notify is skipped when NO_NOTIFY=1.
 	sparkwing.Job(plan, "notify", notifyFn).
-		Needs(deploy).
+		Needs(verify).
 		SkipIf(func(ctx context.Context) bool {
 			return os.Getenv("NO_NOTIFY") == "1"
 		}).
@@ -194,6 +205,34 @@ func notifyFn(ctx context.Context) error {
 func rollbackFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "rolling back to previous deployment")
 	return nap(ctx, 200)
+}
+
+func smokeTestFn(ctx context.Context) error {
+	if err := chatter(ctx, 1100, []string{
+		"GET /healthz",
+		"200 OK · uptime=4s",
+		"GET /api/v1/version",
+		"200 OK · sha=abc1234",
+		"POST /api/v1/echo {ping}",
+		"200 OK · {pong}",
+	}); err != nil {
+		return err
+	}
+	sparkwing.Annotate(ctx, "smoke-test: 3/3 probes passed")
+	return nil
+}
+
+func metricsCheckFn(ctx context.Context) error {
+	if err := chatter(ctx, 900, []string{
+		"querying Prometheus: rate(http_requests_total[1m])",
+		"querying Prometheus: histogram_quantile(0.95, http_request_duration_seconds_bucket)",
+		"p95 latency: 42ms (threshold 500ms)",
+		"error rate: 0.0% (threshold 1%)",
+	}); err != nil {
+		return err
+	}
+	sparkwing.Annotate(ctx, "metrics-check: p95=42ms · err=0% · within SLO")
+	return nil
 }
 
 // --- BuildJob: multi-step Work + typed output ---
