@@ -1137,9 +1137,11 @@ function GroupHeader({
       <span className="text-xs text-[var(--foreground)] truncate font-semibold">
         {name}
       </span>
-      <span className="ml-auto text-[10px] font-mono text-[var(--muted)] shrink-0">
-        {count}
-      </span>
+      <Tooltip content={`${count} node${count === 1 ? "" : "s"} in group`}>
+        <span className="ml-auto text-[10px] font-mono text-[var(--muted)] shrink-0">
+          {count}
+        </span>
+      </Tooltip>
     </button>
   );
 }
