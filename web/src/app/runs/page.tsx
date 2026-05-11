@@ -2466,7 +2466,7 @@ function DAG({
   const colGap = 64;
   const rowGap = 14;
   const padX = 12;
-  const padY = 24;
+  const padY = 32;
   const nodeHeight = () => nodeH;
 
   const byID = new Map(nodes.map((n) => [n.id, n]));
@@ -2654,7 +2654,7 @@ function DAG({
   // on the left -- the (safety) header shouldn't look like a
   // different feature from the DAG container.
   const groupFramePad = 8;
-  const groupLabelOffset = 6;
+  const groupLabelOffset = 14;
   const groupFrames: {
     name: string;
     x: number;
