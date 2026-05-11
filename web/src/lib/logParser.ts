@@ -27,6 +27,10 @@ export interface StepSection extends LogSection {
   status: "passed" | "failed" | "running";
   duration: string | null;
   durationMs: number | null;
+  // startedAtMs is the unix-millis at which the step began, parsed
+  // from the step_start log record's timestamp. Null when the parser
+  // didn't observe a step_start (older logs, manual phase buckets).
+  startedAtMs: number | null;
 }
 
 export interface ParsedLog {
@@ -193,6 +197,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           status: "running",
           duration: null,
           durationMs: null,
+          startedAtMs: recTS,
           lines: [],
         };
         currentStartedAt = recTS;
@@ -211,6 +216,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           status: "running",
           duration: null,
           durationMs: null,
+          startedAtMs: recTS,
           lines: [],
         };
         currentStartedAt = recTS;
@@ -249,6 +255,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           status: "passed",
           duration: null,
           durationMs: null,
+          startedAtMs: recTS,
           lines: reason ? [`[skipped: ${reason}]`] : ["[skipped]"],
         });
         lastPhaseIdx = sections.length - 1;
@@ -417,6 +424,7 @@ export function parseLogLines(lines: string[]): ParsedLog {
         status: "running",
         duration: null,
         durationMs: null,
+        startedAtMs: null,
         lines: [],
       } as StepSection;
       continue;

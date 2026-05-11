@@ -115,16 +115,32 @@ function LogLines({
   );
 }
 
+function fmtOffset(ms: number): string {
+  if (ms < 0) ms = 0;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms - m * 60_000) / 1000);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
 function StepBucket({
   section,
   lineOffset,
   maxDurationMs,
+  waterfallStartMs,
+  waterfallTotalMs,
   expanded: expandedProp,
   onToggle,
 }: {
   section: StepSection;
   lineOffset: number;
   maxDurationMs: number;
+  // When set, the bar renders as a positioned waterfall segment
+  // relative to the chart's overall timeline. When zero/null we fall
+  // back to a left-aligned, length-only bar.
+  waterfallStartMs?: number | null;
+  waterfallTotalMs?: number | null;
   expanded?: boolean;
   onToggle?: () => void;
 }) {
@@ -139,8 +155,26 @@ function StepBucket({
   const si = statusIcon[section.status] || statusIcon.running;
   const heading = stepNameFromSection(section);
 
+  const useWaterfall =
+    !!waterfallTotalMs &&
+    waterfallTotalMs > 0 &&
+    section.startedAtMs != null &&
+    (section.durationMs ?? 0) > 0;
+  let barLeftPct = 0;
+  let barWidthPct = 0;
+  if (useWaterfall) {
+    const offset = (section.startedAtMs ?? 0) - (waterfallStartMs ?? 0);
+    barLeftPct = Math.max(0, Math.min(100, (offset / waterfallTotalMs!) * 100));
+    barWidthPct = Math.max(
+      2,
+      Math.min(
+        100 - barLeftPct,
+        ((section.durationMs ?? 0) / waterfallTotalMs!) * 100,
+      ),
+    );
+  }
   const barPct =
-    maxDurationMs > 0 && section.durationMs
+    !useWaterfall && maxDurationMs > 0 && section.durationMs
       ? Math.max(2, Math.round((section.durationMs / maxDurationMs) * 100))
       : 0;
   const barColor =
@@ -148,7 +182,7 @@ function StepBucket({
       ? "bg-red-400/60"
       : section.status === "running"
         ? "bg-indigo-400/60"
-        : "bg-[#30363d]";
+        : "bg-cyan-400/50";
 
   return (
     <div
@@ -183,16 +217,31 @@ function StepBucket({
               label={`Copy ${section.name} logs`}
             />
           )}
-          {barPct > 0 && (
+          {useWaterfall ? (
             <span
-              className="hidden sm:inline-block w-16 h-1.5 bg-[#161b22] rounded overflow-hidden"
-              title={`Duration: ${section.duration || "..."} · proportional to longest step`}
+              className="hidden sm:inline-block w-32 h-1.5 bg-[#161b22] rounded overflow-hidden relative"
+              title={`Started +${fmtOffset((section.startedAtMs ?? 0) - (waterfallStartMs ?? 0))} · ran ${section.duration || "..."}`}
             >
               <span
-                className={`block h-full ${barColor}`}
-                style={{ width: `${barPct}%` }}
+                className={`absolute top-0 h-full ${barColor} rounded-sm`}
+                style={{
+                  left: `${barLeftPct}%`,
+                  width: `${barWidthPct}%`,
+                }}
               />
             </span>
+          ) : (
+            barPct > 0 && (
+              <span
+                className="hidden sm:inline-block w-16 h-1.5 bg-[#161b22] rounded overflow-hidden"
+                title={`Duration: ${section.duration || "..."} · proportional to longest step`}
+              >
+                <span
+                  className={`block h-full ${barColor}`}
+                  style={{ width: `${barPct}%` }}
+                />
+              </span>
+            )
           )}
         </span>
       </button>
@@ -424,6 +473,26 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
     return max;
   }, [parsed]);
 
+  // Waterfall extent: earliest step_start to latest step_end across
+  // all steps with timestamp data. When we have it, each bar renders
+  // positioned along this shared timeline.
+  const { waterfallStartMs, waterfallTotalMs } = useMemo(() => {
+    let start = Infinity;
+    let end = -Infinity;
+    for (const s of parsed.sections) {
+      if (s.type !== "step") continue;
+      const st = s as StepSection;
+      if (st.startedAtMs == null) continue;
+      if (st.startedAtMs < start) start = st.startedAtMs;
+      const finish = st.startedAtMs + (st.durationMs ?? 0);
+      if (finish > end) end = finish;
+    }
+    if (!isFinite(start) || !isFinite(end) || end <= start) {
+      return { waterfallStartMs: null, waterfallTotalMs: null };
+    }
+    return { waterfallStartMs: start, waterfallTotalMs: end - start };
+  }, [parsed]);
+
   let lineOffset = 1;
 
   return (
@@ -498,6 +567,8 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
                 section={section as StepSection}
                 lineOffset={offset}
                 maxDurationMs={maxDurationMs}
+                waterfallStartMs={waterfallStartMs}
+                waterfallTotalMs={waterfallTotalMs}
                 expanded={override}
                 onToggle={() =>
                   setStepOverrides((prev) => {
