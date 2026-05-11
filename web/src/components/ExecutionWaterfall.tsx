@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type Node, type Run, getRunLogs } from "@/lib/api";
-import { parseLogLines, type StepSection } from "@/lib/logParser";
+import { type Node, type NodeWorkStep, type Run } from "@/lib/api";
 
 // Gantt-ish execution timeline. Each row is a node; bar position +
 // width come from the node's started_at / finished_at. Running
 // nodes get an open-ended bar up to now. Skipped/pending nodes are
-// omitted (no timeline presence).
+// omitted (no timeline presence). Step bars are read from the
+// structured NodeWorkStep records on each node (no log parsing).
 
 function fmtMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -78,67 +78,86 @@ function extractRows(nodes: Node[]): {
       running: !n.finished_at,
     };
   });
-  return { rows, zero, totalMs: Math.max(1, totalMs) };
+  return { rows, zero, totalMs };
 }
 
 interface StepRow {
-  name: string; // step display name (no node prefix)
+  name: string;
   startMs: number;
   durationMs: number;
-  status: "passed" | "failed" | "running";
+  status: "passed" | "failed" | "running" | "skipped";
+}
+
+// stepsForNode pulls every NodeWorkStep with timing data and projects
+// it onto the run-wide timeline (offsets relative to `zero`). Steps
+// without started_at are excluded — they never ran or haven't run yet.
+function stepsForNode(node: Node, zero: number): StepRow[] {
+  const work = node.work;
+  if (!work || !work.steps) return [];
+  const now = Date.now();
+  const out: StepRow[] = [];
+  for (const s of work.steps as NodeWorkStep[]) {
+    if (!s.started_at) continue;
+    const start = new Date(s.started_at).getTime();
+    let duration = s.duration_ms ?? 0;
+    if (!duration && s.status === "running") {
+      duration = Math.max(0, now - start);
+    }
+    if (!duration && s.finished_at) {
+      duration = Math.max(0, new Date(s.finished_at).getTime() - start);
+    }
+    out.push({
+      name: s.id,
+      startMs: start - zero,
+      durationMs: Math.max(1, duration),
+      status: (s.status as StepRow["status"]) || "passed",
+    });
+  }
+  return out;
+}
+
+function stepBarColor(status: StepRow["status"]): string {
+  switch (status) {
+    case "failed":
+      return "bg-red-300/80";
+    case "running":
+      return "bg-indigo-300/80";
+    case "skipped":
+      return "bg-slate-400/40";
+    default:
+      return "bg-green-300/80";
+  }
 }
 
 export default function ExecutionWaterfall({
   run,
   nodes,
+  focusNode,
+  focusStep,
+  onSelectNode,
+  onSelectStep,
 }: {
   run: Run;
   nodes: Node[];
+  focusNode?: string | null;
+  focusStep?: string | null;
+  onSelectNode?: (id: string | null) => void;
+  onSelectStep?: (nodeId: string, stepId: string | null) => void;
 }) {
   const { rows, totalMs, zero } = extractRows(nodes);
-  // Pulled run logs let us overlay step-level bars under each node.
-  // Single fetch keyed on (runID, isTerminal): for terminal runs the
-  // log set is final; for in-flight runs we just snapshot once on tab
-  // entry (kept lightweight — re-fetch on demand if needed).
-  const [stepsByNode, setStepsByNode] = useState<Record<string, StepRow[]>>({});
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const isTerminal =
-    run.status === "success" ||
-    run.status === "failed" ||
-    run.status === "cancelled";
+  // Auto-expand the focused node when a step in it is selected so
+  // the step bars reveal without manual toggle.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const text = await getRunLogs(run.id);
-      if (cancelled || !text) return;
-      const parsed = parseLogLines(text.split("\n"));
-      const map: Record<string, StepRow[]> = {};
-      for (const raw of parsed.sections) {
-        if (raw.type !== "step") continue;
-        const s = raw as StepSection;
-        // Step-scope sections are named "{nodeId} · {stepName}".
-        // Node-scope sections (just "{nodeId}") are the setup block;
-        // skip them — they're already represented by the node bar.
-        const idx = s.name.indexOf(" · ");
-        if (idx < 0) continue;
-        const nodeId = s.name.slice(0, idx);
-        const stepName = s.name.slice(idx + 3);
-        if (s.startedAtMs == null) continue;
-        const arr = map[nodeId] ?? [];
-        arr.push({
-          name: stepName,
-          startMs: s.startedAtMs - zero,
-          durationMs: s.durationMs ?? 0,
-          status: s.status,
-        });
-        map[nodeId] = arr;
-      }
-      setStepsByNode(map);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [run.id, zero, isTerminal]);
+    if (!focusStep || !focusNode) return;
+    setExpanded((prev) => {
+      if (prev.has(focusNode)) return prev;
+      const next = new Set(prev);
+      next.add(focusNode);
+      return next;
+    });
+  }, [focusStep, focusNode]);
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -156,16 +175,10 @@ export default function ExecutionWaterfall({
     );
   }
 
-  const stepColor = (status: "passed" | "failed" | "running"): string => {
-    if (status === "failed") return "bg-red-300/80";
-    if (status === "running") return "bg-indigo-300/80";
-    return "bg-green-300/80";
-  };
-
   const barHeight = 20;
   const stepBarHeight = 12;
   const rowGap = 4;
-  const labelWidth = 140;
+  const labelWidth = 160;
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
@@ -181,59 +194,85 @@ export default function ExecutionWaterfall({
       <div className="flex gap-2">
         <div className="shrink-0 flex flex-col" style={{ width: labelWidth }}>
           {rows.map((r) => {
-            const steps = stepsByNode[r.id] || [];
+            const node = nodeById.get(r.id);
+            const steps = node ? stepsForNode(node, zero) : [];
             const isOpen = expanded.has(r.id);
+            const isFocus = focusNode === r.id;
             return (
               <div key={r.id} className="flex flex-col">
-                <button
-                  onClick={() => steps.length > 0 && toggle(r.id)}
-                  className={`text-[11px] text-[var(--foreground)] truncate flex items-center gap-1 font-mono ${steps.length > 0 ? "cursor-pointer hover:text-cyan-300" : "cursor-default"} text-left`}
+                <div
+                  className={`flex items-center gap-1 text-left transition-colors ${isFocus ? "bg-amber-400/10 -mx-1 px-1 rounded" : ""}`}
                   style={{ height: barHeight, marginBottom: rowGap }}
-                  title={r.id}
                 >
-                  <span className="w-3 text-center text-[var(--muted)]">
+                  <button
+                    onClick={() => steps.length > 0 && toggle(r.id)}
+                    className={`w-3 text-center text-[var(--muted)] ${steps.length > 0 ? "cursor-pointer hover:text-cyan-300" : "cursor-default"}`}
+                    title={
+                      steps.length > 0
+                        ? isOpen
+                          ? "collapse steps"
+                          : "expand steps"
+                        : ""
+                    }
+                  >
                     {steps.length > 0 ? (isOpen ? "▾" : "▸") : ""}
-                  </span>
-                  <span className="truncate">{r.id}</span>
+                  </button>
+                  <button
+                    onClick={() => onSelectNode?.(isFocus ? null : r.id)}
+                    className={`text-[11px] truncate font-mono text-left flex-1 min-w-0 ${onSelectNode ? "cursor-pointer hover:text-cyan-300" : "cursor-default"} ${isFocus ? "text-amber-300" : "text-[var(--foreground)]"}`}
+                    title={r.id}
+                  >
+                    {r.id}
+                  </button>
                   {steps.length > 0 && (
                     <span className="text-[9px] text-[var(--muted)] shrink-0">
                       ({steps.length})
                     </span>
                   )}
-                </button>
+                </div>
                 {isOpen &&
-                  steps.map((s, si) => (
-                    <div
-                      key={`${r.id}-${si}-${s.name}`}
-                      className="text-[10px] text-[var(--muted)] truncate font-mono pl-4 flex items-center"
-                      style={{
-                        height: stepBarHeight + 4,
-                        marginBottom: rowGap,
-                      }}
-                      title={s.name}
-                    >
-                      {s.name}
-                    </div>
-                  ))}
+                  steps.map((s, si) => {
+                    const stepFocus =
+                      isFocus && focusStep != null && s.name === focusStep;
+                    return (
+                      <button
+                        key={`${r.id}-${si}-${s.name}`}
+                        onClick={() =>
+                          onSelectStep?.(r.id, stepFocus ? null : s.name)
+                        }
+                        className={`text-[10px] truncate font-mono pl-4 flex items-center text-left ${stepFocus ? "text-amber-300 bg-amber-400/10 -mx-1 px-1 rounded" : "text-[var(--muted)]"} ${onSelectStep ? "cursor-pointer hover:text-cyan-300" : "cursor-default"}`}
+                        style={{
+                          height: stepBarHeight + 4,
+                          marginBottom: rowGap,
+                        }}
+                        title={s.name}
+                      >
+                        {s.name}
+                      </button>
+                    );
+                  })}
               </div>
             );
           })}
         </div>
         <div className="flex-1 relative min-w-[280px]">
           {rows.map((r) => {
-            const steps = stepsByNode[r.id] || [];
+            const node = nodeById.get(r.id);
+            const steps = node ? stepsForNode(node, zero) : [];
             const isOpen = expanded.has(r.id);
+            const isFocus = focusNode === r.id;
             const left = (r.startMs / totalMs) * 100;
             const width = Math.max(0.3, (r.durationMs / totalMs) * 100);
             return (
               <div key={r.id} className="flex flex-col">
                 <div
-                  className="flex items-center"
+                  className={`flex items-center ${isFocus ? "bg-amber-400/10" : ""}`}
                   style={{ height: barHeight, marginBottom: rowGap }}
                 >
                   <div className="relative w-full h-full">
                     <div
-                      className={`absolute h-full rounded ${outcomeColor(r.outcome, r.running)} ${r.running ? "animate-pulse" : ""}`}
+                      onClick={() => onSelectNode?.(isFocus ? null : r.id)}
+                      className={`absolute h-full rounded ${outcomeColor(r.outcome, r.running)} ${r.running ? "animate-pulse" : ""} ${isFocus ? "ring-2 ring-amber-400" : ""} ${onSelectNode ? "cursor-pointer" : ""}`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       title={`${r.id}: ${fmtMs(r.durationMs)}${r.running ? " (running)" : ""}`}
                     />
@@ -246,10 +285,12 @@ export default function ExecutionWaterfall({
                       0.3,
                       ((s.durationMs || 1) / totalMs) * 100,
                     );
+                    const stepFocus =
+                      isFocus && focusStep != null && s.name === focusStep;
                     return (
                       <div
                         key={`${r.id}-${si}-${s.name}`}
-                        className="flex items-center"
+                        className={`flex items-center ${stepFocus ? "bg-amber-400/10" : ""}`}
                         style={{
                           height: stepBarHeight + 4,
                           marginBottom: rowGap,
@@ -257,7 +298,10 @@ export default function ExecutionWaterfall({
                       >
                         <div className="relative w-full h-full">
                           <div
-                            className={`absolute rounded ${stepColor(s.status)} ${s.status === "running" ? "animate-pulse" : ""}`}
+                            onClick={() =>
+                              onSelectStep?.(r.id, stepFocus ? null : s.name)
+                            }
+                            className={`absolute rounded ${stepBarColor(s.status)} ${s.status === "running" ? "animate-pulse" : ""} ${stepFocus ? "ring-2 ring-amber-400" : ""} ${onSelectStep ? "cursor-pointer" : ""}`}
                             style={{
                               left: `${sLeft}%`,
                               width: `${sWidth}%`,
@@ -281,7 +325,8 @@ export default function ExecutionWaterfall({
         </div>
         <div className="shrink-0 flex flex-col" style={{ width: 60 }}>
           {rows.map((r) => {
-            const steps = stepsByNode[r.id] || [];
+            const node = nodeById.get(r.id);
+            const steps = node ? stepsForNode(node, zero) : [];
             const isOpen = expanded.has(r.id);
             return (
               <div key={r.id} className="flex flex-col">

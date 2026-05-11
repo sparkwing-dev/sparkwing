@@ -319,6 +319,8 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
 // are kept since the section name doesn't carry them.
 function recordToLine(rec: LogRecord): string {
   const parts: string[] = [];
+  const ts = fmtTSInline(rec.ts);
+  if (ts) parts.push(ts);
   const crumb = jobBreadcrumb(rec);
   if (crumb) parts.push(crumb);
   if (rec.event === "retry") parts.push("↻");
@@ -332,6 +334,22 @@ function recordToLine(rec: LogRecord): string {
     parts.push(JSON.stringify(rec.attrs));
   }
   return parts.join(" ");
+}
+
+// fmtTSInline renders a record's timestamp as a bracketed
+// HH:MM:SS.mmm prefix. The renderer detects this fixed shape and
+// either keeps it visible or strips it when the user toggles
+// timestamps off; baking it into the line keeps parseLogLines'
+// shape (string[]) intact.
+function fmtTSInline(ts?: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `[${h}:${m}:${s}.${ms}]`;
 }
 
 // jobBreadcrumb renders only the Job-stack frames -- the section

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   type ParsedLog,
   type StepSection,
@@ -69,22 +69,32 @@ const statusIcon: Record<string, { icon: string; color: string }> = {
   running: { icon: "●", color: "text-indigo-400 animate-pulse" },
 };
 
+// TS_PREFIX_RE matches the [HH:MM:SS.mmm] prefix baked into JSON-
+// derived log lines by recordToLine. The renderer splits this off so
+// it can be styled and toggled independently of the line body.
+const TS_PREFIX_RE = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]\s/;
+
 function LogLines({
   lines,
   startLine,
+  showTimestamps = true,
 }: {
   lines: string[];
   startLine: number;
+  showTimestamps?: boolean;
 }) {
   return (
     <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9]">
       {lines.map((line, j) => {
+        const tsMatch = line.match(TS_PREFIX_RE);
+        const ts = tsMatch ? tsMatch[1] : null;
+        const body = tsMatch ? line.slice(tsMatch[0].length) : line;
         // ANSI-colored child-process output (buildx, go test, etc.)
         // gets converted to styled spans. Lines without ANSI fall
         // through to the old semantic-keyword shading so PASS/FAIL/
         // ERROR / `> cmd` still stand out when processes don't color.
-        const hasAnsi = line.includes("\x1b[");
-        const stripped = hasAnsi ? stripAnsi(line) : line;
+        const hasAnsi = body.includes("\x1b[");
+        const stripped = hasAnsi ? stripAnsi(body) : body;
         const semantic = hasAnsi
           ? ""
           : stripped.includes("PASS")
@@ -103,10 +113,15 @@ function LogLines({
             <span className="text-[#484f58] select-none pr-3 text-right shrink-0 w-8 group-hover:text-[#8b949e]">
               {startLine + j}
             </span>
+            {showTimestamps && ts && (
+              <span className="text-[#6e7681] select-none pr-2 shrink-0 tabular-nums">
+                {ts}
+              </span>
+            )}
             {hasAnsi ? (
-              <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
+              <span dangerouslySetInnerHTML={{ __html: ansiToHtml(body) }} />
             ) : (
-              <span className={semantic}>{line}</span>
+              <span className={semantic}>{body}</span>
             )}
           </div>
         );
@@ -132,6 +147,7 @@ function StepBucket({
   waterfallTotalMs,
   expanded: expandedProp,
   onToggle,
+  showTimestamps,
 }: {
   section: StepSection;
   lineOffset: number;
@@ -143,6 +159,7 @@ function StepBucket({
   waterfallTotalMs?: number | null;
   expanded?: boolean;
   onToggle?: () => void;
+  showTimestamps?: boolean;
 }) {
   const defaultExpanded =
     section.status === "failed" || section.status === "running";
@@ -184,8 +201,16 @@ function StepBucket({
         ? "bg-indigo-400/60"
         : "bg-cyan-400/50";
 
+  // stepNameFromSection strips the "<nodeId> · " prefix when present;
+  // leaves the bare node-scope sections (the setup bucket) returning
+  // the full section.name. The data attribute below matches what
+  // external panes use to drive focus-step scrolling.
+  const dataStep = section.name.includes(" · ")
+    ? section.name.split(" · ").slice(-1)[0]
+    : null;
   return (
     <div
+      data-step-id={dataStep ?? undefined}
       className={`border-b border-[var(--border)] last:border-b-0 ${section.status === "failed" ? "bg-red-500/5" : ""}`}
     >
       <button
@@ -249,7 +274,11 @@ function StepBucket({
         <div className="px-3 pb-2">
           {section.lines.length > 0 ? (
             <div className="pl-8">
-              <LogLines lines={section.lines} startLine={lineOffset} />
+              <LogLines
+                lines={section.lines}
+                startLine={lineOffset}
+                showTimestamps={showTimestamps}
+              />
             </div>
           ) : (
             <p className="text-xs text-[var(--muted)] pl-8">No output</p>
@@ -263,9 +292,11 @@ function StepBucket({
 function BetweenSection({
   section,
   lineOffset,
+  showTimestamps,
 }: {
   section: LogSection;
   lineOffset: number;
+  showTimestamps?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const nonEmpty = section.lines.filter((l) => l.trim() !== "");
@@ -286,7 +317,11 @@ function BetweenSection({
       </button>
       {expanded && (
         <div className="px-3 pb-2 pl-8">
-          <LogLines lines={section.lines} startLine={lineOffset} />
+          <LogLines
+            lines={section.lines}
+            startLine={lineOffset}
+            showTimestamps={showTimestamps}
+          />
         </div>
       )}
     </div>
@@ -296,9 +331,11 @@ function BetweenSection({
 function SummarySection({
   section,
   lineOffset,
+  showTimestamps,
 }: {
   section: LogSection;
   lineOffset: number;
+  showTimestamps?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -315,7 +352,11 @@ function SummarySection({
       </button>
       {expanded && (
         <div className="px-3 pb-2 pl-8">
-          <LogLines lines={section.lines} startLine={lineOffset} />
+          <LogLines
+            lines={section.lines}
+            startLine={lineOffset}
+            showTimestamps={showTimestamps}
+          />
         </div>
       )}
     </div>
@@ -324,8 +365,10 @@ function SummarySection({
 
 function InlineLogView({
   sections,
+  showTimestamps = true,
 }: {
   sections: (LogSection | StepSection)[];
+  showTimestamps?: boolean;
 }) {
   // Each line in the inline view is prefixed with the step it
   // belongs to: `<step> | <line>`. That keeps a flat top-to-bottom
@@ -338,11 +381,19 @@ function InlineLogView({
     fallbackClass: string,
     stepLabel?: string,
   ) => {
-    if (line.trim() === "" && !stepLabel)
+    const tsMatch = line.match(TS_PREFIX_RE);
+    const ts = tsMatch ? tsMatch[1] : null;
+    const body = tsMatch ? line.slice(tsMatch[0].length) : line;
+    if (body.trim() === "" && !stepLabel)
       return <div key={key} className="h-5" />;
-    const hasAnsi = line.includes("\x1b[");
+    const hasAnsi = body.includes("\x1b[");
     return (
       <div key={key} className="flex hover:bg-[#161b22] group">
+        {showTimestamps && ts && (
+          <span className="text-[#6e7681] select-none pr-2 shrink-0 tabular-nums">
+            {ts}
+          </span>
+        )}
         {stepLabel && (
           <span className="text-[var(--muted)] shrink-0 pr-2">
             {stepLabel}
@@ -350,9 +401,9 @@ function InlineLogView({
           </span>
         )}
         {hasAnsi ? (
-          <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
+          <span dangerouslySetInnerHTML={{ __html: ansiToHtml(body) }} />
         ) : (
-          <span className={fallbackClass}>{line}</span>
+          <span className={fallbackClass}>{body}</span>
         )}
       </div>
     );
@@ -413,10 +464,24 @@ function InlineLogView({
 interface LogBucketViewProps {
   parsed: ParsedLog;
   jobId?: string;
+  // When set, the matching step bucket auto-expands and scrolls into
+  // view. Match is on the stepName suffix of section.name (which is
+  // formatted as "<nodeId> · <stepName>"). External selection driver
+  // for cross-pane navigation (left nodes panel / StepDag → logs).
+  focusStep?: string | null;
 }
 
-export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
+export default function LogBucketView({
+  parsed,
+  jobId,
+  focusStep,
+}: LogBucketViewProps) {
   const [viewMode, setViewMode] = useState<"steps" | "inline">("steps");
+  // Timestamps default on -- they're the cheapest way to correlate
+  // log lines with the timeline view, and operators reach for them
+  // first when debugging. The toggle parks them when prose-y log
+  // bodies dominate a view.
+  const [showTimestamps, setShowTimestamps] = useState(true);
   const steps = parsed.sections.filter(
     (s) => s.type === "step",
   ) as StepSection[];
@@ -450,6 +515,34 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
     });
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // External focus-step: when a step is selected elsewhere (left
+  // panel row, StepDag click), expand that step's bucket and scroll
+  // it into view. Match against the section's parsed step name so
+  // the lookup stays in step-id terms.
+  useEffect(() => {
+    if (!focusStep) return;
+    const matchIdx = parsed.sections.findIndex((s) => {
+      if (s.type !== "step") return false;
+      const name = (s as StepSection).name;
+      const stepName = name.includes(" · ")
+        ? name.split(" · ").slice(-1)[0]
+        : name;
+      return stepName === focusStep;
+    });
+    if (matchIdx < 0) return;
+    // Single-step-open behavior: collapse every other step bucket
+    // so the selected one sits in isolation, mirroring how the
+    // outer AllNodesLogs collapses sibling nodes on selection.
+    const next: Record<number, boolean> = {};
+    for (const i of stepIndices) next[i] = i === matchIdx;
+    setStepOverrides(next);
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(
+        `[data-step-id="${focusStep}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [focusStep, parsed, stepIndices]);
   const scrollToTop = () => {
     containerRef.current?.scrollIntoView({
       block: "start",
@@ -543,6 +636,13 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
             inline
           </button>
         </div>
+        <button
+          onClick={() => setShowTimestamps((v) => !v)}
+          title={showTimestamps ? "hide timestamps" : "show timestamps"}
+          className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${showTimestamps ? "bg-[#30363d] text-[#c9d1d9]" : "text-[var(--muted)] hover:text-[#c9d1d9]"}`}
+        >
+          ts
+        </button>
         <CopyButton text={allLines.join("\n")} label="Copy all logs" />
         <DownloadButton
           text={allLines.join("\n")}
@@ -552,7 +652,10 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
 
       {viewMode === "inline" ? (
         <div className="px-3 py-2">
-          <InlineLogView sections={parsed.sections} />
+          <InlineLogView
+            sections={parsed.sections}
+            showTimestamps={showTimestamps}
+          />
         </div>
       ) : (
         parsed.sections.map((section, i) => {
@@ -570,6 +673,7 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
                 waterfallStartMs={waterfallStartMs}
                 waterfallTotalMs={waterfallTotalMs}
                 expanded={override}
+                showTimestamps={showTimestamps}
                 onToggle={() =>
                   setStepOverrides((prev) => {
                     const cur =
@@ -584,12 +688,22 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
           }
           if (section.type === "summary") {
             return (
-              <SummarySection key={i} section={section} lineOffset={offset} />
+              <SummarySection
+                key={i}
+                section={section}
+                lineOffset={offset}
+                showTimestamps={showTimestamps}
+              />
             );
           }
           if (section.type === "between" || section.type === "preamble") {
             return (
-              <BetweenSection key={i} section={section} lineOffset={offset} />
+              <BetweenSection
+                key={i}
+                section={section}
+                lineOffset={offset}
+                showTimestamps={showTimestamps}
+              />
             );
           }
           return null;

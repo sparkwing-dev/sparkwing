@@ -276,6 +276,14 @@ export interface NodeWork {
   spawns?: NodeWorkSpawn[];
   spawn_each?: NodeWorkSpawnEach[];
   result_step?: string;
+  // Named Step bundles from sparkwing.GroupSteps. Members are step
+  // ids in declaration order. Empty name = a structural-only group.
+  step_groups?: NodeStepGroup[];
+}
+
+export interface NodeStepGroup {
+  name?: string;
+  members: string[];
 }
 
 export interface NodeWorkStep {
@@ -283,6 +291,17 @@ export interface NodeWorkStep {
   needs?: string[];
   is_result?: boolean;
   has_skip_if?: boolean;
+  // Runtime state joined in from node_steps rows server-side.
+  // status is one of "running" | "passed" | "failed" | "skipped";
+  // missing/empty means the step hasn't started.
+  status?: "running" | "passed" | "failed" | "skipped";
+  started_at?: string;
+  finished_at?: string;
+  duration_ms?: number;
+  // Free-form per-step summaries fired via sparkwing.Annotate()
+  // while this step was active. Mirrors RunNode.annotations but
+  // scoped to one step inside the inner Work DAG.
+  annotations?: string[];
 }
 
 export interface NodeWorkSpawn {

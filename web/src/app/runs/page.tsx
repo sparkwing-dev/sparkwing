@@ -51,7 +51,6 @@ import {
   getNodeStreamUrl,
   getPipelines,
   getRun,
-  getRunLogs,
   getRuns,
   parseHolder,
   retryRun,
@@ -77,9 +76,8 @@ import LogBucketView from "@/components/LogBucketView";
 import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel from "@/components/SummaryPanel";
 import SelectedNodePanel from "@/components/SelectedNodePanel";
-import { parseLogLines, type StepSection } from "@/lib/logParser";
+import { parseLogLines } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
-import NodeWorkView from "@/components/NodeWorkView";
 
 // Runs-list still polls: the event stream is per-run, not global, so
 // the left sidebar can't subscribe to "anything new". The detail
@@ -240,6 +238,24 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     });
   };
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  // Selected step id within the selected node (or null if no step is
+  // currently focused). Shared across:
+  //   - the left Nodes panel (highlights the row + scrolls into view)
+  //   - the StepDag (paints the step gold)
+  //   - the Logs tab (expands+scrolls to the step bucket)
+  // Cleared when the selected node changes via selectNode.
+  const [selectedStep, setSelectedStep] = useState<string | null>(null);
+  // Wrappers so callers don't have to remember to coordinate the two
+  // pieces of state. selectNode clears any step focus; selectStep
+  // assigns both at once so the post-render reads them consistently.
+  const selectNode = useCallback((id: string | null) => {
+    setSelectedNode(id);
+    setSelectedStep(null);
+  }, []);
+  const selectStep = useCallback((nodeId: string, stepId: string | null) => {
+    setSelectedNode(nodeId);
+    setSelectedStep(stepId);
+  }, []);
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
@@ -429,10 +445,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   focusedTabRef.current = focusedTab;
   const tabRef = useRef(tab);
   tabRef.current = tab;
-  const visibleTabs = useMemo(
-    () => buildVisibleTabs(nodes, node),
-    [nodes, node],
-  );
+  const visibleTabs = useMemo(() => buildVisibleTabs(nodes), [nodes]);
   const visibleTabsRef = useRef(visibleTabs);
   visibleTabsRef.current = visibleTabs;
   const selectedRunRef = useRef(selectedRun);
@@ -539,13 +552,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           e.preventDefault();
           // Header parked (no node focus): Enter clears selection.
           if (!focusedNodeRef.current) {
-            setSelectedNode(null);
+            selectNode(null);
             return;
           }
-          setSelectedNode(focusedNodeRef.current);
+          selectNode(focusedNodeRef.current);
         } else if (e.key === "Escape") {
           if (selectedNodeRef.current) {
-            setSelectedNode(null);
+            selectNode(null);
           } else if (selectedRunRef.current) {
             setFocusedColumn("runs");
             selectRunRef.current(null);
@@ -623,7 +636,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
-    setSelectedNode(null);
+    selectNode(null);
     // Row body click is single-select: replace the selection set so
     // only this row is highlighted. When exiting the collapsed view
     // (id=null), keep the previous selection in checkedRuns so the
@@ -789,7 +802,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               onClick={() => {
                 setFocusedColumn("nodes");
                 setFocusedNode(null);
-                setSelectedNode(null);
+                selectNode(null);
               }}
               className={`px-3 py-2 border-b border-[var(--border)] flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
                 focusedColumn === "nodes" && !focusedNode
@@ -803,7 +816,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedNode(null);
+                    selectNode(null);
                   }}
                   className="text-[var(--muted)] hover:text-red-400 normal-case font-normal tracking-normal"
                   title="clear node selection"
@@ -815,12 +828,18 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             <NodesList
               nodes={nodes}
               selectedNode={selectedNode}
+              selectedStep={selectedStep}
               focusedNode={focusedNode}
               focusedColumnActive={focusedColumn === "nodes"}
               onSelect={(id) => {
                 setFocusedNode(id);
                 setFocusedColumn("nodes");
-                setSelectedNode(id);
+                selectNode(id);
+              }}
+              onSelectStep={(nodeId, stepId) => {
+                setFocusedNode(nodeId);
+                setFocusedColumn("nodes");
+                selectStep(nodeId, stepId);
               }}
             />
           </div>
@@ -834,9 +853,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               run={run}
               nodes={nodes}
               node={node}
+              selectedStep={selectedStep}
               showTrigger={showTrigger}
               setShowTrigger={setShowTrigger}
-              onSelectNode={setSelectedNode}
+              onSelectNode={selectNode}
+              onSelectStep={selectStep}
               tab={tab}
               setTab={setTab}
               focusedTab={focusedColumn === "tabs" ? focusedTab : null}
@@ -1003,15 +1024,19 @@ function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
 function NodesList({
   nodes,
   selectedNode,
+  selectedStep,
   focusedNode,
   focusedColumnActive,
   onSelect,
+  onSelectStep,
 }: {
   nodes: RunNode[];
   selectedNode: string | null;
+  selectedStep: string | null;
   focusedNode?: string | null;
   focusedColumnActive?: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
+  onSelectStep: (nodeId: string, stepId: string | null) => void;
 }) {
   const groups = partitionByGroup(nodes);
   // Collapse state is keyed on the group name and driven by the
@@ -1032,6 +1057,27 @@ function NodesList({
       else next.add(g);
       return next;
     });
+  // Per-node step expansion. Default collapsed so the panel stays
+  // dense; user clicks the caret to drill into a node's steps. Also
+  // auto-expands when a step gets selected elsewhere (StepDag click,
+  // logs nav) so the row reveals its children without manual toggle.
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const toggleNode = (id: string) =>
+    setExpandedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  useEffect(() => {
+    if (!selectedStep || !selectedNode) return;
+    setExpandedNodes((prev) => {
+      if (prev.has(selectedNode)) return prev;
+      const next = new Set(prev);
+      next.add(selectedNode);
+      return next;
+    });
+  }, [selectedStep, selectedNode]);
 
   return (
     <>
@@ -1044,9 +1090,13 @@ function NodesList({
               key={n.id}
               n={n}
               selected={selectedNode === n.id}
+              selectedStep={selectedNode === n.id ? selectedStep : null}
               focused={focusedNode === n.id}
               focusedColumnActive={focusedColumnActive}
+              expanded={expandedNodes.has(n.id)}
+              onToggleExpand={() => toggleNode(n.id)}
               onSelect={onSelect}
+              onSelectStep={onSelectStep}
             />
           ));
         }
@@ -1073,9 +1123,13 @@ function NodesList({
                     key={n.id}
                     n={n}
                     selected={selectedNode === n.id}
+                    selectedStep={selectedNode === n.id ? selectedStep : null}
                     focused={focusedNode === n.id}
                     focusedColumnActive={focusedColumnActive}
+                    expanded={expandedNodes.has(n.id)}
+                    onToggleExpand={() => toggleNode(n.id)}
                     onSelect={onSelect}
+                    onSelectStep={onSelectStep}
                   />
                 ))}
               </div>
@@ -1152,53 +1206,156 @@ function GroupHeader({
 function NodeRow({
   n,
   selected,
+  selectedStep,
   focused,
   focusedColumnActive,
   indent,
+  expanded,
+  onToggleExpand,
   onSelect,
+  onSelectStep,
 }: {
   n: RunNode;
   selected: boolean;
+  selectedStep?: string | null;
   focused?: boolean;
   focusedColumnActive?: boolean;
   indent?: boolean;
-  onSelect: (id: string) => void;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+  onSelect: (id: string | null) => void;
+  onSelectStep?: (nodeId: string, stepId: string | null) => void;
 }) {
   const label = n.id.length > 20 ? n.id.slice(0, 19) + "…" : n.id;
   const statusLabel = n.outcome || n.status;
+  const steps = n.work?.steps ?? [];
+  const hasSteps = steps.length > 0;
+  return (
+    <>
+      <div
+        data-node-id={n.id}
+        className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+          selected
+            ? "bg-violet-500/15 border-l-violet-400"
+            : "border-l-transparent"
+        } ${
+          focused && focusedColumnActive
+            ? "ring-2 ring-inset ring-indigo-300 bg-indigo-500/10"
+            : focused
+              ? "ring-1 ring-inset ring-indigo-400/30"
+              : ""
+        }`}
+        onClick={() => onSelect(selected ? null : n.id)}
+        title={`${n.id} · ${statusLabel}${nodeDuration(n) ? ` · ${fmtMs(nodeDuration(n))}` : ""}`}
+      >
+        <div className="flex items-center gap-1.5">
+          {hasSteps ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpand?.();
+              }}
+              className="w-3 text-center text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] shrink-0"
+              title={expanded ? "collapse steps" : "expand steps"}
+            >
+              {expanded ? "▾" : "▸"}
+            </button>
+          ) : (
+            <span className="w-3 shrink-0" />
+          )}
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+          />
+          <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
+          {(n.annotations?.length ?? 0) > 0 && (
+            <span
+              className="text-[10px] font-mono text-cyan-300 shrink-0"
+              title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}`}
+            >
+              {n.annotations!.length}
+            </span>
+          )}
+          {nodeDuration(n) > 0 && (
+            <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
+              {fmtMs(nodeDuration(n))}
+            </span>
+          )}
+        </div>
+      </div>
+      {hasSteps && expanded && (
+        <div className="bg-[#0a0f17]">
+          {steps.map((s) => (
+            <StepRow
+              key={s.id}
+              s={s}
+              selected={selectedStep === s.id}
+              onClick={() => {
+                const isSel = selectedStep === s.id;
+                if (onSelectStep) onSelectStep(n.id, isSel ? null : s.id);
+                else onSelect(n.id);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function StepRow({
+  s,
+  selected,
+  onClick,
+}: {
+  s: NodeWorkStep;
+  selected?: boolean;
+  onClick: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) {
+      ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selected]);
+  const label = s.id.length > 22 ? s.id.slice(0, 21) + "…" : s.id;
+  const status = s.status;
+  const dot =
+    status === "passed"
+      ? "bg-green-400"
+      : status === "failed"
+        ? "bg-red-400"
+        : status === "running"
+          ? "bg-indigo-400 animate-pulse"
+          : status === "skipped"
+            ? "bg-slate-400"
+            : "bg-slate-600";
+  let durMs = s.duration_ms ?? 0;
+  if (!durMs && status === "running" && s.started_at) {
+    durMs = Math.max(0, Date.now() - new Date(s.started_at).getTime());
+  }
   return (
     <div
-      data-node-id={n.id}
-      className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
-        selected
-          ? "bg-violet-500/15 border-l-violet-400"
-          : "border-l-transparent"
-      } ${
-        focused && focusedColumnActive
-          ? "ring-2 ring-inset ring-indigo-300 bg-indigo-500/10"
-          : focused
-            ? "ring-1 ring-inset ring-indigo-400/30"
-            : ""
-      }`}
-      onClick={() => onSelect(n.id)}
-      title={`${n.id} · ${statusLabel}${nodeDuration(n) ? ` · ${fmtMs(nodeDuration(n))}` : ""}`}
+      ref={ref}
+      className={`pl-9 pr-2 py-1 border-b border-[var(--border)]/60 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${selected ? "bg-amber-400/10 border-l-2 border-l-amber-400" : ""}`}
+      onClick={onClick}
+      title={`${s.id}${status ? ` · ${status}` : ""}${durMs ? ` · ${fmtMs(durMs)}` : ""}`}
     >
       <div className="flex items-center gap-1.5">
-        <span
-          className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
-        />
-        <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
-        {(n.annotations?.length ?? 0) > 0 && (
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+        <span className="text-[10.5px] truncate flex-1 min-w-0 text-[var(--muted)]">
+          {label}
+        </span>
+        {(s.annotations?.length ?? 0) > 0 && (
           <span
             className="text-[10px] font-mono text-cyan-300 shrink-0"
-            title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}`}
+            title={`${s.annotations!.length} annotation${s.annotations!.length === 1 ? "" : "s"}`}
           >
-            ›{n.annotations!.length}
+            {s.annotations!.length}
           </span>
         )}
-        {nodeDuration(n) > 0 && (
+        {durMs > 0 && (
           <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
-            {fmtMs(nodeDuration(n))}
+            {fmtMs(durMs)}
           </span>
         )}
       </div>
@@ -1385,7 +1542,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
     return "";
   };
 
-  const fullTitle = `${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
+  const fullTitle = `${r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
   const datePrefix = fmtDatePrefix(r.started_at);
   const [repoShort, pipelineShort, branchShort] = waterFill(
     [repo, r.pipeline, r.git_branch || ""],
@@ -1499,14 +1656,7 @@ function CompactRunRow({ r }: { r: Run }) {
 
 // --- detail pane ---
 
-type TabKey =
-  | "logs"
-  | "work"
-  | "resources"
-  | "dag"
-  | "timeline"
-  | "summary"
-  | "setup";
+type TabKey = "logs" | "resources" | "dag" | "timeline" | "summary" | "setup";
 
 interface TabDescriptor {
   key: TabKey;
@@ -1515,13 +1665,7 @@ interface TabDescriptor {
   visible: boolean;
 }
 
-function buildVisibleTabs(
-  nodes: RunNode[],
-  selected: RunNode | null,
-): TabDescriptor[] {
-  const hasWork = !!(selected && (selected.work || selected.modifiers));
-  const nodesWithWork = nodes.filter((n) => n.work || n.modifiers);
-  const hasAnyWork = nodesWithWork.length > 0;
+function buildVisibleTabs(nodes: RunNode[]): TabDescriptor[] {
   return (
     [
       { key: "summary" as const, label: "Summary", visible: true },
@@ -1538,16 +1682,6 @@ function buildVisibleTabs(
         label: "Timeline",
         visible: nodes.length > 0,
       },
-      {
-        key: "work" as const,
-        label: "Work",
-        count: hasWork
-          ? `${selected?.work?.steps?.length ?? 0}`
-          : hasAnyWork
-            ? `${nodesWithWork.length}`
-            : undefined,
-        visible: hasAnyWork,
-      },
       { key: "resources" as const, label: "Resources", visible: true },
     ] as TabDescriptor[]
   ).filter((t) => t.visible);
@@ -1557,9 +1691,11 @@ function RunDetailPane({
   run,
   nodes,
   node,
+  selectedStep,
   showTrigger,
   setShowTrigger,
   onSelectNode,
+  onSelectStep,
   onRefresh,
   tab,
   setTab,
@@ -1568,9 +1704,11 @@ function RunDetailPane({
   run: Run;
   nodes: RunNode[];
   node: RunNode | null;
+  selectedStep: string | null;
   showTrigger: boolean;
   setShowTrigger: (v: boolean) => void;
-  onSelectNode: (id: string) => void;
+  onSelectNode: (id: string | null) => void;
+  onSelectStep: (nodeId: string, stepId: string | null) => void;
   onRefresh: () => void;
   tab: TabKey;
   setTab: (k: TabKey) => void;
@@ -1584,9 +1722,7 @@ function RunDetailPane({
     run.status === "success" ||
     run.status === "failed" ||
     run.status === "cancelled";
-  const visibleTabs = buildVisibleTabs(nodes, selected);
-  const nodesWithWork = nodes.filter((n) => n.work || n.modifiers);
-  const hasAnyWork = nodesWithWork.length > 0;
+  const visibleTabs = buildVisibleTabs(nodes);
 
   const selectedId = selected?.id ?? null;
   const tabContentRef = useRef<HTMLDivElement>(null);
@@ -1707,20 +1843,11 @@ function RunDetailPane({
               run={run}
               node={selected}
               nodes={nodes}
+              focusStep={selectedStep}
               onSelectNode={onSelectNode}
             />
           </div>
         )}
-        {effectiveTab === "work" &&
-          (selected && (selected.work || selected.modifiers) ? (
-            <div className="p-4">
-              <NodeWorkView node={selected} />
-            </div>
-          ) : (
-            <div className="p-4">
-              <AllNodesWork nodes={nodesWithWork} onSelectNode={onSelectNode} />
-            </div>
-          ))}
         {effectiveTab === "resources" && (
           <div className="p-4">
             <AllNodesResources
@@ -1736,14 +1863,23 @@ function RunDetailPane({
             <DAG
               nodes={nodes}
               selected={selected?.id || null}
+              selectedStep={selectedStep}
               onSelect={onSelectNode}
+              onSelectStep={onSelectStep}
               runId={run.id}
             />
           </div>
         )}
         {effectiveTab === "timeline" && (
           <div className="p-4">
-            <ExecutionWaterfall run={run} nodes={nodes} />
+            <ExecutionWaterfall
+              run={run}
+              nodes={nodes}
+              focusNode={selected?.id || null}
+              focusStep={selectedStep}
+              onSelectNode={onSelectNode}
+              onSelectStep={onSelectStep}
+            />
           </div>
         )}
         {effectiveTab === "summary" && (
@@ -1791,7 +1927,7 @@ function PendingApprovalsBanner({
 }: {
   runID: string;
   nodes: RunNode[];
-  onSelectNode: (id: string) => void;
+  onSelectNode: (id: string | null) => void;
 }) {
   const pending = nodes.filter((n) => n.status === "approval_pending");
   if (pending.length === 0) return null;
@@ -1819,11 +1955,13 @@ function LogsPane({
   run,
   node,
   nodes,
+  focusStep,
   onSelectNode,
 }: {
   run: Run;
   node: RunNode | null;
   nodes?: RunNode[];
+  focusStep?: string | null;
   onSelectNode?: (id: string) => void;
 }) {
   return (
@@ -1831,6 +1969,7 @@ function LogsPane({
       run={run}
       nodes={nodes || []}
       focusNode={node?.id || null}
+      focusStep={focusStep ?? null}
       onSelectNode={onSelectNode}
     />
   );
@@ -1838,7 +1977,15 @@ function LogsPane({
 
 // SingleNodeLogs renders the streaming/stored log body for one
 // node, deciding by status. Used inside AllNodesLogs sections.
-function SingleNodeLogs({ run, node }: { run: Run; node: RunNode }) {
+function SingleNodeLogs({
+  run,
+  node,
+  focusStep,
+}: {
+  run: Run;
+  node: RunNode;
+  focusStep?: string | null;
+}) {
   if (node.status === "pending") {
     return (
       <div className="text-sm text-[var(--muted)]">
@@ -1848,9 +1995,9 @@ function SingleNodeLogs({ run, node }: { run: Run; node: RunNode }) {
   }
   const body =
     node.status === "approval_pending" || !node.finished_at ? (
-      <StreamingLogs runID={run.id} nodeID={node.id} />
+      <StreamingLogs runID={run.id} nodeID={node.id} focusStep={focusStep} />
     ) : (
-      <StoredLogs runID={run.id} nodeID={node.id} />
+      <StoredLogs runID={run.id} nodeID={node.id} focusStep={focusStep} />
     );
   return (
     <div className="flex flex-col gap-2">
@@ -1950,7 +2097,7 @@ function RunAnnotationsList({
   onSelectNode,
 }: {
   nodes: RunNode[];
-  onSelectNode: (id: string) => void;
+  onSelectNode: (id: string | null) => void;
 }) {
   const groups = nodes.filter((n) => (n.annotations?.length ?? 0) > 0);
   if (groups.length === 0) {
@@ -2012,11 +2159,13 @@ function AllNodesLogs({
   run,
   nodes,
   focusNode,
+  focusStep,
   onSelectNode,
 }: {
   run: Run;
   nodes: RunNode[];
   focusNode?: string | null;
+  focusStep?: string | null;
   onSelectNode?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -2124,7 +2273,11 @@ function AllNodesLogs({
             </div>
             {open && (
               <div className="border-t border-[var(--border)] p-2">
-                <SingleNodeLogs run={run} node={n} />
+                <SingleNodeLogs
+                  run={run}
+                  node={n}
+                  focusStep={isFocus ? (focusStep ?? null) : null}
+                />
               </div>
             )}
           </div>
@@ -2266,104 +2419,15 @@ function AllNodesResources({
   );
 }
 
-// AllNodesWork renders one collapsible block per node that carries
-// work/modifiers data. Collapsed by default; expanding mounts the
-// existing NodeWorkView underneath.
-
-function AllNodesWork({
-  nodes,
-  onSelectNode,
+function StreamingLogs({
+  runID,
+  nodeID,
+  focusStep,
 }: {
-  nodes: RunNode[];
-  onSelectNode?: (id: string) => void;
+  runID: string;
+  nodeID: string;
+  focusStep?: string | null;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  if (nodes.length === 0) {
-    return (
-      <div className="text-sm text-[var(--muted)]">
-        No nodes with work definitions for this run.
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
-        <span>All nodes — expand to view their work definitions</span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
-            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
-          >
-            expand all
-          </button>
-          <button
-            onClick={() => setExpanded(new Set())}
-            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
-          >
-            collapse all
-          </button>
-        </div>
-      </div>
-      {nodes.map((n) => {
-        const open = expanded.has(n.id);
-        const stepCount = n.work?.steps?.length ?? 0;
-        return (
-          <div
-            key={n.id}
-            className="border border-[var(--border)] rounded bg-[#0d1117]"
-          >
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <button
-                onClick={() => toggle(n.id)}
-                className="text-[var(--muted)] w-3 text-center text-xs"
-              >
-                {open ? "▾" : "▸"}
-              </button>
-              <span
-                className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
-              />
-              <button
-                onClick={() => toggle(n.id)}
-                className="font-mono text-xs text-left truncate flex-1 hover:underline"
-                title={n.id}
-              >
-                {n.id}
-              </button>
-              {stepCount > 0 && (
-                <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
-                  {stepCount} step{stepCount === 1 ? "" : "s"}
-                </span>
-              )}
-              {onSelectNode && (
-                <button
-                  onClick={() => onSelectNode(n.id)}
-                  title="open this node"
-                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] underline-offset-2 hover:underline shrink-0"
-                >
-                  open
-                </button>
-              )}
-            </div>
-            {open && (
-              <div className="border-t border-[var(--border)] p-2">
-                <NodeWorkView node={n} />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function StreamingLogs({ runID, nodeID }: { runID: string; nodeID: string }) {
   const [lines, setLines] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -2395,13 +2459,25 @@ function StreamingLogs({ runID, nodeID }: { runID: string; nodeID: string }) {
   const parsed = parseLogLines(lines);
   return (
     <>
-      <LogBucketView parsed={parsed} jobId={`${runID}-${nodeID}`} />
+      <LogBucketView
+        parsed={parsed}
+        jobId={`${runID}-${nodeID}`}
+        focusStep={focusStep}
+      />
       <div ref={endRef} />
     </>
   );
 }
 
-function StoredLogs({ runID, nodeID }: { runID: string; nodeID: string }) {
+function StoredLogs({
+  runID,
+  nodeID,
+  focusStep,
+}: {
+  runID: string;
+  nodeID: string;
+  focusStep?: string | null;
+}) {
   const [text, setText] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2427,7 +2503,13 @@ function StoredLogs({ runID, nodeID }: { runID: string; nodeID: string }) {
     );
   }
   const parsed = parseLogLines(text.split("\n"));
-  return <LogBucketView parsed={parsed} jobId={`${runID}-${nodeID}`} />;
+  return (
+    <LogBucketView
+      parsed={parsed}
+      jobId={`${runID}-${nodeID}`}
+      focusStep={focusStep}
+    />
+  );
 }
 
 // --- DAG ---
@@ -2442,22 +2524,61 @@ function StoredLogs({ runID, nodeID }: { runID: string; nodeID: string }) {
 function DAG({
   nodes,
   selected,
+  selectedStep,
   onSelect,
+  onSelectStep,
   runId,
 }: {
   nodes: RunNode[];
   selected: string | null;
-  onSelect: (id: string) => void;
+  selectedStep: string | null;
+  onSelect: (id: string | null) => void;
+  onSelectStep: (nodeId: string, stepId: string | null) => void;
   runId?: string;
 }) {
+  // Auto-scroll the selected node into view when arriving with a
+  // selection (e.g. switching to the DAG tab from elsewhere) or when
+  // selection changes. The node's group is tagged with data-node-id
+  // so a querySelector lookup finds it after layout.
+  const dagRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) return;
+    requestAnimationFrame(() => {
+      const el = dagRef.current?.querySelector(
+        `[data-node-id="${selected}"]`,
+      ) as SVGGElement | null;
+      el?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "center",
+      });
+    });
+  }, [selected]);
   // Hover state for the floating tooltip overlay. Tracks which node
   // the pointer is currently over plus its viewport coords so we can
-  // render a position:fixed card next to the cursor.
+  // render a position:fixed card next to the cursor. The card waits
+  // 500ms before appearing so a quick mouse-over doesn't flash a card
+  // every time the cursor crosses the DAG.
   const [hover, setHover] = useState<{
     node: RunNode;
     x: number;
     y: number;
   } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelHover = () => {
+    if (hoverTimer.current !== null) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  };
+  const scheduleHover = (n: RunNode, x: number, y: number) => {
+    cancelHover();
+    hoverTimer.current = setTimeout(() => {
+      setHover({ node: n, x, y });
+      hoverTimer.current = null;
+    }, 500);
+  };
+  useEffect(() => () => cancelHover(), []);
   const [chipHover, setChipHover] = useState<{
     text: string;
     x: number;
@@ -2471,7 +2592,7 @@ function DAG({
   const nodeW = 168;
   const nodeH = 38;
   const colGap = 64;
-  const rowGap = 14;
+  const rowGap = 26;
   const padX = 12;
   const padY = 32;
   const nodeHeight = () => nodeH;
@@ -2518,19 +2639,35 @@ function DAG({
     if (!columns[l]) columns[l] = [];
     columns[l].push(n);
   }
-  // Sort each column by (group, id) so nodes sharing a `.Group()`
-  // tag land adjacent. Matters for the group-frame overlay: if a
-  // group's members are split by an unrelated node of the same
-  // topological depth, the bounding box would swallow the outsider.
-  // Ungrouped nodes (empty string) sort first within a column.
+  // Within-column ordering follows declaration order, with groups
+  // anchored to their first member's position. Each "cluster" (a
+  // named group, or a singleton ungrouped node) takes the minimum
+  // declaration index of its members in this column. Clusters sort
+  // by that anchor; group members sort by declaration index within.
+  //
+  // Result: the column reads in the same sequence the user wrote in
+  // their DSL (and that the left Nodes panel renders), but grouped
+  // members are still adjacent so the frame overlay's bounding box
+  // doesn't swallow an outsider.
+  const nodeOrder = new Map(nodes.map((n, i) => [n.id, i]));
+  const nodeClusterKey = (n: RunNode): string => n.groups?.[0] || `:${n.id}`;
   for (const col of columns) {
-    if (col)
-      col.sort((a, b) => {
-        const ag = a.groups?.[0] || "";
-        const bg = b.groups?.[0] || "";
-        if (ag !== bg) return ag.localeCompare(bg);
-        return a.id.localeCompare(b.id);
-      });
+    if (!col) continue;
+    const anchor = new Map<string, number>();
+    for (const n of col) {
+      const k = nodeClusterKey(n);
+      const idx = nodeOrder.get(n.id) ?? 0;
+      const cur = anchor.get(k);
+      if (cur === undefined || idx < cur) anchor.set(k, idx);
+    }
+    col.sort((a, b) => {
+      const ka = nodeClusterKey(a);
+      const kb = nodeClusterKey(b);
+      if (ka !== kb) {
+        return (anchor.get(ka) ?? 0) - (anchor.get(kb) ?? 0);
+      }
+      return (nodeOrder.get(a.id) ?? 0) - (nodeOrder.get(b.id) ?? 0);
+    });
   }
 
   // Per-column max widths so nodes size to their labels but still
@@ -2539,15 +2676,11 @@ function DAG({
   // pills, and edge padding. Cap at a generous max so a long step id
   // doesn't run the column off-screen.
   const charPxApprox = 7;
-  // dot(24) + duration(46) + pad(16). Zoom chip is added per-node
-  // since it grows with the step count.
+  // dot(24) + duration(46) + pad(16). Step-count + error pills hang
+  // off the bottom edge now, so they don't claim inline width.
   const baseChrome = 24 + 46 + 16;
-  const zoomChipWidth = (stepCount: number) =>
-    12 + `${stepCount}⤢`.length * 6 + 8;
   const measureNodeW = (n: RunNode): number => {
-    const stepCount = n.work?.steps?.length ?? 0;
-    const chrome = baseChrome + (stepCount > 0 ? zoomChipWidth(stepCount) : 0);
-    const w = Math.ceil(n.id.length * charPxApprox + chrome);
+    const w = Math.ceil(n.id.length * charPxApprox + baseChrome);
     return Math.max(140, Math.min(360, w));
   };
   const columnWidths: number[] = columns.map((col) =>
@@ -2562,15 +2695,32 @@ function DAG({
     });
   }
 
+  // Group frames extend groupFramePad below the last member and
+  // groupFramePad + groupLabelOffset above the first (for the label
+  // strip). Pre-reserve that space when a column transitions between
+  // groups (or in/out of ungrouped). Nodes also carry bottom-edge
+  // badges (SKIPPED / annotation / error) that hang ~7px below the
+  // rect, so the reservation is layered on TOP of rowGap rather than
+  // collapsing into it -- a max() would let the frame eat the badge.
+  const groupFramePad = 8;
+  const groupLabelOffset = 14;
+  const primaryGroupOf = (n: RunNode): string => n.groups?.[0] || "";
   const pos = new Map<string, { x: number; y: number; w: number }>();
   const columnHeights: number[] = [];
   columns.forEach((col, ci) => {
     if (!col) return;
     let y = padY;
     const w = columnWidths[ci];
-    col.forEach((n) => {
+    let prevGroup: string | null = null;
+    col.forEach((n, idx) => {
+      const g = primaryGroupOf(n);
+      if (idx > 0 && g !== prevGroup) {
+        if (prevGroup) y += groupFramePad;
+        if (g) y += groupFramePad + groupLabelOffset;
+      }
       pos.set(n.id, { x: columnStartX[ci], y, w });
       y += nodeH + rowGap;
+      prevGroup = g;
     });
     columnHeights[ci] = y;
   });
@@ -2591,10 +2741,14 @@ function DAG({
       rawEdges.push({ src: n.on_failure_of, dst: n.id, onFailure: true });
     }
   }
-  // Edge collapsing: when a source has >1 edge to the same dest
-  // group AND the source isn't in that group itself, draw a single
-  // line into the group frame instead of N parallel arrows. Keeps
-  // fan-out patterns (build → publish-{linux,darwin,...}) readable.
+  // Edge collapsing in two directions:
+  //   1. src → group:   one source has ≥2 edges into the same dest
+  //      group → draw one line into the group frame instead of N.
+  //      Keeps fan-out patterns (build → publish-{linux,darwin,...})
+  //      readable.
+  //   2. group → dst:   ≥2 sources in one group all point at the same
+  //      destination → draw one line out of the group frame.
+  //      Symmetric optimization for fan-in patterns.
   type CollapsedEdge =
     | {
         kind: "node";
@@ -2603,53 +2757,83 @@ function DAG({
         onFailure?: boolean;
       }
     | {
-        kind: "group";
+        kind: "to-group";
         src: string;
         groupName: string;
         sampleDstStatus: RunNode | undefined;
+      }
+    | {
+        kind: "from-group";
+        groupName: string;
+        dst: string;
       };
   const dstGroupOf = (id: string): string | null => {
     const n = byID.get(id);
     return n?.groups?.[0] || null;
   };
-  const edges: CollapsedEdge[] = [];
-  // Bucket non-failure edges by (src, dst_group). Failure edges stay
-  // 1:1 because their dashed-red styling is meaningful per recovery
-  // node, not per group.
+  // Pass 1: collapse src → group.
+  const pass1: CollapsedEdge[] = [];
   type Bucket = { dsts: string[] };
-  const buckets = new Map<string, Bucket>();
+  const toGroupBuckets = new Map<string, Bucket>();
   for (const e of rawEdges) {
     if (e.onFailure) {
-      edges.push({ kind: "node", src: e.src, dst: e.dst, onFailure: true });
+      pass1.push({ kind: "node", src: e.src, dst: e.dst, onFailure: true });
       continue;
     }
     const g = dstGroupOf(e.dst);
     const srcInSameGroup = g && byID.get(e.src)?.groups?.includes(g);
     if (!g || srcInSameGroup) {
-      edges.push({ kind: "node", src: e.src, dst: e.dst });
+      pass1.push({ kind: "node", src: e.src, dst: e.dst });
       continue;
     }
     const key = `${e.src}::${g}`;
-    let b = buckets.get(key);
+    let b = toGroupBuckets.get(key);
     if (!b) {
       b = { dsts: [] };
-      buckets.set(key, b);
+      toGroupBuckets.set(key, b);
     }
     b.dsts.push(e.dst);
   }
-  for (const [key, b] of buckets) {
+  for (const [key, b] of toGroupBuckets) {
     const [src, group] = key.split("::");
     if (b.dsts.length === 1) {
-      edges.push({ kind: "node", src, dst: b.dsts[0] });
+      pass1.push({ kind: "node", src, dst: b.dsts[0] });
     } else {
-      // Use the first member as a status sample so the collapsed
-      // edge can still color based on the group's aggregate behavior.
-      edges.push({
-        kind: "group",
+      pass1.push({
+        kind: "to-group",
         src,
         groupName: group,
         sampleDstStatus: byID.get(b.dsts[0]),
       });
+    }
+  }
+  // Pass 2: collapse group → dst. Only inspects plain node edges
+  // (failure stays 1:1 for readability; to-group is already collapsed
+  // by direction-1 and doesn't participate here).
+  const edges: CollapsedEdge[] = [];
+  const fromGroupBuckets = new Map<string, string[]>();
+  for (const e of pass1) {
+    if (e.kind !== "node" || e.onFailure) {
+      edges.push(e);
+      continue;
+    }
+    const sg = byID.get(e.src)?.groups?.[0] || "";
+    const dstInSameGroup = sg && byID.get(e.dst)?.groups?.includes(sg);
+    if (!sg || dstInSameGroup) {
+      edges.push(e);
+      continue;
+    }
+    const key = `${sg}::${e.dst}`;
+    const arr = fromGroupBuckets.get(key) ?? [];
+    arr.push(e.src);
+    fromGroupBuckets.set(key, arr);
+  }
+  for (const [key, srcs] of fromGroupBuckets) {
+    const [group, dst] = key.split("::");
+    if (srcs.length === 1) {
+      edges.push({ kind: "node", src: srcs[0], dst });
+    } else {
+      edges.push({ kind: "from-group", groupName: group, dst });
     }
   }
 
@@ -2660,8 +2844,6 @@ function DAG({
   // still get a frame so the visual grouping matches the nodes list
   // on the left -- the (safety) header shouldn't look like a
   // different feature from the DAG container.
-  const groupFramePad = 8;
-  const groupLabelOffset = 14;
   const groupFrames: {
     name: string;
     x: number;
@@ -2709,7 +2891,10 @@ function DAG({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto">
+      <div
+        ref={dagRef}
+        className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto"
+      >
         <svg
           width={width}
           height={height}
@@ -2756,28 +2941,54 @@ function DAG({
             </g>
           ))}
           {edges.map((e, i) => {
-            const a = pos.get(e.src);
-            if (!a) return null;
-            const x1 = a.x + a.w;
-            const y1 = a.y + nodeH / 2;
-            let x2: number, y2: number, color: string, dashed: boolean;
-            if (e.kind === "group") {
+            let x1: number, y1: number;
+            let x2: number, y2: number;
+            let color: string;
+            let dashed = false;
+            // An edge is "touched" by the selection when either endpoint
+            // is the selected node, or when a collapsed group endpoint
+            // contains the selected node. Touched edges paint gold and
+            // thicker so the selection's neighborhood pops out.
+            let touched = false;
+            const groupContainsSelected = (g: string): boolean =>
+              !!selected && !!byID.get(selected)?.groups?.includes(g);
+            if (e.kind === "to-group") {
+              const a = pos.get(e.src);
               const frame = groupFrameByName.get(e.groupName);
-              if (!frame) return null;
+              if (!a || !frame) return null;
+              x1 = a.x + a.w;
+              y1 = a.y + nodeH / 2;
               x2 = frame.x;
               y2 = frame.y + frame.h / 2;
               color = dagEdgeColor(e.sampleDstStatus);
-              dashed = false;
-            } else {
+              touched =
+                e.src === selected || groupContainsSelected(e.groupName);
+            } else if (e.kind === "from-group") {
+              const frame = groupFrameByName.get(e.groupName);
               const b = pos.get(e.dst);
-              if (!b) return null;
+              if (!frame || !b) return null;
+              x1 = frame.x + frame.w;
+              y1 = frame.y + frame.h / 2;
+              x2 = b.x;
+              y2 = b.y + nodeH / 2;
+              color = dagEdgeColor(byID.get(e.dst));
+              touched =
+                e.dst === selected || groupContainsSelected(e.groupName);
+            } else {
+              const a = pos.get(e.src);
+              const b = pos.get(e.dst);
+              if (!a || !b) return null;
+              x1 = a.x + a.w;
+              y1 = a.y + nodeH / 2;
               x2 = b.x;
               y2 = b.y + nodeH / 2;
               color = e.onFailure
                 ? "rgba(248,113,113,0.55)"
                 : dagEdgeColor(byID.get(e.dst));
               dashed = !!e.onFailure;
+              touched = e.src === selected || e.dst === selected;
             }
+            if (touched) color = "rgba(251,191,36,0.95)";
             const dx = Math.max(32, (x2 - x1) * 0.4);
             return (
               <path
@@ -2785,7 +2996,7 @@ function DAG({
                 d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
                 fill="none"
                 stroke={color}
-                strokeWidth="1.5"
+                strokeWidth={touched ? 2.25 : 1.5}
                 strokeDasharray={dashed ? "5 4" : undefined}
               />
             );
@@ -2795,14 +3006,12 @@ function DAG({
             if (!p) return null;
             const isSel = selected === n.id;
             const { fill, border } = dagNodeColors(n, isSel);
-            const hasSteps = (n.work?.steps?.length ?? 0) > 0;
             return (
               <g
                 key={n.id}
+                data-node-id={n.id}
                 transform={`translate(${p.x}, ${p.y})`}
-                onMouseEnter={(e) =>
-                  setHover({ node: n, x: e.clientX, y: e.clientY })
-                }
+                onMouseEnter={(e) => scheduleHover(n, e.clientX, e.clientY)}
                 onMouseMove={(e) =>
                   setHover((prev) =>
                     prev && prev.node.id === n.id
@@ -2810,11 +3019,12 @@ function DAG({
                       : prev,
                   )
                 }
-                onMouseLeave={() =>
+                onMouseLeave={() => {
+                  cancelHover();
                   setHover((prev) =>
                     prev && prev.node.id === n.id ? null : prev,
-                  )
-                }
+                  );
+                }}
               >
                 <rect
                   width={p.w}
@@ -2825,7 +3035,10 @@ function DAG({
                   stroke={border}
                   strokeWidth={isSel ? 2 : 1}
                 />
-                <g onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }}>
+                <g
+                  onClick={() => onSelect(isSel ? null : n.id)}
+                  style={{ cursor: "pointer" }}
+                >
                   <rect width={p.w} height={nodeH} fill="transparent" />
                   <circle
                     cx={14}
@@ -2844,12 +3057,7 @@ function DAG({
                   </text>
                 </g>
                 <text
-                  x={
-                    p.w -
-                    (hasSteps
-                      ? 14 + zoomChipWidth(n.work?.steps?.length ?? 0)
-                      : 8)
-                  }
+                  x={p.w - 8}
                   y={nodeH / 2 + 4}
                   textAnchor="end"
                   fill="rgba(148,163,184,0.8)"
@@ -2858,168 +3066,117 @@ function DAG({
                 >
                   {fmtMs(nodeDuration(n))}
                 </text>
-                {hasSteps &&
+                {n.dynamic && <DynamicPill nodeW={p.w} />}
+                {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
+                {n.outcome === "cached" && !n.approval && (
+                  <CachedPill nodeW={p.w} />
+                )}
+                {(n.annotations?.length ?? 0) > 0 &&
                   (() => {
-                    const stepCount = n.work?.steps?.length ?? 0;
-                    const label = `${stepCount}`;
-                    const chipW = Math.max(20, 10 + label.length * 7);
-                    const tipText = `${stepCount} step${stepCount === 1 ? "" : "s"} · select node to view`;
+                    const text = `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`;
                     return (
-                      <g
-                        onClick={() => onSelect(n.id)}
+                      <NodeBadge
+                        x={6}
+                        y={nodeH - 6}
+                        width={22}
+                        label={`${n.annotations!.length}`}
+                        fill="rgba(34,211,238,0.95)"
+                        onMouseEnter={(e) =>
+                          setChipHover({ text, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseMove={(e) =>
+                          setChipHover({ text, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseLeave={() => setChipHover(null)}
+                      />
+                    );
+                  })()}
+                {(() => {
+                  // Bottom-right stack. Step-count pill anchors to the
+                  // right edge; the error chip (when present) sits one
+                  // slot to its left. Anchoring the step count there
+                  // keeps the in-rect duration text free of the chip
+                  // and gives the eye a stable "X steps · Y duration"
+                  // read on every node.
+                  const stepCount = n.work?.steps?.length ?? 0;
+                  const hasError =
+                    !!n.error ||
+                    !!n.failure_reason ||
+                    (typeof n.exit_code === "number" && n.exit_code !== 0);
+                  if (stepCount === 0 && !hasError) return null;
+                  let cursor = p.w - 6;
+                  const elems: React.ReactElement[] = [];
+                  if (stepCount > 0) {
+                    const label = `${stepCount}`;
+                    const w = Math.max(20, 10 + label.length * 6);
+                    cursor -= w;
+                    const tip = `${stepCount} step${stepCount === 1 ? "" : "s"} · select node to view`;
+                    elems.push(
+                      <NodeBadge
+                        key="step-count"
+                        x={cursor}
+                        y={nodeH - 6}
+                        width={w}
+                        label={label}
+                        fill="rgba(148,163,184,0.95)"
+                        cursor="pointer"
+                        onClick={() => {
+                          const isSel = selected === n.id;
+                          onSelect(isSel ? null : n.id);
+                        }}
                         onMouseEnter={(e) =>
                           setChipHover({
-                            text: tipText,
+                            text: tip,
                             x: e.clientX,
                             y: e.clientY,
                           })
                         }
                         onMouseMove={(e) =>
                           setChipHover({
-                            text: tipText,
+                            text: tip,
                             x: e.clientX,
                             y: e.clientY,
                           })
                         }
                         onMouseLeave={() => setChipHover(null)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        <rect
-                          x={p.w - 6 - chipW}
-                          y={nodeH / 2 - 8}
-                          width={chipW}
-                          height={16}
-                          rx={3}
-                          ry={3}
-                          fill="rgba(148,163,184,0.18)"
-                          stroke="rgba(148,163,184,0.55)"
-                        />
-                        <text
-                          x={p.w - 6 - chipW / 2}
-                          y={nodeH / 2 + 4}
-                          textAnchor="middle"
-                          fill="rgba(203,213,225,0.95)"
-                          fontSize={11}
-                          fontFamily="ui-monospace, monospace"
-                        >
-                          {label}
-                        </text>
-                      </g>
+                      />,
                     );
-                  })()}
-                {n.dynamic && <DynamicPill nodeW={p.w} />}
-                {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
-                {n.outcome === "cached" && !n.approval && (
-                  <CachedPill nodeW={p.w} />
-                )}
-                {(n.annotations?.length ?? 0) > 0 && (
-                  <g
-                    onMouseEnter={(e) =>
-                      setChipHover({
-                        text: `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`,
-                        x: e.clientX,
-                        y: e.clientY,
-                      })
-                    }
-                    onMouseMove={(e) =>
-                      setChipHover({
-                        text: `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`,
-                        x: e.clientX,
-                        y: e.clientY,
-                      })
-                    }
-                    onMouseLeave={() => setChipHover(null)}
-                  >
-                    <rect
-                      x={6}
-                      y={nodeH - 7}
-                      width={22}
-                      height={13}
-                      rx={3}
-                      ry={3}
-                      fill="rgba(34,211,238,0.45)"
-                    />
-                    <text
-                      x={17}
-                      y={nodeH + 2}
-                      textAnchor="middle"
-                      fill="#cffafe"
-                      fontSize={9}
-                      fontWeight="bold"
-                      fontFamily="ui-monospace, monospace"
-                    >
-                      ›{n.annotations!.length}
-                    </text>
-                  </g>
-                )}
-                {(n.error ||
-                  n.failure_reason ||
-                  (typeof n.exit_code === "number" && n.exit_code !== 0)) && (
-                  <g
-                    onMouseEnter={(e) =>
-                      setChipHover({
-                        text:
-                          n.error || n.failure_reason || `exit ${n.exit_code}`,
-                        x: e.clientX,
-                        y: e.clientY,
-                      })
-                    }
-                    onMouseMove={(e) =>
-                      setChipHover({
-                        text:
-                          n.error || n.failure_reason || `exit ${n.exit_code}`,
-                        x: e.clientX,
-                        y: e.clientY,
-                      })
-                    }
-                    onMouseLeave={() => setChipHover(null)}
-                  >
-                    <rect
-                      x={p.w - 24}
-                      y={nodeH - 7}
-                      width={18}
-                      height={13}
-                      rx={3}
-                      ry={3}
-                      fill="rgba(248,113,113,0.55)"
-                    />
-                    <text
-                      x={p.w - 15}
-                      y={nodeH + 2}
-                      textAnchor="middle"
-                      fill="#fee2e2"
-                      fontSize={10}
-                      fontWeight="bold"
-                      fontFamily="ui-monospace, monospace"
-                    >
-                      !
-                    </text>
-                  </g>
-                )}
+                    cursor -= 4;
+                  }
+                  if (hasError) {
+                    const w = 18;
+                    cursor -= w;
+                    const text =
+                      n.error || n.failure_reason || `exit ${n.exit_code}`;
+                    elems.push(
+                      <NodeBadge
+                        key="error"
+                        x={cursor}
+                        y={nodeH - 6}
+                        width={w}
+                        label="!"
+                        fill="rgba(248,113,113,0.95)"
+                        onMouseEnter={(e) =>
+                          setChipHover({ text, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseMove={(e) =>
+                          setChipHover({ text, x: e.clientX, y: e.clientY })
+                        }
+                        onMouseLeave={() => setChipHover(null)}
+                      />,
+                    );
+                  }
+                  return <>{elems}</>;
+                })()}
                 {n.outcome === "skipped" && (
-                  <g>
-                    <title>skipped</title>
-                    <rect
-                      x={p.w / 2 - 26}
-                      y={nodeH - 7}
-                      width={52}
-                      height={13}
-                      rx={3}
-                      ry={3}
-                      fill="rgba(148,163,184,0.4)"
-                    />
-                    <text
-                      x={p.w / 2}
-                      y={nodeH + 2}
-                      textAnchor="middle"
-                      fill="#e2e8f0"
-                      fontSize={9}
-                      fontWeight="bold"
-                      fontFamily="ui-monospace, monospace"
-                    >
-                      SKIPPED
-                    </text>
-                  </g>
+                  <NodeBadge
+                    x={p.w / 2 - 26}
+                    y={nodeH - 6}
+                    width={52}
+                    label="SKIPPED"
+                    fill="rgba(148,163,184,0.95)"
+                    title="skipped"
+                  />
                 )}
               </g>
             );
@@ -3059,7 +3216,8 @@ function DAG({
           rowGap={rowGap}
           padX={padX}
           padY={padY}
-          runId={runId}
+          selectedStep={selectedStep}
+          onSelectStep={(stepId) => onSelectStep(stackedStepNode.id, stepId)}
         />
       )}
     </div>
@@ -3094,9 +3252,37 @@ function stepColorFor(id: string): { fill: string; stroke: string } {
   return palette[Math.abs(h) % palette.length];
 }
 
-interface StepRuntime {
-  status: "passed" | "failed" | "running";
-  durationMs: number;
+// Step rect coloring keyed by runtime status. Mirrors dagNodeColors:
+// skipped is the lightest, pending the dim default, failed/passed
+// use their dedicated hues. No "cancelled" state at the step layer.
+function stepStatusColors(
+  status?: "passed" | "failed" | "running" | "skipped",
+): {
+  fill: string;
+  border: string;
+} {
+  switch (status) {
+    case "passed":
+      return { fill: "rgba(34,197,94,0.10)", border: "rgba(74,222,128,0.45)" };
+    case "failed":
+      return { fill: "rgba(239,68,68,0.12)", border: "rgba(248,113,113,0.55)" };
+    case "running":
+      return {
+        fill: "rgba(99,102,241,0.12)",
+        border: "rgba(129,140,248,0.55)",
+      };
+    case "skipped":
+      return {
+        fill: "rgba(148,163,184,0.04)",
+        border: "rgba(148,163,184,0.25)",
+      };
+    default:
+      // pending (no step_start yet)
+      return {
+        fill: "rgba(100,116,139,0.08)",
+        border: "rgba(100,116,139,0.30)",
+      };
+  }
 }
 
 function StepDag({
@@ -3108,7 +3294,8 @@ function StepDag({
   padX,
   padY,
   onBack,
-  runId,
+  selectedStep,
+  onSelectStep,
 }: {
   node: RunNode;
   nodeW: number;
@@ -3118,38 +3305,47 @@ function StepDag({
   padX: number;
   padY: number;
   onBack?: () => void;
-  runId?: string;
+  selectedStep?: string | null;
+  onSelectStep?: (stepId: string | null) => void;
 }) {
-  const steps = node.work?.steps ?? [];
-  // Pull step status + duration out of the run's parsed logs so each
-  // step box can render like a run-level node (dot + duration). Falls
-  // back to the structural-only render when logs aren't available.
-  const [stepInfo, setStepInfo] = useState<Record<string, StepRuntime>>({});
+  // Auto-scroll selected step into view (mirrors the run-level DAG).
+  const stepDagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!runId) return;
-    let cancelled = false;
-    (async () => {
-      const text = await getRunLogs(runId);
-      if (cancelled || !text) return;
-      const parsed = parseLogLines(text.split("\n"));
-      const info: Record<string, StepRuntime> = {};
-      const prefix = `${node.id} · `;
-      for (const raw of parsed.sections) {
-        if (raw.type !== "step") continue;
-        const s = raw as StepSection;
-        if (!s.name.startsWith(prefix)) continue;
-        const stepName = s.name.slice(prefix.length);
-        info[stepName] = {
-          status: s.status,
-          durationMs: s.durationMs ?? 0,
-        };
-      }
-      setStepInfo(info);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [runId, node.id]);
+    if (!selectedStep) return;
+    requestAnimationFrame(() => {
+      const el = stepDagRef.current?.querySelector(
+        `[data-step-id="${selectedStep}"]`,
+      ) as SVGGElement | null;
+      el?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "center",
+      });
+    });
+  }, [selectedStep]);
+  // Hover state for the floating tooltip. Mirrors the run-level DAG:
+  // 500ms delay before showing so a quick mouse-over doesn't flash.
+  const [hover, setHover] = useState<{
+    step: NodeWorkStep;
+    x: number;
+    y: number;
+  } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelStepHover = () => {
+    if (hoverTimer.current !== null) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  };
+  const scheduleStepHover = (s: NodeWorkStep, x: number, y: number) => {
+    cancelStepHover();
+    hoverTimer.current = setTimeout(() => {
+      setHover({ step: s, x, y });
+      hoverTimer.current = null;
+    }, 500);
+  };
+  useEffect(() => () => cancelStepHover(), []);
+  const steps = node.work?.steps ?? [];
   const byId = new Map(steps.map((s) => [s.id, s]));
   const level = new Map<string, number>();
   const resolve = (id: string): number => {
@@ -3167,32 +3363,182 @@ function StepDag({
     return l;
   };
   for (const s of steps) resolve(s.id);
+  // Map step id → its first named group (so column sort + frame
+  // computation match the run-level DAG's per-row clustering).
+  const stepGroupOf = new Map<string, string>();
+  const stepGroups = node.work?.step_groups ?? [];
+  for (const g of stepGroups) {
+    if (!g.name) continue;
+    for (const m of g.members) {
+      if (!stepGroupOf.has(m)) stepGroupOf.set(m, g.name);
+    }
+  }
   const cols: NodeWorkStep[][] = [];
   for (const s of steps) {
     const l = level.get(s.id) ?? 0;
     if (!cols[l]) cols[l] = [];
     cols[l].push(s);
   }
+  // Mirror the run-level DAG: each column orders by declaration
+  // index with groups anchored to their first member. Keeps grouped
+  // members adjacent (needed by the frame overlay) while letting the
+  // overall column flow read the same as the left Nodes panel.
+  const stepOrder = new Map(steps.map((s, i) => [s.id, i]));
+  const stepClusterKey = (s: NodeWorkStep): string =>
+    stepGroupOf.get(s.id) || `:${s.id}`;
+  for (const col of cols) {
+    if (!col) continue;
+    const anchor = new Map<string, number>();
+    for (const s of col) {
+      const k = stepClusterKey(s);
+      const idx = stepOrder.get(s.id) ?? 0;
+      const cur = anchor.get(k);
+      if (cur === undefined || idx < cur) anchor.set(k, idx);
+    }
+    col.sort((a, b) => {
+      const ka = stepClusterKey(a);
+      const kb = stepClusterKey(b);
+      if (ka !== kb) {
+        return (anchor.get(ka) ?? 0) - (anchor.get(kb) ?? 0);
+      }
+      return (stepOrder.get(a.id) ?? 0) - (stepOrder.get(b.id) ?? 0);
+    });
+  }
+  // Mirror the run-level DAG spacing: reserve frame-label space and
+  // bottom padding on top of rowGap when crossing a group boundary,
+  // so a frame doesn't bleed into the row above or below.
+  const groupFramePad = 8;
+  const groupLabelOffset = 14;
   const pos = new Map<string, { x: number; y: number }>();
+  const colMaxY: number[] = [];
   cols.forEach((col, ci) => {
     if (!col) return;
-    col.forEach((s, ri) => {
+    let y = padY;
+    let prevGroup: string | null = null;
+    col.forEach((s, idx) => {
+      const g = stepGroupOf.get(s.id) || "";
+      if (idx > 0 && g !== prevGroup) {
+        if (prevGroup) y += groupFramePad;
+        if (g) y += groupFramePad + groupLabelOffset;
+      }
       pos.set(s.id, {
         x: padX + ci * (nodeW + colGap),
-        y: padY + ri * (nodeH + rowGap),
+        y,
       });
+      y += nodeH + rowGap;
+      prevGroup = g;
     });
+    colMaxY[ci] = y;
   });
   const width =
     padX * 2 +
     Math.max(1, cols.length) * nodeW +
     Math.max(0, cols.length - 1) * colGap;
-  const height =
-    padY * 2 +
-    Math.max(1, ...cols.map((c) => (c ? c.length : 0))) * (nodeH + rowGap);
+  const height = padY + Math.max(padY, ...colMaxY);
+
+  // Step-group frames: bounding box around each group's members.
+  const stepGroupFrames: {
+    name: string;
+    accent: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }[] = [];
+  for (const g of stepGroups) {
+    if (!g.name || g.members.length === 0) continue;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const m of g.members) {
+      const p = pos.get(m);
+      if (!p) continue;
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x + nodeW > maxX) maxX = p.x + nodeW;
+      if (p.y + nodeH > maxY) maxY = p.y + nodeH;
+    }
+    if (!isFinite(minX)) continue;
+    stepGroupFrames.push({
+      name: g.name,
+      accent: stepColorFor(g.name).stroke,
+      x: minX - groupFramePad,
+      y: minY - groupFramePad - groupLabelOffset,
+      w: maxX - minX + groupFramePad * 2,
+      h: maxY - minY + groupFramePad * 2 + groupLabelOffset,
+    });
+  }
+  const stepGroupFrameByName = new Map(stepGroupFrames.map((f) => [f.name, f]));
+  // Collapse step edges in both directions:
+  //   1. step → group:  one source with ≥2 needs in the same group →
+  //      one line into the group frame.
+  //   2. group → step:  ≥2 sources in one group all feed the same
+  //      destination → one line out of the group frame.
+  type StepEdge =
+    | { kind: "step"; src: string; dst: string }
+    | { kind: "to-group"; src: string; groupName: string }
+    | { kind: "from-group"; groupName: string; dst: string };
+  const rawStepEdges: { src: string; dst: string }[] = [];
+  for (const s of steps) {
+    for (const d of s.needs ?? []) {
+      if (byId.has(d)) rawStepEdges.push({ src: d, dst: s.id });
+    }
+  }
+  const pass1Step: StepEdge[] = [];
+  const toGroupStepBuckets = new Map<string, string[]>();
+  for (const e of rawStepEdges) {
+    const g = stepGroupOf.get(e.dst);
+    const srcGroup = stepGroupOf.get(e.src);
+    if (!g || srcGroup === g) {
+      pass1Step.push({ kind: "step", src: e.src, dst: e.dst });
+      continue;
+    }
+    const key = `${e.src}::${g}`;
+    const arr = toGroupStepBuckets.get(key) ?? [];
+    arr.push(e.dst);
+    toGroupStepBuckets.set(key, arr);
+  }
+  for (const [key, dsts] of toGroupStepBuckets) {
+    const [src, group] = key.split("::");
+    if (dsts.length === 1) {
+      pass1Step.push({ kind: "step", src, dst: dsts[0] });
+    } else {
+      pass1Step.push({ kind: "to-group", src, groupName: group });
+    }
+  }
+  const stepEdges: StepEdge[] = [];
+  const fromGroupStepBuckets = new Map<string, string[]>();
+  for (const e of pass1Step) {
+    if (e.kind !== "step") {
+      stepEdges.push(e);
+      continue;
+    }
+    const sg = stepGroupOf.get(e.src);
+    const dg = stepGroupOf.get(e.dst);
+    if (!sg || sg === dg) {
+      stepEdges.push(e);
+      continue;
+    }
+    const key = `${sg}::${e.dst}`;
+    const arr = fromGroupStepBuckets.get(key) ?? [];
+    arr.push(e.src);
+    fromGroupStepBuckets.set(key, arr);
+  }
+  for (const [key, srcs] of fromGroupStepBuckets) {
+    const [group, dst] = key.split("::");
+    if (srcs.length === 1) {
+      stepEdges.push({ kind: "step", src: srcs[0], dst });
+    } else {
+      stepEdges.push({ kind: "from-group", groupName: group, dst });
+    }
+  }
 
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto">
+    <div
+      ref={stepDagRef}
+      className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto"
+    >
       <div className="flex items-center gap-2 px-1 pb-2 text-xs">
         {onBack && (
           <button
@@ -3202,11 +3548,11 @@ function StepDag({
             ← back to run
           </button>
         )}
+        <span className="font-mono text-violet-300">{node.id}</span>
+        <span className="text-[var(--muted)]">/</span>
         <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
           Steps
         </span>
-        <span className="text-[var(--muted)]">/</span>
-        <span className="font-mono text-violet-300">{node.id}</span>
         <span className="text-[var(--muted)]">
           ({steps.length} step{steps.length === 1 ? "" : "s"})
         </span>
@@ -3239,33 +3585,87 @@ function StepDag({
           height={height}
           style={{ minWidth: width, display: "block" }}
         >
-          {steps.flatMap((s) =>
-            (s.needs ?? []).map((dep) => {
-              const a = pos.get(dep);
-              const b = pos.get(s.id);
+          {stepGroupFrames.map((g) => (
+            <g key={`stepgroup-${g.name}`}>
+              <rect
+                x={g.x}
+                y={g.y}
+                width={g.w}
+                height={g.h}
+                rx={8}
+                ry={8}
+                fill="rgba(56,189,248,0.05)"
+                stroke={g.accent}
+                strokeWidth={1.25}
+                strokeDasharray="5 3"
+              />
+              <text
+                x={g.x + 10}
+                y={g.y + 12}
+                fill="rgba(165,243,252,0.95)"
+                fontSize={11}
+                fontWeight="bold"
+                fontFamily="ui-monospace, monospace"
+              >
+                {g.name}
+              </text>
+            </g>
+          ))}
+          {stepEdges.map((e, i) => {
+            let x1: number, y1: number, x2: number, y2: number;
+            // Mirror the run-level DAG: any edge connected to the
+            // selected step (or to a group whose members include it)
+            // paints gold so the in/out neighborhood pops out.
+            let touched = false;
+            const stepInGroup = (g: string): boolean =>
+              !!selectedStep && stepGroupOf.get(selectedStep) === g;
+            if (e.kind === "to-group") {
+              const a = pos.get(e.src);
+              const frame = stepGroupFrameByName.get(e.groupName);
+              if (!a || !frame) return null;
+              x1 = a.x + nodeW;
+              y1 = a.y + nodeH / 2;
+              x2 = frame.x;
+              y2 = frame.y + frame.h / 2;
+              touched = e.src === selectedStep || stepInGroup(e.groupName);
+            } else if (e.kind === "from-group") {
+              const frame = stepGroupFrameByName.get(e.groupName);
+              const b = pos.get(e.dst);
+              if (!frame || !b) return null;
+              x1 = frame.x + frame.w;
+              y1 = frame.y + frame.h / 2;
+              x2 = b.x;
+              y2 = b.y + nodeH / 2;
+              touched = e.dst === selectedStep || stepInGroup(e.groupName);
+            } else {
+              const a = pos.get(e.src);
+              const b = pos.get(e.dst);
               if (!a || !b) return null;
-              const x1 = a.x + nodeW;
-              const y1 = a.y + nodeH / 2;
-              const x2 = b.x;
-              const y2 = b.y + nodeH / 2;
-              const dx = Math.max(16, Math.abs(x2 - x1) / 2);
-              return (
-                <path
-                  key={`${dep}->${s.id}`}
-                  d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
-                  fill="none"
-                  stroke="rgba(148,163,184,0.55)"
-                  strokeWidth={1.25}
-                />
-              );
-            }),
-          )}
+              x1 = a.x + nodeW;
+              y1 = a.y + nodeH / 2;
+              x2 = b.x;
+              y2 = b.y + nodeH / 2;
+              touched = e.src === selectedStep || e.dst === selectedStep;
+            }
+            const dx = Math.max(16, Math.abs(x2 - x1) / 2);
+            return (
+              <path
+                key={i}
+                d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
+                fill="none"
+                stroke={
+                  touched ? "rgba(251,191,36,0.95)" : "rgba(148,163,184,0.55)"
+                }
+                strokeWidth={touched ? 2.25 : 1.25}
+              />
+            );
+          })}
           {steps.map((s) => {
             const p = pos.get(s.id);
             if (!p) return null;
-            const palette = stepColorFor(s.id);
-            const info = stepInfo[s.id];
-            const status = info?.status;
+            const status = s.status;
+            const { fill, border } = stepStatusColors(status);
+            const isSel = selectedStep === s.id;
             const dotClass =
               status === "failed"
                 ? "fill-red-400"
@@ -3273,17 +3673,39 @@ function StepDag({
                   ? "fill-indigo-400 animate-pulse"
                   : status === "passed"
                     ? "fill-green-400"
-                    : "fill-slate-500";
+                    : status === "skipped"
+                      ? "fill-slate-400"
+                      : "fill-slate-600";
             return (
-              <g key={s.id} transform={`translate(${p.x}, ${p.y})`}>
+              <g
+                key={s.id}
+                data-step-id={s.id}
+                transform={`translate(${p.x}, ${p.y})`}
+                onClick={() => onSelectStep?.(isSel ? null : s.id)}
+                onMouseEnter={(e) => scheduleStepHover(s, e.clientX, e.clientY)}
+                onMouseMove={(e) =>
+                  setHover((prev) =>
+                    prev && prev.step.id === s.id
+                      ? { step: s, x: e.clientX, y: e.clientY }
+                      : prev,
+                  )
+                }
+                onMouseLeave={() => {
+                  cancelStepHover();
+                  setHover((prev) =>
+                    prev && prev.step.id === s.id ? null : prev,
+                  );
+                }}
+                style={{ cursor: onSelectStep ? "pointer" : undefined }}
+              >
                 <rect
                   width={nodeW}
                   height={nodeH}
                   rx={6}
                   ry={6}
-                  fill={palette.fill}
-                  stroke={palette.stroke}
-                  strokeWidth={1.5}
+                  fill={fill}
+                  stroke={isSel ? "rgba(251,191,36,0.95)" : border}
+                  strokeWidth={isSel ? 2 : 1.5}
                 />
                 <circle cx={14} cy={nodeH / 2} r={4} className={dotClass} />
                 <text
@@ -3295,67 +3717,171 @@ function StepDag({
                 >
                   {truncate(s.id, 18)}
                 </text>
-                {info && info.durationMs > 0 && (
-                  <text
-                    x={nodeW - 8}
-                    y={nodeH / 2 + 4}
-                    textAnchor="end"
-                    fill="rgba(148,163,184,0.85)"
-                    fontSize={10}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    {fmtMs(info.durationMs)}
-                  </text>
-                )}
+                {(() => {
+                  let ms = s.duration_ms ?? 0;
+                  if (!ms && status === "running" && s.started_at) {
+                    ms = Math.max(
+                      0,
+                      Date.now() - new Date(s.started_at).getTime(),
+                    );
+                  }
+                  if (!ms) return null;
+                  return (
+                    <text
+                      x={nodeW - 8}
+                      y={nodeH / 2 + 4}
+                      textAnchor="end"
+                      fill="rgba(148,163,184,0.85)"
+                      fontSize={10}
+                      fontFamily="ui-monospace, monospace"
+                    >
+                      {fmtMs(ms)}
+                    </text>
+                  );
+                })()}
                 {(() => {
                   // Edge badges, stacked along the top edge. Result
                   // pill sits rightmost; skipIf to its left when both
                   // are present.
                   const badges: {
                     label: string;
-                    bg: string;
-                    fg: string;
+                    fill: string;
                   }[] = [];
                   if (s.is_result)
                     badges.push({
                       label: "★ result",
-                      bg: "rgba(34,197,94,0.5)",
-                      fg: "#dcfce7",
+                      fill: "rgba(74,222,128,0.95)",
                     });
                   if (s.has_skip_if)
                     badges.push({
                       label: "skipIf",
-                      bg: "rgba(251,191,36,0.55)",
-                      fg: "#1f2937",
+                      fill: "rgba(251,191,36,0.95)",
                     });
                   let rightEdge = nodeW - 6;
                   return badges.map((b, bi) => {
                     const w = 10 + b.label.length * 6;
                     rightEdge -= w + (bi > 0 ? 4 : 0);
-                    const x = rightEdge;
                     return (
-                      <g key={b.label} transform={`translate(${x}, -7)`}>
-                        <rect width={w} height={13} rx={3} ry={3} fill={b.bg} />
-                        <text
-                          x={w / 2}
-                          y={9}
-                          textAnchor="middle"
-                          fill={b.fg}
-                          fontSize={9}
-                          fontWeight="bold"
-                          fontFamily="ui-monospace, monospace"
-                        >
-                          {b.label}
-                        </text>
-                      </g>
+                      <NodeBadge
+                        key={b.label}
+                        x={rightEdge}
+                        y={-7}
+                        width={w}
+                        label={b.label}
+                        fill={b.fill}
+                      />
                     );
                   });
                 })()}
+                {(s.annotations?.length ?? 0) > 0 &&
+                  (() => {
+                    const count = s.annotations!.length;
+                    const title = `${count} annotation${count === 1 ? "" : "s"}\n${s.annotations!.join("\n")}`;
+                    const label = `${count}`;
+                    const w = Math.max(22, 10 + label.length * 6);
+                    return (
+                      <NodeBadge
+                        x={6}
+                        y={nodeH - 7}
+                        width={w}
+                        label={label}
+                        fill="rgba(34,211,238,0.95)"
+                        title={title}
+                      />
+                    );
+                  })()}
               </g>
             );
           })}
         </svg>
       )}
+      {hover && <StepTooltip step={hover.step} x={hover.x} y={hover.y} />}
+    </div>
+  );
+}
+
+function StepTooltip({
+  step,
+  x,
+  y,
+}: {
+  step: NodeWorkStep;
+  x: number;
+  y: number;
+}) {
+  const status = step.status || "pending";
+  const dot =
+    status === "passed"
+      ? "bg-green-400"
+      : status === "failed"
+        ? "bg-red-400"
+        : status === "running"
+          ? "bg-indigo-400 animate-pulse"
+          : status === "skipped"
+            ? "bg-slate-400"
+            : "bg-slate-600";
+  let dur = step.duration_ms ?? 0;
+  if (!dur && status === "running" && step.started_at) {
+    dur = Math.max(0, Date.now() - new Date(step.started_at).getTime());
+  }
+  const alignRight = x > window.innerWidth - 280;
+  const style: React.CSSProperties = {
+    position: "fixed",
+    top: y + 14,
+    left: alignRight ? undefined : x + 14,
+    right: alignRight ? window.innerWidth - x + 14 : undefined,
+    zIndex: 100,
+    pointerEvents: "none",
+  };
+  const badges: { label: string; cls: string }[] = [];
+  if (step.is_result)
+    badges.push({ label: "result", cls: "bg-green-500/20 text-green-300" });
+  if (step.has_skip_if)
+    badges.push({ label: "skipIf", cls: "bg-amber-500/20 text-amber-300" });
+  return (
+    <div style={style}>
+      <div className="bg-[#1e293b] border border-[var(--border)] rounded-lg px-3 py-2 text-xs shadow-xl min-w-[220px] max-w-sm">
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+          <span className="font-mono font-bold">{step.id}</span>
+        </div>
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+          <span className="text-[var(--muted)]">State:</span>
+          <span className="font-mono">{status}</span>
+          {dur > 0 && (
+            <>
+              <span className="text-[var(--muted)]">Duration:</span>
+              <span className="font-mono">{fmtMs(dur)}</span>
+            </>
+          )}
+          {step.needs && step.needs.length > 0 && (
+            <>
+              <span className="text-[var(--muted)]">Needs:</span>
+              <span className="font-mono">{step.needs.join(", ")}</span>
+            </>
+          )}
+          {(step.annotations?.length ?? 0) > 0 && (
+            <>
+              <span className="text-[var(--muted)]">Annotations:</span>
+              <span className="font-mono whitespace-pre-wrap">
+                {step.annotations!.join("\n")}
+              </span>
+            </>
+          )}
+        </div>
+        {badges.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {badges.map((b) => (
+              <span
+                key={b.label}
+                className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${b.cls}`}
+              >
+                {b.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -3459,13 +3985,81 @@ function DagNodeTooltip({
   );
 }
 
+// NodeBadge is the shared pill primitive every node-attached chip
+// renders through (SKIPPED / annotation count / error indicator /
+// step ★result + skipIf flags). Pill-shaped (rx = h/2), opaque fill,
+// sans-serif label -- matches the corner-pill family (DynamicPill /
+// ApprovalPill / CachedPill) so the whole node visual reads as one
+// design system instead of two eras of ad-hoc inline SVG.
+function NodeBadge({
+  x,
+  y,
+  width,
+  label,
+  fill,
+  fg = "rgba(15,15,15,0.95)",
+  title,
+  cursor,
+  onMouseEnter,
+  onMouseMove,
+  onMouseLeave,
+  onClick,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  label: string;
+  fill: string;
+  fg?: string;
+  title?: string;
+  cursor?: "pointer";
+  onMouseEnter?: React.MouseEventHandler<SVGGElement>;
+  onMouseMove?: React.MouseEventHandler<SVGGElement>;
+  onMouseLeave?: React.MouseEventHandler<SVGGElement>;
+  onClick?: React.MouseEventHandler<SVGGElement>;
+}) {
+  const h = 15;
+  return (
+    <g
+      onMouseEnter={onMouseEnter}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      onClick={onClick}
+      style={cursor ? { cursor } : undefined}
+    >
+      {title ? <title>{title}</title> : null}
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={h}
+        rx={h / 2}
+        ry={h / 2}
+        fill={fill}
+      />
+      <text
+        x={x + width / 2}
+        y={y + h / 2 + 3.5}
+        textAnchor="middle"
+        fill={fg}
+        fontSize={10}
+        fontWeight={700}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        style={{ letterSpacing: "0.4px" }}
+      >
+        {label}
+      </text>
+    </g>
+  );
+}
+
 // DynamicPill is the rainbow-gradient "DYNAMIC" corner badge painted
 // on a DAG node whose shape is runtime-variable. Centered along the
 // top edge of the node, overhanging upward -- keeps the pill from
 // clipping the left or right SVG boundary regardless of column.
 function DynamicPill({ nodeW }: { nodeW: number }) {
   const pillW = 56;
-  const pillH = 13;
+  const pillH = 15;
   // Horizontally centered, sitting just above + straddling the top
   // border of the node so it reads as a badge attached to the node
   // rather than a floating annotation.
@@ -3484,10 +4078,10 @@ function DynamicPill({ nodeW }: { nodeW: number }) {
       />
       <text
         x={x + pillW / 2}
-        y={y + pillH / 2 + 3}
+        y={y + pillH / 2 + 3.5}
         textAnchor="middle"
         fill="white"
-        fontSize={9}
+        fontSize={10}
         fontWeight={700}
         fontFamily="ui-sans-serif, system-ui, sans-serif"
         style={{
@@ -3512,7 +4106,7 @@ function DynamicPill({ nodeW }: { nodeW: number }) {
 function ApprovalPill({ n, nodeW }: { n: RunNode; nodeW: number }) {
   const { label, fill, pulse } = approvalPillVisuals(n);
   const pillW = label === "AWAITING" ? 60 : label === "APPROVAL" ? 58 : 64;
-  const pillH = 13;
+  const pillH = 15;
   const x = (nodeW - pillW) / 2;
   const y = -6;
   return (
@@ -3529,10 +4123,10 @@ function ApprovalPill({ n, nodeW }: { n: RunNode; nodeW: number }) {
       />
       <text
         x={x + pillW / 2}
-        y={y + pillH / 2 + 3}
+        y={y + pillH / 2 + 3.5}
         textAnchor="middle"
         fill="rgba(15,15,15,0.95)"
-        fontSize={9}
+        fontSize={10}
         fontWeight={700}
         fontFamily="ui-sans-serif, system-ui, sans-serif"
         style={{ letterSpacing: "0.5px" }}
@@ -3589,7 +4183,7 @@ function approvalPillVisuals(n: RunNode): {
 // don't want two pills overlapping at the top of the rect.
 function CachedPill({ nodeW }: { nodeW: number }) {
   const pillW = 52;
-  const pillH = 13;
+  const pillH = 15;
   const x = (nodeW - pillW) / 2;
   const y = -6;
   return (
@@ -3605,10 +4199,10 @@ function CachedPill({ nodeW }: { nodeW: number }) {
       />
       <text
         x={x + pillW / 2}
-        y={y + pillH / 2 + 3}
+        y={y + pillH / 2 + 3.5}
         textAnchor="middle"
         fill="rgba(20,15,30,0.95)"
-        fontSize={9}
+        fontSize={10}
         fontWeight={700}
         fontFamily="ui-sans-serif, system-ui, sans-serif"
         style={{ letterSpacing: "0.5px" }}
@@ -3677,13 +4271,21 @@ function dagEdgeColor(dst?: RunNode): string {
   }
 }
 
+// Node rect colors keyed on the lifecycle state. Pending / skipped /
+// cancelled used to all read as one wash of slate; the palette below
+// pushes them apart on the lightness axis so operators can spot each
+// at a glance:
+//   skipped     -> lightest ghosted grey (deliberately not run)
+//   pending     -> dim slate (hasn't started)
+//   cancelled   -> charcoal, more solid (stopped with prejudice)
+// Running, success, failed, cached keep their dedicated hue.
 function dagNodeColors(
   n: RunNode,
   isSelected: boolean,
 ): { fill: string; border: string } {
   const k = n.outcome || n.status;
-  let fill = "rgba(100,116,139,0.12)";
-  let border = "rgba(100,116,139,0.35)";
+  let fill = "rgba(100,116,139,0.08)";
+  let border = "rgba(100,116,139,0.30)";
   switch (k) {
     case "success":
       fill = "rgba(34,197,94,0.10)";
@@ -3699,22 +4301,28 @@ function dagNodeColors(
       border = "rgba(129,140,248,0.55)";
       break;
     case "cancelled":
-      fill = "rgba(100,116,139,0.10)";
-      border = "rgba(148,163,184,0.5)";
+      // Charcoal: stopped with prejudice. Darker + more solid than
+      // pending or skipped so it reads as a deliberate halt.
+      fill = "rgba(30,41,59,0.45)";
+      border = "rgba(71,85,105,0.75)";
       break;
     case "cached":
       fill = "rgba(139,92,246,0.12)";
       border = "rgba(167,139,250,0.55)";
       break;
     case "skipped":
-      fill = "rgba(100,116,139,0.08)";
-      border = "rgba(100,116,139,0.3)";
+      // Lightest ghosted grey: intentionally not run. Pushes lighter
+      // than the pending default so the eye reads "decided to skip"
+      // versus "waiting to start".
+      fill = "rgba(148,163,184,0.04)";
+      border = "rgba(148,163,184,0.25)";
       break;
     case "skipped-concurrent":
-      // OnLimit:Skip. A darker slate than plain skipped so
-      // operators can spot "slot was full" in the DAG.
-      fill = "rgba(71,85,105,0.14)";
-      border = "rgba(100,116,139,0.5)";
+      // OnLimit:Skip -- slot was full, not a deliberate skip. Sits
+      // between pending and cancelled in weight so it reads as
+      // "blocked from running" rather than "chose not to run".
+      fill = "rgba(71,85,105,0.22)";
+      border = "rgba(100,116,139,0.6)";
       break;
     case "superseded":
       // CancelOthers eviction. Amber (distinct from
@@ -3745,19 +4353,22 @@ function dagStatusClass(n: RunNode): string {
     case "claimed":
       return "fill-indigo-400";
     case "cancelled":
-      return "fill-slate-500";
+      // Light dot on the charcoal rect reads as "stopped".
+      return "fill-slate-300";
     case "cached":
       return "fill-violet-400";
     case "skipped":
-      return "fill-slate-500";
+      // Faint dot on the ghosted rect -- "decided to skip".
+      return "fill-slate-400";
     case "skipped-concurrent":
-      return "fill-slate-600";
+      return "fill-slate-500";
     case "superseded":
       return "fill-amber-500";
     case "approval_pending":
       return "fill-yellow-400 animate-pulse";
     default:
-      return "fill-gray-500";
+      // pending (no outcome, no running status yet)
+      return "fill-slate-600";
   }
 }
 
