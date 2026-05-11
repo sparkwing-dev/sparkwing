@@ -42,6 +42,7 @@ import {
 } from "@/components/RunFilters";
 import {
   type Node as RunNode,
+  type NodeWorkStep,
   type PipelineMeta,
   type Run,
   type RunDetail,
@@ -2414,12 +2415,98 @@ function DAG({
     x: number;
     y: number;
   } | null>(null);
+  const [expandedDagNodes, setExpandedDagNodes] = useState<Set<string>>(
+    new Set(),
+  );
+  const toggleExpanded = (id: string) =>
+    setExpandedDagNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const nodeW = 168;
   const nodeH = 38;
   const colGap = 64;
   const rowGap = 14;
   const padX = 12;
   const padY = 12;
+  // Inner step DAG dims, used when a node is expanded.
+  const stepW = 88;
+  const stepH = 18;
+  const stepColGap = 16;
+  const stepRowGap = 6;
+  const innerPadX = 10;
+  const innerPadY = 6;
+
+  // Lay out a single node's work.steps using the same column-by-deps
+  // algorithm as the outer DAG, scaled down. Returns positions
+  // (relative to inner origin), total width and height.
+  function layoutSteps(work: { steps?: NodeWorkStep[] } | undefined): {
+    positions: Map<string, { x: number; y: number }>;
+    width: number;
+    height: number;
+  } {
+    const steps = work?.steps || [];
+    if (steps.length === 0)
+      return { positions: new Map(), width: 0, height: 0 };
+    const byId = new Map(steps.map((s) => [s.id, s]));
+    const lvl = new Map<string, number>();
+    const resolve = (id: string): number => {
+      const cached = lvl.get(id);
+      if (cached !== undefined) return cached;
+      const s = byId.get(id);
+      if (!s || !s.needs || s.needs.length === 0) {
+        lvl.set(id, 0);
+        return 0;
+      }
+      lvl.set(id, 0);
+      let l = 0;
+      for (const d of s.needs) if (byId.has(d)) l = Math.max(l, resolve(d) + 1);
+      lvl.set(id, l);
+      return l;
+    };
+    for (const s of steps) resolve(s.id);
+    const cols: NodeWorkStep[][] = [];
+    for (const s of steps) {
+      const l = lvl.get(s.id) ?? 0;
+      if (!cols[l]) cols[l] = [];
+      cols[l].push(s);
+    }
+    const positions = new Map<string, { x: number; y: number }>();
+    cols.forEach((col, ci) => {
+      if (!col) return;
+      col.forEach((s, ri) => {
+        positions.set(s.id, {
+          x: innerPadX + ci * (stepW + stepColGap),
+          y: innerPadY + ri * (stepH + stepRowGap) + 18, // 18 for header
+        });
+      });
+    });
+    const width =
+      innerPadX * 2 +
+      Math.max(1, cols.length) * stepW +
+      Math.max(0, cols.length - 1) * stepColGap;
+    const tallest = Math.max(0, ...cols.map((c) => (c ? c.length : 0)));
+    const height = innerPadY * 2 + tallest * (stepH + stepRowGap) + 22;
+    return { positions, width, height };
+  }
+  const innerLayouts = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof layoutSteps>>();
+    for (const n of nodes) {
+      if (!expandedDagNodes.has(n.id)) continue;
+      if (!n.work?.steps?.length) continue;
+      m.set(n.id, layoutSteps(n.work));
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, expandedDagNodes]);
+  const nodeHeight = (n: RunNode) => {
+    if (!expandedDagNodes.has(n.id)) return nodeH;
+    const inner = innerLayouts.get(n.id);
+    if (!inner) return nodeH;
+    return nodeH + inner.height + 4;
+  };
 
   const byID = new Map(nodes.map((n) => [n.id, n]));
   // Treat `on_failure_of` as a virtual dep for column placement: a
@@ -2479,23 +2566,27 @@ function DAG({
   }
 
   const pos = new Map<string, { x: number; y: number }>();
+  // Per-column accumulating y, so expanded (taller) nodes push
+  // subsequent rows down within their own column.
+  const columnHeights: number[] = [];
   columns.forEach((col, ci) => {
     if (!col) return;
-    col.forEach((n, ri) => {
+    let y = padY;
+    col.forEach((n) => {
       pos.set(n.id, {
         x: padX + ci * (nodeW + colGap),
-        y: padY + ri * (nodeH + rowGap),
+        y,
       });
+      y += nodeHeight(n) + rowGap;
     });
+    columnHeights[ci] = y;
   });
 
   const width =
     padX * 2 +
     Math.max(1, columns.length) * nodeW +
     Math.max(0, columns.length - 1) * colGap;
-  const height =
-    padY * 2 +
-    Math.max(1, ...columns.map((c) => (c ? c.length : 0))) * (nodeH + rowGap);
+  const height = padY + Math.max(padY, ...columnHeights);
 
   const edges: { src: string; dst: string; onFailure?: boolean }[] = [];
   for (const n of nodes) {
@@ -2543,7 +2634,7 @@ function DAG({
       if (p.x < minX) minX = p.x;
       if (p.y < minY) minY = p.y;
       if (p.x + nodeW > maxX) maxX = p.x + nodeW;
-      if (p.y + nodeH > maxY) maxY = p.y + nodeH;
+      if (p.y + nodeHeight(m) > maxY) maxY = p.y + nodeHeight(m);
     }
     if (!isFinite(minX)) continue;
     groupFrames.push({
@@ -2585,19 +2676,20 @@ function DAG({
               height={g.h}
               rx={8}
               ry={8}
-              fill="rgba(148,163,184,0.04)"
-              stroke="rgba(148,163,184,0.35)"
-              strokeWidth={1}
-              strokeDasharray="4 3"
+              fill="rgba(56,189,248,0.05)"
+              stroke="rgba(56,189,248,0.55)"
+              strokeWidth={1.25}
+              strokeDasharray="5 3"
             />
             <text
-              x={g.x + 8}
-              y={g.y + 10}
-              fill="rgba(148,163,184,0.85)"
-              fontSize={10}
+              x={g.x + 10}
+              y={g.y + 12}
+              fill="rgba(165,243,252,0.95)"
+              fontSize={11}
+              fontWeight="bold"
               fontFamily="ui-monospace, monospace"
             >
-              ({g.name})
+              {g.name}
             </text>
           </g>
         ))}
@@ -2633,11 +2725,14 @@ function DAG({
           if (!p) return null;
           const isSel = selected === n.id;
           const { fill, border } = dagNodeColors(n, isSel);
+          const isExpanded = expandedDagNodes.has(n.id);
+          const hasSteps = (n.work?.steps?.length ?? 0) > 0;
+          const fullH = nodeHeight(n);
+          const inner = isExpanded ? innerLayouts.get(n.id) : undefined;
           return (
             <g
               key={n.id}
               transform={`translate(${p.x}, ${p.y})`}
-              onClick={() => onSelect(n.id)}
               onMouseEnter={(e) =>
                 setHover({ node: n, x: e.clientX, y: e.clientY })
               }
@@ -2653,34 +2748,47 @@ function DAG({
                   prev && prev.node.id === n.id ? null : prev,
                 )
               }
-              style={{ cursor: "pointer" }}
             >
               <rect
                 width={nodeW}
-                height={nodeH}
+                height={fullH}
                 rx={6}
                 ry={6}
                 fill={fill}
                 stroke={border}
                 strokeWidth={isSel ? 2 : 1}
               />
-              <circle
-                cx={14}
-                cy={nodeH / 2}
-                r={4}
-                className={dagStatusClass(n)}
-              />
+              {isExpanded && (
+                <line
+                  x1={0}
+                  y1={nodeH}
+                  x2={nodeW}
+                  y2={nodeH}
+                  stroke={border}
+                  strokeWidth={1}
+                  opacity={0.4}
+                />
+              )}
+              <g onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }}>
+                <rect width={nodeW} height={nodeH} fill="transparent" />
+                <circle
+                  cx={14}
+                  cy={nodeH / 2}
+                  r={4}
+                  className={dagStatusClass(n)}
+                />
+                <text
+                  x={26}
+                  y={nodeH / 2 + 4}
+                  fill="currentColor"
+                  fontSize={11}
+                  fontFamily="ui-monospace, monospace"
+                >
+                  {truncate(n.id, 16)}
+                </text>
+              </g>
               <text
-                x={26}
-                y={nodeH / 2 + 4}
-                fill="currentColor"
-                fontSize={11}
-                fontFamily="ui-monospace, monospace"
-              >
-                {truncate(n.id, 18)}
-              </text>
-              <text
-                x={nodeW - 8}
+                x={nodeW - (hasSteps ? 26 : 8)}
                 y={nodeH / 2 + 4}
                 textAnchor="end"
                 fill="rgba(148,163,184,0.8)"
@@ -2689,10 +2797,112 @@ function DAG({
               >
                 {fmtMs(nodeDuration(n))}
               </text>
+              {hasSteps && (
+                <g
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleExpanded(n.id);
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <rect
+                    x={nodeW - 22}
+                    y={nodeH / 2 - 8}
+                    width={16}
+                    height={16}
+                    rx={3}
+                    ry={3}
+                    fill="rgba(148,163,184,0.12)"
+                    stroke="rgba(148,163,184,0.4)"
+                  />
+                  <text
+                    x={nodeW - 14}
+                    y={nodeH / 2 + 4}
+                    textAnchor="middle"
+                    fill="rgba(203,213,225,0.95)"
+                    fontSize={11}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    {isExpanded ? "−" : "+"}
+                  </text>
+                </g>
+              )}
               {n.dynamic && <DynamicPill nodeW={nodeW} />}
               {n.approval && <ApprovalPill n={n} nodeW={nodeW} />}
               {n.outcome === "cached" && !n.approval && (
                 <CachedPill nodeW={nodeW} />
+              )}
+              {isExpanded && inner && (
+                <g transform={`translate(0, ${nodeH})`}>
+                  <text
+                    x={innerPadX}
+                    y={14}
+                    fill="rgba(148,163,184,0.85)"
+                    fontSize={9}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    {n.work?.steps?.length ?? 0} step
+                    {(n.work?.steps?.length ?? 0) === 1 ? "" : "s"}
+                  </text>
+                  {(n.work?.steps ?? []).flatMap((s) =>
+                    (s.needs ?? []).map((dep) => {
+                      const a = inner.positions.get(dep);
+                      const b = inner.positions.get(s.id);
+                      if (!a || !b) return null;
+                      const x1 = a.x + stepW;
+                      const y1 = a.y + stepH / 2;
+                      const x2 = b.x;
+                      const y2 = b.y + stepH / 2;
+                      const dx = Math.max(8, Math.abs(x2 - x1) / 2);
+                      return (
+                        <path
+                          key={`${dep}->${s.id}`}
+                          d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
+                          fill="none"
+                          stroke="rgba(148,163,184,0.45)"
+                          strokeWidth={1}
+                        />
+                      );
+                    }),
+                  )}
+                  {(n.work?.steps ?? []).map((s) => {
+                    const sp = inner.positions.get(s.id);
+                    if (!sp) return null;
+                    return (
+                      <g key={s.id} transform={`translate(${sp.x}, ${sp.y})`}>
+                        <rect
+                          width={stepW}
+                          height={stepH}
+                          rx={3}
+                          ry={3}
+                          fill="rgba(15,23,42,0.6)"
+                          stroke="rgba(148,163,184,0.45)"
+                        />
+                        <text
+                          x={6}
+                          y={stepH / 2 + 3}
+                          fill="rgba(203,213,225,0.95)"
+                          fontSize={9}
+                          fontFamily="ui-monospace, monospace"
+                        >
+                          {truncate(s.id, 12)}
+                        </text>
+                        {s.is_result && (
+                          <text
+                            x={stepW - 4}
+                            y={stepH / 2 + 3}
+                            textAnchor="end"
+                            fill="rgba(34,197,94,0.85)"
+                            fontSize={8}
+                            fontFamily="ui-monospace, monospace"
+                          >
+                            ★
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </g>
               )}
             </g>
           );
