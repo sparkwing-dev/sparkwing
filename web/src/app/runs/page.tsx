@@ -1767,11 +1767,19 @@ function LogsPane({
   nodes?: RunNode[];
   onSelectNode?: (id: string) => void;
 }) {
-  if (!node) {
-    return (
-      <AllNodesLogs run={run} nodes={nodes || []} onSelectNode={onSelectNode} />
-    );
-  }
+  return (
+    <AllNodesLogs
+      run={run}
+      nodes={nodes || []}
+      focusNode={node?.id || null}
+      onSelectNode={onSelectNode}
+    />
+  );
+}
+
+// SingleNodeLogs renders the streaming/stored log body for one
+// node, deciding by status. Used inside AllNodesLogs sections.
+function SingleNodeLogs({ run, node }: { run: Run; node: RunNode }) {
   if (node.status === "pending") {
     return (
       <div className="text-sm text-[var(--muted)]">
@@ -1779,14 +1787,10 @@ function LogsPane({
       </div>
     );
   }
-  // Approval gate logs still stream here while waiting; the
-  // approve/deny banner itself has moved up to RunDetailPane so
-  // users can action the gate without clicking the specific node.
   if (node.status === "approval_pending") {
     return <StreamingLogs runID={run.id} nodeID={node.id} />;
   }
-  const isLive = !node.finished_at;
-  if (isLive) {
+  if (!node.finished_at) {
     return <StreamingLogs runID={run.id} nodeID={node.id} />;
   }
   return <StoredLogs runID={run.id} nodeID={node.id} />;
@@ -1799,10 +1803,12 @@ function LogsPane({
 function AllNodesLogs({
   run,
   nodes,
+  focusNode,
   onSelectNode,
 }: {
   run: Run;
   nodes: RunNode[];
+  focusNode?: string | null;
   onSelectNode?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -1813,6 +1819,23 @@ function AllNodesLogs({
       else next.add(id);
       return next;
     });
+  // When a node selection arrives from outside, auto-expand it and
+  // scroll its block into view so the user lands on the right logs.
+  useEffect(() => {
+    if (!focusNode) return;
+    setExpanded((prev) => {
+      if (prev.has(focusNode)) return prev;
+      const next = new Set(prev);
+      next.add(focusNode);
+      return next;
+    });
+    requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-log-node-id="${focusNode}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [focusNode]);
   if (nodes.length === 0) {
     return (
       <div className="text-sm text-[var(--muted)]">
@@ -1842,10 +1865,12 @@ function AllNodesLogs({
       {nodes.map((n) => {
         const open = expanded.has(n.id);
         const dur = nodeDuration(n);
+        const isFocus = focusNode === n.id;
         return (
           <div
             key={n.id}
-            className="border border-[var(--border)] rounded bg-[#0d1117]"
+            data-log-node-id={n.id}
+            className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"}`}
           >
             <div className="flex items-center gap-2 px-2 py-1.5">
               <button
@@ -1884,7 +1909,7 @@ function AllNodesLogs({
             </div>
             {open && (
               <div className="border-t border-[var(--border)] p-2">
-                <LogsPane run={run} node={n} />
+                <SingleNodeLogs run={run} node={n} />
               </div>
             )}
           </div>
