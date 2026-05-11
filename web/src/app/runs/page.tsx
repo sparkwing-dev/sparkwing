@@ -1819,16 +1819,11 @@ function AllNodesLogs({
       else next.add(id);
       return next;
     });
-  // When a node selection arrives from outside, auto-expand it and
-  // scroll its block into view so the user lands on the right logs.
+  // When a node selection arrives from outside, collapse other
+  // sections so only the selected node is open, then scroll it in.
   useEffect(() => {
     if (!focusNode) return;
-    setExpanded((prev) => {
-      if (prev.has(focusNode)) return prev;
-      const next = new Set(prev);
-      next.add(focusNode);
-      return next;
-    });
+    setExpanded(new Set([focusNode]));
     requestAnimationFrame(() => {
       const el = document.querySelector(
         `[data-log-node-id="${focusNode}"]`,
