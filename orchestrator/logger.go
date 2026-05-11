@@ -296,6 +296,23 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		p.writeStepSkipped(sink, rec, nodeHue)
 	case "retry":
 		fmt.Fprintln(sink, p.color(fmt.Sprintf("  ↻ %s", rec.Msg), ansiYellow))
+	case "approval_requested":
+		fmt.Fprintln(sink, "  "+p.color("⏸ approval requested", ansiBold+ansiYellow)+p.color(" › "+rec.Msg, ansiDim))
+	case "approval_resolved":
+		resolution, _ := rec.Attrs["resolution"].(string)
+		via, _ := rec.Attrs["via"].(string)
+		icon, code := "🔓", ansiGreen
+		switch resolution {
+		case "denied":
+			icon, code = "✗", ansiRed
+		case "timed_out":
+			icon, code = "⏱", ansiRed
+		}
+		head := p.color(icon+" "+rec.Msg, ansiBold+code)
+		if via != "" {
+			head += p.color(" ["+via+"]", ansiDim)
+		}
+		fmt.Fprintln(sink, "  "+head)
 	case "exec_line":
 		fmt.Fprint(sink, p.breadcrumb(rec, nodeHue))
 		fmt.Fprintln(sink, rec.Msg)

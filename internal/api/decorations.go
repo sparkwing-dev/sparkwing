@@ -8,6 +8,7 @@ package api
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
@@ -42,6 +43,14 @@ type Decorations struct {
 	// RunsOn / Cache / Inline / hook presence) inline with the node
 	// card.
 	Modifiers *NodeModifiers `json:"modifiers,omitempty"`
+	// ApprovalState carries the runtime resolution of an approval
+	// gate: who approved (or "auto-approved by timeout policy"), the
+	// optional human comment, when it was resolved, and when it was
+	// originally requested. Populated for nodes with Approval=true
+	// when an approvals row exists; nil otherwise. The dashboard
+	// renders this on hover so an operator sees the answer without
+	// digging through the approvals API.
+	ApprovalState *NodeApprovalState `json:"approval_state,omitempty"`
 	// Work is the node's inner DAG: Steps with Needs plus SpawnNode
 	// declarations. Populated for nodes registered via plan.Job.
 	// Renderers walk this to draw the Plan -> Node -> Work -> Step
@@ -96,6 +105,35 @@ type NodeStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
+
+	// Runtime state, joined in from node_steps rows. Populated when
+	// the response handler hands a step lookup to DecorateNodes (the
+	// dashboard's /runs/{id}?include=nodes path). Status is one of
+	// "running" | "passed" | "failed" | "skipped"; empty means the
+	// step hasn't started (or step state isn't being tracked yet for
+	// this run).
+	Status      string     `json:"status,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	DurationMS  int64      `json:"duration_ms,omitempty"`
+	Annotations []string   `json:"annotations,omitempty"`
+}
+
+// NodeApprovalState is the runtime resolution of a JobApproval gate.
+// Fields mirror the approvals store row but trimmed to what the
+// dashboard's hover card surfaces. Empty Resolution means the gate
+// is still pending (requested but unresolved); Approver=="sparkwing"
+// signals an orchestrator-written timeout resolution rather than a
+// human action.
+type NodeApprovalState struct {
+	Resolution  string     `json:"resolution,omitempty"`
+	Approver    string     `json:"approver,omitempty"`
+	Comment     string     `json:"comment,omitempty"`
+	RequestedAt time.Time  `json:"requested_at,omitempty"`
+	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
+	TimeoutMS   int64      `json:"timeout_ms,omitempty"`
+	OnTimeout   string     `json:"on_timeout,omitempty"`
+	Message     string     `json:"message,omitempty"`
 }
 
 type NodeSpawn struct {
@@ -176,11 +214,102 @@ func DecorationsFromSnapshot(snapshot []byte) map[string]*Decorations {
 // still emit the wrapped wire shape consistently. Pass-through nil
 // decorations marshal to the bare store.Node fields with no
 // `"decorations"` key -- additive vs. the baseline.
-func DecorateNodes(nodes []*store.Node, snapshot []byte) []*NodeWithDecorations {
+//
+// steps, when non-nil, joins runtime per-step state into each
+// node's Decorations.Work.Steps tree. Pass nil to skip the join
+// (e.g. lightweight list endpoints that don't render the inner DAG).
+//
+// approvals, when non-nil, joins approval-gate resolutions (who
+// approved, when, via what path) onto each gate node's Decorations
+// .ApprovalState. Pass nil to skip the join.
+func DecorateNodes(nodes []*store.Node, snapshot []byte, steps []*store.NodeStep, approvals []*store.Approval) []*NodeWithDecorations {
 	dmap := DecorationsFromSnapshot(snapshot)
+	if len(steps) > 0 {
+		populateStepRuntime(dmap, steps)
+	}
+	if len(approvals) > 0 {
+		populateApprovalState(dmap, approvals)
+	}
 	out := make([]*NodeWithDecorations, len(nodes))
 	for i, n := range nodes {
 		out[i] = &NodeWithDecorations{Node: n, Decorations: dmap[n.NodeID]}
 	}
 	return out
+}
+
+// populateApprovalState attaches each Approval row to its node's
+// Decorations. Lazily creates a Decorations entry for nodes whose
+// snapshot carried no decoration (otherwise we'd silently drop the
+// runtime state on a node the snapshot didn't pre-decorate).
+func populateApprovalState(dmap map[string]*Decorations, approvals []*store.Approval) {
+	for _, a := range approvals {
+		if a == nil {
+			continue
+		}
+		dec := dmap[a.NodeID]
+		if dec == nil {
+			dec = &Decorations{}
+			dmap[a.NodeID] = dec
+		}
+		dec.ApprovalState = &NodeApprovalState{
+			Resolution:  a.Resolution,
+			Approver:    a.Approver,
+			Comment:     a.Comment,
+			RequestedAt: a.RequestedAt,
+			ResolvedAt:  a.ResolvedAt,
+			TimeoutMS:   a.TimeoutMS,
+			OnTimeout:   a.OnTimeout,
+			Message:     a.Message,
+		}
+	}
+}
+
+// populateStepRuntime stamps each NodeStep with its runtime state
+// from node_steps rows. Walks the entire Work tree (including spawn
+// target_work and spawn_each item_template_work) so steps nested
+// inside spawned sub-jobs get populated too.
+func populateStepRuntime(dmap map[string]*Decorations, steps []*store.NodeStep) {
+	byNode := make(map[string]map[string]*store.NodeStep, len(steps))
+	for _, s := range steps {
+		m, ok := byNode[s.NodeID]
+		if !ok {
+			m = make(map[string]*store.NodeStep)
+			byNode[s.NodeID] = m
+		}
+		m[s.StepID] = s
+	}
+	for nodeID, dec := range dmap {
+		lookup := byNode[nodeID]
+		if dec == nil || dec.Work == nil || len(lookup) == 0 {
+			continue
+		}
+		stampWork(dec.Work, lookup)
+	}
+}
+
+func stampWork(w *NodeWork, lookup map[string]*store.NodeStep) {
+	for i := range w.Steps {
+		s := &w.Steps[i]
+		row := lookup[s.ID]
+		if row == nil {
+			continue
+		}
+		s.Status = row.Status
+		s.StartedAt = row.StartedAt
+		s.FinishedAt = row.FinishedAt
+		if row.StartedAt != nil && row.FinishedAt != nil {
+			s.DurationMS = row.FinishedAt.Sub(*row.StartedAt).Milliseconds()
+		}
+		s.Annotations = row.Annotations
+	}
+	for i := range w.Spawns {
+		if w.Spawns[i].TargetWork != nil {
+			stampWork(w.Spawns[i].TargetWork, lookup)
+		}
+	}
+	for i := range w.SpawnEach {
+		if w.SpawnEach[i].ItemTemplateWork != nil {
+			stampWork(w.SpawnEach[i].ItemTemplateWork, lookup)
+		}
+	}
 }

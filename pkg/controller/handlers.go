@@ -203,8 +203,12 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Attach plan-snapshot-derived decorations (modifiers, groups,
-		// approval, on_failure_of, inner-Work tree).
-		decorated := api.DecorateNodes(nodes, run.PlanSnapshot)
+		// approval, inner-Work tree) and join per-step runtime state
+		// from node_steps so the dashboard reads structured rows
+		// instead of re-parsing the log stream.
+		steps, _ := s.store.ListNodeSteps(r.Context(), runID)
+		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
+		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals)
 		writeJSON(w, http.StatusOK, map[string]any{"run": run, "nodes": decorated})
 		return
 	}
@@ -1036,6 +1040,123 @@ func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleStartNodeStep records the running transition for one inner
+// Work step. Server stamps started_at; idempotent so retried POSTs
+// don't reset the clock.
+func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		StepID string `json:"step_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.StepID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
+		return
+	}
+	if err := s.store.StartNodeStep(r.Context(), runID, nodeID, body.StepID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleFinishNodeStep records the terminal status of a step.
+// Accepts "passed" or "failed".
+func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		StepID string `json:"step_id"`
+		Status string `json:"status"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.StepID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
+		return
+	}
+	if body.Status != store.StepPassed && body.Status != store.StepFailed {
+		writeError(w, http.StatusBadRequest, errors.New("status must be passed or failed"))
+		return
+	}
+	if err := s.store.FinishNodeStep(r.Context(), runID, nodeID, body.StepID, body.Status); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSkipNodeStep records a step that never ran (skipIf guard,
+// dry-run gap, etc.).
+func (s *Server) handleSkipNodeStep(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		StepID string `json:"step_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.StepID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
+		return
+	}
+	if err := s.store.SkipNodeStep(r.Context(), runID, nodeID, body.StepID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAppendStepAnnotation appends one persistent summary string
+// to a step's annotations list. Body is {"step_id":"...","message":"..."}.
+// Driven by sparkwing.Annotate() called from inside a step body
+// (the active step is captured via the rec.Step envelope field).
+func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		StepID  string `json:"step_id"`
+		Message string `json:"message"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.StepID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
+		return
+	}
+	if err := s.store.AppendStepAnnotation(r.Context(), runID, nodeID, body.StepID, body.Message); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListNodeSteps returns every step row for one run as one
+// flat slice. Callers bucket by node_id client-side; the rows ship
+// in (node_id, started_at) order so that's cheap.
+func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	steps, err := s.store.ListNodeSteps(r.Context(), runID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if steps == nil {
+		steps = []*store.NodeStep{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
 }
 
 // handleTouchNodeHeartbeat bumps last_heartbeat without touching

@@ -211,8 +211,12 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Attach plan-snapshot-derived decorations (modifiers, groups,
-		// approval, on_failure_of, inner-Work tree).
-		decorated := api.DecorateNodes(nodes, run.PlanSnapshot)
+		// approval, inner-Work tree) and join per-step runtime state
+		// from node_steps so the dashboard reads structured rows
+		// instead of re-parsing the log stream.
+		steps, _ := s.store.ListNodeSteps(r.Context(), runID)
+		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
+		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals)
 		writeJSON(w, http.StatusOK, map[string]any{"run": run, "nodes": decorated})
 		return
 	}

@@ -122,7 +122,7 @@ func TestDecorateNodes_WireShape(t *testing.T) {
 		{NodeID: "build", Status: "running", Deps: []string{}},
 		{NodeID: "plain", Status: "pending", Deps: []string{}},
 	}
-	wrapped := api.DecorateNodes(nodes, []byte(fixtureSnapshot))
+	wrapped := api.DecorateNodes(nodes, []byte(fixtureSnapshot), nil, nil)
 	if len(wrapped) != 2 {
 		t.Fatalf("len=%d want 2", len(wrapped))
 	}
@@ -164,7 +164,7 @@ func TestDecorateNodes_WireShape(t *testing.T) {
 // unaffected.
 func TestDecorateNodes_NoSnapshot(t *testing.T) {
 	nodes := []*store.Node{{NodeID: "a", Status: "pending", Deps: []string{}}}
-	wrapped := api.DecorateNodes(nodes, nil)
+	wrapped := api.DecorateNodes(nodes, nil, nil, nil)
 	body, err := json.Marshal(wrapped)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
