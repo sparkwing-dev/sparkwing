@@ -69,6 +69,19 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
           {node.error}
         </div>
       )}
+      {(node.annotations?.length ?? 0) > 0 && (
+        <ul className="mt-1 flex flex-col gap-0.5">
+          {node.annotations!.map((a, i) => (
+            <li
+              key={i}
+              className="text-xs font-mono text-[var(--foreground)] flex items-start gap-2"
+            >
+              <span className="text-cyan-300 shrink-0">›</span>
+              <span className="whitespace-pre-wrap break-words">{a}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -1713,7 +1713,11 @@ function RunDetailPane({
               onToggle={() => {}}
               inline
             />
-            {selected && <SelectedNodePanel node={selected} />}
+            {selected ? (
+              <SelectedNodePanel node={selected} />
+            ) : (
+              <RunAnnotationsList nodes={nodes} onSelectNode={onSelectNode} />
+            )}
           </div>
         )}
         {effectiveTab === "setup" && (
@@ -1896,6 +1900,68 @@ function NodeLogSummary({ node }: { node: RunNode }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// RunAnnotationsList flattens every node's annotations into a single
+// scannable list grouped by node, for the Summary tab when no node
+// is selected. Clicking a node header filters the page to that node.
+function RunAnnotationsList({
+  nodes,
+  onSelectNode,
+}: {
+  nodes: RunNode[];
+  onSelectNode: (id: string) => void;
+}) {
+  const groups = nodes.filter((n) => (n.annotations?.length ?? 0) > 0);
+  if (groups.length === 0) {
+    return (
+      <div className="text-xs text-[var(--muted)]">
+        No annotations on this run. Steps can post one with{" "}
+        <span className="font-mono">sparkwing.Annotate(ctx, msg)</span>.
+      </div>
+    );
+  }
+  const total = groups.reduce((n, g) => n + (g.annotations?.length ?? 0), 0);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+        Annotations ({total})
+      </div>
+      {groups.map((n) => (
+        <div
+          key={n.id}
+          className="border border-[var(--border)] rounded p-2 bg-[#0d1117]"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+            />
+            <button
+              onClick={() => onSelectNode(n.id)}
+              className="font-mono text-xs text-[var(--accent)] hover:underline truncate"
+              title={`select ${n.id}`}
+            >
+              {n.id}
+            </button>
+            <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
+              {n.annotations!.length}
+            </span>
+          </div>
+          <ul className="flex flex-col gap-0.5 pl-3.5">
+            {n.annotations!.map((a, i) => (
+              <li
+                key={i}
+                className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2"
+              >
+                <span className="text-cyan-300 shrink-0">›</span>
+                <span className="whitespace-pre-wrap break-words">{a}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
