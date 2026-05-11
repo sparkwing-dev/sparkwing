@@ -109,6 +109,12 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
 	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
+	// Cross-pipeline dependency: spawn the `weather-report` pipeline
+	// from inside a step body and consume its typed output. Demos
+	// sparkwing.RunAndAwait -- the imperative path for using another
+	// pipeline as a dependency without importing its Go package.
+	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline()
+
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
 	// so a flake retries once.
@@ -231,6 +237,26 @@ func notifyFn(ctx context.Context) error {
 func rollbackFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "rolling back to previous deployment")
 	return nap(ctx, 200)
+}
+
+// weatherCheckFn triggers the `weather-report` pipeline via
+// sparkwing.RunAndAwait, decodes its typed WeatherOut, and annotates
+// the node with the result. Exercises the cross-pipeline dependency
+// surface end-to-end -- the awaiter enqueues a child trigger, the
+// orchestrator dispatches it on the same dispatcher, and the typed
+// output is JSON-decoded into the caller's frame.
+func weatherCheckFn(ctx context.Context) error {
+	sparkwing.Info(ctx, "calling weather-report pipeline via RunAndAwait")
+	out, err := sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](
+		ctx, "weather-report", "stamp",
+		sparkwing.WithFreshTimeout(30*time.Second),
+	)
+	if err != nil {
+		return fmt.Errorf("weather-report: %w", err)
+	}
+	sparkwing.Info(ctx, "weather-report returned: %s, %d°F", out.Forecast, out.TempF)
+	sparkwing.Annotate(ctx, fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF))
+	return nil
 }
 
 // offshootFn returns a closure that emits `lines` log lines spread

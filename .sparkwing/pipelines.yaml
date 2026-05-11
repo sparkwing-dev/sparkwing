@@ -48,3 +48,12 @@ pipelines:
     entrypoint: Example
     group: Examples
     tags: [example, docs]
+
+  # weather-report: tiny standalone pipeline the example calls via
+  # sparkwing.RunAndAwait to exercise cross-pipeline dependencies.
+  # Hidden from tab-complete; still invokable directly.
+  - name: weather-report
+    entrypoint: WeatherReport
+    group: Examples
+    hidden: true
+    tags: [example]
