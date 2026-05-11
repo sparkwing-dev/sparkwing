@@ -1147,6 +1147,14 @@ function NodeRow({
           className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
         />
         <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
+        {(n.annotations?.length ?? 0) > 0 && (
+          <span
+            className="text-[10px] font-mono text-cyan-300 shrink-0"
+            title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}`}
+          >
+            ›{n.annotations!.length}
+          </span>
+        )}
         {nodeDuration(n) > 0 && (
           <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
             {fmtMs(nodeDuration(n))}
@@ -1993,6 +2001,14 @@ function AllNodesLogs({
                 </span>
               )}
               <span className="flex-1" />
+              {(n.annotations?.length ?? 0) > 0 && (
+                <span
+                  className="text-[10px] font-mono text-cyan-300 shrink-0"
+                  title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}:\n${n.annotations!.join("\n")}`}
+                >
+                  › {n.annotations!.length}
+                </span>
+              )}
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -2113,6 +2129,14 @@ function AllNodesResources({
                 </span>
               )}
               <span className="flex-1" />
+              {(n.annotations?.length ?? 0) > 0 && (
+                <span
+                  className="text-[10px] font-mono text-cyan-300 shrink-0"
+                  title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}:\n${n.annotations!.join("\n")}`}
+                >
+                  › {n.annotations!.length}
+                </span>
+              )}
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
