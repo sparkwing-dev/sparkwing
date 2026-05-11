@@ -17,6 +17,7 @@ import (
 //	  Job (single closure)               .................. configure, notify
 //	  Job (multi-step, typed output)     .................. build (Produces[BuildOut])
 //	  JobFanOut -> NodeGroup             .................. checks, publish-images
+//	  JobApproval (auto-approve in 2s)   .................. approve-deploy
 //	  modifiers: Retry · Timeout         .................. build, deploy
 //	  modifiers: BeforeRun · AfterRun    .................. configure, notify
 //	  modifiers: OnFailure               .................. deploy -> deploy-rollback
@@ -44,7 +45,7 @@ func (Example) ShortHelp() string {
 }
 
 func (Example) Help() string {
-	return "A self-contained pipeline that exercises the SDK end-to-end: Plan-layer Jobs and JobFanOut (NodeGroup), multi-step Work with GroupSteps (StepGroup), typed Ref[T] outputs via Produces[T] and StepGet[T], the full modifier set (Retry, Timeout, BeforeRun, AfterRun, OnFailure), Plan-layer and Work-layer SkipIf, and Annotate for persistent node-level summaries. Every step sleeps briefly and emits an Annotate so the dashboard surfaces a readable narrative without digging into logs."
+	return "A self-contained pipeline that exercises the SDK end-to-end: Plan-layer Jobs and JobFanOut (NodeGroup), JobApproval gate (auto-approves after 2s for demo purposes), multi-step Work with GroupSteps (StepGroup), typed Ref[T] outputs via Produces[T] and StepGet[T], the full modifier set (Retry, Timeout, BeforeRun, AfterRun, OnFailure), Plan-layer and Work-layer SkipIf, and Annotate for persistent node-level summaries. Every step sleeps briefly and emits an Annotate so the dashboard surfaces a readable narrative without digging into logs."
 }
 
 func (Example) Examples() []sparkwing.Example {
@@ -99,11 +100,21 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			return "publish-" + target, publishFn(target, buildRef)
 		}).Needs(build)
 
+	// Approval gate between publish and deploy. Real pipelines block
+	// here for a human; the demo uses a 2s Timeout with OnExpiry=
+	// ApprovalApprove so the gate auto-approves and the run flows
+	// through. Swap to ApprovalFail/Deny to see the blocked paths.
+	approveDeploy := sparkwing.JobApproval(plan, "approve-deploy", sparkwing.ApprovalConfig{
+		Message:  "Promote example:sha-abc1234 to prod?",
+		Timeout:  2 * time.Second,
+		OnExpiry: sparkwing.ApprovalApprove,
+	}).Needs(publishImages)
+
 	// deploy times out after 10s and registers a sibling rollback
 	// node that only runs if deploy fails (OnFailure). The rollback
 	// is wired but won't fire in the success path.
 	deploy := sparkwing.Job(plan, "deploy", &DeployJob{Build: buildRef}).
-		Needs(publishImages).
+		Needs(approveDeploy).
 		Timeout(10*time.Second).
 		OnFailure("deploy-rollback", rollbackFn)
 
