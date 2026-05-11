@@ -85,6 +85,24 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			return name, checkFn(name)
 		}).Needs(configure)
 
+	// Off-shoot branches that depend on configure but never rejoin
+	// the build/deploy/notify lane -- useful for testing taller DAG
+	// layouts. Six nodes hang directly off configure; three of those
+	// chain further to exercise deep columns.
+	sparkwing.Job(plan, "audit-permissions", offshootFn("audit-permissions", 3)).Needs(configure)
+	sparkwing.Job(plan, "audit-licenses", offshootFn("audit-licenses", 3)).Needs(configure)
+	sparkwing.Job(plan, "docs-snapshot", offshootFn("docs-snapshot", 2)).Needs(configure)
+	repoStats := sparkwing.Job(plan, "repo-stats", offshootFn("repo-stats", 3)).Needs(configure)
+	sparkwing.Job(plan, "repo-stats-publish", offshootFn("repo-stats-publish", 2)).Needs(repoStats)
+
+	benchBaseline := sparkwing.Job(plan, "bench-baseline", offshootFn("bench-baseline", 4)).Needs(configure)
+	benchRecord := sparkwing.Job(plan, "bench-record", offshootFn("bench-record", 3)).Needs(benchBaseline)
+	sparkwing.Job(plan, "bench-publish", offshootFn("bench-publish", 2)).Needs(benchRecord)
+
+	invCache := sparkwing.Job(plan, "inventory-cache", offshootFn("inventory-cache", 3)).Needs(configure)
+	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
+	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm)
+
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
 	// so a flake retries once.
@@ -205,6 +223,23 @@ func notifyFn(ctx context.Context) error {
 func rollbackFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "rolling back to previous deployment")
 	return nap(ctx, 200)
+}
+
+// offshootFn returns a closure that emits `lines` log lines spread
+// over 600ms, then annotates the node with a one-line summary.
+// Used for the taller-DAG off-shoot branches hanging off configure.
+func offshootFn(id string, lines int) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		msgs := make([]string, lines)
+		for i := range msgs {
+			msgs[i] = fmt.Sprintf("%s: phase %d/%d", id, i+1, lines)
+		}
+		if err := chatter(ctx, 600, msgs); err != nil {
+			return err
+		}
+		sparkwing.Annotate(ctx, fmt.Sprintf("%s: ok", id))
+		return nil
+	}
 }
 
 func smokeTestFn(ctx context.Context) error {
