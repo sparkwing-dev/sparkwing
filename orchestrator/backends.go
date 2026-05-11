@@ -40,6 +40,16 @@ type StateBackend interface {
 	// the node's annotations list. Driven by sparkwing.Annotate().
 	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 
+	// Per-step state. Mirror the step_start / step_end / step_skipped
+	// log events so the dashboard reads structured rows instead of
+	// re-parsing the log stream. Errors are advisory; callers swallow
+	// them the same way annotations do.
+	StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+	FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
+	SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+	AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
+	ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
+
 	// TouchNodeHeartbeat bumps last_heartbeat without status changes.
 	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 
@@ -160,6 +170,21 @@ func (l localState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detai
 }
 func (l localState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return l.st.AppendNodeAnnotation(ctx, runID, nodeID, msg)
+}
+func (l localState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	return l.st.StartNodeStep(ctx, runID, nodeID, stepID)
+}
+func (l localState) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	return l.st.FinishNodeStep(ctx, runID, nodeID, stepID, status)
+}
+func (l localState) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	return l.st.SkipNodeStep(ctx, runID, nodeID, stepID)
+}
+func (l localState) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
+	return l.st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
+}
+func (l localState) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
+	return l.st.ListNodeSteps(ctx, runID)
 }
 func (l localState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return l.st.TouchNodeHeartbeat(ctx, runID, nodeID)

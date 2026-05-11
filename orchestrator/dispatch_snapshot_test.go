@@ -40,7 +40,16 @@ func (b *captureBackend) UpdateNodeDeps(ctx context.Context, _, _ string, _ []st
 }
 func (b *captureBackend) UpdateNodeActivity(ctx context.Context, _, _, _ string) error   { return nil }
 func (b *captureBackend) AppendNodeAnnotation(ctx context.Context, _, _, _ string) error { return nil }
-func (b *captureBackend) TouchNodeHeartbeat(ctx context.Context, _, _ string) error      { return nil }
+func (b *captureBackend) StartNodeStep(ctx context.Context, _, _, _ string) error        { return nil }
+func (b *captureBackend) FinishNodeStep(ctx context.Context, _, _, _, _ string) error    { return nil }
+func (b *captureBackend) SkipNodeStep(ctx context.Context, _, _, _ string) error         { return nil }
+func (b *captureBackend) AppendStepAnnotation(ctx context.Context, _, _, _, _ string) error {
+	return nil
+}
+func (b *captureBackend) ListNodeSteps(ctx context.Context, _ string) ([]*store.NodeStep, error) {
+	return nil, nil
+}
+func (b *captureBackend) TouchNodeHeartbeat(ctx context.Context, _, _ string) error { return nil }
 func (b *captureBackend) AppendEvent(ctx context.Context, _, _, _ string, _ []byte) error {
 	return nil
 }

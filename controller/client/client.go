@@ -282,6 +282,75 @@ func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg st
 		http.StatusNoContent, nil)
 }
 
+// StartNodeStep POSTs the running transition for one step. Body
+// carries the step id; the server stamps started_at server-side.
+func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/start",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"step_id": stepID},
+		http.StatusNoContent, nil)
+}
+
+// FinishNodeStep POSTs the terminal status (passed | failed) and
+// finished_at stamp for one step.
+func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/finish",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"step_id": stepID, "status": status},
+		http.StatusNoContent, nil)
+}
+
+// SkipNodeStep records a step that was skipped before it ran (skipIf
+// guard fired, dry-run with no body, etc.). Server inserts a single
+// terminal row with started_at == finished_at.
+func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/skip",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"step_id": stepID},
+		http.StatusNoContent, nil)
+}
+
+// AppendStepAnnotation POSTs one persistent summary string onto a
+// step's annotations list. Mirrors AppendNodeAnnotation but scoped
+// to a single step inside a node's inner Work DAG.
+func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/annotations",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"step_id": stepID, "message": msg},
+		http.StatusNoContent, nil)
+}
+
+// ListNodeSteps fetches every step row for the run, across nodes.
+// The wire shape matches the local store (per-step status + started/
+// finished timestamps); the dashboard's nodes endpoint joins this in
+// when serving ?include=nodes.
+func (c *Client) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
+	u := fmt.Sprintf("%s/api/v1/runs/%s/steps", c.baseURL, url.PathEscape(runID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readHTTPError(resp)
+	}
+	var body struct {
+		Steps []*store.NodeStep `json:"steps"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	return body.Steps, nil
+}
+
 // --- Events ---
 
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {

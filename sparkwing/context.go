@@ -244,6 +244,15 @@ func Annotate(ctx context.Context, msg string) {
 // dispatch on this constant rather than the raw string.
 const EventNodeAnnotation = "node_annotation"
 
+// Per-step lifecycle events. Emitted by the Work-runner before / after
+// each step body. EventStepSkipped fires for skipIf / dry-run guards
+// that short-circuit the step before its body runs.
+const (
+	EventStepStart   = "step_start"
+	EventStepEnd     = "step_end"
+	EventStepSkipped = "step_skipped"
+)
+
 func emitLevel(ctx context.Context, level, format string, args ...any) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),

@@ -16,14 +16,20 @@ import (
 // Persist errors are intentionally swallowed: annotations are
 // advisory metadata, never load-bearing for run correctness.
 type annotatingNodeLog struct {
-	inner   NodeLog
-	persist func(msg string)
+	inner       NodeLog
+	persistNode func(msg string)
+	persistStep func(stepID, msg string)
 }
 
 // wrapNodeLogWithAnnotations returns inner unchanged when state is
 // nil. The returned wrapper writes annotation messages to state and
 // then delegates the original record to inner so the JSONL log file,
 // pretty renderer, and dashboard tail all still see the event.
+//
+// Annotation routing: when the LogRecord carries a Step (set by
+// recordEnvelope while inside a step body), the message lands on the
+// node_steps row instead of the node row. Annotations fired between
+// steps (node setup, after-hooks, etc.) still land on the node row.
 func wrapNodeLogWithAnnotations(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner
@@ -31,8 +37,11 @@ func wrapNodeLogWithAnnotations(inner NodeLog, state StateBackend, runID, nodeID
 	ctx := context.Background()
 	return &annotatingNodeLog{
 		inner: inner,
-		persist: func(msg string) {
+		persistNode: func(msg string) {
 			_ = state.AppendNodeAnnotation(ctx, runID, nodeID, msg)
+		},
+		persistStep: func(stepID, msg string) {
+			_ = state.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
 		},
 	}
 }
@@ -48,7 +57,15 @@ func (l *annotatingNodeLog) Emit(rec sparkwing.LogRecord) {
 			}
 		}
 		if msg != "" {
-			l.persist(msg)
+			// Always persist at the node level so the node-row
+			// annotations list stays the authoritative aggregate.
+			// When fired inside a step body (rec.Step set), also
+			// persist on the per-step row so the dashboard can
+			// surface a step-scoped badge without re-bucketing.
+			l.persistNode(msg)
+			if rec.Step != "" {
+				l.persistStep(rec.Step, msg)
+			}
 		}
 	}
 	l.inner.Emit(rec)

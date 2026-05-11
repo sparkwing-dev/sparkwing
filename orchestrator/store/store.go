@@ -252,6 +252,24 @@ CREATE INDEX IF NOT EXISTS idx_concurrency_cache_lru
     ON concurrency_cache(last_hit_at);
 
 -- Per-node resource samples; append-only.
+-- Per-step runtime state. One row per (run, node, step). Status is
+-- one of running | passed | failed | skipped. Skipped steps insert
+-- with started_at == finished_at and never transition. Rows are
+-- written by the orchestrator on step_start / step_end / step_skipped.
+-- Reads serve the dashboard's per-node step DAG.
+CREATE TABLE IF NOT EXISTS node_steps (
+    run_id      TEXT NOT NULL,
+    node_id     TEXT NOT NULL,
+    step_id     TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    started_at  INTEGER,
+    finished_at INTEGER,
+    PRIMARY KEY (run_id, node_id, step_id),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_node_steps_lookup
+    ON node_steps(run_id, node_id);
+
 CREATE TABLE IF NOT EXISTS node_metrics (
     run_id          TEXT NOT NULL,
     node_id         TEXT NOT NULL,
@@ -375,6 +393,11 @@ func (s *Store) migrate() error {
 	}
 	// SQLite lacks ADD COLUMN IF NOT EXISTS; probe table_info and add
 	// missing columns to keep laptop dev DBs moving.
+	if err := s.ensureColumns("node_steps", map[string]string{
+		"annotations_json": "BLOB",
+	}); err != nil {
+		return err
+	}
 	if err := s.ensureColumns("nodes", map[string]string{
 		"ready_at":         "INTEGER",
 		"claimed_by":       "TEXT",
@@ -1051,6 +1074,159 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET annotations_json = ? WHERE run_id = ? AND node_id = ?`,
 		next, runID, nodeID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Step status constants. Steps are inserted as StepRunning on
+// step_start and transitioned to passed/failed on step_end. Skipped
+// steps insert directly as StepSkipped with started_at == finished_at.
+const (
+	StepRunning = "running"
+	StepPassed  = "passed"
+	StepFailed  = "failed"
+	StepSkipped = "skipped"
+)
+
+// NodeStep is one row from the node_steps table: per-step runtime
+// state for the inner-Work DAG. Status moves running -> passed/failed
+// once; skipped is terminal at insert.
+type NodeStep struct {
+	RunID       string     `json:"run_id,omitempty"`
+	NodeID      string     `json:"node_id"`
+	StepID      string     `json:"step_id"`
+	Status      string     `json:"status"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Annotations []string   `json:"annotations,omitempty"`
+}
+
+// StartNodeStep inserts a row in the running state, stamping
+// started_at. Idempotent: a repeat call for the same (run, node,
+// step) is a no-op, leaving the original started_at intact so a
+// retry doesn't reset the clock.
+func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO node_steps (run_id, node_id, step_id, status, started_at)
+VALUES (?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
+		runID, nodeID, stepID, StepRunning, time.Now().UnixNano())
+	return err
+}
+
+// FinishNodeStep transitions a running step to passed/failed and
+// stamps finished_at. Caller passes StepPassed or StepFailed.
+// Creates the row if missing so the rare reorder where step_end
+// lands before step_start still records terminal state.
+func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	now := time.Now().UnixNano()
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (?,?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
+    status      = excluded.status,
+    finished_at = excluded.finished_at`,
+		runID, nodeID, stepID, status, now, now)
+	return err
+}
+
+// SkipNodeStep marks a step as skipped (single insert; no running
+// phase). started_at == finished_at == now so duration computes to 0
+// without special-casing nulls in the wire-shape serializer.
+func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	now := time.Now().UnixNano()
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (?,?,?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
+    status      = excluded.status,
+    finished_at = excluded.finished_at`,
+		runID, nodeID, stepID, StepSkipped, now, now)
+	return err
+}
+
+// ListNodeSteps returns every step row for the run, across all
+// nodes. Returned in (node_id, started_at) order so callers can
+// stream-bucket by node without a second sort.
+func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT node_id, step_id, status, started_at, finished_at, annotations_json
+FROM node_steps
+WHERE run_id = ?
+ORDER BY node_id, started_at`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*NodeStep
+	for rows.Next() {
+		ns := &NodeStep{RunID: runID}
+		var started, finished sql.NullInt64
+		var annotations []byte
+		if err := rows.Scan(&ns.NodeID, &ns.StepID, &ns.Status, &started, &finished, &annotations); err != nil {
+			return nil, err
+		}
+		if started.Valid {
+			t := time.Unix(0, started.Int64)
+			ns.StartedAt = &t
+		}
+		if finished.Valid {
+			t := time.Unix(0, finished.Int64)
+			ns.FinishedAt = &t
+		}
+		if len(annotations) > 0 {
+			_ = json.Unmarshal(annotations, &ns.Annotations)
+		}
+		out = append(out, ns)
+	}
+	return out, rows.Err()
+}
+
+// AppendStepAnnotation appends one summary string to a step's
+// annotations list. Inserts a placeholder row if the step doesn't
+// yet exist (annotations may fire before step_start lands in the
+// rare reorder case). Read-modify-write inside one txn to keep
+// concurrent appenders from losing entries.
+func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO node_steps (run_id, node_id, step_id, status)
+VALUES (?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
+		runID, nodeID, stepID, StepRunning); err != nil {
+		return err
+	}
+	var current []byte
+	row := tx.QueryRowContext(ctx, `
+SELECT annotations_json FROM node_steps
+WHERE run_id = ? AND node_id = ? AND step_id = ?`,
+		runID, nodeID, stepID)
+	if err := row.Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	var list []string
+	if len(current) > 0 {
+		if err := json.Unmarshal(current, &list); err != nil {
+			list = nil
+		}
+	}
+	list = append(list, msg)
+	next, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE node_steps SET annotations_json = ?
+WHERE run_id = ? AND node_id = ? AND step_id = ?`,
+		next, runID, nodeID, stepID); err != nil {
 		return err
 	}
 	return tx.Commit()

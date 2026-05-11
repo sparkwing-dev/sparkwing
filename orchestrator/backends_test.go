@@ -179,6 +179,21 @@ func (f *fakeState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detai
 func (f *fakeState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return nil
 }
+func (f *fakeState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	return nil
+}
+func (f *fakeState) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	return nil
+}
+func (f *fakeState) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
+	return nil
+}
+func (f *fakeState) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
+	return nil
+}
+func (f *fakeState) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
+	return nil, nil
+}
 func (f *fakeState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return nil
 }
