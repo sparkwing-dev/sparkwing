@@ -3161,6 +3161,24 @@ function StepDag({
           ({steps.length} step{steps.length === 1 ? "" : "s"})
         </span>
       </div>
+      {(node.annotations?.length ?? 0) > 0 && (
+        <div className="mb-2 border border-[var(--border)] rounded p-2 bg-[#0d1117]">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+            Annotations ({node.annotations!.length})
+          </div>
+          <ul className="flex flex-col gap-0.5">
+            {node.annotations!.map((a, i) => (
+              <li
+                key={i}
+                className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2"
+              >
+                <span className="text-cyan-300 shrink-0">›</span>
+                <span className="whitespace-pre-wrap break-words">{a}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {steps.length === 0 ? (
         <div className="px-1 py-4 text-sm text-[var(--muted)]">
           This node has no inner steps.
