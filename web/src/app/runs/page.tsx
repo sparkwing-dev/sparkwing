@@ -1892,19 +1892,20 @@ function AllNodesLogs({
                     e.stopPropagation();
                     onSelectNode(n.id);
                   }}
-                  className="font-mono text-xs text-left truncate flex-1 text-[var(--accent)] hover:underline"
+                  className="font-mono text-xs text-left truncate max-w-[24rem] text-[var(--accent)] hover:underline"
                   title={`select ${n.id}`}
                 >
                   {n.id}
                 </button>
               ) : (
                 <span
-                  className="font-mono text-xs truncate flex-1"
+                  className="font-mono text-xs truncate max-w-[24rem]"
                   title={n.id}
                 >
                   {n.id}
                 </span>
               )}
+              <span className="flex-1" />
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -2011,19 +2012,20 @@ function AllNodesResources({
                     e.stopPropagation();
                     onSelectNode(n.id);
                   }}
-                  className="font-mono text-xs text-left truncate flex-1 text-[var(--accent)] hover:underline"
+                  className="font-mono text-xs text-left truncate max-w-[24rem] text-[var(--accent)] hover:underline"
                   title={`select ${n.id}`}
                 >
                   {n.id}
                 </button>
               ) : (
                 <span
-                  className="font-mono text-xs truncate flex-1"
+                  className="font-mono text-xs truncate max-w-[24rem]"
                   title={n.id}
                 >
                   {n.id}
                 </span>
               )}
+              <span className="flex-1" />
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
