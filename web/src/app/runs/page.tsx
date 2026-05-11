@@ -2952,6 +2952,25 @@ function DAG({
 // StepDag is the zoomed-in view: the work.steps of one parent node
 // rendered as a full-size DAG using the same dims as the outer
 // graph. The header carries a breadcrumb back to the run-level view.
+// stepColorFor hashes the step id into a stable palette pick so
+// neighboring steps don't look like one big block. Two-tone (low-
+// alpha fill + saturated stroke) keeps the inner step DAG legible
+// against the dark canvas.
+function stepColorFor(id: string): { fill: string; stroke: string } {
+  const palette = [
+    { fill: "rgba(56,189,248,0.18)", stroke: "rgba(56,189,248,0.9)" }, // cyan
+    { fill: "rgba(167,139,250,0.18)", stroke: "rgba(167,139,250,0.9)" }, // violet
+    { fill: "rgba(244,114,182,0.18)", stroke: "rgba(244,114,182,0.9)" }, // pink
+    { fill: "rgba(34,197,94,0.18)", stroke: "rgba(34,197,94,0.9)" }, // green
+    { fill: "rgba(251,191,36,0.18)", stroke: "rgba(251,191,36,0.9)" }, // amber
+    { fill: "rgba(96,165,250,0.18)", stroke: "rgba(96,165,250,0.9)" }, // blue
+    { fill: "rgba(248,113,113,0.18)", stroke: "rgba(248,113,113,0.9)" }, // red
+  ];
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
+}
+
 function StepDag({
   node,
   nodeW,
@@ -3067,6 +3086,7 @@ function StepDag({
           {steps.map((s) => {
             const p = pos.get(s.id);
             if (!p) return null;
+            const palette = stepColorFor(s.id);
             return (
               <g key={s.id} transform={`translate(${p.x}, ${p.y})`}>
                 <rect
@@ -3074,8 +3094,9 @@ function StepDag({
                   height={nodeH}
                   rx={6}
                   ry={6}
-                  fill="rgba(15,23,42,0.6)"
-                  stroke="rgba(148,163,184,0.5)"
+                  fill={palette.fill}
+                  stroke={palette.stroke}
+                  strokeWidth={1.5}
                 />
                 <text
                   x={12}
@@ -3098,14 +3119,14 @@ function StepDag({
                   if (s.is_result)
                     badges.push({
                       label: "★ result",
-                      bg: "rgba(34,197,94,0.18)",
-                      fg: "rgba(34,197,94,0.95)",
+                      bg: "rgba(34,197,94,0.5)",
+                      fg: "#dcfce7",
                     });
                   if (s.has_skip_if)
                     badges.push({
                       label: "skipIf",
-                      bg: "rgba(251,191,36,0.18)",
-                      fg: "rgba(251,191,36,0.95)",
+                      bg: "rgba(251,191,36,0.55)",
+                      fg: "#1f2937",
                     });
                   let rightEdge = nodeW - 6;
                   return badges.map((b, bi) => {
@@ -3114,21 +3135,14 @@ function StepDag({
                     const x = rightEdge;
                     return (
                       <g key={b.label} transform={`translate(${x}, -7)`}>
-                        <rect
-                          width={w}
-                          height={13}
-                          rx={3}
-                          ry={3}
-                          fill={b.bg}
-                          stroke={b.fg}
-                          strokeOpacity={0.45}
-                        />
+                        <rect width={w} height={13} rx={3} ry={3} fill={b.bg} />
                         <text
                           x={w / 2}
                           y={9}
                           textAnchor="middle"
                           fill={b.fg}
                           fontSize={9}
+                          fontWeight="bold"
                           fontFamily="ui-monospace, monospace"
                         >
                           {b.label}
