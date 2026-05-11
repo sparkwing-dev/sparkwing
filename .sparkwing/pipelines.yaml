@@ -38,3 +38,13 @@ pipelines:
     entrypoint: Release
     group: Release
     tags: [release]
+
+  # example: reference pipeline that exercises the two-layer
+  # Plan/Work model -- a Plan with two Nodes where the first Node's
+  # Work mixes a sequential chain with a parallel group. Anyone
+  # checking out the repo can `wing example` to see the SDK shape
+  # render in the dashboard.
+  - name: example
+    entrypoint: Example
+    group: Examples
+    tags: [example, docs]
