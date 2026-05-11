@@ -43,6 +43,7 @@ import {
 import {
   type Node as RunNode,
   type NodeWorkStep,
+  type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
   type RunDetail,
@@ -2547,10 +2548,13 @@ function DAG({
       const el = dagRef.current?.querySelector(
         `[data-node-id="${selected}"]`,
       ) as SVGGElement | null;
+      // "nearest" leaves the viewport alone when the node is already
+      // visible; only scrolls the minimum needed to reveal it. Avoids
+      // snapping the page on every click when the whole DAG fits.
       el?.scrollIntoView({
         behavior: "smooth",
-        block: "center",
-        inline: "center",
+        block: "nearest",
+        inline: "nearest",
       });
     });
   }, [selected]);
@@ -3071,6 +3075,15 @@ function DAG({
                 {n.outcome === "cached" && !n.approval && (
                   <CachedPill nodeW={p.w} />
                 )}
+                {(n.spawned_pipelines?.length ?? 0) > 0 &&
+                  !n.dynamic &&
+                  !n.approval &&
+                  n.outcome !== "cached" && (
+                    <CrossPipelinePill
+                      nodeW={p.w}
+                      pipelines={n.spawned_pipelines!}
+                    />
+                  )}
                 {(n.annotations?.length ?? 0) > 0 &&
                   (() => {
                     const text = `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`;
@@ -3309,6 +3322,7 @@ function StepDag({
   onSelectStep?: (stepId: string | null) => void;
 }) {
   // Auto-scroll selected step into view (mirrors the run-level DAG).
+  // "nearest" so we don't snap when the step is already visible.
   const stepDagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selectedStep) return;
@@ -3318,8 +3332,8 @@ function StepDag({
       ) as SVGGElement | null;
       el?.scrollIntoView({
         behavior: "smooth",
-        block: "center",
-        inline: "center",
+        block: "nearest",
+        inline: "nearest",
       });
     });
   }, [selectedStep]);
@@ -3967,6 +3981,18 @@ function DagNodeTooltip({
               </span>
             </>
           )}
+          {(node.spawned_pipelines?.length ?? 0) > 0 && (
+            <>
+              <span className="text-[var(--muted)]">Spawns:</span>
+              <span className="font-mono text-sky-300 whitespace-pre-wrap">
+                {node
+                  .spawned_pipelines!.map(
+                    (p) => `↗ ${p.pipeline} (${p.child_run_id.slice(-8)})`,
+                  )
+                  .join("\n")}
+              </span>
+            </>
+          )}
         </div>
         {badges.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
@@ -4208,6 +4234,54 @@ function CachedPill({ nodeW }: { nodeW: number }) {
         style={{ letterSpacing: "0.5px" }}
       >
         CACHED
+      </text>
+    </g>
+  );
+}
+
+// CrossPipelinePill marks a node that fired sparkwing.RunAndAwait
+// during its body. Sky-cyan to read as "outgoing connection," with
+// the target pipeline name when only one child was spawned, or a
+// `↗ N pipelines` count when there were several. The label is the
+// node's tooltip-side context too — operators reading the hover
+// card see the full list of child run ids.
+function CrossPipelinePill({
+  nodeW,
+  pipelines,
+}: {
+  nodeW: number;
+  pipelines: SpawnedPipelineRef[];
+}) {
+  const label =
+    pipelines.length === 1
+      ? `↗ ${truncate(pipelines[0].pipeline, 16)}`
+      : `↗ ${pipelines.length} pipelines`;
+  const pillH = 15;
+  const pillW = Math.max(48, 12 + label.length * 6);
+  const x = (nodeW - pillW) / 2;
+  const y = -6;
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <rect
+        x={x}
+        y={y}
+        width={pillW}
+        height={pillH}
+        rx={pillH / 2}
+        ry={pillH / 2}
+        fill="rgba(56,189,248,0.95)"
+      />
+      <text
+        x={x + pillW / 2}
+        y={y + pillH / 2 + 3.5}
+        textAnchor="middle"
+        fill="rgba(8,15,30,0.95)"
+        fontSize={10}
+        fontWeight={700}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        style={{ letterSpacing: "0.3px" }}
+      >
+        {label}
       </text>
     </g>
   );

@@ -1857,6 +1857,43 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return err
 }
 
+// SpawnedChild is one row of the cross-pipeline spawn relation. A
+// node X in run R that invoked sparkwing.RunAndAwait("target") yields
+// a SpawnedChild{ParentNodeID: X, Pipeline: "target", ChildRunID: ...}
+// for each invocation. Surfaced to the dashboard so a node carrying
+// a cross-pipeline call paints a distinct corner pill.
+type SpawnedChild struct {
+	ParentNodeID string `json:"parent_node_id"`
+	Pipeline     string `json:"pipeline"`
+	ChildRunID   string `json:"child_run_id"`
+}
+
+// ListSpawnedChildrenByRun returns every cross-pipeline spawn the
+// nodes of runID triggered. Each child trigger was enqueued by an
+// awaiter inside a parent node's body; the row carries parent_node_id
+// + pipeline so the caller can attribute the spawn back to its node.
+// Ordered by parent_node_id, created_at so callers can stream-bucket.
+func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT parent_node_id, pipeline, id
+FROM triggers
+WHERE parent_run_id = ? AND parent_node_id != ''
+ORDER BY parent_node_id, created_at`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SpawnedChild
+	for rows.Next() {
+		var c SpawnedChild
+		if err := rows.Scan(&c.ParentNodeID, &c.Pipeline, &c.ChildRunID); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // GetRunAncestorPipelines returns ancestor pipeline names from
 // parent_run_id walks (excludes runID's own). Missing ancestors and
 // data cycles terminate cleanly; partial chains are still useful for

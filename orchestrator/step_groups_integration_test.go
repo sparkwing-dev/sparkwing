@@ -71,7 +71,7 @@ func TestRun_StepGroupsSurviveStoreToAPI(t *testing.T) {
 	}
 
 	steps, _ := st.ListNodeSteps(context.Background(), res.RunID)
-	decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, nil)
+	decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, nil, nil)
 	var build *api.NodeWithDecorations
 	for _, n := range decorated {
 		if n.NodeID == "build" {

@@ -56,6 +56,22 @@ type Decorations struct {
 	// Renderers walk this to draw the Plan -> Node -> Work -> Step
 	// tree.
 	Work *NodeWork `json:"work,omitempty"`
+	// SpawnedPipelines is the list of cross-pipeline calls a node
+	// fired via sparkwing.RunAndAwait during its body. Joined from
+	// the triggers table at response time (each child trigger carries
+	// parent_node_id + pipeline). Empty for nodes that didn't spawn
+	// any cross-pipeline runs. The dashboard renders a corner pill
+	// listing the targets so cross-pipeline edges are visible without
+	// drilling into the trigger log.
+	SpawnedPipelines []SpawnedPipelineRef `json:"spawned_pipelines,omitempty"`
+}
+
+// SpawnedPipelineRef is one cross-pipeline call out of a node: the
+// target pipeline name and the child run id the awaiter created so
+// the dashboard can deep-link from the pill into the spawned run.
+type SpawnedPipelineRef struct {
+	Pipeline   string `json:"pipeline"`
+	ChildRunID string `json:"child_run_id"`
 }
 
 // NodeModifiers mirrors the orchestrator's snapshotModifiers wire
@@ -222,7 +238,11 @@ func DecorationsFromSnapshot(snapshot []byte) map[string]*Decorations {
 // approvals, when non-nil, joins approval-gate resolutions (who
 // approved, when, via what path) onto each gate node's Decorations
 // .ApprovalState. Pass nil to skip the join.
-func DecorateNodes(nodes []*store.Node, snapshot []byte, steps []*store.NodeStep, approvals []*store.Approval) []*NodeWithDecorations {
+//
+// spawned, when non-nil, joins cross-pipeline spawn records (one row
+// per RunAndAwait invocation) onto the parent node's Decorations
+// .SpawnedPipelines so the dashboard can render a corner pill.
+func DecorateNodes(nodes []*store.Node, snapshot []byte, steps []*store.NodeStep, approvals []*store.Approval, spawned []store.SpawnedChild) []*NodeWithDecorations {
 	dmap := DecorationsFromSnapshot(snapshot)
 	if len(steps) > 0 {
 		populateStepRuntime(dmap, steps)
@@ -230,11 +250,35 @@ func DecorateNodes(nodes []*store.Node, snapshot []byte, steps []*store.NodeStep
 	if len(approvals) > 0 {
 		populateApprovalState(dmap, approvals)
 	}
+	if len(spawned) > 0 {
+		populateSpawnedPipelines(dmap, spawned)
+	}
 	out := make([]*NodeWithDecorations, len(nodes))
 	for i, n := range nodes {
 		out[i] = &NodeWithDecorations{Node: n, Decorations: dmap[n.NodeID]}
 	}
 	return out
+}
+
+// populateSpawnedPipelines attaches each SpawnedChild row to its
+// parent node's Decorations. Lazily creates a Decorations entry for
+// nodes whose snapshot carried no decoration so a runtime-spawned
+// pipeline isn't silently dropped from the wire shape.
+func populateSpawnedPipelines(dmap map[string]*Decorations, spawned []store.SpawnedChild) {
+	for _, c := range spawned {
+		if c.ParentNodeID == "" {
+			continue
+		}
+		dec := dmap[c.ParentNodeID]
+		if dec == nil {
+			dec = &Decorations{}
+			dmap[c.ParentNodeID] = dec
+		}
+		dec.SpawnedPipelines = append(dec.SpawnedPipelines, SpawnedPipelineRef{
+			Pipeline:   c.Pipeline,
+			ChildRunID: c.ChildRunID,
+		})
+	}
 }
 
 // populateApprovalState attaches each Approval row to its node's

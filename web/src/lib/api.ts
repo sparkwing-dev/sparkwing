@@ -251,6 +251,17 @@ export interface Node {
   // registered via plan.Job. The dashboard renders this as a
   // collapsible Work section under each node card.
   work?: NodeWork;
+  // Cross-pipeline calls this node made via sparkwing.RunAndAwait.
+  // Server joins the triggers table at response time; each entry
+  // carries the target pipeline name and the spawned child run id.
+  // Drives a corner pill on the node so the cross-pipeline edge is
+  // visible without drilling into the trigger log.
+  spawned_pipelines?: SpawnedPipelineRef[];
+}
+
+export interface SpawnedPipelineRef {
+  pipeline: string;
+  child_run_id: string;
 }
 
 export interface NodeModifiers {
@@ -399,6 +410,8 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
       if (dec.approval && n.approval == null) n.approval = dec.approval;
       if (dec.on_failure_of && !n.on_failure_of)
         n.on_failure_of = dec.on_failure_of;
+      if (dec.spawned_pipelines && !n.spawned_pipelines)
+        n.spawned_pipelines = dec.spawned_pipelines;
     }
   }
   return body;
