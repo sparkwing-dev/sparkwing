@@ -60,7 +60,7 @@ type LogRecord struct {
 	Job      string         `json:"job,omitempty"`   // innermost Job frame
 	JobStack []string       `json:"job_stack,omitempty"`
 	Step     string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
-	Event    string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
+	Event    string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
 	Msg      string         `json:"msg,omitempty"`
 	Attrs    map[string]any `json:"attrs,omitempty"`
 }
@@ -206,6 +206,43 @@ func Warn(ctx context.Context, format string, args ...any) {
 func Error(ctx context.Context, format string, args ...any) {
 	emitLevel(ctx, "error", format, args...)
 }
+
+// Annotate records a persistent, human-readable summary string on the
+// currently-executing Node. Unlike Info, which writes to the run log,
+// annotations are stored on the Node row itself and surface on the
+// dashboard alongside the node's status -- a place for the step to
+// say "processed 1,234 records · 12 failed" without an operator
+// having to dig through logs.
+//
+// Multiple calls within a node accumulate; the orchestrator appends
+// each message to the node's annotations list in call order. Outside
+// a node context (no logger installed, or no node ID in ctx) Annotate
+// is a no-op, matching the Info/Warn/Error convention.
+//
+// Example:
+//
+//	func (j *IngestJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+//	    return sparkwing.Step(w, "ingest", func(ctx context.Context) error {
+//	        ok, failed := ingest(ctx)
+//	        sparkwing.Annotate(ctx, fmt.Sprintf("processed %d records · %d failed", ok, failed))
+//	        return nil
+//	    }), nil
+//	}
+func Annotate(ctx context.Context, msg string) {
+	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
+		TS:    time.Now(),
+		Level: "info",
+		Node:  NodeFromContext(ctx),
+		Event: EventNodeAnnotation,
+		Msg:   msg,
+		Attrs: map[string]any{"message": msg},
+	}))
+}
+
+// EventNodeAnnotation is the LogRecord.Event value emitted by
+// Annotate. Persistence layers observing the log stream should
+// dispatch on this constant rather than the raw string.
+const EventNodeAnnotation = "node_annotation"
 
 func emitLevel(ctx context.Context, level, format string, args ...any) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
