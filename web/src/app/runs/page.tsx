@@ -51,6 +51,7 @@ import {
   getNodeStreamUrl,
   getPipelines,
   getRun,
+  getRunLogs,
   getRuns,
   parseHolder,
   retryRun,
@@ -76,7 +77,7 @@ import LogBucketView from "@/components/LogBucketView";
 import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel from "@/components/SummaryPanel";
 import SelectedNodePanel from "@/components/SelectedNodePanel";
-import { parseLogLines } from "@/lib/logParser";
+import { parseLogLines, type StepSection } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
 import NodeWorkView from "@/components/NodeWorkView";
 
@@ -1736,6 +1737,7 @@ function RunDetailPane({
               nodes={nodes}
               selected={selected?.id || null}
               onSelect={onSelectNode}
+              runId={run.id}
             />
           </div>
         )}
@@ -2441,10 +2443,12 @@ function DAG({
   nodes,
   selected,
   onSelect,
+  runId,
 }: {
   nodes: RunNode[];
   selected: string | null;
   onSelect: (id: string) => void;
+  runId?: string;
 }) {
   // Hover state for the floating tooltip overlay. Tracks which node
   // the pointer is currently over plus its viewport coords so we can
@@ -3055,6 +3059,7 @@ function DAG({
           rowGap={rowGap}
           padX={padX}
           padY={padY}
+          runId={runId}
         />
       )}
     </div>
@@ -3089,6 +3094,11 @@ function stepColorFor(id: string): { fill: string; stroke: string } {
   return palette[Math.abs(h) % palette.length];
 }
 
+interface StepRuntime {
+  status: "passed" | "failed" | "running";
+  durationMs: number;
+}
+
 function StepDag({
   node,
   nodeW,
@@ -3098,6 +3108,7 @@ function StepDag({
   padX,
   padY,
   onBack,
+  runId,
 }: {
   node: RunNode;
   nodeW: number;
@@ -3107,8 +3118,38 @@ function StepDag({
   padX: number;
   padY: number;
   onBack?: () => void;
+  runId?: string;
 }) {
   const steps = node.work?.steps ?? [];
+  // Pull step status + duration out of the run's parsed logs so each
+  // step box can render like a run-level node (dot + duration). Falls
+  // back to the structural-only render when logs aren't available.
+  const [stepInfo, setStepInfo] = useState<Record<string, StepRuntime>>({});
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    (async () => {
+      const text = await getRunLogs(runId);
+      if (cancelled || !text) return;
+      const parsed = parseLogLines(text.split("\n"));
+      const info: Record<string, StepRuntime> = {};
+      const prefix = `${node.id} · `;
+      for (const raw of parsed.sections) {
+        if (raw.type !== "step") continue;
+        const s = raw as StepSection;
+        if (!s.name.startsWith(prefix)) continue;
+        const stepName = s.name.slice(prefix.length);
+        info[stepName] = {
+          status: s.status,
+          durationMs: s.durationMs ?? 0,
+        };
+      }
+      setStepInfo(info);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, node.id]);
   const byId = new Map(steps.map((s) => [s.id, s]));
   const level = new Map<string, number>();
   const resolve = (id: string): number => {
@@ -3223,6 +3264,16 @@ function StepDag({
             const p = pos.get(s.id);
             if (!p) return null;
             const palette = stepColorFor(s.id);
+            const info = stepInfo[s.id];
+            const status = info?.status;
+            const dotClass =
+              status === "failed"
+                ? "fill-red-400"
+                : status === "running"
+                  ? "fill-indigo-400 animate-pulse"
+                  : status === "passed"
+                    ? "fill-green-400"
+                    : "fill-slate-500";
             return (
               <g key={s.id} transform={`translate(${p.x}, ${p.y})`}>
                 <rect
@@ -3234,15 +3285,28 @@ function StepDag({
                   stroke={palette.stroke}
                   strokeWidth={1.5}
                 />
+                <circle cx={14} cy={nodeH / 2} r={4} className={dotClass} />
                 <text
-                  x={12}
+                  x={26}
                   y={nodeH / 2 + 4}
                   fill="currentColor"
                   fontSize={11}
                   fontFamily="ui-monospace, monospace"
                 >
-                  {truncate(s.id, 20)}
+                  {truncate(s.id, 18)}
                 </text>
+                {info && info.durationMs > 0 && (
+                  <text
+                    x={nodeW - 8}
+                    y={nodeH / 2 + 4}
+                    textAnchor="end"
+                    fill="rgba(148,163,184,0.85)"
+                    fontSize={10}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    {fmtMs(info.durationMs)}
+                  </text>
+                )}
                 {(() => {
                   // Edge badges, stacked along the top edge. Result
                   // pill sits rightmost; skipIf to its left when both
