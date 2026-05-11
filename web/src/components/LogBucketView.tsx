@@ -380,6 +380,12 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
     const next: Record<number, boolean> = {};
     for (const i of stepIndices) next[i] = false;
     setStepOverrides(next);
+    requestAnimationFrame(() => {
+      containerRef.current?.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      });
+    });
   };
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollToTop = () => {
