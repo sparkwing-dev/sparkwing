@@ -77,7 +77,18 @@ type NodeWork struct {
 	Steps      []NodeStep      `json:"steps,omitempty"`
 	Spawns     []NodeSpawn     `json:"spawns,omitempty"`
 	SpawnEach  []NodeSpawnEach `json:"spawn_each,omitempty"`
+	StepGroups []NodeStepGroup `json:"step_groups,omitempty"`
 	ResultStep string          `json:"result_step,omitempty"`
+}
+
+// NodeStepGroup is one sparkwing.GroupSteps declaration: a named
+// bundle of step IDs the dashboard frames as a cluster inside the
+// inner Work DAG. Step-to-group membership is computed client-side
+// by intersecting Members against the surrounding Steps array,
+// mirroring how the node-group renderer works at the Plan layer.
+type NodeStepGroup struct {
+	Name    string   `json:"name,omitempty"`
+	Members []string `json:"members"`
 }
 
 type NodeStep struct {

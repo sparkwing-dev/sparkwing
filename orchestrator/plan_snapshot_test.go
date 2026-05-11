@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -110,6 +111,73 @@ func (snapshotForEachJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return "shard-" + item, snapshotChildJob{}
 	})
 	return nil, nil
+}
+
+// snapshotGroupSteps declares two GroupSteps inside its Work so the
+// snapshot walker has groups to serialize.
+type snapshotGroupSteps struct{}
+
+func (snapshotGroupSteps) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	fetch := sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
+	lint := sparkwing.Step(w, "lint", func(ctx context.Context) error { return nil }).Needs(fetch)
+	vet := sparkwing.Step(w, "vet", func(ctx context.Context) error { return nil }).Needs(fetch)
+	test := sparkwing.Step(w, "test", func(ctx context.Context) error { return nil }).Needs(fetch)
+	smoke := sparkwing.Step(w, "smoke", func(ctx context.Context) error { return nil })
+	bench := sparkwing.Step(w, "bench", func(ctx context.Context) error { return nil })
+	sparkwing.GroupSteps(w, "ci", lint, vet, test)
+	sparkwing.GroupSteps(w, "verify", smoke, bench)
+	return nil, nil
+}
+
+func TestMarshalPlanSnapshot_EmitsStepGroupsInDeclarationOrder(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "grouped", snapshotGroupSteps{})
+
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"})
+	if err != nil {
+		t.Fatalf("marshalPlanSnapshot: %v", err)
+	}
+	var snap planSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(snap.Nodes) != 1 || snap.Nodes[0].Work == nil {
+		t.Fatalf("missing node work: %+v", snap.Nodes)
+	}
+	groups := snap.Nodes[0].Work.StepGroups
+	if len(groups) != 2 {
+		t.Fatalf("step_groups len=%d, want 2", len(groups))
+	}
+	if groups[0].Name != "ci" {
+		t.Errorf("step_groups[0].Name = %q, want %q", groups[0].Name, "ci")
+	}
+	wantCI := []string{"lint", "vet", "test"}
+	if !reflect.DeepEqual(groups[0].Members, wantCI) {
+		t.Errorf("step_groups[0].Members = %v, want %v", groups[0].Members, wantCI)
+	}
+	if groups[1].Name != "verify" {
+		t.Errorf("step_groups[1].Name = %q, want %q", groups[1].Name, "verify")
+	}
+	wantVerify := []string{"smoke", "bench"}
+	if !reflect.DeepEqual(groups[1].Members, wantVerify) {
+		t.Errorf("step_groups[1].Members = %v, want %v", groups[1].Members, wantVerify)
+	}
+
+	// Round-trip: re-marshal the parsed snapshot and confirm
+	// step_groups survives the next decode (the storage path is JSON
+	// blob on runs.plan_json, so this is the persistence shape).
+	again, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("re-marshal: %v", err)
+	}
+	var roundTrip planSnapshot
+	if err := json.Unmarshal(again, &roundTrip); err != nil {
+		t.Fatalf("round-trip unmarshal: %v", err)
+	}
+	rtGroups := roundTrip.Nodes[0].Work.StepGroups
+	if !reflect.DeepEqual(groups, rtGroups) {
+		t.Errorf("round-trip diverged:\n  before=%+v\n  after=%+v", groups, rtGroups)
+	}
 }
 
 func TestMarshalPlanSnapshot_RendersSpawnEachTemplate(t *testing.T) {

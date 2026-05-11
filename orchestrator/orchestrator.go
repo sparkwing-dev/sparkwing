@@ -1951,7 +1951,19 @@ type snapshotWork struct {
 	Steps      []snapshotStep      `json:"steps,omitempty"`
 	Spawns     []snapshotSpawn     `json:"spawns,omitempty"`
 	SpawnEach  []snapshotSpawnEach `json:"spawn_each,omitempty"`
+	StepGroups []snapshotStepGroup `json:"step_groups,omitempty"`
 	ResultStep string              `json:"result_step,omitempty"`
+}
+
+// snapshotStepGroup is the wire shape of a sparkwing.GroupSteps
+// declaration: a named bundle of step IDs the dashboard renders as
+// a collapsible cluster inside the inner Work DAG. Groups are
+// emitted in author declaration order; member IDs preserve the order
+// they were passed to GroupSteps. Anonymous groups (empty Name) are
+// still emitted so structural-only groupings round-trip.
+type snapshotStepGroup struct {
+	Name    string   `json:"name,omitempty"`
+	Members []string `json:"members"`
 }
 
 type snapshotStep struct {
@@ -2160,6 +2172,17 @@ func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) 
 		}
 		spawn.TargetWork = target
 		out.Spawns = append(out.Spawns, spawn)
+	}
+	for _, g := range work.Groups() {
+		members := g.Members()
+		ids := make([]string, len(members))
+		for i, m := range members {
+			ids[i] = m.ID()
+		}
+		out.StepGroups = append(out.StepGroups, snapshotStepGroup{
+			Name:    g.Name(),
+			Members: ids,
+		})
 	}
 	for _, g := range work.SpawnGens() {
 		each := snapshotSpawnEach{
