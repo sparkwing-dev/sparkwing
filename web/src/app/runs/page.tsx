@@ -540,9 +540,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             setSelectedNode(null);
             return;
           }
-          const target = focusedNodeRef.current;
-          if (selectedNodeRef.current === target) setSelectedNode(null);
-          else setSelectedNode(target);
+          setSelectedNode(focusedNodeRef.current);
         } else if (e.key === "Escape") {
           if (selectedNodeRef.current) {
             setSelectedNode(null);
@@ -820,7 +818,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               onSelect={(id) => {
                 setFocusedNode(id);
                 setFocusedColumn("nodes");
-                setSelectedNode(selectedNode === id ? null : id);
+                setSelectedNode(id);
               }}
             />
           </div>
