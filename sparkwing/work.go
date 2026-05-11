@@ -39,6 +39,7 @@ type Work struct {
 	byID      map[string]*WorkStep
 	spawns    []*SpawnSpec
 	spawnGens []*SpawnGenSpec
+	groups    []*StepGroup
 }
 
 // NewWork returns an empty Work.
@@ -75,6 +76,17 @@ func (w *Work) Spawns() []*SpawnSpec {
 func (w *Work) SpawnGens() []*SpawnGenSpec {
 	out := make([]*SpawnGenSpec, len(w.spawnGens))
 	copy(out, w.spawnGens)
+	return out
+}
+
+// Groups returns the StepGroups declared on this Work in declaration
+// order. Each entry is a (name, members) bundle the plan-snapshot
+// walker surfaces to the dashboard so it can frame group members.
+func (w *Work) Groups() []*StepGroup {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]*StepGroup, len(w.groups))
+	copy(out, w.groups)
 	return out
 }
 
@@ -611,7 +623,11 @@ func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup {
 			members = append(members, s)
 		}
 	}
-	return &StepGroup{name: name, members: members}
+	g := &StepGroup{name: name, members: members}
+	w.mu.Lock()
+	w.groups = append(w.groups, g)
+	w.mu.Unlock()
+	return g
 }
 
 // Needs declares an upstream dependency on every member of the group.
