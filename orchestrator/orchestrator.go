@@ -1651,30 +1651,79 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.Node) runner.Result {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	outcome, errMsg, out := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
+	res := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
+
+	// Surface the resolution metadata as a structured event plus a
+	// persistent node annotation, so operators see WHO approved (or
+	// "auto-approved by timeout policy=approve") without diffing the
+	// approval row JSON. Skip when the runner was cancelled mid-poll.
+	if res.via != "" {
+		resAttrs := map[string]any{
+			"resolution":  res.resolution,
+			"via":         res.via,
+			"duration_ms": time.Since(nodeStartTS).Milliseconds(),
+		}
+		if res.approver != "" {
+			resAttrs["approver"] = res.approver
+		}
+		if res.comment != "" {
+			resAttrs["comment"] = res.comment
+		}
+		nlog.Emit(sparkwing.LogRecord{
+			TS:    time.Now(),
+			Level: "info",
+			Event: "approval_resolved",
+			Msg:   res.summary,
+			Attrs: resAttrs,
+		})
+		// Persist the summary directly on the node row so the
+		// dashboard and `runs status` see "approved by alice" or
+		// "auto-approved (timeout policy=approve)" alongside outcome.
+		// Direct State call avoids a duplicate log line in the
+		// streaming view -- approval_resolved already carries the
+		// human-readable form above.
+		_ = s.backends.State.AppendNodeAnnotation(s.ctx, s.runID, node.ID(), res.summary)
+	}
 
 	nlog.Emit(sparkwing.LogRecord{
 		TS:    time.Now(),
 		Level: "info",
 		Event: "node_end",
 		Attrs: map[string]any{
-			"outcome":     string(outcome),
+			"outcome":     string(res.outcome),
 			"duration_ms": time.Since(nodeStartTS).Milliseconds(),
 		},
 	})
 
-	if err := s.backends.State.FinishNode(s.ctx, s.runID, node.ID(), string(outcome), errMsg, out); err != nil {
+	if err := s.backends.State.FinishNode(s.ctx, s.runID, node.ID(), string(res.outcome), res.errMsg, res.payload); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
+	outcome, errMsg := res.outcome, res.errMsg
 	if outcome == sparkwing.Failed && errMsg != "" {
 		return runner.Result{Outcome: outcome, Err: errors.New(errMsg), Output: nil}
 	}
 	return runner.Result{Outcome: outcome}
 }
 
+// approvalResult bundles the outcome of a resolved approval gate
+// plus the metadata operators want to see -- who approved (or "the
+// timeout policy"), what they said, and how long the gate waited.
+// The orchestrator surfaces these via the approval_resolved log
+// event and a matching node annotation.
+type approvalResult struct {
+	outcome    sparkwing.Outcome
+	errMsg     string
+	payload    []byte
+	resolution string
+	approver   string
+	comment    string
+	via        string
+	summary    string
+}
+
 // pollApproval blocks until a resolution appears or deadline fires.
 // On deadline writes timed_out so a late human resolve becomes 409.
-func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeout string, ticker *time.Ticker) (sparkwing.Outcome, string, []byte) {
+func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeout string, ticker *time.Ticker) approvalResult {
 	for {
 		got, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
 		if err == nil && got.ResolvedAt != nil {
@@ -1695,44 +1744,77 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 		select {
 		case <-ticker.C:
 		case <-s.ctx.Done():
-			return sparkwing.Cancelled, "ctx-cancelled", nil
+			return approvalResult{outcome: sparkwing.Cancelled, errMsg: "ctx-cancelled"}
 		}
 	}
 }
 
-// approvalResolutionToOutcome maps a stored resolution to outcome.
-func approvalResolutionToOutcome(resolution, approver, comment string) (sparkwing.Outcome, string, []byte) {
+// approvalResolutionToOutcome maps a stored resolution (human action
+// or written-by-orchestrator timeout) to an approvalResult.
+func approvalResolutionToOutcome(resolution, approver, comment string) approvalResult {
 	payload, _ := json.Marshal(map[string]any{
 		"resolution": resolution,
 		"approver":   approver,
 		"comment":    comment,
 	})
+	r := approvalResult{
+		resolution: resolution,
+		approver:   approver,
+		comment:    comment,
+		payload:    payload,
+		via:        "human",
+	}
+	if approver == "sparkwing" {
+		// ResolveApproval written by the dispatcher on timeout fire
+		// uses "sparkwing" as the approver sentinel.
+		r.via = "timeout"
+	}
 	switch resolution {
 	case store.ApprovalResolutionApproved:
-		return sparkwing.Success, "", payload
-	case store.ApprovalResolutionDenied:
-		msg := fmt.Sprintf("denied by %s", approver)
+		r.outcome = sparkwing.Success
+		r.summary = fmt.Sprintf("approved by %s", approver)
 		if comment != "" {
-			msg += ": " + comment
+			r.summary += " · " + comment
 		}
-		return sparkwing.Failed, msg, payload
+	case store.ApprovalResolutionDenied:
+		r.outcome = sparkwing.Failed
+		r.errMsg = fmt.Sprintf("denied by %s", approver)
+		if comment != "" {
+			r.errMsg += ": " + comment
+		}
+		r.summary = r.errMsg
 	case store.ApprovalResolutionTimedOut:
-		return sparkwing.Failed, "approval timed out", payload
+		r.outcome = sparkwing.Failed
+		r.errMsg = "approval timed out"
+		r.summary = "approval timed out"
 	default:
-		return sparkwing.Failed, "unknown approval resolution: " + resolution, payload
+		r.outcome = sparkwing.Failed
+		r.errMsg = "unknown approval resolution: " + resolution
+		r.summary = r.errMsg
 	}
+	return r
 }
 
-// approvalTimeoutToOutcome applies the author-configured on_timeout.
-func approvalTimeoutToOutcome(onTimeout string) (sparkwing.Outcome, string, []byte) {
+// approvalTimeoutToOutcome applies the author-configured on_timeout
+// when the deadline fires before any human acts. Surfaces the policy
+// in the summary so an operator sees "auto-approved (timeout
+// policy=approve)" rather than a bare Success.
+func approvalTimeoutToOutcome(onTimeout string) approvalResult {
+	r := approvalResult{via: "timeout-policy:" + onTimeout}
 	switch onTimeout {
 	case store.ApprovalOnTimeoutApprove:
-		return sparkwing.Success, "", nil
+		r.outcome = sparkwing.Success
+		r.summary = "auto-approved (timeout policy=approve)"
 	case store.ApprovalOnTimeoutDeny:
-		return sparkwing.Failed, "approval timed out (policy=deny)", nil
+		r.outcome = sparkwing.Failed
+		r.errMsg = "approval timed out (policy=deny)"
+		r.summary = "auto-denied (timeout policy=deny)"
 	default:
-		return sparkwing.Failed, "approval timed out (policy=fail)", nil
+		r.outcome = sparkwing.Failed
+		r.errMsg = "approval timed out (policy=fail)"
+		r.summary = "approval timed out (policy=fail)"
 	}
+	return r
 }
 
 // invokeRecoveryRunner runs a recovery node via the in-process
