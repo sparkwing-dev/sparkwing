@@ -272,6 +272,16 @@ func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) e
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
+// AppendNodeAnnotation POSTs a single persistent summary string to
+// append to the node's annotations list. Driven by sparkwing.Annotate.
+func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/annotations",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"message": msg},
+		http.StatusNoContent, nil)
+}
+
 // --- Events ---
 
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {

@@ -1018,6 +1018,26 @@ func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleAppendNodeAnnotation appends one persistent summary string
+// to the node's annotations list. Body is {"message":"<string>"}.
+// Driven by sparkwing.Annotate() inside step bodies.
+func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.AppendNodeAnnotation(r.Context(), runID, nodeID, body.Message); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleTouchNodeHeartbeat bumps last_heartbeat without touching
 // status_detail. Runners call this on a ticker while executing.
 func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request) {

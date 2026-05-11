@@ -291,6 +291,7 @@ func (s *Server) Handler() http.Handler {
 	// Activity / heartbeat surface for the dashboard's liveness dot.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleUpdateNodeActivity)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchNodeHeartbeat)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAppendNodeAnnotation)))
 
 	// Debug pauses. /paused is an alias for the dashboard SPA;
 	// /debug-pauses is the orchestrator + admin-write surface.
