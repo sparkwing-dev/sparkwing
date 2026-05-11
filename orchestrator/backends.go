@@ -36,6 +36,10 @@ type StateBackend interface {
 	// UpdateNodeActivity stamps status_detail and bumps last_heartbeat.
 	UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 
+	// AppendNodeAnnotation appends one persistent summary string to
+	// the node's annotations list. Driven by sparkwing.Annotate().
+	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
+
 	// TouchNodeHeartbeat bumps last_heartbeat without status changes.
 	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 
@@ -153,6 +157,9 @@ func (l localState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, de
 }
 func (l localState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
 	return l.st.UpdateNodeActivity(ctx, runID, nodeID, detail)
+}
+func (l localState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
+	return l.st.AppendNodeAnnotation(ctx, runID, nodeID, msg)
 }
 func (l localState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return l.st.TouchNodeHeartbeat(ctx, runID, nodeID)

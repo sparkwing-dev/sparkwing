@@ -176,6 +176,9 @@ func (f *fakeState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, de
 func (f *fakeState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
 	return nil
 }
+func (f *fakeState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
+	return nil
+}
 func (f *fakeState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return nil
 }

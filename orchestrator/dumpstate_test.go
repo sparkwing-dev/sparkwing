@@ -89,7 +89,8 @@ UPDATE nodes SET
    output_json=?, started_at=?, finished_at=?, ready_at=?,
    claimed_by='runner-7', lease_expires_at=?,
    status_detail='compiling',
-   last_heartbeat=?, failure_reason='exit_nonzero', exit_code=?
+   last_heartbeat=?, failure_reason='exit_nonzero', exit_code=?,
+   annotations_json=?
  WHERE run_id=? AND node_id=?`,
 		[]byte(`{"out":"ok"}`),
 		time.Unix(1746335100, 0).UnixNano(),
@@ -98,6 +99,7 @@ UPDATE nodes SET
 		time.Unix(1746335300, 0).UnixNano(),
 		time.Unix(1746335150, 0).UnixNano(),
 		17,
+		[]byte(`["compiled 14 MiB","linked in 1.2s"]`),
 		runID, nodeID,
 	); err != nil {
 		t.Fatalf("populate node row: %v", err)

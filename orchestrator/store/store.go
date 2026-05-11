@@ -384,6 +384,7 @@ func (s *Store) migrate() error {
 		"last_heartbeat":   "INTEGER",
 		"failure_reason":   "TEXT NOT NULL DEFAULT ''",
 		"exit_code":        "INTEGER",
+		"annotations_json": "BLOB",
 	}); err != nil {
 		return err
 	}
@@ -855,6 +856,12 @@ type Node struct {
 	FailureReason string `json:"failure_reason,omitempty"`
 	// ExitCode: process exit; nil when not applicable.
 	ExitCode *int `json:"exit_code,omitempty"`
+
+	// Annotations is the accumulated list of summary strings emitted
+	// by sparkwing.Annotate during the node's execution. Each call
+	// appends one entry; order preserved. Surfaced to the dashboard
+	// alongside the node's status.
+	Annotations []string `json:"annotations,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -922,7 +929,7 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code
+       failure_reason, exit_code, annotations_json
   FROM nodes
  WHERE run_id = ?
  ORDER BY rowid`, runID)
@@ -946,7 +953,7 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 	row := s.db.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code
+       failure_reason, exit_code, annotations_json
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -958,7 +965,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 // scanNodeRow reads one row into n.
 func scanNodeRow(rs rowScanner, n *Node) error {
-	var depsJSON, outputJSON, labelsJSON []byte
+	var depsJSON, outputJSON, labelsJSON, annotationsJSON []byte
 	var startedNS, finishedNS, readyNS, leaseNS, heartbeatNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
@@ -966,7 +973,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
 		&n.StatusDetail, &heartbeatNS,
-		&n.FailureReason, &exitCode)
+		&n.FailureReason, &exitCode, &annotationsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -1005,7 +1012,48 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		v := int(exitCode.Int64)
 		n.ExitCode = &v
 	}
+	if len(annotationsJSON) > 0 {
+		_ = json.Unmarshal(annotationsJSON, &n.Annotations)
+	}
 	return nil
+}
+
+// AppendNodeAnnotation appends one annotation string to the node's
+// annotations list. Implemented as read-modify-write inside a single
+// transaction so concurrent appenders don't lose entries.
+func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var current []byte
+	row := tx.QueryRowContext(ctx,
+		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID)
+	if err := row.Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	var list []string
+	if len(current) > 0 {
+		if err := json.Unmarshal(current, &list); err != nil {
+			list = nil
+		}
+	}
+	list = append(list, msg)
+	next, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE nodes SET annotations_json = ? WHERE run_id = ? AND node_id = ?`,
+		next, runID, nodeID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // MarkNodeReady stamps ready_at if unset. Idempotent.
@@ -1073,7 +1121,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 		err = scanNodeRow(tx.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code
+       failure_reason, exit_code, annotations_json
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done'
  ORDER BY ready_at ASC

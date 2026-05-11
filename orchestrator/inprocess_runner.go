@@ -98,6 +98,8 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	}
 	// Redact secrets before persist + delegate.
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
+	// Persist sparkwing.Annotate() messages onto the node row.
+	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
 	defer nlog.Close()
 
 	if err := r.backends.State.StartNode(ctx, runID, node.ID()); err != nil {
