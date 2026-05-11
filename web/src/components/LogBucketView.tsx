@@ -410,10 +410,10 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
   return (
     <div
       ref={containerRef}
-      className="bg-[#0d1117] border border-[var(--border)] rounded-lg overflow-hidden"
+      className="bg-[#0d1117] border border-[var(--border)] rounded-lg"
     >
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22]">
+      <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22] rounded-t-lg">
         <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
         </span>
