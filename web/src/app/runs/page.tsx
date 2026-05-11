@@ -1876,23 +1876,35 @@ function AllNodesLogs({
             data-log-node-id={n.id}
             className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"}`}
           >
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <button
-                onClick={() => toggle(n.id)}
-                className="text-[var(--muted)] w-3 text-center text-xs"
-              >
+            <div
+              onClick={() => toggle(n.id)}
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors"
+            >
+              <span className="text-[var(--muted)] w-3 text-center text-xs">
                 {open ? "▾" : "▸"}
-              </button>
+              </span>
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
               />
-              <button
-                onClick={() => toggle(n.id)}
-                className="font-mono text-xs text-left truncate flex-1 hover:underline"
-                title={n.id}
-              >
-                {n.id}
-              </button>
+              {onSelectNode ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectNode(n.id);
+                  }}
+                  className="font-mono text-xs text-left truncate flex-1 text-[var(--accent)] hover:underline"
+                  title={`select ${n.id}`}
+                >
+                  {n.id}
+                </button>
+              ) : (
+                <span
+                  className="font-mono text-xs truncate flex-1"
+                  title={n.id}
+                >
+                  {n.id}
+                </span>
+              )}
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -1900,15 +1912,6 @@ function AllNodesLogs({
                 <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                   {fmtMs(dur)}
                 </span>
-              )}
-              {onSelectNode && (
-                <button
-                  onClick={() => onSelectNode(n.id)}
-                  title="open this node"
-                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] underline-offset-2 hover:underline shrink-0"
-                >
-                  open
-                </button>
               )}
             </div>
             {open && (
@@ -1992,23 +1995,35 @@ function AllNodesResources({
             data-resource-node-id={n.id}
             className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"}`}
           >
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <button
-                onClick={() => toggle(n.id)}
-                className="text-[var(--muted)] w-3 text-center text-xs"
-              >
+            <div
+              onClick={() => toggle(n.id)}
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors"
+            >
+              <span className="text-[var(--muted)] w-3 text-center text-xs">
                 {open ? "▾" : "▸"}
-              </button>
+              </span>
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
               />
-              <button
-                onClick={() => toggle(n.id)}
-                className="font-mono text-xs text-left truncate flex-1 hover:underline"
-                title={n.id}
-              >
-                {n.id}
-              </button>
+              {onSelectNode ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectNode(n.id);
+                  }}
+                  className="font-mono text-xs text-left truncate flex-1 text-[var(--accent)] hover:underline"
+                  title={`select ${n.id}`}
+                >
+                  {n.id}
+                </button>
+              ) : (
+                <span
+                  className="font-mono text-xs truncate flex-1"
+                  title={n.id}
+                >
+                  {n.id}
+                </span>
+              )}
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -2016,15 +2031,6 @@ function AllNodesResources({
                 <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                   {fmtMs(dur)}
                 </span>
-              )}
-              {onSelectNode && (
-                <button
-                  onClick={() => onSelectNode(n.id)}
-                  title="open this node"
-                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] underline-offset-2 hover:underline shrink-0"
-                >
-                  open
-                </button>
               )}
             </div>
             {open && (
