@@ -2526,36 +2526,119 @@ function DAG({
       });
   }
 
-  const pos = new Map<string, { x: number; y: number }>();
-  // Per-column accumulating y, so expanded (taller) nodes push
-  // subsequent rows down within their own column.
+  // Per-column max widths so nodes size to their labels but still
+  // line up vertically. ~7px per mono char at fontSize=11, plus the
+  // status dot (24px), duration cell (~46px), zoom chip (22px),
+  // pills, and edge padding. Cap at a generous max so a long step id
+  // doesn't run the column off-screen.
+  const charPxApprox = 7;
+  const fixedChrome = 24 + 46 + 22 + 8; // dot + duration + zoom + pad
+  const measureNodeW = (n: RunNode): number => {
+    const hasSteps = (n.work?.steps?.length ?? 0) > 0;
+    const chrome = fixedChrome - (hasSteps ? 0 : 22);
+    const w = Math.ceil(n.id.length * charPxApprox + chrome);
+    return Math.max(140, Math.min(360, w));
+  };
+  const columnWidths: number[] = columns.map((col) =>
+    col ? Math.max(...col.map(measureNodeW)) : 0,
+  );
+  const columnStartX: number[] = [];
+  {
+    let x = padX;
+    columnWidths.forEach((w, i) => {
+      columnStartX[i] = x;
+      x += w + colGap;
+    });
+  }
+
+  const pos = new Map<string, { x: number; y: number; w: number }>();
   const columnHeights: number[] = [];
   columns.forEach((col, ci) => {
     if (!col) return;
     let y = padY;
+    const w = columnWidths[ci];
     col.forEach((n) => {
-      pos.set(n.id, {
-        x: padX + ci * (nodeW + colGap),
-        y,
-      });
+      pos.set(n.id, { x: columnStartX[ci], y, w });
       y += nodeH + rowGap;
     });
     columnHeights[ci] = y;
   });
 
   const width =
-    padX * 2 +
-    Math.max(1, columns.length) * nodeW +
-    Math.max(0, columns.length - 1) * colGap;
+    padX +
+    columnWidths.reduce((acc, w) => acc + w, 0) +
+    Math.max(0, columns.length - 1) * colGap +
+    padX;
   const height = padY + Math.max(padY, ...columnHeights);
 
-  const edges: { src: string; dst: string; onFailure?: boolean }[] = [];
+  const rawEdges: { src: string; dst: string; onFailure?: boolean }[] = [];
   for (const n of nodes) {
     for (const d of n.deps || []) {
-      if (byID.has(d)) edges.push({ src: d, dst: n.id });
+      if (byID.has(d)) rawEdges.push({ src: d, dst: n.id });
     }
     if (n.on_failure_of && byID.has(n.on_failure_of)) {
-      edges.push({ src: n.on_failure_of, dst: n.id, onFailure: true });
+      rawEdges.push({ src: n.on_failure_of, dst: n.id, onFailure: true });
+    }
+  }
+  // Edge collapsing: when a source has >1 edge to the same dest
+  // group AND the source isn't in that group itself, draw a single
+  // line into the group frame instead of N parallel arrows. Keeps
+  // fan-out patterns (build → publish-{linux,darwin,...}) readable.
+  type CollapsedEdge =
+    | {
+        kind: "node";
+        src: string;
+        dst: string;
+        onFailure?: boolean;
+      }
+    | {
+        kind: "group";
+        src: string;
+        groupName: string;
+        sampleDstStatus: RunNode | undefined;
+      };
+  const dstGroupOf = (id: string): string | null => {
+    const n = byID.get(id);
+    return n?.groups?.[0] || null;
+  };
+  const edges: CollapsedEdge[] = [];
+  // Bucket non-failure edges by (src, dst_group). Failure edges stay
+  // 1:1 because their dashed-red styling is meaningful per recovery
+  // node, not per group.
+  type Bucket = { dsts: string[] };
+  const buckets = new Map<string, Bucket>();
+  for (const e of rawEdges) {
+    if (e.onFailure) {
+      edges.push({ kind: "node", src: e.src, dst: e.dst, onFailure: true });
+      continue;
+    }
+    const g = dstGroupOf(e.dst);
+    const srcInSameGroup = g && byID.get(e.src)?.groups?.includes(g);
+    if (!g || srcInSameGroup) {
+      edges.push({ kind: "node", src: e.src, dst: e.dst });
+      continue;
+    }
+    const key = `${e.src}::${g}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = { dsts: [] };
+      buckets.set(key, b);
+    }
+    b.dsts.push(e.dst);
+  }
+  for (const [key, b] of buckets) {
+    const [src, group] = key.split("::");
+    if (b.dsts.length === 1) {
+      edges.push({ kind: "node", src, dst: b.dsts[0] });
+    } else {
+      // Use the first member as a status sample so the collapsed
+      // edge can still color based on the group's aggregate behavior.
+      edges.push({
+        kind: "group",
+        src,
+        groupName: group,
+        sampleDstStatus: byID.get(b.dsts[0]),
+      });
     }
   }
 
@@ -2594,7 +2677,7 @@ function DAG({
       if (!p) continue;
       if (p.x < minX) minX = p.x;
       if (p.y < minY) minY = p.y;
-      if (p.x + nodeW > maxX) maxX = p.x + nodeW;
+      if (p.x + p.w > maxX) maxX = p.x + p.w;
       if (p.y + nodeH > maxY) maxY = p.y + nodeH;
     }
     if (!isFinite(minX)) continue;
@@ -2606,6 +2689,7 @@ function DAG({
       h: maxY - minY + groupFramePad * 2 + groupLabelOffset,
     });
   }
+  const groupFrameByName = new Map(groupFrames.map((g) => [g.name, g]));
 
   if (zoomedNode) {
     return (
@@ -2671,20 +2755,28 @@ function DAG({
         ))}
         {edges.map((e, i) => {
           const a = pos.get(e.src);
-          const b = pos.get(e.dst);
-          if (!a || !b) return null;
-          const x1 = a.x + nodeW;
+          if (!a) return null;
+          const x1 = a.x + a.w;
           const y1 = a.y + nodeH / 2;
-          const x2 = b.x;
-          const y2 = b.y + nodeH / 2;
+          let x2: number, y2: number, color: string, dashed: boolean;
+          if (e.kind === "group") {
+            const frame = groupFrameByName.get(e.groupName);
+            if (!frame) return null;
+            x2 = frame.x;
+            y2 = frame.y + frame.h / 2;
+            color = dagEdgeColor(e.sampleDstStatus);
+            dashed = false;
+          } else {
+            const b = pos.get(e.dst);
+            if (!b) return null;
+            x2 = b.x;
+            y2 = b.y + nodeH / 2;
+            color = e.onFailure
+              ? "rgba(248,113,113,0.55)"
+              : dagEdgeColor(byID.get(e.dst));
+            dashed = !!e.onFailure;
+          }
           const dx = Math.max(32, (x2 - x1) * 0.4);
-          // OnFailure edges get a distinct red-dashed stroke so the
-          // reader clocks "this path only runs if the parent failed."
-          // Regular deps key off the dst's status (green once
-          // succeeded, indigo while running, etc.).
-          const color = e.onFailure
-            ? "rgba(248,113,113,0.55)"
-            : dagEdgeColor(byID.get(e.dst));
           return (
             <path
               key={i}
@@ -2692,7 +2784,7 @@ function DAG({
               fill="none"
               stroke={color}
               strokeWidth="1.5"
-              strokeDasharray={e.onFailure ? "5 4" : undefined}
+              strokeDasharray={dashed ? "5 4" : undefined}
             />
           );
         })}
@@ -2723,7 +2815,7 @@ function DAG({
               }
             >
               <rect
-                width={nodeW}
+                width={p.w}
                 height={nodeH}
                 rx={6}
                 ry={6}
@@ -2732,7 +2824,7 @@ function DAG({
                 strokeWidth={isSel ? 2 : 1}
               />
               <g onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }}>
-                <rect width={nodeW} height={nodeH} fill="transparent" />
+                <rect width={p.w} height={nodeH} fill="transparent" />
                 <circle
                   cx={14}
                   cy={nodeH / 2}
@@ -2746,11 +2838,11 @@ function DAG({
                   fontSize={11}
                   fontFamily="ui-monospace, monospace"
                 >
-                  {truncate(n.id, 16)}
+                  {n.id}
                 </text>
               </g>
               <text
-                x={nodeW - (hasSteps ? 26 : 8)}
+                x={p.w - (hasSteps ? 26 : 8)}
                 y={nodeH / 2 + 4}
                 textAnchor="end"
                 fill="rgba(148,163,184,0.8)"
@@ -2769,7 +2861,7 @@ function DAG({
                 >
                   <title>{`zoom into ${n.work?.steps?.length ?? 0} steps`}</title>
                   <rect
-                    x={nodeW - 22}
+                    x={p.w - 22}
                     y={nodeH / 2 - 8}
                     width={16}
                     height={16}
@@ -2779,7 +2871,7 @@ function DAG({
                     stroke="rgba(148,163,184,0.4)"
                   />
                   <text
-                    x={nodeW - 14}
+                    x={p.w - 14}
                     y={nodeH / 2 + 4}
                     textAnchor="middle"
                     fill="rgba(203,213,225,0.95)"
@@ -2790,10 +2882,10 @@ function DAG({
                   </text>
                 </g>
               )}
-              {n.dynamic && <DynamicPill nodeW={nodeW} />}
-              {n.approval && <ApprovalPill n={n} nodeW={nodeW} />}
+              {n.dynamic && <DynamicPill nodeW={p.w} />}
+              {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
               {n.outcome === "cached" && !n.approval && (
-                <CachedPill nodeW={nodeW} />
+                <CachedPill nodeW={p.w} />
               )}
             </g>
           );
