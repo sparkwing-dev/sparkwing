@@ -2532,10 +2532,14 @@ function DAG({
   // pills, and edge padding. Cap at a generous max so a long step id
   // doesn't run the column off-screen.
   const charPxApprox = 7;
-  const fixedChrome = 24 + 46 + 22 + 8; // dot + duration + zoom + pad
+  // dot(24) + duration(46) + pad(16). Zoom chip is added per-node
+  // since it grows with the step count.
+  const baseChrome = 24 + 46 + 16;
+  const zoomChipWidth = (stepCount: number) =>
+    12 + `${stepCount}⤢`.length * 6 + 8;
   const measureNodeW = (n: RunNode): number => {
-    const hasSteps = (n.work?.steps?.length ?? 0) > 0;
-    const chrome = fixedChrome - (hasSteps ? 0 : 22);
+    const stepCount = n.work?.steps?.length ?? 0;
+    const chrome = baseChrome + (stepCount > 0 ? zoomChipWidth(stepCount) : 0);
     const w = Math.ceil(n.id.length * charPxApprox + chrome);
     return Math.max(140, Math.min(360, w));
   };
@@ -2842,7 +2846,12 @@ function DAG({
                 </text>
               </g>
               <text
-                x={p.w - (hasSteps ? 26 : 8)}
+                x={
+                  p.w -
+                  (hasSteps
+                    ? 14 + zoomChipWidth(n.work?.steps?.length ?? 0)
+                    : 8)
+                }
                 y={nodeH / 2 + 4}
                 textAnchor="end"
                 fill="rgba(148,163,184,0.8)"
@@ -2851,37 +2860,43 @@ function DAG({
               >
                 {fmtMs(nodeDuration(n))}
               </text>
-              {hasSteps && (
-                <g
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setZoomedNodeId(n.id);
-                  }}
-                  style={{ cursor: "zoom-in" }}
-                >
-                  <title>{`zoom into ${n.work?.steps?.length ?? 0} steps`}</title>
-                  <rect
-                    x={p.w - 22}
-                    y={nodeH / 2 - 8}
-                    width={16}
-                    height={16}
-                    rx={3}
-                    ry={3}
-                    fill="rgba(148,163,184,0.12)"
-                    stroke="rgba(148,163,184,0.4)"
-                  />
-                  <text
-                    x={p.w - 14}
-                    y={nodeH / 2 + 4}
-                    textAnchor="middle"
-                    fill="rgba(203,213,225,0.95)"
-                    fontSize={10}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    ⤢
-                  </text>
-                </g>
-              )}
+              {hasSteps &&
+                (() => {
+                  const stepCount = n.work?.steps?.length ?? 0;
+                  const label = `${stepCount}⤢`;
+                  const chipW = 12 + label.length * 6;
+                  return (
+                    <g
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setZoomedNodeId(n.id);
+                      }}
+                      style={{ cursor: "zoom-in" }}
+                    >
+                      <title>{`zoom into ${stepCount} step${stepCount === 1 ? "" : "s"}`}</title>
+                      <rect
+                        x={p.w - 6 - chipW}
+                        y={nodeH / 2 - 8}
+                        width={chipW}
+                        height={16}
+                        rx={3}
+                        ry={3}
+                        fill="rgba(148,163,184,0.12)"
+                        stroke="rgba(148,163,184,0.4)"
+                      />
+                      <text
+                        x={p.w - 6 - chipW / 2}
+                        y={nodeH / 2 + 4}
+                        textAnchor="middle"
+                        fill="rgba(203,213,225,0.95)"
+                        fontSize={10}
+                        fontFamily="ui-monospace, monospace"
+                      >
+                        {label}
+                      </text>
+                    </g>
+                  );
+                })()}
               {n.dynamic && <DynamicPill nodeW={p.w} />}
               {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
               {n.outcome === "cached" && !n.approval && (
