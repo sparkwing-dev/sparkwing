@@ -2908,6 +2908,115 @@ function DAG({
                 {n.outcome === "cached" && !n.approval && (
                   <CachedPill nodeW={p.w} />
                 )}
+                {(n.annotations?.length ?? 0) > 0 && (
+                  <g
+                    onMouseEnter={(e) =>
+                      setChipHover({
+                        text: `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
+                    onMouseMove={(e) =>
+                      setChipHover({
+                        text: `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
+                    onMouseLeave={() => setChipHover(null)}
+                  >
+                    <rect
+                      x={6}
+                      y={nodeH - 7}
+                      width={22}
+                      height={13}
+                      rx={3}
+                      ry={3}
+                      fill="rgba(34,211,238,0.45)"
+                    />
+                    <text
+                      x={17}
+                      y={nodeH + 2}
+                      textAnchor="middle"
+                      fill="#cffafe"
+                      fontSize={9}
+                      fontWeight="bold"
+                      fontFamily="ui-monospace, monospace"
+                    >
+                      ›{n.annotations!.length}
+                    </text>
+                  </g>
+                )}
+                {(n.error ||
+                  n.failure_reason ||
+                  (typeof n.exit_code === "number" && n.exit_code !== 0)) && (
+                  <g
+                    onMouseEnter={(e) =>
+                      setChipHover({
+                        text:
+                          n.error || n.failure_reason || `exit ${n.exit_code}`,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
+                    onMouseMove={(e) =>
+                      setChipHover({
+                        text:
+                          n.error || n.failure_reason || `exit ${n.exit_code}`,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
+                    onMouseLeave={() => setChipHover(null)}
+                  >
+                    <rect
+                      x={p.w - 24}
+                      y={nodeH - 7}
+                      width={18}
+                      height={13}
+                      rx={3}
+                      ry={3}
+                      fill="rgba(248,113,113,0.55)"
+                    />
+                    <text
+                      x={p.w - 15}
+                      y={nodeH + 2}
+                      textAnchor="middle"
+                      fill="#fee2e2"
+                      fontSize={10}
+                      fontWeight="bold"
+                      fontFamily="ui-monospace, monospace"
+                    >
+                      !
+                    </text>
+                  </g>
+                )}
+                {n.outcome === "skipped" && (
+                  <g>
+                    <title>skipped</title>
+                    <rect
+                      x={p.w / 2 - 26}
+                      y={nodeH - 7}
+                      width={52}
+                      height={13}
+                      rx={3}
+                      ry={3}
+                      fill="rgba(148,163,184,0.4)"
+                    />
+                    <text
+                      x={p.w / 2}
+                      y={nodeH + 2}
+                      textAnchor="middle"
+                      fill="#e2e8f0"
+                      fontSize={9}
+                      fontWeight="bold"
+                      fontFamily="ui-monospace, monospace"
+                    >
+                      SKIPPED
+                    </text>
+                  </g>
+                )}
               </g>
             );
           })}
