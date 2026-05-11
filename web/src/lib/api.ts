@@ -217,6 +217,10 @@ export interface Node {
   // falls back to the raw error string in that case.
   failure_reason?: string;
   exit_code?: number;
+  // Free-form, human-readable summaries posted by step code via
+  // sparkwing.Annotate(ctx, msg). Multiple entries accumulate in
+  // call order. Surfaced in the dashboard's NodeLogSummary block.
+  annotations?: string[];
   // Named-group memberships from the Plan DSL: every plan.Group(name,
   // members...) this node belongs to. Populated from the plan snapshot
   // server-side; empty/undefined for ungrouped nodes. Drives the

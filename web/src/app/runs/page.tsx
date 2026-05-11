@@ -1819,8 +1819,16 @@ function NodeLogSummary({ node }: { node: RunNode }) {
   const isFailed =
     outcome === "failed" || node.status === "failed" || !!node.error;
   const isRunning = !node.finished_at && node.status !== "pending";
-  // Plain success: skip the block entirely so it doesn't add noise.
-  if (!isFailed && !isRunning && !node.failure_reason && !node.error) {
+  const annotations = node.annotations ?? [];
+  // Plain success with nothing to surface: hide the block entirely so
+  // it doesn't add noise.
+  if (
+    !isFailed &&
+    !isRunning &&
+    !node.failure_reason &&
+    !node.error &&
+    annotations.length === 0
+  ) {
     return null;
   }
   const tone = isFailed
@@ -1866,6 +1874,19 @@ function NodeLogSummary({ node }: { node: RunNode }) {
         <div className="mt-1 font-mono text-[11px] text-[var(--muted)] whitespace-pre-wrap break-words">
           {node.status_detail}
         </div>
+      )}
+      {annotations.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-0.5">
+          {annotations.map((a, i) => (
+            <li
+              key={i}
+              className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2"
+            >
+              <span className="text-[var(--muted)] shrink-0">›</span>
+              <span className="whitespace-pre-wrap break-words">{a}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
