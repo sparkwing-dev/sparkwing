@@ -1065,7 +1065,7 @@ function NodesList({
             {!collapsed && (
               <div className="relative">
                 <span
-                  className={`absolute left-1.5 top-0 bottom-0 w-0.5 rounded ${accent}`}
+                  className={`absolute left-0 top-0 bottom-0 w-0.5 ${accent}`}
                 />
                 {children.map((n) => (
                   <NodeRow
@@ -1125,7 +1125,7 @@ function GroupHeader({
     >
       {accentClass && (
         <span
-          className={`absolute left-1.5 top-1 bottom-1 w-0.5 rounded ${accentClass}`}
+          className={`absolute left-0 top-0 bottom-0 w-0.5 ${accentClass}`}
         />
       )}
       <span className="w-3 text-center text-[var(--muted)] text-[10px]">
