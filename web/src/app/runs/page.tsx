@@ -2454,12 +2454,15 @@ function DAG({
     x: number;
     y: number;
   } | null>(null);
-  // Zoomed-in node: when set, the DAG canvas swaps to show that
-  // node's inner step DAG instead of the run-level node graph. A
-  // breadcrumb above the canvas lets the user pop back out.
-  const [zoomedNodeId, setZoomedNodeId] = useState<string | null>(null);
-  const zoomedNode = zoomedNodeId
-    ? (nodes.find((n) => n.id === zoomedNodeId) ?? null)
+  const [chipHover, setChipHover] = useState<{
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  // When a node with inner steps is selected, render its step DAG as
+  // a stacked panel beneath the main DAG.
+  const selectedNode = selected
+    ? (nodes.find((n) => n.id === selected) ?? null)
     : null;
   const nodeW = 168;
   const nodeH = 38;
@@ -2695,218 +2698,247 @@ function DAG({
   }
   const groupFrameByName = new Map(groupFrames.map((g) => [g.name, g]));
 
-  if (zoomedNode) {
-    return (
-      <StepDag
-        node={zoomedNode}
-        nodeW={nodeW}
-        nodeH={nodeH}
-        colGap={colGap}
-        rowGap={rowGap}
-        padX={padX}
-        padY={padY}
-        onBack={() => setZoomedNodeId(null)}
-      />
-    );
-  }
+  const stackedStepNode =
+    selectedNode && (selectedNode.work?.steps?.length ?? 0) > 0
+      ? selectedNode
+      : null;
 
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto">
-      <svg
-        width={width}
-        height={height}
-        style={{ minWidth: width, display: "block" }}
-      >
-        <defs>
-          {/* Rainbow gradient for the DYNAMIC pill. Stops mirror the
+    <div className="flex flex-col gap-2">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto">
+        <svg
+          width={width}
+          height={height}
+          style={{ minWidth: width, display: "block" }}
+        >
+          <defs>
+            {/* Rainbow gradient for the DYNAMIC pill. Stops mirror the
               subset of `nodePalette` hues the terminal renderer uses
               for its rainbow-letter [dynamic] tag -- keeps the two
               surfaces visually linked. */}
-          <linearGradient id="dynamic-pill-grad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#ffaf00" />
-            <stop offset="20%" stopColor="#87d7ff" />
-            <stop offset="40%" stopColor="#87d787" />
-            <stop offset="60%" stopColor="#ff87d7" />
-            <stop offset="80%" stopColor="#ff8700" />
-            <stop offset="100%" stopColor="#af87d7" />
-          </linearGradient>
-        </defs>
-        {groupFrames.map((g) => (
-          <g key={`group-${g.name}`}>
-            <rect
-              x={g.x}
-              y={g.y}
-              width={g.w}
-              height={g.h}
-              rx={8}
-              ry={8}
-              fill="rgba(56,189,248,0.05)"
-              stroke="rgba(56,189,248,0.55)"
-              strokeWidth={1.25}
-              strokeDasharray="5 3"
-            />
-            <text
-              x={g.x + 10}
-              y={g.y + 12}
-              fill="rgba(165,243,252,0.95)"
-              fontSize={11}
-              fontWeight="bold"
-              fontFamily="ui-monospace, monospace"
-            >
-              {g.name}
-            </text>
-          </g>
-        ))}
-        {edges.map((e, i) => {
-          const a = pos.get(e.src);
-          if (!a) return null;
-          const x1 = a.x + a.w;
-          const y1 = a.y + nodeH / 2;
-          let x2: number, y2: number, color: string, dashed: boolean;
-          if (e.kind === "group") {
-            const frame = groupFrameByName.get(e.groupName);
-            if (!frame) return null;
-            x2 = frame.x;
-            y2 = frame.y + frame.h / 2;
-            color = dagEdgeColor(e.sampleDstStatus);
-            dashed = false;
-          } else {
-            const b = pos.get(e.dst);
-            if (!b) return null;
-            x2 = b.x;
-            y2 = b.y + nodeH / 2;
-            color = e.onFailure
-              ? "rgba(248,113,113,0.55)"
-              : dagEdgeColor(byID.get(e.dst));
-            dashed = !!e.onFailure;
-          }
-          const dx = Math.max(32, (x2 - x1) * 0.4);
-          return (
-            <path
-              key={i}
-              d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
-              fill="none"
-              stroke={color}
-              strokeWidth="1.5"
-              strokeDasharray={dashed ? "5 4" : undefined}
-            />
-          );
-        })}
-        {nodes.map((n) => {
-          const p = pos.get(n.id);
-          if (!p) return null;
-          const isSel = selected === n.id;
-          const { fill, border } = dagNodeColors(n, isSel);
-          const hasSteps = (n.work?.steps?.length ?? 0) > 0;
-          return (
-            <g
-              key={n.id}
-              transform={`translate(${p.x}, ${p.y})`}
-              onMouseEnter={(e) =>
-                setHover({ node: n, x: e.clientX, y: e.clientY })
-              }
-              onMouseMove={(e) =>
-                setHover((prev) =>
-                  prev && prev.node.id === n.id
-                    ? { node: n, x: e.clientX, y: e.clientY }
-                    : prev,
-                )
-              }
-              onMouseLeave={() =>
-                setHover((prev) =>
-                  prev && prev.node.id === n.id ? null : prev,
-                )
-              }
-            >
+            <linearGradient id="dynamic-pill-grad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#ffaf00" />
+              <stop offset="20%" stopColor="#87d7ff" />
+              <stop offset="40%" stopColor="#87d787" />
+              <stop offset="60%" stopColor="#ff87d7" />
+              <stop offset="80%" stopColor="#ff8700" />
+              <stop offset="100%" stopColor="#af87d7" />
+            </linearGradient>
+          </defs>
+          {groupFrames.map((g) => (
+            <g key={`group-${g.name}`}>
               <rect
-                width={p.w}
-                height={nodeH}
-                rx={6}
-                ry={6}
-                fill={fill}
-                stroke={border}
-                strokeWidth={isSel ? 2 : 1}
+                x={g.x}
+                y={g.y}
+                width={g.w}
+                height={g.h}
+                rx={8}
+                ry={8}
+                fill="rgba(56,189,248,0.05)"
+                stroke="rgba(56,189,248,0.55)"
+                strokeWidth={1.25}
+                strokeDasharray="5 3"
               />
-              <g onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }}>
-                <rect width={p.w} height={nodeH} fill="transparent" />
-                <circle
-                  cx={14}
-                  cy={nodeH / 2}
-                  r={4}
-                  className={dagStatusClass(n)}
-                />
-                <text
-                  x={26}
-                  y={nodeH / 2 + 4}
-                  fill="currentColor"
-                  fontSize={11}
-                  fontFamily="ui-monospace, monospace"
-                >
-                  {n.id}
-                </text>
-              </g>
               <text
-                x={
-                  p.w -
-                  (hasSteps
-                    ? 14 + zoomChipWidth(n.work?.steps?.length ?? 0)
-                    : 8)
-                }
-                y={nodeH / 2 + 4}
-                textAnchor="end"
-                fill="rgba(148,163,184,0.8)"
-                fontSize={10}
+                x={g.x + 10}
+                y={g.y + 12}
+                fill="rgba(165,243,252,0.95)"
+                fontSize={11}
+                fontWeight="bold"
                 fontFamily="ui-monospace, monospace"
               >
-                {fmtMs(nodeDuration(n))}
+                {g.name}
               </text>
-              {hasSteps &&
-                (() => {
-                  const stepCount = n.work?.steps?.length ?? 0;
-                  const label = `${stepCount}⤢`;
-                  const chipW = 12 + label.length * 6;
-                  return (
-                    <g
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setZoomedNodeId(n.id);
-                      }}
-                      style={{ cursor: "zoom-in" }}
-                    >
-                      <title>{`zoom into ${stepCount} step${stepCount === 1 ? "" : "s"}`}</title>
-                      <rect
-                        x={p.w - 6 - chipW}
-                        y={nodeH / 2 - 8}
-                        width={chipW}
-                        height={16}
-                        rx={3}
-                        ry={3}
-                        fill="rgba(148,163,184,0.12)"
-                        stroke="rgba(148,163,184,0.4)"
-                      />
-                      <text
-                        x={p.w - 6 - chipW / 2}
-                        y={nodeH / 2 + 4}
-                        textAnchor="middle"
-                        fill="rgba(203,213,225,0.95)"
-                        fontSize={10}
-                        fontFamily="ui-monospace, monospace"
-                      >
-                        {label}
-                      </text>
-                    </g>
-                  );
-                })()}
-              {n.dynamic && <DynamicPill nodeW={p.w} />}
-              {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
-              {n.outcome === "cached" && !n.approval && (
-                <CachedPill nodeW={p.w} />
-              )}
             </g>
-          );
-        })}
-      </svg>
-      {hover && <DagNodeTooltip node={hover.node} x={hover.x} y={hover.y} />}
+          ))}
+          {edges.map((e, i) => {
+            const a = pos.get(e.src);
+            if (!a) return null;
+            const x1 = a.x + a.w;
+            const y1 = a.y + nodeH / 2;
+            let x2: number, y2: number, color: string, dashed: boolean;
+            if (e.kind === "group") {
+              const frame = groupFrameByName.get(e.groupName);
+              if (!frame) return null;
+              x2 = frame.x;
+              y2 = frame.y + frame.h / 2;
+              color = dagEdgeColor(e.sampleDstStatus);
+              dashed = false;
+            } else {
+              const b = pos.get(e.dst);
+              if (!b) return null;
+              x2 = b.x;
+              y2 = b.y + nodeH / 2;
+              color = e.onFailure
+                ? "rgba(248,113,113,0.55)"
+                : dagEdgeColor(byID.get(e.dst));
+              dashed = !!e.onFailure;
+            }
+            const dx = Math.max(32, (x2 - x1) * 0.4);
+            return (
+              <path
+                key={i}
+                d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
+                fill="none"
+                stroke={color}
+                strokeWidth="1.5"
+                strokeDasharray={dashed ? "5 4" : undefined}
+              />
+            );
+          })}
+          {nodes.map((n) => {
+            const p = pos.get(n.id);
+            if (!p) return null;
+            const isSel = selected === n.id;
+            const { fill, border } = dagNodeColors(n, isSel);
+            const hasSteps = (n.work?.steps?.length ?? 0) > 0;
+            return (
+              <g
+                key={n.id}
+                transform={`translate(${p.x}, ${p.y})`}
+                onMouseEnter={(e) =>
+                  setHover({ node: n, x: e.clientX, y: e.clientY })
+                }
+                onMouseMove={(e) =>
+                  setHover((prev) =>
+                    prev && prev.node.id === n.id
+                      ? { node: n, x: e.clientX, y: e.clientY }
+                      : prev,
+                  )
+                }
+                onMouseLeave={() =>
+                  setHover((prev) =>
+                    prev && prev.node.id === n.id ? null : prev,
+                  )
+                }
+              >
+                <rect
+                  width={p.w}
+                  height={nodeH}
+                  rx={6}
+                  ry={6}
+                  fill={fill}
+                  stroke={border}
+                  strokeWidth={isSel ? 2 : 1}
+                />
+                <g onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }}>
+                  <rect width={p.w} height={nodeH} fill="transparent" />
+                  <circle
+                    cx={14}
+                    cy={nodeH / 2}
+                    r={4}
+                    className={dagStatusClass(n)}
+                  />
+                  <text
+                    x={26}
+                    y={nodeH / 2 + 4}
+                    fill="currentColor"
+                    fontSize={11}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    {n.id}
+                  </text>
+                </g>
+                <text
+                  x={
+                    p.w -
+                    (hasSteps
+                      ? 14 + zoomChipWidth(n.work?.steps?.length ?? 0)
+                      : 8)
+                  }
+                  y={nodeH / 2 + 4}
+                  textAnchor="end"
+                  fill="rgba(148,163,184,0.8)"
+                  fontSize={10}
+                  fontFamily="ui-monospace, monospace"
+                >
+                  {fmtMs(nodeDuration(n))}
+                </text>
+                {hasSteps &&
+                  (() => {
+                    const stepCount = n.work?.steps?.length ?? 0;
+                    const label = `${stepCount}`;
+                    const chipW = Math.max(20, 10 + label.length * 7);
+                    const tipText = `${stepCount} step${stepCount === 1 ? "" : "s"} · select node to view`;
+                    return (
+                      <g
+                        onClick={() => onSelect(n.id)}
+                        onMouseEnter={(e) =>
+                          setChipHover({
+                            text: tipText,
+                            x: e.clientX,
+                            y: e.clientY,
+                          })
+                        }
+                        onMouseMove={(e) =>
+                          setChipHover({
+                            text: tipText,
+                            x: e.clientX,
+                            y: e.clientY,
+                          })
+                        }
+                        onMouseLeave={() => setChipHover(null)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <rect
+                          x={p.w - 6 - chipW}
+                          y={nodeH / 2 - 8}
+                          width={chipW}
+                          height={16}
+                          rx={3}
+                          ry={3}
+                          fill="rgba(148,163,184,0.18)"
+                          stroke="rgba(148,163,184,0.55)"
+                        />
+                        <text
+                          x={p.w - 6 - chipW / 2}
+                          y={nodeH / 2 + 4}
+                          textAnchor="middle"
+                          fill="rgba(203,213,225,0.95)"
+                          fontSize={11}
+                          fontFamily="ui-monospace, monospace"
+                        >
+                          {label}
+                        </text>
+                      </g>
+                    );
+                  })()}
+                {n.dynamic && <DynamicPill nodeW={p.w} />}
+                {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
+                {n.outcome === "cached" && !n.approval && (
+                  <CachedPill nodeW={p.w} />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+        {hover && <DagNodeTooltip node={hover.node} x={hover.x} y={hover.y} />}
+        {chipHover && (
+          <div
+            style={{
+              position: "fixed",
+              top: chipHover.y + 14,
+              left: chipHover.x + 14,
+              zIndex: 100,
+              pointerEvents: "none",
+            }}
+            className="bg-[#1e293b] border border-[var(--border)] rounded px-2 py-1 text-[10px] font-mono text-[var(--foreground)] shadow-lg"
+          >
+            {chipHover.text}
+          </div>
+        )}
+      </div>
+      {stackedStepNode && (
+        <StepDag
+          node={stackedStepNode}
+          nodeW={nodeW}
+          nodeH={nodeH}
+          colGap={colGap}
+          rowGap={rowGap}
+          padX={padX}
+          padY={padY}
+        />
+      )}
     </div>
   );
 }
@@ -2937,7 +2969,7 @@ function StepDag({
   rowGap: number;
   padX: number;
   padY: number;
-  onBack: () => void;
+  onBack?: () => void;
 }) {
   const steps = node.work?.steps ?? [];
   const byId = new Map(steps.map((s) => [s.id, s]));
@@ -2984,12 +3016,17 @@ function StepDag({
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto">
       <div className="flex items-center gap-2 px-1 pb-2 text-xs">
-        <button
-          onClick={onBack}
-          className="px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] transition-colors"
-        >
-          ← back to run
-        </button>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] transition-colors"
+          >
+            ← back to run
+          </button>
+        )}
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+          Steps
+        </span>
         <span className="text-[var(--muted)]">/</span>
         <span className="font-mono text-violet-300">{node.id}</span>
         <span className="text-[var(--muted)]">
