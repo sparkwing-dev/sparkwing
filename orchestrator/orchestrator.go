@@ -759,6 +759,35 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 		if srcs := plan.GroupSourceIDs(n.ID()); len(srcs) > 0 {
 			row["group_deps"] = srcs
 		}
+		if w := n.Work(); w != nil {
+			workSteps := w.Steps()
+			// Suppress the synthetic single "run" step that single-
+			// closure Jobs produce -- the node line already conveys
+			// everything in that case.
+			if !(len(workSteps) == 1 && workSteps[0].ID() == "run") {
+				groupByStep := map[string][]string{}
+				for _, g := range w.Groups() {
+					if g.Name() == "" {
+						continue
+					}
+					for _, m := range g.Members() {
+						groupByStep[m.ID()] = append(groupByStep[m.ID()], g.Name())
+					}
+				}
+				stepRows := make([]map[string]any, 0, len(workSteps))
+				for _, s := range workSteps {
+					sr := map[string]any{"id": s.ID()}
+					if deps := s.DepIDs(); len(deps) > 0 {
+						sr["deps"] = deps
+					}
+					if gs := groupByStep[s.ID()]; len(gs) > 0 {
+						sr["groups"] = gs
+					}
+					stepRows = append(stepRows, sr)
+				}
+				row["steps"] = stepRows
+			}
+		}
 		rows = append(rows, row)
 	}
 	delegate.Emit(sparkwing.LogRecord{

@@ -411,6 +411,11 @@ func (p *PrettyRenderer) levelize(level, msg string) string {
 // writePlan renders the DAG as a topologically-sorted node list.
 func (p *PrettyRenderer) writePlan(w io.Writer, rec sparkwing.LogRecord) {
 	raw, _ := rec.Attrs["nodes"].([]any)
+	type stepRow struct {
+		id     string
+		deps   []string
+		groups []string
+	}
 	type node struct {
 		id        string
 		deps      []string
@@ -419,6 +424,7 @@ func (p *PrettyRenderer) writePlan(w io.Writer, rec sparkwing.LogRecord) {
 		dynamic   bool
 		approval  bool
 		groups    []string
+		steps     []stepRow
 	}
 	byID := make(map[string]*node, len(raw))
 	order := make([]*node, 0, len(raw))
@@ -465,7 +471,46 @@ func (p *PrettyRenderer) writePlan(w io.Writer, rec sparkwing.LogRecord) {
 				}
 			}
 		}
-		n := &node{id: id, deps: deps, groupDeps: groupDeps, inline: inline, dynamic: dynamic, approval: approval, groups: groups}
+		// run_plan delivers `steps` as []map[string]any in-process and
+		// as []any post-JSON-roundtrip; accept both shapes.
+		var rawSteps []map[string]any
+		switch v := m["steps"].(type) {
+		case []map[string]any:
+			rawSteps = v
+		case []any:
+			for _, x := range v {
+				if sm, ok := x.(map[string]any); ok {
+					rawSteps = append(rawSteps, sm)
+				}
+			}
+		}
+		var steps []stepRow
+		for _, sm := range rawSteps {
+			sid, _ := sm["id"].(string)
+			sr := stepRow{id: sid}
+			switch d := sm["deps"].(type) {
+			case []string:
+				sr.deps = append(sr.deps, d...)
+			case []any:
+				for _, x := range d {
+					if s, ok := x.(string); ok {
+						sr.deps = append(sr.deps, s)
+					}
+				}
+			}
+			switch g := sm["groups"].(type) {
+			case []string:
+				sr.groups = append(sr.groups, g...)
+			case []any:
+				for _, x := range g {
+					if s, ok := x.(string); ok {
+						sr.groups = append(sr.groups, s)
+					}
+				}
+			}
+			steps = append(steps, sr)
+		}
+		n := &node{id: id, deps: deps, groupDeps: groupDeps, inline: inline, dynamic: dynamic, approval: approval, groups: groups, steps: steps}
 		byID[id] = n
 		order = append(order, n)
 	}
@@ -555,6 +600,29 @@ func (p *PrettyRenderer) writePlan(w io.Writer, rec sparkwing.LogRecord) {
 			tags += "  " + p.color("(group: "+strings.Join(n.groups, ",")+")", ansiDim)
 		}
 		fmt.Fprintln(w, "  "+p.color("●", p.hueFor(n.id))+" "+name+arrow+tags)
+		if len(n.steps) > 0 {
+			stepMaxName := 0
+			for _, s := range n.steps {
+				stepMaxName = max(stepMaxName, len(s.id))
+			}
+			stepMaxName = min(stepMaxName, 40)
+			for _, s := range n.steps {
+				sname := p.color(fmt.Sprintf("%-*s", stepMaxName, s.id), p.hueFor(n.id))
+				var sarrow string
+				if len(s.deps) > 0 {
+					deps := make([]string, len(s.deps))
+					for i, d := range s.deps {
+						deps[i] = p.color(d, p.hueFor(n.id))
+					}
+					sarrow = "  " + p.color("←", ansiDim) + " " + strings.Join(deps, p.color(", ", ansiDim))
+				}
+				var stags string
+				if len(s.groups) > 0 {
+					stags += "  " + p.color("(group: "+strings.Join(s.groups, ",")+")", ansiDim)
+				}
+				fmt.Fprintln(w, "    "+p.color("└", ansiDim)+" "+sname+sarrow+stags)
+			}
+		}
 	}
 }
 
