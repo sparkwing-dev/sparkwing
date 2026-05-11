@@ -364,7 +364,25 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
     cache: "no-store",
   });
   if (!res.ok) return null;
-  return res.json();
+  const body = (await res.json()) as RunDetail;
+  // The server nests plan-snapshot adornments under `decorations` to
+  // keep the core Node row lean. Flatten them onto the Node so the
+  // dashboard's existing readers (n.work / n.modifiers / n.groups /
+  // n.dynamic / n.approval / n.on_failure_of) keep working.
+  if (body && Array.isArray(body.nodes)) {
+    for (const n of body.nodes) {
+      const dec = (n as Node & { decorations?: Partial<Node> }).decorations;
+      if (!dec) continue;
+      if (dec.work && !n.work) n.work = dec.work;
+      if (dec.modifiers && !n.modifiers) n.modifiers = dec.modifiers;
+      if (dec.groups && !n.groups) n.groups = dec.groups;
+      if (dec.dynamic && n.dynamic == null) n.dynamic = dec.dynamic;
+      if (dec.approval && n.approval == null) n.approval = dec.approval;
+      if (dec.on_failure_of && !n.on_failure_of)
+        n.on_failure_of = dec.on_failure_of;
+    }
+  }
+  return body;
 }
 
 // Log fetchers ask the server for raw NDJSON so the dashboard's
