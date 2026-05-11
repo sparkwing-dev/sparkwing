@@ -2466,7 +2466,7 @@ function DAG({
   const colGap = 64;
   const rowGap = 14;
   const padX = 12;
-  const padY = 12;
+  const padY = 24;
   const nodeHeight = () => nodeH;
 
   const byID = new Map(nodes.map((n) => [n.id, n]));
