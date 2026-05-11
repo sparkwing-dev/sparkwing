@@ -3086,30 +3086,57 @@ function StepDag({
                 >
                   {truncate(s.id, 20)}
                 </text>
-                {s.is_result && (
-                  <text
-                    x={nodeW - 8}
-                    y={nodeH / 2 + 4}
-                    textAnchor="end"
-                    fill="rgba(34,197,94,0.9)"
-                    fontSize={10}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    ★ result
-                  </text>
-                )}
-                {s.has_skip_if && (
-                  <text
-                    x={nodeW - 8}
-                    y={nodeH / 2 + 4}
-                    textAnchor="end"
-                    fill="rgba(251,191,36,0.9)"
-                    fontSize={10}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    skipIf
-                  </text>
-                )}
+                {(() => {
+                  // Edge badges, stacked along the top edge. Result
+                  // pill sits rightmost; skipIf to its left when both
+                  // are present.
+                  const badges: {
+                    label: string;
+                    bg: string;
+                    fg: string;
+                  }[] = [];
+                  if (s.is_result)
+                    badges.push({
+                      label: "★ result",
+                      bg: "rgba(34,197,94,0.18)",
+                      fg: "rgba(34,197,94,0.95)",
+                    });
+                  if (s.has_skip_if)
+                    badges.push({
+                      label: "skipIf",
+                      bg: "rgba(251,191,36,0.18)",
+                      fg: "rgba(251,191,36,0.95)",
+                    });
+                  let rightEdge = nodeW - 6;
+                  return badges.map((b, bi) => {
+                    const w = 10 + b.label.length * 6;
+                    rightEdge -= w + (bi > 0 ? 4 : 0);
+                    const x = rightEdge;
+                    return (
+                      <g key={b.label} transform={`translate(${x}, -7)`}>
+                        <rect
+                          width={w}
+                          height={13}
+                          rx={3}
+                          ry={3}
+                          fill={b.bg}
+                          stroke={b.fg}
+                          strokeOpacity={0.45}
+                        />
+                        <text
+                          x={w / 2}
+                          y={9}
+                          textAnchor="middle"
+                          fill={b.fg}
+                          fontSize={9}
+                          fontFamily="ui-monospace, monospace"
+                        >
+                          {b.label}
+                        </text>
+                      </g>
+                    );
+                  });
+                })()}
               </g>
             );
           })}
