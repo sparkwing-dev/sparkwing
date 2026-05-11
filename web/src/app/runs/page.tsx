@@ -1796,13 +1796,79 @@ function SingleNodeLogs({ run, node }: { run: Run; node: RunNode }) {
       </div>
     );
   }
-  if (node.status === "approval_pending") {
-    return <StreamingLogs runID={run.id} nodeID={node.id} />;
+  const body =
+    node.status === "approval_pending" || !node.finished_at ? (
+      <StreamingLogs runID={run.id} nodeID={node.id} />
+    ) : (
+      <StoredLogs runID={run.id} nodeID={node.id} />
+    );
+  return (
+    <div className="flex flex-col gap-2">
+      <NodeLogSummary node={node} />
+      {body}
+    </div>
+  );
+}
+
+// NodeLogSummary shows a one-or-two-line, glanceable block above the
+// step list: outcome, failure reason / error message, exit code,
+// duration. Hidden entirely when there's nothing useful to add
+// beyond a plain "success".
+function NodeLogSummary({ node }: { node: RunNode }) {
+  const outcome = node.outcome || node.status;
+  const isFailed =
+    outcome === "failed" || node.status === "failed" || !!node.error;
+  const isRunning = !node.finished_at && node.status !== "pending";
+  // Plain success: skip the block entirely so it doesn't add noise.
+  if (!isFailed && !isRunning && !node.failure_reason && !node.error) {
+    return null;
   }
-  if (!node.finished_at) {
-    return <StreamingLogs runID={run.id} nodeID={node.id} />;
-  }
-  return <StoredLogs runID={run.id} nodeID={node.id} />;
+  const tone = isFailed
+    ? "border-red-500/40 bg-red-500/5"
+    : isRunning
+      ? "border-indigo-500/40 bg-indigo-500/5"
+      : "border-[var(--border)] bg-[#161b22]";
+  const labelTone = isFailed
+    ? "text-red-300"
+    : isRunning
+      ? "text-indigo-300"
+      : "text-[var(--muted)]";
+  return (
+    <div className={`border rounded-lg p-2 text-xs ${tone}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className={`uppercase tracking-wider font-bold text-[10px] ${labelTone}`}
+        >
+          {outcome}
+        </span>
+        {node.failure_reason && (
+          <span className="font-mono text-[10px] text-red-300/80">
+            {node.failure_reason}
+          </span>
+        )}
+        {typeof node.exit_code === "number" && node.exit_code !== 0 && (
+          <span className="font-mono text-[10px] text-[var(--muted)]">
+            exit {node.exit_code}
+          </span>
+        )}
+        {node.duration_ms > 0 && (
+          <span className="font-mono text-[10px] text-[var(--muted)] ml-auto">
+            {fmtMs(node.duration_ms)}
+          </span>
+        )}
+      </div>
+      {node.error && (
+        <div className="mt-1 font-mono text-[11px] text-red-300/90 whitespace-pre-wrap break-words">
+          {node.error}
+        </div>
+      )}
+      {!node.error && node.status_detail && (
+        <div className="mt-1 font-mono text-[11px] text-[var(--muted)] whitespace-pre-wrap break-words">
+          {node.status_detail}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // AllNodesLogs renders one collapsible block per node. Expanding a
