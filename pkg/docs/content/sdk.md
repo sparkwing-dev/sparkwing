@@ -235,7 +235,15 @@ Info(ctx, format, args...)                // info-level log on the current node
 Warn(ctx, format, args...)                // warn-level log
 Error(ctx, format, args...)               // error-level log
 Debug(ctx, format, args...)               // only when SPARKWING_DEBUG=1
+Annotate(ctx, msg)                        // persistent node-level summary
 ```
+
+`Annotate` differs from the four log helpers: the message is appended
+to a persistent `annotations` list on the Node row instead of (only)
+appearing in the run log. The dashboard surfaces these summaries
+next to the node so operators see "processed 1,234 records · 12
+failed" without opening the log view. Multiple calls per node
+accumulate; calls outside a node context are a silent no-op.
 
 Per-level methods only -- the level lives in the verb name, no
 level-as-string arg. Same printf-style format-args contract across
@@ -454,10 +462,10 @@ dispatch then picks one of three paths:
   where authoring a separate dry-run shim would be redundant.
 - Neither declared -> the step soft-skips with `step_skipped` /
   `skip_reason: no_dry_run_defined`. Existing pipelines keep working
-  under `--dry-run` while the contract gap is visible in run logs;
-  A future change will tighten this to a hard refusal when paired with
-  blast-radius markers (`Destructive()`, `AffectsProduction()`,
-  `CostsMoney()`).
+  under `--dry-run` while the contract gap is visible in run logs.
+  When paired with blast-radius markers (`Destructive()`,
+  `AffectsProduction()`, `CostsMoney()`), this soft-skip tightens
+  to a hard refusal.
 
 For step bodies that need to branch on the mode (e.g. emit a
 structured "would do X" log line for an op without a native

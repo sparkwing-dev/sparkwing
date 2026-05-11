@@ -235,7 +235,15 @@ Info(ctx, format, args...)                // info-level log on the current node
 Warn(ctx, format, args...)                // warn-level log
 Error(ctx, format, args...)               // error-level log
 Debug(ctx, format, args...)               // only when SPARKWING_DEBUG=1
+Annotate(ctx, msg)                        // persistent node-level summary
 ```
+
+`Annotate` differs from the four log helpers: the message is appended
+to a persistent `annotations` list on the Node row instead of (only)
+appearing in the run log. The dashboard surfaces these summaries
+next to the node so operators see "processed 1,234 records · 12
+failed" without opening the log view. Multiple calls per node
+accumulate; calls outside a node context are a silent no-op.
 
 Per-level methods only -- the level lives in the verb name, no
 level-as-string arg. Same printf-style format-args contract across
