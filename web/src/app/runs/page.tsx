@@ -1540,6 +1540,12 @@ function RunDetailPane({
   const hasAnyWork = nodesWithWork.length > 0;
 
   const selectedId = selected?.id ?? null;
+  const tabContentRef = useRef<HTMLDivElement>(null);
+  // Reset scroll position when switching tabs so the new tab opens
+  // at the top, not wherever the previous tab was parked.
+  useEffect(() => {
+    tabContentRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
   const prevSelectedRef = useRef<string | null>(selectedId);
 
   // The previous-selection ref is kept so future routing decisions
@@ -1615,7 +1621,13 @@ function RunDetailPane({
           <button
             key={t.key}
             data-tab-key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => {
+              if (effectiveTab === t.key) {
+                tabContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+              } else {
+                setTab(t.key);
+              }
+            }}
             className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px whitespace-nowrap rounded-t ${
               effectiveTab === t.key
                 ? "border-cyan-400 text-[var(--foreground)]"
@@ -1636,7 +1648,10 @@ function RunDetailPane({
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-[#0d1117] relative">
+      <div
+        ref={tabContentRef}
+        className="flex-1 overflow-y-auto bg-[#0d1117] relative"
+      >
         {effectiveTab === "logs" && (
           <div className="p-4">
             <LogsPane

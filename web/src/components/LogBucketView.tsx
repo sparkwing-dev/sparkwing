@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import {
   type ParsedLog,
   type StepSection,
@@ -119,14 +119,23 @@ function StepBucket({
   section,
   lineOffset,
   maxDurationMs,
+  expanded: expandedProp,
+  onToggle,
 }: {
   section: StepSection;
   lineOffset: number;
   maxDurationMs: number;
+  expanded?: boolean;
+  onToggle?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(
-    section.status === "failed" || section.status === "running",
-  );
+  const defaultExpanded =
+    section.status === "failed" || section.status === "running";
+  const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
+  const expanded = expandedProp ?? localExpanded;
+  const setExpanded = (next: boolean) => {
+    if (onToggle) onToggle();
+    else setLocalExpanded(next);
+  };
   const si = statusIcon[section.status] || statusIcon.running;
   const heading = stepNameFromSection(section);
 
@@ -350,6 +359,36 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
     (s) => s.type === "step",
   ) as StepSection[];
 
+  // Lifted per-step expand state so the header can offer expand/
+  // collapse-all. Map key = step index in parsed.sections.
+  const [stepOverrides, setStepOverrides] = useState<Record<number, boolean>>(
+    {},
+  );
+  const stepIndices = useMemo(
+    () =>
+      parsed.sections
+        .map((s, i) => (s.type === "step" ? i : -1))
+        .filter((i) => i >= 0),
+    [parsed],
+  );
+  const expandAll = () => {
+    const next: Record<number, boolean> = {};
+    for (const i of stepIndices) next[i] = true;
+    setStepOverrides(next);
+  };
+  const collapseAll = () => {
+    const next: Record<number, boolean> = {};
+    for (const i of stepIndices) next[i] = false;
+    setStepOverrides(next);
+  };
+  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollToTop = () => {
+    containerRef.current?.scrollIntoView({
+      block: "start",
+      behavior: "smooth",
+    });
+  };
+
   const allLines = useMemo(
     () => parsed.sections.flatMap((s) => s.lines),
     [parsed],
@@ -369,13 +408,39 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
   let lineOffset = 1;
 
   return (
-    <div className="bg-[#0d1117] border border-[var(--border)] rounded-lg overflow-hidden">
+    <div
+      ref={containerRef}
+      className="bg-[#0d1117] border border-[var(--border)] rounded-lg overflow-hidden"
+    >
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22]">
         <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
         </span>
         <span className="flex-1" />
+        {viewMode === "steps" && steps.length > 0 && (
+          <div className="flex items-center gap-1 text-[10px]">
+            <button
+              onClick={expandAll}
+              className="px-1.5 py-0.5 rounded text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors"
+            >
+              expand all
+            </button>
+            <button
+              onClick={collapseAll}
+              className="px-1.5 py-0.5 rounded text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors"
+            >
+              collapse all
+            </button>
+          </div>
+        )}
+        <button
+          onClick={scrollToTop}
+          title="scroll to top"
+          className="px-1.5 py-0.5 rounded text-[10px] text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors"
+        >
+          ↑ top
+        </button>
         <div className="flex items-center gap-1 text-[10px]">
           <button
             onClick={() => setViewMode("steps")}
@@ -407,12 +472,23 @@ export default function LogBucketView({ parsed, jobId }: LogBucketViewProps) {
           lineOffset += section.lines.length;
 
           if (section.type === "step") {
+            const override = stepOverrides[i];
             return (
               <StepBucket
                 key={i}
                 section={section as StepSection}
                 lineOffset={offset}
                 maxDurationMs={maxDurationMs}
+                expanded={override}
+                onToggle={() =>
+                  setStepOverrides((prev) => {
+                    const cur =
+                      prev[i] ??
+                      ((section as StepSection).status === "failed" ||
+                        (section as StepSection).status === "running");
+                    return { ...prev, [i]: !cur };
+                  })
+                }
               />
             );
           }
