@@ -1713,11 +1713,7 @@ function RunDetailPane({
               onToggle={() => {}}
               inline
             />
-            {selected ? (
-              <SelectedNodePanel node={selected} />
-            ) : (
-              <RunAnnotationsList nodes={nodes} onSelectNode={onSelectNode} />
-            )}
+            <RunAnnotationsList nodes={nodes} onSelectNode={onSelectNode} />
           </div>
         )}
         {effectiveTab === "setup" && (
