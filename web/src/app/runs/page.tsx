@@ -1657,20 +1657,16 @@ function RunDetailPane({
               <AllNodesWork nodes={nodesWithWork} onSelectNode={onSelectNode} />
             </div>
           ))}
-        {effectiveTab === "resources" &&
-          (selected ? (
-            <div className="p-4">
-              <ResourceChart
-                runID={run.id}
-                nodeID={selected.id}
-                isRunning={selectedIsRunning}
-              />
-            </div>
-          ) : (
-            <div className="p-4 text-sm text-[var(--muted)]">
-              Select a node to view its CPU / memory usage over time.
-            </div>
-          ))}
+        {effectiveTab === "resources" && (
+          <div className="p-4">
+            <AllNodesResources
+              run={run}
+              nodes={nodes}
+              focusNode={selected?.id || null}
+              onSelectNode={onSelectNode}
+            />
+          </div>
+        )}
         {effectiveTab === "dag" && (
           <div className="p-4">
             <DAG
@@ -1903,6 +1899,126 @@ function AllNodesLogs({
             {open && (
               <div className="border-t border-[var(--border)] p-2">
                 <SingleNodeLogs run={run} node={n} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// AllNodesResources renders one collapsible block per node with a
+// ResourceChart inside. Selection auto-expands + scrolls just like
+// AllNodesLogs; other sections collapse on selection.
+function AllNodesResources({
+  run,
+  nodes,
+  focusNode,
+  onSelectNode,
+}: {
+  run: Run;
+  nodes: RunNode[];
+  focusNode?: string | null;
+  onSelectNode?: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  useEffect(() => {
+    if (!focusNode) return;
+    setExpanded(new Set([focusNode]));
+    requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-resource-node-id="${focusNode}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [focusNode]);
+  if (nodes.length === 0) {
+    return (
+      <div className="text-sm text-[var(--muted)]">
+        No nodes for this run yet.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
+        <span>All nodes — expand to load CPU / memory over time</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
+            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
+          >
+            expand all
+          </button>
+          <button
+            onClick={() => setExpanded(new Set())}
+            className="hover:text-[var(--foreground)] underline-offset-2 hover:underline"
+          >
+            collapse all
+          </button>
+        </div>
+      </div>
+      {nodes.map((n) => {
+        const open = expanded.has(n.id);
+        const dur = nodeDuration(n);
+        const isFocus = focusNode === n.id;
+        const isRunning = !n.finished_at && n.status !== "pending";
+        return (
+          <div
+            key={n.id}
+            data-resource-node-id={n.id}
+            className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"}`}
+          >
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <button
+                onClick={() => toggle(n.id)}
+                className="text-[var(--muted)] w-3 text-center text-xs"
+              >
+                {open ? "▾" : "▸"}
+              </button>
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+              />
+              <button
+                onClick={() => toggle(n.id)}
+                className="font-mono text-xs text-left truncate flex-1 hover:underline"
+                title={n.id}
+              >
+                {n.id}
+              </button>
+              <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
+                {n.outcome || n.status}
+              </span>
+              {dur > 0 && (
+                <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
+                  {fmtMs(dur)}
+                </span>
+              )}
+              {onSelectNode && (
+                <button
+                  onClick={() => onSelectNode(n.id)}
+                  title="open this node"
+                  className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] underline-offset-2 hover:underline shrink-0"
+                >
+                  open
+                </button>
+              )}
+            </div>
+            {open && (
+              <div className="border-t border-[var(--border)] p-2">
+                <ResourceChart
+                  runID={run.id}
+                  nodeID={n.id}
+                  isRunning={isRunning}
+                />
               </div>
             )}
           </div>
