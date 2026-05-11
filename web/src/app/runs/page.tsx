@@ -1018,15 +1018,18 @@ function NodesList({
   // failed; collapsed once every child succeeded. The user can
   // override either way by clicking the header; we track that as an
   // explicit toggle so auto-collapse doesn't fight them.
-  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  // Groups default to expanded so every node is visible without
+  // hunting; the user can collapse one explicitly via the header
+  // chevron. Tracked as a Set so the default state is "open".
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    new Set(),
+  );
   const toggle = (g: string) =>
-    setOverrides((prev) => {
-      const agg = aggregateGroupStatus(
-        groups.find((x) => x.group === g)?.nodes || [],
-      );
-      const defaultCollapsed = agg === "success";
-      const current = prev[g] ?? defaultCollapsed;
-      return { ...prev, [g]: !current };
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g);
+      else next.add(g);
+      return next;
     });
 
   return (
@@ -1047,34 +1050,57 @@ function NodesList({
           ));
         }
         const agg = aggregateGroupStatus(children);
-        const defaultCollapsed = agg === "success";
-        const collapsed = overrides[group] ?? defaultCollapsed;
+        const collapsed = collapsedGroups.has(group);
+        const accent = groupAccentClass(group);
         return (
-          <div key={group}>
+          <div key={group} className="relative">
             <GroupHeader
               name={group}
               agg={agg}
               count={children.length}
               collapsed={collapsed}
               onToggle={() => toggle(group)}
+              accentClass={accent}
             />
-            {!collapsed &&
-              children.map((n) => (
-                <NodeRow
-                  key={n.id}
-                  n={n}
-                  selected={selectedNode === n.id}
-                  focused={focusedNode === n.id}
-                  focusedColumnActive={focusedColumnActive}
-                  indent
-                  onSelect={onSelect}
+            {!collapsed && (
+              <div className="relative">
+                <span
+                  className={`absolute left-1.5 top-0 bottom-0 w-0.5 rounded ${accent}`}
                 />
-              ))}
+                {children.map((n) => (
+                  <NodeRow
+                    key={n.id}
+                    n={n}
+                    selected={selectedNode === n.id}
+                    focused={focusedNode === n.id}
+                    focusedColumnActive={focusedColumnActive}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
     </>
   );
+}
+
+// groupAccentClass picks a stable Tailwind background class for the
+// vertical bar marking nodes in a group. Hashes by group name so the
+// same group keeps the same color across renders.
+function groupAccentClass(name: string): string {
+  const palette = [
+    "bg-cyan-400/70",
+    "bg-amber-400/70",
+    "bg-pink-400/70",
+    "bg-emerald-400/70",
+    "bg-violet-400/70",
+    "bg-sky-400/70",
+  ];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
 }
 
 function GroupHeader({
@@ -1083,25 +1109,34 @@ function GroupHeader({
   count,
   collapsed,
   onToggle,
+  accentClass,
 }: {
   name: string;
   agg: GroupAgg;
   count: number;
   collapsed: boolean;
   onToggle: () => void;
+  accentClass?: string;
 }) {
   return (
     <button
       onClick={onToggle}
-      className="w-full flex items-center gap-2 px-3 py-2 border-b border-[var(--border)] text-left hover:bg-[var(--surface-raised)] transition-colors"
+      className="relative w-full flex items-center gap-2 px-3 py-2 border-b border-[var(--border)] text-left hover:bg-[var(--surface-raised)] transition-colors"
     >
+      {accentClass && (
+        <span
+          className={`absolute left-1.5 top-1 bottom-1 w-0.5 rounded ${accentClass}`}
+        />
+      )}
       <span className="w-3 text-center text-[var(--muted)] text-[10px]">
         {collapsed ? "▸" : "▾"}
       </span>
       <Tooltip content={`${agg} (${count} node${count === 1 ? "" : "s"})`}>
         <span className={`w-2 h-2 rounded-full shrink-0 ${statusDot(agg)}`} />
       </Tooltip>
-      <span className="text-xs text-[var(--muted)] truncate">({name})</span>
+      <span className="text-xs text-[var(--foreground)] truncate font-semibold">
+        {name}
+      </span>
       <span className="ml-auto text-[10px] font-mono text-[var(--muted)] shrink-0">
         {count}
       </span>
@@ -2415,98 +2450,20 @@ function DAG({
     x: number;
     y: number;
   } | null>(null);
-  const [expandedDagNodes, setExpandedDagNodes] = useState<Set<string>>(
-    new Set(),
-  );
-  const toggleExpanded = (id: string) =>
-    setExpandedDagNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Zoomed-in node: when set, the DAG canvas swaps to show that
+  // node's inner step DAG instead of the run-level node graph. A
+  // breadcrumb above the canvas lets the user pop back out.
+  const [zoomedNodeId, setZoomedNodeId] = useState<string | null>(null);
+  const zoomedNode = zoomedNodeId
+    ? (nodes.find((n) => n.id === zoomedNodeId) ?? null)
+    : null;
   const nodeW = 168;
   const nodeH = 38;
   const colGap = 64;
   const rowGap = 14;
   const padX = 12;
   const padY = 12;
-  // Inner step DAG dims, used when a node is expanded.
-  const stepW = 88;
-  const stepH = 18;
-  const stepColGap = 16;
-  const stepRowGap = 6;
-  const innerPadX = 10;
-  const innerPadY = 6;
-
-  // Lay out a single node's work.steps using the same column-by-deps
-  // algorithm as the outer DAG, scaled down. Returns positions
-  // (relative to inner origin), total width and height.
-  function layoutSteps(work: { steps?: NodeWorkStep[] } | undefined): {
-    positions: Map<string, { x: number; y: number }>;
-    width: number;
-    height: number;
-  } {
-    const steps = work?.steps || [];
-    if (steps.length === 0)
-      return { positions: new Map(), width: 0, height: 0 };
-    const byId = new Map(steps.map((s) => [s.id, s]));
-    const lvl = new Map<string, number>();
-    const resolve = (id: string): number => {
-      const cached = lvl.get(id);
-      if (cached !== undefined) return cached;
-      const s = byId.get(id);
-      if (!s || !s.needs || s.needs.length === 0) {
-        lvl.set(id, 0);
-        return 0;
-      }
-      lvl.set(id, 0);
-      let l = 0;
-      for (const d of s.needs) if (byId.has(d)) l = Math.max(l, resolve(d) + 1);
-      lvl.set(id, l);
-      return l;
-    };
-    for (const s of steps) resolve(s.id);
-    const cols: NodeWorkStep[][] = [];
-    for (const s of steps) {
-      const l = lvl.get(s.id) ?? 0;
-      if (!cols[l]) cols[l] = [];
-      cols[l].push(s);
-    }
-    const positions = new Map<string, { x: number; y: number }>();
-    cols.forEach((col, ci) => {
-      if (!col) return;
-      col.forEach((s, ri) => {
-        positions.set(s.id, {
-          x: innerPadX + ci * (stepW + stepColGap),
-          y: innerPadY + ri * (stepH + stepRowGap) + 18, // 18 for header
-        });
-      });
-    });
-    const width =
-      innerPadX * 2 +
-      Math.max(1, cols.length) * stepW +
-      Math.max(0, cols.length - 1) * stepColGap;
-    const tallest = Math.max(0, ...cols.map((c) => (c ? c.length : 0)));
-    const height = innerPadY * 2 + tallest * (stepH + stepRowGap) + 22;
-    return { positions, width, height };
-  }
-  const innerLayouts = useMemo(() => {
-    const m = new Map<string, ReturnType<typeof layoutSteps>>();
-    for (const n of nodes) {
-      if (!expandedDagNodes.has(n.id)) continue;
-      if (!n.work?.steps?.length) continue;
-      m.set(n.id, layoutSteps(n.work));
-    }
-    return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, expandedDagNodes]);
-  const nodeHeight = (n: RunNode) => {
-    if (!expandedDagNodes.has(n.id)) return nodeH;
-    const inner = innerLayouts.get(n.id);
-    if (!inner) return nodeH;
-    return nodeH + inner.height + 4;
-  };
+  const nodeHeight = () => nodeH;
 
   const byID = new Map(nodes.map((n) => [n.id, n]));
   // Treat `on_failure_of` as a virtual dep for column placement: a
@@ -2577,7 +2534,7 @@ function DAG({
         x: padX + ci * (nodeW + colGap),
         y,
       });
-      y += nodeHeight(n) + rowGap;
+      y += nodeH + rowGap;
     });
     columnHeights[ci] = y;
   });
@@ -2634,7 +2591,7 @@ function DAG({
       if (p.x < minX) minX = p.x;
       if (p.y < minY) minY = p.y;
       if (p.x + nodeW > maxX) maxX = p.x + nodeW;
-      if (p.y + nodeHeight(m) > maxY) maxY = p.y + nodeHeight(m);
+      if (p.y + nodeH > maxY) maxY = p.y + nodeH;
     }
     if (!isFinite(minX)) continue;
     groupFrames.push({
@@ -2644,6 +2601,21 @@ function DAG({
       w: maxX - minX + groupFramePad * 2,
       h: maxY - minY + groupFramePad * 2 + groupLabelOffset,
     });
+  }
+
+  if (zoomedNode) {
+    return (
+      <StepDag
+        node={zoomedNode}
+        nodeW={nodeW}
+        nodeH={nodeH}
+        colGap={colGap}
+        rowGap={rowGap}
+        padX={padX}
+        padY={padY}
+        onBack={() => setZoomedNodeId(null)}
+      />
+    );
   }
 
   return (
@@ -2725,10 +2697,7 @@ function DAG({
           if (!p) return null;
           const isSel = selected === n.id;
           const { fill, border } = dagNodeColors(n, isSel);
-          const isExpanded = expandedDagNodes.has(n.id);
           const hasSteps = (n.work?.steps?.length ?? 0) > 0;
-          const fullH = nodeHeight(n);
-          const inner = isExpanded ? innerLayouts.get(n.id) : undefined;
           return (
             <g
               key={n.id}
@@ -2751,24 +2720,13 @@ function DAG({
             >
               <rect
                 width={nodeW}
-                height={fullH}
+                height={nodeH}
                 rx={6}
                 ry={6}
                 fill={fill}
                 stroke={border}
                 strokeWidth={isSel ? 2 : 1}
               />
-              {isExpanded && (
-                <line
-                  x1={0}
-                  y1={nodeH}
-                  x2={nodeW}
-                  y2={nodeH}
-                  stroke={border}
-                  strokeWidth={1}
-                  opacity={0.4}
-                />
-              )}
               <g onClick={() => onSelect(n.id)} style={{ cursor: "pointer" }}>
                 <rect width={nodeW} height={nodeH} fill="transparent" />
                 <circle
@@ -2801,10 +2759,11 @@ function DAG({
                 <g
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleExpanded(n.id);
+                    setZoomedNodeId(n.id);
                   }}
-                  style={{ cursor: "pointer" }}
+                  style={{ cursor: "zoom-in" }}
                 >
+                  <title>{`zoom into ${n.work?.steps?.length ?? 0} steps`}</title>
                   <rect
                     x={nodeW - 22}
                     y={nodeH / 2 - 8}
@@ -2820,10 +2779,10 @@ function DAG({
                     y={nodeH / 2 + 4}
                     textAnchor="middle"
                     fill="rgba(203,213,225,0.95)"
-                    fontSize={11}
+                    fontSize={10}
                     fontFamily="ui-monospace, monospace"
                   >
-                    {isExpanded ? "−" : "+"}
+                    ⤢
                   </text>
                 </g>
               )}
@@ -2831,78 +2790,6 @@ function DAG({
               {n.approval && <ApprovalPill n={n} nodeW={nodeW} />}
               {n.outcome === "cached" && !n.approval && (
                 <CachedPill nodeW={nodeW} />
-              )}
-              {isExpanded && inner && (
-                <g transform={`translate(0, ${nodeH})`}>
-                  <text
-                    x={innerPadX}
-                    y={14}
-                    fill="rgba(148,163,184,0.85)"
-                    fontSize={9}
-                    fontFamily="ui-monospace, monospace"
-                  >
-                    {n.work?.steps?.length ?? 0} step
-                    {(n.work?.steps?.length ?? 0) === 1 ? "" : "s"}
-                  </text>
-                  {(n.work?.steps ?? []).flatMap((s) =>
-                    (s.needs ?? []).map((dep) => {
-                      const a = inner.positions.get(dep);
-                      const b = inner.positions.get(s.id);
-                      if (!a || !b) return null;
-                      const x1 = a.x + stepW;
-                      const y1 = a.y + stepH / 2;
-                      const x2 = b.x;
-                      const y2 = b.y + stepH / 2;
-                      const dx = Math.max(8, Math.abs(x2 - x1) / 2);
-                      return (
-                        <path
-                          key={`${dep}->${s.id}`}
-                          d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
-                          fill="none"
-                          stroke="rgba(148,163,184,0.45)"
-                          strokeWidth={1}
-                        />
-                      );
-                    }),
-                  )}
-                  {(n.work?.steps ?? []).map((s) => {
-                    const sp = inner.positions.get(s.id);
-                    if (!sp) return null;
-                    return (
-                      <g key={s.id} transform={`translate(${sp.x}, ${sp.y})`}>
-                        <rect
-                          width={stepW}
-                          height={stepH}
-                          rx={3}
-                          ry={3}
-                          fill="rgba(15,23,42,0.6)"
-                          stroke="rgba(148,163,184,0.45)"
-                        />
-                        <text
-                          x={6}
-                          y={stepH / 2 + 3}
-                          fill="rgba(203,213,225,0.95)"
-                          fontSize={9}
-                          fontFamily="ui-monospace, monospace"
-                        >
-                          {truncate(s.id, 12)}
-                        </text>
-                        {s.is_result && (
-                          <text
-                            x={stepW - 4}
-                            y={stepH / 2 + 3}
-                            textAnchor="end"
-                            fill="rgba(34,197,94,0.85)"
-                            fontSize={8}
-                            fontFamily="ui-monospace, monospace"
-                          >
-                            ★
-                          </text>
-                        )}
-                      </g>
-                    );
-                  })}
-                </g>
               )}
             </g>
           );
@@ -2919,6 +2806,171 @@ function DAG({
 // Offset 14px down-right of the cursor so it doesn't sit under the
 // mouse. Right-anchors when near the viewport edge so the card
 // doesn't clip off-screen on rightmost-column hovers.
+// StepDag is the zoomed-in view: the work.steps of one parent node
+// rendered as a full-size DAG using the same dims as the outer
+// graph. The header carries a breadcrumb back to the run-level view.
+function StepDag({
+  node,
+  nodeW,
+  nodeH,
+  colGap,
+  rowGap,
+  padX,
+  padY,
+  onBack,
+}: {
+  node: RunNode;
+  nodeW: number;
+  nodeH: number;
+  colGap: number;
+  rowGap: number;
+  padX: number;
+  padY: number;
+  onBack: () => void;
+}) {
+  const steps = node.work?.steps ?? [];
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const level = new Map<string, number>();
+  const resolve = (id: string): number => {
+    const cached = level.get(id);
+    if (cached !== undefined) return cached;
+    const s = byId.get(id);
+    if (!s || !s.needs || s.needs.length === 0) {
+      level.set(id, 0);
+      return 0;
+    }
+    level.set(id, 0);
+    let l = 0;
+    for (const d of s.needs) if (byId.has(d)) l = Math.max(l, resolve(d) + 1);
+    level.set(id, l);
+    return l;
+  };
+  for (const s of steps) resolve(s.id);
+  const cols: NodeWorkStep[][] = [];
+  for (const s of steps) {
+    const l = level.get(s.id) ?? 0;
+    if (!cols[l]) cols[l] = [];
+    cols[l].push(s);
+  }
+  const pos = new Map<string, { x: number; y: number }>();
+  cols.forEach((col, ci) => {
+    if (!col) return;
+    col.forEach((s, ri) => {
+      pos.set(s.id, {
+        x: padX + ci * (nodeW + colGap),
+        y: padY + ri * (nodeH + rowGap),
+      });
+    });
+  });
+  const width =
+    padX * 2 +
+    Math.max(1, cols.length) * nodeW +
+    Math.max(0, cols.length - 1) * colGap;
+  const height =
+    padY * 2 +
+    Math.max(1, ...cols.map((c) => (c ? c.length : 0))) * (nodeH + rowGap);
+
+  return (
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto">
+      <div className="flex items-center gap-2 px-1 pb-2 text-xs">
+        <button
+          onClick={onBack}
+          className="px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] transition-colors"
+        >
+          ← back to run
+        </button>
+        <span className="text-[var(--muted)]">/</span>
+        <span className="font-mono text-violet-300">{node.id}</span>
+        <span className="text-[var(--muted)]">
+          ({steps.length} step{steps.length === 1 ? "" : "s"})
+        </span>
+      </div>
+      {steps.length === 0 ? (
+        <div className="px-1 py-4 text-sm text-[var(--muted)]">
+          This node has no inner steps.
+        </div>
+      ) : (
+        <svg
+          width={width}
+          height={height}
+          style={{ minWidth: width, display: "block" }}
+        >
+          {steps.flatMap((s) =>
+            (s.needs ?? []).map((dep) => {
+              const a = pos.get(dep);
+              const b = pos.get(s.id);
+              if (!a || !b) return null;
+              const x1 = a.x + nodeW;
+              const y1 = a.y + nodeH / 2;
+              const x2 = b.x;
+              const y2 = b.y + nodeH / 2;
+              const dx = Math.max(16, Math.abs(x2 - x1) / 2);
+              return (
+                <path
+                  key={`${dep}->${s.id}`}
+                  d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke="rgba(148,163,184,0.55)"
+                  strokeWidth={1.25}
+                />
+              );
+            }),
+          )}
+          {steps.map((s) => {
+            const p = pos.get(s.id);
+            if (!p) return null;
+            return (
+              <g key={s.id} transform={`translate(${p.x}, ${p.y})`}>
+                <rect
+                  width={nodeW}
+                  height={nodeH}
+                  rx={6}
+                  ry={6}
+                  fill="rgba(15,23,42,0.6)"
+                  stroke="rgba(148,163,184,0.5)"
+                />
+                <text
+                  x={12}
+                  y={nodeH / 2 + 4}
+                  fill="currentColor"
+                  fontSize={11}
+                  fontFamily="ui-monospace, monospace"
+                >
+                  {truncate(s.id, 20)}
+                </text>
+                {s.is_result && (
+                  <text
+                    x={nodeW - 8}
+                    y={nodeH / 2 + 4}
+                    textAnchor="end"
+                    fill="rgba(34,197,94,0.9)"
+                    fontSize={10}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    ★ result
+                  </text>
+                )}
+                {s.has_skip_if && (
+                  <text
+                    x={nodeW - 8}
+                    y={nodeH / 2 + 4}
+                    textAnchor="end"
+                    fill="rgba(251,191,36,0.9)"
+                    fontSize={10}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    skipIf
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function DagNodeTooltip({
   node,
   x,
