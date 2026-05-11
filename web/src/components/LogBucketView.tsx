@@ -168,6 +168,14 @@ function StepBucket({
             {section.duration || "..."}
           </span>
         )}
+        {section.lines.length > 0 && (
+          <span
+            className="font-mono text-[var(--muted)] tabular-nums text-[10px] shrink-0"
+            title={`${section.lines.length} log line${section.lines.length === 1 ? "" : "s"}`}
+          >
+            {section.lines.length}L
+          </span>
+        )}
         <span className="flex items-center gap-2 ml-auto shrink-0">
           {expanded && section.lines.length > 0 && (
             <CopyButton
@@ -176,7 +184,10 @@ function StepBucket({
             />
           )}
           {barPct > 0 && (
-            <span className="hidden sm:inline-block w-16 h-1.5 bg-[#161b22] rounded overflow-hidden">
+            <span
+              className="hidden sm:inline-block w-16 h-1.5 bg-[#161b22] rounded overflow-hidden"
+              title={`Duration: ${section.duration || "..."} · proportional to longest step`}
+            >
               <span
                 className={`block h-full ${barColor}`}
                 style={{ width: `${barPct}%` }}
