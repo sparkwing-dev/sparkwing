@@ -20,6 +20,7 @@ import (
 //	  GroupJobs -> NodeGroup             .................. post-deploy-verify
 //	  JobApproval (auto-approve in 2s)   .................. approve-deploy
 //	  modifiers: Retry · Timeout         .................. build, deploy
+//	  modifiers: Inline                  .................. configure, notify, audit-*, docs-snapshot, *-publish, *-report
 //	  modifiers: BeforeRun · AfterRun    .................. configure, notify
 //	  modifiers: OnFailure               .................. deploy -> deploy-rollback
 //	  Ref[T] / RefTo[T] typed values     .................. build -> publish, deploy
@@ -66,8 +67,11 @@ type BuildOut struct {
 }
 
 func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	// Single-closure Job with BeforeRun + AfterRun hooks.
+	// Single-closure Job with BeforeRun + AfterRun hooks. Inline so
+	// the dispatcher runs it in-process -- typical of lightweight
+	// setup/config work that doesn't need a runner boot.
 	configure := sparkwing.Job(plan, "configure", configureFn).
+		Inline().
 		BeforeRun(func(ctx context.Context) error {
 			sparkwing.Info(ctx, "BeforeRun: warming workspace")
 			return nil
@@ -89,19 +93,21 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	// the build/deploy/notify lane -- useful for testing taller DAG
 	// layouts. Six nodes hang directly off configure; three of those
 	// chain further to exercise deep columns.
-	sparkwing.Job(plan, "audit-permissions", offshootFn("audit-permissions", 3)).Needs(configure)
-	sparkwing.Job(plan, "audit-licenses", offshootFn("audit-licenses", 3)).Needs(configure)
-	sparkwing.Job(plan, "docs-snapshot", offshootFn("docs-snapshot", 2)).Needs(configure)
+	// Lightweight offshoot leaves run Inline -- they're sub-second
+	// closures that don't justify spinning up a runner.
+	sparkwing.Job(plan, "audit-permissions", offshootFn("audit-permissions", 3)).Needs(configure).Inline()
+	sparkwing.Job(plan, "audit-licenses", offshootFn("audit-licenses", 3)).Needs(configure).Inline()
+	sparkwing.Job(plan, "docs-snapshot", offshootFn("docs-snapshot", 2)).Needs(configure).Inline()
 	repoStats := sparkwing.Job(plan, "repo-stats", offshootFn("repo-stats", 3)).Needs(configure)
-	sparkwing.Job(plan, "repo-stats-publish", offshootFn("repo-stats-publish", 2)).Needs(repoStats)
+	sparkwing.Job(plan, "repo-stats-publish", offshootFn("repo-stats-publish", 2)).Needs(repoStats).Inline()
 
 	benchBaseline := sparkwing.Job(plan, "bench-baseline", offshootFn("bench-baseline", 4)).Needs(configure)
 	benchRecord := sparkwing.Job(plan, "bench-record", offshootFn("bench-record", 3)).Needs(benchBaseline)
-	sparkwing.Job(plan, "bench-publish", offshootFn("bench-publish", 2)).Needs(benchRecord)
+	sparkwing.Job(plan, "bench-publish", offshootFn("bench-publish", 2)).Needs(benchRecord).Inline()
 
 	invCache := sparkwing.Job(plan, "inventory-cache", offshootFn("inventory-cache", 3)).Needs(configure)
 	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
-	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm)
+	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
@@ -147,9 +153,11 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	metricsCheck := sparkwing.Job(plan, "metrics-check", metricsCheckFn).Needs(deploy)
 	verify := sparkwing.GroupJobs(plan, "post-deploy-verify", smokeTest, metricsCheck)
 
-	// Plan-layer SkipIf: notify is skipped when NO_NOTIFY=1.
+	// Plan-layer SkipIf: notify is skipped when NO_NOTIFY=1. Inline
+	// because the body is a single Slack webhook post.
 	sparkwing.Job(plan, "notify", notifyFn).
 		Needs(verify).
+		Inline().
 		SkipIf(func(ctx context.Context) bool {
 			return os.Getenv("NO_NOTIFY") == "1"
 		}).
