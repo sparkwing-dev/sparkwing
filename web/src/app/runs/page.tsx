@@ -3022,20 +3022,29 @@ function DAG({
           })}
         </svg>
         {hover && <DagNodeTooltip node={hover.node} x={hover.x} y={hover.y} />}
-        {chipHover && (
-          <div
-            style={{
+        {chipHover &&
+          (() => {
+            const w = typeof window === "undefined" ? 1920 : window.innerWidth;
+            const alignRight = chipHover.x > w - 360;
+            const style: React.CSSProperties = {
               position: "fixed",
               top: chipHover.y + 14,
-              left: chipHover.x + 14,
               zIndex: 100,
               pointerEvents: "none",
-            }}
-            className="bg-[#1e293b] border border-[var(--border)] rounded px-2 py-1 text-[10px] font-mono text-[var(--foreground)] shadow-lg"
-          >
-            {chipHover.text}
-          </div>
-        )}
+              maxWidth: "min(90vw, 360px)",
+              whiteSpace: "pre-wrap",
+            };
+            if (alignRight) style.right = w - chipHover.x + 14;
+            else style.left = chipHover.x + 14;
+            return (
+              <div
+                style={style}
+                className="bg-[#1e293b] border border-[var(--border)] rounded px-2 py-1 text-[10px] font-mono text-[var(--foreground)] shadow-lg break-words"
+              >
+                {chipHover.text}
+              </div>
+            );
+          })()}
       </div>
       {stackedStepNode && (
         <StepDag
