@@ -72,7 +72,13 @@ type planSnapshotWork struct {
 	Steps      []planSnapshotStep      `json:"steps,omitempty"`
 	Spawns     []planSnapshotSpawn     `json:"spawns,omitempty"`
 	SpawnEach  []planSnapshotSpawnEach `json:"spawn_each,omitempty"`
+	StepGroups []planSnapshotStepGroup `json:"step_groups,omitempty"`
 	ResultStep string                  `json:"result_step,omitempty"`
+}
+
+type planSnapshotStepGroup struct {
+	Name    string   `json:"name,omitempty"`
+	Members []string `json:"members"`
 }
 
 type planSnapshotStep struct {
@@ -484,6 +490,18 @@ func nodeModifiersSuffix(n *planSnapshotNode) string {
 
 func printWork(w *planSnapshotWork, indent string) {
 	fmt.Printf("%sWork\n", indent)
+	// Reverse-index step id -> group names so a step in one or more
+	// GroupSteps clusters surfaces "(groups=ci)" alongside its other
+	// modifiers, mirroring the Node-layer NodeGroup display.
+	groupByStep := map[string][]string{}
+	for _, g := range w.StepGroups {
+		if g.Name == "" {
+			continue
+		}
+		for _, m := range g.Members {
+			groupByStep[m] = append(groupByStep[m], g.Name)
+		}
+	}
 	for _, s := range w.Steps {
 		marker := ""
 		if s.IsResult {
@@ -498,6 +516,9 @@ func printWork(w *planSnapshotWork, indent string) {
 		// (the common case).
 		if len(s.BlastRadius) > 0 {
 			marker += " [" + strings.Join(s.BlastRadius, ",") + "]"
+		}
+		if names := groupByStep[s.ID]; len(names) > 0 {
+			marker += " (groups=" + strings.Join(names, ",") + ")"
 		}
 		needs := ""
 		if len(s.Needs) > 0 {
