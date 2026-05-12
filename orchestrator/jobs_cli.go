@@ -777,7 +777,10 @@ func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error
 	return sc.Err()
 }
 
-// formatPlain renders one record as an ANSI-stripped line.
+// formatPlain renders one record as an ANSI-stripped line. The
+// node[/step] prefix mirrors the dashboard's inline view -- agents
+// can split on the bracketed segment to group lines by step
+// without regex against ad-hoc body output.
 func formatPlain(rec sparkwing.LogRecord) string {
 	ts := rec.TS.Format(time.RFC3339Nano)
 	lvl := rec.Level
@@ -786,7 +789,11 @@ func formatPlain(rec sparkwing.LogRecord) string {
 	}
 	prefix := ts + " " + lvl
 	if rec.Node != "" {
-		prefix += " " + rec.Node
+		if rec.Step != "" {
+			prefix += " " + rec.Node + "/" + rec.Step
+		} else {
+			prefix += " " + rec.Node
+		}
 	}
 	if rec.Event != "" {
 		prefix += " [" + rec.Event + "]"

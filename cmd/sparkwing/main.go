@@ -593,16 +593,24 @@ func runJobs(args []string) error {
 			return errors.New("jobs logs: --tree is local-mode only (cannot combine with --on)")
 		}
 		// Merge --format into --output for backward compat.
+		// "ndjson" is accepted as an alias for "json" because the JSON
+		// output is already newline-delimited; agents that ask for
+		// "ndjson" by name shouldn't need to know they're the same.
 		effectiveOut := *outFmt
 		if effectiveOut == "" && *format != "" {
 			switch *format {
 			case "pretty":
 				effectiveOut = "table"
-			case "json", "plain":
-				effectiveOut = *format
+			case "json", "ndjson":
+				effectiveOut = "json"
+			case "plain":
+				effectiveOut = "plain"
 			default:
-				return fmt.Errorf("jobs logs: --format must be one of json|pretty|plain, got %q", *format)
+				return fmt.Errorf("jobs logs: --format must be one of json|ndjson|pretty|plain, got %q", *format)
 			}
+		}
+		if effectiveOut == "ndjson" {
+			effectiveOut = "json"
 		}
 		if *pretty {
 			if effectiveOut != "" && effectiveOut != "table" {
