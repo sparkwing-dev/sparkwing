@@ -43,6 +43,7 @@ import {
 import {
   type Node as RunNode,
   type NodeWorkStep,
+  type RunLogMatch,
   type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
@@ -56,6 +57,7 @@ import {
   parseHolder,
   retryRun,
   runDurationMs,
+  searchRunLogs,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
 import {
@@ -77,7 +79,7 @@ import LogBucketView from "@/components/LogBucketView";
 import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel, { NodeAttrChips } from "@/components/SummaryPanel";
 import SelectedNodePanel from "@/components/SelectedNodePanel";
-import { parseLogLines, type ParsedLog } from "@/lib/logParser";
+import { parseLogLines } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
 
 // Runs-list still polls: the event stream is per-run, not global, so
@@ -2205,64 +2207,50 @@ function AllNodesLogs({
     });
   }, [focusNode]);
   // --- Global log search (all nodes) ---
-  // Lazy-fetches each node's logs into a session-local cache on
-  // first non-empty query, then walks matches across the run.
-  // Cache is keyed by nodeID; lives for the component mount (one
-  // per run open). Streaming nodes won't auto-refresh; user can
-  // re-trigger the search to pick up new lines.
+  // Server-side grep: one debounced call to
+  //   GET /api/v1/runs/{id}/logs/search?q=
+  // walks every node's log file and returns matching (node_id, line,
+  // content) tuples. Avoids pulling N node-log payloads to the
+  // browser just to grep them client-side; also sidesteps the
+  // parallel-fetch + rate-limit traps that the previous lazy
+  // client-side version was prone to.
   const [globalQuery, setGlobalQuery] = useState("");
   const [globalCursor, setGlobalCursor] = useState(0);
-  const [logCache, setLogCache] = useState<Record<string, ParsedLog>>({});
-  const loadingLogs = useRef<Set<string>>(new Set());
+  const [globalResults, setGlobalResults] = useState<RunLogMatch[]>([]);
+  const [globalSearching, setGlobalSearching] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [globalFocus, setGlobalFocus] = useState<{
     nodeID: string;
     line: number;
   } | null>(null);
   useEffect(() => {
-    if (globalQuery.trim() === "") return;
-    let cancelled = false;
-    for (const n of nodes) {
-      if (logCache[n.id] !== undefined) continue;
-      if (loadingLogs.current.has(n.id)) continue;
-      loadingLogs.current.add(n.id);
-      getNodeLogs(run.id, n.id).then((text) => {
-        if (cancelled) return;
-        const parsed = parseLogLines(text.split("\n"));
-        setLogCache((prev) => ({ ...prev, [n.id]: parsed }));
-        loadingLogs.current.delete(n.id);
-      });
+    const q = globalQuery.trim();
+    if (q === "") {
+      setGlobalResults([]);
+      setGlobalSearching(false);
+      return;
     }
-    return () => {
-      cancelled = true;
-    };
-  }, [globalQuery, nodes, run.id, logCache]);
-  const globalMatches = useMemo(() => {
-    const q = globalQuery.trim().toLowerCase();
-    if (!q) return [] as { nodeID: string; line: number }[];
-    const out: { nodeID: string; line: number }[] = [];
-    for (const n of nodes) {
-      const parsed = logCache[n.id];
-      if (!parsed) continue;
-      let lineCursor = 1;
-      for (const section of parsed.sections) {
-        for (let j = 0; j < section.lines.length; j++) {
-          if (section.lines[j].toLowerCase().includes(q)) {
-            out.push({ nodeID: n.id, line: lineCursor + j });
-          }
-        }
-        lineCursor += section.lines.length;
-      }
-    }
-    return out;
-  }, [globalQuery, logCache, nodes]);
-  // Reset cursor on every query change so the next jump lands on
-  // hit #1, not on a stale position past the new match list.
+    setGlobalSearching(true);
+    const handle = setTimeout(async () => {
+      const resp = await searchRunLogs(run.id, q, 500);
+      if (!mountedRef.current) return;
+      setGlobalResults(resp.results || []);
+      setGlobalSearching(false);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [globalQuery, run.id]);
+  // Reset cursor whenever the result set changes (new query, new
+  // server response). Wraps via modular arithmetic in jumpGlobal.
   useEffect(() => {
     setGlobalCursor(0);
-  }, [globalQuery]);
-  const pendingFetches = nodes.filter(
-    (n) => logCache[n.id] === undefined && loadingLogs.current.has(n.id),
-  ).length;
+  }, [globalResults]);
+  const globalMatches = globalResults;
   const jumpGlobal = (idx: number) => {
     if (globalMatches.length === 0) return;
     const wrapped =
@@ -2270,11 +2258,11 @@ function AllNodesLogs({
       globalMatches.length;
     setGlobalCursor(wrapped);
     const target = globalMatches[wrapped];
-    setExpanded(new Set([target.nodeID]));
-    setGlobalFocus({ nodeID: target.nodeID, line: target.line });
+    setExpanded(new Set([target.node_id]));
+    setGlobalFocus({ nodeID: target.node_id, line: target.line });
     requestAnimationFrame(() => {
       const sec = document.querySelector(
-        `[data-log-node-id="${target.nodeID}"]`,
+        `[data-log-node-id="${target.node_id}"]`,
       ) as HTMLElement | null;
       sec?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
@@ -2315,8 +2303,8 @@ function AllNodesLogs({
             <span className="font-mono tabular-nums">
               {globalMatches.length > 0
                 ? `${globalCursor + 1}/${globalMatches.length}`
-                : pendingFetches > 0
-                  ? `loading… (${pendingFetches})`
+                : globalSearching
+                  ? "searching…"
                   : "0/0"}
             </span>
             <button

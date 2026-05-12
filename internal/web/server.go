@@ -6,6 +6,7 @@
 package web
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"embed"
@@ -97,6 +98,7 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	// Method+path-param routes register before the catch-all proxy so
 	// Go 1.22's ServeMux picks these over /api/v1/.
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs", runLogsHandler(opts.Backend))
+	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/search", runLogsSearchHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}", nodeLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
@@ -506,6 +508,75 @@ func serveLogs(b backend.Backend, w http.ResponseWriter, r *http.Request, runID,
 func runLogsHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		serveLogs(b, w, r, r.PathValue("id"), "")
+	}
+}
+
+// runLogsSearchHandler greps every node's log file in one run for
+// case-insensitive substring matches of `q`. Returns matches with
+// (node_id, line, content) so the dashboard's "search all logs"
+// box can render results without pulling N node-log payloads to
+// the browser. limit caps total matches returned (default 500,
+// max 5000); the server walks every line so the total count
+// reflects the full run.
+func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
+	type match struct {
+		NodeID  string `json:"node_id"`
+		Line    int    `json:"line"`
+		Content string `json:"content"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID := r.PathValue("id")
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		if q == "" {
+			writeErr(w, http.StatusBadRequest, errors.New("q is required"))
+			return
+		}
+		limit := 500
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		if limit > 5000 {
+			limit = 5000
+		}
+		needle := strings.ToLower(q)
+		nodes, err := b.ListNodes(r.Context(), runID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		matches := make([]match, 0, 64)
+		total := 0
+		for _, n := range nodes {
+			content, err := b.ReadNodeLog(r.Context(), runID, n.NodeID, backend.ReadOpts{})
+			if err != nil || len(content) == 0 {
+				continue
+			}
+			sc := bufio.NewScanner(bytes.NewReader(content))
+			sc.Buffer(make([]byte, 1<<16), 1<<20)
+			lineNum := 0
+			for sc.Scan() {
+				lineNum++
+				line := sc.Text()
+				if !strings.Contains(strings.ToLower(line), needle) {
+					continue
+				}
+				total++
+				if len(matches) < limit {
+					matches = append(matches, match{
+						NodeID:  n.NodeID,
+						Line:    lineNum,
+						Content: line,
+					})
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"query":   q,
+			"results": matches,
+			"total":   total,
+		})
 	}
 }
 

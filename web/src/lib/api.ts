@@ -447,6 +447,36 @@ export async function getNodeLogs(
   return res.text();
 }
 
+export interface RunLogMatch {
+  node_id: string;
+  line: number;
+  content: string;
+}
+
+export interface RunLogSearchResponse {
+  query: string;
+  results: RunLogMatch[];
+  total: number;
+}
+
+// searchRunLogs greps every node's log file in one run server-side
+// and returns matching (node_id, line, content) tuples. Only matching
+// bytes come over the wire -- the dashboard doesn't have to pull N
+// node-log payloads to the browser to search them.
+export async function searchRunLogs(
+  runID: string,
+  query: string,
+  limit = 500,
+): Promise<RunLogSearchResponse> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const res = await authFetch(
+    `${API_URL}/api/v1/runs/${runID}/logs/search?${params}`,
+    { cache: "no-store" },
+  ).catch(() => null);
+  if (!res || !res.ok) return { query, results: [], total: 0 };
+  return res.json();
+}
+
 export function getNodeStreamUrl(runID: string, nodeID: string): string {
   return `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/stream?format=ansi`;
 }
