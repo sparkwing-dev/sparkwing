@@ -1819,9 +1819,32 @@ function RunDetailPane({
   // Per-tab counts. Summary / DAG / Timeline / Setup all reflect
   // structured matches (node-level). Logs uses the server-grep count.
   // Resources gets no badge.
+  // Set view for fast in-render lookup; per-node log line set
+  // surfaces server-grep matches for in-bucket highlighting.
+  const findMatchedNodes = useMemo(
+    () => new Set(findStructuredNodes),
+    [findStructuredNodes],
+  );
+  const findMatchedLogsByNode = useMemo(() => {
+    const out = new Map<string, Set<number>>();
+    for (const m of findLogResults) {
+      let set = out.get(m.node_id);
+      if (!set) {
+        set = new Set();
+        out.set(m.node_id, set);
+      }
+      set.add(m.line);
+    }
+    return out;
+  }, [findLogResults]);
+  // Per-tab counts. Summary / DAG / Timeline render node-shaped
+  // content so the structured-node match count is meaningful for
+  // them. Setup is run/pipeline/trigger config (no per-node content
+  // to highlight against the query), and Resources is metric charts;
+  // both opt out so we don't show a number that doesn't correspond
+  // to anything visible.
   const findCounts: Partial<Record<TabKey, number>> = {
     summary: findStructuredNodes.length,
-    setup: findStructuredNodes.length,
     dag: findStructuredNodes.length,
     timeline: findStructuredNodes.length,
     logs: findLogTotal,
@@ -2074,6 +2097,7 @@ function RunDetailPane({
               onSelect={onSelectNode}
               onSelectStep={onSelectStep}
               runId={run.id}
+              findMatched={findMatchedNodes}
             />
           </div>
         )}
@@ -2086,6 +2110,7 @@ function RunDetailPane({
               focusStep={selectedStep}
               onSelectNode={onSelectNode}
               onSelectStep={onSelectStep}
+              findMatched={findMatchedNodes}
             />
           </div>
         )}
@@ -2798,6 +2823,7 @@ function DAG({
   onSelect,
   onSelectStep,
   runId,
+  findMatched,
 }: {
   nodes: RunNode[];
   selected: string | null;
@@ -2805,6 +2831,7 @@ function DAG({
   onSelect: (id: string | null) => void;
   onSelectStep: (nodeId: string, stepId: string | null) => void;
   runId?: string;
+  findMatched?: Set<string>;
 }) {
   const dagRouter = useRouter();
   // Auto-scroll the selected node into view when arriving with a
@@ -3378,6 +3405,7 @@ function DAG({
             // group's card; skip their individual node render.
             if (collapsedGroupOf(n.id)) return null;
             const isSel = selected === n.id;
+            const isFindHit = findMatched?.has(n.id) ?? false;
             const { fill, border } = dagNodeColors(n, isSel);
             return (
               <g
@@ -3399,6 +3427,20 @@ function DAG({
                   );
                 }}
               >
+                {isFindHit && (
+                  <rect
+                    x={-3}
+                    y={-3}
+                    width={p.w + 6}
+                    height={nodeH + 6}
+                    rx={8}
+                    ry={8}
+                    fill="none"
+                    stroke="rgba(251,191,36,0.9)"
+                    strokeWidth={2}
+                    pointerEvents="none"
+                  />
+                )}
                 <rect
                   width={p.w}
                   height={nodeH}

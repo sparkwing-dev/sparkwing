@@ -136,6 +136,7 @@ export default function ExecutionWaterfall({
   focusStep,
   onSelectNode,
   onSelectStep,
+  findMatched,
 }: {
   run: Run;
   nodes: Node[];
@@ -143,6 +144,7 @@ export default function ExecutionWaterfall({
   focusStep?: string | null;
   onSelectNode?: (id: string | null) => void;
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
+  findMatched?: Set<string>;
 }) {
   const { rows, totalMs, zero } = extractRows(nodes);
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
@@ -272,7 +274,7 @@ export default function ExecutionWaterfall({
                   <div className="relative w-full h-full">
                     <div
                       onClick={() => onSelectNode?.(isFocus ? null : r.id)}
-                      className={`absolute h-full rounded ${outcomeColor(r.outcome, r.running)} ${r.running ? "animate-pulse" : ""} ${isFocus ? "ring-2 ring-amber-400" : ""} ${onSelectNode ? "cursor-pointer" : ""}`}
+                      className={`absolute h-full rounded ${outcomeColor(r.outcome, r.running)} ${r.running ? "animate-pulse" : ""} ${isFocus ? "ring-2 ring-amber-400" : findMatched?.has(r.id) ? "ring-2 ring-amber-400/60" : ""} ${onSelectNode ? "cursor-pointer" : ""}`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       title={`${r.id}: ${fmtMs(r.durationMs)}${r.running ? " (running)" : ""}`}
                     />
