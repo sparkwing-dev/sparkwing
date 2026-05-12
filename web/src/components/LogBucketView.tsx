@@ -78,10 +78,16 @@ function LogLines({
   lines,
   startLine,
   showTimestamps = true,
+  matchLineSet,
+  currentMatchLine,
 }: {
   lines: string[];
   startLine: number;
   showTimestamps?: boolean;
+  // When set, lines whose absolute number is in the set are painted
+  // with a yellow wash; the currentMatchLine gets a brighter band.
+  matchLineSet?: Set<number>;
+  currentMatchLine?: number;
 }) {
   return (
     <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9]">
@@ -108,11 +114,19 @@ function LogLines({
                   : stripped.match(/^(prepare|compile|cache)/)
                     ? "text-cyan-400"
                     : "";
+        const absLine = startLine + j;
+        const isMatch = matchLineSet?.has(absLine);
+        const isCurrent = isMatch && currentMatchLine === absLine;
+        const matchCls = isCurrent
+          ? "bg-yellow-400/30"
+          : isMatch
+            ? "bg-yellow-400/10"
+            : "";
         return (
           <div
             key={j}
-            data-line={startLine + j}
-            className="flex hover:bg-[#161b22] group"
+            data-line={absLine}
+            className={`flex hover:bg-[#161b22] group ${matchCls}`}
           >
             <span className="text-[#484f58] select-none pr-3 text-right shrink-0 w-8 group-hover:text-[#8b949e]">
               {startLine + j}
@@ -154,6 +168,8 @@ function StepBucket({
   showTimestamps,
   isResult,
   hasSkipIf,
+  matchLineSet,
+  currentMatchLine,
 }: {
   section: StepSection;
   lineOffset: number;
@@ -169,6 +185,8 @@ function StepBucket({
   // Step-level attributes that mirror the StepDag pill set.
   isResult?: boolean;
   hasSkipIf?: boolean;
+  matchLineSet?: Set<number>;
+  currentMatchLine?: number;
 }) {
   const defaultExpanded =
     section.status === "failed" || section.status === "running";
@@ -303,6 +321,8 @@ function StepBucket({
                 lines={section.lines}
                 startLine={lineOffset}
                 showTimestamps={showTimestamps}
+                matchLineSet={matchLineSet}
+                currentMatchLine={currentMatchLine}
               />
             </div>
           ) : (
@@ -318,10 +338,14 @@ function BetweenSection({
   section,
   lineOffset,
   showTimestamps,
+  matchLineSet,
+  currentMatchLine,
 }: {
   section: LogSection;
   lineOffset: number;
   showTimestamps?: boolean;
+  matchLineSet?: Set<number>;
+  currentMatchLine?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const nonEmpty = section.lines.filter((l) => l.trim() !== "");
@@ -346,6 +370,8 @@ function BetweenSection({
             lines={section.lines}
             startLine={lineOffset}
             showTimestamps={showTimestamps}
+            matchLineSet={matchLineSet}
+            currentMatchLine={currentMatchLine}
           />
         </div>
       )}
@@ -357,10 +383,14 @@ function SummarySection({
   section,
   lineOffset,
   showTimestamps,
+  matchLineSet,
+  currentMatchLine,
 }: {
   section: LogSection;
   lineOffset: number;
   showTimestamps?: boolean;
+  matchLineSet?: Set<number>;
+  currentMatchLine?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -381,6 +411,8 @@ function SummarySection({
             lines={section.lines}
             startLine={lineOffset}
             showTimestamps={showTimestamps}
+            matchLineSet={matchLineSet}
+            currentMatchLine={currentMatchLine}
           />
         </div>
       )}
@@ -391,9 +423,13 @@ function SummarySection({
 function InlineLogView({
   sections,
   showTimestamps = true,
+  matchLineSet,
+  currentMatchLine,
 }: {
   sections: (LogSection | StepSection)[];
   showTimestamps?: boolean;
+  matchLineSet?: Set<number>;
+  currentMatchLine?: number;
 }) {
   // Each line in the inline view is prefixed with the step it
   // belongs to: `<step> | <line>`. That keeps a flat top-to-bottom
@@ -409,11 +445,22 @@ function InlineLogView({
     const tsMatch = line.match(TS_PREFIX_RE);
     const ts = tsMatch ? tsMatch[1] : null;
     const body = tsMatch ? line.slice(tsMatch[0].length) : line;
+    const isMatch = matchLineSet?.has(key);
+    const isCurrent = isMatch && currentMatchLine === key;
+    const matchCls = isCurrent
+      ? "bg-yellow-400/30"
+      : isMatch
+        ? "bg-yellow-400/10"
+        : "";
     if (body.trim() === "" && !stepLabel)
-      return <div key={key} data-line={key} className="h-5" />;
+      return <div key={key} data-line={key} className={`h-5 ${matchCls}`} />;
     const hasAnsi = body.includes("\x1b[");
     return (
-      <div key={key} data-line={key} className="flex hover:bg-[#161b22] group">
+      <div
+        key={key}
+        data-line={key}
+        className={`flex hover:bg-[#161b22] group ${matchCls}`}
+      >
         {showTimestamps && ts && (
           <span className="text-[#6e7681] select-none pr-2 shrink-0 tabular-nums">
             {ts}
@@ -588,6 +635,71 @@ export default function LogBucketView({
       el?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
   };
+  // Search: free-text matching across every log line. Lines that
+  // contain the query (case-insensitive) get a yellow wash; the
+  // active match gets a brighter highlight. Walker mirrors
+  // nextError -- expands the containing step bucket and scrolls the
+  // line into view. Empty query disables the highlight + walker.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchCursor, setMatchCursor] = useState(0);
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [] as { sectionIdx: number; line: number }[];
+    const out: { sectionIdx: number; line: number }[] = [];
+    let lineCursor = 1;
+    parsed.sections.forEach((section, idx) => {
+      for (let j = 0; j < section.lines.length; j++) {
+        if (section.lines[j].toLowerCase().includes(q)) {
+          out.push({ sectionIdx: idx, line: lineCursor + j });
+        }
+      }
+      lineCursor += section.lines.length;
+    });
+    return out;
+  }, [parsed, searchQuery]);
+  const matchLineSet = useMemo(
+    () => new Set(searchMatches.map((m) => m.line)),
+    [searchMatches],
+  );
+  // Reset cursor when the query / match list changes so the next
+  // arrow lands on the first hit instead of an index past the end.
+  useEffect(() => {
+    setMatchCursor(0);
+  }, [searchQuery]);
+  // Auto-scroll to the first match when the user types. Skips when
+  // the query is empty so the view doesn't jump back to top on
+  // clearing the search.
+  useEffect(() => {
+    if (searchQuery.trim() === "" || searchMatches.length === 0) return;
+    const target = searchMatches[0];
+    setStepOverrides((prev) => ({ ...prev, [target.sectionIdx]: true }));
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(
+        `[data-line="${target.line}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchMatches]);
+  const jumpToMatch = (idx: number) => {
+    if (searchMatches.length === 0) return;
+    const wrapped =
+      ((idx % searchMatches.length) + searchMatches.length) %
+      searchMatches.length;
+    setMatchCursor(wrapped);
+    const target = searchMatches[wrapped];
+    setStepOverrides((prev) => ({ ...prev, [target.sectionIdx]: true }));
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(
+        `[data-line="${target.line}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
+  const nextMatch = () => jumpToMatch(matchCursor + 1);
+  const prevMatch = () => jumpToMatch(matchCursor - 1);
+  const currentMatchLine =
+    searchMatches.length > 0 ? (searchMatches[matchCursor]?.line ?? -1) : -1;
   // External focus-step: when a step is selected elsewhere (left
   // panel row, StepDag click), expand that step's bucket and scroll
   // it into view. Match against the section's parsed step name so
@@ -671,6 +783,47 @@ export default function LogBucketView({
         <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
         </span>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (e.shiftKey) prevMatch();
+              else nextMatch();
+            } else if (e.key === "Escape") {
+              setSearchQuery("");
+            }
+          }}
+          placeholder="search logs"
+          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)] w-40"
+        />
+        {searchQuery.trim() !== "" && (
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-[var(--muted)] font-mono tabular-nums">
+              {searchMatches.length > 0
+                ? `${matchCursor + 1}/${searchMatches.length}`
+                : "0/0"}
+            </span>
+            <button
+              onClick={prevMatch}
+              disabled={searchMatches.length === 0}
+              title="previous match (Shift+Enter)"
+              className="px-1.5 py-0.5 rounded text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              ↑
+            </button>
+            <button
+              onClick={nextMatch}
+              disabled={searchMatches.length === 0}
+              title="next match (Enter)"
+              className="px-1.5 py-0.5 rounded text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              ↓
+            </button>
+          </div>
+        )}
         <span className="flex-1" />
         {viewMode === "steps" && steps.length > 0 && (
           <div className="flex items-center gap-1 text-[10px]">
@@ -737,6 +890,8 @@ export default function LogBucketView({
           <InlineLogView
             sections={parsed.sections}
             showTimestamps={showTimestamps}
+            matchLineSet={matchLineSet}
+            currentMatchLine={currentMatchLine}
           />
         </div>
       ) : (
@@ -760,6 +915,8 @@ export default function LogBucketView({
                 showTimestamps={showTimestamps}
                 isResult={attrs?.is_result}
                 hasSkipIf={attrs?.has_skip_if}
+                matchLineSet={matchLineSet}
+                currentMatchLine={currentMatchLine}
                 onToggle={() =>
                   setStepOverrides((prev) => {
                     const cur =
@@ -779,6 +936,8 @@ export default function LogBucketView({
                 section={section}
                 lineOffset={offset}
                 showTimestamps={showTimestamps}
+                matchLineSet={matchLineSet}
+                currentMatchLine={currentMatchLine}
               />
             );
           }
@@ -789,6 +948,8 @@ export default function LogBucketView({
                 section={section}
                 lineOffset={offset}
                 showTimestamps={showTimestamps}
+                matchLineSet={matchLineSet}
+                currentMatchLine={currentMatchLine}
               />
             );
           }
