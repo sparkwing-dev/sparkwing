@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -462,9 +463,17 @@ func runJobs(args []string) error {
 		_ = fs.MarkHidden("json")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
 		since := fs.Duration("since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
-		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable, OR semantics)")
-		statuses := multiFlagVar(fs, "status", "filter by status (repeatable, OR semantics)")
+		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
+		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
 		tags := multiFlagVar(fs, "tag", "filter by pipelines.yaml tag (repeatable, OR semantics)")
+		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
+		shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
+		errorSubstr := fs.String("error", "", "substring match against the persisted failure reason")
+		search := fs.String("search", "", "free-text search across pipeline/branch/sha/id/error; prefix a term with `-` to exclude")
+		startedAfter := fs.String("started-after", "", "only runs whose StartedAt >= this (today, yesterday, 24h, 7d, or a date)")
+		startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
+		finishedAfter := fs.String("finished-after", "", "only runs whose FinishedAt >= this (excludes still-running)")
+		finishedBefore := fs.String("finished-before", "", "only runs whose FinishedAt <= this (excludes still-running)")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
@@ -477,7 +486,12 @@ func runJobs(args []string) error {
 			return err
 		}
 
-		pipelineSet := *pipelines
+		pipelineInc, pipelineExc := orchestrator.SplitExcludes(*pipelines)
+		statusInc, statusExc := orchestrator.SplitExcludes(*statuses)
+		branchInc, branchExc := orchestrator.SplitExcludes(*branches)
+		shaInc, shaExc := orchestrator.SplitExcludes(*shas)
+
+		pipelineSet := pipelineInc
 		if len(*tags) > 0 {
 			extra, err := pipelinesWithTags(*tags)
 			if err != nil {
@@ -494,13 +508,45 @@ func runJobs(args []string) error {
 				return nil
 			}
 		}
+
+		compiled := orchestrator.CompiledFilter{
+			Branches:       branchInc,
+			BranchExcludes: branchExc,
+			SHAPrefixes:    shaInc,
+			SHAExcludes:    shaExc,
+			ErrorSubstr:    *errorSubstr,
+			StatusExcludes: statusExc,
+			PipelineExcl:   pipelineExc,
+			Search:         orchestrator.ParseSearch(*search),
+		}
+		for _, ts := range []struct {
+			raw  string
+			into *time.Time
+			name string
+		}{
+			{*startedAfter, &compiled.StartedAfter, "started-after"},
+			{*startedBefore, &compiled.StartedBefore, "started-before"},
+			{*finishedAfter, &compiled.FinishedAfter, "finished-after"},
+			{*finishedBefore, &compiled.FinishedBefore, "finished-before"},
+		} {
+			if ts.raw == "" {
+				continue
+			}
+			t, err := orchestrator.ParseLooseDate(ts.raw)
+			if err != nil {
+				return fmt.Errorf("jobs list: --%s: %w", ts.name, err)
+			}
+			*ts.into = t
+		}
+
 		listOpts := orchestrator.ListOpts{
 			Limit:     *limit,
 			Pipelines: pipelineSet,
-			Statuses:  *statuses,
+			Statuses:  statusInc,
 			Since:     *since,
 			JSON:      resolvedFmt == "json",
 			Quiet:     *quiet,
+			Filter:    compiled,
 		}
 		if *on != "" {
 			prof, err := resolveProfile(*on)

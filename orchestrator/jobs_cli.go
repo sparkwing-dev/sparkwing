@@ -27,6 +27,12 @@ type ListOpts struct {
 
 	// Quiet prints only ids (or a JSON id array with JSON).
 	Quiet bool
+
+	// Filter holds the cooked client-side filter set built from the
+	// CLI's --branch / --sha / --error / --search / --started-after
+	// / --finished-before / `!`-prefixed exclusion flags. Empty
+	// CompiledFilter is a no-op.
+	Filter CompiledFilter
 }
 
 // ListJobs prints or emits recent runs filtered by opts.
@@ -47,7 +53,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
 
 	filter := store.RunFilter{
-		Limit:     opts.Limit,
+		Limit:     listFetchLimit(opts),
 		Pipelines: opts.Pipelines,
 		Statuses:  opts.Statuses,
 	}
@@ -58,7 +64,26 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err != nil {
 		return err
 	}
+	runs = applyClientFilters(runs, opts.Filter)
+	if opts.Limit > 0 && len(runs) > opts.Limit {
+		runs = runs[:opts.Limit]
+	}
 	return renderRunList(runs, opts, out)
+}
+
+// listFetchLimit returns the server-side LIMIT to use. When any
+// client-side filter is active we over-fetch (cap at 1000) so the
+// post-filter pass can still hit the requested Limit. Cheap because
+// runs is SQLite-local.
+func listFetchLimit(opts ListOpts) int {
+	if !opts.Filter.HasAny() {
+		return opts.Limit
+	}
+	const overFetch = 1000
+	if opts.Limit <= 0 || opts.Limit > overFetch {
+		return overFetch
+	}
+	return overFetch
 }
 
 // renderRunList prints quiet/JSON/table output.

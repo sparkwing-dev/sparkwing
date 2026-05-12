@@ -25,7 +25,7 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 	}
 	c := client.NewWithToken(controllerURL, nil, token)
 	filter := store.RunFilter{
-		Limit:     opts.Limit,
+		Limit:     listFetchLimit(opts),
 		Pipelines: opts.Pipelines,
 		Statuses:  opts.Statuses,
 	}
@@ -35,6 +35,10 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 	runs, err := c.ListRuns(ctx, filter)
 	if err != nil {
 		return err
+	}
+	runs = applyClientFilters(runs, opts.Filter)
+	if opts.Limit > 0 && len(runs) > opts.Limit {
+		runs = runs[:opts.Limit]
 	}
 	return renderRunList(runs, opts, out)
 }
