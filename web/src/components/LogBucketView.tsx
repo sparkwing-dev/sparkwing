@@ -148,6 +148,8 @@ function StepBucket({
   expanded: expandedProp,
   onToggle,
   showTimestamps,
+  isResult,
+  hasSkipIf,
 }: {
   section: StepSection;
   lineOffset: number;
@@ -160,6 +162,9 @@ function StepBucket({
   expanded?: boolean;
   onToggle?: () => void;
   showTimestamps?: boolean;
+  // Step-level attributes that mirror the StepDag pill set.
+  isResult?: boolean;
+  hasSkipIf?: boolean;
 }) {
   const defaultExpanded =
     section.status === "failed" || section.status === "running";
@@ -222,6 +227,22 @@ function StepBucket({
         </span>
         <span className={`w-4 text-center ${si.color}`}>{si.icon}</span>
         <span className="font-mono text-[#c9d1d9] truncate">{heading}</span>
+        {isResult && (
+          <span
+            className="px-1.5 rounded text-[10px] bg-green-500/15 text-green-300 shrink-0"
+            title="step output is the node's result"
+          >
+            result
+          </span>
+        )}
+        {hasSkipIf && (
+          <span
+            className="px-1.5 rounded text-[10px] bg-amber-500/15 text-amber-300 shrink-0"
+            title="step has a SkipIf guard"
+          >
+            skipIf
+          </span>
+        )}
         {(section.duration || section.status === "running") && (
           <span className="font-mono text-[var(--muted)] tabular-nums text-[10px] shrink-0">
             {section.duration || "..."}
@@ -469,12 +490,17 @@ interface LogBucketViewProps {
   // formatted as "<nodeId> · <stepName>"). External selection driver
   // for cross-pane navigation (left nodes panel / StepDag → logs).
   focusStep?: string | null;
+  // Structured-state lookup for each parsed step bucket. The header
+  // renders the step's is_result / has_skip_if / annotation flags as
+  // chips alongside the step name, matching the StepDag pill set.
+  nodeSteps?: { id: string; is_result?: boolean; has_skip_if?: boolean }[];
 }
 
 export default function LogBucketView({
   parsed,
   jobId,
   focusStep,
+  nodeSteps,
 }: LogBucketViewProps) {
   const [viewMode, setViewMode] = useState<"steps" | "inline">("steps");
   // Timestamps default on -- they're the cheapest way to correlate
@@ -664,6 +690,8 @@ export default function LogBucketView({
 
           if (section.type === "step") {
             const override = stepOverrides[i];
+            const stepName = stepNameFromSection(section as StepSection);
+            const attrs = nodeSteps?.find((s) => s.id === stepName);
             return (
               <StepBucket
                 key={i}
@@ -674,6 +702,8 @@ export default function LogBucketView({
                 waterfallTotalMs={waterfallTotalMs}
                 expanded={override}
                 showTimestamps={showTimestamps}
+                isResult={attrs?.is_result}
+                hasSkipIf={attrs?.has_skip_if}
                 onToggle={() =>
                   setStepOverrides((prev) => {
                     const cur =

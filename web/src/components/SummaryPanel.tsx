@@ -116,7 +116,7 @@ interface Tally {
 // shape, approval gates, cached runs, inline jobs, group membership,
 // and cross-pipeline spawns. Each spawn entry is a deep link to the
 // child run; everything else is informational.
-function NodeAttrChips({ n }: { n: RunNode }) {
+export function NodeAttrChips({ n }: { n: RunNode }) {
   const chips: { label: string; cls: string; key: string }[] = [];
   if (n.dynamic)
     chips.push({

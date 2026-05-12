@@ -75,7 +75,7 @@ import ExecutionWaterfall from "@/components/ExecutionWaterfall";
 import ResourceChart from "@/components/ResourceChart";
 import LogBucketView from "@/components/LogBucketView";
 import SetupPanel from "@/components/SetupPanel";
-import SummaryPanel from "@/components/SummaryPanel";
+import SummaryPanel, { NodeAttrChips } from "@/components/SummaryPanel";
 import SelectedNodePanel from "@/components/SelectedNodePanel";
 import { parseLogLines } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
@@ -1994,11 +1994,22 @@ function SingleNodeLogs({
       </div>
     );
   }
+  const steps = node.work?.steps;
   const body =
     node.status === "approval_pending" || !node.finished_at ? (
-      <StreamingLogs runID={run.id} nodeID={node.id} focusStep={focusStep} />
+      <StreamingLogs
+        runID={run.id}
+        nodeID={node.id}
+        focusStep={focusStep}
+        steps={steps}
+      />
     ) : (
-      <StoredLogs runID={run.id} nodeID={node.id} focusStep={focusStep} />
+      <StoredLogs
+        runID={run.id}
+        nodeID={node.id}
+        focusStep={focusStep}
+        steps={steps}
+      />
     );
   return (
     <div className="flex flex-col gap-2">
@@ -2254,6 +2265,7 @@ function AllNodesLogs({
                   {n.id}
                 </span>
               )}
+              <NodeAttrChips n={n} />
               <span className="flex-1" />
               {(n.annotations?.length ?? 0) > 0 && (
                 <span
@@ -2424,10 +2436,12 @@ function StreamingLogs({
   runID,
   nodeID,
   focusStep,
+  steps,
 }: {
   runID: string;
   nodeID: string;
   focusStep?: string | null;
+  steps?: NodeWorkStep[];
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
@@ -2464,6 +2478,7 @@ function StreamingLogs({
         parsed={parsed}
         jobId={`${runID}-${nodeID}`}
         focusStep={focusStep}
+        nodeSteps={steps}
       />
       <div ref={endRef} />
     </>
@@ -2474,10 +2489,12 @@ function StoredLogs({
   runID,
   nodeID,
   focusStep,
+  steps,
 }: {
   runID: string;
   nodeID: string;
   focusStep?: string | null;
+  steps?: NodeWorkStep[];
 }) {
   const [text, setText] = useState<string | null>(null);
 
@@ -2509,6 +2526,7 @@ function StoredLogs({
       parsed={parsed}
       jobId={`${runID}-${nodeID}`}
       focusStep={focusStep}
+      nodeSteps={steps}
     />
   );
 }
@@ -3175,6 +3193,13 @@ function DAG({
                 {n.outcome === "cached" && !n.approval && (
                   <CachedPill nodeW={p.w} />
                 )}
+                {n.modifiers?.inline &&
+                  !n.dynamic &&
+                  !n.approval &&
+                  n.outcome !== "cached" &&
+                  !(n.spawned_pipelines?.length ?? 0) && (
+                    <InlinePill nodeW={p.w} />
+                  )}
                 {(n.spawned_pipelines?.length ?? 0) > 0 &&
                   !n.dynamic &&
                   !n.approval &&
@@ -4311,6 +4336,43 @@ function approvalPillVisuals(n: RunNode): {
 // treatment. Not shown when the node is also an approval gate --
 // the ApprovalPill already encodes "APPROVED" for that case and we
 // don't want two pills overlapping at the top of the rect.
+// InlinePill marks a job declared with .Inline() -- runs in the
+// orchestrator process instead of dispatching to a runner, so it
+// shows up as a lightweight slate pill (no hue commitment). Hidden
+// when a more specific pill (dynamic / approval / cached / cross-
+// pipeline) takes the top slot for this node.
+function InlinePill({ nodeW }: { nodeW: number }) {
+  const pillW = 48;
+  const pillH = 15;
+  const x = (nodeW - pillW) / 2;
+  const y = -6;
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <rect
+        x={x}
+        y={y}
+        width={pillW}
+        height={pillH}
+        rx={pillH / 2}
+        ry={pillH / 2}
+        fill="rgba(148,163,184,0.95)"
+      />
+      <text
+        x={x + pillW / 2}
+        y={y + pillH / 2 + 3.5}
+        textAnchor="middle"
+        fill="rgba(15,15,15,0.95)"
+        fontSize={10}
+        fontWeight={700}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        style={{ letterSpacing: "0.5px" }}
+      >
+        INLINE
+      </text>
+    </g>
+  );
+}
+
 function CachedPill({ nodeW }: { nodeW: number }) {
   const pillW = 52;
   const pillH = 15;
