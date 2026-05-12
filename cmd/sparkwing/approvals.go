@@ -100,7 +100,7 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 	fs := flag.NewFlagSet(cmdApprovalsList.Path, flag.ContinueOnError)
 	on := fs.String("on", "", "profile name (default: local)")
 	runID := fs.String("run", "", "restrict to one run's approvals (pending + history)")
-	outFmt := fs.StringP("output", "o", "", "output format: table|json|plain")
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
 	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdApprovalsList, fs, args); err != nil {

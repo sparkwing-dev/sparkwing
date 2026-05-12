@@ -47,7 +47,7 @@ func runHealth(args []string) error {
 	fs := flag.NewFlagSet(cmdHealth.Path, flag.ContinueOnError)
 	on := fs.String("on", "", "profile name (default: current default)")
 	asJSON := fs.Bool("json", false, "emit JSON (alias of -o json)")
-	outputFormat := fs.StringP("output", "o", "", "output format: table | json")
+	outputFormat := fs.StringP("output", "o", "", "output format: pretty | json")
 	if err := parseAndCheck(cmdHealth, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

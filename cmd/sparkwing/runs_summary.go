@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 
 	flag "github.com/spf13/pflag"
@@ -16,7 +15,9 @@ import (
 func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsSummary.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	outFmt := fs.StringP("output", "o", "", "output format: text|json")
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
+	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
+	pretty := fs.Bool("pretty", false, "force the human-readable view even when piped (alias for -o table)")
 	on := fs.String("on", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsSummary, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -25,12 +26,11 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 		return err
 	}
 	*runID = normalizeRunID(*runID)
-	switch *outFmt {
-	case "", "text", "json":
-	default:
-		return fmt.Errorf("%s: -o/--output must be text or json, got %q", cmdJobsSummary.Path, *outFmt)
+	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, fs.Changed("output"), *asJSON, *pretty, cmdJobsSummary.Path)
+	if err != nil {
+		return err
 	}
-	opts := orchestrator.SummaryOpts{JSON: *outFmt == "json"}
+	opts := orchestrator.SummaryOpts{JSON: resolvedFmt == "json"}
 	if *on == "" {
 		return orchestrator.RunSummaryLocal(ctx, paths, *runID, opts, os.Stdout)
 	}

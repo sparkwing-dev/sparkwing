@@ -105,7 +105,7 @@ func TestResolveOutputFormat(t *testing.T) {
 			outFmt:        "yaml",
 			outputChanged: true,
 			jsonAlias:     false,
-			wantErr:       `must be one of table|json|plain, got "yaml"`,
+			wantErr:       `must be one of pretty|json|plain, got "yaml"`,
 		},
 	}
 	for _, tc := range tests {

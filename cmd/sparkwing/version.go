@@ -76,7 +76,7 @@ func runVersion(args []string) error {
 	}
 	fs := flag.NewFlagSet(cmdVersion.Path, flag.ContinueOnError)
 	var output string
-	fs.StringVarP(&output, "output", "o", "table", "table | json | plain")
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	offline := fs.Bool("offline", false, "skip the network fetch for latest release")
 	if err := parseAndCheck(cmdVersion, fs, args); err != nil {

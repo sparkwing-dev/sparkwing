@@ -44,7 +44,7 @@ func runDocs(args []string) error {
 func runDocsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
 	var output string
-	fs.StringVarP(&output, "output", "o", "table", "table | json | plain")
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -114,7 +114,7 @@ func runDocsSearch(args []string) error {
 	var query string
 	var output string
 	fs.StringVarP(&query, "query", "q", "", "search terms (every token must match somewhere)")
-	fs.StringVarP(&output, "output", "o", "table", "table | json | plain")
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := parseAndCheck(cmdDocsSearch, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -194,6 +194,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("unknown output format %q (valid: table, json, plain)", output)
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
 	}
 }

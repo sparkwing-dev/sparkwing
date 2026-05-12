@@ -78,7 +78,7 @@ type sparkListEntry struct {
 func runSparksList(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksList.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
-	outFmt := fs.StringP("output", "o", "", "output format: table|json|plain (default: table)")
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
 	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
 	_ = fs.MarkHidden("json")
 	noResolve := fs.Bool("no-resolve", false, "skip module-proxy lookups; only print declared versions")

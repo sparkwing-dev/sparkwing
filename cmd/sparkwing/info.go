@@ -145,7 +145,7 @@ const infoBat = `      /\                        /\
 func runInfo(args []string) error {
 	fs := flag.NewFlagSet(cmdInfo.Path, flag.ContinueOnError)
 	// Empty default lets resolveOutputFormat distinguish unset from explicit.
-	output := fs.StringP("output", "o", "", "output format: table | json | plain (default: table)")
+	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	forAgent := fs.Bool("for-agent", false, "emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)")
 	firstTime := fs.Bool("first-time", false, "print the post-install onboarding card (used by install.sh; re-runnable any time)")

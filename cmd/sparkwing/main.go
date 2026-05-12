@@ -458,7 +458,7 @@ func runJobs(args []string) error {
 	case "list":
 		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
 		limit := fs.Int("limit", 20, "max runs to show")
-		outFmt := fs.StringP("output", "o", "", "output format: table|json|plain (default: table)")
+		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
 		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
 		_ = fs.MarkHidden("json")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
@@ -632,7 +632,7 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		node := fs.String("node", "", "limit output to one node id")
-		outFmt := fs.StringP("output", "o", "", "output format: table|json|plain (default: table on TTY, json when piped)")
+		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
 		pretty := fs.Bool("pretty", false, "force the human-readable colored renderer even when stdout isn't a terminal (alias for -o table)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
@@ -735,7 +735,7 @@ func runJobs(args []string) error {
 	case "errors":
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
-		outFmt := fs.StringP("output", "o", "", "output format: table|json|plain")
+		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
 		_ = fs.MarkHidden("json")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
@@ -811,10 +811,17 @@ func runJobs(args []string) error {
 // BOTH flags are user-set AND disagree do we surface a conflict.
 // Mirrors the kubectl / gh / aws CLI convention.
 func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
+	// "pretty" is a synonym for "table": for verbs whose human form
+	// isn't actually tabular (runs logs, runs summary, runs timeline),
+	// "pretty" reads better. Internally everything still funnels to
+	// "table" so handler-side switches stay compact.
+	if outFmt == "pretty" {
+		outFmt = "table"
+	}
 	switch outFmt {
 	case "", "table", "json", "plain":
 	default:
-		return "", fmt.Errorf("%s: -o/--output must be one of table|json|plain, got %q", cmdPath, outFmt)
+		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
 	}
 	if jsonAlias {
 		if outputChanged && outFmt != "" && outFmt != "json" {
@@ -826,6 +833,60 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 		return "table", nil
 	}
 	return outFmt, nil
+}
+
+// resolveTTYAwareOutput canonicalizes -o/--output for verbs that
+// want runs-logs-style behavior: TTY default + --json/--pretty
+// aliases that fold into the same canonical FORMAT.
+//
+// Rules:
+//   - --pretty wins as a forced "table" (errors if -o disagrees).
+//   - --json wins as a forced "json" (errors if -o disagrees).
+//   - With an explicit -o value, that value passes through.
+//   - With nothing set: "table" when stdout is a TTY, "json" otherwise.
+//     The auto-default lets agents pipe `... | jq` without typing
+//     --json, while humans get the readable form by default.
+//
+// outputChanged should reflect whether the user actually typed
+// -o/--output (e.g. fs.Changed("output")). It distinguishes a
+// default-shaped --output from a user-set one, mirroring the
+// kubectl explicit-bit convention.
+func resolveTTYAwareOutput(outFmt string, outputChanged, jsonAlias, prettyAlias bool, cmdPath string) (string, error) {
+	if jsonAlias && prettyAlias {
+		return "", fmt.Errorf("%s: --json and --pretty cannot be combined", cmdPath)
+	}
+	// "pretty" is the canonical name for "human-readable form" --
+	// some verbs render a real table (runs list, runs grep), others
+	// render prose / a waterfall / a colored stream (runs logs,
+	// runs summary, runs timeline). Accept both; normalize to
+	// "table" internally so handlers stay terse.
+	if outFmt == "pretty" {
+		outFmt = "table"
+	}
+	switch outFmt {
+	case "", "table", "json", "plain":
+	default:
+		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
+	}
+	if prettyAlias {
+		if outputChanged && outFmt != "" && outFmt != "table" {
+			return "", fmt.Errorf("%s: --pretty and -o %s disagree", cmdPath, outFmt)
+		}
+		return "table", nil
+	}
+	if jsonAlias {
+		if outputChanged && outFmt != "" && outFmt != "json" {
+			return "", fmt.Errorf("%s: --json and -o %s disagree", cmdPath, outFmt)
+		}
+		return "json", nil
+	}
+	if outFmt != "" {
+		return outFmt, nil
+	}
+	if color.IsInteractiveStdout() {
+		return "table", nil
+	}
+	return "json", nil
 }
 
 func isTerminalRunStatus(s string) bool {

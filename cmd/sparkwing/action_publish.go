@@ -45,7 +45,7 @@ func runPipelinePublish(args []string) error {
 			"(e.g. linux/amd64,linux/arm64,darwin/arm64). Default: current platform.")
 	sparkwingDirFlag := fs.String("dir", "",
 		"path to .sparkwing/ (default: walk up from cwd)")
-	output := fs.StringP("output", "o", "table", "output format: table | json | plain")
+	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := fs.Parse(args); err != nil {
 		return err

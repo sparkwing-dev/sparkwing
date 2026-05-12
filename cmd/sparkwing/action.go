@@ -118,7 +118,7 @@ func runPipeline(args []string) error {
 
 func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "table", "output format: table | json | plain")
+	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
@@ -153,7 +153,7 @@ func runPipelineList(args []string) error {
 
 func runPipelineDiscover(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDiscover.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "table", "output format: table | json | plain")
+	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	queryFlag := fs.String("query", "", "search query (one or more tokens; all must match some field)")
 	if err := parseAndCheck(cmdPipelineDiscover, fs, args); err != nil {
@@ -276,7 +276,7 @@ func plural(n int) string {
 
 func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "table", "output format: table | json | plain")
+	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {

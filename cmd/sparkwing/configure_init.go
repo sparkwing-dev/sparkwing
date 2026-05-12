@@ -50,7 +50,7 @@ type ConfigureInitToolchain struct {
 
 func runConfigureInit(args []string) error {
 	fs := flag.NewFlagSet(cmdConfigureInit.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: table | json | plain (default: table)")
+	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
 	asJSON := fs.Bool("json", false, "alias for --output json")
 	dryRun := fs.Bool("dry-run", false, "probe + report without creating ~/.config/sparkwing/")
 	if err := parseAndCheck(cmdConfigureInit, fs, args); err != nil {

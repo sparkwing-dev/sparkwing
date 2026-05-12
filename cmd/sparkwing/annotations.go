@@ -59,7 +59,7 @@ func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []st
 	nodeID := fs.String("node", "", "limit to one node id")
 	stepID := fs.String("step", "", "limit to one step id (implies node-scope or step-scope reads)")
 	includeSteps := fs.Bool("steps", false, "include per-step annotations as separate rows")
-	outFmt := fs.StringP("output", "o", "", "output format: table|json|plain")
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	on := fs.String("on", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdAnnotationsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
