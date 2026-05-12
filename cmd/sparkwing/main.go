@@ -791,6 +791,8 @@ func runJobs(args []string) error {
 		return runJobsTimeline(ctx, paths, args[1:])
 	case "summary":
 		return runJobsSummary(ctx, paths, args[1:])
+	case "grep":
+		return runJobsGrep(ctx, paths, args[1:])
 	default:
 		return fmt.Errorf("jobs: unknown command %q", args[0])
 	}

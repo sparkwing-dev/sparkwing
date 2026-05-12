@@ -1829,6 +1829,45 @@ infrastructure error.`,
 	},
 }
 
+var cmdJobsGrep = Command{
+	Path:     "sparkwing runs grep",
+	Synopsis: "Search log bodies across recent runs for a substring",
+	Description: `Walks the runs matching the filter set and substring-greps
+every node's log. Reuses the same filter flags as ` + "`runs list`" + ` so
+the candidate set is identical to what that verb would return.
+In cluster mode the grep runs server-side per (run, node), so only
+matching bytes come back over the wire.
+
+Default output is a table of RUN / NODE / LINE / TEXT. -q
+(quiet) prints just the unique matching run ids -- the usual
+shape for piping into ` + "`runs logs`" + ` or ` + "`runs status`" + `.
+
+Exit code 0 even when there are no matches.`,
+	PosArgs: []PosArg{
+		{Name: "PATTERN", Desc: "Substring to match (case-sensitive)", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "pipeline", Argument: "NAME", Desc: "Restrict candidate runs to one pipeline (repeatable; `!` to exclude)", Group: "Filter"},
+		{Name: "status", Argument: "STATUS", Desc: "Restrict by status (repeatable; `!` to exclude)", Group: "Filter"},
+		{Name: "branch", Argument: "BRANCH", Desc: "Restrict by git branch (repeatable; `!` to exclude)", Group: "Filter"},
+		{Name: "sha", Argument: "PREFIX", Desc: "Restrict by git sha prefix (repeatable; `!` to exclude)", Group: "Filter"},
+		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this", Group: "Filter"},
+		{Name: "started-after", Argument: "DATE", Desc: "Only runs whose StartedAt >= this", Group: "Filter"},
+		{Name: "started-before", Argument: "DATE", Desc: "Only runs whose StartedAt <= this", Group: "Filter"},
+		{Name: "limit", Argument: "N", Desc: "Max candidate runs to scan", Default: "50", Group: "Output"},
+		{Name: "max-matches", Argument: "M", Desc: "Per-node match cap (0 = no cap)", Default: "5", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: table|json", Group: "Output"},
+		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
+		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+	},
+	GroupOrder: []string{"Filter", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Find every run that hit a permission-denied line in the past week", "sparkwing runs grep 'permission denied' --since 7d"},
+		{"Pipe matching run ids into runs logs", "sparkwing runs grep 'OOMKilled' --since 24h -q | xargs -I{} sparkwing runs logs --run {}"},
+		{"Search prod runs as JSON for an agent", "sparkwing runs grep 'connection refused' --on prod --since 24h -o json"},
+	},
+}
+
 var cmdJobsSummary = Command{
 	Path:     "sparkwing runs summary",
 	Synopsis: "Aggregated work view: groups, work items, modifiers, annotations",
