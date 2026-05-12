@@ -597,6 +597,10 @@ interface LogBucketViewProps {
   // formatted as "<nodeId> · <stepName>"). External selection driver
   // for cross-pane navigation (left nodes panel / StepDag → logs).
   focusStep?: string | null;
+  // When set, locates the section containing the absolute line
+  // number, expands its step bucket, and scrolls the line into
+  // view. Driven by the cross-node global log search.
+  focusLine?: number | null;
   // Structured-state lookup for each parsed step bucket. The header
   // renders the step's is_result / has_skip_if / annotation flags as
   // chips alongside the step name, matching the StepDag pill set.
@@ -607,6 +611,7 @@ export default function LogBucketView({
   parsed,
   jobId,
   focusStep,
+  focusLine,
   nodeSteps,
 }: LogBucketViewProps) {
   const [viewMode, setViewMode] = useState<"steps" | "inline">("steps");
@@ -808,6 +813,36 @@ export default function LogBucketView({
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [focusStep]);
+  // Same change-detection trick as focusStep: only act when the
+  // incoming focusLine actually changes value (not on every parsed
+  // re-render). The walker finds which section contains the line,
+  // force-expands it, and scrolls the matching data-line element
+  // into view.
+  const lastFocusedLine = useRef<number | null>(null);
+  useEffect(() => {
+    const incoming = focusLine ?? null;
+    if (incoming === lastFocusedLine.current) return;
+    lastFocusedLine.current = incoming;
+    if (incoming == null) return;
+    let lineCursor = 1;
+    let sectionIdx = -1;
+    for (let i = 0; i < parsedRef.current.sections.length; i++) {
+      const sec = parsedRef.current.sections[i];
+      if (incoming >= lineCursor && incoming < lineCursor + sec.lines.length) {
+        sectionIdx = i;
+        break;
+      }
+      lineCursor += sec.lines.length;
+    }
+    if (sectionIdx < 0) return;
+    setStepOverrides((prev) => ({ ...prev, [sectionIdx]: true }));
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(
+        `[data-line="${incoming}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [focusLine]);
   const scrollToTop = () => {
     containerRef.current?.scrollIntoView({
       block: "start",

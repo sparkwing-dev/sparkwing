@@ -77,7 +77,7 @@ import LogBucketView from "@/components/LogBucketView";
 import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel, { NodeAttrChips } from "@/components/SummaryPanel";
 import SelectedNodePanel from "@/components/SelectedNodePanel";
-import { parseLogLines } from "@/lib/logParser";
+import { parseLogLines, type ParsedLog } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
 
 // Runs-list still polls: the event stream is per-run, not global, so
@@ -1982,10 +1982,12 @@ function SingleNodeLogs({
   run,
   node,
   focusStep,
+  focusLine,
 }: {
   run: Run;
   node: RunNode;
   focusStep?: string | null;
+  focusLine?: number | null;
 }) {
   if (node.status === "pending") {
     return (
@@ -2001,6 +2003,7 @@ function SingleNodeLogs({
         runID={run.id}
         nodeID={node.id}
         focusStep={focusStep}
+        focusLine={focusLine}
         steps={steps}
       />
     ) : (
@@ -2008,6 +2011,7 @@ function SingleNodeLogs({
         runID={run.id}
         nodeID={node.id}
         focusStep={focusStep}
+        focusLine={focusLine}
         steps={steps}
       />
     );
@@ -2200,6 +2204,83 @@ function AllNodesLogs({
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [focusNode]);
+  // --- Global log search (all nodes) ---
+  // Lazy-fetches each node's logs into a session-local cache on
+  // first non-empty query, then walks matches across the run.
+  // Cache is keyed by nodeID; lives for the component mount (one
+  // per run open). Streaming nodes won't auto-refresh; user can
+  // re-trigger the search to pick up new lines.
+  const [globalQuery, setGlobalQuery] = useState("");
+  const [globalCursor, setGlobalCursor] = useState(0);
+  const [logCache, setLogCache] = useState<Record<string, ParsedLog>>({});
+  const loadingLogs = useRef<Set<string>>(new Set());
+  const [globalFocus, setGlobalFocus] = useState<{
+    nodeID: string;
+    line: number;
+  } | null>(null);
+  useEffect(() => {
+    if (globalQuery.trim() === "") return;
+    let cancelled = false;
+    for (const n of nodes) {
+      if (logCache[n.id] !== undefined) continue;
+      if (loadingLogs.current.has(n.id)) continue;
+      loadingLogs.current.add(n.id);
+      getNodeLogs(run.id, n.id).then((text) => {
+        if (cancelled) return;
+        const parsed = parseLogLines(text.split("\n"));
+        setLogCache((prev) => ({ ...prev, [n.id]: parsed }));
+        loadingLogs.current.delete(n.id);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [globalQuery, nodes, run.id, logCache]);
+  const globalMatches = useMemo(() => {
+    const q = globalQuery.trim().toLowerCase();
+    if (!q) return [] as { nodeID: string; line: number }[];
+    const out: { nodeID: string; line: number }[] = [];
+    for (const n of nodes) {
+      const parsed = logCache[n.id];
+      if (!parsed) continue;
+      let lineCursor = 1;
+      for (const section of parsed.sections) {
+        for (let j = 0; j < section.lines.length; j++) {
+          if (section.lines[j].toLowerCase().includes(q)) {
+            out.push({ nodeID: n.id, line: lineCursor + j });
+          }
+        }
+        lineCursor += section.lines.length;
+      }
+    }
+    return out;
+  }, [globalQuery, logCache, nodes]);
+  // Reset cursor on every query change so the next jump lands on
+  // hit #1, not on a stale position past the new match list.
+  useEffect(() => {
+    setGlobalCursor(0);
+  }, [globalQuery]);
+  const pendingFetches = nodes.filter(
+    (n) => logCache[n.id] === undefined && loadingLogs.current.has(n.id),
+  ).length;
+  const jumpGlobal = (idx: number) => {
+    if (globalMatches.length === 0) return;
+    const wrapped =
+      ((idx % globalMatches.length) + globalMatches.length) %
+      globalMatches.length;
+    setGlobalCursor(wrapped);
+    const target = globalMatches[wrapped];
+    setExpanded(new Set([target.nodeID]));
+    setGlobalFocus({ nodeID: target.nodeID, line: target.line });
+    requestAnimationFrame(() => {
+      const sec = document.querySelector(
+        `[data-log-node-id="${target.nodeID}"]`,
+      ) as HTMLElement | null;
+      sec?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  };
+  const nextGlobal = () => jumpGlobal(globalCursor + 1);
+  const prevGlobal = () => jumpGlobal(globalCursor - 1);
   if (nodes.length === 0) {
     return (
       <div className="text-sm text-[var(--muted)]">
@@ -2209,8 +2290,54 @@ function AllNodesLogs({
   }
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
-        <span>All nodes — expand a node to load its logs</span>
+      <div className="flex items-center gap-2 text-[10px] text-[var(--muted)] mb-1">
+        <span className="shrink-0">
+          All nodes — expand a node to load its logs
+        </span>
+        <input
+          type="text"
+          value={globalQuery}
+          onChange={(e) => setGlobalQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (e.shiftKey) prevGlobal();
+              else nextGlobal();
+            } else if (e.key === "Escape") {
+              setGlobalQuery("");
+            }
+          }}
+          placeholder="search all logs"
+          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)] w-44"
+        />
+        {globalQuery.trim() !== "" && (
+          <div className="flex items-center gap-1">
+            <span className="font-mono tabular-nums">
+              {globalMatches.length > 0
+                ? `${globalCursor + 1}/${globalMatches.length}`
+                : pendingFetches > 0
+                  ? `loading… (${pendingFetches})`
+                  : "0/0"}
+            </span>
+            <button
+              onClick={prevGlobal}
+              disabled={globalMatches.length === 0}
+              title="previous match (Shift+Enter)"
+              className="px-1.5 py-0.5 rounded hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              ↑
+            </button>
+            <button
+              onClick={nextGlobal}
+              disabled={globalMatches.length === 0}
+              title="next match (Enter)"
+              className="px-1.5 py-0.5 rounded hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              ↓
+            </button>
+          </div>
+        )}
+        <span className="flex-1" />
         <div className="flex items-center gap-2">
           <button
             onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
@@ -2234,7 +2361,13 @@ function AllNodesLogs({
           <div
             key={n.id}
             data-log-node-id={n.id}
-            className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"}`}
+            className={`border rounded bg-[#0d1117] ${
+              isFocus
+                ? "border-violet-400"
+                : n.outcome === "failed"
+                  ? "border-red-500/60"
+                  : "border-[var(--border)]"
+            }`}
           >
             <div
               onClick={() => toggle(n.id)}
@@ -2290,6 +2423,9 @@ function AllNodesLogs({
                   run={run}
                   node={n}
                   focusStep={isFocus ? (focusStep ?? null) : null}
+                  focusLine={
+                    globalFocus?.nodeID === n.id ? globalFocus.line : null
+                  }
                 />
               </div>
             )}
@@ -2436,11 +2572,13 @@ function StreamingLogs({
   runID,
   nodeID,
   focusStep,
+  focusLine,
   steps,
 }: {
   runID: string;
   nodeID: string;
   focusStep?: string | null;
+  focusLine?: number | null;
   steps?: NodeWorkStep[];
 }) {
   const [lines, setLines] = useState<string[]>([]);
@@ -2478,6 +2616,7 @@ function StreamingLogs({
         parsed={parsed}
         jobId={`${runID}-${nodeID}`}
         focusStep={focusStep}
+        focusLine={focusLine}
         nodeSteps={steps}
       />
       <div ref={endRef} />
@@ -2489,11 +2628,13 @@ function StoredLogs({
   runID,
   nodeID,
   focusStep,
+  focusLine,
   steps,
 }: {
   runID: string;
   nodeID: string;
   focusStep?: string | null;
+  focusLine?: number | null;
   steps?: NodeWorkStep[];
 }) {
   const [text, setText] = useState<string | null>(null);
@@ -2526,6 +2667,7 @@ function StoredLogs({
       parsed={parsed}
       jobId={`${runID}-${nodeID}`}
       focusStep={focusStep}
+      focusLine={focusLine}
       nodeSteps={steps}
     />
   );
