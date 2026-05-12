@@ -109,7 +109,11 @@ function LogLines({
                     ? "text-cyan-400"
                     : "";
         return (
-          <div key={j} className="flex hover:bg-[#161b22] group">
+          <div
+            key={j}
+            data-line={startLine + j}
+            className="flex hover:bg-[#161b22] group"
+          >
             <span className="text-[#484f58] select-none pr-3 text-right shrink-0 w-8 group-hover:text-[#8b949e]">
               {startLine + j}
             </span>
@@ -406,10 +410,10 @@ function InlineLogView({
     const ts = tsMatch ? tsMatch[1] : null;
     const body = tsMatch ? line.slice(tsMatch[0].length) : line;
     if (body.trim() === "" && !stepLabel)
-      return <div key={key} className="h-5" />;
+      return <div key={key} data-line={key} className="h-5" />;
     const hasAnsi = body.includes("\x1b[");
     return (
-      <div key={key} className="flex hover:bg-[#161b22] group">
+      <div key={key} data-line={key} className="flex hover:bg-[#161b22] group">
         {showTimestamps && ts && (
           <span className="text-[#6e7681] select-none pr-2 shrink-0 tabular-nums">
             {ts}
@@ -540,7 +544,42 @@ export default function LogBucketView({
       });
     });
   };
+  // Build the error-block list: every log line in any section whose
+  // body contains an ERROR / error: / FAIL marker. Each block carries
+  // its section index (so the walker can auto-expand the containing
+  // step bucket) plus the absolute line number (rendered as
+  // data-line on the line `<div>`) so scrollIntoView lands on the
+  // actual message instead of the section header.
+  const errorBlocks = useMemo(() => {
+    const out: { sectionIdx: number; line: number }[] = [];
+    const reError = /\bERROR\b|\berror:|\bFAIL\b|\bpanic:/;
+    let lineCursor = 1;
+    parsed.sections.forEach((section, idx) => {
+      for (let j = 0; j < section.lines.length; j++) {
+        if (reError.test(section.lines[j])) {
+          out.push({ sectionIdx: idx, line: lineCursor + j });
+        }
+      }
+      lineCursor += section.lines.length;
+    });
+    return out;
+  }, [parsed]);
+  const errorCursor = useRef(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const nextError = () => {
+    if (errorBlocks.length === 0) return;
+    errorCursor.current = (errorCursor.current + 1) % errorBlocks.length;
+    const target = errorBlocks[errorCursor.current];
+    // Auto-expand the containing step bucket (no-op for between /
+    // summary sections, which render their lines inline already).
+    setStepOverrides((prev) => ({ ...prev, [target.sectionIdx]: true }));
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(
+        `[data-line="${target.line}"]`,
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
   // External focus-step: when a step is selected elsewhere (left
   // panel row, StepDag click), expand that step's bucket and scroll
   // it into view. Match against the section's parsed step name so
@@ -627,6 +666,15 @@ export default function LogBucketView({
         <span className="flex-1" />
         {viewMode === "steps" && steps.length > 0 && (
           <div className="flex items-center gap-1 text-[10px]">
+            {errorBlocks.length > 0 && (
+              <button
+                onClick={nextError}
+                title={`next error message (${errorBlocks.length} match${errorBlocks.length === 1 ? "" : "es"})`}
+                className="px-1.5 py-0.5 rounded text-red-300 hover:text-red-200 hover:bg-red-500/20 transition-colors"
+              >
+                ↓ next error ({errorBlocks.length})
+              </button>
+            )}
             <button
               onClick={expandAll}
               className="px-1.5 py-0.5 rounded text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors"
