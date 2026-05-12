@@ -703,6 +703,34 @@ export default function LogBucketView({
       });
     });
   };
+  // Map each find-hit line to the step section it sits in and force
+  // that bucket open. Otherwise the fuchsia wash hides behind a
+  // collapsed header.
+  const findHitSections = useMemo(() => {
+    if (!findLineSet || findLineSet.size === 0) return null;
+    const out = new Set<number>();
+    let lineCursor = 1;
+    parsed.sections.forEach((section, idx) => {
+      if (section.type === "step") {
+        for (let j = 0; j < section.lines.length; j++) {
+          if (findLineSet.has(lineCursor + j)) {
+            out.add(idx);
+            break;
+          }
+        }
+      }
+      lineCursor += section.lines.length;
+    });
+    return out;
+  }, [parsed, findLineSet]);
+  useEffect(() => {
+    if (!findHitSections || findHitSections.size === 0) return;
+    setStepOverrides((prev) => {
+      const next = { ...prev };
+      for (const i of findHitSections) next[i] = true;
+      return next;
+    });
+  }, [findHitSections]);
   // Build the error-block list: every log line in any section whose
   // body contains an ERROR / error: / FAIL marker. Each block carries
   // its section index (so the walker can auto-expand the containing
