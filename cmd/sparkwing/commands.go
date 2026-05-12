@@ -52,6 +52,7 @@ var allCommands = []*Command{
 	&cmdSparks, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup,
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
+	&cmdAnnotations, &cmdAnnotationsList, &cmdAnnotationsAdd,
 }
 
 // CommandJSON is the wire shape emitted by `sparkwing commands` and

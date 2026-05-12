@@ -453,6 +453,8 @@ func runJobs(args []string) error {
 	switch args[0] {
 	case "approvals":
 		return runRunsApprovals(ctx, paths, args[1:])
+	case "annotations":
+		return runRunsAnnotations(ctx, paths, args[1:])
 	case "triggers":
 		return runTriggers(args[1:])
 	case "list":

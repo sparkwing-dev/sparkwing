@@ -2608,3 +2608,62 @@ cross-run pending queue; with --run it's every approval (pending
 		{"Emit JSON for an agent", "sparkwing runs approvals list -o json"},
 	},
 }
+
+// ---- sparkwing runs annotations --------------------------------
+
+var cmdAnnotations = Command{
+	Path:     "sparkwing runs annotations",
+	Synopsis: "Read or append persistent node + step annotations",
+	Description: `Annotations are short summary strings that pipelines (via
+sparkwing.Annotate) and agents append to a node or step during a
+run. They show up on the dashboard alongside outcome. This verb
+lets an agent read every annotation on a run or contribute one
+without going through the SDK.`,
+	Subcommands: []SubcommandRef{
+		{"list", "List annotations on a run (optionally filtered to a node/step)"},
+		{"add", "Append one annotation to a node or step"},
+	},
+}
+
+var cmdAnnotationsList = Command{
+	Path:     "sparkwing runs annotations list",
+	Synopsis: "List annotations on a run",
+	Description: `Prints node-level annotations by default. Pass --steps to also
+include per-step annotations as separate rows; passing --step
+implies step-scope and limits to the matching step.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "node", Argument: "NODE_ID", Desc: "Limit to one node", Group: "Filter"},
+		{Name: "step", Argument: "STEP_ID", Desc: "Limit to one step (implies step-scope reads)", Group: "Filter"},
+		{Name: "steps", Desc: "Include per-step annotations", Group: "Filter"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: table|json|plain", Group: "Output"},
+		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+	},
+	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Every node annotation on a run", "sparkwing runs annotations list --run run-..."},
+		{"Include per-step annotations", "sparkwing runs annotations list --run run-... --steps"},
+		{"One node's annotations as JSON", "sparkwing runs annotations list --run run-... --node build -o json"},
+	},
+}
+
+var cmdAnnotationsAdd = Command{
+	Path:     "sparkwing runs annotations add",
+	Synopsis: "Append an annotation to a node or step",
+	Description: `Appends one message to the annotations list on a node, or on a
+step when --step is given. Annotations are append-only; the same
+message string can be added more than once and the order is
+preserved as the dashboard renders them.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "node", Argument: "NODE_ID", Desc: "Node identifier", Required: true, Group: "Input"},
+		{Name: "step", Argument: "STEP_ID", Desc: "Step identifier (annotates the step instead of the node)", Group: "Input"},
+		{Name: "message", Short: "m", Argument: "TEXT", Desc: "Annotation text", Required: true, Group: "Input"},
+		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+	},
+	GroupOrder: []string{"Input", "System", "Other"},
+	Examples: []Example{
+		{"Note something on a node", "sparkwing runs annotations add --run run-... --node deploy -m 'agent: retried after 502'"},
+		{"Note something on a step inside a node", "sparkwing runs annotations add --run run-... --node deploy --step canary -m 'rolled out 5%'"},
+	},
+}
