@@ -183,7 +183,7 @@ func runCommands(args []string) error {
 			fmt.Println(c.Path)
 		}
 		return nil
-	case "table":
+	case "pretty", "table":
 		// Token effort -- a wide table of every verb is rarely the
 		// right view for humans; they should use sparkwing -h. Render
 		// a thin two-column table so the verb is at least usable.

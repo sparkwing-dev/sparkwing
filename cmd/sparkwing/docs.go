@@ -151,7 +151,7 @@ func renderDocsList(entries []docs.Entry, output string) error {
 			fmt.Println(e.Slug)
 		}
 		return nil
-	case "table", "":
+	case "pretty", "table", "":
 		if len(entries) == 0 {
 			fmt.Println(color.Dim("(no docs match)"))
 			return nil

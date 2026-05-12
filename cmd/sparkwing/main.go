@@ -666,8 +666,8 @@ func runJobs(args []string) error {
 		effectiveOut := *outFmt
 		if effectiveOut == "" && *format != "" {
 			switch *format {
-			case "pretty":
-				effectiveOut = "table"
+			case "pretty", "table":
+				effectiveOut = "pretty"
 			case "json", "ndjson":
 				effectiveOut = "json"
 			case "plain":
@@ -679,11 +679,14 @@ func runJobs(args []string) error {
 		if effectiveOut == "ndjson" {
 			effectiveOut = "json"
 		}
+		if effectiveOut == "table" {
+			effectiveOut = "pretty"
+		}
 		if *pretty {
-			if effectiveOut != "" && effectiveOut != "table" {
+			if effectiveOut != "" && effectiveOut != "pretty" {
 				return fmt.Errorf("jobs logs: --pretty and -o %s disagree", effectiveOut)
 			}
-			effectiveOut = "table"
+			effectiveOut = "pretty"
 		}
 		// Default to JSONL when piped so agents/CI get structured output without --json.
 		if effectiveOut == "" && !*asJSON && !color.IsInteractiveStdout() {
@@ -799,27 +802,27 @@ func runJobs(args []string) error {
 }
 
 // resolveOutputFormat canonicalizes -o/--output + --json into one of
-// {"table","json","plain"}. Disagreeing values error rather than silently win.
+// {"pretty","json","plain"}. Disagreeing values error rather than
+// silently winning.
 //
 // outputChanged distinguishes "user explicitly typed -o/--output" from
 // "the flag took its default value." Callers using pflag pass
 // fs.Changed("output"); hand-parsers pass `parsed.output != ""`. The
 // distinction matters because a default-shaped --output (e.g. the
-// "table" pflag default a leaf may register) must not collide with a
-// user-set --json: --json is documented as an alias for --output=json
-// and "default + --json" should resolve to JSON, not error. Only when
-// BOTH flags are user-set AND disagree do we surface a conflict.
-// Mirrors the kubectl / gh / aws CLI convention.
+// "pretty" pflag default a leaf may register) must not collide with
+// a user-set --json: --json is documented as an alias for
+// --output=json and "default + --json" should resolve to JSON, not
+// error. Only when BOTH flags are user-set AND disagree do we surface
+// a conflict. Mirrors the kubectl / gh / aws CLI convention.
+//
+// "table" is accepted at the input boundary as a silent back-compat
+// alias for "pretty" so older scripts that pin -o table keep working.
 func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
-	// "pretty" is a synonym for "table": for verbs whose human form
-	// isn't actually tabular (runs logs, runs summary, runs timeline),
-	// "pretty" reads better. Internally everything still funnels to
-	// "table" so handler-side switches stay compact.
-	if outFmt == "pretty" {
-		outFmt = "table"
+	if outFmt == "table" {
+		outFmt = "pretty"
 	}
 	switch outFmt {
-	case "", "table", "json", "plain":
+	case "", "pretty", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
 	}
@@ -830,7 +833,7 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 		return "json", nil
 	}
 	if outFmt == "" {
-		return "table", nil
+		return "pretty", nil
 	}
 	return outFmt, nil
 }
@@ -840,10 +843,10 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 // aliases that fold into the same canonical FORMAT.
 //
 // Rules:
-//   - --pretty wins as a forced "table" (errors if -o disagrees).
+//   - --pretty wins as a forced "pretty" (errors if -o disagrees).
 //   - --json wins as a forced "json" (errors if -o disagrees).
 //   - With an explicit -o value, that value passes through.
-//   - With nothing set: "table" when stdout is a TTY, "json" otherwise.
+//   - With nothing set: "pretty" when stdout is a TTY, "json" otherwise.
 //     The auto-default lets agents pipe `... | jq` without typing
 //     --json, while humans get the readable form by default.
 //
@@ -851,28 +854,26 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 // -o/--output (e.g. fs.Changed("output")). It distinguishes a
 // default-shaped --output from a user-set one, mirroring the
 // kubectl explicit-bit convention.
+//
+// "table" is accepted at the input boundary as a silent back-compat
+// alias for "pretty".
 func resolveTTYAwareOutput(outFmt string, outputChanged, jsonAlias, prettyAlias bool, cmdPath string) (string, error) {
 	if jsonAlias && prettyAlias {
 		return "", fmt.Errorf("%s: --json and --pretty cannot be combined", cmdPath)
 	}
-	// "pretty" is the canonical name for "human-readable form" --
-	// some verbs render a real table (runs list, runs grep), others
-	// render prose / a waterfall / a colored stream (runs logs,
-	// runs summary, runs timeline). Accept both; normalize to
-	// "table" internally so handlers stay terse.
-	if outFmt == "pretty" {
-		outFmt = "table"
+	if outFmt == "table" {
+		outFmt = "pretty"
 	}
 	switch outFmt {
-	case "", "table", "json", "plain":
+	case "", "pretty", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
 	}
 	if prettyAlias {
-		if outputChanged && outFmt != "" && outFmt != "table" {
+		if outputChanged && outFmt != "" && outFmt != "pretty" {
 			return "", fmt.Errorf("%s: --pretty and -o %s disagree", cmdPath, outFmt)
 		}
-		return "table", nil
+		return "pretty", nil
 	}
 	if jsonAlias {
 		if outputChanged && outFmt != "" && outFmt != "json" {
@@ -884,7 +885,7 @@ func resolveTTYAwareOutput(outFmt string, outputChanged, jsonAlias, prettyAlias 
 		return outFmt, nil
 	}
 	if color.IsInteractiveStdout() {
-		return "table", nil
+		return "pretty", nil
 	}
 	return "json", nil
 }

@@ -8,9 +8,9 @@ import (
 // TestResolveOutputFormat covers the four-quadrant matrix: --json on
 // its own, --output=json on its own, both set in agreement, and both
 // set in disagreement. An earlier resolver errored on quadrant (1)
-// when a leaf registered "table" as the pflag default ("--json and
-// -o table disagree"), because the resolver couldn't distinguish
-// "user typed -o table" from "table was the default and the user
+// when a leaf registered "pretty" as the pflag default ("--json and
+// -o pretty disagree"), because the resolver couldn't distinguish
+// "user typed -o pretty" from "pretty was the default and the user
 // never touched -o." Tracking outputChanged explicitly fixes that
 // asymmetry.
 func TestResolveOutputFormat(t *testing.T) {
@@ -24,12 +24,12 @@ func TestResolveOutputFormat(t *testing.T) {
 		want    string
 		wantErr string // substring match; "" = expect no error
 	}{
-		// Quadrant 1: only --json set. Default outFmt may be "table"
+		// Quadrant 1: only --json set. Default outFmt may be "pretty"
 		// (action.go callers) or "" (info.go callers); in both cases
 		// the resolver should yield "json" because outputChanged=false.
 		{
-			name:          "only --json (default outFmt=table)",
-			outFmt:        "table",
+			name:          "only --json (default outFmt=pretty)",
+			outFmt:        "pretty",
 			outputChanged: false,
 			jsonAlias:     true,
 			want:          "json",
@@ -40,6 +40,14 @@ func TestResolveOutputFormat(t *testing.T) {
 			outputChanged: false,
 			jsonAlias:     true,
 			want:          "json",
+		},
+		// "table" is a back-compat input alias for "pretty"; same path.
+		{
+			name:          "back-compat -o table normalizes to pretty",
+			outFmt:        "table",
+			outputChanged: true,
+			jsonAlias:     false,
+			want:          "pretty",
 		},
 		// Quadrant 2: only --output=json. No --json alias; resolver
 		// returns the explicit value.
@@ -62,11 +70,11 @@ func TestResolveOutputFormat(t *testing.T) {
 		// Quadrant 4: both set, disagree. Real conflict; resolver
 		// surfaces the error so the user fixes their invocation.
 		{
-			name:          "both --json and --output=table (disagree)",
-			outFmt:        "table",
+			name:          "both --json and --output=pretty (disagree)",
+			outFmt:        "pretty",
 			outputChanged: true,
 			jsonAlias:     true,
-			wantErr:       "--json and -o table disagree",
+			wantErr:       "--json and -o pretty disagree",
 		},
 		{
 			name:          "both --json and --output=plain (disagree)",
@@ -75,21 +83,21 @@ func TestResolveOutputFormat(t *testing.T) {
 			jsonAlias:     true,
 			wantErr:       "--json and -o plain disagree",
 		},
-		// Defaults: nothing set on either side -> "table". Regression
+		// Defaults: nothing set on either side -> "pretty". Regression
 		// check.
 		{
 			name:          "nothing set (default empty)",
 			outFmt:        "",
 			outputChanged: false,
 			jsonAlias:     false,
-			want:          "table",
+			want:          "pretty",
 		},
 		{
-			name:          "nothing set (default table)",
-			outFmt:        "table",
+			name:          "nothing set (default pretty)",
+			outFmt:        "pretty",
 			outputChanged: false,
 			jsonAlias:     false,
-			want:          "table",
+			want:          "pretty",
 		},
 		// Explicit --output=plain (without --json) is honored.
 		{

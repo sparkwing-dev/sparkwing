@@ -90,12 +90,15 @@ func runPipelinePublish(args []string) error {
 		results = append(results, row)
 	}
 
-	format := "table"
+	format := "pretty"
 	switch {
 	case *asJSON:
 		format = "json"
 	case *output != "":
 		format = *output
+		if format == "table" {
+			format = "pretty"
+		}
 	}
 	return renderPublishResults(results, format)
 }

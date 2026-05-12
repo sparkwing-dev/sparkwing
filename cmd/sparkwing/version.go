@@ -94,10 +94,13 @@ func runVersion(args []string) error {
 
 	report := gatherVersionReport(*offline)
 
+	if output == "table" {
+		output = "pretty"
+	}
 	switch strings.ToLower(output) {
 	case "json", "":
 		if output == "" {
-			output = "table"
+			output = "pretty"
 		}
 		if output == "json" {
 			enc := json.NewEncoder(os.Stdout)
