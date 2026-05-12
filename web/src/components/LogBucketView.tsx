@@ -275,9 +275,20 @@ function StepBucket({
       data-step-id={dataStep ?? undefined}
       className={`border-b border-[var(--border)] last:border-b-0 ${section.status === "failed" ? "bg-red-500/5" : ""}`}
     >
-      <button
+      {/* Header is a div, not a button, so the inline CopyButton can
+        sit inside it without nesting button elements (invalid HTML).
+        Keyboard activation is wired via role + Enter/Space handler. */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b]/50 transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b]/50 transition-colors cursor-pointer"
       >
         <span className="w-4 text-center text-[var(--muted)]">
           {expanded ? "▾" : "▸"}
@@ -347,7 +358,7 @@ function StepBucket({
             )
           )}
         </span>
-      </button>
+      </div>
       {expanded && (
         <div className="px-3 pb-2">
           {section.lines.length > 0 ? (
