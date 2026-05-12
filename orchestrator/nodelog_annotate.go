@@ -8,8 +8,11 @@ import (
 
 // annotatingNodeLog observes LogRecords for the node_annotation event
 // emitted by sparkwing.Annotate and forwards each one to the State
-// backend so it lands on the persistent node row. Non-annotation
-// records pass through unchanged.
+// backend. Annotations fired inside a step body (rec.Step set) land
+// on the per-step row; everything else lands on the node row. The
+// two are disjoint so consumers can render them side-by-side without
+// deduplication. A consumer that wants every annotation on a node
+// should sum node.annotations + each step.annotations.
 //
 // The wrapper holds its own background context for the persist call
 // so an annotation that fires late in a canceled step still lands.
@@ -57,14 +60,16 @@ func (l *annotatingNodeLog) Emit(rec sparkwing.LogRecord) {
 			}
 		}
 		if msg != "" {
-			// Always persist at the node level so the node-row
-			// annotations list stays the authoritative aggregate.
-			// When fired inside a step body (rec.Step set), also
-			// persist on the per-step row so the dashboard can
-			// surface a step-scoped badge without re-bucketing.
-			l.persistNode(msg)
+			// Step-scoped annotations land on the per-step row only;
+			// node-scoped ones (fired between steps / before any
+			// step starts) land on the node row. The two are disjoint
+			// so consumers can render them side-by-side without
+			// deduplication; the total for a node is node.annotations
+			// + sum of each step.annotations.
 			if rec.Step != "" {
 				l.persistStep(rec.Step, msg)
+			} else {
+				l.persistNode(msg)
 			}
 		}
 	}

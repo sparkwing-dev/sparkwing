@@ -1812,7 +1812,15 @@ function RunDetailPane({
       ) {
         out.push({ kind: "node", nodeID: n.id });
       }
+      // Drop node-level annotations that appear on any step too;
+      // older runs dual-persisted step annotations onto the node row,
+      // and we already emit step-anno hits for those.
+      const stepTexts = new Set<string>();
+      for (const s of n.work?.steps ?? []) {
+        for (const a of s.annotations ?? []) stepTexts.add(a);
+      }
       (n.annotations ?? []).forEach((a, i) => {
+        if (stepTexts.has(a)) return;
         if (has(a)) out.push({ kind: "node-anno", nodeID: n.id, annoIdx: i });
       });
       for (const s of n.work?.steps ?? []) {
@@ -1938,6 +1946,13 @@ function RunDetailPane({
     const key = findHitDomKey(hit);
     setFindActiveKey(key);
     if (effectiveTab === "summary") {
+      // Summary find lives entirely inside the tab; the left sidebar
+      // shouldn't be implicitly steered by it. Clear any leftover
+      // step focus from a prior DAG/Timeline visit so the NodesList
+      // doesn't paint a step that has nothing to do with the cursor.
+      if (selectedStep && selected) {
+        onSelectStep(selected.id, null);
+      }
       // Step-level hits have no per-step row in Summary; fall back
       // to the parent node's job row so the user still has something
       // to scroll to.
@@ -2468,10 +2483,18 @@ function RunAnnotationsList({
 }) {
   const groups = nodes
     .map((n) => {
-      const nodeAnnos = n.annotations ?? [];
       const stepAnnos = (n.work?.steps ?? [])
         .map((s) => ({ stepID: s.id, annos: s.annotations ?? [] }))
         .filter((sg) => sg.annos.length > 0);
+      // Older runs dual-persisted step annotations onto the node row;
+      // drop any node-level entry whose text is also on a step so we
+      // don't render the same line twice. Original index is preserved
+      // for data-find-key alignment with findMatchedNodeAnnos.
+      const stepTexts = new Set<string>();
+      for (const sg of stepAnnos) for (const a of sg.annos) stepTexts.add(a);
+      const nodeAnnos = (n.annotations ?? [])
+        .map((text, idx) => ({ idx, text }))
+        .filter((a) => !stepTexts.has(a.text));
       const total =
         nodeAnnos.length +
         stepAnnos.reduce((acc, sg) => acc + sg.annos.length, 0);
@@ -2521,18 +2544,20 @@ function RunAnnotationsList({
           </div>
           {g.nodeAnnos.length > 0 && (
             <ul className="flex flex-col gap-0.5 pl-3.5 mb-1">
-              {g.nodeAnnos.map((a, i) => {
-                const key = `node-anno::${g.node.id}::${i}`;
+              {g.nodeAnnos.map((a) => {
+                const key = `node-anno::${g.node.id}::${a.idx}`;
                 const match =
-                  findMatchedNodeAnnos?.get(g.node.id)?.has(i) ?? false;
+                  findMatchedNodeAnnos?.get(g.node.id)?.has(a.idx) ?? false;
                 return (
                   <li
-                    key={i}
+                    key={a.idx}
                     data-find-key={key}
                     className={`font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2 px-1 rounded ${annoCls(key, match)}`}
                   >
                     <span className="text-cyan-300 shrink-0">›</span>
-                    <span className="whitespace-pre-wrap break-words">{a}</span>
+                    <span className="whitespace-pre-wrap break-words">
+                      {a.text}
+                    </span>
                   </li>
                 );
               })}
