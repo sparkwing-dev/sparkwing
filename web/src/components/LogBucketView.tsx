@@ -81,6 +81,8 @@ function LogLines({
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
+  findLineSet,
+  findCurrentLine,
 }: {
   lines: string[];
   startLine: number;
@@ -92,6 +94,10 @@ function LogLines({
   // When set (filter mode), lines NOT in the set are hidden; gaps
   // between visible lines collapse into a "…" separator row.
   visibleLineSet?: Set<number> | null;
+  // Top-level find hits — painted fuchsia so they're visually
+  // distinct from the per-bucket yellow search.
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   let lastVisibleIdx = -2;
   const rendered: React.ReactElement[] = [];
@@ -116,6 +122,8 @@ function LogLines({
         showTimestamps,
         matchLineSet,
         currentMatchLine,
+        findLineSet,
+        findCurrentLine,
       ),
     );
   });
@@ -132,6 +140,8 @@ function renderLogLine(
   showTimestamps: boolean,
   matchLineSet: Set<number> | undefined,
   currentMatchLine: number | undefined,
+  findLineSet?: Set<number>,
+  findCurrentLine?: number | null,
 ): React.ReactElement {
   const tsMatch = line.match(TS_PREFIX_RE);
   const ts = tsMatch ? tsMatch[1] : null;
@@ -153,11 +163,17 @@ function renderLogLine(
               : "";
   const isMatch = matchLineSet?.has(absLine);
   const isCurrent = isMatch && currentMatchLine === absLine;
-  const matchCls = isCurrent
-    ? "bg-yellow-400/30"
-    : isMatch
-      ? "bg-yellow-400/10"
-      : "";
+  const isFindHit = findLineSet?.has(absLine);
+  const isFindCurrent = isFindHit && findCurrentLine === absLine;
+  const matchCls = isFindCurrent
+    ? "bg-fuchsia-400/30"
+    : isFindHit
+      ? "bg-fuchsia-400/15"
+      : isCurrent
+        ? "bg-yellow-400/30"
+        : isMatch
+          ? "bg-yellow-400/10"
+          : "";
   return (
     <div
       key={absLine}
@@ -204,6 +220,8 @@ function StepBucket({
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
+  findLineSet,
+  findCurrentLine,
 }: {
   section: StepSection;
   lineOffset: number;
@@ -222,6 +240,8 @@ function StepBucket({
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   const defaultExpanded =
     section.status === "failed" || section.status === "running";
@@ -370,6 +390,8 @@ function StepBucket({
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}
+                findLineSet={findLineSet}
+                findCurrentLine={findCurrentLine}
               />
             </div>
           ) : (
@@ -388,6 +410,8 @@ function BetweenSection({
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
+  findLineSet,
+  findCurrentLine,
 }: {
   section: LogSection;
   lineOffset: number;
@@ -395,6 +419,8 @@ function BetweenSection({
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const nonEmpty = section.lines.filter((l) => l.trim() !== "");
@@ -422,6 +448,8 @@ function BetweenSection({
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
             visibleLineSet={visibleLineSet}
+            findLineSet={findLineSet}
+            findCurrentLine={findCurrentLine}
           />
         </div>
       )}
@@ -436,6 +464,8 @@ function SummarySection({
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
+  findLineSet,
+  findCurrentLine,
 }: {
   section: LogSection;
   lineOffset: number;
@@ -443,6 +473,8 @@ function SummarySection({
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -466,6 +498,8 @@ function SummarySection({
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
             visibleLineSet={visibleLineSet}
+            findLineSet={findLineSet}
+            findCurrentLine={findCurrentLine}
           />
         </div>
       )}
@@ -479,12 +513,16 @@ function InlineLogView({
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
+  findLineSet,
+  findCurrentLine,
 }: {
   sections: (LogSection | StepSection)[];
   showTimestamps?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   // Each line in the inline view is prefixed with the step it
   // belongs to: `<step> | <line>`. That keeps a flat top-to-bottom
@@ -503,11 +541,17 @@ function InlineLogView({
     const body = tsMatch ? line.slice(tsMatch[0].length) : line;
     const isMatch = matchLineSet?.has(key);
     const isCurrent = isMatch && currentMatchLine === key;
-    const matchCls = isCurrent
-      ? "bg-yellow-400/30"
-      : isMatch
-        ? "bg-yellow-400/10"
-        : "";
+    const isFindHit = findLineSet?.has(key);
+    const isFindCurrent = isFindHit && findCurrentLine === key;
+    const matchCls = isFindCurrent
+      ? "bg-fuchsia-400/30"
+      : isFindHit
+        ? "bg-fuchsia-400/15"
+        : isCurrent
+          ? "bg-yellow-400/30"
+          : isMatch
+            ? "bg-yellow-400/10"
+            : "";
     if (body.trim() === "" && !stepLabel)
       return <div key={key} data-line={key} className={`h-5 ${matchCls}`} />;
     const hasAnsi = body.includes("\x1b[");
@@ -605,6 +649,11 @@ interface LogBucketViewProps {
   // renders the step's is_result / has_skip_if / annotation flags as
   // chips alongside the step name, matching the StepDag pill set.
   nodeSteps?: { id: string; is_result?: boolean; has_skip_if?: boolean }[];
+  // Top-level find hits for this node (absolute log-line numbers).
+  // Each line gets a fuchsia wash; findCurrentLine is the brighter
+  // "current" band. Distinct from the per-bucket yellow search.
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }
 
 export default function LogBucketView({
@@ -613,6 +662,8 @@ export default function LogBucketView({
   focusStep,
   focusLine,
   nodeSteps,
+  findLineSet,
+  findCurrentLine,
 }: LogBucketViewProps) {
   const [viewMode, setViewMode] = useState<"steps" | "inline">("steps");
   // Timestamps default on -- they're the cheapest way to correlate
@@ -1060,6 +1111,8 @@ export default function LogBucketView({
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
             visibleLineSet={visibleLineSet}
+            findLineSet={findLineSet}
+            findCurrentLine={findCurrentLine}
           />
         </div>
       ) : (
@@ -1086,6 +1139,8 @@ export default function LogBucketView({
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}
+                findLineSet={findLineSet}
+                findCurrentLine={findCurrentLine}
                 onToggle={() =>
                   setStepOverrides((prev) => {
                     const cur =
@@ -1108,6 +1163,8 @@ export default function LogBucketView({
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}
+                findLineSet={findLineSet}
+                findCurrentLine={findCurrentLine}
               />
             );
           }
@@ -1121,6 +1178,8 @@ export default function LogBucketView({
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}
+                findLineSet={findLineSet}
+                findCurrentLine={findCurrentLine}
               />
             );
           }

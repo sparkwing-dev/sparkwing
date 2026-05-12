@@ -2067,6 +2067,7 @@ function RunDetailPane({
               focusStep={selectedStep}
               onSelectNode={onSelectNode}
               externalFindFocus={findLogFocus}
+              findMatchedLogsByNode={findMatchedLogsByNode}
             />
           </div>
         )}
@@ -2185,6 +2186,7 @@ function LogsPane({
   focusStep,
   onSelectNode,
   externalFindFocus,
+  findMatchedLogsByNode,
 }: {
   run: Run;
   node: RunNode | null;
@@ -2192,6 +2194,7 @@ function LogsPane({
   focusStep?: string | null;
   onSelectNode?: (id: string) => void;
   externalFindFocus?: { nodeID: string; line: number } | null;
+  findMatchedLogsByNode?: Map<string, Set<number>>;
 }) {
   return (
     <AllNodesLogs
@@ -2201,6 +2204,7 @@ function LogsPane({
       focusStep={focusStep ?? null}
       onSelectNode={onSelectNode}
       externalFindFocus={externalFindFocus ?? null}
+      findMatchedLogsByNode={findMatchedLogsByNode}
     />
   );
 }
@@ -2212,11 +2216,15 @@ function SingleNodeLogs({
   node,
   focusStep,
   focusLine,
+  findLineSet,
+  findCurrentLine,
 }: {
   run: Run;
   node: RunNode;
   focusStep?: string | null;
   focusLine?: number | null;
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   if (node.status === "pending") {
     return (
@@ -2234,6 +2242,8 @@ function SingleNodeLogs({
         focusStep={focusStep}
         focusLine={focusLine}
         steps={steps}
+        findLineSet={findLineSet}
+        findCurrentLine={findCurrentLine}
       />
     ) : (
       <StoredLogs
@@ -2242,6 +2252,8 @@ function SingleNodeLogs({
         focusStep={focusStep}
         focusLine={focusLine}
         steps={steps}
+        findLineSet={findLineSet}
+        findCurrentLine={findCurrentLine}
       />
     );
   return (
@@ -2407,6 +2419,7 @@ function AllNodesLogs({
   focusStep,
   onSelectNode,
   externalFindFocus,
+  findMatchedLogsByNode,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -2418,6 +2431,9 @@ function AllNodesLogs({
   // owning node section and pass focusLine down to LogBucketView
   // so the bucket auto-expands and scrolls to the exact line.
   externalFindFocus?: { nodeID: string; line: number } | null;
+  // Per-node line numbers that match the top-level find query;
+  // LogBucketView paints these fuchsia.
+  findMatchedLogsByNode?: Map<string, Set<number>>;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -2451,6 +2467,17 @@ function AllNodesLogs({
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [externalFindFocus]);
+  // Auto-expand every node section whose logs contain a find match.
+  // Users typing a query expect to see fuchsia highlights without
+  // hunting through collapsed nodes.
+  useEffect(() => {
+    if (!findMatchedLogsByNode || findMatchedLogsByNode.size === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const id of findMatchedLogsByNode.keys()) next.add(id);
+      return next;
+    });
+  }, [findMatchedLogsByNode]);
   if (nodes.length === 0) {
     return (
       <div className="text-sm text-[var(--muted)]">
@@ -2551,6 +2578,12 @@ function AllNodesLogs({
                   node={n}
                   focusStep={isFocus ? (focusStep ?? null) : null}
                   focusLine={
+                    externalFindFocus?.nodeID === n.id
+                      ? externalFindFocus.line
+                      : null
+                  }
+                  findLineSet={findMatchedLogsByNode?.get(n.id)}
+                  findCurrentLine={
                     externalFindFocus?.nodeID === n.id
                       ? externalFindFocus.line
                       : null
@@ -2703,12 +2736,16 @@ function StreamingLogs({
   focusStep,
   focusLine,
   steps,
+  findLineSet,
+  findCurrentLine,
 }: {
   runID: string;
   nodeID: string;
   focusStep?: string | null;
   focusLine?: number | null;
   steps?: NodeWorkStep[];
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
@@ -2747,6 +2784,8 @@ function StreamingLogs({
         focusStep={focusStep}
         focusLine={focusLine}
         nodeSteps={steps}
+        findLineSet={findLineSet}
+        findCurrentLine={findCurrentLine}
       />
       <div ref={endRef} />
     </>
@@ -2759,12 +2798,16 @@ function StoredLogs({
   focusStep,
   focusLine,
   steps,
+  findLineSet,
+  findCurrentLine,
 }: {
   runID: string;
   nodeID: string;
   focusStep?: string | null;
   focusLine?: number | null;
   steps?: NodeWorkStep[];
+  findLineSet?: Set<number>;
+  findCurrentLine?: number | null;
 }) {
   const [text, setText] = useState<string | null>(null);
 
@@ -2798,6 +2841,8 @@ function StoredLogs({
       focusStep={focusStep}
       focusLine={focusLine}
       nodeSteps={steps}
+      findLineSet={findLineSet}
+      findCurrentLine={findCurrentLine}
     />
   );
 }
