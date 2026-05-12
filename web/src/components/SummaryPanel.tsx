@@ -210,6 +210,7 @@ export default function SummaryPanel({
   onToggle,
   inline = false,
   findMatched,
+  findActiveKey,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -217,6 +218,7 @@ export default function SummaryPanel({
   onToggle: () => void;
   inline?: boolean;
   findMatched?: Set<string>;
+  findActiveKey?: string | null;
 }) {
   const tally = useMemo(() => buildTally(nodes), [nodes]);
   const failed = useMemo(
@@ -311,13 +313,18 @@ export default function SummaryPanel({
             {nodes.map((n) => {
               const g = outcomeGlyph(n.outcome);
               const isFindHit = findMatched?.has(n.id) ?? false;
+              const key = `node::${n.id}`;
+              const isCurrentFind = findActiveKey === key;
               return (
                 <div
                   key={n.id}
+                  data-find-key={key}
                   className={`flex items-center gap-2 text-xs font-mono px-1 -mx-1 rounded ${
-                    isFindHit
-                      ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
-                      : ""
+                    isCurrentFind
+                      ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                      : isFindHit
+                        ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                        : ""
                   }`}
                 >
                   <span className={`w-4 text-center ${g.cls}`}>{g.glyph}</span>

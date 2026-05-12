@@ -1788,41 +1788,110 @@ function RunDetailPane({
     }, 250);
     return () => clearTimeout(t);
   }, [findQuery, run.id]);
-  // One node contributes a node-level hit plus one hit per matching step.
-  type FindHit = { nodeID: string; stepID: string | null };
+  // Each match is its own hit so the walker can step through individual
+  // annotations instead of stopping at the containing node/step. Order:
+  // for each node, emit node-level → node annotations → for each step,
+  // step-level → step annotations.
+  type FindHit =
+    | { kind: "node"; nodeID: string }
+    | { kind: "node-anno"; nodeID: string; annoIdx: number }
+    | { kind: "step"; nodeID: string; stepID: string }
+    | { kind: "step-anno"; nodeID: string; stepID: string; annoIdx: number };
   const findStructuredHits = useMemo<FindHit[]>(() => {
     const q = findQuery.trim().toLowerCase();
     if (!q) return [];
+    const has = (s: string | undefined | null) =>
+      !!s && s.toLowerCase().includes(q);
     const out: FindHit[] = [];
     for (const n of nodes) {
-      const nodeHay: string[] = [n.id];
-      if (n.error) nodeHay.push(n.error);
-      if (n.failure_reason) nodeHay.push(n.failure_reason);
-      if (n.groups) nodeHay.push(...n.groups);
-      if (n.annotations) nodeHay.push(...n.annotations);
-      const nodeMatches = nodeHay.some((h) => h.toLowerCase().includes(q));
-      if (nodeMatches) out.push({ nodeID: n.id, stepID: null });
+      if (
+        has(n.id) ||
+        has(n.error) ||
+        has(n.failure_reason) ||
+        (n.groups ?? []).some(has)
+      ) {
+        out.push({ kind: "node", nodeID: n.id });
+      }
+      (n.annotations ?? []).forEach((a, i) => {
+        if (has(a)) out.push({ kind: "node-anno", nodeID: n.id, annoIdx: i });
+      });
       for (const s of n.work?.steps ?? []) {
-        const stepHay: string[] = [s.id];
-        if (s.annotations) stepHay.push(...s.annotations);
-        if (stepHay.some((h) => h.toLowerCase().includes(q))) {
-          out.push({ nodeID: n.id, stepID: s.id });
+        if (has(s.id)) {
+          out.push({ kind: "step", nodeID: n.id, stepID: s.id });
         }
+        (s.annotations ?? []).forEach((a, i) => {
+          if (has(a)) {
+            out.push({
+              kind: "step-anno",
+              nodeID: n.id,
+              stepID: s.id,
+              annoIdx: i,
+            });
+          }
+        });
       }
     }
     return out;
   }, [findQuery, nodes]);
-  const findMatchedNodes = useMemo(
-    () => new Set(findStructuredHits.map((h) => h.nodeID)),
-    [findStructuredHits],
-  );
+  // DOM data-find-key for the active hit so the Summary tab walker can
+  // querySelector → scrollIntoView. Each summary item renders this key.
+  const findHitDomKey = (h: FindHit): string => {
+    switch (h.kind) {
+      case "node":
+        return `node::${h.nodeID}`;
+      case "node-anno":
+        return `node-anno::${h.nodeID}::${h.annoIdx}`;
+      case "step":
+        return `step::${h.nodeID}::${h.stepID}`;
+      case "step-anno":
+        return `step-anno::${h.nodeID}::${h.stepID}::${h.annoIdx}`;
+    }
+  };
+  const findMatchedNodes = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findStructuredHits) set.add(h.nodeID);
+    return set;
+  }, [findStructuredHits]);
   // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
   const findMatchedSteps = useMemo(() => {
     const set = new Set<string>();
     for (const h of findStructuredHits) {
-      if (h.stepID) set.add(`${h.nodeID}::${h.stepID}`);
+      if (h.kind === "step" || h.kind === "step-anno") {
+        set.add(`${h.nodeID}::${h.stepID}`);
+      }
     }
     return set;
+  }, [findStructuredHits]);
+  // Per-(node, idx) and per-(node, step, idx) annotation hit sets so
+  // tooltips / NodeLogSummary / RunAnnotationsList can paint just the
+  // matching annotation rows fuchsia instead of every annotation under
+  // a matching node.
+  const findMatchedNodeAnnos = useMemo(() => {
+    const map = new Map<string, Set<number>>();
+    for (const h of findStructuredHits) {
+      if (h.kind !== "node-anno") continue;
+      let set = map.get(h.nodeID);
+      if (!set) {
+        set = new Set();
+        map.set(h.nodeID, set);
+      }
+      set.add(h.annoIdx);
+    }
+    return map;
+  }, [findStructuredHits]);
+  const findMatchedStepAnnos = useMemo(() => {
+    const map = new Map<string, Set<number>>();
+    for (const h of findStructuredHits) {
+      if (h.kind !== "step-anno") continue;
+      const k = `${h.nodeID}::${h.stepID}`;
+      let set = map.get(k);
+      if (!set) {
+        set = new Set();
+        map.set(k, set);
+      }
+      set.add(h.annoIdx);
+    }
+    return map;
   }, [findStructuredHits]);
   const findMatchedLogsByNode = useMemo(() => {
     const out = new Map<string, Set<number>>();
@@ -1846,8 +1915,13 @@ function RunDetailPane({
   useEffect(() => {
     setFindCursor(0);
   }, [findQuery, tab]);
-  // Step-scoped hits route through selectStep so Timeline auto-expands
-  // the parent node row and StepDag highlights the matched step.
+  // findActiveKey is the data-find-key of the current hit; Summary
+  // items watch it to mark themselves "current" (brighter fuchsia).
+  const [findActiveKey, setFindActiveKey] = useState<string | null>(null);
+  // Summary tab walker: scroll the matching item within the page
+  // (jobs list row / annotation row) without touching sidebar
+  // selection. The DAG/Timeline tabs still drive selection because
+  // their job IS to focus a node/step.
   const jumpFind = (idx: number) => {
     const isLogs = effectiveTab === "logs";
     const len = isLogs ? findLogResults.length : findStructuredHits.length;
@@ -1858,13 +1932,32 @@ function RunDetailPane({
       const m = findLogResults[wrapped];
       onSelectNode(m.node_id);
       setFindLogFocus({ nodeID: m.node_id, line: m.line });
+      return;
+    }
+    const hit = findStructuredHits[wrapped];
+    const key = findHitDomKey(hit);
+    setFindActiveKey(key);
+    if (effectiveTab === "summary") {
+      // Step-level hits have no per-step row in Summary; fall back
+      // to the parent node's job row so the user still has something
+      // to scroll to.
+      const fallback = hit.kind === "step" ? `node::${hit.nodeID}` : key;
+      requestAnimationFrame(() => {
+        const el =
+          (tabContentRef.current?.querySelector(
+            `[data-find-key="${key}"]`,
+          ) as HTMLElement | null) ??
+          (tabContentRef.current?.querySelector(
+            `[data-find-key="${fallback}"]`,
+          ) as HTMLElement | null);
+        el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+      return;
+    }
+    if (hit.kind === "step" || hit.kind === "step-anno") {
+      onSelectStep(hit.nodeID, hit.stepID);
     } else {
-      const hit = findStructuredHits[wrapped];
-      if (hit.stepID) {
-        onSelectStep(hit.nodeID, hit.stepID);
-      } else {
-        onSelectNode(hit.nodeID);
-      }
+      onSelectNode(hit.nodeID);
     }
   };
   const nextFind = () => jumpFind(findCursor + 1);
@@ -1878,7 +1971,10 @@ function RunDetailPane({
   // Clear the focus when the query clears so a stale jump doesn't
   // ride into the next session.
   useEffect(() => {
-    if (findQuery.trim() === "") setFindLogFocus(null);
+    if (findQuery.trim() === "") {
+      setFindLogFocus(null);
+      setFindActiveKey(null);
+    }
   }, [findQuery]);
   const visibleTabs = buildVisibleTabs(
     nodes,
@@ -2118,8 +2214,15 @@ function RunDetailPane({
               onToggle={() => {}}
               inline
               findMatched={findMatchedNodes}
+              findActiveKey={findActiveKey}
             />
-            <RunAnnotationsList nodes={nodes} onSelectNode={onSelectNode} />
+            <RunAnnotationsList
+              nodes={nodes}
+              onSelectNode={onSelectNode}
+              findActiveKey={findActiveKey}
+              findMatchedNodeAnnos={findMatchedNodeAnnos}
+              findMatchedStepAnnos={findMatchedStepAnnos}
+            />
           </div>
         )}
         {effectiveTab === "setup" && (
@@ -2346,17 +2449,35 @@ function NodeLogSummary({ node }: { node: RunNode }) {
   );
 }
 
-// RunAnnotationsList flattens every node's annotations into a single
-// scannable list grouped by node, for the Summary tab when no node
-// is selected. Clicking a node header filters the page to that node.
+// RunAnnotationsList shows every annotation in a run, grouped first by
+// node and then by step. The Summary tab uses it as the destination
+// the find walker scrolls into; each <li> carries a data-find-key so
+// jumpFind can target an individual annotation.
 function RunAnnotationsList({
   nodes,
   onSelectNode,
+  findActiveKey,
+  findMatchedNodeAnnos,
+  findMatchedStepAnnos,
 }: {
   nodes: RunNode[];
   onSelectNode: (id: string | null) => void;
+  findActiveKey?: string | null;
+  findMatchedNodeAnnos?: Map<string, Set<number>>;
+  findMatchedStepAnnos?: Map<string, Set<number>>;
 }) {
-  const groups = nodes.filter((n) => (n.annotations?.length ?? 0) > 0);
+  const groups = nodes
+    .map((n) => {
+      const nodeAnnos = n.annotations ?? [];
+      const stepAnnos = (n.work?.steps ?? [])
+        .map((s) => ({ stepID: s.id, annos: s.annotations ?? [] }))
+        .filter((sg) => sg.annos.length > 0);
+      const total =
+        nodeAnnos.length +
+        stepAnnos.reduce((acc, sg) => acc + sg.annos.length, 0);
+      return { node: n, nodeAnnos, stepAnnos, total };
+    })
+    .filter((g) => g.total > 0);
   if (groups.length === 0) {
     return (
       <div className="text-xs text-[var(--muted)]">
@@ -2365,43 +2486,87 @@ function RunAnnotationsList({
       </div>
     );
   }
-  const total = groups.reduce((n, g) => n + (g.annotations?.length ?? 0), 0);
+  const total = groups.reduce((acc, g) => acc + g.total, 0);
+  const annoCls = (key: string, match: boolean): string => {
+    if (findActiveKey === key) {
+      return "bg-fuchsia-400/30 ring-1 ring-fuchsia-400";
+    }
+    if (match) return "bg-fuchsia-400/15 ring-1 ring-fuchsia-400/40";
+    return "";
+  };
   return (
     <div className="flex flex-col gap-2">
       <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
         Annotations ({total})
       </div>
-      {groups.map((n) => (
+      {groups.map((g) => (
         <div
-          key={n.id}
+          key={g.node.id}
           className="border border-[var(--border)] rounded p-2 bg-[#0d1117]"
         >
           <div className="flex items-center gap-2 mb-1">
             <span
-              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(g.node.outcome, g.node.status)}`}
             />
             <button
-              onClick={() => onSelectNode(n.id)}
+              onClick={() => onSelectNode(g.node.id)}
               className="font-mono text-xs text-[var(--accent)] hover:underline truncate"
-              title={`select ${n.id}`}
+              title={`select ${g.node.id}`}
             >
-              {n.id}
+              {g.node.id}
             </button>
             <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
-              {n.annotations!.length}
+              {g.total}
             </span>
           </div>
-          <ul className="flex flex-col gap-0.5 pl-3.5">
-            {n.annotations!.map((a, i) => (
-              <li
-                key={i}
-                className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2"
-              >
-                <span className="text-cyan-300 shrink-0">›</span>
-                <span className="whitespace-pre-wrap break-words">{a}</span>
-              </li>
-            ))}
-          </ul>
+          {g.nodeAnnos.length > 0 && (
+            <ul className="flex flex-col gap-0.5 pl-3.5 mb-1">
+              {g.nodeAnnos.map((a, i) => {
+                const key = `node-anno::${g.node.id}::${i}`;
+                const match =
+                  findMatchedNodeAnnos?.get(g.node.id)?.has(i) ?? false;
+                return (
+                  <li
+                    key={i}
+                    data-find-key={key}
+                    className={`font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2 px-1 rounded ${annoCls(key, match)}`}
+                  >
+                    <span className="text-cyan-300 shrink-0">›</span>
+                    <span className="whitespace-pre-wrap break-words">{a}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {g.stepAnnos.map((sg) => (
+            <div key={sg.stepID} className="pl-3.5 mb-1">
+              <div className="text-[10px] text-[var(--muted)] font-mono mb-0.5">
+                step{" "}
+                <span className="text-[var(--foreground)]">{sg.stepID}</span>
+              </div>
+              <ul className="flex flex-col gap-0.5 pl-3.5">
+                {sg.annos.map((a, i) => {
+                  const key = `step-anno::${g.node.id}::${sg.stepID}::${i}`;
+                  const match =
+                    findMatchedStepAnnos
+                      ?.get(`${g.node.id}::${sg.stepID}`)
+                      ?.has(i) ?? false;
+                  return (
+                    <li
+                      key={i}
+                      data-find-key={key}
+                      className={`font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2 px-1 rounded ${annoCls(key, match)}`}
+                    >
+                      <span className="text-cyan-300 shrink-0">›</span>
+                      <span className="whitespace-pre-wrap break-words">
+                        {a}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </div>
       ))}
     </div>
