@@ -550,15 +550,23 @@ export default function LogBucketView({
   // step bucket) plus the absolute line number (rendered as
   // data-line on the line `<div>`) so scrollIntoView lands on the
   // actual message instead of the section header.
+  // Consecutive error lines collapse into one block: a run of 50
+  // "ERROR shard-bravo: item N/55 FAILED" lines is one navigation
+  // target, not 50. The block's anchor is its first line so scroll
+  // lands at the top of the error burst. A non-matching line breaks
+  // the run, and the next matching line starts a new block.
   const errorBlocks = useMemo(() => {
     const out: { sectionIdx: number; line: number }[] = [];
     const reError = /\bERROR\b|\berror:|\bFAIL\b|\bpanic:/;
     let lineCursor = 1;
     parsed.sections.forEach((section, idx) => {
+      let inBlock = false;
       for (let j = 0; j < section.lines.length; j++) {
-        if (reError.test(section.lines[j])) {
+        const isErr = reError.test(section.lines[j]);
+        if (isErr && !inBlock) {
           out.push({ sectionIdx: idx, line: lineCursor + j });
         }
+        inBlock = isErr;
       }
       lineCursor += section.lines.length;
     });
