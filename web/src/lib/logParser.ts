@@ -106,21 +106,28 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
   const sections: (LogSection | StepSection)[] = [];
   let preamble: LogSection = { type: "preamble", lines: [] };
 
-  // Currently-open bucket. Starts as the node-scope setup when
-  // node_start fires; each `step` event flushes it and opens a new
-  // phase-scope bucket.
-  let current: StepSection | null = null;
-  let currentStartedAt: number | null = null;
+  // Node-scope bucket -- holds lines emitted between node_start and
+  // the first step_start, or after step_end before node_end. Lives
+  // separately from step buckets so it doesn't have to share state.
+  let nodeScope: StepSection | null = null;
+  let nodeScopeStartedAt: number | null = null;
+  let nodeScopeHasContent = false;
   let currentNode: string = "";
-  // Index of the last phase bucket that belonged to the active node,
-  // so we can retroactively mark it failed when the node fails. Reset
-  // to -1 between nodes.
+  // Index of the most recently started step section in `sections`.
+  // Used for retroactive failure attribution at node_end when no
+  // explicit step_end:failed lands.
   let lastPhaseIdx: number = -1;
-  // True if the current bucket has seen at least one non-setup record
-  // or is itself a phase (post-step). A pure-setup node-scope bucket
-  // with no content is dropped on node_end so empty wrapper buckets
-  // don't appear in the UI.
-  let currentHasContent: boolean = false;
+  // Parallel-aware: the orchestrator runs steps concurrently inside
+  // one node (parallel shard pattern), so we keep every in-flight
+  // step in a map keyed on step id. Log records carry rec.step set
+  // inside the step body, which we use to route lines to the right
+  // bucket. step_start pushes a section into `sections` immediately
+  // so order reflects start-order; step_end finalizes the bucket in
+  // place and removes it from the map.
+  const openSteps = new Map<
+    string,
+    { section: StepSection; startedAtMs: number | null }
+  >();
 
   const pushPreamble = () => {
     if (preamble.lines.length > 0 && !isBlankSection(preamble.lines)) {
@@ -135,38 +142,72 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     return isNaN(ms) ? null : ms;
   };
 
-  // closeCurrent flushes the active bucket with its computed duration
-  // relative to `nextTS` (the timestamp of the event that's closing
-  // it). `isPhase` marks phase-scope buckets so we can track the
-  // last-phase index for node-level failure propagation. `done`
-  // means "an explicit boundary is closing this bucket" (next step,
-  // node_end, run_summary); stream-tail flushes pass `done=false` so
-  // the in-flight step keeps its `running` status — that's what the
-  // live log viewer leans on to render the pulsing indigo marker.
-  const closeCurrent = (
-    nextTS: number | null,
-    isPhase: boolean,
-    done: boolean,
-  ) => {
-    if (!current) return;
-    if (!currentHasContent && !isPhase) {
-      // Drop an empty node-scope setup bucket — a node that went
-      // straight into its first step has nothing to show here.
-      current = null;
-      currentStartedAt = null;
+  // closeNodeScope flushes the node-scope setup bucket. `isFinal`
+  // means an explicit boundary (node_end / run_summary); stream-
+  // tail flushes pass false so a still-mid-flight setup keeps its
+  // "running" marker.
+  const closeNodeScope = (nextTS: number | null, isFinal: boolean) => {
+    if (!nodeScope) return;
+    if (!nodeScopeHasContent) {
+      nodeScope = null;
+      nodeScopeStartedAt = null;
       return;
     }
-    if (currentStartedAt != null && nextTS != null) {
-      const ms = nextTS - currentStartedAt;
-      current.duration = formatDuration(ms);
-      current.durationMs = ms;
+    if (nodeScopeStartedAt != null && nextTS != null) {
+      const ms = nextTS - nodeScopeStartedAt;
+      nodeScope.duration = formatDuration(ms);
+      nodeScope.durationMs = ms;
     }
-    if (done && current.status === "running") current.status = "passed";
-    sections.push(current);
-    if (isPhase) lastPhaseIdx = sections.length - 1;
-    current = null;
-    currentStartedAt = null;
-    currentHasContent = false;
+    if (isFinal && nodeScope.status === "running") nodeScope.status = "passed";
+    sections.push(nodeScope);
+    nodeScope = null;
+    nodeScopeStartedAt = null;
+    nodeScopeHasContent = false;
+  };
+
+  // closeStep finalizes one step bucket by id. Outcome comes from
+  // step_end.attrs (preferred); when null (node_end sweep or stream-
+  // tail), the bucket keeps its current status unless `done` is true
+  // and it's still "running" -- then we promote to passed.
+  const closeStep = (
+    stepID: string,
+    nextTS: number | null,
+    outcome: string | null,
+    durationMs: number | null,
+    done: boolean,
+  ) => {
+    const entry = openSteps.get(stepID);
+    if (!entry) return;
+    const sec = entry.section;
+    if (outcome === "failed") sec.status = "failed";
+    else if (outcome === "success") sec.status = "passed";
+    else if (outcome === "skipped") sec.status = "passed";
+    else if (done && sec.status === "running") sec.status = "passed";
+    if (durationMs != null && durationMs > 0) {
+      sec.durationMs = durationMs;
+      sec.duration = formatDuration(durationMs);
+    } else if (entry.startedAtMs != null && nextTS != null) {
+      const ms = nextTS - entry.startedAtMs;
+      sec.durationMs = ms;
+      sec.duration = formatDuration(ms);
+    }
+    openSteps.delete(stepID);
+  };
+
+  const closeAllOpenSteps = (
+    nextTS: number | null,
+    failNode: boolean,
+    done: boolean,
+  ) => {
+    for (const k of Array.from(openSteps.keys())) {
+      if (failNode) {
+        const entry = openSteps.get(k);
+        if (entry && entry.section.status === "running") {
+          entry.section.status = "failed";
+        }
+      }
+      closeStep(k, nextTS, null, null, done);
+    }
   };
 
   for (const raw of lines) {
@@ -176,9 +217,12 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     try {
       rec = JSON.parse(t);
     } catch {
-      if (current) {
-        current.lines.push(raw);
-        currentHasContent = true;
+      // Non-JSON line: route to node-scope (or preamble before any
+      // node has started). Can't attribute to a parallel step
+      // because there's no rec.step on a raw text line.
+      if (nodeScope) {
+        nodeScope.lines.push(raw);
+        nodeScopeHasContent = true;
       } else {
         preamble.lines.push(raw);
       }
@@ -188,10 +232,11 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     switch (rec.event) {
       case "node_start": {
         pushPreamble();
-        closeCurrent(recTS, false, true);
+        closeAllOpenSteps(recTS, false, true);
+        closeNodeScope(recTS, true);
         lastPhaseIdx = -1;
         currentNode = rec.node || "node";
-        current = {
+        nodeScope = {
           type: "step",
           name: currentNode,
           status: "running",
@@ -200,58 +245,45 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           startedAtMs: recTS,
           lines: [],
         };
-        currentStartedAt = recTS;
-        currentHasContent = false;
+        nodeScopeStartedAt = recTS;
+        nodeScopeHasContent = false;
         break;
       }
       case "step_start": {
-        // Close the currently-open bucket (node-scope setup or the
-        // previous phase) and open a new phase bucket. Setup buckets
-        // with no content are dropped; phase buckets always render.
-        const stepName = rec.msg || "step";
-        closeCurrent(recTS, current?.name !== currentNode, true);
-        current = {
+        // First step_start of the node flushes the setup bucket (it
+        // had its chance to collect pre-step lines). Subsequent
+        // step_starts that fire while the node-scope is already null
+        // are no-ops on closeNodeScope. Each step pushes its own
+        // section now so the rendered order matches start-order.
+        closeNodeScope(recTS, false);
+        const stepID = rec.msg || "step";
+        const sec: StepSection = {
           type: "step",
-          name: `${currentNode} · ${stepName}`,
+          name: `${currentNode} · ${stepID}`,
           status: "running",
           duration: null,
           durationMs: null,
           startedAtMs: recTS,
           lines: [],
         };
-        currentStartedAt = recTS;
-        currentHasContent = true;
+        sections.push(sec);
+        lastPhaseIdx = sections.length - 1;
+        openSteps.set(stepID, { section: sec, startedAtMs: recTS });
         break;
       }
       case "step_end": {
-        // Close the active step bucket with the explicit outcome from
-        // attrs.outcome. Duration prefers attrs.duration_ms (set by
-        // the SDK) over the timestamp delta so a clock-skewed renderer
-        // doesn't drift away from the engine's measurement.
-        if (current && current.name !== currentNode) {
-          const outcome = (rec.attrs?.outcome as string) || "";
-          if (outcome === "failed") current.status = "failed";
-          else current.status = "passed";
-          const dms = Number(rec.attrs?.duration_ms ?? 0);
-          if (dms > 0) {
-            current.duration = formatDuration(dms);
-            current.durationMs = dms;
-          }
-          closeCurrent(recTS, true, true);
-        }
+        const stepID = rec.msg || "";
+        const outcome = (rec.attrs?.outcome as string) || null;
+        const dms = Number(rec.attrs?.duration_ms ?? 0);
+        closeStep(stepID, recTS, outcome, dms > 0 ? dms : null, true);
         break;
       }
       case "step_skipped": {
-        // A skipped step closes the previous bucket (if any) and
-        // pushes a one-line bucket of its own marked passed (skipped
-        // is non-failure). Reason, when present, lands in the bucket
-        // body so the UI can show "[range_skip]" alongside the name.
-        const stepName = rec.msg || "step";
-        closeCurrent(recTS, current?.name !== currentNode, true);
+        const stepID = rec.msg || "step";
         const reason = (rec.attrs?.reason as string) || "";
         sections.push({
           type: "step",
-          name: `${currentNode} · ${stepName}`,
+          name: `${currentNode} · ${stepID}`,
           status: "passed",
           duration: null,
           durationMs: null,
@@ -268,15 +300,21 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           outcome !== "cached" &&
           outcome !== "skipped" &&
           outcome !== "cancelled";
-        // Close the active bucket, inheriting the node's outcome on
-        // the last phase so the UI highlights the actual failure
-        // point rather than every bucket under a failed node.
-        if (current) {
-          if (failed) current.status = "failed";
-          closeCurrent(recTS, current.name !== currentNode, true);
+        // Any step still running at node_end inherits the node's
+        // failure. If everything was already closed and the node
+        // still failed (e.g. failed in the dispatch envelope), tag
+        // the most recently started step so the UI has somewhere
+        // to surface the red marker.
+        if (openSteps.size > 0) {
+          closeAllOpenSteps(recTS, failed, true);
         } else if (failed && lastPhaseIdx >= 0) {
           const last = sections[lastPhaseIdx] as StepSection;
-          last.status = "failed";
+          if (last.status === "running") last.status = "failed";
+        }
+        if (nodeScope) {
+          if (failed && nodeScope.status === "running")
+            nodeScope.status = "failed";
+          closeNodeScope(recTS, true);
         }
         currentNode = "";
         lastPhaseIdx = -1;
@@ -284,15 +322,23 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
       }
       case "run_summary": {
         pushPreamble();
-        closeCurrent(recTS, current?.name !== currentNode, true);
+        closeAllOpenSteps(recTS, false, true);
+        closeNodeScope(recTS, true);
         const sumLines = summaryLines(rec);
         sections.push({ type: "summary", lines: sumLines });
         break;
       }
       default: {
-        if (current) {
-          current.lines.push(recordToLine(rec));
-          currentHasContent = true;
+        // Route the line to its owning step bucket via rec.step.
+        // Falls back to the node-scope bucket when the record has
+        // no step attribution (between-step Info logs, etc.).
+        const stepID = rec.step || "";
+        const entry = stepID ? openSteps.get(stepID) : null;
+        if (entry) {
+          entry.section.lines.push(recordToLine(rec));
+        } else if (nodeScope) {
+          nodeScope.lines.push(recordToLine(rec));
+          nodeScopeHasContent = true;
         } else {
           preamble.lines.push(recordToLine(rec));
         }
@@ -300,12 +346,12 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
       }
     }
   }
-  // Stream-tail flush: pass done=false so an in-flight step keeps
-  // its "running" status for the live viewer. Historical readers
-  // that expect final state will either see the explicit node_end
-  // (and thus a "passed"/"failed" status set above) or be looking
-  // at a truncated log, in which case "running" is the honest label.
-  closeCurrent(null, current?.name !== currentNode, false);
+  // Stream-tail flush: keep open steps in their current status
+  // (typically "running") for the live viewer. Tail-flushes pass
+  // done=false so an in-flight step doesn't get prematurely promoted
+  // to "passed" before its actual step_end arrives.
+  closeAllOpenSteps(null, false, false);
+  closeNodeScope(null, false);
   pushPreamble();
   return { sections };
 }
