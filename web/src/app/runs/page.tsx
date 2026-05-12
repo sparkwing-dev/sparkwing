@@ -1668,24 +1668,58 @@ interface TabDescriptor {
   visible: boolean;
 }
 
-function buildVisibleTabs(nodes: RunNode[]): TabDescriptor[] {
+function buildVisibleTabs(
+  nodes: RunNode[],
+  findCounts?: Partial<Record<TabKey, number>> | null,
+): TabDescriptor[] {
+  // When a find is active, the badge text becomes the per-tab match
+  // count (e.g. "3 hits") so the user can see at-a-glance where the
+  // query lands. Falls back to the static count (node total on the
+  // DAG tab) when there's no query.
+  const formatCount = (key: TabKey, fallback: string | undefined) => {
+    if (!findCounts) return fallback;
+    const n = findCounts[key];
+    if (n == null) return fallback;
+    return n > 0 ? `${n}` : "0";
+  };
   return (
     [
-      { key: "summary" as const, label: "Summary", visible: true },
-      { key: "setup" as const, label: "Setup", visible: true },
+      {
+        key: "summary" as const,
+        label: "Summary",
+        count: formatCount("summary", undefined),
+        visible: true,
+      },
+      {
+        key: "setup" as const,
+        label: "Setup",
+        count: formatCount("setup", undefined),
+        visible: true,
+      },
       {
         key: "dag" as const,
         label: "DAG",
-        count: nodes.length ? `${nodes.length}` : undefined,
+        count: formatCount("dag", nodes.length ? `${nodes.length}` : undefined),
         visible: nodes.length > 0,
       },
-      { key: "logs" as const, label: "Logs", visible: true },
+      {
+        key: "logs" as const,
+        label: "Logs",
+        count: formatCount("logs", undefined),
+        visible: true,
+      },
       {
         key: "timeline" as const,
         label: "Timeline",
+        count: formatCount("timeline", undefined),
         visible: nodes.length > 0,
       },
-      { key: "resources" as const, label: "Resources", visible: true },
+      {
+        key: "resources" as const,
+        label: "Resources",
+        count: formatCount("resources", undefined),
+        visible: true,
+      },
     ] as TabDescriptor[]
   ).filter((t) => t.visible);
 }
@@ -1725,7 +1759,116 @@ function RunDetailPane({
     run.status === "success" ||
     run.status === "failed" ||
     run.status === "cancelled";
-  const visibleTabs = buildVisibleTabs(nodes);
+  // --- Top-level find (cross-pane) ---
+  // Structured matches (nodes/steps/annotations) are computed
+  // synchronously from data we already have in memory. Log matches
+  // come from a debounced server call so we don't pull megabytes of
+  // log text into the browser just to grep them. Per-tab badges show
+  // whatever count is relevant to that tab; prev/next arrows walk the
+  // active tab's matches.
+  const [findQuery, setFindQuery] = useState("");
+  const [findCursor, setFindCursor] = useState(0);
+  const [findLogResults, setFindLogResults] = useState<RunLogMatch[]>([]);
+  const [findLogTotal, setFindLogTotal] = useState(0);
+  const [findLogSearching, setFindLogSearching] = useState(false);
+  useEffect(() => {
+    const q = findQuery.trim();
+    if (q === "") {
+      setFindLogResults([]);
+      setFindLogTotal(0);
+      setFindLogSearching(false);
+      return;
+    }
+    setFindLogSearching(true);
+    const t = setTimeout(async () => {
+      const resp = await searchRunLogs(run.id, q, 500);
+      setFindLogResults(resp.results || []);
+      setFindLogTotal(resp.total || 0);
+      setFindLogSearching(false);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [findQuery, run.id]);
+  // Structured matches: nodes whose id/annotations/error/failure_reason
+  // /groups -- or any of their steps' id/annotations -- contain the
+  // query (case-insensitive). Returned as ordered node ids so the
+  // cursor walks them in the same sequence the DAG / left panel show.
+  const findStructuredNodes = useMemo(() => {
+    const q = findQuery.trim().toLowerCase();
+    if (!q) return [] as string[];
+    const out: string[] = [];
+    for (const n of nodes) {
+      const hay: string[] = [n.id];
+      if (n.error) hay.push(n.error);
+      if (n.failure_reason) hay.push(n.failure_reason);
+      if (n.groups) hay.push(...n.groups);
+      if (n.annotations) hay.push(...n.annotations);
+      const steps = n.work?.steps ?? [];
+      for (const s of steps) {
+        hay.push(s.id);
+        if (s.annotations) hay.push(...s.annotations);
+      }
+      for (const h of hay) {
+        if (h.toLowerCase().includes(q)) {
+          out.push(n.id);
+          break;
+        }
+      }
+    }
+    return out;
+  }, [findQuery, nodes]);
+  // Per-tab counts. Summary / DAG / Timeline / Setup all reflect
+  // structured matches (node-level). Logs uses the server-grep count.
+  // Resources gets no badge.
+  const findCounts: Partial<Record<TabKey, number>> = {
+    summary: findStructuredNodes.length,
+    setup: findStructuredNodes.length,
+    dag: findStructuredNodes.length,
+    timeline: findStructuredNodes.length,
+    logs: findLogTotal,
+  };
+  useEffect(() => {
+    setFindCursor(0);
+  }, [findQuery, tab]);
+  // prev/next nav: cursor walks matches in the currently active tab.
+  // For Logs that's the server-grep result list (selects the node and
+  // sets a focusLine for in-Logs scroll); for the structured tabs we
+  // walk node ids and selectNode (each tab already auto-scrolls its
+  // selection into view).
+  const jumpFind = (idx: number) => {
+    const isLogs = effectiveTab === "logs";
+    const len = isLogs ? findLogResults.length : findStructuredNodes.length;
+    if (len === 0) return;
+    const wrapped = ((idx % len) + len) % len;
+    setFindCursor(wrapped);
+    if (isLogs) {
+      const m = findLogResults[wrapped];
+      onSelectNode(m.node_id);
+      // The Logs pane reads globalFocus from AllNodesLogs; nudge it
+      // via the same channel by stashing the line on the run url's
+      // hash? Simpler: drive through state at this level next.
+      setFindLogFocus({ nodeID: m.node_id, line: m.line });
+    } else {
+      const nodeID = findStructuredNodes[wrapped];
+      onSelectNode(nodeID);
+    }
+  };
+  const nextFind = () => jumpFind(findCursor + 1);
+  const prevFind = () => jumpFind(findCursor - 1);
+  // focusLine state passed down to the Logs view so jumping a Logs
+  // match scrolls to the exact line, not just the node header.
+  const [findLogFocus, setFindLogFocus] = useState<{
+    nodeID: string;
+    line: number;
+  } | null>(null);
+  // Clear the focus when the query clears so a stale jump doesn't
+  // ride into the next session.
+  useEffect(() => {
+    if (findQuery.trim() === "") setFindLogFocus(null);
+  }, [findQuery]);
+  const visibleTabs = buildVisibleTabs(
+    nodes,
+    findQuery.trim() ? findCounts : null,
+  );
 
   const selectedId = selected?.id ?? null;
   const tabContentRef = useRef<HTMLDivElement>(null);
@@ -1805,35 +1948,95 @@ function RunDetailPane({
       )}
 
       <div className="border-b border-[var(--border)] shrink-0 flex items-center gap-1 px-2 bg-[var(--surface)] overflow-x-auto">
-        {visibleTabs.map((t) => (
-          <button
-            key={t.key}
-            data-tab-key={t.key}
-            onClick={() => {
-              if (effectiveTab === t.key) {
-                tabContentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-              } else {
-                setTab(t.key);
-              }
-            }}
-            className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px whitespace-nowrap rounded-t ${
-              effectiveTab === t.key
-                ? "border-cyan-400 text-[var(--foreground)]"
-                : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
-            } ${
-              focusedTab === t.key
-                ? "ring-2 ring-inset ring-cyan-300 bg-cyan-500/10"
-                : ""
-            }`}
-          >
-            <span className="font-semibold">{t.label}</span>
-            {t.count && (
-              <span className="ml-1.5 font-mono text-[var(--muted)]">
-                {t.count}
-              </span>
-            )}
-          </button>
-        ))}
+        {visibleTabs.map((t) => {
+          const isFindActive = findQuery.trim() !== "";
+          const isFindBadge = isFindActive && findCounts[t.key] != null;
+          return (
+            <button
+              key={t.key}
+              data-tab-key={t.key}
+              onClick={() => {
+                if (effectiveTab === t.key) {
+                  tabContentRef.current?.scrollTo({
+                    top: 0,
+                    behavior: "smooth",
+                  });
+                } else {
+                  setTab(t.key);
+                }
+              }}
+              className={`text-xs px-3 py-2 border-b-2 transition-colors -mb-px whitespace-nowrap rounded-t ${
+                effectiveTab === t.key
+                  ? "border-cyan-400 text-[var(--foreground)]"
+                  : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+              } ${
+                focusedTab === t.key
+                  ? "ring-2 ring-inset ring-cyan-300 bg-cyan-500/10"
+                  : ""
+              }`}
+            >
+              <span className="font-semibold">{t.label}</span>
+              {t.count && (
+                <span
+                  className={`ml-1.5 font-mono ${
+                    isFindBadge && (findCounts[t.key] ?? 0) > 0
+                      ? "text-amber-300"
+                      : "text-[var(--muted)]"
+                  }`}
+                >
+                  {t.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <span className="flex-1" />
+        <input
+          type="text"
+          value={findQuery}
+          onChange={(e) => setFindQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (e.shiftKey) prevFind();
+              else nextFind();
+            } else if (e.key === "Escape") {
+              setFindQuery("");
+            }
+          }}
+          placeholder="find in run"
+          className="text-[11px] font-mono px-2 py-1 my-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)] w-44"
+        />
+        {findQuery.trim() !== "" && (
+          <div className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
+            <span className="font-mono tabular-nums">
+              {(() => {
+                const isLogs = effectiveTab === "logs";
+                const list = isLogs ? findLogResults : findStructuredNodes;
+                const total = isLogs
+                  ? findLogTotal
+                  : findStructuredNodes.length;
+                if (isLogs && findLogSearching) return "searching…";
+                if (list.length === 0) return "0/0";
+                return `${findCursor + 1}/${total}`;
+              })()}
+            </span>
+            <button
+              onClick={prevFind}
+              title="previous match (Shift+Enter)"
+              className="px-1 py-0.5 rounded hover:text-[var(--foreground)] hover:bg-[#30363d] transition-colors"
+            >
+              ↑
+            </button>
+            <button
+              onClick={nextFind}
+              title="next match (Enter)"
+              className="px-1 py-0.5 rounded hover:text-[var(--foreground)] hover:bg-[#30363d] transition-colors mr-2"
+            >
+              ↓
+            </button>
+          </div>
+        )}
       </div>
 
       <div
@@ -1848,6 +2051,7 @@ function RunDetailPane({
               nodes={nodes}
               focusStep={selectedStep}
               onSelectNode={onSelectNode}
+              externalFindFocus={findLogFocus}
             />
           </div>
         )}
@@ -1960,12 +2164,14 @@ function LogsPane({
   nodes,
   focusStep,
   onSelectNode,
+  externalFindFocus,
 }: {
   run: Run;
   node: RunNode | null;
   nodes?: RunNode[];
   focusStep?: string | null;
   onSelectNode?: (id: string) => void;
+  externalFindFocus?: { nodeID: string; line: number } | null;
 }) {
   return (
     <AllNodesLogs
@@ -1974,6 +2180,7 @@ function LogsPane({
       focusNode={node?.id || null}
       focusStep={focusStep ?? null}
       onSelectNode={onSelectNode}
+      externalFindFocus={externalFindFocus ?? null}
     />
   );
 }
@@ -2179,12 +2386,18 @@ function AllNodesLogs({
   focusNode,
   focusStep,
   onSelectNode,
+  externalFindFocus,
 }: {
   run: Run;
   nodes: RunNode[];
   focusNode?: string | null;
   focusStep?: string | null;
   onSelectNode?: (id: string) => void;
+  // Driven by the top-level find bar. When a Logs-tab match is
+  // navigated to, the parent sets {nodeID, line}; we expand the
+  // owning node section and pass focusLine down to LogBucketView
+  // so the bucket auto-expands and scrolls to the exact line.
+  externalFindFocus?: { nodeID: string; line: number } | null;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -2206,69 +2419,18 @@ function AllNodesLogs({
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [focusNode]);
-  // --- Global log search (all nodes) ---
-  // Server-side grep: one debounced call to
-  //   GET /api/v1/runs/{id}/logs/search?q=
-  // walks every node's log file and returns matching (node_id, line,
-  // content) tuples. Avoids pulling N node-log payloads to the
-  // browser just to grep them client-side; also sidesteps the
-  // parallel-fetch + rate-limit traps that the previous lazy
-  // client-side version was prone to.
-  const [globalQuery, setGlobalQuery] = useState("");
-  const [globalCursor, setGlobalCursor] = useState(0);
-  const [globalResults, setGlobalResults] = useState<RunLogMatch[]>([]);
-  const [globalSearching, setGlobalSearching] = useState(false);
-  const mountedRef = useRef(true);
+  // Mirror the same single-section-open + scroll behavior when the
+  // parent's find walker advances to a Logs match.
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-  const [globalFocus, setGlobalFocus] = useState<{
-    nodeID: string;
-    line: number;
-  } | null>(null);
-  useEffect(() => {
-    const q = globalQuery.trim();
-    if (q === "") {
-      setGlobalResults([]);
-      setGlobalSearching(false);
-      return;
-    }
-    setGlobalSearching(true);
-    const handle = setTimeout(async () => {
-      const resp = await searchRunLogs(run.id, q, 500);
-      if (!mountedRef.current) return;
-      setGlobalResults(resp.results || []);
-      setGlobalSearching(false);
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [globalQuery, run.id]);
-  // Reset cursor whenever the result set changes (new query, new
-  // server response). Wraps via modular arithmetic in jumpGlobal.
-  useEffect(() => {
-    setGlobalCursor(0);
-  }, [globalResults]);
-  const globalMatches = globalResults;
-  const jumpGlobal = (idx: number) => {
-    if (globalMatches.length === 0) return;
-    const wrapped =
-      ((idx % globalMatches.length) + globalMatches.length) %
-      globalMatches.length;
-    setGlobalCursor(wrapped);
-    const target = globalMatches[wrapped];
-    setExpanded(new Set([target.node_id]));
-    setGlobalFocus({ nodeID: target.node_id, line: target.line });
+    if (!externalFindFocus) return;
+    setExpanded(new Set([externalFindFocus.nodeID]));
     requestAnimationFrame(() => {
-      const sec = document.querySelector(
-        `[data-log-node-id="${target.node_id}"]`,
+      const el = document.querySelector(
+        `[data-log-node-id="${externalFindFocus.nodeID}"]`,
       ) as HTMLElement | null;
-      sec?.scrollIntoView({ block: "start", behavior: "smooth" });
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
-  };
-  const nextGlobal = () => jumpGlobal(globalCursor + 1);
-  const prevGlobal = () => jumpGlobal(globalCursor - 1);
+  }, [externalFindFocus]);
   if (nodes.length === 0) {
     return (
       <div className="text-sm text-[var(--muted)]">
@@ -2282,49 +2444,6 @@ function AllNodesLogs({
         <span className="shrink-0">
           All nodes — expand a node to load its logs
         </span>
-        <input
-          type="text"
-          value={globalQuery}
-          onChange={(e) => setGlobalQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              if (e.shiftKey) prevGlobal();
-              else nextGlobal();
-            } else if (e.key === "Escape") {
-              setGlobalQuery("");
-            }
-          }}
-          placeholder="search all logs"
-          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)] w-44"
-        />
-        {globalQuery.trim() !== "" && (
-          <div className="flex items-center gap-1">
-            <span className="font-mono tabular-nums">
-              {globalMatches.length > 0
-                ? `${globalCursor + 1}/${globalMatches.length}`
-                : globalSearching
-                  ? "searching…"
-                  : "0/0"}
-            </span>
-            <button
-              onClick={prevGlobal}
-              disabled={globalMatches.length === 0}
-              title="previous match (Shift+Enter)"
-              className="px-1.5 py-0.5 rounded hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              ↑
-            </button>
-            <button
-              onClick={nextGlobal}
-              disabled={globalMatches.length === 0}
-              title="next match (Enter)"
-              className="px-1.5 py-0.5 rounded hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              ↓
-            </button>
-          </div>
-        )}
         <span className="flex-1" />
         <div className="flex items-center gap-2">
           <button
@@ -2412,7 +2531,9 @@ function AllNodesLogs({
                   node={n}
                   focusStep={isFocus ? (focusStep ?? null) : null}
                   focusLine={
-                    globalFocus?.nodeID === n.id ? globalFocus.line : null
+                    externalFindFocus?.nodeID === n.id
+                      ? externalFindFocus.line
+                      : null
                   }
                 />
               </div>
