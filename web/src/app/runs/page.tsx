@@ -1911,6 +1911,28 @@ function RunDetailPane({
     }
     return set;
   }, [findNameHits]);
+  // Timeline drops nodes without started_at -- they never ran, so a
+  // fuchsia ring with no bar to sit on would be misleading. Filter
+  // both the count and the hit list so the walker can't land on an
+  // invisible match.
+  const findTimelineHits = useMemo(() => {
+    const startedNodes = new Set(
+      nodes.filter((n) => !!n.started_at).map((n) => n.id),
+    );
+    return findNameHits.filter((h) => startedNodes.has(h.nodeID));
+  }, [findNameHits, nodes]);
+  const findMatchedNodesByTimeline = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findTimelineHits) set.add(h.nodeID);
+    return set;
+  }, [findTimelineHits]);
+  const findMatchedStepsByTimeline = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findTimelineHits) {
+      if (h.kind === "step") set.add(`${h.nodeID}::${h.stepID}`);
+    }
+    return set;
+  }, [findTimelineHits]);
   // Per-(node, idx) and per-(node, step, idx) annotation hit sets so
   // tooltips / NodeLogSummary / RunAnnotationsList can paint just the
   // matching annotation rows fuchsia instead of every annotation under
@@ -1958,7 +1980,7 @@ function RunDetailPane({
   const findCounts: Partial<Record<TabKey, number>> = {
     summary: findStructuredHits.length,
     dag: findNameHits.length,
-    timeline: findNameHits.length,
+    timeline: findTimelineHits.length,
     logs: findLogTotal,
   };
   useEffect(() => {
@@ -1973,8 +1995,12 @@ function RunDetailPane({
   // their job IS to focus a node/step.
   const jumpFind = (idx: number) => {
     const isLogs = effectiveTab === "logs";
-    const isNameOnly = effectiveTab === "dag" || effectiveTab === "timeline";
-    const activeHits = isNameOnly ? findNameHits : findStructuredHits;
+    const activeHits =
+      effectiveTab === "timeline"
+        ? findTimelineHits
+        : effectiveTab === "dag"
+          ? findNameHits
+          : findStructuredHits;
     const len = isLogs ? findLogResults.length : activeHits.length;
     if (len === 0) return;
     const wrapped = ((idx % len) + len) % len;
@@ -2185,11 +2211,12 @@ function RunDetailPane({
             <span className="font-mono tabular-nums">
               {(() => {
                 const isLogs = effectiveTab === "logs";
-                const isNameOnly =
-                  effectiveTab === "dag" || effectiveTab === "timeline";
-                const activeHits = isNameOnly
-                  ? findNameHits
-                  : findStructuredHits;
+                const activeHits =
+                  effectiveTab === "timeline"
+                    ? findTimelineHits
+                    : effectiveTab === "dag"
+                      ? findNameHits
+                      : findStructuredHits;
                 const len = isLogs ? findLogResults.length : activeHits.length;
                 const total = isLogs ? findLogTotal : activeHits.length;
                 if (isLogs && findLogSearching) return "searching…";
@@ -2265,8 +2292,8 @@ function RunDetailPane({
               focusStep={selectedStep}
               onSelectNode={onSelectNode}
               onSelectStep={onSelectStep}
-              findMatched={findMatchedNodesByName}
-              findMatchedSteps={findMatchedStepsByName}
+              findMatched={findMatchedNodesByTimeline}
+              findMatchedSteps={findMatchedStepsByTimeline}
             />
           </div>
         )}
