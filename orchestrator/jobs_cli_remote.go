@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"text/tabwriter"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/controller/client"
@@ -56,15 +55,16 @@ func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, op
 		if err != nil {
 			return err
 		}
+		steps, _ := c.ListNodeSteps(ctx, runID)
 		approvals, _ := c.ListApprovalsForRun(ctx, runID)
 		if opts.JSON {
-			payload := map[string]any{"run": run, "nodes": nodes}
+			payload := map[string]any{"run": run, "nodes": joinStepsByNode(nodes, steps)}
 			if len(approvals) > 0 {
 				payload["approvals"] = approvals
 			}
 			return writeJSON(out, payload)
 		}
-		return renderRemoteStatus(run, nodes, approvals, out, opts.Follow)
+		return renderRemoteStatus(run, nodes, groupStepsByNode(steps), approvals, out, opts.Follow, opts.Steps)
 	}
 
 	if !opts.Follow {
@@ -96,7 +96,7 @@ func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, op
 	}
 }
 
-func renderRemoteStatus(run *store.Run, nodes []*store.Node, approvals []*store.Approval, out io.Writer, followBanner bool) error {
+func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[string][]*store.NodeStep, approvals []*store.Approval, out io.Writer, followBanner, includeSteps bool) error {
 	if followBanner {
 		fmt.Fprintf(out, "# following %s (ctrl-c to stop)\n\n", run.ID)
 	}
@@ -123,23 +123,7 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, approvals []*store.
 	}
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "nodes (%d total, %d done):\n", len(nodes), countFinished(nodes))
-	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  ID\tSTATUS\tOUTCOME\tDURATION\tDEPS")
-	for _, n := range nodes {
-		outcome := n.Outcome
-		if outcome == "" {
-			outcome = "-"
-		}
-		deps := strings.Join(n.Deps, ",")
-		if deps == "" {
-			deps = "-"
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-			n.NodeID, n.Status, outcome, formatNodeDuration(n), deps)
-	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
+	renderNodesWithSteps(out, nodes, stepsByNode, includeSteps)
 	for _, n := range nodes {
 		if n.Error != "" && n.Error != "upstream-failed" {
 			fmt.Fprintf(out, "\n%s error:\n  %s\n", n.NodeID, indent(n.Error, "  "))

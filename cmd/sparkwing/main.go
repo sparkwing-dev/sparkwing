@@ -521,6 +521,7 @@ func runJobs(args []string) error {
 		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
 		_ = fs.MarkHidden("json")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
+		steps := fs.Bool("steps", false, "render every step on every node in plain output")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
@@ -535,7 +536,7 @@ func runJobs(args []string) error {
 		if err != nil {
 			return err
 		}
-		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow}
+		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow, Steps: *steps}
 		if *on != "" {
 			prof, err := resolveProfile(*on)
 			if err != nil {

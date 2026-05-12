@@ -104,6 +104,41 @@ func renderRunList(runs []*store.Run, opts ListOpts, out io.Writer) error {
 type StatusOpts struct {
 	JSON   bool
 	Follow bool // poll until the run reaches a terminal state
+
+	// Steps forces per-step rows under every node in plain output.
+	// JSON output always carries steps when the run has them; this
+	// flag is for human-readable mode only.
+	Steps bool
+}
+
+// nodeWithSteps wraps store.Node with its per-step state for the
+// JSON output of `runs status` and `runs receipt`. Annotations
+// already live on store.Node; this adds the inner per-step view
+// that the dashboard renders on Summary + step DAG.
+type nodeWithSteps struct {
+	*store.Node
+	Steps []*store.NodeStep `json:"steps,omitempty"`
+}
+
+// groupStepsByNode buckets a flat NodeStep list by node id.
+func groupStepsByNode(steps []*store.NodeStep) map[string][]*store.NodeStep {
+	idx := make(map[string][]*store.NodeStep, len(steps))
+	for _, s := range steps {
+		idx[s.NodeID] = append(idx[s.NodeID], s)
+	}
+	return idx
+}
+
+// joinStepsByNode wraps each store.Node with its per-step state so
+// the JSON output of `runs status` / `runs receipt` carries the
+// inner Work DAG inline. Annotations already live on store.Node.
+func joinStepsByNode(nodes []*store.Node, steps []*store.NodeStep) []nodeWithSteps {
+	idx := groupStepsByNode(steps)
+	out := make([]nodeWithSteps, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, nodeWithSteps{Node: n, Steps: idx[n.NodeID]})
+	}
+	return out
 }
 
 // JobStatus prints DAG + per-node state. Follow re-renders on poll.
@@ -125,7 +160,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 
 	if !opts.Follow {
-		return renderStatus(ctx, st, runID, out, false)
+		return renderStatus(ctx, st, runID, out, false, opts.Steps)
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -136,7 +171,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 			fmt.Fprint(out, "\033[H\033[J")
 		}
 		first = false
-		if err := renderStatus(ctx, st, runID, out, true); err != nil {
+		if err := renderStatus(ctx, st, runID, out, true, opts.Steps); err != nil {
 			return err
 		}
 		run, err := st.GetRun(ctx, runID)
@@ -154,7 +189,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 }
 
-func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Writer, followBanner bool) error {
+func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Writer, followBanner, includeSteps bool) error {
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -163,6 +198,8 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 	if err != nil {
 		return err
 	}
+	steps, _ := st.ListNodeSteps(ctx, runID)
+	stepsByNode := groupStepsByNode(steps)
 
 	if followBanner {
 		fmt.Fprintf(out, "# following %s (ctrl-c to stop)\n\n", runID)
@@ -192,23 +229,7 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "nodes (%d total, %d done):\n", len(nodes), countFinished(nodes))
-	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  ID\tSTATUS\tOUTCOME\tDURATION\tDEPS")
-	for _, n := range nodes {
-		outcome := n.Outcome
-		if outcome == "" {
-			outcome = "-"
-		}
-		deps := strings.Join(n.Deps, ",")
-		if deps == "" {
-			deps = "-"
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-			n.NodeID, n.Status, outcome, formatNodeDuration(n), deps)
-	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
+	renderNodesWithSteps(out, nodes, stepsByNode, includeSteps)
 
 	for _, n := range nodes {
 		if len(n.Output) > 0 {
@@ -231,6 +252,83 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 		renderApprovalsSection(out, approvals)
 	}
 	return nil
+}
+
+// renderNodesWithSteps prints the node table, then per-node step
+// rows when the node has any non-success/skipped step, any
+// annotations, or when force=true (the --steps flag). Annotation
+// lines render with an "@" prefix so they're visually distinct
+// from log lines.
+func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[string][]*store.NodeStep, force bool) {
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "  ID\tSTATUS\tOUTCOME\tDURATION\tDEPS")
+	for _, n := range nodes {
+		outcome := n.Outcome
+		if outcome == "" {
+			outcome = "-"
+		}
+		deps := strings.Join(n.Deps, ",")
+		if deps == "" {
+			deps = "-"
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
+			n.NodeID, n.Status, outcome, formatNodeDuration(n), deps)
+	}
+	_ = tw.Flush()
+	for _, n := range nodes {
+		steps := stepsByNode[n.NodeID]
+		annotations := n.Annotations
+		// Skip detail block for vanilla success nodes unless forced.
+		shouldRender := force || len(annotations) > 0 || hasNonPassedStep(steps)
+		if !shouldRender {
+			continue
+		}
+		fmt.Fprintf(out, "    %s:\n", n.NodeID)
+		for _, a := range annotations {
+			fmt.Fprintf(out, "      @ %s\n", a)
+		}
+		for _, s := range steps {
+			fmt.Fprintf(out, "      %s\t%s\t%s\n",
+				stepGlyph(s.Status), s.StepID, formatStepDuration(s))
+			for _, a := range s.Annotations {
+				fmt.Fprintf(out, "        @ %s\n", a)
+			}
+		}
+	}
+}
+
+func hasNonPassedStep(steps []*store.NodeStep) bool {
+	for _, s := range steps {
+		if s.Status != store.StepPassed {
+			return true
+		}
+	}
+	return false
+}
+
+func stepGlyph(status string) string {
+	switch status {
+	case store.StepPassed:
+		return "✓"
+	case store.StepFailed:
+		return "✗"
+	case store.StepSkipped:
+		return "↷"
+	case store.StepRunning:
+		return "…"
+	default:
+		return "·"
+	}
+}
+
+func formatStepDuration(s *store.NodeStep) string {
+	if s.StartedAt != nil && s.FinishedAt != nil {
+		return s.FinishedAt.Sub(*s.StartedAt).Round(time.Millisecond).String()
+	}
+	if s.StartedAt != nil {
+		return "running " + time.Since(*s.StartedAt).Round(100*time.Millisecond).String()
+	}
+	return "—"
 }
 
 // renderApprovalsSection prints a compact block of approval-gate
@@ -1184,7 +1282,9 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	if err != nil {
 		return err
 	}
-	payload := map[string]any{"run": run, "nodes": nodes}
+	steps, _ := st.ListNodeSteps(ctx, runID)
+	wrapped := joinStepsByNode(nodes, steps)
+	payload := map[string]any{"run": run, "nodes": wrapped}
 	if approvals, err := st.ListApprovalsForRun(ctx, runID); err == nil && len(approvals) > 0 {
 		payload["approvals"] = approvals
 	}
