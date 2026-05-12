@@ -115,15 +115,23 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	// pipeline as a dependency without importing its Go package.
 	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline()
 
-	// Error-canary: multi-step Work where four parallel "shard"
-	// steps each emit ~60 chatty lines and then return an error, and
-	// a downstream `final` step gets cascade-skipped because every
-	// shard it Needs() failed. Optional() keeps the overall run
-	// reporting success so the rest of the example still passes;
-	// the per-step failures are the point -- a place to test
-	// stepping through multiple errored, chatty steps in the
-	// dashboard / log view / status JSON.
-	sparkwing.Job(plan, "error-canary", &ErrorCanaryJob{}).Needs(configure).Optional()
+	// Error-canary cluster: four Plan-layer Nodes that each emit
+	// ~60 chatty lines then return a distinct failure. Lifted to
+	// the Plan layer (rather than steps inside one Work) so they
+	// don't share a runner ctx -- Work-layer steps fail-fast by
+	// design, cancelling siblings on first error. Each node is
+	// Optional() so the run still reports success and downstream
+	// nothing cascades, and GroupJobs clusters them in the
+	// dashboard like a single logical fixture.
+	canaryAlpha := sparkwing.Job(plan, "error-canary-alpha", canaryShard("error-canary-alpha", 60, 2500,
+		"connection reset by peer at item 042 (after 3 retries)")).Needs(configure).Inline().Optional()
+	canaryBravo := sparkwing.Job(plan, "error-canary-bravo", canaryShard("error-canary-bravo", 55, 2200,
+		"timeout waiting for downstream service (10s deadline)")).Needs(configure).Inline().Optional()
+	canaryCharlie := sparkwing.Job(plan, "error-canary-charlie", canaryShard("error-canary-charlie", 70, 2800,
+		"checksum mismatch on item 051: want sha256:abc... got sha256:def...")).Needs(configure).Inline().Optional()
+	canaryDelta := sparkwing.Job(plan, "error-canary-delta", canaryShard("error-canary-delta", 50, 2000,
+		"out of memory: allocated 1.4GiB of 1.0GiB quota")).Needs(configure).Inline().Optional()
+	sparkwing.GroupJobs(plan, "error-canary", canaryAlpha, canaryBravo, canaryCharlie, canaryDelta)
 
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
@@ -249,75 +257,44 @@ func rollbackFn(ctx context.Context) error {
 	return nap(ctx, 200)
 }
 
-// ErrorCanaryJob is the multi-step error fixture: a `seed` step that
-// succeeds chattily, four parallel shard steps that each chatter
-// before returning a distinct failure mode, and a `final` step that
-// .Needs() every shard so it cascade-skips. Used to test how the
-// dashboard, log view, and status JSON render multiple errored,
-// chatty steps side-by-side -- the place to "step through" failures.
-type ErrorCanaryJob struct{ sparkwing.Base }
-
-func (j *ErrorCanaryJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	seed := sparkwing.Step(w, "seed", j.seed)
-	shardAlpha := sparkwing.Step(w, "shard-alpha", j.shardAlpha).Needs(seed)
-	shardBravo := sparkwing.Step(w, "shard-bravo", j.shardBravo).Needs(seed)
-	shardCharlie := sparkwing.Step(w, "shard-charlie", j.shardCharlie).Needs(seed)
-	shardDelta := sparkwing.Step(w, "shard-delta", j.shardDelta).Needs(seed)
-	return sparkwing.Step(w, "final", j.final).
-		Needs(shardAlpha, shardBravo, shardCharlie, shardDelta), nil
-}
-
-func (*ErrorCanaryJob) seed(ctx context.Context) error {
-	lines := make([]string, 0, 50)
-	for i := 1; i <= 50; i++ {
-		lines = append(lines, fmt.Sprintf("seed: prefetched key %03d/050", i))
+// canaryShard returns a single-closure Job body that emits `items`
+// chatty progress lines -- the last ~15 of which are graduated
+// warnings + errors via sparkwing.Warn/Error so the log stream has
+// real warn/error-level entries to scroll back through, not just a
+// silent return at the end. Then annotates and returns the supplied
+// failure so the run records the structured outcome too.
+func canaryShard(label string, items int, durMS int, fail string) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		// Tick budget: spread `durMS` evenly across items so the
+		// pacing matches the previous chatter() behavior.
+		tick := time.Duration(durMS) * time.Millisecond / time.Duration(items)
+		warnStart := items - 14
+		errorStart := items - 4
+		if warnStart < 1 {
+			warnStart = 1
+		}
+		if errorStart < 1 {
+			errorStart = 1
+		}
+		for i := 1; i <= items; i++ {
+			switch {
+			case i >= errorStart:
+				sparkwing.Error(ctx, "%s: item %03d/%03d ... FAILED (%s)", label, i, items, fail)
+			case i >= warnStart:
+				sparkwing.Warn(ctx, "%s: item %03d/%03d ... slow (retry queue depth=%d)", label, i, items, i-warnStart+1)
+			default:
+				sparkwing.Info(ctx, "%s: item %03d/%03d ... ok", label, i, items)
+			}
+			select {
+			case <-time.After(tick):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		sparkwing.Error(ctx, "%s: aborting batch -- too many failures", label)
+		sparkwing.Annotate(ctx, fmt.Sprintf("%s: %d items processed before failure", label, items))
+		return fmt.Errorf("%s: %s", label, fail)
 	}
-	if err := chatter(ctx, 800, lines); err != nil {
-		return err
-	}
-	sparkwing.Annotate(ctx, "seed: 50 keys prefetched")
-	return nil
-}
-
-// errorShard runs `items` chatty progress lines then returns the
-// supplied failure. Shared boilerplate for the four parallel
-// erroring shards so each can vary cardinality, label, and
-// failure mode without re-implementing the loop.
-func errorShard(ctx context.Context, label string, items int, durMS int, fail string) error {
-	lines := make([]string, 0, items)
-	for i := 1; i <= items; i++ {
-		lines = append(lines, fmt.Sprintf("%s: item %03d/%03d ... ok", label, i, items))
-	}
-	if err := chatter(ctx, durMS, lines); err != nil {
-		return err
-	}
-	sparkwing.Annotate(ctx, fmt.Sprintf("%s: %d items processed before failure", label, items))
-	return fmt.Errorf("%s: %s", label, fail)
-}
-
-func (*ErrorCanaryJob) shardAlpha(ctx context.Context) error {
-	return errorShard(ctx, "shard-alpha", 60, 2500,
-		"connection reset by peer at item 042 (after 3 retries)")
-}
-
-func (*ErrorCanaryJob) shardBravo(ctx context.Context) error {
-	return errorShard(ctx, "shard-bravo", 55, 2200,
-		"timeout waiting for downstream service (10s deadline)")
-}
-
-func (*ErrorCanaryJob) shardCharlie(ctx context.Context) error {
-	return errorShard(ctx, "shard-charlie", 70, 2800,
-		"checksum mismatch on item 051: want sha256:abc... got sha256:def...")
-}
-
-func (*ErrorCanaryJob) shardDelta(ctx context.Context) error {
-	return errorShard(ctx, "shard-delta", 50, 2000,
-		"out of memory: allocated 1.4GiB of 1.0GiB quota")
-}
-
-func (*ErrorCanaryJob) final(ctx context.Context) error {
-	sparkwing.Info(ctx, "final: aggregating shard outputs")
-	return nap(ctx, 100)
 }
 
 // weatherCheckFn triggers the `weather-report` pipeline via
