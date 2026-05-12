@@ -115,6 +115,13 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	// pipeline as a dependency without importing its Go package.
 	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline()
 
+	// Error-canary leaf: emits ~200 progress lines then returns an
+	// error. Optional() keeps the overall run reporting success so
+	// the rest of the example still passes; the node-level failure
+	// is the point -- a place to test how errors bubble up through
+	// the dashboard, log view, and status JSON.
+	sparkwing.Job(plan, "error-canary", errorCanaryFn).Needs(configure).Optional()
+
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
 	// so a flake retries once.
@@ -237,6 +244,30 @@ func notifyFn(ctx context.Context) error {
 func rollbackFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "rolling back to previous deployment")
 	return nap(ctx, 200)
+}
+
+// errorCanaryFn emits ~200 progress lines, then returns an error so
+// the dashboard, log view, and status JSON show how a node-level
+// failure bubbles up. Marked Optional() at the Plan layer so the
+// overall run still reports success; only this node's status flips
+// to failed. No downstream needs it -- it's a pure error fixture.
+func errorCanaryFn(ctx context.Context) error {
+	sparkwing.Info(ctx, "error-canary: starting batch of 200 items")
+	lines := make([]string, 0, 200)
+	for i := 1; i <= 170; i++ {
+		lines = append(lines, fmt.Sprintf("processing item %03d/200 ... ok", i))
+	}
+	for i := 171; i <= 195; i++ {
+		lines = append(lines, fmt.Sprintf("processing item %03d/200 ... slow (retry queue depth=%d)", i, i-170))
+	}
+	for i := 196; i <= 200; i++ {
+		lines = append(lines, fmt.Sprintf("processing item %03d/200 ... warning: memory pressure", i))
+	}
+	if err := chatter(ctx, 3000, lines); err != nil {
+		return err
+	}
+	sparkwing.Annotate(ctx, "error-canary: processed 200 items before failure")
+	return fmt.Errorf("batch failed at item 173: connection reset by peer (after 3 retries)")
 }
 
 // weatherCheckFn triggers the `weather-report` pipeline via
