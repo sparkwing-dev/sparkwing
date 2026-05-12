@@ -1829,6 +1829,29 @@ infrastructure error.`,
 	},
 }
 
+var cmdJobsTimeline = Command{
+	Path:     "sparkwing runs timeline",
+	Synopsis: "ASCII waterfall of nodes (and optional steps) for a run",
+	Description: `Renders one row per node, laid out along the run's wall-clock
+span. With --steps each node also expands into its inner Work
+steps. Useful for an agent reasoning about parallelism and the
+critical path without correlating logs by hand. JSON output
+emits start/end offsets in milliseconds per row.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "steps", Desc: "Include per-step rows under each node", Group: "Output"},
+		{Name: "width", Argument: "N", Desc: "Bar width in characters", Default: "60", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: text|json", Group: "Output"},
+		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+	},
+	GroupOrder: []string{"Input", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Default node waterfall", "sparkwing runs timeline --run run-..."},
+		{"Expand into per-step bars", "sparkwing runs timeline --run run-... --steps"},
+		{"JSON for an agent", "sparkwing runs timeline --run run-... --steps -o json"},
+	},
+}
+
 var cmdJobsRetry = Command{
 	Path:     "sparkwing runs retry",
 	Synopsis: "Trigger fresh runs copying pipeline + args from old ones",
