@@ -1829,6 +1829,26 @@ infrastructure error.`,
 	},
 }
 
+var cmdJobsSummary = Command{
+	Path:     "sparkwing runs summary",
+	Synopsis: "Aggregated work view: groups, work items, modifiers, annotations",
+	Description: `Run-level rollup of every node in one render. Mirrors the
+dashboard's Summary tab: run header + run-wide annotations +
+node groups + work items (nodes and inner steps) + modifiers
+in effect + any approval-gate state. Useful for the
+"did this run actually do what I asked" agent question.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: text|json", Group: "Output"},
+		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+	},
+	GroupOrder: []string{"Input", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Quick run rollup", "sparkwing runs summary --run run-..."},
+		{"JSON for an agent", "sparkwing runs summary --run run-... -o json"},
+	},
+}
+
 var cmdJobsTimeline = Command{
 	Path:     "sparkwing runs timeline",
 	Synopsis: "ASCII waterfall of nodes (and optional steps) for a run",
