@@ -6,17 +6,16 @@ import (
 	"testing"
 )
 
-func TestCollectRunIDs_FlagPositionalStdin(t *testing.T) {
+func TestCollectRunIDs_FlagsAndStdinDash(t *testing.T) {
 	stdin := strings.NewReader("run-stdin-1\nrun-stdin-2\n")
 	got, err := collectRunIDs(
-		[]string{"run-flag-a"},
-		[]string{"run-pos-b", "-"},
+		[]string{"run-flag-a", "-", "run-flag-b"},
 		stdin,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run-flag-a", "run-pos-b", "run-stdin-1", "run-stdin-2"}
+	want := []string{"run-flag-a", "run-flag-b", "run-stdin-1", "run-stdin-2"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -27,9 +26,20 @@ func TestCollectRunIDs_FlagPositionalStdin(t *testing.T) {
 	}
 }
 
+func TestCollectRunIDs_NoDashMeansNoStdinRead(t *testing.T) {
+	stdin := strings.NewReader("should-not-be-read\n")
+	got, err := collectRunIDs([]string{"run-a"}, stdin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "run-a" {
+		t.Errorf("got %v, want [run-a]", got)
+	}
+}
+
 func TestCollectRunIDs_Dedup(t *testing.T) {
 	stdin := strings.NewReader("run-a\nrun-b\n")
-	got, err := collectRunIDs([]string{"run-a"}, []string{"run-b", "-"}, stdin)
+	got, err := collectRunIDs([]string{"run-a", "-"}, stdin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +50,7 @@ func TestCollectRunIDs_Dedup(t *testing.T) {
 
 func TestCollectRunIDs_SkipsBlankStdinLines(t *testing.T) {
 	stdin := strings.NewReader("run-a\n\n   \nrun-b\n")
-	got, err := collectRunIDs(nil, []string{"-"}, stdin)
+	got, err := collectRunIDs([]string{"-"}, stdin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +60,7 @@ func TestCollectRunIDs_SkipsBlankStdinLines(t *testing.T) {
 }
 
 func TestCollectRunIDs_EmptyReturnsEmpty(t *testing.T) {
-	got, err := collectRunIDs(nil, nil, nil)
+	got, err := collectRunIDs(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

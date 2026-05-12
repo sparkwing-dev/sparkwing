@@ -1843,10 +1843,8 @@ Default output is a table of RUN / NODE / LINE / TEXT. -q
 shape for piping into ` + "`runs logs`" + ` or ` + "`runs status`" + `.
 
 Exit code 0 even when there are no matches.`,
-	PosArgs: []PosArg{
-		{Name: "PATTERN", Desc: "Substring to match (case-sensitive)", Required: true},
-	},
 	Flags: []FlagSpec{
+		{Name: "pattern", Argument: "TEXT", Desc: "Substring to match (case-sensitive)", Required: true, Group: "Input"},
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict candidate runs to one pipeline (repeatable; `!` to exclude)", Group: "Filter"},
 		{Name: "status", Argument: "STATUS", Desc: "Restrict by status (repeatable; `!` to exclude)", Group: "Filter"},
 		{Name: "branch", Argument: "BRANCH", Desc: "Restrict by git branch (repeatable; `!` to exclude)", Group: "Filter"},
@@ -1860,11 +1858,11 @@ Exit code 0 even when there are no matches.`,
 		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
-	GroupOrder: []string{"Filter", "Output", "System", "Other"},
+	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Find every run that hit a permission-denied line in the past week", "sparkwing runs grep 'permission denied' --since 7d"},
-		{"Pipe matching run ids into runs logs", "sparkwing runs grep 'OOMKilled' --since 24h -q | xargs -I{} sparkwing runs logs --run {}"},
-		{"Search prod runs as JSON for an agent", "sparkwing runs grep 'connection refused' --on prod --since 24h -o json"},
+		{"Find every run that hit a permission-denied line in the past week", "sparkwing runs grep --pattern 'permission denied' --since 7d"},
+		{"Pipe matching run ids into runs logs", "sparkwing runs grep --pattern OOMKilled --since 24h -q | xargs -I{} sparkwing runs logs --run {}"},
+		{"Search prod runs as JSON for an agent", "sparkwing runs grep --pattern 'connection refused' --on prod --since 24h -o json"},
 	},
 }
 
@@ -1920,19 +1918,18 @@ and retry_of=<old-id> so the orchestrator's skip-passed
 rehydration fires: nodes that passed in the source run are reused,
 only the failed / unreached nodes re-execute.
 
-Source ids can come from --run (repeatable), positional args, or
-stdin (use the literal positional '-' to read ids one per line).
-Failures on individual ids don't abort the batch; the verb prints
-a per-id status line and exits non-zero only when at least one id
-failed.`,
+Pass --run once per source id (repeatable). Use --run - to read ids
+from stdin, one per line. Failures on individual ids don't abort
+the batch; the verb prints a per-id status line and exits non-zero
+only when at least one id failed.`,
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Source run id (repeatable; positional and `-` for stdin also accepted)", Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Source run id (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
 		{"Retry one run on prod", "sparkwing runs retry --run run-... --on prod"},
-		{"Retry every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry - --on prod"},
+		{"Retry every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --run - --on prod"},
 	},
 }
 
@@ -1944,16 +1941,16 @@ transitions to 'cancelling' and then 'cancelled' once the runner
 acknowledges. Already-finished runs surface a per-id error but
 don't abort the batch.
 
-Run ids can come from --run (repeatable), positional args, or
-stdin (use the literal positional '-' to read ids one per line).`,
+Pass --run once per id (repeatable). Use --run - to read ids
+from stdin, one per line.`,
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; positional and `-` for stdin also accepted)", Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
 		{"Cancel one run", "sparkwing runs cancel --run run-... --on prod"},
-		{"Cancel every running prod run", "sparkwing runs list --status running --on prod -q | sparkwing runs cancel - --on prod"},
+		{"Cancel every running prod run", "sparkwing runs list --status running --on prod -q | sparkwing runs cancel --run - --on prod"},
 	},
 }
 
@@ -1963,20 +1960,20 @@ var cmdJobsPrune = Command{
 	Description: `Prunes terminal runs (success / failed / cancelled) so the
 controller's SQLite store doesn't grow unbounded. Supply either
 --older-than DUR (batch by age) or one-or-more run ids via --run
-(repeatable), positional args, or stdin ('-'). The two modes are
-mutually exclusive.
+(repeatable). Use --run - to read ids from stdin. The two modes
+are mutually exclusive.
 
 Use --dry-run first to confirm the victim list.`,
 	Flags: []FlagSpec{
-		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when no run ids are supplied", ConflictsWith: []string{"run"}, Group: "Input"},
-		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; positional and `-` for stdin also accepted)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
+		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when no --run ids are supplied", ConflictsWith: []string{"run"}, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; use --run - to read ids from stdin)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
 		{Name: "dry-run", Desc: "List matching runs without deleting", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --on prod"},
 		{"Delete a few specific runs", "sparkwing runs prune --run run-A --run run-B --on prod"},
-		{"Prune ids from another query", "sparkwing runs list --pipeline scratch -q | sparkwing runs prune - --on prod"},
+		{"Prune ids from another query", "sparkwing runs list --pipeline scratch -q | sparkwing runs prune --run - --on prod"},
 	},
 }
 

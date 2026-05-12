@@ -16,6 +16,7 @@ import (
 
 func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsGrep.Path, flag.ContinueOnError)
+	pattern := fs.String("pattern", "", "substring to match (case-sensitive)")
 	pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; prefix `!` to exclude)")
 	statuses := multiFlagVar(fs, "status", "filter by status (repeatable; prefix `!` to exclude)")
 	branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
@@ -34,14 +35,9 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	rest := fs.Args()
-	if len(rest) == 0 {
-		return fmt.Errorf("%s: PATTERN positional is required", cmdJobsGrep.Path)
+	if rest := fs.Args(); len(rest) > 0 {
+		return fmt.Errorf("%s: unexpected positional %q (use --pattern)", cmdJobsGrep.Path, rest[0])
 	}
-	if len(rest) > 1 {
-		return fmt.Errorf("%s: only one PATTERN positional supported (got %d)", cmdJobsGrep.Path, len(rest))
-	}
-	pattern := rest[0]
 	switch *outFmt {
 	case "", "table", "json":
 	default:
@@ -80,7 +76,7 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 	}
 
 	opts := orchestrator.GrepOpts{
-		Pattern:    pattern,
+		Pattern:    *pattern,
 		Limit:      *limit,
 		MaxMatches: *maxMatches,
 		JSON:       *outFmt == "json",

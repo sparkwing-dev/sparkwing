@@ -24,10 +24,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 )
 
-// collectRunIDs walks --run flags, positional args, and stdin (when
-// the positional `-` token is present) and returns the deduplicated
-// id list in encounter order. Empty lines from stdin are skipped.
-func collectRunIDs(flagIDs []string, positional []string, stdin io.Reader) ([]string, error) {
+// collectRunIDs walks --run flags and returns the deduplicated id
+// list in encounter order. A --run value of "-" reads ids from
+// stdin (one per line). Empty/whitespace-only entries are skipped.
+func collectRunIDs(flagIDs []string, stdin io.Reader) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
 	add := func(raw string) {
@@ -42,20 +42,17 @@ func collectRunIDs(flagIDs []string, positional []string, stdin io.Reader) ([]st
 		seen[id] = true
 		out = append(out, id)
 	}
-	for _, id := range flagIDs {
-		add(id)
-	}
 	var sawDash bool
-	for _, p := range positional {
-		if p == "-" {
+	for _, id := range flagIDs {
+		if id == "-" {
 			sawDash = true
 			continue
 		}
-		add(p)
+		add(id)
 	}
 	if sawDash {
 		if stdin == nil {
-			return nil, errors.New("stdin requested with '-' but no stream available")
+			return nil, errors.New("--run - requested but no stdin available")
 		}
 		sc := bufio.NewScanner(stdin)
 		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -112,12 +109,15 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		}
 		return err
 	}
-	ids, err := collectRunIDs(*runIDs, fs.Args(), os.Stdin)
+	if rest := fs.Args(); len(rest) > 0 {
+		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsRetry.Path, rest[0])
+	}
+	ids, err := collectRunIDs(*runIDs, os.Stdin)
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
-		return fmt.Errorf("%s: at least one run id is required (--run, positional, or `-` for stdin)", cmdJobsRetry.Path)
+		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsRetry.Path)
 	}
 	prof, err := resolveProfile(*on)
 	if err != nil {
@@ -160,7 +160,7 @@ func retryOne(ctx context.Context, c *client.Client, srcRunID string) runResult 
 
 func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
-	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; can also be a positional or `-` for stdin)")
+	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
 	on := fs.String("on", "", "profile name (default: current default)")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -168,12 +168,15 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		}
 		return err
 	}
-	ids, err := collectRunIDs(*runIDs, fs.Args(), os.Stdin)
+	if rest := fs.Args(); len(rest) > 0 {
+		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsCancel.Path, rest[0])
+	}
+	ids, err := collectRunIDs(*runIDs, os.Stdin)
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
-		return fmt.Errorf("%s: at least one run id is required (--run, positional, or `-` for stdin)", cmdJobsCancel.Path)
+		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsCancel.Path)
 	}
 	prof, err := resolveProfile(*on)
 	if err != nil {
@@ -201,19 +204,22 @@ func runRunsPrune(ctx context.Context, args []string) error {
 	on := fs.String("on", "", "profile name (default: current default)")
 	olderThan := fs.Duration("older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
 	dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
-	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; positional and `-` for stdin also accepted)")
+	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; use --run - to read ids from stdin)")
 	if err := parseAndCheck(cmdJobsPrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	explicitIDs, err := collectRunIDs(*runIDs, fs.Args(), os.Stdin)
+	if rest := fs.Args(); len(rest) > 0 {
+		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsPrune.Path, rest[0])
+	}
+	explicitIDs, err := collectRunIDs(*runIDs, os.Stdin)
 	if err != nil {
 		return err
 	}
 	if len(explicitIDs) == 0 && *olderThan <= 0 {
-		return errors.New("runs prune: either --older-than DUR or --run RUN_ID (or positional/stdin ids) is required")
+		return errors.New("runs prune: either --older-than DUR or --run RUN_ID is required")
 	}
 	if len(explicitIDs) > 0 && *olderThan > 0 {
 		return errors.New("runs prune: --run and --older-than are mutually exclusive")
