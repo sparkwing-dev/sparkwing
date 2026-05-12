@@ -1810,53 +1810,70 @@ infrastructure error.`,
 
 var cmdJobsRetry = Command{
 	Path:     "sparkwing runs retry",
-	Synopsis: "Trigger a fresh run copying pipeline + args from an old one",
-	Description: `Issues a new trigger with the same pipeline, args, branch, and
-SHA as the source run. The new run is tagged with source=retry:<old-id>
-and retry_of=<old-id> so the orchestrator's skip-passed rehydration
-fires: nodes that passed in the source run are reused, only the
-failed / unreached nodes re-execute.`,
+	Synopsis: "Trigger fresh runs copying pipeline + args from old ones",
+	Description: `Issues a new trigger per source run with the same pipeline, args,
+branch, and SHA. Each new run is tagged with source=retry:<old-id>
+and retry_of=<old-id> so the orchestrator's skip-passed
+rehydration fires: nodes that passed in the source run are reused,
+only the failed / unreached nodes re-execute.
+
+Source ids can come from --run (repeatable), positional args, or
+stdin (use the literal positional '-' to read ids one per line).
+Failures on individual ids don't abort the batch; the verb prints
+a per-id status line and exits non-zero only when at least one id
+failed.`,
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Source run to retry", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Source run id (repeatable; positional and `-` for stdin also accepted)", Group: "Input"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Retry a flaky build on prod", "sparkwing runs retry --run run-... --on prod"},
+		{"Retry one run on prod", "sparkwing runs retry --run run-... --on prod"},
+		{"Retry every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry - --on prod"},
 	},
 }
 
 var cmdJobsCancel = Command{
-	Path:        "sparkwing runs cancel",
-	Synopsis:    "Request cancellation of an in-flight run",
-	Description: `Sends a cancel request to the controller. The run transitions to 'cancelling' and then 'cancelled' once the runner acknowledges. Already-finished runs return a no-op error.`,
+	Path:     "sparkwing runs cancel",
+	Synopsis: "Request cancellation of in-flight runs",
+	Description: `Sends a cancel request per run to the controller. Each run
+transitions to 'cancelling' and then 'cancelled' once the runner
+acknowledges. Already-finished runs surface a per-id error but
+don't abort the batch.
+
+Run ids can come from --run (repeatable), positional args, or
+stdin (use the literal positional '-' to read ids one per line).`,
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run to cancel", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; positional and `-` for stdin also accepted)", Group: "Input"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Cancel a run", "sparkwing runs cancel --run run-... --on prod"},
+		{"Cancel one run", "sparkwing runs cancel --run run-... --on prod"},
+		{"Cancel every running prod run", "sparkwing runs list --status running --on prod -q | sparkwing runs cancel - --on prod"},
 	},
 }
 
 var cmdJobsPrune = Command{
 	Path:     "sparkwing runs prune",
-	Synopsis: "Delete finished runs older than a threshold",
+	Synopsis: "Delete finished runs older than a threshold, or by id",
 	Description: `Prunes terminal runs (success / failed / cancelled) so the
-controller's SQLite store doesn't grow unbounded. Supply
-either --older-than DUR (batch) or --run RUN_ID (single).
+controller's SQLite store doesn't grow unbounded. Supply either
+--older-than DUR (batch by age) or one-or-more run ids via --run
+(repeatable), positional args, or stdin ('-'). The two modes are
+mutually exclusive.
 
 Use --dry-run first to confirm the victim list.`,
 	Flags: []FlagSpec{
-		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when --run is not set", ConflictsWith: []string{"run"}, Group: "Input"},
-		{Name: "run", Argument: "RUN_ID", Desc: "Prune this specific run id", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
+		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when no run ids are supplied", ConflictsWith: []string{"run"}, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; positional and `-` for stdin also accepted)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
 		{Name: "dry-run", Desc: "List matching runs without deleting", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --on prod"},
-		{"Delete one specific run", "sparkwing runs prune --run run-20260101-000000-xyz --on prod"},
+		{"Delete a few specific runs", "sparkwing runs prune --run run-A --run run-B --on prod"},
+		{"Prune ids from another query", "sparkwing runs list --pipeline scratch -q | sparkwing runs prune - --on prod"},
 	},
 }
 

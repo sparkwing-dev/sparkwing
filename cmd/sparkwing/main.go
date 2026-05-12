@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -20,8 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingconfig"
 	"github.com/sparkwing-dev/sparkwing/profile"
 	"github.com/sparkwing-dev/sparkwing/repos"
@@ -693,142 +690,11 @@ func runJobs(args []string) error {
 		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
 
 	case "cancel":
-		fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
-		runID := fs.String("run", "", "run identifier to cancel")
-		on := fs.String("on", "", "profile name (default: current default)")
-		if err := parseAndCheck(cmdJobsCancel, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		*runID = normalizeRunID(*runID)
-		prof, err := resolveProfile(*on)
-		if err != nil {
-			return err
-		}
-		if err := requireController(prof, "jobs cancel"); err != nil {
-			return err
-		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
-		if err := c.CancelRun(ctx, *runID); err != nil {
-			return fmt.Errorf("cancel %s: %w", *runID, err)
-		}
-		fmt.Fprintf(os.Stdout, "cancel requested for %s\n", *runID)
-		return nil
-
+		return runRunsCancel(ctx, args[1:])
 	case "retry":
-		fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
-		srcRunIDFlag := fs.String("run", "", "run identifier to retry")
-		on := fs.String("on", "", "profile name (default: current default)")
-		if err := parseAndCheck(cmdJobsRetry, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		*srcRunIDFlag = normalizeRunID(*srcRunIDFlag)
-		prof, err := resolveProfile(*on)
-		if err != nil {
-			return err
-		}
-		if err := requireController(prof, "jobs retry"); err != nil {
-			return err
-		}
-		srcRunID := *srcRunIDFlag
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
-		run, err := c.GetRun(ctx, srcRunID)
-		if err != nil {
-			return fmt.Errorf("lookup %s: %w", srcRunID, err)
-		}
-		resp, err := c.CreateTrigger(ctx, client.TriggerRequest{
-			Pipeline: run.Pipeline,
-			Args:     run.Args,
-			Trigger: client.TriggerMeta{
-				// Audit trail to origin run for "retry of run-X" surfaces.
-				Source: "retry:" + srcRunID,
-			},
-			Git:     client.GitMeta{Branch: run.GitBranch, SHA: run.GitSHA},
-			RetryOf: srcRunID,
-		})
-		if err != nil {
-			return fmt.Errorf("trigger retry: %w", err)
-		}
-		fmt.Fprintf(os.Stdout, "retried %s as %s\n", srcRunID, resp.RunID)
-		return nil
-
+		return runRunsRetry(ctx, args[1:])
 	case "prune":
-		fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)
-		on := fs.String("on", "", "profile name (default: current default)")
-		olderThan := fs.Duration("older-than", 0, "prune runs older than this (e.g. 7d, 48h). Required unless --run is set.")
-		dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
-		oneRun := fs.String("run", "", "prune this specific run id")
-		if err := parseAndCheck(cmdJobsPrune, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		*oneRun = normalizeRunID(*oneRun)
-		prof, err := resolveProfile(*on)
-		if err != nil {
-			return err
-		}
-		if err := requireController(prof, "jobs prune"); err != nil {
-			return err
-		}
-		if *oneRun == "" && *olderThan <= 0 {
-			return errors.New("jobs prune: either --older-than DUR or --run RUN_ID is required")
-		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
-		var logc storage.LogStore
-		if prof.Logs != "" {
-			logc = sparkwinglogs.New(prof.Logs, nil, prof.Token)
-		}
-		var victims []string
-		if *oneRun != "" {
-			victims = []string{*oneRun}
-		} else {
-			runs, err := c.ListRuns(ctx, store.RunFilter{Limit: 10000})
-			if err != nil {
-				return fmt.Errorf("list runs: %w", err)
-			}
-			cutoff := time.Now().Add(-*olderThan)
-			for _, r := range runs {
-				if !r.StartedAt.Before(cutoff) {
-					continue
-				}
-				// Never prune in-flight work; the worker owns that row.
-				if r.Status != "success" && r.Status != "failed" && r.Status != "cancelled" {
-					continue
-				}
-				victims = append(victims, r.ID)
-			}
-		}
-		if len(victims) == 0 {
-			fmt.Fprintln(os.Stdout, "no runs match prune criteria")
-			return nil
-		}
-		if *dryRun {
-			fmt.Fprintf(os.Stdout, "would prune %d run(s):\n", len(victims))
-			for _, id := range victims {
-				fmt.Fprintln(os.Stdout, "  "+id)
-			}
-			return nil
-		}
-		for _, id := range victims {
-			if err := c.DeleteRun(ctx, id); err != nil {
-				return fmt.Errorf("delete run %s: %w", id, err)
-			}
-			if logc != nil {
-				if err := logc.DeleteRun(ctx, id); err != nil {
-					// Don't abort: controller row is gone; warn and continue.
-					fmt.Fprintf(os.Stderr, "warn: logs delete %s: %v\n", id, err)
-				}
-			}
-		}
-		fmt.Fprintf(os.Stdout, "pruned %d run(s)\n", len(victims))
-		return nil
+		return runRunsPrune(ctx, args[1:])
 
 	case "failures":
 		return runJobsFailures(ctx, paths, args[1:])
