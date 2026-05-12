@@ -9,6 +9,7 @@
 // terminal.
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { Node as RunNode, Run, RunInvocation } from "@/lib/api";
 
 function fmtMs(ms: number): string {
@@ -108,6 +109,74 @@ interface Tally {
   failed: number;
   skipped: number;
   other: number;
+}
+
+// NodeAttrChips surfaces the DAG-pill attributes inline in the Jobs
+// list so the summary view tells the same story as the DAG: dynamic
+// shape, approval gates, cached runs, inline jobs, group membership,
+// and cross-pipeline spawns. Each spawn entry is a deep link to the
+// child run; everything else is informational.
+function NodeAttrChips({ n }: { n: RunNode }) {
+  const chips: { label: string; cls: string; key: string }[] = [];
+  if (n.dynamic)
+    chips.push({
+      key: "dynamic",
+      label: "dynamic",
+      cls: "bg-fuchsia-500/15 text-fuchsia-300",
+    });
+  if (n.approval)
+    chips.push({
+      key: "approval",
+      label: "approval",
+      cls: "bg-yellow-500/15 text-yellow-300",
+    });
+  if (n.outcome === "cached")
+    chips.push({
+      key: "cached",
+      label: "cached",
+      cls: "bg-violet-500/15 text-violet-300",
+    });
+  if (n.modifiers?.inline)
+    chips.push({
+      key: "inline",
+      label: "inline",
+      cls: "bg-slate-500/15 text-slate-300",
+    });
+  if (n.on_failure_of)
+    chips.push({
+      key: "onfail",
+      label: `on-failure-of ${n.on_failure_of}`,
+      cls: "bg-red-500/15 text-red-300",
+    });
+  if (n.groups && n.groups.length > 0)
+    chips.push({
+      key: "groups",
+      label: `group: ${n.groups.join(", ")}`,
+      cls: "bg-cyan-500/15 text-cyan-300",
+    });
+  return (
+    <span className="flex items-center gap-1 flex-wrap">
+      {chips.map((c) => (
+        <span
+          key={c.key}
+          className={`px-1.5 rounded text-[10px] ${c.cls}`}
+          title={c.label}
+        >
+          {c.label}
+        </span>
+      ))}
+      {(n.spawned_pipelines ?? []).map((p) => (
+        <Link
+          key={p.child_run_id}
+          href={`?run=${encodeURIComponent(p.child_run_id)}`}
+          className="px-1.5 rounded text-[10px] bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 transition-colors"
+          title={`open spawned run for ${p.pipeline}`}
+        >
+          ↗ {p.pipeline}
+        </Link>
+      ))}
+    </span>
+  );
 }
 
 function buildTally(nodes: RunNode[]): Tally {
@@ -245,7 +314,9 @@ export default function SummaryPanel({
                   className="flex items-center gap-2 text-xs font-mono"
                 >
                   <span className={`w-4 text-center ${g.cls}`}>{g.glyph}</span>
-                  <span className="flex-1 truncate">{n.id}</span>
+                  <span className="truncate">{n.id}</span>
+                  <NodeAttrChips n={n} />
+                  <span className="flex-1" />
                   {/* Outcome word for non-success cases (mirrors the
                       CLI: success is unambiguous from the glyph;
                       anything else benefits from the label). */}

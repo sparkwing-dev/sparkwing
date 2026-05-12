@@ -2537,6 +2537,7 @@ function DAG({
   onSelectStep: (nodeId: string, stepId: string | null) => void;
   runId?: string;
 }) {
+  const dagRouter = useRouter();
   // Auto-scroll the selected node into view when arriving with a
   // selection (e.g. switching to the DAG tab from elsewhere) or when
   // selection changes. The node's group is tagged with data-node-id
@@ -2730,13 +2731,28 @@ function DAG({
     let y = padY;
     const w = columnWidths[ci];
     let prevGroup: string | null = null;
+    // For collapsed groups, every member shares the same y slot so
+    // the frame's bounding box squashes to one node-row tall (we
+    // still allocate width = columnWidth, but height = nodeH). The
+    // first member claims the slot and advances y; subsequent
+    // members reuse it without advancing.
+    const collapsedSlot = new Map<string, number>();
     col.forEach((n, idx) => {
       const g = primaryGroupOf(n);
+      const isCollapsed = g && collapsedGroups.has(g);
+      if (isCollapsed) {
+        const existingY = collapsedSlot.get(g);
+        if (existingY !== undefined) {
+          pos.set(n.id, { x: columnStartX[ci], y: existingY, w });
+          return;
+        }
+      }
       if (idx > 0 && g !== prevGroup) {
         if (prevGroup) y += groupFramePad;
         if (g) y += groupFramePad + groupLabelOffset;
       }
       pos.set(n.id, { x: columnStartX[ci], y, w });
+      if (isCollapsed) collapsedSlot.set(g, y);
       y += nodeH + rowGap;
       prevGroup = g;
     });
@@ -2964,14 +2980,10 @@ function DAG({
                   height={g.h}
                   rx={8}
                   ry={8}
-                  fill={
-                    collapsed
-                      ? "rgba(56,189,248,0.18)"
-                      : "rgba(56,189,248,0.05)"
-                  }
+                  fill="rgba(56,189,248,0.05)"
                   stroke="rgba(56,189,248,0.55)"
                   strokeWidth={1.25}
-                  strokeDasharray={collapsed ? undefined : "5 3"}
+                  strokeDasharray="5 3"
                 />
                 <g
                   onClick={() => toggleCollapsedGroup(g.name)}
@@ -2992,10 +3004,8 @@ function DAG({
                     fontWeight="bold"
                     fontFamily="ui-monospace, monospace"
                   >
-                    {collapsed ? "▸" : "▾"} {g.name}
-                    {collapsed
-                      ? ` (${memberCount} node${memberCount === 1 ? "" : "s"})`
-                      : ""}
+                    {collapsed ? "▸" : "▾"} {g.name} ({memberCount} node
+                    {memberCount === 1 ? "" : "s"})
                   </text>
                 </g>
               </g>
@@ -3172,6 +3182,9 @@ function DAG({
                     <CrossPipelinePill
                       nodeW={p.w}
                       pipelines={n.spawned_pipelines!}
+                      onOpen={(runID) =>
+                        dagRouter.push(`?run=${encodeURIComponent(runID)}`)
+                      }
                     />
                   )}
                 {(n.annotations?.length ?? 0) > 0 &&
@@ -4331,28 +4344,40 @@ function CachedPill({ nodeW }: { nodeW: number }) {
 }
 
 // CrossPipelinePill marks a node that fired sparkwing.RunAndAwait
-// during its body. Sky-cyan to read as "outgoing connection," with
-// the target pipeline name when only one child was spawned, or a
-// `↗ N pipelines` count when there were several. The label is the
-// node's tooltip-side context too — operators reading the hover
-// card see the full list of child run ids.
+// during its body. Sky-cyan to read as "outgoing connection." Label
+// is the generic "SPAWNS" (with a count when there are several) so
+// pill width is stable across pipeline names. Clicking the pill
+// jumps to the spawned run — for multi-spawn nodes it routes to the
+// first child; the hover tooltip lists the full set.
 function CrossPipelinePill({
   nodeW,
   pipelines,
+  onOpen,
 }: {
   nodeW: number;
   pipelines: SpawnedPipelineRef[];
+  onOpen?: (runID: string) => void;
 }) {
   const label =
-    pipelines.length === 1
-      ? `↗ ${truncate(pipelines[0].pipeline, 16)}`
-      : `↗ ${pipelines.length} pipelines`;
+    pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
   const pillH = 15;
   const pillW = Math.max(48, 12 + label.length * 6);
   const x = (nodeW - pillW) / 2;
   const y = -6;
+  const first = pipelines[0];
+  const tip = pipelines
+    .map((p) => `↗ ${p.pipeline} (run ${p.child_run_id})`)
+    .join("\n");
   return (
-    <g style={{ pointerEvents: "none" }}>
+    <g
+      style={{ cursor: first ? "pointer" : undefined }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!first) return;
+        onOpen?.(first.child_run_id);
+      }}
+    >
+      <title>{tip}</title>
       <rect
         x={x}
         y={y}
