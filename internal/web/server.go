@@ -21,6 +21,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
@@ -546,30 +547,61 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
+		// Read + grep each node's log concurrently. ReadNodeLog is a
+		// per-node HTTP hop in cluster-mode (ClientBackend), so the
+		// difference between serial and parallel here is N round-trips
+		// vs. one round-trip wall-clock per search.
+		type nodeResult struct {
+			matches []match
+			count   int
+			order   int
+		}
+		const fanout = 8
+		sem := make(chan struct{}, fanout)
+		results := make([]nodeResult, len(nodes))
+		var wg sync.WaitGroup
+		for i, n := range nodes {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, nodeID string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				content, err := b.ReadNodeLog(r.Context(), runID, nodeID, backend.ReadOpts{})
+				if err != nil || len(content) == 0 {
+					return
+				}
+				sc := bufio.NewScanner(bytes.NewReader(content))
+				sc.Buffer(make([]byte, 1<<16), 1<<20)
+				lineNum := 0
+				local := nodeResult{order: i}
+				for sc.Scan() {
+					lineNum++
+					line := sc.Text()
+					if !strings.Contains(strings.ToLower(line), needle) {
+						continue
+					}
+					local.count++
+					if local.count <= limit {
+						local.matches = append(local.matches, match{
+							NodeID:  nodeID,
+							Line:    lineNum,
+							Content: line,
+						})
+					}
+				}
+				results[i] = local
+			}(i, n.NodeID)
+		}
+		wg.Wait()
 		matches := make([]match, 0, 64)
 		total := 0
-		for _, n := range nodes {
-			content, err := b.ReadNodeLog(r.Context(), runID, n.NodeID, backend.ReadOpts{})
-			if err != nil || len(content) == 0 {
-				continue
-			}
-			sc := bufio.NewScanner(bytes.NewReader(content))
-			sc.Buffer(make([]byte, 1<<16), 1<<20)
-			lineNum := 0
-			for sc.Scan() {
-				lineNum++
-				line := sc.Text()
-				if !strings.Contains(strings.ToLower(line), needle) {
-					continue
+		for _, res := range results {
+			total += res.count
+			for _, m := range res.matches {
+				if len(matches) >= limit {
+					break
 				}
-				total++
-				if len(matches) < limit {
-					matches = append(matches, match{
-						NodeID:  n.NodeID,
-						Line:    lineNum,
-						Content: line,
-					})
-				}
+				matches = append(matches, m)
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
