@@ -519,6 +519,49 @@ func runLogsHandler(b backend.Backend) http.HandlerFunc {
 // the browser. limit caps total matches returned (default 500,
 // max 5000); the server walks every line so the total count
 // reflects the full run.
+// displayBodyForLogLine mirrors the frontend's parseJSONLLogs +
+// recordToLine: only records that produce a visible line in the
+// dashboard contribute to the display-line counter, and the body
+// matched is what the user actually sees (msg / attrs / synthetic
+// "[skipped: …]"), not the raw NDJSON framing.
+//
+// Returns (body, true) when the line corresponds to a displayed row,
+// or ("", false) for framing events the parser swallows (node_start,
+// step_start, step_end, node_end, run_summary).
+func displayBodyForLogLine(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed[0] != '{' {
+		return raw, true
+	}
+	var rec struct {
+		Event string                 `json:"event"`
+		Msg   string                 `json:"msg"`
+		Level string                 `json:"level"`
+		Attrs map[string]interface{} `json:"attrs,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &rec); err != nil {
+		return raw, true
+	}
+	switch rec.Event {
+	case "node_start", "step_start", "step_end", "node_end", "run_summary":
+		return "", false
+	case "step_skipped":
+		reason, _ := rec.Attrs["reason"].(string)
+		if reason != "" {
+			return "[skipped: " + reason + "]", true
+		}
+		return "[skipped]", true
+	}
+	if rec.Msg != "" {
+		return rec.Msg, true
+	}
+	if len(rec.Attrs) > 0 {
+		attrBytes, _ := json.Marshal(rec.Attrs)
+		return string(attrBytes), true
+	}
+	return "", true
+}
+
 func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 	type match struct {
 		NodeID  string `json:"node_id"`
@@ -572,20 +615,24 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 				}
 				sc := bufio.NewScanner(bytes.NewReader(content))
 				sc.Buffer(make([]byte, 1<<16), 1<<20)
-				lineNum := 0
+				displayLine := 0
 				local := nodeResult{order: i}
 				for sc.Scan() {
-					lineNum++
-					line := sc.Text()
-					if !strings.Contains(strings.ToLower(line), needle) {
+					raw := sc.Text()
+					body, ok := displayBodyForLogLine(raw)
+					if !ok {
+						continue
+					}
+					displayLine++
+					if !strings.Contains(strings.ToLower(body), needle) {
 						continue
 					}
 					local.count++
 					if local.count <= limit {
 						local.matches = append(local.matches, match{
 							NodeID:  nodeID,
-							Line:    lineNum,
-							Content: line,
+							Line:    displayLine,
+							Content: body,
 						})
 					}
 				}
