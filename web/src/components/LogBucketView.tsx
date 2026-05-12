@@ -80,6 +80,7 @@ function LogLines({
   showTimestamps = true,
   matchLineSet,
   currentMatchLine,
+  visibleLineSet,
 }: {
   lines: string[];
   startLine: number;
@@ -88,63 +89,95 @@ function LogLines({
   // with a yellow wash; the currentMatchLine gets a brighter band.
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
+  // When set (filter mode), lines NOT in the set are hidden; gaps
+  // between visible lines collapse into a "…" separator row.
+  visibleLineSet?: Set<number> | null;
 }) {
+  let lastVisibleIdx = -2;
+  const rendered: React.ReactElement[] = [];
+  lines.forEach((line, j) => {
+    const absLine = startLine + j;
+    if (visibleLineSet && !visibleLineSet.has(absLine)) return;
+    if (visibleLineSet && lastVisibleIdx >= 0 && j !== lastVisibleIdx + 1) {
+      rendered.push(
+        <div
+          key={`gap-${j}`}
+          className="flex text-[#484f58] select-none px-3 py-0.5 text-[10px] italic"
+        >
+          … {j - lastVisibleIdx - 1} hidden
+        </div>,
+      );
+    }
+    lastVisibleIdx = j;
+    rendered.push(
+      renderLogLine(
+        line,
+        absLine,
+        showTimestamps,
+        matchLineSet,
+        currentMatchLine,
+      ),
+    );
+  });
   return (
     <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9]">
-      {lines.map((line, j) => {
-        const tsMatch = line.match(TS_PREFIX_RE);
-        const ts = tsMatch ? tsMatch[1] : null;
-        const body = tsMatch ? line.slice(tsMatch[0].length) : line;
-        // ANSI-colored child-process output (buildx, go test, etc.)
-        // gets converted to styled spans. Lines without ANSI fall
-        // through to the old semantic-keyword shading so PASS/FAIL/
-        // ERROR / `> cmd` still stand out when processes don't color.
-        const hasAnsi = body.includes("\x1b[");
-        const stripped = hasAnsi ? stripAnsi(body) : body;
-        const semantic = hasAnsi
-          ? ""
-          : stripped.includes("PASS")
-            ? "text-green-400"
-            : stripped.includes("FAIL")
-              ? "text-red-400"
-              : stripped.includes("ERROR") || stripped.includes("error:")
-                ? "text-red-400"
-                : stripped.startsWith(">") || stripped.startsWith("sparkwing:")
-                  ? "text-cyan-400"
-                  : stripped.match(/^(prepare|compile|cache)/)
-                    ? "text-cyan-400"
-                    : "";
-        const absLine = startLine + j;
-        const isMatch = matchLineSet?.has(absLine);
-        const isCurrent = isMatch && currentMatchLine === absLine;
-        const matchCls = isCurrent
-          ? "bg-yellow-400/30"
-          : isMatch
-            ? "bg-yellow-400/10"
-            : "";
-        return (
-          <div
-            key={j}
-            data-line={absLine}
-            className={`flex hover:bg-[#161b22] group ${matchCls}`}
-          >
-            <span className="text-[#484f58] select-none pr-3 text-right shrink-0 w-8 group-hover:text-[#8b949e]">
-              {startLine + j}
-            </span>
-            {showTimestamps && ts && (
-              <span className="text-[#6e7681] select-none pr-2 shrink-0 tabular-nums">
-                {ts}
-              </span>
-            )}
-            {hasAnsi ? (
-              <span dangerouslySetInnerHTML={{ __html: ansiToHtml(body) }} />
-            ) : (
-              <span className={semantic}>{body}</span>
-            )}
-          </div>
-        );
-      })}
+      {rendered}
     </pre>
+  );
+}
+
+function renderLogLine(
+  line: string,
+  absLine: number,
+  showTimestamps: boolean,
+  matchLineSet: Set<number> | undefined,
+  currentMatchLine: number | undefined,
+): React.ReactElement {
+  const tsMatch = line.match(TS_PREFIX_RE);
+  const ts = tsMatch ? tsMatch[1] : null;
+  const body = tsMatch ? line.slice(tsMatch[0].length) : line;
+  const hasAnsi = body.includes("\x1b[");
+  const stripped = hasAnsi ? stripAnsi(body) : body;
+  const semantic = hasAnsi
+    ? ""
+    : stripped.includes("PASS")
+      ? "text-green-400"
+      : stripped.includes("FAIL")
+        ? "text-red-400"
+        : stripped.includes("ERROR") || stripped.includes("error:")
+          ? "text-red-400"
+          : stripped.startsWith(">") || stripped.startsWith("sparkwing:")
+            ? "text-cyan-400"
+            : stripped.match(/^(prepare|compile|cache)/)
+              ? "text-cyan-400"
+              : "";
+  const isMatch = matchLineSet?.has(absLine);
+  const isCurrent = isMatch && currentMatchLine === absLine;
+  const matchCls = isCurrent
+    ? "bg-yellow-400/30"
+    : isMatch
+      ? "bg-yellow-400/10"
+      : "";
+  return (
+    <div
+      key={absLine}
+      data-line={absLine}
+      className={`flex hover:bg-[#161b22] group ${matchCls}`}
+    >
+      <span className="text-[#484f58] select-none pr-3 text-right shrink-0 w-8 group-hover:text-[#8b949e]">
+        {absLine}
+      </span>
+      {showTimestamps && ts && (
+        <span className="text-[#6e7681] select-none pr-2 shrink-0 tabular-nums">
+          {ts}
+        </span>
+      )}
+      {hasAnsi ? (
+        <span dangerouslySetInnerHTML={{ __html: ansiToHtml(body) }} />
+      ) : (
+        <span className={semantic}>{body}</span>
+      )}
+    </div>
   );
 }
 
@@ -170,6 +203,7 @@ function StepBucket({
   hasSkipIf,
   matchLineSet,
   currentMatchLine,
+  visibleLineSet,
 }: {
   section: StepSection;
   lineOffset: number;
@@ -187,6 +221,7 @@ function StepBucket({
   hasSkipIf?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
+  visibleLineSet?: Set<number> | null;
 }) {
   const defaultExpanded =
     section.status === "failed" || section.status === "running";
@@ -323,6 +358,7 @@ function StepBucket({
                 showTimestamps={showTimestamps}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
+                visibleLineSet={visibleLineSet}
               />
             </div>
           ) : (
@@ -340,12 +376,14 @@ function BetweenSection({
   showTimestamps,
   matchLineSet,
   currentMatchLine,
+  visibleLineSet,
 }: {
   section: LogSection;
   lineOffset: number;
   showTimestamps?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
+  visibleLineSet?: Set<number> | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const nonEmpty = section.lines.filter((l) => l.trim() !== "");
@@ -372,6 +410,7 @@ function BetweenSection({
             showTimestamps={showTimestamps}
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
+            visibleLineSet={visibleLineSet}
           />
         </div>
       )}
@@ -385,12 +424,14 @@ function SummarySection({
   showTimestamps,
   matchLineSet,
   currentMatchLine,
+  visibleLineSet,
 }: {
   section: LogSection;
   lineOffset: number;
   showTimestamps?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
+  visibleLineSet?: Set<number> | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -413,6 +454,7 @@ function SummarySection({
             showTimestamps={showTimestamps}
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
+            visibleLineSet={visibleLineSet}
           />
         </div>
       )}
@@ -425,11 +467,13 @@ function InlineLogView({
   showTimestamps = true,
   matchLineSet,
   currentMatchLine,
+  visibleLineSet,
 }: {
   sections: (LogSection | StepSection)[];
   showTimestamps?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
+  visibleLineSet?: Set<number> | null;
 }) {
   // Each line in the inline view is prefixed with the step it
   // belongs to: `<step> | <line>`. That keeps a flat top-to-bottom
@@ -442,6 +486,7 @@ function InlineLogView({
     fallbackClass: string,
     stepLabel?: string,
   ) => {
+    if (visibleLineSet && !visibleLineSet.has(key)) return null;
     const tsMatch = line.match(TS_PREFIX_RE);
     const ts = tsMatch ? tsMatch[1] : null;
     const body = tsMatch ? line.slice(tsMatch[0].length) : line;
@@ -640,8 +685,15 @@ export default function LogBucketView({
   // active match gets a brighter highlight. Walker mirrors
   // nextError -- expands the containing step bucket and scrolls the
   // line into view. Empty query disables the highlight + walker.
+  //
+  // Filter mode layers on top: when on, only matching lines (plus
+  // `searchContext` neighbors on each side) render; gaps collapse
+  // into a "…" separator. Toggling filter off snaps the scroll
+  // back to the active match so position survives the mode swap.
   const [searchQuery, setSearchQuery] = useState("");
   const [matchCursor, setMatchCursor] = useState(0);
+  const [filterMode, setFilterMode] = useState(false);
+  const [searchContext, setSearchContext] = useState(2);
   const searchMatches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [] as { sectionIdx: number; line: number }[];
@@ -661,6 +713,20 @@ export default function LogBucketView({
     () => new Set(searchMatches.map((m) => m.line)),
     [searchMatches],
   );
+  // visibleLineSet: when filter mode is on, the union of match lines
+  // and their `searchContext` neighbors. null = show everything.
+  // LogLines uses this to skip non-matching rows and collapse gaps
+  // into a "…" separator.
+  const visibleLineSet = useMemo(() => {
+    if (!filterMode || searchMatches.length === 0) return null;
+    const set = new Set<number>();
+    for (const m of searchMatches) {
+      for (let d = -searchContext; d <= searchContext; d++) {
+        set.add(m.line + d);
+      }
+    }
+    return set;
+  }, [filterMode, searchMatches, searchContext]);
   // Reset cursor when the query / match list changes so the next
   // arrow lands on the first hit instead of an index past the end.
   useEffect(() => {
@@ -704,30 +770,43 @@ export default function LogBucketView({
   // panel row, StepDag click), expand that step's bucket and scroll
   // it into view. Match against the section's parsed step name so
   // the lookup stays in step-id terms.
+  // Fire only when focusStep actually changes. The parsed/stepIndices
+  // deps would have re-fired this on every streaming-log render,
+  // re-snapping the scroll back to the focused step every time the
+  // user tried to move. Refs let us read the latest parsed without
+  // listing it in the dep array.
+  const parsedRef = useRef(parsed);
+  parsedRef.current = parsed;
+  const stepIndicesRef = useRef(stepIndices);
+  stepIndicesRef.current = stepIndices;
+  const lastFocusedStep = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusStep) return;
-    const matchIdx = parsed.sections.findIndex((s) => {
+    const incoming = focusStep ?? null;
+    if (incoming === lastFocusedStep.current) return;
+    lastFocusedStep.current = incoming;
+    if (!incoming) return;
+    const matchIdx = parsedRef.current.sections.findIndex((s) => {
       if (s.type !== "step") return false;
       const name = (s as StepSection).name;
       const stepName = name.includes(" · ")
         ? name.split(" · ").slice(-1)[0]
         : name;
-      return stepName === focusStep;
+      return stepName === incoming;
     });
     if (matchIdx < 0) return;
     // Single-step-open behavior: collapse every other step bucket
     // so the selected one sits in isolation, mirroring how the
     // outer AllNodesLogs collapses sibling nodes on selection.
     const next: Record<number, boolean> = {};
-    for (const i of stepIndices) next[i] = i === matchIdx;
+    for (const i of stepIndicesRef.current) next[i] = i === matchIdx;
     setStepOverrides(next);
     requestAnimationFrame(() => {
       const el = containerRef.current?.querySelector(
-        `[data-step-id="${focusStep}"]`,
+        `[data-step-id="${incoming}"]`,
       ) as HTMLElement | null;
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
-  }, [focusStep, parsed, stepIndices]);
+  }, [focusStep]);
   const scrollToTop = () => {
     containerRef.current?.scrollIntoView({
       block: "start",
@@ -822,6 +901,58 @@ export default function LogBucketView({
             >
               ↓
             </button>
+            <button
+              onClick={() => {
+                const wasOn = filterMode;
+                setFilterMode(!wasOn);
+                // Toggling filter off keeps position: scroll back to
+                // the current match after the render that re-reveals
+                // surrounding lines.
+                if (wasOn && currentMatchLine > 0) {
+                  requestAnimationFrame(() => {
+                    const el = containerRef.current?.querySelector(
+                      `[data-line="${currentMatchLine}"]`,
+                    ) as HTMLElement | null;
+                    el?.scrollIntoView({
+                      block: "center",
+                      behavior: "smooth",
+                    });
+                  });
+                }
+              }}
+              title={
+                filterMode
+                  ? "show all lines"
+                  : "hide non-matching lines (filter)"
+              }
+              className={`px-1.5 py-0.5 rounded transition-colors ${
+                filterMode
+                  ? "bg-yellow-500/25 text-yellow-200"
+                  : "text-[var(--muted)] hover:text-[#c9d1d9] hover:bg-[#30363d]"
+              }`}
+            >
+              filter
+            </button>
+            {filterMode && (
+              <label
+                className="flex items-center gap-1 text-[var(--muted)]"
+                title="context lines on each side of every match"
+              >
+                ±
+                <select
+                  value={searchContext}
+                  onChange={(e) => setSearchContext(Number(e.target.value))}
+                  className="bg-[#0d1117] border border-[var(--border)] rounded px-1 py-0 text-[10px]"
+                >
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                </select>
+              </label>
+            )}
           </div>
         )}
         <span className="flex-1" />
@@ -892,6 +1023,7 @@ export default function LogBucketView({
             showTimestamps={showTimestamps}
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
+            visibleLineSet={visibleLineSet}
           />
         </div>
       ) : (
@@ -911,12 +1043,13 @@ export default function LogBucketView({
                 maxDurationMs={maxDurationMs}
                 waterfallStartMs={waterfallStartMs}
                 waterfallTotalMs={waterfallTotalMs}
-                expanded={override}
+                expanded={filterMode ? true : override}
                 showTimestamps={showTimestamps}
                 isResult={attrs?.is_result}
                 hasSkipIf={attrs?.has_skip_if}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
+                visibleLineSet={visibleLineSet}
                 onToggle={() =>
                   setStepOverrides((prev) => {
                     const cur =
@@ -938,6 +1071,7 @@ export default function LogBucketView({
                 showTimestamps={showTimestamps}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
+                visibleLineSet={visibleLineSet}
               />
             );
           }
@@ -950,6 +1084,7 @@ export default function LogBucketView({
                 showTimestamps={showTimestamps}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
+                visibleLineSet={visibleLineSet}
               />
             );
           }
