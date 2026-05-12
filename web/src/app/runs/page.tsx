@@ -1933,6 +1933,59 @@ function RunDetailPane({
     }
     return set;
   }, [findTimelineHits]);
+  // Resources tab matches on node ids only — that's the visible text.
+  type ResourceHit = { nodeID: string };
+  const findResourceHits = useMemo<ResourceHit[]>(() => {
+    const q = findQuery.trim().toLowerCase();
+    if (!q) return [];
+    return nodes
+      .filter((n) => n.id.toLowerCase().includes(q))
+      .map((n) => ({ nodeID: n.id }));
+  }, [findQuery, nodes]);
+  const findMatchedResourceNodes = useMemo(
+    () => new Set(findResourceHits.map((h) => h.nodeID)),
+    [findResourceHits],
+  );
+  // Setup tab is a flat list of run-config rows; each row that
+  // contains the query becomes a hit. The DOM-key carries the row's
+  // semantic name so SetupPanel can attach data-find-key in the
+  // matching spot.
+  type SetupHit = { fieldKey: string };
+  const findSetupHits = useMemo<SetupHit[]>(() => {
+    const q = findQuery.trim().toLowerCase();
+    if (!q) return [];
+    const out: SetupHit[] = [];
+    const has = (s: string | undefined | null) =>
+      !!s && s.toLowerCase().includes(q);
+    const push = (k: string) => out.push({ fieldKey: k });
+    if (has(run.id)) push("run-id");
+    if (has(run.pipeline)) push("pipeline");
+    if (has(run.trigger_source)) push("trigger");
+    if (has(run.git_sha)) push("commit");
+    if (has(run.git_branch)) push("branch");
+    const inv = run.invocation ?? {};
+    if (has(inv.binary_source)) push("binary");
+    if (has(inv.cwd)) push("cwd");
+    if (has(inv.reproducer)) push("reproducer");
+    if (has(inv.inputs_hash)) push("inputs-hash");
+    if (has(inv.plan_hash)) push("plan-hash");
+    const flags = inv.flags ?? {};
+    for (const [k, v] of Object.entries(flags)) {
+      if (has(k) || has(String(v))) push(`flag-${k}`);
+    }
+    const args = inv.args ?? run.args ?? {};
+    for (const [k, v] of Object.entries(args)) {
+      if (has(k) || has(String(v))) push(`arg-${k}`);
+    }
+    for (const k of inv.trigger_env_keys ?? []) {
+      if (has(k)) push(`env-${k}`);
+    }
+    return out;
+  }, [findQuery, run]);
+  const findMatchedSetupFields = useMemo(
+    () => new Set(findSetupHits.map((h) => h.fieldKey)),
+    [findSetupHits],
+  );
   // Per-(node, idx) and per-(node, step, idx) annotation hit sets so
   // tooltips / NodeLogSummary / RunAnnotationsList can paint just the
   // matching annotation rows fuchsia instead of every annotation under
@@ -1981,6 +2034,8 @@ function RunDetailPane({
     summary: findStructuredHits.length,
     dag: findNameHits.length,
     timeline: findTimelineHits.length,
+    setup: findSetupHits.length,
+    resources: findResourceHits.length,
     logs: findLogTotal,
   };
   useEffect(() => {
@@ -1993,53 +2048,73 @@ function RunDetailPane({
   // (jobs list row / annotation row) without touching sidebar
   // selection. The DAG/Timeline tabs still drive selection because
   // their job IS to focus a node/step.
+  const scrollToFindKey = (key: string, fallback?: string) => {
+    requestAnimationFrame(() => {
+      const el =
+        (tabContentRef.current?.querySelector(
+          `[data-find-key="${key}"]`,
+        ) as HTMLElement | null) ??
+        (fallback
+          ? (tabContentRef.current?.querySelector(
+              `[data-find-key="${fallback}"]`,
+            ) as HTMLElement | null)
+          : null);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
   const jumpFind = (idx: number) => {
-    const isLogs = effectiveTab === "logs";
+    if (effectiveTab === "logs") {
+      const len = findLogResults.length;
+      if (len === 0) return;
+      const wrapped = ((idx % len) + len) % len;
+      setFindCursor(wrapped);
+      const m = findLogResults[wrapped];
+      setFindLogFocus({ nodeID: m.node_id, line: m.line });
+      return;
+    }
+    if (effectiveTab === "resources") {
+      const len = findResourceHits.length;
+      if (len === 0) return;
+      const wrapped = ((idx % len) + len) % len;
+      setFindCursor(wrapped);
+      const h = findResourceHits[wrapped];
+      const key = `resource-node::${h.nodeID}`;
+      setFindActiveKey(key);
+      scrollToFindKey(key);
+      return;
+    }
+    if (effectiveTab === "setup") {
+      const len = findSetupHits.length;
+      if (len === 0) return;
+      const wrapped = ((idx % len) + len) % len;
+      setFindCursor(wrapped);
+      const h = findSetupHits[wrapped];
+      const key = `setup::${h.fieldKey}`;
+      setFindActiveKey(key);
+      scrollToFindKey(key);
+      return;
+    }
     const activeHits =
       effectiveTab === "timeline"
         ? findTimelineHits
         : effectiveTab === "dag"
           ? findNameHits
           : findStructuredHits;
-    const len = isLogs ? findLogResults.length : activeHits.length;
+    const len = activeHits.length;
     if (len === 0) return;
     const wrapped = ((idx % len) + len) % len;
     setFindCursor(wrapped);
-    if (isLogs) {
-      const m = findLogResults[wrapped];
-      // Drive expand + line scroll via externalFindFocus only.
-      // Calling onSelectNode here forces AllNodesLogs' focusNode
-      // effect to scroll the node header to the viewport top, which
-      // races (and wins) against the line-level scrollIntoView and
-      // leaves the user looking at the node header, not the match.
-      setFindLogFocus({ nodeID: m.node_id, line: m.line });
-      return;
-    }
     const hit = activeHits[wrapped];
     const key = findHitDomKey(hit);
     setFindActiveKey(key);
     if (effectiveTab === "summary") {
-      // Summary find lives entirely inside the tab; the left sidebar
-      // shouldn't be implicitly steered by it. Clear any leftover
-      // step focus from a prior DAG/Timeline visit so the NodesList
-      // doesn't paint a step that has nothing to do with the cursor.
       if (selectedStep && selected) {
         onSelectStep(selected.id, null);
       }
       // Step-level hits have no per-step row in Summary; fall back
-      // to the parent node's job row so the user still has something
-      // to scroll to.
-      const fallback = hit.kind === "step" ? `node::${hit.nodeID}` : key;
-      requestAnimationFrame(() => {
-        const el =
-          (tabContentRef.current?.querySelector(
-            `[data-find-key="${key}"]`,
-          ) as HTMLElement | null) ??
-          (tabContentRef.current?.querySelector(
-            `[data-find-key="${fallback}"]`,
-          ) as HTMLElement | null);
-        el?.scrollIntoView({ block: "center", behavior: "smooth" });
-      });
+      // to the parent node's job row.
+      const fallback = hit.kind === "step" ? `node::${hit.nodeID}` : undefined;
+      scrollToFindKey(key, fallback);
       return;
     }
     if (hit.kind === "step" || hit.kind === "step-anno") {
@@ -2211,14 +2286,19 @@ function RunDetailPane({
             <span className="font-mono tabular-nums">
               {(() => {
                 const isLogs = effectiveTab === "logs";
-                const activeHits =
+                const total =
                   effectiveTab === "timeline"
-                    ? findTimelineHits
+                    ? findTimelineHits.length
                     : effectiveTab === "dag"
-                      ? findNameHits
-                      : findStructuredHits;
-                const len = isLogs ? findLogResults.length : activeHits.length;
-                const total = isLogs ? findLogTotal : activeHits.length;
+                      ? findNameHits.length
+                      : effectiveTab === "resources"
+                        ? findResourceHits.length
+                        : effectiveTab === "setup"
+                          ? findSetupHits.length
+                          : isLogs
+                            ? findLogTotal
+                            : findStructuredHits.length;
+                const len = isLogs ? findLogResults.length : total;
                 if (isLogs && findLogSearching) return "searching…";
                 if (len === 0) return "0/0";
                 return `${findCursor + 1}/${total}`;
@@ -2266,6 +2346,8 @@ function RunDetailPane({
               nodes={nodes}
               focusNode={selected?.id || null}
               onSelectNode={onSelectNode}
+              findMatched={findMatchedResourceNodes}
+              findActiveKey={findActiveKey}
             />
           </div>
         )}
@@ -2330,6 +2412,8 @@ function RunDetailPane({
                 if (el) (el as HTMLElement).click();
                 else window.location.assign(`?run=${id}`);
               }}
+              findMatchedFields={findMatchedSetupFields}
+              findActiveKey={findActiveKey}
             />
           </div>
         )}
@@ -2873,11 +2957,15 @@ function AllNodesResources({
   nodes,
   focusNode,
   onSelectNode,
+  findMatched,
+  findActiveKey,
 }: {
   run: Run;
   nodes: RunNode[];
   focusNode?: string | null;
   onSelectNode?: (id: string) => void;
+  findMatched?: Set<string>;
+  findActiveKey?: string | null;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -2928,11 +3016,20 @@ function AllNodesResources({
         const dur = nodeDuration(n);
         const isFocus = focusNode === n.id;
         const isRunning = !n.finished_at && n.status !== "pending";
+        const findKey = `resource-node::${n.id}`;
+        const isFindHit = findMatched?.has(n.id) ?? false;
+        const isFindCurrent = findActiveKey === findKey;
+        const findCls = isFindCurrent
+          ? "ring-2 ring-fuchsia-400 bg-fuchsia-400/10"
+          : isFindHit
+            ? "ring-1 ring-fuchsia-400/60"
+            : "";
         return (
           <div
             key={n.id}
             data-resource-node-id={n.id}
-            className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"}`}
+            data-find-key={findKey}
+            className={`border rounded bg-[#0d1117] ${isFocus ? "border-violet-400" : "border-[var(--border)]"} ${findCls}`}
           >
             <div
               onClick={() => toggle(n.id)}

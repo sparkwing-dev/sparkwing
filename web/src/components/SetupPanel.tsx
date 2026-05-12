@@ -138,12 +138,28 @@ function RunLink({
 function LabelRow({
   label,
   children,
+  fieldKey,
+  findMatchedFields,
+  findActiveKey,
 }: {
   label: string;
   children: React.ReactNode;
+  fieldKey?: string;
+  findMatchedFields?: Set<string>;
+  findActiveKey?: string | null;
 }) {
+  const isFindHit = !!fieldKey && (findMatchedFields?.has(fieldKey) ?? false);
+  const isFindCurrent = !!fieldKey && findActiveKey === `setup::${fieldKey}`;
+  const findCls = isFindCurrent
+    ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+    : isFindHit
+      ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+      : "";
   return (
-    <div className="flex items-baseline gap-3 text-xs">
+    <div
+      data-find-key={fieldKey ? `setup::${fieldKey}` : undefined}
+      className={`flex items-baseline gap-3 text-xs px-1 -mx-1 rounded ${findCls}`}
+    >
       <div className="w-20 shrink-0 text-[var(--muted)] font-mono">{label}</div>
       <div className="min-w-0 flex-1 text-[var(--foreground)] font-mono break-all">
         {children}
@@ -158,6 +174,8 @@ export default function SetupPanel({
   onToggle,
   onOpenRun,
   inline = false,
+  findMatchedFields,
+  findActiveKey,
 }: {
   run: Run;
   collapsed: boolean;
@@ -171,6 +189,10 @@ export default function SetupPanel({
   // the panel is being embedded somewhere (e.g., a tab) where the
   // surrounding UI already names it.
   inline?: boolean;
+  // Set of field keys matching the run's top-level find query.
+  // Each labeled row checks for its key to paint a fuchsia wash.
+  findMatchedFields?: Set<string>;
+  findActiveKey?: string | null;
 }) {
   const inv: RunInvocation = run.invocation ?? {};
   const flags = inv.flags ?? {};
@@ -206,7 +228,12 @@ export default function SetupPanel({
       )}
       {(inline || !collapsed) && (
         <div className="px-4 pb-3 space-y-1">
-          <LabelRow label="run">
+          <LabelRow
+            label="run"
+            fieldKey="run-id"
+            findMatchedFields={findMatchedFields}
+            findActiveKey={findActiveKey}
+          >
             <span
               className="cursor-pointer hover:text-cyan-300"
               onClick={() => navigator.clipboard.writeText(run.id)}
@@ -215,11 +242,23 @@ export default function SetupPanel({
               {run.id}
             </span>
           </LabelRow>
-          <LabelRow label="pipeline">
+          <LabelRow
+            label="pipeline"
+            fieldKey="pipeline"
+            findMatchedFields={findMatchedFields}
+            findActiveKey={findActiveKey}
+          >
             <span className="text-violet-300">{run.pipeline}</span>
           </LabelRow>
           {run.trigger_source && (
-            <LabelRow label="trigger">{run.trigger_source}</LabelRow>
+            <LabelRow
+              label="trigger"
+              fieldKey="trigger"
+              findMatchedFields={findMatchedFields}
+              findActiveKey={findActiveKey}
+            >
+              {run.trigger_source}
+            </LabelRow>
           )}
           <LabelRow label="started">
             <span>{new Date(run.started_at).toLocaleTimeString()}</span>
@@ -231,7 +270,12 @@ export default function SetupPanel({
             )}
           </LabelRow>
           {run.git_sha && (
-            <LabelRow label="commit">
+            <LabelRow
+              label="commit"
+              fieldKey="commit"
+              findMatchedFields={findMatchedFields}
+              findActiveKey={findActiveKey}
+            >
               {commitUrl ? (
                 <a
                   href={commitUrl}
@@ -247,7 +291,12 @@ export default function SetupPanel({
             </LabelRow>
           )}
           {run.git_branch && (
-            <LabelRow label="branch">
+            <LabelRow
+              label="branch"
+              fieldKey="branch"
+              findMatchedFields={findMatchedFields}
+              findActiveKey={findActiveKey}
+            >
               {branchUrl ? (
                 <a
                   href={branchUrl}
@@ -263,15 +312,40 @@ export default function SetupPanel({
             </LabelRow>
           )}
           {inv.binary_source && (
-            <LabelRow label="binary">{inv.binary_source}</LabelRow>
+            <LabelRow
+              label="binary"
+              fieldKey="binary"
+              findMatchedFields={findMatchedFields}
+              findActiveKey={findActiveKey}
+            >
+              {inv.binary_source}
+            </LabelRow>
           )}
-          {inv.cwd && <LabelRow label="cwd">{inv.cwd}</LabelRow>}
+          {inv.cwd && (
+            <LabelRow
+              label="cwd"
+              fieldKey="cwd"
+              findMatchedFields={findMatchedFields}
+              findActiveKey={findActiveKey}
+            >
+              {inv.cwd}
+            </LabelRow>
+          )}
 
           {/* Reproducer is highlighted as the main "copy this command"
                affordance -- agents and humans both want to paste it
                back into a terminal. */}
           {inv.reproducer && (
-            <div className="flex items-center gap-3 text-xs pt-1">
+            <div
+              data-find-key="setup::reproducer"
+              className={`flex items-center gap-3 text-xs pt-1 px-1 -mx-1 rounded ${
+                findActiveKey === "setup::reproducer"
+                  ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                  : findMatchedFields?.has("reproducer")
+                    ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                    : ""
+              }`}
+            >
               <div className="w-20 shrink-0 text-[var(--muted)] font-mono">
                 rerun
               </div>
@@ -290,9 +364,26 @@ export default function SetupPanel({
                 flags
               </div>
               <div className="min-w-0 flex-1 flex flex-wrap gap-1.5">
-                {flagKeys.map((k) => (
-                  <FlagBadge key={k} name={k} value={flags[k]} />
-                ))}
+                {flagKeys.map((k) => {
+                  const key = `setup::flag-${k}`;
+                  const isHit = findMatchedFields?.has(`flag-${k}`) ?? false;
+                  const isCurrent = findActiveKey === key;
+                  return (
+                    <span
+                      key={k}
+                      data-find-key={key}
+                      className={`rounded ${
+                        isCurrent
+                          ? "ring-2 ring-fuchsia-400 bg-fuchsia-400/15"
+                          : isHit
+                            ? "ring-1 ring-fuchsia-400/60"
+                            : ""
+                      }`}
+                    >
+                      <FlagBadge name={k} value={flags[k]} />
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -303,14 +394,34 @@ export default function SetupPanel({
                 args
               </div>
               <div className="min-w-0 flex-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5">
-                {argKeys.map((k) => (
-                  <div key={k} className="contents">
-                    <span className="text-[var(--muted)] font-mono">{k}</span>
-                    <span className="text-[var(--foreground)] font-mono break-all">
-                      {args[k]}
-                    </span>
-                  </div>
-                ))}
+                {argKeys.map((k) => {
+                  const key = `setup::arg-${k}`;
+                  const isHit = findMatchedFields?.has(`arg-${k}`) ?? false;
+                  const isCurrent = findActiveKey === key;
+                  const findCls = isCurrent
+                    ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                    : isHit
+                      ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                      : "";
+                  return (
+                    <div
+                      key={k}
+                      data-find-key={key}
+                      className={`contents ${findCls}`}
+                    >
+                      <span
+                        className={`text-[var(--muted)] font-mono px-0.5 rounded ${findCls}`}
+                      >
+                        {k}
+                      </span>
+                      <span
+                        className={`text-[var(--foreground)] font-mono break-all px-0.5 rounded ${findCls}`}
+                      >
+                        {args[k]}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -321,14 +432,26 @@ export default function SetupPanel({
                 env
               </div>
               <div className="min-w-0 flex-1 flex flex-wrap gap-1.5">
-                {triggerEnvKeys.map((k) => (
-                  <span
-                    key={k}
-                    className="px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] text-[11px] font-mono"
-                  >
-                    {k}
-                  </span>
-                ))}
+                {triggerEnvKeys.map((k) => {
+                  const key = `setup::env-${k}`;
+                  const isHit = findMatchedFields?.has(`env-${k}`) ?? false;
+                  const isCurrent = findActiveKey === key;
+                  return (
+                    <span
+                      key={k}
+                      data-find-key={key}
+                      className={`px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] text-[11px] font-mono ${
+                        isCurrent
+                          ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                          : isHit
+                            ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                            : ""
+                      }`}
+                    >
+                      {k}
+                    </span>
+                  );
+                })}
                 <span className="text-[10px] text-[var(--muted)] italic">
                   values omitted
                 </span>
@@ -343,7 +466,16 @@ export default function SetupPanel({
               </div>
               <div className="min-w-0 flex-1 space-y-0.5">
                 {inv.inputs_hash && (
-                  <div className="flex items-center gap-2">
+                  <div
+                    data-find-key="setup::inputs-hash"
+                    className={`flex items-center gap-2 px-1 -mx-1 rounded ${
+                      findActiveKey === "setup::inputs-hash"
+                        ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                        : findMatchedFields?.has("inputs-hash")
+                          ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                          : ""
+                    }`}
+                  >
                     <span className="text-[var(--muted)] font-mono w-14">
                       inputs
                     </span>
@@ -359,7 +491,16 @@ export default function SetupPanel({
                   </div>
                 )}
                 {inv.plan_hash && (
-                  <div className="flex items-center gap-2">
+                  <div
+                    data-find-key="setup::plan-hash"
+                    className={`flex items-center gap-2 px-1 -mx-1 rounded ${
+                      findActiveKey === "setup::plan-hash"
+                        ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                        : findMatchedFields?.has("plan-hash")
+                          ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                          : ""
+                    }`}
+                  >
                     <span className="text-[var(--muted)] font-mono w-14">
                       plan
                     </span>
