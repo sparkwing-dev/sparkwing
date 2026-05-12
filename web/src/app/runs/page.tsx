@@ -1788,12 +1788,19 @@ function RunDetailPane({
     }, 250);
     return () => clearTimeout(t);
   }, [findQuery, run.id]);
-  // Each match is its own hit so the walker can step through individual
-  // annotations instead of stopping at the containing node/step. Order:
-  // for each node, emit node-level → node annotations → for each step,
-  // step-level → step annotations.
+  // Each find target is its own hit so the walker behaves like Ctrl-F
+  // on the Summary view: cycle through every matching item, scrolling
+  // each into view. Kinds correspond to distinct DOM targets:
+  //   node      — id (or group) match → Jobs row + DAG/Timeline ring
+  //   node-err  — error message match → Errors list row
+  //   node-anno — node-scoped annotation match → annotation row
+  //   step      — step id match → DAG/Timeline ring (no Summary row)
+  //   step-anno — step-scoped annotation match → annotation row
+  // DAG/Timeline restrict to id-based kinds (node, step); Summary
+  // walks all of them.
   type FindHit =
     | { kind: "node"; nodeID: string }
+    | { kind: "node-err"; nodeID: string }
     | { kind: "node-anno"; nodeID: string; annoIdx: number }
     | { kind: "step"; nodeID: string; stepID: string }
     | { kind: "step-anno"; nodeID: string; stepID: string; annoIdx: number };
@@ -1804,13 +1811,11 @@ function RunDetailPane({
       !!s && s.toLowerCase().includes(q);
     const out: FindHit[] = [];
     for (const n of nodes) {
-      if (
-        has(n.id) ||
-        has(n.error) ||
-        has(n.failure_reason) ||
-        (n.groups ?? []).some(has)
-      ) {
+      if (has(n.id) || (n.groups ?? []).some(has)) {
         out.push({ kind: "node", nodeID: n.id });
+      }
+      if (has(n.error) || has(n.failure_reason)) {
+        out.push({ kind: "node-err", nodeID: n.id });
       }
       // Drop node-level annotations that appear on any step too;
       // older runs dual-persisted step annotations onto the node row,
@@ -1847,6 +1852,8 @@ function RunDetailPane({
     switch (h.kind) {
       case "node":
         return `node::${h.nodeID}`;
+      case "node-err":
+        return `node-err::${h.nodeID}`;
       case "node-anno":
         return `node-anno::${h.nodeID}::${h.annoIdx}`;
       case "step":
@@ -1855,9 +1862,21 @@ function RunDetailPane({
         return `step-anno::${h.nodeID}::${h.stepID}::${h.annoIdx}`;
     }
   };
+  // Only true node-id matches paint the Summary Jobs row (and the
+  // DAG/Timeline ring). Error / annotation matches have their own
+  // target rows so they don't drag the whole node into highlight.
   const findMatchedNodes = useMemo(() => {
     const set = new Set<string>();
-    for (const h of findStructuredHits) set.add(h.nodeID);
+    for (const h of findStructuredHits) {
+      if (h.kind === "node") set.add(h.nodeID);
+    }
+    return set;
+  }, [findStructuredHits]);
+  const findMatchedErrorNodes = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findStructuredHits) {
+      if (h.kind === "node-err") set.add(h.nodeID);
+    }
     return set;
   }, [findStructuredHits]);
   // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
@@ -1870,6 +1889,28 @@ function RunDetailPane({
     }
     return set;
   }, [findStructuredHits]);
+  // DAG and Timeline match on node/step *names* only. Annotation
+  // matches don't decorate those views because the annotation text
+  // isn't visible there -- a fuchsia ring with no on-screen reason
+  // is confusing. Summary still uses the full hit set since its
+  // job is to surface annotations.
+  const findNameHits = useMemo(
+    () =>
+      findStructuredHits.filter((h) => h.kind === "node" || h.kind === "step"),
+    [findStructuredHits],
+  );
+  const findMatchedNodesByName = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findNameHits) set.add(h.nodeID);
+    return set;
+  }, [findNameHits]);
+  const findMatchedStepsByName = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findNameHits) {
+      if (h.kind === "step") set.add(`${h.nodeID}::${h.stepID}`);
+    }
+    return set;
+  }, [findNameHits]);
   // Per-(node, idx) and per-(node, step, idx) annotation hit sets so
   // tooltips / NodeLogSummary / RunAnnotationsList can paint just the
   // matching annotation rows fuchsia instead of every annotation under
@@ -1916,8 +1957,8 @@ function RunDetailPane({
   // Setup / Resources opt out — no per-node content to match against.
   const findCounts: Partial<Record<TabKey, number>> = {
     summary: findStructuredHits.length,
-    dag: findStructuredHits.length,
-    timeline: findStructuredHits.length,
+    dag: findNameHits.length,
+    timeline: findNameHits.length,
     logs: findLogTotal,
   };
   useEffect(() => {
@@ -1932,17 +1973,23 @@ function RunDetailPane({
   // their job IS to focus a node/step.
   const jumpFind = (idx: number) => {
     const isLogs = effectiveTab === "logs";
-    const len = isLogs ? findLogResults.length : findStructuredHits.length;
+    const isNameOnly = effectiveTab === "dag" || effectiveTab === "timeline";
+    const activeHits = isNameOnly ? findNameHits : findStructuredHits;
+    const len = isLogs ? findLogResults.length : activeHits.length;
     if (len === 0) return;
     const wrapped = ((idx % len) + len) % len;
     setFindCursor(wrapped);
     if (isLogs) {
       const m = findLogResults[wrapped];
-      onSelectNode(m.node_id);
+      // Drive expand + line scroll via externalFindFocus only.
+      // Calling onSelectNode here forces AllNodesLogs' focusNode
+      // effect to scroll the node header to the viewport top, which
+      // races (and wins) against the line-level scrollIntoView and
+      // leaves the user looking at the node header, not the match.
       setFindLogFocus({ nodeID: m.node_id, line: m.line });
       return;
     }
-    const hit = findStructuredHits[wrapped];
+    const hit = activeHits[wrapped];
     const key = findHitDomKey(hit);
     setFindActiveKey(key);
     if (effectiveTab === "summary") {
@@ -2138,10 +2185,13 @@ function RunDetailPane({
             <span className="font-mono tabular-nums">
               {(() => {
                 const isLogs = effectiveTab === "logs";
-                const len = isLogs
-                  ? findLogResults.length
-                  : findStructuredHits.length;
-                const total = isLogs ? findLogTotal : findStructuredHits.length;
+                const isNameOnly =
+                  effectiveTab === "dag" || effectiveTab === "timeline";
+                const activeHits = isNameOnly
+                  ? findNameHits
+                  : findStructuredHits;
+                const len = isLogs ? findLogResults.length : activeHits.length;
+                const total = isLogs ? findLogTotal : activeHits.length;
                 if (isLogs && findLogSearching) return "searching…";
                 if (len === 0) return "0/0";
                 return `${findCursor + 1}/${total}`;
@@ -2201,8 +2251,8 @@ function RunDetailPane({
               onSelect={onSelectNode}
               onSelectStep={onSelectStep}
               runId={run.id}
-              findMatched={findMatchedNodes}
-              findMatchedSteps={findMatchedSteps}
+              findMatched={findMatchedNodesByName}
+              findMatchedSteps={findMatchedStepsByName}
             />
           </div>
         )}
@@ -2215,8 +2265,8 @@ function RunDetailPane({
               focusStep={selectedStep}
               onSelectNode={onSelectNode}
               onSelectStep={onSelectStep}
-              findMatched={findMatchedNodes}
-              findMatchedSteps={findMatchedSteps}
+              findMatched={findMatchedNodesByName}
+              findMatchedSteps={findMatchedStepsByName}
             />
           </div>
         )}
@@ -2229,6 +2279,7 @@ function RunDetailPane({
               onToggle={() => {}}
               inline
               findMatched={findMatchedNodes}
+              findMatchedErrors={findMatchedErrorNodes}
               findActiveKey={findActiveKey}
             />
             <RunAnnotationsList
@@ -2645,16 +2696,15 @@ function AllNodesLogs({
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [focusNode]);
-  // Mirror the same single-section-open + scroll behavior when the
-  // parent's find walker advances to a Logs match.
+  // Open the owning section so LogBucketView mounts and its
+  // focusLine effect can scroll the exact line into view. Don't
+  // scroll the node-header here -- the deeper line scroll handles
+  // positioning, and scrolling both races and ends at the node top.
   useEffect(() => {
     if (!externalFindFocus) return;
-    setExpanded(new Set([externalFindFocus.nodeID]));
-    requestAnimationFrame(() => {
-      const el = document.querySelector(
-        `[data-log-node-id="${externalFindFocus.nodeID}"]`,
-      ) as HTMLElement | null;
-      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+    setExpanded((prev) => {
+      if (prev.has(externalFindFocus.nodeID) && prev.size === 1) return prev;
+      return new Set([externalFindFocus.nodeID]);
     });
   }, [externalFindFocus]);
   // Auto-expand every node section whose logs contain a find match.

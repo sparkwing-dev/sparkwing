@@ -210,6 +210,7 @@ export default function SummaryPanel({
   onToggle,
   inline = false,
   findMatched,
+  findMatchedErrors,
   findActiveKey,
 }: {
   run: Run;
@@ -217,7 +218,10 @@ export default function SummaryPanel({
   collapsed: boolean;
   onToggle: () => void;
   inline?: boolean;
+  // Node-id matches → highlight Jobs row.
   findMatched?: Set<string>;
+  // Error-text matches → highlight Errors row instead.
+  findMatchedErrors?: Set<string>;
   findActiveKey?: string | null;
 }) {
   const tally = useMemo(() => buildTally(nodes), [nodes]);
@@ -353,11 +357,21 @@ export default function SummaryPanel({
               {failed.map((n) => {
                 const { step, body } = splitStepErrorPrefix(n.error ?? "");
                 const lines = body.split("\n");
+                const errKey = `node-err::${n.id}`;
+                const isErrHit = findMatchedErrors?.has(n.id) ?? false;
+                const isErrCurrent = findActiveKey === errKey;
                 return (
-                  <div key={n.id} className="text-xs font-mono space-y-0.5">
-                    {/* First line carries the breadcrumb so multi-line
-                         errors stay attributable. Matches the CLI's
-                         `<node> › <step> │ <message>` layout. */}
+                  <div
+                    key={n.id}
+                    data-find-key={errKey}
+                    className={`text-xs font-mono space-y-0.5 px-1 -mx-1 rounded ${
+                      isErrCurrent
+                        ? "bg-fuchsia-400/30 ring-1 ring-fuchsia-400"
+                        : isErrHit
+                          ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                          : ""
+                    }`}
+                  >
                     <div>
                       <span className="text-[var(--foreground)]">{n.id}</span>
                       {step && (
