@@ -225,7 +225,57 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 			fmt.Fprintf(out, "\n%s error:\n  %s\n", n.NodeID, indent(n.Error, "  "))
 		}
 	}
+
+	approvals, err := st.ListApprovalsForRun(ctx, runID)
+	if err == nil {
+		renderApprovalsSection(out, approvals)
+	}
 	return nil
+}
+
+// renderApprovalsSection prints a compact block of approval-gate
+// state for a run: who is pending, who approved/denied, and what
+// timeout policy the gate carries. Skipped entirely when the run
+// has no gates.
+func renderApprovalsSection(out io.Writer, approvals []*store.Approval) {
+	if len(approvals) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "approvals:")
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "  NODE\tSTATUS\tPOLICY\tAPPROVER\tWAITED")
+	for _, a := range approvals {
+		status := "pending"
+		if a.ResolvedAt != nil {
+			status = a.Resolution
+		}
+		waited := "—"
+		if a.ResolvedAt != nil {
+			waited = a.ResolvedAt.Sub(a.RequestedAt).Round(time.Second).String()
+		} else {
+			waited = time.Since(a.RequestedAt).Round(time.Second).String() + " (running)"
+		}
+		policy := a.OnTimeout
+		if policy == "" {
+			policy = "-"
+		}
+		approver := a.Approver
+		if approver == "" {
+			approver = "-"
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
+			a.NodeID, status, policy, approver, waited)
+	}
+	_ = tw.Flush()
+	for _, a := range approvals {
+		if a.Comment != "" {
+			fmt.Fprintf(out, "  %s comment: %s\n", a.NodeID, a.Comment)
+		}
+		if a.Message != "" && a.ResolvedAt == nil {
+			fmt.Fprintf(out, "  %s message: %s\n", a.NodeID, a.Message)
+		}
+	}
 }
 
 // LogsOpts configures `sparkwing jobs logs`.
@@ -1127,5 +1177,9 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	if err != nil {
 		return err
 	}
-	return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
+	payload := map[string]any{"run": run, "nodes": nodes}
+	if approvals, err := st.ListApprovalsForRun(ctx, runID); err == nil && len(approvals) > 0 {
+		payload["approvals"] = approvals
+	}
+	return writeJSON(out, payload)
 }

@@ -56,10 +56,15 @@ func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, op
 		if err != nil {
 			return err
 		}
+		approvals, _ := c.ListApprovalsForRun(ctx, runID)
 		if opts.JSON {
-			return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
+			payload := map[string]any{"run": run, "nodes": nodes}
+			if len(approvals) > 0 {
+				payload["approvals"] = approvals
+			}
+			return writeJSON(out, payload)
 		}
-		return renderRemoteStatus(run, nodes, out, opts.Follow)
+		return renderRemoteStatus(run, nodes, approvals, out, opts.Follow)
 	}
 
 	if !opts.Follow {
@@ -91,7 +96,7 @@ func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, op
 	}
 }
 
-func renderRemoteStatus(run *store.Run, nodes []*store.Node, out io.Writer, followBanner bool) error {
+func renderRemoteStatus(run *store.Run, nodes []*store.Node, approvals []*store.Approval, out io.Writer, followBanner bool) error {
 	if followBanner {
 		fmt.Fprintf(out, "# following %s (ctrl-c to stop)\n\n", run.ID)
 	}
@@ -140,6 +145,7 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, out io.Writer, foll
 			fmt.Fprintf(out, "\n%s error:\n  %s\n", n.NodeID, indent(n.Error, "  "))
 		}
 	}
+	renderApprovalsSection(out, approvals)
 	return nil
 }
 

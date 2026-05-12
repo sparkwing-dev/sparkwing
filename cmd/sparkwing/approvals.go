@@ -164,7 +164,7 @@ func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID str
 
 func renderApprovalsTable(w *os.File, rows []*store.Approval) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tNODE\tREQUESTED\tSTATUS\tAPPROVER\tMESSAGE")
+	fmt.Fprintln(tw, "RUN\tNODE\tSTATUS\tREQUESTED\tPOLICY\tAPPROVER\tCOMMENT\tMESSAGE")
 	for _, a := range rows {
 		status := "pending"
 		if a.ResolvedAt != nil {
@@ -172,10 +172,21 @@ func renderApprovalsTable(w *os.File, rows []*store.Approval) error {
 		}
 		age := time.Since(a.RequestedAt).Round(time.Second).String()
 		msg := truncateOneLine(a.Message, 60)
-		fmt.Fprintf(tw, "%s\t%s\t%s ago\t%s\t%s\t%s\n",
-			a.RunID, a.NodeID, age, status, a.Approver, msg)
+		comment := truncateOneLine(a.Comment, 40)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s ago\t%s\t%s\t%s\t%s\n",
+			a.RunID, a.NodeID, status, age,
+			orDashApproval(a.OnTimeout), orDashApproval(a.Approver),
+			orDashApproval(comment), msg)
 	}
 	return tw.Flush()
+}
+
+// orDashApproval renders empty strings as "-" so columns line up.
+func orDashApproval(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // runApprovals routes the top-level `sparkwing approvals` verb to

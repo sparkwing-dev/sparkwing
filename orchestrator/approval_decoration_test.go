@@ -49,7 +49,7 @@ func TestApproval_DecorationCarriesResolution(t *testing.T) {
 		t.Fatalf("approvals=%d, want 1", len(approvals))
 	}
 
-	decorated := api.DecorateNodes(nodes, run.PlanSnapshot, nil, approvals)
+	decorated := api.DecorateNodes(nodes, run.PlanSnapshot, nil, approvals, nil)
 	var gate *api.NodeWithDecorations
 	for _, n := range decorated {
 		if n.NodeID == "gate" {
