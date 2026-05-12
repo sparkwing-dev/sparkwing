@@ -743,11 +743,14 @@ export default function LogBucketView({
   useEffect(() => {
     setMatchCursor(0);
   }, [searchQuery]);
-  // Auto-scroll to the first match when the user types. Skips when
-  // the query is empty so the view doesn't jump back to top on
-  // clearing the search.
+  // Auto-scroll to the first match when the user types. Keyed on
+  // searchQuery (not searchMatches) so streaming-log re-renders --
+  // which re-create `parsed` and thus `searchMatches` -- don't keep
+  // dragging the view back to the first hit while the user scrolls
+  // through results manually.
   useEffect(() => {
-    if (searchQuery.trim() === "" || searchMatches.length === 0) return;
+    const q = searchQuery.trim();
+    if (q === "" || searchMatches.length === 0) return;
     const target = searchMatches[0];
     setStepOverrides((prev) => ({ ...prev, [target.sectionIdx]: true }));
     requestAnimationFrame(() => {
@@ -757,7 +760,7 @@ export default function LogBucketView({
       el?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchMatches]);
+  }, [searchQuery]);
   const jumpToMatch = (idx: number) => {
     if (searchMatches.length === 0) return;
     const wrapped =
