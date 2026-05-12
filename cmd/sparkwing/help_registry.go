@@ -1546,6 +1546,9 @@ shell piping:
 		{Name: "limit", Argument: "N", Desc: "Max runs to show", Default: "20", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: table|json|plain", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (or JSON array of ids with -o json)", Group: "Output"},
+		{Name: "by-pipeline", Desc: "Pivot into one row per pipeline with a status sparkline of the last N runs", Group: "Output"},
+		{Name: "sparkline", Argument: "N", Desc: "Sparkline length when --by-pipeline is set", Default: "30", Group: "Output"},
+		{Name: "style", Argument: "STYLE", Desc: "Sparkline glyph style: ascii|block|dot", Default: "ascii", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
@@ -1557,6 +1560,8 @@ shell piping:
 		{"Runs that hit a specific failure", "sparkwing runs list --error 'permission denied'"},
 		{"Runs finished today", "sparkwing runs list --finished-after today"},
 		{"List prod runs", "sparkwing runs list --on prod --limit 50"},
+		{"By-pipeline rollup with sparkline", "sparkwing runs list --by-pipeline --since 7d"},
+		{"By-pipeline JSON for an agent", "sparkwing runs list --by-pipeline -o json --since 24h"},
 		{"Pipe the most recent run id into another verb", "sparkwing runs list --limit 1 -q | xargs -I{} sparkwing runs logs --run {}"},
 	},
 }

@@ -37,6 +37,11 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 		return err
 	}
 	runs = applyClientFilters(runs, opts.Filter)
+	if opts.ByPipeline {
+		opts.Pivot.JSON = opts.JSON
+		opts.Pivot.Quiet = opts.Quiet
+		return RenderPipelinePivot(runs, opts.Pivot, out)
+	}
 	if opts.Limit > 0 && len(runs) > opts.Limit {
 		runs = runs[:opts.Limit]
 	}

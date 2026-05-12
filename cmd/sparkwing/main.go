@@ -474,6 +474,9 @@ func runJobs(args []string) error {
 		startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
 		finishedAfter := fs.String("finished-after", "", "only runs whose FinishedAt >= this (excludes still-running)")
 		finishedBefore := fs.String("finished-before", "", "only runs whose FinishedAt <= this (excludes still-running)")
+		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
+		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
+		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
@@ -539,14 +542,31 @@ func runJobs(args []string) error {
 			*ts.into = t
 		}
 
+		var sparkStyle orchestrator.SparklineStyle
+		switch *style {
+		case "ascii", "":
+			sparkStyle = orchestrator.SparkAscii
+		case "block":
+			sparkStyle = orchestrator.SparkBlock
+		case "dot":
+			sparkStyle = orchestrator.SparkDot
+		default:
+			return fmt.Errorf("jobs list: --style must be ascii|block|dot, got %q", *style)
+		}
+
 		listOpts := orchestrator.ListOpts{
-			Limit:     *limit,
-			Pipelines: pipelineSet,
-			Statuses:  statusInc,
-			Since:     *since,
-			JSON:      resolvedFmt == "json",
-			Quiet:     *quiet,
-			Filter:    compiled,
+			Limit:      *limit,
+			Pipelines:  pipelineSet,
+			Statuses:   statusInc,
+			Since:      *since,
+			JSON:       resolvedFmt == "json",
+			Quiet:      *quiet,
+			Filter:     compiled,
+			ByPipeline: *byPipeline,
+			Pivot: orchestrator.PivotOpts{
+				SparklineLen: *sparkline,
+				Style:        sparkStyle,
+			},
 		}
 		if *on != "" {
 			prof, err := resolveProfile(*on)

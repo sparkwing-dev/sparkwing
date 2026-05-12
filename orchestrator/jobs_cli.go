@@ -33,6 +33,13 @@ type ListOpts struct {
 	// / --finished-before / `!`-prefixed exclusion flags. Empty
 	// CompiledFilter is a no-op.
 	Filter CompiledFilter
+
+	// ByPipeline pivots the filtered run set into one row per
+	// pipeline with a status sparkline across the last
+	// SparklineLen runs (mirrors the dashboard's "By pipeline"
+	// view). When set, Pivot configures the rendering.
+	ByPipeline bool
+	Pivot      PivotOpts
 }
 
 // ListJobs prints or emits recent runs filtered by opts.
@@ -65,6 +72,11 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 		return err
 	}
 	runs = applyClientFilters(runs, opts.Filter)
+	if opts.ByPipeline {
+		opts.Pivot.JSON = opts.JSON
+		opts.Pivot.Quiet = opts.Quiet
+		return RenderPipelinePivot(runs, opts.Pivot, out)
+	}
 	if opts.Limit > 0 && len(runs) > opts.Limit {
 		runs = runs[:opts.Limit]
 	}
