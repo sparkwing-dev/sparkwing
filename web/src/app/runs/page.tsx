@@ -2588,6 +2588,20 @@ function DAG({
     x: number;
     y: number;
   } | null>(null);
+  // Collapsed groups: while a name is in this set, its member nodes
+  // hide and the group frame renders as a single solid card. Edges in
+  // and out of the group reroute to the card's edge and dedupe so a
+  // 5-fanout into a collapsed group becomes one visual line.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    new Set(),
+  );
+  const toggleCollapsedGroup = (name: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   // When a node with inner steps is selected, render its step DAG as
   // a stacked panel beneath the main DAG.
   const selectedNode = selected
@@ -2887,6 +2901,18 @@ function DAG({
     });
   }
   const groupFrameByName = new Map(groupFrames.map((g) => [g.name, g]));
+  // collapsedGroupOf: if a node belongs to any group that's currently
+  // collapsed, returns the first such group name; otherwise null. The
+  // renderer hides the node and reroutes its edges to the group's
+  // card.
+  const collapsedGroupOf = (nodeID: string): string | null => {
+    const n = byID.get(nodeID);
+    if (!n?.groups) return null;
+    for (const g of n.groups) {
+      if (collapsedGroups.has(g) && groupFrameByName.has(g)) return g;
+    }
+    return null;
+  };
 
   const stackedStepNode =
     selectedNode && (selectedNode.work?.steps?.length ?? 0) > 0
@@ -2899,6 +2925,14 @@ function DAG({
         ref={dagRef}
         className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto"
       >
+        <div className="flex items-center gap-2 px-1 pb-2 text-xs">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+            Nodes
+          </span>
+          <span className="text-[var(--muted)]">
+            ({nodes.length} node{nodes.length === 1 ? "" : "s"})
+          </span>
+        </div>
         <svg
           width={width}
           height={height}
@@ -2918,96 +2952,152 @@ function DAG({
               <stop offset="100%" stopColor="#af87d7" />
             </linearGradient>
           </defs>
-          {groupFrames.map((g) => (
-            <g key={`group-${g.name}`}>
-              <rect
-                x={g.x}
-                y={g.y}
-                width={g.w}
-                height={g.h}
-                rx={8}
-                ry={8}
-                fill="rgba(56,189,248,0.05)"
-                stroke="rgba(56,189,248,0.55)"
-                strokeWidth={1.25}
-                strokeDasharray="5 3"
-              />
-              <text
-                x={g.x + 10}
-                y={g.y + 12}
-                fill="rgba(165,243,252,0.95)"
-                fontSize={11}
-                fontWeight="bold"
-                fontFamily="ui-monospace, monospace"
-              >
-                {g.name}
-              </text>
-            </g>
-          ))}
-          {edges.map((e, i) => {
-            let x1: number, y1: number;
-            let x2: number, y2: number;
-            let color: string;
-            let dashed = false;
-            // An edge is "touched" by the selection when either endpoint
-            // is the selected node, or when a collapsed group endpoint
-            // contains the selected node. Touched edges paint gold and
-            // thicker so the selection's neighborhood pops out.
-            let touched = false;
-            const groupContainsSelected = (g: string): boolean =>
-              !!selected && !!byID.get(selected)?.groups?.includes(g);
-            if (e.kind === "to-group") {
-              const a = pos.get(e.src);
-              const frame = groupFrameByName.get(e.groupName);
-              if (!a || !frame) return null;
-              x1 = a.x + a.w;
-              y1 = a.y + nodeH / 2;
-              x2 = frame.x;
-              y2 = frame.y + frame.h / 2;
-              color = dagEdgeColor(e.sampleDstStatus);
-              touched =
-                e.src === selected || groupContainsSelected(e.groupName);
-            } else if (e.kind === "from-group") {
-              const frame = groupFrameByName.get(e.groupName);
-              const b = pos.get(e.dst);
-              if (!frame || !b) return null;
-              x1 = frame.x + frame.w;
-              y1 = frame.y + frame.h / 2;
-              x2 = b.x;
-              y2 = b.y + nodeH / 2;
-              color = dagEdgeColor(byID.get(e.dst));
-              touched =
-                e.dst === selected || groupContainsSelected(e.groupName);
-            } else {
-              const a = pos.get(e.src);
-              const b = pos.get(e.dst);
-              if (!a || !b) return null;
-              x1 = a.x + a.w;
-              y1 = a.y + nodeH / 2;
-              x2 = b.x;
-              y2 = b.y + nodeH / 2;
-              color = e.onFailure
-                ? "rgba(248,113,113,0.55)"
-                : dagEdgeColor(byID.get(e.dst));
-              dashed = !!e.onFailure;
-              touched = e.src === selected || e.dst === selected;
-            }
-            if (touched) color = "rgba(251,191,36,0.95)";
-            const dx = Math.max(32, (x2 - x1) * 0.4);
+          {groupFrames.map((g) => {
+            const collapsed = collapsedGroups.has(g.name);
+            const memberCount = byGroup.get(g.name)?.length ?? 0;
             return (
-              <path
-                key={i}
-                d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
-                fill="none"
-                stroke={color}
-                strokeWidth={touched ? 2.25 : 1.5}
-                strokeDasharray={dashed ? "5 4" : undefined}
-              />
+              <g key={`group-${g.name}`}>
+                <rect
+                  x={g.x}
+                  y={g.y}
+                  width={g.w}
+                  height={g.h}
+                  rx={8}
+                  ry={8}
+                  fill={
+                    collapsed
+                      ? "rgba(56,189,248,0.18)"
+                      : "rgba(56,189,248,0.05)"
+                  }
+                  stroke="rgba(56,189,248,0.55)"
+                  strokeWidth={1.25}
+                  strokeDasharray={collapsed ? undefined : "5 3"}
+                />
+                <g
+                  onClick={() => toggleCollapsedGroup(g.name)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <rect
+                    x={g.x}
+                    y={g.y}
+                    width={g.w}
+                    height={collapsed ? g.h : 18}
+                    fill="transparent"
+                  />
+                  <text
+                    x={g.x + 10}
+                    y={g.y + 12}
+                    fill="rgba(165,243,252,0.95)"
+                    fontSize={11}
+                    fontWeight="bold"
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    {collapsed ? "▸" : "▾"} {g.name}
+                    {collapsed
+                      ? ` (${memberCount} node${memberCount === 1 ? "" : "s"})`
+                      : ""}
+                  </text>
+                </g>
+              </g>
             );
           })}
+          {(() => {
+            // Resolve an edge endpoint to coordinates + a stable key.
+            // If a node belongs to a collapsed group, the endpoint
+            // shifts to the group's frame so edges route to the card.
+            // Group-frame endpoints (the to-group / from-group kinds)
+            // resolve to the frame directly. Returned `key` is what
+            // we dedupe on — multiple parallel edges into one
+            // collapsed group fold to one visual line.
+            const resolveEnd = (
+              kind: "node" | "group",
+              id: string,
+              side: "left" | "right",
+            ): { x: number; y: number; key: string } | null => {
+              if (kind === "node") {
+                const cg = collapsedGroupOf(id);
+                if (cg) {
+                  const f = groupFrameByName.get(cg);
+                  if (!f) return null;
+                  return {
+                    x: side === "left" ? f.x : f.x + f.w,
+                    y: f.y + f.h / 2,
+                    key: `g:${cg}`,
+                  };
+                }
+                const p = pos.get(id);
+                if (!p) return null;
+                return {
+                  x: side === "left" ? p.x : p.x + p.w,
+                  y: p.y + nodeH / 2,
+                  key: `n:${id}`,
+                };
+              }
+              const f = groupFrameByName.get(id);
+              if (!f) return null;
+              return {
+                x: side === "left" ? f.x : f.x + f.w,
+                y: f.y + f.h / 2,
+                key: `g:${id}`,
+              };
+            };
+            const groupContainsSelected = (g: string): boolean =>
+              !!selected && !!byID.get(selected)?.groups?.includes(g);
+            const seen = new Set<string>();
+            const paths: React.ReactElement[] = [];
+            edges.forEach((e, i) => {
+              let from: { x: number; y: number; key: string } | null;
+              let to: { x: number; y: number; key: string } | null;
+              let color: string;
+              let dashed = false;
+              let touched = false;
+              if (e.kind === "to-group") {
+                from = resolveEnd("node", e.src, "right");
+                to = resolveEnd("group", e.groupName, "left");
+                color = dagEdgeColor(e.sampleDstStatus);
+                touched =
+                  e.src === selected || groupContainsSelected(e.groupName);
+              } else if (e.kind === "from-group") {
+                from = resolveEnd("group", e.groupName, "right");
+                to = resolveEnd("node", e.dst, "left");
+                color = dagEdgeColor(byID.get(e.dst));
+                touched =
+                  e.dst === selected || groupContainsSelected(e.groupName);
+              } else {
+                from = resolveEnd("node", e.src, "right");
+                to = resolveEnd("node", e.dst, "left");
+                color = e.onFailure
+                  ? "rgba(248,113,113,0.55)"
+                  : dagEdgeColor(byID.get(e.dst));
+                dashed = !!e.onFailure;
+                touched = e.src === selected || e.dst === selected;
+              }
+              if (!from || !to) return;
+              if (from.key === to.key) return; // collapses to a loop
+              const dedupKey = `${from.key}->${to.key}${e.kind === "node" && (e as { onFailure?: boolean }).onFailure ? "*" : ""}`;
+              if (seen.has(dedupKey)) return;
+              seen.add(dedupKey);
+              if (touched) color = "rgba(251,191,36,0.95)";
+              const dx = Math.max(32, (to.x - from.x) * 0.4);
+              paths.push(
+                <path
+                  key={i}
+                  d={`M ${from.x} ${from.y} C ${from.x + dx} ${from.y}, ${to.x - dx} ${to.y}, ${to.x} ${to.y}`}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={touched ? 2.25 : 1.5}
+                  strokeDasharray={dashed ? "5 4" : undefined}
+                />,
+              );
+            });
+            return paths;
+          })()}
           {nodes.map((n) => {
             const p = pos.get(n.id);
             if (!p) return null;
+            // Members of a collapsed group are absorbed into the
+            // group's card; skip their individual node render.
+            if (collapsedGroupOf(n.id)) return null;
             const isSel = selected === n.id;
             const { fill, border } = dagNodeColors(n, isSel);
             return (
@@ -3553,7 +3643,7 @@ function StepDag({
       ref={stepDagRef}
       className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-2 overflow-x-auto"
     >
-      <div className="flex items-center gap-2 px-1 pb-2 text-xs">
+      <div className="relative flex items-center gap-2 px-1 pb-2 text-xs">
         {onBack && (
           <button
             onClick={onBack}
@@ -3562,13 +3652,14 @@ function StepDag({
             ← back to run
           </button>
         )}
-        <span className="font-mono text-violet-300">{node.id}</span>
-        <span className="text-[var(--muted)]">/</span>
         <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
           Steps
         </span>
         <span className="text-[var(--muted)]">
           ({steps.length} step{steps.length === 1 ? "" : "s"})
+        </span>
+        <span className="absolute left-1/2 -translate-x-1/2 font-mono text-violet-300 pointer-events-none">
+          {node.id}
         </span>
       </div>
       {(node.annotations?.length ?? 0) > 0 && (
