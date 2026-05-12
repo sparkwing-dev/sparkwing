@@ -413,11 +413,13 @@ func coerceSpawnEachJob(v any) Workable {
 // Cache, RunsOn, BeforeRun/AfterRun) are deliberately absent on
 // WorkStep -- promote to a Node via JobSpawn if you need them.
 type WorkStep struct {
-	id      string
-	fn      func(ctx context.Context) (any, error)
-	outType reflect.Type
-	needs   []string
-	skipIf  []SkipPredicate
+	id              string
+	fn              func(ctx context.Context) (any, error)
+	outType         reflect.Type
+	needs           []string
+	skipIf          []SkipPredicate
+	continueOnError bool
+	optional        bool
 	// Dry-run contract. dryRunFn is installed via
 	// .DryRun(fn) and runs in place of fn when the orchestrator
 	// dispatches under WithDryRun(ctx). safeWithoutDryRun is the
@@ -532,6 +534,40 @@ func (s *WorkStep) SkipIf(fn SkipPredicate) *WorkStep {
 
 // SkipPredicates returns the registered skip predicates.
 func (s *WorkStep) SkipPredicates() []SkipPredicate { return s.skipIf }
+
+// ContinueOnError marks the step's failure as non-blocking for the
+// rest of the Work: in-flight sibling steps are not cancelled, and
+// downstream steps that .Needs() this one still dispatch. The Job's
+// overall outcome still reports the failure unless the step is also
+// marked Optional. Mirrors Node.ContinueOnError at the Plan layer.
+//
+//	a := sw.Step(w, "scan-a", scanA).ContinueOnError()
+//	b := sw.Step(w, "scan-b", scanB).ContinueOnError() // runs even if a fails
+//	sw.Step(w, "report", report).Needs(a, b)            // runs even if both fail
+func (s *WorkStep) ContinueOnError() *WorkStep {
+	s.continueOnError = true
+	return s
+}
+
+// IsContinueOnError reports whether this step's failure is non-
+// blocking for sibling cancellation and downstream Needs() dispatch.
+func (s *WorkStep) IsContinueOnError() bool { return s.continueOnError }
+
+// Optional marks the step as non-essential: a failure is recorded
+// (still visible in logs and step status) but does not count toward
+// the Job's rollup outcome. Implies ContinueOnError. Mirrors
+// Node.Optional at the Plan layer.
+//
+//	sw.Step(w, "best-effort-metrics", emitMetrics).Optional()
+func (s *WorkStep) Optional() *WorkStep {
+	s.optional = true
+	s.continueOnError = true
+	return s
+}
+
+// IsOptional reports whether this step's failure is masked from the
+// Job's rollup outcome.
+func (s *WorkStep) IsOptional() bool { return s.optional }
 
 // MarkDone is called by the runner once the step terminates. Stores
 // the typed output so downstream sparkwing.StepGet[T](ctx, step) calls

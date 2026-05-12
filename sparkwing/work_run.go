@@ -133,21 +133,43 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 
 	var (
 		mu       sync.Mutex
-		firstErr error
+		firstErr error // returned by RunWork; Optional steps don't fill this
+		fatalErr error // halts further scheduling; non-ContinueOnError steps fill this
 		running  int
 	)
-	setErr := func(err error) {
+	// setErr records a failure and decides whether to cancel siblings.
+	// item is the failed workItem so we can read its WorkStep flags;
+	// nil item (spawn/spawnEach failure) follows the legacy fail-fast
+	// path -- only WorkSteps carry the Optional / ContinueOnError
+	// opt-outs.
+	setErr := func(it *workItem, err error) {
 		mu.Lock()
-		if firstErr == nil {
-			firstErr = err
+		defer mu.Unlock()
+		step := stepOf(it)
+		// Optional masks the failure from the rollup. ContinueOnError
+		// (implied by Optional, also set on its own) skips the cancel
+		// + skips the schedule-halt so siblings keep running.
+		if step == nil || !step.IsOptional() {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		if step == nil || !step.IsContinueOnError() {
+			if fatalErr == nil {
+				fatalErr = err
+			}
 			cancel()
 		}
-		mu.Unlock()
 	}
 	getErr := func() error {
 		mu.Lock()
 		defer mu.Unlock()
 		return firstErr
+	}
+	getFatalErr := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return fatalErr
 	}
 
 	schedule := func() {
@@ -174,13 +196,27 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		running--
 
 		if res.err != nil {
-			setErr(res.err)
+			it := items[res.id]
+			setErr(it, res.err)
+			// ContinueOnError lets dependents that .Needs() this step
+			// still dispatch -- decrement the in-degree like a normal
+			// completion. Default behavior leaves indeg untouched so
+			// dependents stay blocked (cascade-skip).
+			step := stepOf(it)
+			if step != nil && step.IsContinueOnError() {
+				for _, c := range children[res.id] {
+					indeg[c]--
+				}
+			}
+			if getFatalErr() == nil {
+				schedule()
+			}
 			continue
 		}
 		for _, c := range children[res.id] {
 			indeg[c]--
 		}
-		if getErr() == nil {
+		if getFatalErr() == nil {
 			schedule()
 		}
 	}
@@ -189,6 +225,16 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		return nil, err
 	}
 	return nil, nil
+}
+
+// stepOf returns the WorkStep for a step-kind item, or nil for
+// spawn / spawnEach items (which don't carry Optional /
+// ContinueOnError flags today).
+func stepOf(it *workItem) *WorkStep {
+	if it == nil || it.kind != itemStep {
+		return nil
+	}
+	return it.step
 }
 
 type itemKind int
