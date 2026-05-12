@@ -115,23 +115,16 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	// pipeline as a dependency without importing its Go package.
 	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline()
 
-	// Error-canary cluster: four Plan-layer Nodes that each emit
-	// ~60 chatty lines then return a distinct failure. Lifted to
-	// the Plan layer (rather than steps inside one Work) so they
-	// don't share a runner ctx -- Work-layer steps fail-fast by
-	// design, cancelling siblings on first error. Each node is
-	// Optional() so the run still reports success and downstream
-	// nothing cascades, and GroupJobs clusters them in the
-	// dashboard like a single logical fixture.
-	canaryAlpha := sparkwing.Job(plan, "error-canary-alpha", canaryShard("error-canary-alpha", 60, 2500,
-		"connection reset by peer at item 042 (after 3 retries)")).Needs(configure).Inline().Optional()
-	canaryBravo := sparkwing.Job(plan, "error-canary-bravo", canaryShard("error-canary-bravo", 55, 2200,
-		"timeout waiting for downstream service (10s deadline)")).Needs(configure).Inline().Optional()
-	canaryCharlie := sparkwing.Job(plan, "error-canary-charlie", canaryShard("error-canary-charlie", 70, 2800,
-		"checksum mismatch on item 051: want sha256:abc... got sha256:def...")).Needs(configure).Inline().Optional()
-	canaryDelta := sparkwing.Job(plan, "error-canary-delta", canaryShard("error-canary-delta", 50, 2000,
-		"out of memory: allocated 1.4GiB of 1.0GiB quota")).Needs(configure).Inline().Optional()
-	sparkwing.GroupJobs(plan, "error-canary", canaryAlpha, canaryBravo, canaryCharlie, canaryDelta)
+	// Error-canary: single Plan-layer node with a Work containing four
+	// parallel "shard" steps. Each shard emits ~60 chatty lines (with
+	// graduated WARN/ERROR-level entries near the end) then returns
+	// a distinct failure. Each step is .ContinueOnError() so a fail
+	// doesn't cancel its siblings -- all four run to completion
+	// independently. Node-level .Optional() keeps the run reporting
+	// success while the per-step failures stay visible. No downstream
+	// needs the node; the point is to test stepping through multiple
+	// errored, chatty steps.
+	sparkwing.Job(plan, "error-canary", &ErrorCanaryJob{}).Needs(configure).Optional()
 
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
@@ -255,6 +248,31 @@ func notifyFn(ctx context.Context) error {
 func rollbackFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "rolling back to previous deployment")
 	return nap(ctx, 200)
+}
+
+// ErrorCanaryJob is the multi-step error fixture. Four parallel
+// shard steps each emit ~60 chatty progress lines (with graduated
+// WARN / ERROR-level entries near the end) and then return a
+// distinct failure mode. Every shard is marked .ContinueOnError()
+// so one shard's failure doesn't cancel its in-flight siblings, and
+// the surrounding Plan-layer Node is .Optional() so the run still
+// reports success while every per-step failure stays visible.
+type ErrorCanaryJob struct{ sparkwing.Base }
+
+func (j *ErrorCanaryJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "shard-alpha", canaryShard("shard-alpha", 60, 2500,
+		"connection reset by peer at item 042 (after 3 retries)")).
+		ContinueOnError()
+	sparkwing.Step(w, "shard-bravo", canaryShard("shard-bravo", 55, 2200,
+		"timeout waiting for downstream service (10s deadline)")).
+		ContinueOnError()
+	sparkwing.Step(w, "shard-charlie", canaryShard("shard-charlie", 70, 2800,
+		"checksum mismatch on item 051: want sha256:abc... got sha256:def...")).
+		ContinueOnError()
+	sparkwing.Step(w, "shard-delta", canaryShard("shard-delta", 50, 2000,
+		"out of memory: allocated 1.4GiB of 1.0GiB quota")).
+		ContinueOnError()
+	return nil, nil
 }
 
 // canaryShard returns a single-closure Job body that emits `items`
