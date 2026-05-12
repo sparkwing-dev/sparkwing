@@ -1788,43 +1788,42 @@ function RunDetailPane({
     }, 250);
     return () => clearTimeout(t);
   }, [findQuery, run.id]);
-  // Structured matches: nodes whose id/annotations/error/failure_reason
-  // /groups -- or any of their steps' id/annotations -- contain the
-  // query (case-insensitive). Returned as ordered node ids so the
-  // cursor walks them in the same sequence the DAG / left panel show.
-  const findStructuredNodes = useMemo(() => {
+  // One node contributes a node-level hit plus one hit per matching step.
+  type FindHit = { nodeID: string; stepID: string | null };
+  const findStructuredHits = useMemo<FindHit[]>(() => {
     const q = findQuery.trim().toLowerCase();
-    if (!q) return [] as string[];
-    const out: string[] = [];
+    if (!q) return [];
+    const out: FindHit[] = [];
     for (const n of nodes) {
-      const hay: string[] = [n.id];
-      if (n.error) hay.push(n.error);
-      if (n.failure_reason) hay.push(n.failure_reason);
-      if (n.groups) hay.push(...n.groups);
-      if (n.annotations) hay.push(...n.annotations);
-      const steps = n.work?.steps ?? [];
-      for (const s of steps) {
-        hay.push(s.id);
-        if (s.annotations) hay.push(...s.annotations);
-      }
-      for (const h of hay) {
-        if (h.toLowerCase().includes(q)) {
-          out.push(n.id);
-          break;
+      const nodeHay: string[] = [n.id];
+      if (n.error) nodeHay.push(n.error);
+      if (n.failure_reason) nodeHay.push(n.failure_reason);
+      if (n.groups) nodeHay.push(...n.groups);
+      if (n.annotations) nodeHay.push(...n.annotations);
+      const nodeMatches = nodeHay.some((h) => h.toLowerCase().includes(q));
+      if (nodeMatches) out.push({ nodeID: n.id, stepID: null });
+      for (const s of n.work?.steps ?? []) {
+        const stepHay: string[] = [s.id];
+        if (s.annotations) stepHay.push(...s.annotations);
+        if (stepHay.some((h) => h.toLowerCase().includes(q))) {
+          out.push({ nodeID: n.id, stepID: s.id });
         }
       }
     }
     return out;
   }, [findQuery, nodes]);
-  // Per-tab counts. Summary / DAG / Timeline / Setup all reflect
-  // structured matches (node-level). Logs uses the server-grep count.
-  // Resources gets no badge.
-  // Set view for fast in-render lookup; per-node log line set
-  // surfaces server-grep matches for in-bucket highlighting.
   const findMatchedNodes = useMemo(
-    () => new Set(findStructuredNodes),
-    [findStructuredNodes],
+    () => new Set(findStructuredHits.map((h) => h.nodeID)),
+    [findStructuredHits],
   );
+  // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
+  const findMatchedSteps = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of findStructuredHits) {
+      if (h.stepID) set.add(`${h.nodeID}::${h.stepID}`);
+    }
+    return set;
+  }, [findStructuredHits]);
   const findMatchedLogsByNode = useMemo(() => {
     const out = new Map<string, Set<number>>();
     for (const m of findLogResults) {
@@ -1837,42 +1836,35 @@ function RunDetailPane({
     }
     return out;
   }, [findLogResults]);
-  // Per-tab counts. Summary / DAG / Timeline render node-shaped
-  // content so the structured-node match count is meaningful for
-  // them. Setup is run/pipeline/trigger config (no per-node content
-  // to highlight against the query), and Resources is metric charts;
-  // both opt out so we don't show a number that doesn't correspond
-  // to anything visible.
+  // Setup / Resources opt out — no per-node content to match against.
   const findCounts: Partial<Record<TabKey, number>> = {
-    summary: findStructuredNodes.length,
-    dag: findStructuredNodes.length,
-    timeline: findStructuredNodes.length,
+    summary: findStructuredHits.length,
+    dag: findStructuredHits.length,
+    timeline: findStructuredHits.length,
     logs: findLogTotal,
   };
   useEffect(() => {
     setFindCursor(0);
   }, [findQuery, tab]);
-  // prev/next nav: cursor walks matches in the currently active tab.
-  // For Logs that's the server-grep result list (selects the node and
-  // sets a focusLine for in-Logs scroll); for the structured tabs we
-  // walk node ids and selectNode (each tab already auto-scrolls its
-  // selection into view).
+  // Step-scoped hits route through selectStep so Timeline auto-expands
+  // the parent node row and StepDag highlights the matched step.
   const jumpFind = (idx: number) => {
     const isLogs = effectiveTab === "logs";
-    const len = isLogs ? findLogResults.length : findStructuredNodes.length;
+    const len = isLogs ? findLogResults.length : findStructuredHits.length;
     if (len === 0) return;
     const wrapped = ((idx % len) + len) % len;
     setFindCursor(wrapped);
     if (isLogs) {
       const m = findLogResults[wrapped];
       onSelectNode(m.node_id);
-      // The Logs pane reads globalFocus from AllNodesLogs; nudge it
-      // via the same channel by stashing the line on the run url's
-      // hash? Simpler: drive through state at this level next.
       setFindLogFocus({ nodeID: m.node_id, line: m.line });
     } else {
-      const nodeID = findStructuredNodes[wrapped];
-      onSelectNode(nodeID);
+      const hit = findStructuredHits[wrapped];
+      if (hit.stepID) {
+        onSelectStep(hit.nodeID, hit.stepID);
+      } else {
+        onSelectNode(hit.nodeID);
+      }
     }
   };
   const nextFind = () => jumpFind(findCursor + 1);
@@ -2003,7 +1995,7 @@ function RunDetailPane({
                 <span
                   className={`ml-1.5 font-mono ${
                     isFindBadge && (findCounts[t.key] ?? 0) > 0
-                      ? "text-amber-300"
+                      ? "text-fuchsia-300"
                       : "text-[var(--muted)]"
                   }`}
                 >
@@ -2035,12 +2027,12 @@ function RunDetailPane({
             <span className="font-mono tabular-nums">
               {(() => {
                 const isLogs = effectiveTab === "logs";
-                const list = isLogs ? findLogResults : findStructuredNodes;
-                const total = isLogs
-                  ? findLogTotal
-                  : findStructuredNodes.length;
+                const len = isLogs
+                  ? findLogResults.length
+                  : findStructuredHits.length;
+                const total = isLogs ? findLogTotal : findStructuredHits.length;
                 if (isLogs && findLogSearching) return "searching…";
-                if (list.length === 0) return "0/0";
+                if (len === 0) return "0/0";
                 return `${findCursor + 1}/${total}`;
               })()}
             </span>
@@ -2098,6 +2090,7 @@ function RunDetailPane({
               onSelectStep={onSelectStep}
               runId={run.id}
               findMatched={findMatchedNodes}
+              findMatchedSteps={findMatchedSteps}
             />
           </div>
         )}
@@ -2111,6 +2104,7 @@ function RunDetailPane({
               onSelectNode={onSelectNode}
               onSelectStep={onSelectStep}
               findMatched={findMatchedNodes}
+              findMatchedSteps={findMatchedSteps}
             />
           </div>
         )}
@@ -2122,6 +2116,7 @@ function RunDetailPane({
               collapsed={false}
               onToggle={() => {}}
               inline
+              findMatched={findMatchedNodes}
             />
             <RunAnnotationsList nodes={nodes} onSelectNode={onSelectNode} />
           </div>
@@ -2824,6 +2819,7 @@ function DAG({
   onSelectStep,
   runId,
   findMatched,
+  findMatchedSteps,
 }: {
   nodes: RunNode[];
   selected: string | null;
@@ -2832,6 +2828,7 @@ function DAG({
   onSelectStep: (nodeId: string, stepId: string | null) => void;
   runId?: string;
   findMatched?: Set<string>;
+  findMatchedSteps?: Set<string>;
 }) {
   const dagRouter = useRouter();
   // Auto-scroll the selected node into view when arriving with a
@@ -3436,7 +3433,7 @@ function DAG({
                     rx={8}
                     ry={8}
                     fill="none"
-                    stroke="rgba(251,191,36,0.9)"
+                    stroke="rgba(232,121,249,0.95)"
                     strokeWidth={2}
                     pointerEvents="none"
                   />
@@ -3652,6 +3649,7 @@ function DAG({
           padY={padY}
           selectedStep={selectedStep}
           onSelectStep={(stepId) => onSelectStep(stackedStepNode.id, stepId)}
+          findMatchedSteps={findMatchedSteps}
         />
       )}
     </div>
@@ -3730,6 +3728,7 @@ function StepDag({
   onBack,
   selectedStep,
   onSelectStep,
+  findMatchedSteps,
 }: {
   node: RunNode;
   nodeW: number;
@@ -3741,6 +3740,8 @@ function StepDag({
   onBack?: () => void;
   selectedStep?: string | null;
   onSelectStep?: (stepId: string | null) => void;
+  // Keys: "<nodeID>::<stepID>" — same shape as the run-level set.
+  findMatchedSteps?: Set<string>;
 }) {
   // Auto-scroll selected step into view (mirrors the run-level DAG).
   // "nearest" so we don't snap when the step is already visible.
@@ -4102,6 +4103,8 @@ function StepDag({
             const status = s.status;
             const { fill, border } = stepStatusColors(status);
             const isSel = selectedStep === s.id;
+            const isFindHit =
+              !isSel && (findMatchedSteps?.has(`${node.id}::${s.id}`) ?? false);
             const dotClass =
               status === "failed"
                 ? "fill-red-400"
@@ -4143,6 +4146,20 @@ function StepDag({
                   stroke={isSel ? "rgba(251,191,36,0.95)" : border}
                   strokeWidth={isSel ? 2 : 1.5}
                 />
+                {isFindHit && (
+                  <rect
+                    x={-3}
+                    y={-3}
+                    width={nodeW + 6}
+                    height={nodeH + 6}
+                    rx={8}
+                    ry={8}
+                    fill="none"
+                    stroke="rgba(232,121,249,0.95)"
+                    strokeWidth={2}
+                    pointerEvents="none"
+                  />
+                )}
                 <circle cx={14} cy={nodeH / 2} r={4} className={dotClass} />
                 <text
                   x={26}

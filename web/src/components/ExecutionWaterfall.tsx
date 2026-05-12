@@ -137,6 +137,7 @@ export default function ExecutionWaterfall({
   onSelectNode,
   onSelectStep,
   findMatched,
+  findMatchedSteps,
 }: {
   run: Run;
   nodes: Node[];
@@ -145,6 +146,8 @@ export default function ExecutionWaterfall({
   onSelectNode?: (id: string | null) => void;
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
   findMatched?: Set<string>;
+  // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
+  findMatchedSteps?: Set<string>;
 }) {
   const { rows, totalMs, zero } = extractRows(nodes);
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
@@ -274,7 +277,7 @@ export default function ExecutionWaterfall({
                   <div className="relative w-full h-full">
                     <div
                       onClick={() => onSelectNode?.(isFocus ? null : r.id)}
-                      className={`absolute h-full rounded ${outcomeColor(r.outcome, r.running)} ${r.running ? "animate-pulse" : ""} ${isFocus ? "ring-2 ring-amber-400" : findMatched?.has(r.id) ? "ring-2 ring-amber-400/60" : ""} ${onSelectNode ? "cursor-pointer" : ""}`}
+                      className={`absolute h-full rounded ${outcomeColor(r.outcome, r.running)} ${r.running ? "animate-pulse" : ""} ${isFocus ? "ring-2 ring-amber-400" : findMatched?.has(r.id) ? "ring-2 ring-fuchsia-400" : ""} ${onSelectNode ? "cursor-pointer" : ""}`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       title={`${r.id}: ${fmtMs(r.durationMs)}${r.running ? " (running)" : ""}`}
                     />
@@ -289,10 +292,13 @@ export default function ExecutionWaterfall({
                     );
                     const stepFocus =
                       isFocus && focusStep != null && s.name === focusStep;
+                    const stepFindHit = findMatchedSteps?.has(
+                      `${r.id}::${s.name}`,
+                    );
                     return (
                       <div
                         key={`${r.id}-${si}-${s.name}`}
-                        className={`flex items-center ${stepFocus ? "bg-amber-400/10" : ""}`}
+                        className={`flex items-center ${stepFocus ? "bg-amber-400/10" : stepFindHit ? "bg-fuchsia-400/10" : ""}`}
                         style={{
                           height: stepBarHeight + 4,
                           marginBottom: rowGap,
@@ -303,7 +309,7 @@ export default function ExecutionWaterfall({
                             onClick={() =>
                               onSelectStep?.(r.id, stepFocus ? null : s.name)
                             }
-                            className={`absolute rounded ${stepBarColor(s.status)} ${s.status === "running" ? "animate-pulse" : ""} ${stepFocus ? "ring-2 ring-amber-400" : ""} ${onSelectStep ? "cursor-pointer" : ""}`}
+                            className={`absolute rounded ${stepBarColor(s.status)} ${s.status === "running" ? "animate-pulse" : ""} ${stepFocus ? "ring-2 ring-amber-400" : stepFindHit ? "ring-2 ring-fuchsia-400" : ""} ${onSelectStep ? "cursor-pointer" : ""}`}
                             style={{
                               left: `${sLeft}%`,
                               width: `${sWidth}%`,

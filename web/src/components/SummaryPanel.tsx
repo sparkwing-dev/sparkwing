@@ -209,12 +209,14 @@ export default function SummaryPanel({
   collapsed,
   onToggle,
   inline = false,
+  findMatched,
 }: {
   run: Run;
   nodes: RunNode[];
   collapsed: boolean;
   onToggle: () => void;
   inline?: boolean;
+  findMatched?: Set<string>;
 }) {
   const tally = useMemo(() => buildTally(nodes), [nodes]);
   const failed = useMemo(
@@ -308,10 +310,15 @@ export default function SummaryPanel({
             </div>
             {nodes.map((n) => {
               const g = outcomeGlyph(n.outcome);
+              const isFindHit = findMatched?.has(n.id) ?? false;
               return (
                 <div
                   key={n.id}
-                  className="flex items-center gap-2 text-xs font-mono"
+                  className={`flex items-center gap-2 text-xs font-mono px-1 -mx-1 rounded ${
+                    isFindHit
+                      ? "bg-fuchsia-400/10 ring-1 ring-fuchsia-400/60"
+                      : ""
+                  }`}
                 >
                   <span className={`w-4 text-center ${g.cls}`}>{g.glyph}</span>
                   <span className="truncate">{n.id}</span>
