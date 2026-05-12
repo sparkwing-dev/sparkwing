@@ -143,12 +143,12 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 		}).Needs(build)
 
 	// Approval gate between publish and deploy. Real pipelines block
-	// here for a human; the demo uses a 2s Timeout with OnExpiry=
+	// here for a human; the demo uses a 20s Timeout with OnExpiry=
 	// ApprovalApprove so the gate auto-approves and the run flows
 	// through. Swap to ApprovalFail/Deny to see the blocked paths.
 	approveDeploy := sparkwing.JobApproval(plan, "approve-deploy", sparkwing.ApprovalConfig{
 		Message:  "Promote example:sha-abc1234 to prod?",
-		Timeout:  2 * time.Second,
+		Timeout:  20 * time.Second,
 		OnExpiry: sparkwing.ApprovalApprove,
 	}).Needs(publishImages)
 
