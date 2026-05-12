@@ -743,24 +743,11 @@ export default function LogBucketView({
   useEffect(() => {
     setMatchCursor(0);
   }, [searchQuery]);
-  // Auto-scroll to the first match when the user types. Keyed on
-  // searchQuery (not searchMatches) so streaming-log re-renders --
-  // which re-create `parsed` and thus `searchMatches` -- don't keep
-  // dragging the view back to the first hit while the user scrolls
-  // through results manually.
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (q === "" || searchMatches.length === 0) return;
-    const target = searchMatches[0];
-    setStepOverrides((prev) => ({ ...prev, [target.sectionIdx]: true }));
-    requestAnimationFrame(() => {
-      const el = containerRef.current?.querySelector(
-        `[data-line="${target.line}"]`,
-      ) as HTMLElement | null;
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery]);
+  // Filter + highlight update live as the user types (the render
+  // already re-flows from searchMatches), but the view itself only
+  // jumps on explicit nav: Enter, Shift+Enter, or the ↑/↓ buttons.
+  // Auto-jumping while typing was grabbing the viewport during
+  // browsing, which felt wrong.
   const jumpToMatch = (idx: number) => {
     if (searchMatches.length === 0) return;
     const wrapped =
