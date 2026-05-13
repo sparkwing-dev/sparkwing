@@ -1843,14 +1843,16 @@ const FullRunRow = memo(function FullRunRow({
   return (
     <div className="grid grid-cols-[minmax(16rem,32rem)_minmax(0,1fr)] gap-6 items-start">
       {meta}
-      <div className="min-w-0 text-[11px] font-mono truncate">
+      <div className="min-w-0 text-[11px] font-mono">
         {r.error ? (
           <Tooltip
             content={
               <span className="whitespace-pre-wrap break-words">{r.error}</span>
             }
           >
-            <div className="text-red-400 truncate">error: {r.error}</div>
+            <div className="text-red-400 line-clamp-2 break-words">
+              error: {r.error}
+            </div>
           </Tooltip>
         ) : r.annotation_count && r.top_annotation ? (
           <Tooltip
@@ -1865,7 +1867,7 @@ const FullRunRow = memo(function FullRunRow({
               </ul>
             }
           >
-            <div className="text-cyan-300/90 truncate">
+            <div className="text-cyan-300/90 line-clamp-2 break-words">
               {(r.annotations && r.annotations.length > 0
                 ? r.annotations
                 : [r.top_annotation]

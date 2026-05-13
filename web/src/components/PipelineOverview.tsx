@@ -792,7 +792,7 @@ function RunSummary({ run }: { run: Run }) {
             <span className="whitespace-pre-wrap break-words">{run.error}</span>
           }
         >
-          <div className="truncate font-mono text-[11px] text-red-400">
+          <div className="line-clamp-2 break-words font-mono text-[11px] text-red-400">
             {run.error}
           </div>
         </Tooltip>
@@ -815,7 +815,7 @@ function RunSummary({ run }: { run: Run }) {
             </ul>
           }
         >
-          <div className="truncate font-mono text-[11px] text-cyan-300/90">
+          <div className="line-clamp-2 break-words font-mono text-[11px] text-cyan-300/90">
             {list.map((a, i) => (
               <span key={i}>
                 {i > 0 && <span className="text-[var(--muted)] mx-1">·</span>}
