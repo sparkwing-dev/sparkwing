@@ -13,7 +13,8 @@ export default function Tooltip({ content, children }: TooltipProps) {
     x: number;
     y: number;
     align: "center" | "left" | "right";
-  }>({ x: 0, y: 0, align: "center" });
+    flip: boolean;
+  }>({ x: 0, y: 0, align: "center", flip: false });
   const ref = useRef<HTMLSpanElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -22,17 +23,22 @@ export default function Tooltip({ content, children }: TooltipProps) {
     if (!show || !ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const tipWidth = tipRef.current?.offsetWidth || 200;
+    const tipHeight = tipRef.current?.offsetHeight || 60;
     const cx = rect.left + rect.width / 2;
-
-    // If centered tooltip would clip left edge, anchor to left
+    // Flip below the trigger when there isn't enough room above for
+    // the tooltip + arrow + a few pixels of breathing room.
+    const flip = rect.top - tipHeight - 12 < 8;
+    const y = flip ? rect.bottom + 6 : rect.top - 6;
+    let x = cx;
+    let align: "center" | "left" | "right" = "center";
     if (cx - tipWidth / 2 < 8) {
-      setPos({ x: rect.left, y: rect.top - 6, align: "left" });
-      // If it would clip right edge, anchor to right
+      x = rect.left;
+      align = "left";
     } else if (cx + tipWidth / 2 > window.innerWidth - 8) {
-      setPos({ x: rect.right, y: rect.top - 6, align: "right" });
-    } else {
-      setPos({ x: cx, y: rect.top - 6, align: "center" });
+      x = rect.right;
+      align = "right";
     }
+    setPos({ x, y, align, flip });
   }, [show]);
 
   const handleMouseEnter = () => {
@@ -44,12 +50,10 @@ export default function Tooltip({ content, children }: TooltipProps) {
     setShow(false);
   };
 
-  const transform =
-    pos.align === "left"
-      ? "translate(0, -100%)"
-      : pos.align === "right"
-        ? "translate(-100%, -100%)"
-        : "translate(-50%, -100%)";
+  const xTransform =
+    pos.align === "left" ? "0" : pos.align === "right" ? "-100%" : "-50%";
+  const yTransform = pos.flip ? "0" : "-100%";
+  const transform = `translate(${xTransform}, ${yTransform})`;
 
   const arrowAlign =
     pos.align === "left"
@@ -57,6 +61,13 @@ export default function Tooltip({ content, children }: TooltipProps) {
       : pos.align === "right"
         ? "mr-3 ml-auto"
         : "mx-auto";
+  // When flipped, the arrow sits above the bubble pointing up; with
+  // the default direction it sits below pointing down.
+  const arrow = (
+    <div
+      className={`w-2 h-2 bg-[#1e293b] border-${pos.flip ? "t" : "b"} border-${pos.flip ? "l" : "r"} border-[var(--border)] rotate-45 ${pos.flip ? "-mb-1" : "-mt-1"} ${arrowAlign}`}
+    />
+  );
 
   return (
     <>
@@ -73,12 +84,11 @@ export default function Tooltip({ content, children }: TooltipProps) {
           className="fixed z-[100] pointer-events-none"
           style={{ left: pos.x, top: pos.y, transform }}
         >
+          {pos.flip && arrow}
           <div className="bg-[#1e293b] border border-[var(--border)] rounded-lg px-3 py-2 text-xs shadow-xl whitespace-pre-wrap break-words max-w-[min(90vw,40rem)] w-max">
             {content}
           </div>
-          <div
-            className={`w-2 h-2 bg-[#1e293b] border-b border-r border-[var(--border)] rotate-45 -mt-1 ${arrowAlign}`}
-          />
+          {!pos.flip && arrow}
         </div>
       )}
     </>

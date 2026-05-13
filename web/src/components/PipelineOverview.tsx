@@ -816,12 +816,12 @@ function RunSummary({ run }: { run: Run }) {
           }
         >
           <div className="truncate font-mono text-[11px] text-cyan-300/90">
-            › {run.top_annotation}
-            {run.annotation_count > 1 && (
-              <span className="text-[var(--muted)] ml-1">
-                (+{run.annotation_count - 1})
+            {list.map((a, i) => (
+              <span key={i}>
+                {i > 0 && <span className="text-[var(--muted)] mx-1">·</span>}
+                <span>› {a}</span>
               </span>
-            )}
+            ))}
           </div>
         </Tooltip>
       </div>
