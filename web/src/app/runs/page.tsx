@@ -51,6 +51,7 @@ import {
   type Run,
   type RunDetail,
   cancelRun,
+  deleteRun,
   getNodeLogs,
   getNodeStreamUrl,
   getPipelines,
@@ -83,6 +84,9 @@ import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel, { NodeAttrChips } from "@/components/SummaryPanel";
 import { parseLogLines } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
+import { toast } from "@/components/Toasts";
+import ActionMenu from "@/components/ActionMenu";
+import AttemptsDropdown from "@/components/AttemptsDropdown";
 
 // Runs-list still polls: the event stream is per-run, not global, so
 // the left sidebar can't subscribe to "anything new". The detail
@@ -712,6 +716,20 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const selectRunRef = useRef(selectRun);
   selectRunRef.current = selectRun;
 
+  // Lineage chips on each row fire SELECT_RUN_EVENT to jump across
+  // retry edges. We route the id back through selectRun so URL,
+  // scroll, and the row's checkbox highlight all stay in sync.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<string>;
+      const id = ce.detail;
+      if (typeof id !== "string" || !id) return;
+      selectRunRef.current(id);
+    };
+    window.addEventListener(SELECT_RUN_EVENT, handler);
+    return () => window.removeEventListener(SELECT_RUN_EVENT, handler);
+  }, []);
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div
@@ -754,36 +772,79 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   </span>
                 </label>
               )}
-              <button
-                disabled={checkedRuns.size !== 1}
-                onClick={async () => {
-                  if (checkedRuns.size !== 1) return;
-                  const [id] = checkedRuns;
-                  await retryRun(id).catch(() => null);
-                  refresh();
-                }}
+              <ActionMenu
+                align="end"
                 title={
-                  checkedRuns.size === 0
-                    ? "Select a run to rerun"
-                    : checkedRuns.size > 1
-                      ? "Rerun supports one run at a time"
-                      : `Rerun ${[...checkedRuns][0]}`
+                  checkedRuns.size === 1
+                    ? "Delete this run?"
+                    : `Delete ${checkedRuns.size} runs?`
                 }
-                className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[var(--muted)] disabled:hover:border-[var(--border)] transition-colors"
-              >
-                ↻ Rerun
-              </button>
-              <button
-                disabled
-                title={
-                  checkedRuns.size > 0
-                    ? `Delete ${checkedRuns.size} run${checkedRuns.size === 1 ? "" : "s"} (not implemented yet)`
-                    : "Delete (not implemented yet)"
-                }
-                className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] opacity-40 cursor-not-allowed"
-              >
-                ✕ Delete
-              </button>
+                items={[
+                  {
+                    label:
+                      checkedRuns.size === 1
+                        ? "Yes, delete it"
+                        : `Yes, delete ${checkedRuns.size} runs`,
+                    description:
+                      "Logs and node history are removed permanently.",
+                    tone: "danger",
+                    onSelect: async () => {
+                      const ids = [...checkedRuns];
+                      if (ids.length === 0) return;
+                      const results = await Promise.allSettled(
+                        ids.map((id) => deleteRun(id)),
+                      );
+                      const failed = results.filter(
+                        (r) => r.status === "rejected",
+                      ).length;
+                      const ok = results.length - failed;
+                      if (failed === 0) {
+                        toast(
+                          ok === 1 ? "Run deleted" : `${ok} runs deleted`,
+                          "success",
+                        );
+                      } else if (ok === 0) {
+                        toast(
+                          failed === 1
+                            ? "Delete failed"
+                            : `Delete failed for ${failed} runs`,
+                          "error",
+                        );
+                      } else {
+                        toast(`Deleted ${ok}, ${failed} failed`, "error");
+                      }
+                      setCheckedRuns(new Set());
+                      if (run && ids.includes(run.id)) {
+                        selectRun(null);
+                      }
+                      refresh();
+                    },
+                  },
+                  { label: "Cancel", onSelect: () => {} },
+                ]}
+                trigger={(open, toggle) => (
+                  <button
+                    disabled={checkedRuns.size === 0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle();
+                    }}
+                    aria-expanded={open}
+                    title={
+                      checkedRuns.size === 0
+                        ? "Select one or more runs to delete"
+                        : `Delete ${checkedRuns.size} run${checkedRuns.size === 1 ? "" : "s"}`
+                    }
+                    className={`text-[10px] px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      open
+                        ? "border-rose-400 text-rose-300 bg-rose-500/10"
+                        : "border-[var(--border)] text-[var(--muted)] hover:text-rose-300 hover:border-rose-400"
+                    }`}
+                  >
+                    ✕ Delete
+                  </button>
+                )}
+              />
             </div>
           }
         />
@@ -1732,6 +1793,13 @@ function StepRow({
 
 // --- run row variants ---
 
+// SELECT_RUN_EVENT lets the lineage chips drive selection without
+// having to thread the page's selectRun callback through every row
+// component. The page registers a window listener that calls
+// selectRun on the matching id. URL stays canonical via selectRun
+// itself, which also handles scrolling and focus.
+const SELECT_RUN_EVENT = "sparkwing:select-run";
+
 const FullRunRow = memo(function FullRunRow({
   r,
   ctx,
@@ -1813,6 +1881,9 @@ const FullRunRow = memo(function FullRunRow({
               {r.trigger_source}
             </span>
           </Tooltip>
+        )}
+        {(r.retry_of || r.retried_as) && (
+          <AttemptsDropdown currentRunID={r.id} dense />
         )}
       </div>
       <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
@@ -1974,6 +2045,9 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
                 {branchShort}
               </span>
             </>
+          )}
+          {(r.retry_of || r.retried_as) && (
+            <AttemptsDropdown currentRunID={r.id} dense />
           )}
         </div>
         <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
@@ -2594,6 +2668,7 @@ function RunDetailPane({
             #{run.id}
           </span>
           <span className="ml-auto flex items-center gap-2">
+            <AttemptsDropdown currentRunID={run.id} />
             {runIsActive && <CancelButton runId={run.id} onDone={onRefresh} />}
             <RetryButton runId={run.id} onDone={onRefresh} />
             <button
@@ -6011,39 +6086,140 @@ function CancelButton({
   onDone: () => void;
 }) {
   const [loading, setLoading] = useState(false);
+  // Two-step inline confirmation. First click flips to "Confirm" +
+  // back-arrow; second click commits. Avoids the native browser
+  // confirm() dialog that breaks the dashboard's visual tone.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+
+  if (loading) {
+    return (
+      <button
+        disabled
+        className="bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-1 rounded text-xs font-medium opacity-60"
+      >
+        ...
+      </button>
+    );
+  }
+
+  if (!armed) {
+    return (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setArmed(true);
+        }}
+        className="bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-red-500/30 transition-colors"
+        title={`Cancel run ${runId}`}
+      >
+        Cancel
+      </button>
+    );
+  }
+
   return (
-    <button
-      onClick={async (e) => {
-        e.stopPropagation();
-        if (!confirm(`Cancel run ${runId}?`)) return;
-        setLoading(true);
-        await cancelRun(runId);
-        onDone();
-        setLoading(false);
-      }}
-      disabled={loading}
-      className="bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-red-500/30 transition-colors"
-    >
-      {loading ? "..." : "Cancel"}
-    </button>
+    <span className="inline-flex items-center gap-1">
+      <button
+        onClick={async (e) => {
+          e.stopPropagation();
+          setLoading(true);
+          setArmed(false);
+          try {
+            await cancelRun(runId);
+            toast(`Cancel requested for ${runId}`, "info");
+          } catch {
+            toast(`Cancel failed for ${runId}`, "error");
+          }
+          onDone();
+          setLoading(false);
+        }}
+        className="bg-red-500 text-white border border-red-400 px-2 py-1 rounded text-xs font-semibold hover:bg-red-400 transition-colors"
+        title="Confirm cancel"
+      >
+        Confirm cancel
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setArmed(false);
+        }}
+        className="text-[var(--muted)] hover:text-[var(--foreground)] px-1.5 py-1 rounded text-xs transition-colors"
+        title="Back"
+        aria-label="back"
+      >
+        ✕
+      </button>
+    </span>
   );
 }
 
 function RetryButton({ runId, onDone }: { runId: string; onDone: () => void }) {
   const [loading, setLoading] = useState(false);
+
+  const submit = async (full: boolean) => {
+    setLoading(true);
+    const fresh = await retryRun(runId, { full }).catch(() => null);
+    if (fresh?.id) {
+      toast(
+        full
+          ? `Rerun (all nodes) queued as ${fresh.id}`
+          : `Rerun (from failed) queued as ${fresh.id}`,
+        "success",
+      );
+    } else {
+      toast(`Rerun failed for ${runId}`, "error");
+    }
+    onDone();
+    setLoading(false);
+  };
+
   return (
-    <button
-      onClick={async (e) => {
-        e.stopPropagation();
-        setLoading(true);
-        await retryRun(runId);
-        onDone();
-        setLoading(false);
-      }}
-      disabled={loading}
-      className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-indigo-500/30 transition-colors"
-    >
-      {loading ? "..." : "Rerun"}
-    </button>
+    <ActionMenu
+      align="end"
+      title="Rerun"
+      items={[
+        {
+          label: "Rerun from failed",
+          description:
+            "Reuse cached/passed nodes; re-execute only failed or unreached.",
+          tone: "primary",
+          disabled: loading,
+          onSelect: () => submit(false),
+        },
+        {
+          label: "Rerun all",
+          description:
+            "Re-execute every node from scratch, ignoring previous results.",
+          tone: "primary",
+          disabled: loading,
+          onSelect: () => submit(true),
+        },
+      ]}
+      trigger={(open, toggle) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle();
+          }}
+          aria-expanded={open}
+          disabled={loading}
+          className={`px-2 py-1 rounded text-xs font-medium border transition-colors inline-flex items-center gap-1 ${
+            open
+              ? "bg-indigo-500/30 text-indigo-200 border-indigo-400"
+              : "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30"
+          }`}
+        >
+          {loading ? "..." : "Rerun"}
+          <span aria-hidden className="text-[10px] opacity-70">
+            ▾
+          </span>
+        </button>
+      )}
+    />
   );
 }

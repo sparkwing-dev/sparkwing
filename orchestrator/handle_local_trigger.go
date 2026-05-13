@@ -65,6 +65,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		ParentRunID: trigger.ParentRunID,
 		RetryOf:     trigger.RetryOf,
 		RetrySource: trigger.RetrySource,
+		Full:        trigger.Full,
 		Trigger: sparkwing.TriggerInfo{
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,

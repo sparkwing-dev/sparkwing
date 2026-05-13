@@ -127,6 +127,11 @@ func Run(ctx context.Context, opts Options) error {
 		if opts.ArtifactStore != nil {
 			ctrl.SetArtifactStore(opts.ArtifactStore)
 		}
+		// Consume pending triggers (web/CLI retry, /api/v1/triggers)
+		// in the background by compiling + execing each pipeline's
+		// .sparkwing/ binary. Without this, retried runs sit in the
+		// trigger table forever.
+		go orchestrator.RunLocalTriggerConsumer(ctx, st, nil)
 	}
 
 	var dashBackend backend.Backend
@@ -175,6 +180,13 @@ func Run(ctx context.Context, opts Options) error {
 	if logsSrv != nil {
 		root.Handle("/api/v1/logs/", logsSrv.Handler())
 	}
+	// /api/v1/pipelines aggregates `.sparkwing/pipelines.yaml` across
+	// every repo registered in ~/.config/sparkwing/repos.yaml. The
+	// dashboard's TriggerForm uses this to populate its pipeline
+	// picker without each user needing to start the dashboard from
+	// inside a sparkwing-bearing repo. Registered ahead of any
+	// controller catch-all so Go 1.22 mux specificity prefers it.
+	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	if ctrl != nil {
 		ctrlHandler := ctrl.Handler()
 		if opts.ReadOnly {
@@ -182,19 +194,6 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		root.Handle("/api/v1/", ctrlHandler)
 		root.Handle("/webhooks/", ctrlHandler)
-	} else {
-		// Local-only mode has no controller and therefore no
-		// pipelines.yaml registry. The dashboard polls
-		// /api/v1/pipelines for tag-filter options and registry-only
-		// rows; without a stub the requests 404 every poll cycle.
-		// Empty body is the right answer — the UI degrades gracefully
-		// (no tag options, no unrun pipelines) and the controller's
-		// real handler wins when present via Go 1.22 mux specificity.
-		root.Handle("GET /api/v1/pipelines",
-			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"pipelines":{}}`))
-			}))
 	}
 	root.Handle("/", webHandler)
 

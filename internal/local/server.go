@@ -245,6 +245,9 @@ func (s *Server) Handler() http.Handler {
 
 	// Retry: creates a fresh run. Same write scope as triggers.
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
+	// Retry tree: every run sharing the same root retry ancestor,
+	// ordered by created_at. Drives the dashboard's Attempts dropdown.
+	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
 	// Cross-pipeline refs: "latest run of pipeline X matching these
 	// statuses / within this age." Powers sparkwing.Ref[T].Get.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -466,6 +467,11 @@ func (s *Store) migrate() error {
 		"retry_of":       "TEXT NOT NULL DEFAULT ''",
 		"retry_source":   "TEXT NOT NULL DEFAULT ''",
 		"parent_node_id": "TEXT NOT NULL DEFAULT ''",
+		// full=1 means "rerun all": ignore the skip-passed
+		// rehydration that Options.RetryOf would normally trigger
+		// and re-execute every node. Surfaced via the dashboard's
+		// "Rerun all" choice on the retry menu.
+		"full": "INTEGER NOT NULL DEFAULT 0",
 	}); err != nil {
 		return err
 	}
@@ -756,6 +762,87 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 	return err
 }
 
+// ListRunRetryTree returns every run in the retry tree that runID
+// belongs to, ordered by created_at (oldest first). The "root" is
+// found by walking retry_of upward until it hits "", then the result
+// includes the root plus every descendant whose retry_of chain leads
+// back to it. Branching is preserved: if attempt #2 was retried twice
+// (creating #3 and #4 with the same retry_of=#2), both #3 and #4
+// appear as siblings in the list.
+//
+// Numbering / display: callers number the returned slice 1..N in
+// order; the chronological position is the user-visible "Attempt N".
+//
+// Cycle guard: a hard cap on the upward walk keeps a corrupted
+// retry_of cycle from spinning forever.
+func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	// Walk up to the root.
+	const maxDepth = 256
+	rootID := runID
+	for range maxDepth {
+		row := s.db.QueryRowContext(ctx,
+			`SELECT retry_of FROM runs WHERE id = ?`, rootID)
+		var parent string
+		if err := row.Scan(&parent); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if parent == "" || parent == rootID {
+			break
+		}
+		rootID = parent
+	}
+	// BFS down: collect every run whose retry_of chain reaches rootID.
+	collected := map[string]*Run{}
+	root, err := s.GetRun(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil {
+		return nil, nil
+	}
+	collected[rootID] = root
+	frontier := []string{rootID}
+	for len(frontier) > 0 {
+		next := frontier[:0:0]
+		for _, id := range frontier {
+			rows, err := s.db.QueryContext(ctx,
+				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+				   FROM runs WHERE retry_of = ?`, id)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				r, scanErr := scanRun(rows)
+				if scanErr != nil {
+					rows.Close()
+					return nil, scanErr
+				}
+				if _, dup := collected[r.ID]; dup {
+					continue
+				}
+				collected[r.ID] = r
+				next = append(next, r.ID)
+			}
+			rows.Close()
+		}
+		frontier = next
+	}
+	out := make([]*Run, 0, len(collected))
+	for _, r := range collected {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx, `
@@ -871,6 +958,15 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 }
 
 // DeleteRun removes the run + its trigger; CASCADE handles children.
+//
+// Triggers carrying parent_node_id are the cross-pipeline spawn
+// linkage from their PARENT run -- they double as the dispatch row
+// AND the edge the parent's DAG renders as "spawned this child".
+// Deleting that trigger would silently strip the spawn pill from the
+// parent and flip the node back to its declared Inline pill, which
+// surprises operators who only meant to discard the child. We keep
+// the trigger row in that case (orphaned: child run is gone, edge
+// remains visible) so parent DAGs stay stable.
 func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -880,7 +976,8 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, runID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM triggers WHERE id = ?`, runID); err != nil {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM triggers WHERE id = ? AND parent_node_id = ''`, runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2017,6 +2114,12 @@ type Trigger struct {
 	// ParentNodeID: which parent node spawned this; for retry-lineage
 	// chaining across nested spawns.
 	ParentNodeID string `json:"parent_node_id,omitempty"`
+	// Full: "rerun all" mode for manual retries. When true, the
+	// orchestrator ignores skip-passed rehydration and re-executes
+	// every node even though retry_of is set. The dashboard's
+	// "Rerun all" choice flips this; "Rerun from failed" leaves
+	// it false (the default).
+	Full bool `json:"full,omitempty"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -2035,14 +2138,18 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if t.ParentRunID != "" {
 		parent = sql.NullString{String: t.ParentRunID, Valid: true}
 	}
+	fullInt := 0
+	if t.Full {
+		fullInt = 1
+	}
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
-		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.RetryOf, t.RetrySource, t.ParentNodeID,
+		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
 	)
 	return err
 }
@@ -2140,7 +2247,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
   FROM triggers
  WHERE status = 'pending'`
 	args := []any{}
@@ -2168,13 +2275,15 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	var argsJSON, envJSON []byte
 	var createdNS int64
 	var parent sql.NullString
+	var fullInt int
 	err = tx.QueryRowContext(ctx, sel, args...).Scan(
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID)
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt)
 	if parent.Valid {
 		t.ParentRunID = parent.String
 	}
+	t.Full = fullInt != 0
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -2387,14 +2496,15 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	var argsJSON, envJSON []byte
 	var createdNS int64
 	var parent sql.NullString
+	var fullInt int
 	if err := tx.QueryRowContext(ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID); err != nil {
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2403,6 +2513,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	if parent.Valid {
 		t.ParentRunID = parent.String
 	}
+	t.Full = fullInt != 0
 	t.CreatedAt = time.Unix(0, createdNS)
 	t.ClaimedAt = &now
 	t.LeaseExpiresAt = &expires
@@ -2422,14 +2533,15 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var createdNS int64
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
+	var fullInt int
 	err := s.db.QueryRowContext(ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, full
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent)
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -2448,6 +2560,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	if parent.Valid {
 		t.ParentRunID = parent.String
 	}
+	t.Full = fullInt != 0
 	if len(argsJSON) > 0 {
 		_ = json.Unmarshal(argsJSON, &t.Args)
 	}
@@ -2520,7 +2633,7 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
@@ -2538,12 +2651,14 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		var createdNS int64
 		var claimedNS, leaseNS sql.NullInt64
 		var parent sql.NullString
+		var fullInt int
 		if err := rows.Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
-			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID); err != nil {
+			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
 			return nil, err
 		}
+		t.Full = fullInt != 0
 		t.CreatedAt = time.Unix(0, createdNS)
 		if claimedNS.Valid {
 			ct := time.Unix(0, claimedNS.Int64)

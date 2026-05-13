@@ -10,10 +10,38 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+// handleListAttempts returns every run in the same retry tree as
+// the requested id, ordered oldest-first. The dashboard's Attempts
+// dropdown numbers them sequentially -- branches (e.g. attempt #2
+// retried twice) appear as siblings ordered by created_at, so
+// chronological numbering stays linear even when the underlying
+// retry_of graph has forks.
+//
+// Response shape mirrors GET /api/v1/runs: { "runs": [Run, ...] }
+// so the existing client decoder works unchanged.
+func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	runs, err := s.store.ListRunRetryTree(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if runs == nil {
+		runs = []*store.Run{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
 // handleRetry creates a new run with the same pipeline + args as an
 // existing run. The source run's status doesn't matter (retrying a
 // running run is allowed). Trigger source is "retry" so callers can
 // distinguish retries from originals.
+//
+// Query parameters:
+//   - full=1  re-execute every node, ignoring the skip-passed
+//     rehydration that retry_of would normally trigger. This is the
+//     "Rerun all" choice on the dashboard retry menu. Default "Rerun
+//     from failed" leaves full unset (skip-passed kicks in).
 func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	srcID := r.PathValue("id")
 	src, err := s.store.GetRun(r.Context(), srcID)
@@ -25,6 +53,8 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	full := r.URL.Query().Get("full") == "1"
 
 	newID := newRunID()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
@@ -42,6 +72,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		GithubRepo:    src.GithubRepo,
 		RetryOf:       srcID,
 		RetrySource:   store.RetrySourceManual,
+		Full:          full,
 		CreatedAt:     time.Now(),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))

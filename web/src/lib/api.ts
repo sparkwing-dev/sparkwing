@@ -406,6 +406,20 @@ export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
   return body.runs || [];
 }
 
+// getRunAttempts returns every run in the same retry tree as runID,
+// ordered oldest-first. Empty array when the run has no retry history
+// (it's its own only attempt). Used by the dashboard's Attempts
+// dropdown to let users navigate across reruns of the same pipeline
+// invocation.
+export async function getRunAttempts(runID: string): Promise<Run[]> {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/attempts`, {
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res || !res.ok) return [];
+  const body = await res.json();
+  return body.runs || [];
+}
+
 export async function getRun(runID: string): Promise<RunDetail | null> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${runID}?include=nodes`, {
     cache: "no-store",
@@ -606,6 +620,17 @@ export async function cancelRun(runID: string): Promise<void> {
   }
 }
 
+// deleteRun removes the run row (cascade-drops its nodes/events) and
+// its trigger. Idempotent: a missing id returns 204.
+export async function deleteRun(runID: string): Promise<void> {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}`, {
+    method: "DELETE",
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`delete failed: ${res.status}`);
+  }
+}
+
 // --- Dark stubs: each becomes a real endpoint in a later session ---
 //
 // These exist so components that reference them still compile and
@@ -786,8 +811,18 @@ export async function getNodeMetrics(
 export type JobMetrics = NodeMetrics;
 
 // Session I -- retry.
-export async function retryRun(runID: string): Promise<Run | null> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/retry`, {
+//
+// Default mode is "rerun from failed": the new run inherits retry_of
+// and the orchestrator rehydrates passed nodes, re-executing only the
+// failed / unreached subset. Pass full=true for "rerun all" -- the
+// orchestrator ignores skip-passed rehydration and re-executes every
+// node even though retry_of is set.
+export async function retryRun(
+  runID: string,
+  opts?: { full?: boolean },
+): Promise<Run | null> {
+  const qs = opts?.full ? "?full=1" : "";
+  const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/retry${qs}`, {
     method: "POST",
   }).catch(() => null);
   if (!res || !res.ok) return null;

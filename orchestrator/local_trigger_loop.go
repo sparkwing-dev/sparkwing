@@ -72,6 +72,64 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, log
 	}
 }
 
+// RunLocalTriggerConsumer polls for pending triggers (including ones
+// created by web/CLI retry against the same SQLite store) and
+// dispatches each via the compile+exec path. Use this in long-lived
+// laptop dev servers (localws) so retried/queued runs actually
+// execute instead of sitting in the trigger table.
+//
+// The compile cache is shared across the consumer's lifetime so
+// back-to-back triggers against the same .sparkwing/ skip the rebuild.
+// Returns when ctx is cancelled; in-flight dispatches finish first.
+func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	cache := &localCompileCache{}
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		trig, err := st.ClaimNextTrigger(ctx, store.DefaultLeaseDuration)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			logger.Warn("local trigger consumer: claim failed", "err", err)
+			continue
+		}
+		if trig == nil {
+			continue
+		}
+
+		wg.Add(1)
+		go func(t *store.Trigger) {
+			defer wg.Done()
+			if err := dispatchLocalTrigger(ctx, st, t, cache, logger); err != nil {
+				logger.Error("local trigger dispatch failed",
+					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
+				_ = st.CreateRun(ctx, store.Run{
+					ID:        t.ID,
+					Pipeline:  t.Pipeline,
+					Status:    "failed",
+					StartedAt: time.Now(),
+				})
+				_ = st.FinishRun(ctx, t.ID, "failed", "local dispatch: "+err.Error())
+				_ = st.FinishTrigger(ctx, t.ID)
+			}
+		}(trig)
+	}
+}
+
 // claimChildTrigger claims the oldest pending trigger parented to
 // runID. Filtering keeps multi-run sessions from stealing each
 // other's children.

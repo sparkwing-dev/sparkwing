@@ -19,10 +19,46 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 )
+
+// resolveRunsClient returns a controller client for runs verbs. When
+// onFlag is empty, the local dashboard's URL (written to
+// $SPARKWING_HOME/dev.env by localws) is used so the verb operates
+// against the local SQLite-backed controller without needing a
+// configured profile.
+//
+// logc, when non-nil, is the matching logs-service client for prune's
+// log-blob cleanup.
+func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogStore, err error) {
+	if onFlag != "" {
+		prof, perr := resolveProfile(onFlag)
+		if perr != nil {
+			return nil, nil, perr
+		}
+		if perr := requireController(prof, cmd); perr != nil {
+			return nil, nil, perr
+		}
+		c = client.NewWithToken(prof.Controller, nil, prof.Token)
+		if prof.Logs != "" {
+			logc = sparkwinglogs.New(prof.Logs, nil, prof.Token)
+		}
+		return c, logc, nil
+	}
+	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
+	if ctrlURL == "" {
+		return nil, nil, fmt.Errorf("%s: no --on profile and no local dashboard running "+
+			"(start it with `sparkwing dashboard start`, or pass --on <profile>)", cmd)
+	}
+	c = client.New(ctrlURL, nil)
+	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
+		logc = sparkwinglogs.New(logsURL, nil, "")
+	}
+	return c, logc, nil
+}
 
 // collectRunIDs walks --run flags and returns the deduplicated id
 // list in encounter order. A --run value of "-" reads ids from
@@ -119,14 +155,10 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsRetry.Path)
 	}
-	prof, err := resolveProfile(*on)
+	c, _, err := resolveRunsClient(*on, cmdJobsRetry.Path)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, cmdJobsRetry.Path); err != nil {
-		return err
-	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
 
 	results := make([]runResult, 0, len(ids))
 	for _, srcID := range ids {
@@ -178,14 +210,10 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsCancel.Path)
 	}
-	prof, err := resolveProfile(*on)
+	c, _, err := resolveRunsClient(*on, cmdJobsCancel.Path)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, cmdJobsCancel.Path); err != nil {
-		return err
-	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
 	results := make([]runResult, 0, len(ids))
 	for _, id := range ids {
 		if err := c.CancelRun(ctx, id); err != nil {
@@ -224,17 +252,9 @@ func runRunsPrune(ctx context.Context, args []string) error {
 	if len(explicitIDs) > 0 && *olderThan > 0 {
 		return errors.New("runs prune: --run and --older-than are mutually exclusive")
 	}
-	prof, err := resolveProfile(*on)
+	c, logc, err := resolveRunsClient(*on, cmdJobsPrune.Path)
 	if err != nil {
 		return err
-	}
-	if err := requireController(prof, cmdJobsPrune.Path); err != nil {
-		return err
-	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
-	var logc storage.LogStore
-	if prof.Logs != "" {
-		logc = sparkwinglogs.New(prof.Logs, nil, prof.Token)
 	}
 
 	victims := explicitIDs
