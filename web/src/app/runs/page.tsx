@@ -1107,50 +1107,75 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedBefore: filterState.setFinishedBefore,
   };
 
-  // The grep query lives in the URL (?q=…) so the search survives
-  // refresh and is shareable.
-  const initialQuery = searchParams.get("q") || "";
+  // gq + since live in the URL so the search survives refresh, is
+  // shareable, and the browser back button restores the same state
+  // when the user navigates from a result row into a run and back.
+  // Using `gq` (not `q`) because the filter bar already owns `q` for
+  // its text search.
+  const initialQuery = searchParams.get("gq") || "";
+  const initialSince = searchParams.get("gsince") || "24h";
   const [query, setQuery] = useState(initialQuery);
-  const [since, setSince] = useState("24h");
+  const [since, setSince] = useState(initialSince);
   const [results, setResults] = useState<RunsGrepMatch[] | null>(null);
   const [runsMap, setRunsMap] = useState<Record<string, RunsGrepRunMeta>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsScanned, setRunsScanned] = useState(0);
-  const submit = useCallback(async () => {
-    const q = query.trim();
-    if (!q) {
-      setResults(null);
-      setRunsMap({});
-      setRunsScanned(0);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await searchRunsGrep(q, {
-        pipelines: filterState.filterPipeline,
-        excludePipelines: filterState.excludePipeline,
-        statuses: filterState.filterStatus,
-        excludeStatuses: filterState.excludeStatus,
-        branches: filterState.filterBranch,
-        excludeBranches: filterState.excludeBranch,
-        shaPrefixes: filterState.filterCommit,
-        excludeShaPrefixes: filterState.excludeCommit,
-        since: since || undefined,
-        limit: 200,
-        maxMatches: 10,
-      });
-      setResults(resp.matches);
-      setRunsMap(resp.runs);
-      setRunsScanned(resp.runs_scanned);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [query, since, filterState]);
+  const runGrep = useCallback(
+    async (q: string, sinceVal: string) => {
+      const trimmed = q.trim();
+      if (!trimmed) {
+        setResults(null);
+        setRunsMap({});
+        setRunsScanned(0);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await searchRunsGrep(trimmed, {
+          pipelines: filterState.filterPipeline,
+          excludePipelines: filterState.excludePipeline,
+          statuses: filterState.filterStatus,
+          excludeStatuses: filterState.excludeStatus,
+          branches: filterState.filterBranch,
+          excludeBranches: filterState.excludeBranch,
+          shaPrefixes: filterState.filterCommit,
+          excludeShaPrefixes: filterState.excludeCommit,
+          since: sinceVal || undefined,
+          limit: 200,
+          maxMatches: 10,
+        });
+        setResults(resp.matches);
+        setRunsMap(resp.runs);
+        setRunsScanned(resp.runs_scanned);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filterState],
+  );
+  const submit = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (query.trim()) params.set("gq", query.trim());
+    else params.delete("gq");
+    if (since && since !== "24h") params.set("gsince", since);
+    else params.delete("gsince");
+    router.replace(`/runs?${params.toString()}`, { scroll: false });
+    runGrep(query, since);
+  }, [query, since, searchParams, router, runGrep]);
+  // Auto-run on mount when the URL arrived with a gq — e.g., direct
+  // link, refresh, or the user pressing Back from a run detail.
+  const ranInitialRef = useRef(false);
+  useEffect(() => {
+    if (ranInitialRef.current) return;
+    ranInitialRef.current = true;
+    if (initialQuery) runGrep(initialQuery, initialSince);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const onResultClick = (m: RunsGrepMatch) => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem(
@@ -1158,10 +1183,11 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         JSON.stringify({ nodeID: m.node_id, line: m.line }),
       );
     }
+    // Keep gq + gsince in the URL so the browser back button drops
+    // the user right back into the search view with the same query.
     const params = new URLSearchParams(searchParams.toString());
     params.delete("view");
     params.set("run", m.run_id);
-    params.delete("q");
     router.push(`/runs?${params.toString()}`);
   };
   const byRun = new Map<string, RunsGrepMatch[]>();
