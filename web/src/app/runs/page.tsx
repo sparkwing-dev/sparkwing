@@ -2762,7 +2762,11 @@ function RunDetailPane({
         )}
         {effectiveTab === "summary" && (
           <div className="flex flex-col gap-3 p-4">
-            <RunSummariesList nodes={nodes} onSelectNode={onSelectNode} />
+            <RunSummariesList
+              nodes={nodes}
+              onSelectNode={onSelectNode}
+              onSelectStep={onSelectStep}
+            />
             <SummaryPanel
               run={run}
               nodes={nodes}
@@ -3016,27 +3020,41 @@ function NodeLogSummary({ node }: { node: RunNode }) {
 function RunSummariesList({
   nodes,
   onSelectNode,
+  onSelectStep,
 }: {
   nodes: RunNode[];
   onSelectNode: (id: string | null) => void;
+  onSelectStep: (nodeId: string, stepId: string | null) => void;
 }) {
-  const groups = nodes
-    .map((n) => {
-      const stepSummaries = (n.work?.steps ?? [])
-        .filter((s) => !!s.summary && s.summary.trim() !== "")
-        .map((s) => ({ stepID: s.id, md: s.summary! }));
-      const nodeSummary = n.summary && n.summary.trim() !== "" ? n.summary : "";
-      return {
-        node: n,
-        nodeSummary,
-        stepSummaries,
-        total: stepSummaries.length + (nodeSummary ? 1 : 0),
+  // Flatten into one card per summary: a node-scope summary and each
+  // step-scope summary are siblings, each with their own `status >
+  // job > step?` header line.
+  type Card =
+    | { kind: "node"; node: RunNode; md: string; key: string }
+    | {
+        kind: "step";
+        node: RunNode;
+        stepID: string;
+        md: string;
+        key: string;
       };
-    })
-    .filter((g) => g.total > 0);
-  // Per-card raw/pretty toggle. Stored as Set<key> where key is
-  // either the nodeID (for node-scope summary) or "nodeID::stepID"
-  // (for step-scope). Default = pretty (key absent).
+  const cards: Card[] = [];
+  for (const n of nodes) {
+    if (n.summary && n.summary.trim() !== "") {
+      cards.push({ kind: "node", node: n, md: n.summary, key: n.id });
+    }
+    for (const s of n.work?.steps ?? []) {
+      if (s.summary && s.summary.trim() !== "") {
+        cards.push({
+          kind: "step",
+          node: n,
+          stepID: s.id,
+          md: s.summary,
+          key: `${n.id}::${s.id}`,
+        });
+      }
+    }
+  }
   const [rawKeys, setRawKeys] = useState<Set<string>>(new Set());
   const toggleRaw = (k: string) =>
     setRawKeys((prev) => {
@@ -3045,54 +3063,48 @@ function RunSummariesList({
       else next.add(k);
       return next;
     });
-  if (groups.length === 0) return null;
+  if (cards.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
       <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-        Summaries ({groups.reduce((acc, g) => acc + g.total, 0)})
+        Summaries ({cards.length})
       </div>
-      {groups.map((g) => (
+      {cards.map((c) => (
         <div
-          key={g.node.id}
-          className="border border-[var(--border)] rounded p-3 bg-[#0d1117]"
+          key={c.key}
+          className="border border-[var(--border)] rounded bg-[#0d1117]"
         >
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[var(--border)] text-xs font-mono">
             <span
-              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(g.node.outcome, g.node.status)}`}
+              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(c.node.outcome, c.node.status)}`}
             />
             <button
-              onClick={() => onSelectNode(g.node.id)}
-              className="font-mono text-xs text-[var(--accent)] hover:underline truncate"
-              title={`select ${g.node.id}`}
+              onClick={() => onSelectNode(c.node.id)}
+              className="text-[var(--accent)] hover:underline truncate"
+              title={`select ${c.node.id}`}
             >
-              {g.node.id}
+              {c.node.id}
             </button>
+            {c.kind === "step" && (
+              <>
+                <span className="text-[var(--muted)] shrink-0">›</span>
+                <button
+                  onClick={() => onSelectStep(c.node.id, c.stepID)}
+                  className="text-violet-300 hover:underline truncate"
+                  title={`select step ${c.stepID}`}
+                >
+                  {c.stepID}
+                </button>
+              </>
+            )}
           </div>
-          {g.nodeSummary && (
+          <div className="p-3">
             <SummaryCard
-              md={g.nodeSummary}
-              raw={rawKeys.has(g.node.id)}
-              onToggle={() => toggleRaw(g.node.id)}
+              md={c.md}
+              raw={rawKeys.has(c.key)}
+              onToggle={() => toggleRaw(c.key)}
             />
-          )}
-          {g.stepSummaries.map((sg) => {
-            const k = `${g.node.id}::${sg.stepID}`;
-            return (
-              <div key={sg.stepID} className="mt-2">
-                <div className="text-[10px] text-[var(--muted)] font-mono mb-1">
-                  step{" "}
-                  <span className="text-[var(--foreground)]">{sg.stepID}</span>
-                </div>
-                <div className="pl-3 border-l border-[var(--border)]">
-                  <SummaryCard
-                    md={sg.md}
-                    raw={rawKeys.has(k)}
-                    onToggle={() => toggleRaw(k)}
-                  />
-                </div>
-              </div>
-            );
-          })}
+          </div>
         </div>
       ))}
     </div>
