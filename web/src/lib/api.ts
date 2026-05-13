@@ -481,6 +481,57 @@ export function getNodeStreamUrl(runID: string, nodeID: string): string {
   return `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/stream?format=ansi`;
 }
 
+export interface RunsGrepMatch {
+  run_id: string;
+  pipeline: string;
+  node_id: string;
+  line: number;
+  content: string;
+}
+
+export interface RunsGrepResponse {
+  query: string;
+  matches: RunsGrepMatch[];
+  total: number;
+  runs_scanned: number;
+}
+
+export interface RunsGrepOpts {
+  pipelines?: string[];
+  statuses?: string[];
+  branches?: string[];
+  shaPrefixes?: string[];
+  since?: string;
+  limit?: number;
+  maxMatches?: number;
+}
+
+// searchRunsGrep is the dashboard counterpart of `sparkwing runs grep`.
+// Walks the recent-runs window narrowed by the filter args and returns
+// matching log lines across every (run, node) pair. Matching uses the
+// displayed log body (msg / attrs), not the raw NDJSON framing.
+export async function searchRunsGrep(
+  query: string,
+  opts: RunsGrepOpts = {},
+): Promise<RunsGrepResponse> {
+  const params = new URLSearchParams({ q: query });
+  for (const p of opts.pipelines ?? []) params.append("pipeline", p);
+  for (const s of opts.statuses ?? []) params.append("status", s);
+  for (const b of opts.branches ?? []) params.append("branch", b);
+  for (const s of opts.shaPrefixes ?? []) params.append("sha", s);
+  if (opts.since) params.set("since", opts.since);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.maxMatches !== undefined)
+    params.set("max_matches", String(opts.maxMatches));
+  const res = await authFetch(`${API_URL}/api/v1/runs/grep?${params}`, {
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    return { query, matches: [], total: 0, runs_scanned: 0 };
+  }
+  return res.json();
+}
+
 export function getRunEventsStreamUrl(runID: string): string {
   return `${API_URL}/api/v1/runs/${runID}/events/stream`;
 }

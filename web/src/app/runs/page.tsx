@@ -44,6 +44,7 @@ import {
   type Node as RunNode,
   type NodeWorkStep,
   type RunLogMatch,
+  type RunsGrepMatch,
   type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
@@ -58,6 +59,7 @@ import {
   retryRun,
   runDurationMs,
   searchRunLogs,
+  searchRunsGrep,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
 import {
@@ -262,6 +264,54 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
+  // Cross-run grep: pattern + result set + loading/error flags. The
+  // request reuses whatever filter chips are already active so the
+  // candidate set matches what the user is looking at.
+  const [grepMode, setGrepMode] = useState(false);
+  const [grepQuery, setGrepQuery] = useState("");
+  const [grepSince, setGrepSince] = useState("24h");
+  const [grepResults, setGrepResults] = useState<RunsGrepMatch[] | null>(null);
+  const [grepLoading, setGrepLoading] = useState(false);
+  const [grepError, setGrepError] = useState<string | null>(null);
+  const [grepRunsScanned, setGrepRunsScanned] = useState(0);
+  // When set, RunDetailPane consumes it once on mount: switches to
+  // the Logs tab, selects the node, and focuses the line. Lets a grep
+  // result click deep-link into the matching line without lifting the
+  // entire tab/log-focus state out of RunDetailPane.
+  const [pendingLogFocus, setPendingLogFocus] = useState<{
+    nodeID: string;
+    line: number;
+  } | null>(null);
+  const runGrep = useCallback(
+    async (pattern: string) => {
+      if (!pattern.trim()) {
+        setGrepResults(null);
+        setGrepRunsScanned(0);
+        return;
+      }
+      setGrepLoading(true);
+      setGrepError(null);
+      try {
+        const resp = await searchRunsGrep(pattern, {
+          pipelines: filterState.filterPipeline,
+          statuses: filterState.filterStatus,
+          branches: filterState.filterBranch,
+          shaPrefixes: filterState.filterCommit,
+          since: grepSince || undefined,
+          limit: 200,
+          maxMatches: 10,
+        });
+        setGrepResults(resp.matches);
+        setGrepRunsScanned(resp.runs_scanned);
+      } catch (e) {
+        setGrepError(e instanceof Error ? e.message : String(e));
+        setGrepResults([]);
+      } finally {
+        setGrepLoading(false);
+      }
+    },
+    [filterState, grepSince],
+  );
 
   const refresh = useCallback(async () => {
     const [runList, meta] = await Promise.all([
@@ -671,6 +721,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           onClearAll={() => clearAllFilters(filterState)}
           trailingActions={
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setGrepMode((v) => !v)}
+                title="search log bodies across runs (matches the active filters)"
+                className={`text-[10px] px-2 py-1 rounded border transition-colors ${
+                  grepMode
+                    ? "border-fuchsia-400 text-fuchsia-300 bg-fuchsia-500/10"
+                    : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]"
+                }`}
+              >
+                ⌕ Search logs
+              </button>
               {topLevel.length > 0 && (
                 <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted)] cursor-pointer shrink-0">
                   <input
@@ -731,7 +792,40 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         />
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      {grepMode && (
+        <GrepPanel
+          query={grepQuery}
+          setQuery={setGrepQuery}
+          since={grepSince}
+          setSince={setGrepSince}
+          onSubmit={() => runGrep(grepQuery)}
+          results={grepResults}
+          loading={grepLoading}
+          error={grepError}
+          runsScanned={grepRunsScanned}
+          activeFilters={{
+            pipelines: filterState.filterPipeline,
+            statuses: filterState.filterStatus,
+            branches: filterState.filterBranch,
+            commits: filterState.filterCommit,
+          }}
+          onResultClick={(m) => {
+            selectRun(m.run_id);
+            selectNode(m.node_id);
+            setPendingLogFocus({ nodeID: m.node_id, line: m.line });
+            setGrepMode(false);
+          }}
+          onClose={() => {
+            setGrepMode(false);
+            setGrepResults(null);
+            setGrepRunsScanned(0);
+          }}
+        />
+      )}
+
+      <div
+        className={`flex flex-1 overflow-hidden ${grepMode ? "hidden" : ""}`}
+      >
         {/* Left: Runs list. Collapses to a sidebar when a run is
           selected; expands to fill the screen otherwise. */}
         <div
@@ -868,6 +962,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 refresh();
                 if (selectedRun) loadDetail(selectedRun);
               }}
+              pendingLogFocus={
+                pendingLogFocus && pendingLogFocus.nodeID
+                  ? pendingLogFocus
+                  : null
+              }
+              onConsumePendingLogFocus={() => setPendingLogFocus(null)}
             />
           </div>
         )}
@@ -1022,6 +1122,197 @@ function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
   if (hasRunning) return "running";
   if (hasPending) return "pending";
   return "success";
+}
+
+// GrepPanel is the cross-run log search view that replaces the runs
+// list when "Search logs" is toggled on. Submits to /api/v1/runs/grep
+// using the page's active filter chips as the candidate set, then
+// renders RUN / NODE / LINE / TEXT rows. Clicking a row exits grep
+// mode and deep-links into that run, scrolling Logs to the matching
+// line.
+function GrepPanel({
+  query,
+  setQuery,
+  since,
+  setSince,
+  onSubmit,
+  results,
+  loading,
+  error,
+  runsScanned,
+  activeFilters,
+  onResultClick,
+  onClose,
+}: {
+  query: string;
+  setQuery: (v: string) => void;
+  since: string;
+  setSince: (v: string) => void;
+  onSubmit: () => void;
+  results: RunsGrepMatch[] | null;
+  loading: boolean;
+  error: string | null;
+  runsScanned: number;
+  activeFilters: {
+    pipelines: string[];
+    statuses: string[];
+    branches: string[];
+    commits: string[];
+  };
+  onResultClick: (m: RunsGrepMatch) => void;
+  onClose: () => void;
+}) {
+  const filterChips: { label: string; values: string[] }[] = [
+    { label: "pipeline", values: activeFilters.pipelines },
+    { label: "status", values: activeFilters.statuses },
+    { label: "branch", values: activeFilters.branches },
+    { label: "commit", values: activeFilters.commits },
+  ].filter((g) => g.values.length > 0);
+  const byRun = new Map<string, RunsGrepMatch[]>();
+  for (const m of results ?? []) {
+    const arr = byRun.get(m.run_id) ?? [];
+    arr.push(m);
+    byRun.set(m.run_id, arr);
+  }
+  const runOrder: string[] = [];
+  for (const m of results ?? []) {
+    if (!runOrder.includes(m.run_id)) runOrder.push(m.run_id);
+  }
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden border-b border-[var(--border)]">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--border)] bg-[var(--surface)] shrink-0">
+        <span className="text-fuchsia-300 font-mono text-xs">⌕ grep</span>
+        <input
+          autoFocus
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onSubmit();
+            } else if (e.key === "Escape") {
+              onClose();
+            }
+          }}
+          placeholder="substring to match across recent log bodies"
+          className="flex-1 text-xs font-mono px-2 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)]"
+        />
+        <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
+          since
+          <input
+            type="text"
+            value={since}
+            onChange={(e) => setSince(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            placeholder="24h"
+            className="w-16 text-xs font-mono px-1.5 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9]"
+          />
+        </label>
+        <button
+          onClick={onSubmit}
+          disabled={loading || !query.trim()}
+          className="text-[10px] px-2 py-1 rounded border border-fuchsia-400/60 text-fuchsia-300 hover:bg-fuchsia-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {loading ? "searching…" : "search"}
+        </button>
+        <button
+          onClick={onClose}
+          title="close grep (Esc)"
+          className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] transition-colors"
+        >
+          ✕ close
+        </button>
+      </div>
+      {filterChips.length > 0 && (
+        <div className="flex items-center flex-wrap gap-1.5 px-4 py-1.5 border-b border-[var(--border)] bg-[#0d1117] shrink-0 text-[10px]">
+          <span className="text-[var(--muted)]">candidate set:</span>
+          {filterChips.map((g) => (
+            <span
+              key={g.label}
+              className="font-mono px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)]"
+            >
+              {g.label}: {g.values.join(",")}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {error && (
+          <div className="text-xs font-mono text-red-400 mb-3">
+            error: {error}
+          </div>
+        )}
+        {results === null && !loading && !error && (
+          <div className="text-xs text-[var(--muted)]">
+            Type a substring and press Enter. Searches the displayed log body
+            (msg fields), not raw NDJSON framing.
+          </div>
+        )}
+        {results !== null && results.length === 0 && !loading && (
+          <div className="text-xs text-[var(--muted)]">
+            no matches across {runsScanned} run{runsScanned === 1 ? "" : "s"}
+          </div>
+        )}
+        {results !== null && results.length > 0 && (
+          <>
+            <div className="text-[10px] text-[var(--muted)] font-mono mb-2">
+              {results.length} match{results.length === 1 ? "" : "es"} across{" "}
+              {byRun.size} run{byRun.size === 1 ? "" : "s"} (scanned{" "}
+              {runsScanned})
+            </div>
+            <div className="flex flex-col gap-3">
+              {runOrder.map((runID) => {
+                const ms = byRun.get(runID) ?? [];
+                return (
+                  <div
+                    key={runID}
+                    className="border border-[var(--border)] rounded bg-[#0d1117]"
+                  >
+                    <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)]">
+                      <span className="font-mono text-xs text-[var(--accent)]">
+                        {runID}
+                      </span>
+                      <span className="font-mono text-[10px] text-violet-300">
+                        {ms[0].pipeline}
+                      </span>
+                      <span className="ml-auto font-mono text-[10px] text-[var(--muted)]">
+                        {ms.length} match{ms.length === 1 ? "" : "es"}
+                      </span>
+                    </div>
+                    <div className="divide-y divide-[var(--border)]">
+                      {ms.map((m, i) => (
+                        <div
+                          key={i}
+                          onClick={() => onResultClick(m)}
+                          className="px-2 py-1 cursor-pointer hover:bg-[#1e293b] transition-colors flex items-baseline gap-2"
+                        >
+                          <span className="font-mono text-[11px] text-cyan-300 shrink-0">
+                            {m.node_id}
+                          </span>
+                          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0">
+                            L{m.line}
+                          </span>
+                          <span className="font-mono text-[11px] text-[#c9d1d9] truncate flex-1">
+                            {m.content}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function NodesList({
@@ -1737,6 +2028,8 @@ function RunDetailPane({
   tab,
   setTab,
   focusedTab,
+  pendingLogFocus,
+  onConsumePendingLogFocus,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -1750,6 +2043,10 @@ function RunDetailPane({
   tab: TabKey;
   setTab: (k: TabKey) => void;
   focusedTab: TabKey | null;
+  // Cross-run grep deep link. When set, switches to the Logs tab and
+  // focuses the matching line; consumed once via onConsumePendingLogFocus.
+  pendingLogFocus?: { nodeID: string; line: number } | null;
+  onConsumePendingLogFocus?: () => void;
 }) {
   const selected = node;
   const selectedIsRunning =
@@ -2131,6 +2428,16 @@ function RunDetailPane({
     nodeID: string;
     line: number;
   } | null>(null);
+  // Cross-run grep deep link: arriving with a pendingLogFocus means
+  // the user clicked a result row in the GrepPanel. Switch to Logs,
+  // wire the focus through so the line scrolls into view, then clear
+  // the pending state so a tab change won't re-fire it.
+  useEffect(() => {
+    if (!pendingLogFocus) return;
+    setTab("logs");
+    setFindLogFocus(pendingLogFocus);
+    onConsumePendingLogFocus?.();
+  }, [pendingLogFocus, setTab, onConsumePendingLogFocus]);
   // Clear the focus when the query clears so a stale jump doesn't
   // ride into the next session.
   useEffect(() => {

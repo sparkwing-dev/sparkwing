@@ -100,6 +100,7 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	// Go 1.22's ServeMux picks these over /api/v1/.
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs", runLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/search", runLogsSearchHandler(opts.Backend))
+	authedMux.HandleFunc("GET /api/v1/runs/grep", runsGrepHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}", nodeLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
@@ -657,6 +658,180 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 			"total":   total,
 		})
 	}
+}
+
+// runsGrepHandler walks recent runs matching the supplied filter set
+// and substring-greps every node log. Mirrors `sparkwing runs grep`
+// from the CLI: same filter shape, same row schema. Each (run, node)
+// log read fans out so the wall-clock cost is dominated by the
+// slowest single read instead of summing all of them.
+//
+// Matching uses displayBodyForLogLine, so node id / step framing in
+// NDJSON metadata doesn't generate spurious hits — only what the
+// dashboard's Logs tab would actually display.
+func runsGrepHandler(b backend.Backend) http.HandlerFunc {
+	type match struct {
+		RunID    string `json:"run_id"`
+		Pipeline string `json:"pipeline"`
+		NodeID   string `json:"node_id"`
+		Line     int    `json:"line"`
+		Content  string `json:"content"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		if q == "" {
+			writeErr(w, http.StatusBadRequest, errors.New("q is required"))
+			return
+		}
+		needle := strings.ToLower(q)
+		runLimit := 50
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				runLimit = n
+			}
+		}
+		if runLimit > 1000 {
+			runLimit = 1000
+		}
+		maxMatches := 5
+		if v := r.URL.Query().Get("max_matches"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				maxMatches = n
+			}
+		}
+		filter := store.RunFilter{
+			Pipelines: r.URL.Query()["pipeline"],
+			Statuses:  r.URL.Query()["status"],
+			Limit:     runLimit,
+		}
+		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+			if d, err := time.ParseDuration(sinceStr); err == nil && d > 0 {
+				filter.Since = time.Now().Add(-d)
+			}
+		}
+		runs, err := b.ListRuns(r.Context(), filter)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		branches := r.URL.Query()["branch"]
+		shaPrefixes := r.URL.Query()["sha"]
+		if len(branches) > 0 || len(shaPrefixes) > 0 {
+			runs = filterRunsByBranchSHA(runs, branches, shaPrefixes)
+		}
+		// Build (run, node) work units up front so the worker pool can
+		// drain them with a single fanout cap rather than nested
+		// per-run goroutines.
+		type work struct {
+			run    *store.Run
+			nodeID string
+		}
+		var units []work
+		for _, run := range runs {
+			nodes, err := b.ListNodes(r.Context(), run.ID)
+			if err != nil {
+				continue
+			}
+			for _, n := range nodes {
+				units = append(units, work{run: run, nodeID: n.NodeID})
+			}
+		}
+		const fanout = 8
+		sem := make(chan struct{}, fanout)
+		type unitResult struct {
+			matches []match
+			count   int
+		}
+		results := make([]unitResult, len(units))
+		var wg sync.WaitGroup
+		for i, u := range units {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, u work) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				content, err := b.ReadNodeLog(r.Context(), u.run.ID, u.nodeID, backend.ReadOpts{})
+				if err != nil || len(content) == 0 {
+					return
+				}
+				sc := bufio.NewScanner(bytes.NewReader(content))
+				sc.Buffer(make([]byte, 1<<16), 1<<20)
+				displayLine := 0
+				var local unitResult
+				for sc.Scan() {
+					body, ok := displayBodyForLogLine(sc.Text())
+					if !ok {
+						continue
+					}
+					displayLine++
+					if !strings.Contains(strings.ToLower(body), needle) {
+						continue
+					}
+					local.count++
+					if maxMatches == 0 || local.count <= maxMatches {
+						local.matches = append(local.matches, match{
+							RunID:    u.run.ID,
+							Pipeline: u.run.Pipeline,
+							NodeID:   u.nodeID,
+							Line:     displayLine,
+							Content:  body,
+						})
+					}
+				}
+				results[i] = local
+			}(i, u)
+		}
+		wg.Wait()
+		var matches []match
+		total := 0
+		for _, res := range results {
+			total += res.count
+			matches = append(matches, res.matches...)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"query":        q,
+			"matches":      matches,
+			"total":        total,
+			"runs_scanned": len(runs),
+		})
+	}
+}
+
+// filterRunsByBranchSHA mirrors the CLI's --branch / --sha narrowing.
+// Empty filter lists short-circuit at the call site so we can keep
+// the body trivial.
+func filterRunsByBranchSHA(runs []*store.Run, branches, shaPrefixes []string) []*store.Run {
+	out := runs[:0]
+	for _, run := range runs {
+		if len(branches) > 0 {
+			if !containsExact(branches, run.GitBranch) {
+				continue
+			}
+		}
+		if len(shaPrefixes) > 0 {
+			matched := false
+			for _, p := range shaPrefixes {
+				if p != "" && strings.HasPrefix(run.GitSHA, p) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		out = append(out, run)
+	}
+	return out
+}
+
+func containsExact(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func nodeLogsHandler(b backend.Backend) http.HandlerFunc {
