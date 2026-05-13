@@ -2968,7 +2968,7 @@ function NodeLogSummary({ node }: { node: RunNode }) {
   const isFailed =
     outcome === "failed" || node.status === "failed" || !!node.error;
   const isRunning = !node.finished_at && node.status !== "pending";
-  const annotations = node.annotations ?? [];
+  const annotations = collectNodeAnnotations(node);
   // Plain success with nothing to surface: hide the block entirely so
   // it doesn't add noise.
   if (
@@ -3029,10 +3029,22 @@ function NodeLogSummary({ node }: { node: RunNode }) {
           {annotations.map((a, i) => (
             <li
               key={i}
-              className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2"
+              className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-1.5"
             >
-              <span className="text-[var(--muted)] shrink-0">›</span>
-              <span className="whitespace-pre-wrap break-words">{a}</span>
+              {a.stepID ? (
+                <>
+                  <span
+                    className="text-violet-300 shrink-0"
+                    title={`step ${a.stepID}`}
+                  >
+                    {a.stepID}
+                  </span>
+                  <span className="text-[var(--muted)] shrink-0">›</span>
+                </>
+              ) : (
+                <span className="text-[var(--muted)] shrink-0">›</span>
+              )}
+              <span className="whitespace-pre-wrap break-words">{a.text}</span>
             </li>
           ))}
         </ul>
