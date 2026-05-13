@@ -37,6 +37,7 @@ import (
 //
 //	Cross-cutting
 //	  Annotate (node-level summaries)    .................. every step
+//	  Summary (markdown step summary)    .................. deploy/rollout
 //
 // Each step sleeps briefly so every node and step renders as its own
 // bar in the dashboard waterfall. Total run ~4-6s.
@@ -535,6 +536,7 @@ func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	// Rollout is the most chatty step: ~14 status pings over 5s
 	// simulating a kubectl rollout watch. Skipped under DRY_RUN=1.
 	return sparkwing.Step(w, "rollout", func(ctx context.Context) error {
+		out := j.Build.Get(ctx)
 		lines := []string{
 			"watching deployment/example-app",
 			"replicas: 0/3 ready, 3 updated, 0 available",
@@ -556,6 +558,21 @@ func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			return err
 		}
 		sparkwing.Annotate(ctx, "rolled out 3/3 replicas to kind-local")
+		sparkwing.Summary(ctx, fmt.Sprintf(`## Rollout complete
+
+**Image** `+"`%s`"+`
+**Digest** `+"`%s`"+`
+**Size** %d MiB · stripped
+
+### Pods
+| name | status |
+|---|---|
+| example-app-7d9c4-abc12 | Ready |
+| example-app-7d9c4-def34 | Ready |
+| example-app-7d9c4-ghi56 | Ready |
+
+3/3 replicas ready on **kind-local**.`,
+			out.Tag, out.Digest, out.SizeMB))
 		return nil
 	}).Needs(apply).SkipIf(func(ctx context.Context) bool {
 		return strings.EqualFold(os.Getenv("DRY_RUN"), "1")
