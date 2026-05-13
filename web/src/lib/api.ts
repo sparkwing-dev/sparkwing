@@ -230,6 +230,10 @@ export interface Node {
   // sparkwing.Annotate(ctx, msg). Multiple entries accumulate in
   // call order. Surfaced in the dashboard's NodeLogSummary block.
   annotations?: string[];
+  // Markdown summary posted by sparkwing.Summary() between steps
+  // (node-scope). Overwrite-on-write. Per-step summaries live on
+  // NodeWorkStep.summary instead.
+  summary?: string;
   // Named-group memberships from the Plan DSL: every plan.Group(name,
   // members...) this node belongs to. Populated from the plan snapshot
   // server-side; empty/undefined for ungrouped nodes. Drives the
@@ -322,6 +326,10 @@ export interface NodeWorkStep {
   // while this step was active. Mirrors RunNode.annotations but
   // scoped to one step inside the inner Work DAG.
   annotations?: string[];
+  // Latest markdown summary posted by sparkwing.Summary() during
+  // this step. Overwrite-on-write, so only the most recent call
+  // survives. Empty when no Summary was emitted.
+  summary?: string;
 }
 
 export interface NodeWorkSpawn {

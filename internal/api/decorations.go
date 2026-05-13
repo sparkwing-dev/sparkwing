@@ -133,6 +133,10 @@ type NodeStep struct {
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	DurationMS  int64      `json:"duration_ms,omitempty"`
 	Annotations []string   `json:"annotations,omitempty"`
+	// Latest markdown summary posted by sparkwing.Summary during this
+	// step. Overwrite-on-write (unlike Annotations), so only the most
+	// recent call survives. Empty when no Summary was emitted.
+	Summary string `json:"summary,omitempty"`
 }
 
 // NodeApprovalState is the runtime resolution of a JobApproval gate.
@@ -345,6 +349,7 @@ func stampWork(w *NodeWork, lookup map[string]*store.NodeStep) {
 			s.DurationMS = row.FinishedAt.Sub(*row.StartedAt).Milliseconds()
 		}
 		s.Annotations = row.Annotations
+		s.Summary = row.Summary
 	}
 	for i := range w.Spawns {
 		if w.Spawns[i].TargetWork != nil {

@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import MarkdownBody from "@/components/MarkdownBody";
 import PipelineOverview from "@/components/PipelineOverview";
 import {
   type FilterCtx,
@@ -2761,6 +2762,7 @@ function RunDetailPane({
         )}
         {effectiveTab === "summary" && (
           <div className="flex flex-col gap-3 p-4">
+            <RunSummariesList nodes={nodes} onSelectNode={onSelectNode} />
             <SummaryPanel
               run={run}
               nodes={nodes}
@@ -3002,6 +3004,76 @@ function NodeLogSummary({ node }: { node: RunNode }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// RunSummariesList renders every sparkwing.Summary() markdown blob
+// posted during the run, grouped by node + step. Overwrite-on-write
+// so each entry is whatever the last Summary call left behind. Sits
+// at the top of the Summary tab as the run's "what happened" pane.
+function RunSummariesList({
+  nodes,
+  onSelectNode,
+}: {
+  nodes: RunNode[];
+  onSelectNode: (id: string | null) => void;
+}) {
+  const groups = nodes
+    .map((n) => {
+      const stepSummaries = (n.work?.steps ?? [])
+        .filter((s) => !!s.summary && s.summary.trim() !== "")
+        .map((s) => ({ stepID: s.id, md: s.summary! }));
+      const nodeSummary = n.summary && n.summary.trim() !== "" ? n.summary : "";
+      return {
+        node: n,
+        nodeSummary,
+        stepSummaries,
+        total: stepSummaries.length + (nodeSummary ? 1 : 0),
+      };
+    })
+    .filter((g) => g.total > 0);
+  if (groups.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+        Summaries ({groups.reduce((acc, g) => acc + g.total, 0)})
+      </div>
+      {groups.map((g) => (
+        <div
+          key={g.node.id}
+          className="border border-[var(--border)] rounded p-3 bg-[#0d1117]"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(g.node.outcome, g.node.status)}`}
+            />
+            <button
+              onClick={() => onSelectNode(g.node.id)}
+              className="font-mono text-xs text-[var(--accent)] hover:underline truncate"
+              title={`select ${g.node.id}`}
+            >
+              {g.node.id}
+            </button>
+          </div>
+          {g.nodeSummary && (
+            <div className="text-[12px]">
+              <MarkdownBody md={g.nodeSummary} />
+            </div>
+          )}
+          {g.stepSummaries.map((sg) => (
+            <div key={sg.stepID} className="mt-2">
+              <div className="text-[10px] text-[var(--muted)] font-mono mb-1">
+                step{" "}
+                <span className="text-[var(--foreground)]">{sg.stepID}</span>
+              </div>
+              <div className="text-[12px] pl-3 border-l border-[var(--border)]">
+                <MarkdownBody md={sg.md} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
