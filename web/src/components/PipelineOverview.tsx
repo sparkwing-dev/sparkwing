@@ -316,7 +316,7 @@ export default function PipelineOverview({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto p-6 w-full">
         <div className="flex items-baseline justify-between mb-4">
           <h1 className="text-xl font-bold">Pipelines</h1>
           <span className="text-[10px] font-mono text-[var(--muted)]">
