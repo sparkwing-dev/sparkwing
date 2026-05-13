@@ -162,6 +162,7 @@ func Run(ctx context.Context, opts Options) error {
 	// assertion.
 	root := http.NewServeMux()
 	root.Handle("/api/v1/health/services", webHandler)
+	root.Handle("GET /api/v1/runs/grep", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs/{node}", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", webHandler)
