@@ -4994,24 +4994,61 @@ function StepDag({
           {node.id}
         </span>
       </div>
-      {(node.annotations?.length ?? 0) > 0 && (
-        <div className="mb-2 border border-[var(--border)] rounded p-2 bg-[#0d1117]">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-            Annotations ({node.annotations!.length})
+      {(() => {
+        // Flatten node-level + per-step annotations. Annotations
+        // emitted inside a step body live on step.annotations (not
+        // node.annotations) since the dual-persist write was dropped,
+        // so reading node.annotations alone misses most of them.
+        type Row =
+          | { stepID: null; text: string }
+          | { stepID: string; text: string };
+        const rows: Row[] = [];
+        const stepTexts = new Set<string>();
+        for (const s of node.work?.steps ?? []) {
+          for (const a of s.annotations ?? []) {
+            rows.push({ stepID: s.id, text: a });
+            stepTexts.add(a);
+          }
+        }
+        for (const a of node.annotations ?? []) {
+          if (stepTexts.has(a)) continue;
+          rows.push({ stepID: null, text: a });
+        }
+        if (rows.length === 0) return null;
+        return (
+          <div className="mb-2 border border-[var(--border)] rounded p-2 bg-[#0d1117]">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+              Annotations ({rows.length})
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {rows.map((r, i) => (
+                <li
+                  key={i}
+                  className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-1.5"
+                >
+                  {r.stepID && (
+                    <>
+                      <span
+                        className="text-violet-300 shrink-0"
+                        title={`step ${r.stepID}`}
+                      >
+                        {r.stepID}
+                      </span>
+                      <span className="text-[var(--muted)] shrink-0">›</span>
+                    </>
+                  )}
+                  {!r.stepID && (
+                    <span className="text-cyan-300 shrink-0">›</span>
+                  )}
+                  <span className="whitespace-pre-wrap break-words">
+                    {r.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <ul className="flex flex-col gap-0.5">
-            {node.annotations!.map((a, i) => (
-              <li
-                key={i}
-                className="font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2"
-              >
-                <span className="text-cyan-300 shrink-0">›</span>
-                <span className="whitespace-pre-wrap break-words">{a}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+        );
+      })()}
       {steps.length === 0 ? (
         <div className="px-1 py-4 text-sm text-[var(--muted)]">
           This node has no inner steps.
