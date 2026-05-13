@@ -2776,6 +2776,7 @@ function RunDetailPane({
             <RunAnnotationsList
               nodes={nodes}
               onSelectNode={onSelectNode}
+              onSelectStep={onSelectStep}
               findActiveKey={findActiveKey}
               findMatchedNodeAnnos={findMatchedNodeAnnos}
               findMatchedStepAnnos={findMatchedStepAnnos}
@@ -3033,6 +3034,17 @@ function RunSummariesList({
       };
     })
     .filter((g) => g.total > 0);
+  // Per-card raw/pretty toggle. Stored as Set<key> where key is
+  // either the nodeID (for node-scope summary) or "nodeID::stepID"
+  // (for step-scope). Default = pretty (key absent).
+  const [rawKeys, setRawKeys] = useState<Set<string>>(new Set());
+  const toggleRaw = (k: string) =>
+    setRawKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
   if (groups.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
@@ -3057,23 +3069,84 @@ function RunSummariesList({
             </button>
           </div>
           {g.nodeSummary && (
-            <div className="text-[12px]">
-              <MarkdownBody md={g.nodeSummary} />
-            </div>
+            <SummaryCard
+              md={g.nodeSummary}
+              raw={rawKeys.has(g.node.id)}
+              onToggle={() => toggleRaw(g.node.id)}
+            />
           )}
-          {g.stepSummaries.map((sg) => (
-            <div key={sg.stepID} className="mt-2">
-              <div className="text-[10px] text-[var(--muted)] font-mono mb-1">
-                step{" "}
-                <span className="text-[var(--foreground)]">{sg.stepID}</span>
+          {g.stepSummaries.map((sg) => {
+            const k = `${g.node.id}::${sg.stepID}`;
+            return (
+              <div key={sg.stepID} className="mt-2">
+                <div className="text-[10px] text-[var(--muted)] font-mono mb-1">
+                  step{" "}
+                  <span className="text-[var(--foreground)]">{sg.stepID}</span>
+                </div>
+                <div className="pl-3 border-l border-[var(--border)]">
+                  <SummaryCard
+                    md={sg.md}
+                    raw={rawKeys.has(k)}
+                    onToggle={() => toggleRaw(k)}
+                  />
+                </div>
               </div>
-              <div className="text-[12px] pl-3 border-l border-[var(--border)]">
-                <MarkdownBody md={sg.md} />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ))}
+    </div>
+  );
+}
+
+// SummaryCard renders one summary blob with a pretty/raw toggle and
+// a copy button. Raw mode preserves whitespace so users can grab the
+// markdown source for an issue / chat paste; pretty mode is the
+// default reading view.
+function SummaryCard({
+  md,
+  raw,
+  onToggle,
+}: {
+  md: string;
+  raw: boolean;
+  onToggle: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    navigator.clipboard.writeText(md).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    });
+  };
+  return (
+    <div className="relative group">
+      <div className="absolute top-0 right-0 flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity">
+        <button
+          onClick={onToggle}
+          title={raw ? "show rendered markdown" : "show raw markdown source"}
+          className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] bg-[#0d1117]"
+        >
+          {raw ? "pretty" : "raw"}
+        </button>
+        <button
+          onClick={copy}
+          title="copy markdown source"
+          className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] bg-[#0d1117]"
+        >
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      {raw ? (
+        <pre className="text-[11px] font-mono whitespace-pre-wrap break-words text-[var(--foreground)] bg-[#161b22] border border-[var(--border)] rounded p-2 pr-20">
+          {md}
+        </pre>
+      ) : (
+        <div className="text-[12px] pr-20">
+          <MarkdownBody md={md} />
+        </div>
+      )}
     </div>
   );
 }
@@ -3085,12 +3158,14 @@ function RunSummariesList({
 function RunAnnotationsList({
   nodes,
   onSelectNode,
+  onSelectStep,
   findActiveKey,
   findMatchedNodeAnnos,
   findMatchedStepAnnos,
 }: {
   nodes: RunNode[];
   onSelectNode: (id: string | null) => void;
+  onSelectStep: (nodeId: string, stepId: string | null) => void;
   findActiveKey?: string | null;
   findMatchedNodeAnnos?: Map<string, Set<number>>;
   findMatchedStepAnnos?: Map<string, Set<number>>;
@@ -3197,12 +3272,13 @@ function RunAnnotationsList({
               <span className="text-[var(--muted)] shrink-0">›</span>
               {r.kind === "step" && (
                 <>
-                  <span
-                    className="text-violet-300 shrink-0 truncate max-w-[10rem]"
-                    title={`step ${r.stepID}`}
+                  <button
+                    onClick={() => onSelectStep(r.nodeID, r.stepID)}
+                    className="text-violet-300 shrink-0 truncate max-w-[10rem] hover:underline"
+                    title={`select step ${r.stepID}`}
                   >
                     {r.stepID}
-                  </span>
+                  </button>
                   <span className="text-[var(--muted)] shrink-0">›</span>
                 </>
               )}
