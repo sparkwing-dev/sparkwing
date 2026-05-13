@@ -308,7 +308,7 @@ function StepBucket({
             setExpanded(!expanded);
           }
         }}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b]/50 transition-colors cursor-pointer"
+        className="sticky top-[3.5rem] z-10 w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b]/50 transition-colors cursor-pointer bg-[#0d1117]"
       >
         <span className="w-4 text-center text-[var(--muted)]">
           {expanded ? "▾" : "▸"}
@@ -972,8 +972,9 @@ export default function LogBucketView({
       ref={containerRef}
       className="bg-[#0d1117] border border-[var(--border)] rounded-lg"
     >
-      {/* Header */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22] rounded-t-lg">
+      {/* Header. Sits under the AllNodesLogs node header (which sticks
+          at top-0), so we offset down to avoid overlap. */}
+      <div className="sticky top-7 z-20 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22] rounded-t-lg">
         <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
         </span>

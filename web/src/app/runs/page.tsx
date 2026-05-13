@@ -2876,7 +2876,7 @@ function AllNodesLogs({
           >
             <div
               onClick={() => toggle(n.id)}
-              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors"
+              className="sticky top-0 z-30 flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors bg-[#0d1117] rounded-t"
             >
               <span className="text-[var(--muted)] w-3 text-center text-xs">
                 {open ? "▾" : "▸"}
