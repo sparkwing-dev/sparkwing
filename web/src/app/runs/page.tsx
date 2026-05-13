@@ -2985,6 +2985,18 @@ function AllNodesResources({
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [focusNode]);
+  // Auto-expand the section the find walker just landed on so the
+  // chart loads instead of just scrolling the collapsed header.
+  useEffect(() => {
+    if (!findActiveKey?.startsWith("resource-node::")) return;
+    const id = findActiveKey.slice("resource-node::".length);
+    setExpanded((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, [findActiveKey]);
   if (nodes.length === 0) {
     return (
       <div className="text-sm text-[var(--muted)]">
