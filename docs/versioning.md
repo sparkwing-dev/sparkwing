@@ -231,7 +231,7 @@ isn't settling.
 
 **Post-v1.0:**
 
-- Pin to the v1 line: `sparkwing-sdk v1`, sparks-core/<sub> v1.
+- Pin to the v1 line: `sparkwing-sdk v1`, `sparks-core/<sub>` v1.
   Specific minor / patch is up to you.
 - API stability is real within v1. Patch and minor bumps are safe.
 - The wing CLI binary is your interface to the runtime; install it
