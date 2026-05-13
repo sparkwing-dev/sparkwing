@@ -293,9 +293,10 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 
 // renderNodesWithSteps prints the node table, then per-node step
 // rows when the node has any non-success/skipped step, any
-// annotations, or when force=true (the --steps flag). Annotation
-// lines render with an "@" prefix so they're visually distinct
-// from log lines.
+// annotations or summary, or when force=true (the --steps flag).
+// Annotation lines render with an "@" prefix so they're visually
+// distinct from log lines; markdown summaries render under a
+// "summary:" sub-heading with each line indented.
 func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[string][]*store.NodeStep, force bool) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "  ID\tSTATUS\tOUTCOME\tDURATION\tDEPS")
@@ -316,7 +317,7 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
 		// Skip detail block for vanilla success nodes unless forced.
-		shouldRender := force || len(annotations) > 0 || hasNonPassedStep(steps)
+		shouldRender := force || len(annotations) > 0 || n.Summary != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
@@ -324,14 +325,40 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 		for _, a := range annotations {
 			fmt.Fprintf(out, "      @ %s\n", a)
 		}
+		if n.Summary != "" {
+			writeIndentedSummary(out, "      ", n.Summary)
+		}
 		for _, s := range steps {
 			fmt.Fprintf(out, "      %s\t%s\t%s\n",
 				stepGlyph(s.Status), s.StepID, formatStepDuration(s))
 			for _, a := range s.Annotations {
 				fmt.Fprintf(out, "        @ %s\n", a)
 			}
+			if s.Summary != "" {
+				writeIndentedSummary(out, "        ", s.Summary)
+			}
 		}
 	}
+}
+
+// writeIndentedSummary prints "summary:" then each line of the
+// markdown indented by prefix + two spaces. Trailing blank lines are
+// trimmed so the block doesn't pad the table out.
+func writeIndentedSummary(out io.Writer, prefix, md string) {
+	fmt.Fprintf(out, "%ssummary:\n", prefix)
+	body := strings.TrimRight(md, "\n")
+	for _, line := range strings.Split(body, "\n") {
+		fmt.Fprintf(out, "%s  %s\n", prefix, line)
+	}
+}
+
+func hasStepSummary(steps []*store.NodeStep) bool {
+	for _, s := range steps {
+		if s.Summary != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasNonPassedStep(steps []*store.NodeStep) bool {
