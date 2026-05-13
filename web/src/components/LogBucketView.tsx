@@ -247,9 +247,28 @@ function StepBucket({
     section.status === "failed" || section.status === "running";
   const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
   const expanded = expandedProp ?? localExpanded;
+  // Wrapper ref so collapsing-from-stuck can scroll the header back
+  // to its sticky resting position. Otherwise the section's height
+  // shrinks under the user's cursor and they lose their place.
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const setExpanded = (next: boolean) => {
+    const wrapper = wrapperRef.current;
+    const header = wrapper?.firstElementChild as HTMLElement | null;
+    let wasStuck = false;
+    if (expanded && wrapper && header) {
+      // Stuck when the header's viewport top has drifted above its
+      // wrapper's natural top (sticky positioning kicked in).
+      wasStuck =
+        header.getBoundingClientRect().top >
+        wrapper.getBoundingClientRect().top + 1;
+    }
     if (onToggle) onToggle();
     else setLocalExpanded(next);
+    if (!next && wasStuck) {
+      requestAnimationFrame(() => {
+        wrapper?.scrollIntoView({ block: "start", behavior: "auto" });
+      });
+    }
   };
   const si = statusIcon[section.status] || statusIcon.running;
   const heading = stepNameFromSection(section);
@@ -292,6 +311,7 @@ function StepBucket({
     : null;
   return (
     <div
+      ref={wrapperRef}
       data-step-id={dataStep ?? undefined}
       className={`border-b border-[var(--border)] last:border-b-0 ${section.status === "failed" ? "bg-red-500/5" : ""}`}
     >

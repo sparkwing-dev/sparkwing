@@ -2788,13 +2788,30 @@ function AllNodesLogs({
   findMatchedLogsByNode?: Map<string, Set<number>>;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    const wasOpen = expanded.has(id);
+    const wrapper = document.querySelector(
+      `[data-log-node-id="${id}"]`,
+    ) as HTMLElement | null;
+    const header = wrapper?.firstElementChild as HTMLElement | null;
+    let wasStuck = false;
+    if (wasOpen && wrapper && header) {
+      wasStuck =
+        header.getBoundingClientRect().top >
+        wrapper.getBoundingClientRect().top + 1;
+    }
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (wasOpen && wasStuck) {
+      requestAnimationFrame(() => {
+        wrapper?.scrollIntoView({ block: "start", behavior: "auto" });
+      });
+    }
+  };
   // When a node selection arrives from outside, collapse other
   // sections so only the selected node is open, then scroll it in.
   useEffect(() => {
