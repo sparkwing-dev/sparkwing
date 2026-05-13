@@ -123,6 +123,30 @@ function outcomeDot(outcome: string, status: string): string {
   return statusDot(status);
 }
 
+// collectNodeAnnotations returns the full annotation set for one
+// node, in display order: step-scoped first (with their step id),
+// then node-scoped (between-step). Step annotations live on the
+// step rows now -- reading n.annotations alone misses them.
+// Dual-persisted older runs may carry the same string on both
+// node + step rows; the dedup keeps the step entry.
+function collectNodeAnnotations(
+  n: RunNode,
+): { stepID: string | null; text: string }[] {
+  const out: { stepID: string | null; text: string }[] = [];
+  const stepTexts = new Set<string>();
+  for (const s of n.work?.steps ?? []) {
+    for (const a of s.annotations ?? []) {
+      out.push({ stepID: s.id, text: a });
+      stepTexts.add(a);
+    }
+  }
+  for (const a of n.annotations ?? []) {
+    if (stepTexts.has(a)) continue;
+    out.push({ stepID: null, text: a });
+  }
+  return out;
+}
+
 function TimeAgo({ ts }: { ts: string }) {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -1607,14 +1631,18 @@ function NodeRow({
             className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
           />
           <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
-          {(n.annotations?.length ?? 0) > 0 && (
-            <span
-              className="text-[10px] font-mono text-cyan-300 shrink-0"
-              title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}`}
-            >
-              {n.annotations!.length}
-            </span>
-          )}
+          {(() => {
+            const annos = collectNodeAnnotations(n);
+            if (annos.length === 0) return null;
+            return (
+              <span
+                className="text-[10px] font-mono text-cyan-300 shrink-0"
+                title={`${annos.length} annotation${annos.length === 1 ? "" : "s"}:\n${annos.map((a) => (a.stepID ? `${a.stepID} › ${a.text}` : a.text)).join("\n")}`}
+              >
+                {annos.length}
+              </span>
+            );
+          })()}
           {nodeDuration(n) > 0 && (
             <span className="text-[10px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
               {fmtMs(nodeDuration(n))}
@@ -3484,14 +3512,18 @@ function AllNodesLogs({
               )}
               <NodeAttrChips n={n} />
               <span className="flex-1" />
-              {(n.annotations?.length ?? 0) > 0 && (
-                <span
-                  className="text-[10px] font-mono text-cyan-300 shrink-0"
-                  title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}:\n${n.annotations!.join("\n")}`}
-                >
-                  › {n.annotations!.length}
-                </span>
-              )}
+              {(() => {
+                const annos = collectNodeAnnotations(n);
+                if (annos.length === 0) return null;
+                return (
+                  <span
+                    className="text-[10px] font-mono text-cyan-300 shrink-0"
+                    title={`${annos.length} annotation${annos.length === 1 ? "" : "s"}:\n${annos.map((a) => (a.stepID ? `${a.stepID} › ${a.text}` : a.text)).join("\n")}`}
+                  >
+                    › {annos.length}
+                  </span>
+                );
+              })()}
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -3652,14 +3684,18 @@ function AllNodesResources({
                 </span>
               )}
               <span className="flex-1" />
-              {(n.annotations?.length ?? 0) > 0 && (
-                <span
-                  className="text-[10px] font-mono text-cyan-300 shrink-0"
-                  title={`${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}:\n${n.annotations!.join("\n")}`}
-                >
-                  › {n.annotations!.length}
-                </span>
-              )}
+              {(() => {
+                const annos = collectNodeAnnotations(n);
+                if (annos.length === 0) return null;
+                return (
+                  <span
+                    className="text-[10px] font-mono text-cyan-300 shrink-0"
+                    title={`${annos.length} annotation${annos.length === 1 ? "" : "s"}:\n${annos.map((a) => (a.stepID ? `${a.stepID} › ${a.text}` : a.text)).join("\n")}`}
+                  >
+                    › {annos.length}
+                  </span>
+                );
+              })()}
               <span className="text-[10px] font-mono text-[var(--muted)] shrink-0">
                 {n.outcome || n.status}
               </span>
@@ -4502,26 +4538,27 @@ function DAG({
                       }
                     />
                   )}
-                {(n.annotations?.length ?? 0) > 0 &&
-                  (() => {
-                    const text = `${n.annotations!.length} annotation${n.annotations!.length === 1 ? "" : "s"}\n${n.annotations!.join("\n")}`;
-                    return (
-                      <NodeBadge
-                        x={6}
-                        y={nodeH - 6}
-                        width={22}
-                        label={`${n.annotations!.length}`}
-                        fill="rgba(34,211,238,0.95)"
-                        onMouseEnter={(e) =>
-                          setChipHover({ text, x: e.clientX, y: e.clientY })
-                        }
-                        onMouseMove={(e) =>
-                          setChipHover({ text, x: e.clientX, y: e.clientY })
-                        }
-                        onMouseLeave={() => setChipHover(null)}
-                      />
-                    );
-                  })()}
+                {(() => {
+                  const annos = collectNodeAnnotations(n);
+                  if (annos.length === 0) return null;
+                  const text = `${annos.length} annotation${annos.length === 1 ? "" : "s"}\n${annos.map((a) => (a.stepID ? `${a.stepID} › ${a.text}` : a.text)).join("\n")}`;
+                  return (
+                    <NodeBadge
+                      x={6}
+                      y={nodeH - 6}
+                      width={22}
+                      label={`${annos.length}`}
+                      fill="rgba(34,211,238,0.95)"
+                      onMouseEnter={(e) =>
+                        setChipHover({ text, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseMove={(e) =>
+                        setChipHover({ text, x: e.clientX, y: e.clientY })
+                      }
+                      onMouseLeave={() => setChipHover(null)}
+                    />
+                  );
+                })()}
                 {(() => {
                   // Bottom-right stack. Step-count pill anchors to the
                   // right edge; the error chip (when present) sits one
@@ -4995,25 +5032,7 @@ function StepDag({
         </span>
       </div>
       {(() => {
-        // Flatten node-level + per-step annotations. Annotations
-        // emitted inside a step body live on step.annotations (not
-        // node.annotations) since the dual-persist write was dropped,
-        // so reading node.annotations alone misses most of them.
-        type Row =
-          | { stepID: null; text: string }
-          | { stepID: string; text: string };
-        const rows: Row[] = [];
-        const stepTexts = new Set<string>();
-        for (const s of node.work?.steps ?? []) {
-          for (const a of s.annotations ?? []) {
-            rows.push({ stepID: s.id, text: a });
-            stepTexts.add(a);
-          }
-        }
-        for (const a of node.annotations ?? []) {
-          if (stepTexts.has(a)) continue;
-          rows.push({ stepID: null, text: a });
-        }
+        const rows = collectNodeAnnotations(node);
         if (rows.length === 0) return null;
         return (
           <div className="mb-2 border border-[var(--border)] rounded p-2 bg-[#0d1117]">
