@@ -69,19 +69,53 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
           {node.error}
         </div>
       )}
-      {(node.annotations?.length ?? 0) > 0 && (
-        <ul className="mt-1 flex flex-col gap-0.5">
-          {node.annotations!.map((a, i) => (
-            <li
-              key={i}
-              className="text-xs font-mono text-[var(--foreground)] flex items-start gap-2"
-            >
-              <span className="text-cyan-300 shrink-0">›</span>
-              <span className="whitespace-pre-wrap break-words">{a}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {(() => {
+        // Flatten node-scope + per-step annotations. After dropping
+        // the dual-persist write, step annotations live on
+        // step.annotations only -- reading node.annotations misses
+        // them. Dual-persisted older runs may carry the same string
+        // on both, so dedup by text.
+        const rows: { stepID: string | null; text: string }[] = [];
+        const stepTexts = new Set<string>();
+        for (const s of node.work?.steps ?? []) {
+          for (const a of s.annotations ?? []) {
+            rows.push({ stepID: s.id, text: a });
+            stepTexts.add(a);
+          }
+        }
+        for (const a of node.annotations ?? []) {
+          if (stepTexts.has(a)) continue;
+          rows.push({ stepID: null, text: a });
+        }
+        if (rows.length === 0) return null;
+        return (
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {rows.map((r, i) => (
+              <li
+                key={i}
+                className="text-xs font-mono text-[var(--foreground)] flex items-start gap-1.5"
+              >
+                {r.stepID ? (
+                  <>
+                    <span
+                      className="text-violet-300 shrink-0"
+                      title={`step ${r.stepID}`}
+                    >
+                      {r.stepID}
+                    </span>
+                    <span className="text-[var(--muted)] shrink-0">›</span>
+                  </>
+                ) : (
+                  <span className="text-cyan-300 shrink-0">›</span>
+                )}
+                <span className="whitespace-pre-wrap break-words">
+                  {r.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        );
+      })()}
     </div>
   );
 }

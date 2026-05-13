@@ -81,7 +81,6 @@ import ResourceChart from "@/components/ResourceChart";
 import LogBucketView from "@/components/LogBucketView";
 import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel, { NodeAttrChips } from "@/components/SummaryPanel";
-import SelectedNodePanel from "@/components/SelectedNodePanel";
 import { parseLogLines } from "@/lib/logParser";
 import ApprovalPane from "@/components/ApprovalPane";
 
