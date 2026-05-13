@@ -481,7 +481,45 @@ func (s *Store) migrate() error {
 	}); err != nil {
 		return err
 	}
+	if err := s.backfillRunAnnotationRollup(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// backfillRunAnnotationRollup populates the runs.annotation_count and
+// runs.top_annotation columns for rows that predate the live-bump
+// writes in AppendNodeAnnotation / AppendStepAnnotation. Idempotent:
+// only rows whose count is still 0 get re-computed, and the
+// computation yields 0 for runs that genuinely have no annotations.
+// Runs into a no-op the second time around.
+func (s *Store) backfillRunAnnotationRollup() error {
+	_, err := s.db.Exec(`
+UPDATE runs SET
+  annotation_count = COALESCE((
+    SELECT SUM(json_array_length(annotations_json))
+    FROM (
+      SELECT annotations_json FROM nodes
+       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
+      UNION ALL
+      SELECT annotations_json FROM node_steps
+       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
+    )
+  ), 0),
+  top_annotation = COALESCE((
+    SELECT json_extract(annotations_json, '$[' || (json_array_length(annotations_json) - 1) || ']')
+    FROM (
+      SELECT annotations_json FROM nodes
+       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
+      UNION ALL
+      SELECT annotations_json FROM node_steps
+       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
+    )
+    LIMIT 1
+  ), '')
+WHERE annotation_count = 0
+`)
+	return err
 }
 
 // ensureColumns adds any of the named columns missing from the table.
