@@ -1146,8 +1146,10 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           limit: 200,
           maxMatches: 10,
         });
-        setResults(resp.matches);
-        setRunsMap(resp.runs);
+        // Server marshals a nil slice as `null`; normalize so the
+        // empty-state branch fires (it checks `!== null`).
+        setResults(resp.matches ?? []);
+        setRunsMap(resp.runs ?? {});
         setRunsScanned(resp.runs_scanned);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -1263,10 +1265,9 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           </div>
         )}
         {results === null && !loading && !error && (
-          <div className="text-xs text-[var(--muted)]">
-            Type a substring and press Enter. Searches the displayed log body
-            (msg fields) across recent runs; the filter chips above narrow which
-            runs get scanned.
+          <div className="text-xs text-[var(--muted)] space-y-1">
+            <div>Searches log body across recent runs.</div>
+            <div>Tip: filters apply to search results.</div>
           </div>
         )}
         {results !== null && results.length === 0 && !loading && (
