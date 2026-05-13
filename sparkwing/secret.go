@@ -86,7 +86,7 @@ func resolveValue(ctx context.Context, caller, name string) (string, bool, error
 	}
 	r := secretResolverFromContext(ctx)
 	if r == nil {
-		return "", false, fmt.Errorf("sparkwing: %s: no resolver installed (called outside the orchestrator?)", caller)
+		return "", false, fmt.Errorf("sparkwing: %s: no resolver installed -- %s can only be called from step bodies or CacheKey functions, not from Plan() (resolver is attached at dispatch time)", caller, caller)
 	}
 	v, masked, err := r.Resolve(ctx, name)
 	if err != nil {

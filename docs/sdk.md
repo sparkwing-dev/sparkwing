@@ -631,6 +631,36 @@ Config(ctx, name) (string, error)        // unmasked config value
 MustConfig(ctx, name) string             // panic on miss
 ```
 
+**Call from step bodies or CacheKey functions, not from `Plan()`.**
+The orchestrator installs the resolver on the run ctx at dispatch
+time, *after* every pipeline's `Plan()` has returned. Calling
+`Secret`/`Config` (or their `Must*` forms) from inside `Plan()`
+returns `no resolver installed` / panics. This is consistent with the
+"Plan() must be pure" rule above: `Plan()` declares the graph; values
+are resolved when the graph runs.
+
+```go
+// Wrong: reads config at Plan time -- no resolver installed yet.
+func (b *Build) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    region := sw.MustConfig(ctx, "REGION") // panics
+    sw.Job(plan, "build", func(_ context.Context) error { return doBuild(region) })
+    return nil
+}
+
+// Right: defer the lookup into the step body.
+func (b *Build) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    sw.Job(plan, "build", func(ctx context.Context) error {
+        region, err := sw.Config(ctx, "REGION")
+        if err != nil { return err }
+        return doBuild(region)
+    })
+    return nil
+}
+```
+
+CacheKey functions also run at dispatch time, so they may call
+`Secret`/`Config` directly.
+
 Register a custom resolver for tests:
 `WithSecretResolver(ctx, SecretResolverFunc(...))`.
 
