@@ -787,11 +787,28 @@ function RunSummary({ run }: { run: Run }) {
   const text = run.error || run.status;
   if (!text) return <span />;
   const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
+  const annotation =
+    run.annotation_count && run.top_annotation ? run.top_annotation : null;
   return (
-    <div className={`min-w-0 truncate pl-4 font-mono text-[11px] ${tone}`}>
-      <Tooltip content={text}>
-        <span>{text}</span>
-      </Tooltip>
+    <div className="min-w-0 pl-4 space-y-0.5">
+      <div className={`truncate font-mono text-[11px] ${tone}`}>
+        <Tooltip content={text}>
+          <span>{text}</span>
+        </Tooltip>
+      </div>
+      {annotation && (
+        <div
+          className="truncate font-mono text-[11px] text-cyan-300/90"
+          title={`${run.annotation_count} annotation${run.annotation_count === 1 ? "" : "s"}: ${annotation}`}
+        >
+          › {annotation}
+          {(run.annotation_count ?? 0) > 1 && (
+            <span className="text-[var(--muted)] ml-1">
+              (+{(run.annotation_count ?? 1) - 1})
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

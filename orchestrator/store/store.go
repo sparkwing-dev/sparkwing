@@ -433,6 +433,11 @@ func (s *Store) migrate() error {
 		"cost_cents":    "INTEGER NOT NULL DEFAULT 0",
 		"cost_currency": "TEXT NOT NULL DEFAULT 'USD'",
 		"cost_settled":  "INTEGER NOT NULL DEFAULT 0",
+		// Annotation summary surfaced into list views. Bumped on each
+		// AppendNodeAnnotation / AppendStepAnnotation so the runs page
+		// can render a chip without a per-row aggregate query.
+		"annotation_count": "INTEGER NOT NULL DEFAULT 0",
+		"top_annotation":   "TEXT NOT NULL DEFAULT ''",
 		// Invocation snapshot: a single BLOB captures the same
 		// shape that flows into run_start.attrs (binary_source, cwd,
 		// flags, args, reproducer, inputs_hash, hints, etc.) so the
@@ -557,6 +562,11 @@ type Run struct {
 	// emitter change with no schema migration. Empty/nil for runs
 	// created before the column landed.
 	Invocation map[string]any `json:"invocation,omitempty"`
+	// Annotation rollup surfaced to list views. Updated server-side on
+	// each sparkwing.Annotate call; the dashboard renders these
+	// without needing a per-row aggregate query.
+	AnnotationCount int    `json:"annotation_count,omitempty"`
+	TopAnnotation   string `json:"top_annotation,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
@@ -649,7 +659,7 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -709,7 +719,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
@@ -753,7 +763,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -820,7 +830,8 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&createdNS, &startedNS, &finishedNS, &parent,
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
-		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON)
+		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
+		&r.AnnotationCount, &r.TopAnnotation)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -1076,6 +1087,11 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 		next, runID, nodeID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
+		msg, runID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -1227,6 +1243,11 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 UPDATE node_steps SET annotations_json = ?
 WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 		next, runID, nodeID, stepID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
+		msg, runID); err != nil {
 		return err
 	}
 	return tx.Commit()

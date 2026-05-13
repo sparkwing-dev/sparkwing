@@ -151,6 +151,12 @@ export interface Run {
   error?: string;
   started_at: string;
   finished_at?: string;
+  // Annotation rollup surfaced into list rows. annotation_count is
+  // the total across every node + step; top_annotation is the most
+  // recent message. Server-maintained, so consumers don't have to
+  // load run detail to surface them.
+  annotation_count?: number;
+  top_annotation?: string;
   // Invocation: snapshot of how the run was started, persisted on the
   // run row at CreateRun time. Mirrors the orchestrator's
   // run_start.attrs payload (see orchestrator/orchestrator.go's
