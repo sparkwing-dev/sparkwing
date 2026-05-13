@@ -485,24 +485,15 @@ export interface RunsGrepMatch {
   run_id: string;
   pipeline: string;
   node_id: string;
+  step_id?: string;
   line: number;
   content: string;
-}
-
-export interface RunsGrepRunMeta {
-  status: string;
-  pipeline: string;
-  started_at?: string;
-  finished_at?: string;
-  git_branch?: string;
-  git_sha?: string;
-  error?: string;
 }
 
 export interface RunsGrepResponse {
   query: string;
   matches: RunsGrepMatch[];
-  runs: Record<string, RunsGrepRunMeta>;
+  runs: Record<string, Run>;
   total: number;
   runs_scanned: number;
 }

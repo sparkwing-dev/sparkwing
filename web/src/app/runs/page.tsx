@@ -45,7 +45,6 @@ import {
   type NodeWorkStep,
   type RunLogMatch,
   type RunsGrepMatch,
-  type RunsGrepRunMeta,
   type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
@@ -1076,6 +1075,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const filterState = useUrlFilterState();
+  const filterCtx = useFilterCtx(filterState);
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [pipelineMeta, setPipelineMeta] = useState<
     Record<string, PipelineMeta>
@@ -1117,7 +1117,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [query, setQuery] = useState(initialQuery);
   const [since, setSince] = useState(initialSince);
   const [results, setResults] = useState<RunsGrepMatch[] | null>(null);
-  const [runsMap, setRunsMap] = useState<Record<string, RunsGrepRunMeta>>({});
+  const [runsMap, setRunsMap] = useState<Record<string, Run>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsScanned, setRunsScanned] = useState(0);
@@ -1286,70 +1286,64 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               {runOrder.map((runID) => {
                 const ms = byRun.get(runID) ?? [];
                 const meta = runsMap[runID];
-                const statusCls = meta
-                  ? meta.status === "failed"
-                    ? "text-red-400"
-                    : meta.status === "running"
-                      ? "text-indigo-400"
-                      : meta.status === "success"
-                        ? "text-green-400"
-                        : "text-[var(--muted)]"
-                  : "text-[var(--muted)]";
                 return (
                   <div
                     key={runID}
                     className="border border-[var(--border)] rounded bg-[#0d1117]"
                   >
-                    <div className="flex items-center flex-wrap gap-2 px-2 py-1.5 border-b border-[var(--border)] text-xs font-mono">
-                      {meta && (
-                        <span className={`uppercase shrink-0 ${statusCls}`}>
-                          {meta.status}
-                        </span>
-                      )}
-                      <span className="text-[var(--accent)] shrink-0">
-                        {runID}
-                      </span>
-                      <span className="text-violet-300 shrink-0">
-                        {meta?.pipeline ?? ms[0].pipeline}
-                      </span>
-                      {meta?.git_branch && (
-                        <span className="text-amber-400 text-[10px] shrink-0">
-                          ⎇ {meta.git_branch}
-                        </span>
-                      )}
-                      {meta?.git_sha && (
-                        <span className="text-cyan-400 text-[10px] shrink-0">
-                          {meta.git_sha.slice(0, 7)}
-                        </span>
-                      )}
-                      {meta?.started_at && (
-                        <span className="text-[var(--muted)] text-[10px] shrink-0">
-                          {fmtAgo(meta.started_at)}
-                        </span>
-                      )}
-                      <span className="ml-auto text-[var(--muted)] text-[10px] shrink-0">
+                    <div className="px-3 py-2 border-b border-[var(--border)] flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        {meta ? (
+                          <FullRunRow r={meta} ctx={filterCtx} />
+                        ) : (
+                          <span className="font-mono text-xs text-[var(--accent)]">
+                            {runID}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono text-[10px] text-[var(--muted)] shrink-0 pt-0.5">
                         {ms.length} match{ms.length === 1 ? "" : "es"}
                       </span>
                     </div>
-                    {meta?.error && (
-                      <div className="px-2 py-1 border-b border-[var(--border)] text-[11px] font-mono text-red-300/90 truncate">
-                        error: {meta.error}
-                      </div>
-                    )}
                     <div className="divide-y divide-[var(--border)]">
                       {ms.map((m, i) => (
                         <div
                           key={i}
                           onClick={() => onResultClick(m)}
-                          className="px-2 py-1 cursor-pointer hover:bg-[#1e293b] transition-colors flex items-baseline gap-2"
+                          className="px-3 py-1 cursor-pointer hover:bg-[#1e293b] transition-colors flex items-baseline gap-2 text-[11px] font-mono"
                         >
-                          <span className="font-mono text-[11px] text-cyan-300 shrink-0">
+                          <span
+                            className="text-cyan-300 shrink-0"
+                            title={`Node: ${m.node_id}`}
+                          >
                             {m.node_id}
                           </span>
-                          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0">
+                          {m.step_id && (
+                            <>
+                              <span
+                                className="text-[var(--muted)] shrink-0"
+                                aria-hidden
+                              >
+                                ›
+                              </span>
+                              <span
+                                className="text-violet-300 shrink-0"
+                                title={`Step: ${m.step_id}`}
+                              >
+                                {m.step_id}
+                              </span>
+                            </>
+                          )}
+                          <span
+                            className="text-[var(--muted)] shrink-0"
+                            aria-hidden
+                          >
+                            ›
+                          </span>
+                          <span className="text-[var(--muted)] shrink-0 text-[10px]">
                             L{m.line}
                           </span>
-                          <span className="font-mono text-[11px] text-[#c9d1d9] truncate flex-1">
+                          <span className="text-[#c9d1d9] truncate flex-1">
                             {m.content}
                           </span>
                         </div>

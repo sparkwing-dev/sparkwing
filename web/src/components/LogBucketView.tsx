@@ -930,20 +930,25 @@ export default function LogBucketView({
   const lastFocusedLine = useRef<number | null>(null);
   useEffect(() => {
     const incoming = focusLine ?? null;
+    if (incoming == null) {
+      lastFocusedLine.current = null;
+      return;
+    }
     if (incoming === lastFocusedLine.current) return;
-    lastFocusedLine.current = incoming;
-    if (incoming == null) return;
     let lineCursor = 1;
     let sectionIdx = -1;
-    for (let i = 0; i < parsedRef.current.sections.length; i++) {
-      const sec = parsedRef.current.sections[i];
+    for (let i = 0; i < parsed.sections.length; i++) {
+      const sec = parsed.sections[i];
       if (incoming >= lineCursor && incoming < lineCursor + sec.lines.length) {
         sectionIdx = i;
         break;
       }
       lineCursor += sec.lines.length;
     }
+    // Logs from a deep-link may arrive before the log fetch resolves;
+    // wait until parsed has the target section, then mark it consumed.
     if (sectionIdx < 0) return;
+    lastFocusedLine.current = incoming;
     setStepOverrides((prev) => ({ ...prev, [sectionIdx]: true }));
     requestAnimationFrame(() => {
       const el = containerRef.current?.querySelector(
@@ -951,7 +956,7 @@ export default function LogBucketView({
       ) as HTMLElement | null;
       el?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
-  }, [focusLine]);
+  }, [focusLine, parsed]);
   const scrollToTop = () => {
     containerRef.current?.scrollIntoView({
       block: "start",

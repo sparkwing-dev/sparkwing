@@ -529,38 +529,54 @@ func runLogsHandler(b backend.Backend) http.HandlerFunc {
 // Returns (body, true) when the line corresponds to a displayed row,
 // or ("", false) for framing events the parser swallows (node_start,
 // step_start, step_end, node_end, run_summary).
+// displayLine is the result of decoding one raw log line for grep:
+// the visible body that would render in the dashboard, plus the step
+// the record was emitted from (empty when between steps), plus a
+// flag indicating whether the line corresponds to a displayed row.
+type displayLine struct {
+	body string
+	step string
+	show bool
+}
+
 func displayBodyForLogLine(raw string) (string, bool) {
+	d := parseDisplayLine(raw)
+	return d.body, d.show
+}
+
+func parseDisplayLine(raw string) displayLine {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || trimmed[0] != '{' {
-		return raw, true
+		return displayLine{body: raw, show: true}
 	}
 	var rec struct {
 		Event string                 `json:"event"`
 		Msg   string                 `json:"msg"`
 		Level string                 `json:"level"`
+		Step  string                 `json:"step"`
 		Attrs map[string]interface{} `json:"attrs,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &rec); err != nil {
-		return raw, true
+		return displayLine{body: raw, show: true}
 	}
 	switch rec.Event {
 	case "node_start", "step_start", "step_end", "node_end", "run_summary":
-		return "", false
+		return displayLine{show: false}
 	case "step_skipped":
 		reason, _ := rec.Attrs["reason"].(string)
 		if reason != "" {
-			return "[skipped: " + reason + "]", true
+			return displayLine{body: "[skipped: " + reason + "]", step: rec.Step, show: true}
 		}
-		return "[skipped]", true
+		return displayLine{body: "[skipped]", step: rec.Step, show: true}
 	}
 	if rec.Msg != "" {
-		return rec.Msg, true
+		return displayLine{body: rec.Msg, step: rec.Step, show: true}
 	}
 	if len(rec.Attrs) > 0 {
 		attrBytes, _ := json.Marshal(rec.Attrs)
-		return string(attrBytes), true
+		return displayLine{body: string(attrBytes), step: rec.Step, show: true}
 	}
-	return "", true
+	return displayLine{body: "", step: rec.Step, show: true}
 }
 
 func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
@@ -674,17 +690,9 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		RunID    string `json:"run_id"`
 		Pipeline string `json:"pipeline"`
 		NodeID   string `json:"node_id"`
+		StepID   string `json:"step_id,omitempty"`
 		Line     int    `json:"line"`
 		Content  string `json:"content"`
-	}
-	type runMeta struct {
-		Status     string `json:"status"`
-		Pipeline   string `json:"pipeline"`
-		StartedAt  string `json:"started_at,omitempty"`
-		FinishedAt string `json:"finished_at,omitempty"`
-		GitBranch  string `json:"git_branch,omitempty"`
-		GitSHA     string `json:"git_sha,omitempty"`
-		Error      string `json:"error,omitempty"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -774,12 +782,12 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 				displayLine := 0
 				var local unitResult
 				for sc.Scan() {
-					body, ok := displayBodyForLogLine(sc.Text())
-					if !ok {
+					d := parseDisplayLine(sc.Text())
+					if !d.show {
 						continue
 					}
 					displayLine++
-					if !strings.Contains(strings.ToLower(body), needle) {
+					if !strings.Contains(strings.ToLower(d.body), needle) {
 						continue
 					}
 					local.count++
@@ -788,8 +796,9 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 							RunID:    u.run.ID,
 							Pipeline: u.run.Pipeline,
 							NodeID:   u.nodeID,
+							StepID:   d.step,
 							Line:     displayLine,
-							Content:  body,
+							Content:  d.body,
 						})
 					}
 				}
@@ -811,20 +820,13 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		for _, run := range runs {
 			runIndex[run.ID] = run
 		}
-		runsMeta := make(map[string]runMeta, len(hitRuns))
+		// Return the full Run object for each matched run so the
+		// dashboard can render the same row layout the Activity view
+		// uses (status dot, branch/sha pills, error preview, etc.).
+		runsMeta := make(map[string]*store.Run, len(hitRuns))
 		for id := range hitRuns {
-			run := runIndex[id]
-			if run == nil {
-				continue
-			}
-			runsMeta[id] = runMeta{
-				Status:     run.Status,
-				Pipeline:   run.Pipeline,
-				StartedAt:  run.StartedAt.Format(time.RFC3339Nano),
-				FinishedAt: timeOrEmptyPtr(run.FinishedAt),
-				GitBranch:  run.GitBranch,
-				GitSHA:     run.GitSHA,
-				Error:      run.Error,
+			if run := runIndex[id]; run != nil {
+				runsMeta[id] = run
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
