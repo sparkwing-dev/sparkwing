@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"golang.org/x/term"
 )
@@ -153,17 +152,6 @@ func Main() {
 	// `runs logs --follow` without a terminal event. Keep the
 	// non-zero exit so wrapper scripts still see the failure.
 	_ = delegate
-	// Markdown summaries emitted via sparkwing.Summary() print below
-	// the renderer's Summary block. Pretty mode only -- JSON
-	// consumers should read them via `sparkwing runs status`. Errors
-	// here are advisory; a missing store shouldn't fail the run.
-	if _, ok := delegate.(*PrettyRenderer); ok && res.RunID != "" {
-		if st, openErr := store.Open(paths.StateDB()); openErr == nil {
-			useColor := os.Getenv("NO_COLOR") == ""
-			_ = printRunSummaries(context.Background(), os.Stdout, useColor, st, res.RunID)
-			_ = st.Close()
-		}
-	}
 	if res.Status != "success" {
 		os.Exit(1)
 	}

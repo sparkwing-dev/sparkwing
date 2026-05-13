@@ -803,6 +803,16 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 		}
 	}
 
+	// Summaries: markdown blobs emitted via sparkwing.Summary(). Folded
+	// inside the Summary block (rather than its own trailing section)
+	// so the post-run output stays cohesive. Step-scoped entries
+	// render under "<node> › <step>" headers; node-scoped under
+	// "<node>". The block is skipped entirely when nothing was emitted.
+	if summary != nil {
+		nodes, _ := summary.Attrs["nodes"].([]any)
+		p.writeRunBlockSummaries(w, nodes)
+	}
+
 	// Tips section: column-0 heading inside the Summary block so the
 	// "what to do next" hints share the same bracketed scope as the
 	// outcome (operator + agent both find them there). The duplicate
@@ -819,6 +829,57 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 	}
 
 	fmt.Fprintln(w, p.sectionRule(""))
+}
+
+// writeRunBlockSummaries renders markdown summaries pulled off the
+// run_summary node rows. Skipped entirely when no node row carries a
+// summary or step_summaries entry.
+func (p *PrettyRenderer) writeRunBlockSummaries(w io.Writer, nodes []any) {
+	type entry struct {
+		nodeID string
+		stepID string
+		md     string
+	}
+	var entries []entry
+	for _, n := range nodes {
+		m, ok := n.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := m["id"].(string)
+		if md, _ := m["summary"].(string); md != "" {
+			entries = append(entries, entry{nodeID: id, md: md})
+		}
+		steps, _ := m["step_summaries"].([]any)
+		for _, s := range steps {
+			sm, ok := s.(map[string]any)
+			if !ok {
+				continue
+			}
+			stepID, _ := sm["step_id"].(string)
+			md, _ := sm["summary"].(string)
+			if md != "" {
+				entries = append(entries, entry{nodeID: id, stepID: stepID, md: md})
+			}
+		}
+	}
+	if len(entries) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, p.color("Summaries", ansiBold))
+	for i, e := range entries {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		hue := p.hueFor(e.nodeID)
+		header := p.color(e.nodeID, ansiBold+hue)
+		if e.stepID != "" {
+			header += p.color(" › ", ansiDim) + p.color(e.stepID, ansiBold)
+		}
+		fmt.Fprintln(w, "  "+header)
+		renderMarkdownSummary(w, "    ", e.md)
+	}
 }
 
 // writeRunBlockNodeRow renders one node row inside the Summary block.

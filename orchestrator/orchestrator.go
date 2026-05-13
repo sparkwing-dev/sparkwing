@@ -825,6 +825,31 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 	if delegate == nil {
 		return
 	}
+	// Pull sparkwing.Summary() markdown off the store so the renderer
+	// can fold it into the trailing Summary block alongside the per-
+	// node table. Best-effort: read errors drop the data, which
+	// already lives on the node/step rows for `runs status`.
+	nodeSummaries := map[string]string{}            // nodeID -> markdown
+	stepSummaries := map[string]map[string]string{} // nodeID -> stepID -> markdown
+	if state.backends.State != nil {
+		if steps, err := state.backends.State.ListNodeSteps(state.ctx, state.runID); err == nil {
+			for _, s := range steps {
+				if s.Summary == "" {
+					continue
+				}
+				if stepSummaries[s.NodeID] == nil {
+					stepSummaries[s.NodeID] = map[string]string{}
+				}
+				stepSummaries[s.NodeID][s.StepID] = s.Summary
+			}
+		}
+		for _, n := range plan.Nodes() {
+			row, err := state.backends.State.GetNode(state.ctx, state.runID, n.ID())
+			if err == nil && row != nil && row.Summary != "" {
+				nodeSummaries[n.ID()] = row.Summary
+			}
+		}
+	}
 	nodes := plan.Nodes()
 	rows := make([]any, 0, len(nodes))
 	seen := make(map[string]bool, len(nodes))
@@ -843,6 +868,16 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 		}
 		if plan.IsDynamicNode(id) {
 			row["dynamic"] = true
+		}
+		if md := nodeSummaries[id]; md != "" {
+			row["summary"] = md
+		}
+		if perStep := stepSummaries[id]; len(perStep) > 0 {
+			steps := make([]any, 0, len(perStep))
+			for stepID, md := range perStep {
+				steps = append(steps, map[string]any{"step_id": stepID, "summary": md})
+			}
+			row["step_summaries"] = steps
 		}
 		rows = append(rows, row)
 		seen[id] = true
