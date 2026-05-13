@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -121,15 +122,17 @@ func writeMarkdownLine(out io.Writer, prefix, line string) {
 		return
 	}
 	if m := reH3.FindStringSubmatch(line); m != nil {
+		// H3: bold only. H2's underline anchors the hierarchy; H3 sits
+		// visibly under it without a competing rule.
 		fmt.Fprintf(out, "%s%s%s\n", prefix, m[1], color.Bold(renderInlineMarkdown(m[2])))
 		return
 	}
 	if m := reH2.FindStringSubmatch(line); m != nil {
-		fmt.Fprintf(out, "%s%s%s\n", prefix, m[1], color.Bold(renderInlineMarkdown(m[2])))
+		writeHeadingWithUnderline(out, prefix+m[1], m[2])
 		return
 	}
 	if m := reH1.FindStringSubmatch(line); m != nil {
-		fmt.Fprintf(out, "%s%s%s\n", prefix, m[1], color.Bold(renderInlineMarkdown(m[2])))
+		writeHeadingWithUnderline(out, prefix+m[1], m[2])
 		return
 	}
 	if m := reChecked.FindStringSubmatch(line); m != nil {
@@ -147,6 +150,18 @@ func writeMarkdownLine(out io.Writer, prefix, line string) {
 		return
 	}
 	fmt.Fprintf(out, "%s%s\n", prefix, renderInlineMarkdown(line))
+}
+
+// writeHeadingWithUnderline emits a top-level heading followed by a
+// dim `─` underline matching the heading's visible width. The
+// underline carries the hierarchy in non-TTY output where bold is
+// stripped and would otherwise leave the heading indistinguishable
+// from body text.
+func writeHeadingWithUnderline(out io.Writer, prefix, text string) {
+	styled := color.Bold(renderInlineMarkdown(text))
+	width := utf8.RuneCountInString(text)
+	fmt.Fprintf(out, "%s%s\n", prefix, styled)
+	fmt.Fprintf(out, "%s%s\n", prefix, color.Dim(strings.Repeat("─", width)))
 }
 
 // renderInlineMarkdown styles `code` and **bold** spans. Order
