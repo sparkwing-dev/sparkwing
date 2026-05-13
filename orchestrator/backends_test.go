@@ -179,6 +179,12 @@ func (f *fakeState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detai
 func (f *fakeState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return nil
 }
+func (f *fakeState) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
+	return nil
+}
+func (f *fakeState) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
+	return nil
+}
 func (f *fakeState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return nil
 }

@@ -40,6 +40,11 @@ type StateBackend interface {
 	// the node's annotations list. Driven by sparkwing.Annotate().
 	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 
+	// SetNodeSummary overwrites the node's markdown summary. Driven by
+	// sparkwing.Summary() emitted outside any step body. Last write
+	// wins.
+	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
+
 	// Per-step state. Mirror the step_start / step_end / step_skipped
 	// log events so the dashboard reads structured rows instead of
 	// re-parsing the log stream. Errors are advisory; callers swallow
@@ -48,6 +53,9 @@ type StateBackend interface {
 	FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 	SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 	AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
+	// SetStepSummary overwrites a step's markdown summary. Driven by
+	// sparkwing.Summary() emitted inside a step body. Last write wins.
+	SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 	ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
 
 	// TouchNodeHeartbeat bumps last_heartbeat without status changes.
@@ -170,6 +178,12 @@ func (l localState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detai
 }
 func (l localState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return l.st.AppendNodeAnnotation(ctx, runID, nodeID, msg)
+}
+func (l localState) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
+	return l.st.SetNodeSummary(ctx, runID, nodeID, md)
+}
+func (l localState) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
+	return l.st.SetStepSummary(ctx, runID, nodeID, stepID, md)
 }
 func (l localState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return l.st.StartNodeStep(ctx, runID, nodeID, stepID)

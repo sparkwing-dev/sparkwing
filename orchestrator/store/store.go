@@ -395,6 +395,7 @@ func (s *Store) migrate() error {
 	// missing columns to keep laptop dev DBs moving.
 	if err := s.ensureColumns("node_steps", map[string]string{
 		"annotations_json": "BLOB",
+		"summary":          "TEXT NOT NULL DEFAULT ''",
 	}); err != nil {
 		return err
 	}
@@ -408,6 +409,7 @@ func (s *Store) migrate() error {
 		"failure_reason":   "TEXT NOT NULL DEFAULT ''",
 		"exit_code":        "INTEGER",
 		"annotations_json": "BLOB",
+		"summary":          "TEXT NOT NULL DEFAULT ''",
 	}); err != nil {
 		return err
 	}
@@ -997,6 +999,13 @@ type Node struct {
 	// appends one entry; order preserved. Surfaced to the dashboard
 	// alongside the node's status.
 	Annotations []string `json:"annotations,omitempty"`
+
+	// Summary is the latest markdown run summary emitted by
+	// sparkwing.Summary while the node was running outside any step
+	// body. Overwrite-on-write: only the last value is kept. Empty
+	// when no node-scoped summary was emitted; step-scoped summaries
+	// live on NodeStep.Summary instead.
+	Summary string `json:"summary,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -1064,7 +1073,7 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json
+       failure_reason, exit_code, annotations_json, summary
   FROM nodes
  WHERE run_id = ?
  ORDER BY rowid`, runID)
@@ -1088,7 +1097,7 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 	row := s.db.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json
+       failure_reason, exit_code, annotations_json, summary
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -1108,7 +1117,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
 		&n.StatusDetail, &heartbeatNS,
-		&n.FailureReason, &exitCode, &annotationsJSON)
+		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -1199,6 +1208,27 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 	return tx.Commit()
 }
 
+// SetNodeSummary replaces the node's markdown summary with md.
+// Overwrite-on-write: later calls supersede earlier ones. Returns
+// ErrNotFound if the node row doesn't exist. Driven by
+// sparkwing.Summary() emitted outside any step body.
+func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE nodes SET summary = ? WHERE run_id = ? AND node_id = ?`,
+		md, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Step status constants. Steps are inserted as StepRunning on
 // step_start and transitioned to passed/failed on step_end. Skipped
 // steps insert directly as StepSkipped with started_at == finished_at.
@@ -1220,6 +1250,10 @@ type NodeStep struct {
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	Annotations []string   `json:"annotations,omitempty"`
+	// Summary is the latest markdown run summary emitted by
+	// sparkwing.Summary inside this step's body. Overwrite-on-write:
+	// only the last value is kept.
+	Summary string `json:"summary,omitempty"`
 }
 
 // StartNodeStep inserts a row in the running state, stamping
@@ -1271,7 +1305,7 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // stream-bucket by node without a second sort.
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT node_id, step_id, status, started_at, finished_at, annotations_json
+SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
 FROM node_steps
 WHERE run_id = ?
 ORDER BY node_id, started_at`, runID)
@@ -1284,7 +1318,7 @@ ORDER BY node_id, started_at`, runID)
 		ns := &NodeStep{RunID: runID}
 		var started, finished sql.NullInt64
 		var annotations []byte
-		if err := rows.Scan(&ns.NodeID, &ns.StepID, &ns.Status, &started, &finished, &annotations); err != nil {
+		if err := rows.Scan(&ns.NodeID, &ns.StepID, &ns.Status, &started, &finished, &annotations, &ns.Summary); err != nil {
 			return nil, err
 		}
 		if started.Valid {
@@ -1360,6 +1394,34 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 	return tx.Commit()
 }
 
+// SetStepSummary replaces a step's markdown summary with md.
+// Overwrite-on-write: later calls supersede earlier ones. Inserts a
+// placeholder row if the step doesn't yet exist (a summary may fire
+// before step_start lands in the rare reorder case), matching the
+// pattern AppendStepAnnotation uses. Driven by sparkwing.Summary()
+// emitted inside a step body.
+func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO node_steps (run_id, node_id, step_id, status)
+VALUES (?,?,?,?)
+ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
+		runID, nodeID, stepID, StepRunning); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE node_steps SET summary = ?
+WHERE run_id = ? AND node_id = ? AND step_id = ?`,
+		md, runID, nodeID, stepID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // MarkNodeReady stamps ready_at if unset. Idempotent.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	res, err := s.db.ExecContext(ctx,
@@ -1425,7 +1487,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 		err = scanNodeRow(tx.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json
+       failure_reason, exit_code, annotations_json, summary
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done'
  ORDER BY ready_at ASC

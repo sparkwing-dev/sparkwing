@@ -1043,6 +1043,26 @@ func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSetNodeSummary overwrites the node's markdown run summary.
+// Body is {"markdown":"<string>"}. Driven by sparkwing.Summary()
+// emitted outside any step body. Last write wins.
+func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		Markdown string `json:"markdown"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.SetNodeSummary(r.Context(), runID, nodeID, body.Markdown); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleStartNodeStep records the running transition for one inner
 // Work step. Server stamps started_at; idempotent so retried POSTs
 // don't reset the clock.
@@ -1138,6 +1158,31 @@ func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.store.AppendStepAnnotation(r.Context(), runID, nodeID, body.StepID, body.Message); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetStepSummary overwrites a step's markdown run summary.
+// Body is {"step_id":"...","markdown":"..."}. Driven by
+// sparkwing.Summary() emitted inside a step body. Last write wins.
+func (s *Server) handleSetStepSummary(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		StepID   string `json:"step_id"`
+		Markdown string `json:"markdown"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.StepID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
+		return
+	}
+	if err := s.store.SetStepSummary(r.Context(), runID, nodeID, body.StepID, body.Markdown); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

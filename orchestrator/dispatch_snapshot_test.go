@@ -40,6 +40,8 @@ func (b *captureBackend) UpdateNodeDeps(ctx context.Context, _, _ string, _ []st
 }
 func (b *captureBackend) UpdateNodeActivity(ctx context.Context, _, _, _ string) error   { return nil }
 func (b *captureBackend) AppendNodeAnnotation(ctx context.Context, _, _, _ string) error { return nil }
+func (b *captureBackend) SetNodeSummary(ctx context.Context, _, _, _ string) error       { return nil }
+func (b *captureBackend) SetStepSummary(ctx context.Context, _, _, _, _ string) error    { return nil }
 func (b *captureBackend) StartNodeStep(ctx context.Context, _, _, _ string) error        { return nil }
 func (b *captureBackend) FinishNodeStep(ctx context.Context, _, _, _, _ string) error    { return nil }
 func (b *captureBackend) SkipNodeStep(ctx context.Context, _, _, _ string) error         { return nil }

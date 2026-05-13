@@ -100,6 +100,8 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 	// Persist sparkwing.Annotate() messages onto the node row.
 	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
+	// Persist sparkwing.Summary() markdown onto the node / step row.
+	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
 	// Persist step_start / step_end / step_skipped to node_steps rows.
 	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
 	defer nlog.Close()

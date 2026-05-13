@@ -60,7 +60,7 @@ type LogRecord struct {
 	Job      string         `json:"job,omitempty"`   // innermost Job frame
 	JobStack []string       `json:"job_stack,omitempty"`
 	Step     string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
-	Event    string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
+	Event    string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
 	Msg      string         `json:"msg,omitempty"`
 	Attrs    map[string]any `json:"attrs,omitempty"`
 }
@@ -243,6 +243,48 @@ func Annotate(ctx context.Context, msg string) {
 // Annotate. Persistence layers observing the log stream should
 // dispatch on this constant rather than the raw string.
 const EventNodeAnnotation = "node_annotation"
+
+// Summary records a persistent markdown run summary on the
+// currently-executing Node or Step. Unlike Annotate, which appends a
+// short scannable line, Summary stores a larger overwrite-on-write
+// markdown blob -- the GitHub-Actions step-summary analogue.
+//
+// Multiple calls within the same scope keep only the last value: the
+// later call replaces the earlier one. Summaries fired inside a step
+// body land on that step's row; summaries fired between steps (or
+// before any step starts) land on the node row. Outside a node
+// context (no logger installed, or no node ID in ctx) Summary is a
+// no-op, matching the Info/Warn/Error convention.
+//
+// The markdown is stored opaquely; the dashboard sanitizes and
+// renders later. There is no enforced size limit, but values are
+// expected to be small (a few KB at most).
+//
+// Example:
+//
+//	func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+//	    return sparkwing.Step(w, "deploy", func(ctx context.Context) error {
+//	        out, err := deploy(ctx)
+//	        sparkwing.Summary(ctx, fmt.Sprintf("## Deployed\n- version: `%s`\n- replicas: %d", out.Version, out.Replicas))
+//	        return err
+//	    }), nil
+//	}
+func Summary(ctx context.Context, markdown string) {
+	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
+		TS:    time.Now(),
+		Level: "info",
+		Node:  NodeFromContext(ctx),
+		Event: EventNodeSummary,
+		Msg:   markdown,
+		Attrs: map[string]any{"markdown": markdown},
+	}))
+}
+
+// EventNodeSummary is the LogRecord.Event value emitted by Summary.
+// Persistence layers observing the log stream should dispatch on
+// this constant rather than the raw string. Overwrite-on-write
+// semantics: the last record per (node, step) scope wins.
+const EventNodeSummary = "node_summary"
 
 // Per-step lifecycle events. Emitted by the Work-runner before / after
 // each step body. EventStepSkipped fires for skipIf / dry-run guards

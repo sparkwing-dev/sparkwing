@@ -282,6 +282,17 @@ func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg st
 		http.StatusNoContent, nil)
 }
 
+// SetNodeSummary POSTs the latest markdown run summary for the node.
+// Driven by sparkwing.Summary() emitted outside any step body. The
+// server overwrites the previous value.
+func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/summary",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"markdown": md},
+		http.StatusNoContent, nil)
+}
+
 // StartNodeStep POSTs the running transition for one step. Body
 // carries the step id; the server stamps started_at server-side.
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
@@ -321,6 +332,17 @@ func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "message": msg},
+		http.StatusNoContent, nil)
+}
+
+// SetStepSummary POSTs the latest markdown run summary for a step.
+// Driven by sparkwing.Summary() emitted inside a step body. The
+// server overwrites the previous value.
+func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/summary",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"step_id": stepID, "markdown": md},
 		http.StatusNoContent, nil)
 }
 
