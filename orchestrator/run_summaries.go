@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 )
@@ -65,10 +64,7 @@ func printRunSummaries(ctx context.Context, w io.Writer, useColor bool, st *stor
 			header += r.color(" › ", ansiDim) + r.color(e.stepID, ansiBold)
 		}
 		fmt.Fprintln(w, "  "+header)
-		body := strings.TrimRight(e.md, "\n")
-		for _, line := range strings.Split(body, "\n") {
-			fmt.Fprintln(w, "    "+line)
-		}
+		renderMarkdownSummary(w, "    ", e.md)
 	}
 	fmt.Fprintln(w, r.sectionRule(""))
 	return nil

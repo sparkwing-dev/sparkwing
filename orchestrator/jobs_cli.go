@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -242,26 +243,28 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 		fmt.Fprintf(out, "# following %s (ctrl-c to stop)\n\n", runID)
 	}
 
-	fmt.Fprintf(out, "run:       %s\n", run.ID)
-	fmt.Fprintf(out, "pipeline:  %s\n", run.Pipeline)
-	fmt.Fprintf(out, "status:    %s\n", run.Status)
-	fmt.Fprintf(out, "trigger:   %s\n", orDash(run.TriggerSource))
-	fmt.Fprintf(out, "started:   %s  (%s)\n",
+	label := func(k string) string { return color.Dim(k) }
+	fmt.Fprintf(out, "%s %s\n", label("run:      "), run.ID)
+	fmt.Fprintf(out, "%s %s\n", label("pipeline: "), run.Pipeline)
+	fmt.Fprintf(out, "%s %s\n", label("status:   "), colorStatus(run.Status))
+	fmt.Fprintf(out, "%s %s\n", label("trigger:  "), orDash(run.TriggerSource))
+	fmt.Fprintf(out, "%s %s  %s\n", label("started:  "),
 		run.StartedAt.Local().Format("2006-01-02 15:04:05"),
-		relativeAge(run.StartedAt),
+		color.Dim("("+relativeAge(run.StartedAt)+")"),
 	)
 	if run.FinishedAt != nil {
-		fmt.Fprintf(out, "finished:  %s  (duration %s)\n",
+		fmt.Fprintf(out, "%s %s  %s\n", label("finished: "),
 			run.FinishedAt.Local().Format("2006-01-02 15:04:05"),
-			run.FinishedAt.Sub(run.StartedAt).Round(time.Millisecond))
+			color.Dim("(duration "+run.FinishedAt.Sub(run.StartedAt).Round(time.Millisecond).String()+")"))
 	} else {
-		fmt.Fprintf(out, "elapsed:   %s\n", time.Since(run.StartedAt).Round(100*time.Millisecond))
+		fmt.Fprintf(out, "%s %s\n", label("elapsed:  "),
+			time.Since(run.StartedAt).Round(100*time.Millisecond))
 	}
 	if run.Error != "" {
-		fmt.Fprintf(out, "error:     %s\n", run.Error)
+		fmt.Fprintf(out, "%s %s\n", label("error:    "), color.Red(run.Error))
 	}
 	if run.GitBranch != "" || run.GitSHA != "" {
-		fmt.Fprintf(out, "git:       %s @ %s\n", run.GitBranch, shortSHA(run.GitSHA))
+		fmt.Fprintf(out, "%s %s @ %s\n", label("git:      "), run.GitBranch, shortSHA(run.GitSHA))
 	}
 
 	fmt.Fprintln(out)
@@ -299,18 +302,15 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 // "summary:" sub-heading with each line indented.
 func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[string][]*store.NodeStep, force bool) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  ID\tSTATUS\tOUTCOME\tDURATION\tDEPS")
+	fmt.Fprintln(tw, "  "+color.Dim("ID\tSTATUS\tOUTCOME\tDURATION\tDEPS"))
 	for _, n := range nodes {
-		outcome := n.Outcome
-		if outcome == "" {
-			outcome = "-"
-		}
 		deps := strings.Join(n.Deps, ",")
 		if deps == "" {
 			deps = "-"
 		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-			n.NodeID, n.Status, outcome, formatNodeDuration(n), deps)
+			n.NodeID, n.Status, colorOutcome(n.Outcome),
+			formatNodeDuration(n), color.Dim(deps))
 	}
 	_ = tw.Flush()
 	for _, n := range nodes {
@@ -321,18 +321,30 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 		if !shouldRender {
 			continue
 		}
-		fmt.Fprintf(out, "    %s:\n", n.NodeID)
+		fmt.Fprintf(out, "    %s\n", color.Bold(n.NodeID+":"))
 		for _, a := range annotations {
-			fmt.Fprintf(out, "      @ %s\n", a)
+			fmt.Fprintf(out, "      %s %s\n", color.Dim("@"), a)
 		}
 		if n.Summary != "" {
 			writeIndentedSummary(out, "      ", n.Summary)
 		}
+		// Compute column widths so step rows align even though
+		// annotations/summaries interleave (a single tabwriter can't
+		// flush across the intervening rows).
+		idWidth := 0
 		for _, s := range steps {
-			fmt.Fprintf(out, "      %s\t%s\t%s\n",
-				stepGlyph(s.Status), s.StepID, formatStepDuration(s))
+			if n := len(s.StepID); n > idWidth {
+				idWidth = n
+			}
+		}
+		for _, s := range steps {
+			pad := strings.Repeat(" ", idWidth-len(s.StepID))
+			fmt.Fprintf(out, "      %s  %s%s  %s\n",
+				colorStepGlyph(s.Status),
+				s.StepID, pad,
+				color.Dim(formatStepDuration(s)))
 			for _, a := range s.Annotations {
-				fmt.Fprintf(out, "        @ %s\n", a)
+				fmt.Fprintf(out, "        %s %s\n", color.Dim("@"), a)
 			}
 			if s.Summary != "" {
 				writeIndentedSummary(out, "        ", s.Summary)
@@ -341,15 +353,12 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	}
 }
 
-// writeIndentedSummary prints "summary:" then each line of the
-// markdown indented by prefix + two spaces. Trailing blank lines are
-// trimmed so the block doesn't pad the table out.
+// writeIndentedSummary prints a "summary:" sub-heading then the
+// pretty-rendered markdown body indented under it. Trailing blank
+// lines are trimmed so the block doesn't pad the table out.
 func writeIndentedSummary(out io.Writer, prefix, md string) {
-	fmt.Fprintf(out, "%ssummary:\n", prefix)
-	body := strings.TrimRight(md, "\n")
-	for _, line := range strings.Split(body, "\n") {
-		fmt.Fprintf(out, "%s  %s\n", prefix, line)
-	}
+	fmt.Fprintf(out, "%s%s\n", prefix, color.Dim("summary:"))
+	renderMarkdownSummary(out, prefix+"  ", md)
 }
 
 func hasStepSummary(steps []*store.NodeStep) bool {

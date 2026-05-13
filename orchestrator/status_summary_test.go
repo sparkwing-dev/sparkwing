@@ -21,7 +21,7 @@ func TestRenderNodesWithSteps_IncludesNodeSummary(t *testing.T) {
 	if !strings.Contains(got, "summary:") {
 		t.Errorf("missing summary: header:\n%s", got)
 	}
-	if !strings.Contains(got, "## Deployed") || !strings.Contains(got, "- replicas: 3") {
+	if !strings.Contains(got, "Deployed") || !strings.Contains(got, "replicas: 3") {
 		t.Errorf("summary body missing:\n%s", got)
 	}
 }
@@ -45,7 +45,7 @@ func TestRenderNodesWithSteps_IncludesStepSummary(t *testing.T) {
 	if !strings.Contains(got, "summary:") {
 		t.Errorf("missing summary: header:\n%s", got)
 	}
-	if !strings.Contains(got, "## Rollout") || !strings.Contains(got, "3/3 ready") {
+	if !strings.Contains(got, "Rollout") || !strings.Contains(got, "3/3 ready") {
 		t.Errorf("step summary body missing:\n%s", got)
 	}
 }

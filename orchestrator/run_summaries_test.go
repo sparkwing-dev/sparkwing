@@ -39,10 +39,10 @@ func TestPrintRunSummaries_NodeAndStepScopes(t *testing.T) {
 	if !strings.Contains(got, "deploy › rollout") {
 		t.Errorf("missing step-scope header:\n%s", got)
 	}
-	if !strings.Contains(got, "## node summary") || !strings.Contains(got, "- ok") {
+	if !strings.Contains(got, "node summary") || !strings.Contains(got, "• ok") {
 		t.Errorf("missing node summary body:\n%s", got)
 	}
-	if !strings.Contains(got, "## rollout") || !strings.Contains(got, "3/3 ready") {
+	if !strings.Contains(got, "rollout") || !strings.Contains(got, "3/3 ready") {
 		t.Errorf("missing step summary body:\n%s", got)
 	}
 }
