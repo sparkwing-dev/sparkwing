@@ -774,7 +774,7 @@ export default function LogBucketView({
   // the run, and the next matching line starts a new block.
   const errorBlocks = useMemo(() => {
     const out: { sectionIdx: number; line: number }[] = [];
-    const reError = /\bERROR\b|\berror:|\bFAIL\b|\bpanic:/;
+    const reError = /\berror\b|\bfail\b|\bpanic\b/i;
     let lineCursor = 1;
     parsed.sections.forEach((section, idx) => {
       let inBlock = false;
