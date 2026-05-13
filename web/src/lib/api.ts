@@ -577,6 +577,27 @@ export function getRunEventsStreamUrl(runID: string): string {
   return `${API_URL}/api/v1/runs/${runID}/events/stream`;
 }
 
+// listRunEvents fetches the historical event log for a run (as
+// opposed to the SSE stream, which only emits new ones). Used for
+// post-hoc summaries that need to enumerate events already-emitted
+// before the dashboard subscribed -- e.g. counting which nodes the
+// orchestrator skipped via retry rehydration.
+export async function listRunEvents(
+  runID: string,
+  opts?: { after?: number; limit?: number },
+): Promise<RunEvent[]> {
+  const params = new URLSearchParams();
+  if (opts?.after) params.set("after", String(opts.after));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const url = `${API_URL}/api/v1/runs/${runID}/events${
+    params.toString() ? `?${params}` : ""
+  }`;
+  const res = await authFetch(url, { cache: "no-store" }).catch(() => null);
+  if (!res || !res.ok) return [];
+  const body = await res.json();
+  return Array.isArray(body) ? (body as RunEvent[]) : [];
+}
+
 // RunEvent mirrors store.Event on the wire. Payload is opaque JSON;
 // consumers cast it per kind. The set of kinds is documented in
 // docs/design/structured-sse-events.md — adding a new kind on the

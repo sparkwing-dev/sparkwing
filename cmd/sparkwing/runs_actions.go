@@ -165,7 +165,31 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		res := retryOne(ctx, c, srcID)
 		results = append(results, res)
 	}
-	return reportResults(os.Stdout, "retry", results)
+	reportErr := reportResults(os.Stdout, "retry", results)
+
+	// Reruns dispatch asynchronously in the localws consumer, so the
+	// CLI returns as soon as the trigger lands. Print the matching
+	// `runs logs --follow` command alongside each new run id so the
+	// operator can hop straight into tailing it from the same
+	// terminal without rebuilding the id by hand.
+	for _, r := range results {
+		if !r.OK || r.NewRunID == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "follow: sparkwing runs logs --run %s --follow%s\n",
+			r.NewRunID, profileSuffix(*on))
+	}
+	return reportErr
+}
+
+// profileSuffix renders the trailing ` --on <name>` segment for hint
+// strings only when the caller used a non-local profile, so the
+// suggested command is copy-pasteable in either mode.
+func profileSuffix(on string) string {
+	if on == "" {
+		return ""
+	}
+	return " --on " + on
 }
 
 func retryOne(ctx context.Context, c *client.Client, srcRunID string) runResult {
@@ -173,11 +197,14 @@ func retryOne(ctx context.Context, c *client.Client, srcRunID string) runResult 
 	if err != nil {
 		return runResult{RunID: srcRunID, Error: fmt.Sprintf("lookup: %v", err)}
 	}
+	// Trigger source stays as the plain string "retry" so it never
+	// leaks the source run id into user-visible chips. The retry_of
+	// field carries the lineage cleanly.
 	resp, err := c.CreateTrigger(ctx, client.TriggerRequest{
 		Pipeline: run.Pipeline,
 		Args:     run.Args,
 		Trigger: client.TriggerMeta{
-			Source: "retry:" + srcRunID,
+			Source: "retry",
 		},
 		Git:     client.GitMeta{Branch: run.GitBranch, SHA: run.GitSHA},
 		RetryOf: srcRunID,

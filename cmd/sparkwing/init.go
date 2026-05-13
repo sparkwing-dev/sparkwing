@@ -59,6 +59,7 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 		{filepath.Join(sparkwingDir, "go.mod"), func() string { return renderInitGoMod(moduleName) }},
 		{filepath.Join(sparkwingDir, "main.go"), func() string { return renderInitMainGo(moduleName) }},
 		{filepath.Join(sparkwingDir, "pipelines.yaml"), func() string { return renderInitPipelinesYAML() }},
+		{filepath.Join(sparkwingDir, "README.md"), func() string { return renderInitReadme() }},
 	}
 	for _, f := range files {
 		rel, _ := filepath.Rel(filepath.Dir(sparkwingDir), f.Path)
@@ -119,6 +120,37 @@ import (
 
 func main() { orchestrator.Main() }
 `, moduleName, moduleName+"/jobs")
+}
+
+func renderInitReadme() string {
+	return "# .sparkwing/\n" +
+		"\n" +
+		"This directory holds this repo's [sparkwing](https://sparkwing.dev) pipeline\n" +
+		"definitions. Pipelines are Go programs registered in `pipelines.yaml` and run\n" +
+		"via `sparkwing run <name>` (or the human shortcut `wing <name>`).\n" +
+		"\n" +
+		"Add a pipeline:\n" +
+		"\n" +
+		"```\n" +
+		"sparkwing pipeline new --name <name>\n" +
+		"```\n" +
+		"\n" +
+		"## Layout\n" +
+		"\n" +
+		"```\n" +
+		".sparkwing/\n" +
+		"  pipelines.yaml      registry of every pipeline (name -> entrypoint)\n" +
+		"  jobs/               Go package holding pipeline definitions; scaffold lands one .go file per pipeline\n" +
+		"  main.go             thin entrypoint; delegates to orchestrator.Main\n" +
+		"  go.mod / go.sum     module + pinned SDK version\n" +
+		"  sparkwing-pipeline  cached compiled binary (gitignored, regenerated)\n" +
+		"```\n" +
+		"\n" +
+		"## Agents\n" +
+		"\n" +
+		agentBlockBody +
+		"\n" +
+		"Refresh this section after major sparkwing upgrades via `sparkwing info --for-agent`.\n"
 }
 
 func renderInitPipelinesYAML() string {

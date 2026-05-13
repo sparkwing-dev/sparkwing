@@ -1930,7 +1930,20 @@ SELECT run_id, seq, node_id, kind, ts, payload
 		}
 		e.TS = time.Unix(0, tsNanos)
 		if len(payload) > 0 {
-			e.Payload = json.RawMessage(payload)
+			// Several AppendEvent callsites write plain strings (error
+			// reason text, "upstream-failed" markers) rather than JSON
+			// objects. json.RawMessage refuses to marshal anything that
+			// isn't valid JSON, so leaving the raw bytes in place would
+			// break the entire response any time one of those events is
+			// included. Wrap unparseable payloads as JSON strings so
+			// readers get the original text and the list response can
+			// always be encoded cleanly.
+			if json.Valid(payload) {
+				e.Payload = json.RawMessage(payload)
+			} else {
+				wrapped, _ := json.Marshal(string(payload))
+				e.Payload = json.RawMessage(wrapped)
+			}
 		}
 		out = append(out, e)
 	}

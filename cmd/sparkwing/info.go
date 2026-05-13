@@ -193,17 +193,22 @@ func runInfo(args []string) error {
 	}
 }
 
+// agentBlockBody is the shared paste-ready agent context.
+// Reused by `sparkwing info --for-agent` and the README scaffolded by
+// `sparkwing pipeline new` so both stay in sync.
+const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go\n" +
+	"programs in `.sparkwing/`. Ask the binary, don't scrape the repo:\n" +
+	"\n" +
+	"- `sparkwing info --json` -- context: binary, project, next steps (start here)\n" +
+	"- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
+	"- `sparkwing pipeline list --json` -- this repo's pipelines\n" +
+	"- `sparkwing run <name>` -- run a pipeline (`wing <name>` is a human alias; agents prefer `sparkwing run`)\n" +
+	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
+
 func printAgentBlock() {
 	fmt.Println("<!-- Sparkwing context for AI agents. Paste into CLAUDE.md or AGENTS.md and commit. Refresh after major sparkwing upgrades via `sparkwing info --for-agent`. -->")
 	fmt.Println()
-	fmt.Println("This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go")
-	fmt.Println("programs in `.sparkwing/`. Ask the binary, don't scrape the repo:")
-	fmt.Println()
-	fmt.Println("- `sparkwing info --json` -- context: binary, project, next steps (start here)")
-	fmt.Println("- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)")
-	fmt.Println("- `sparkwing pipeline list --json` -- this repo's pipelines")
-	fmt.Println("- `sparkwing run <name>` -- run a pipeline (`wing <name>` is a human alias; agents prefer `sparkwing run`)")
-	fmt.Println("- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt")
+	fmt.Print(agentBlockBody)
 }
 
 func printFirstTimeCard() {

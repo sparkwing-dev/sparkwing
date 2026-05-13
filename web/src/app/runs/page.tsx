@@ -53,6 +53,7 @@ import {
   cancelRun,
   deleteRun,
   getNodeLogs,
+  listRunEvents,
   getNodeStreamUrl,
   getPipelines,
   getRun,
@@ -121,7 +122,11 @@ function statusDot(status: string): string {
   }
 }
 
-function outcomeDot(outcome: string, status: string): string {
+function outcomeDot(outcome: string, status: string, reused = false): string {
+  // Reused-from-retry nodes inherit outcome=success but should
+  // read as teal so the sidebar distinguishes carried-forward
+  // success from a fresh execution in this attempt.
+  if (reused) return "bg-teal-300";
   if (outcome) return statusDot(outcome === "success" ? "success" : outcome);
   return statusDot(status);
 }
@@ -481,6 +486,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const run = detail?.run || null;
   const nodes = detail?.nodes || [];
   const node = nodes.find((n) => n.id === selectedNode) || null;
+  // Single source of truth for "which nodes did the orchestrator
+  // rehydrate from a prior attempt." Computed once at the page
+  // level and threaded into both NodesList (sidebar dots) and
+  // RunDetailPane (DAG pills + reuse summary banner).
+  const { ids: reusedNodeIDs, priorRunID: reusedPriorRunID } =
+    useReusedNodeIDs(run);
 
   const filterCtx = useFilterCtx(filterState);
 
@@ -774,6 +785,91 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               )}
               <ActionMenu
                 align="end"
+                title="Rerun"
+                items={[
+                  {
+                    label: "Rerun from failed",
+                    description:
+                      "Reuse cached/passed nodes; re-execute only failed or unreached.",
+                    tone: "primary",
+                    disabled: checkedRuns.size !== 1,
+                    onSelect: async () => {
+                      if (checkedRuns.size !== 1) return;
+                      const [id] = checkedRuns;
+                      const fresh = await retryRun(id, {
+                        full: false,
+                      }).catch(() => null);
+                      if (fresh?.id) {
+                        toast(
+                          `Rerun (from failed) queued as ${fresh.id}`,
+                          "success",
+                        );
+                        window.dispatchEvent(
+                          new CustomEvent("sparkwing:runs-changed"),
+                        );
+                      } else {
+                        toast(`Rerun failed for ${id}`, "error");
+                      }
+                      refresh();
+                    },
+                  },
+                  {
+                    label: "Rerun all",
+                    description:
+                      "Re-execute every node from scratch, ignoring previous results.",
+                    tone: "primary",
+                    disabled: checkedRuns.size !== 1,
+                    onSelect: async () => {
+                      if (checkedRuns.size !== 1) return;
+                      const [id] = checkedRuns;
+                      const fresh = await retryRun(id, { full: true }).catch(
+                        () => null,
+                      );
+                      if (fresh?.id) {
+                        toast(
+                          `Rerun (all nodes) queued as ${fresh.id}`,
+                          "success",
+                        );
+                        window.dispatchEvent(
+                          new CustomEvent("sparkwing:runs-changed"),
+                        );
+                      } else {
+                        toast(`Rerun failed for ${id}`, "error");
+                      }
+                      refresh();
+                    },
+                  },
+                ]}
+                trigger={(open, toggle) => (
+                  <button
+                    disabled={checkedRuns.size !== 1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle();
+                    }}
+                    aria-expanded={open}
+                    title={
+                      checkedRuns.size === 0
+                        ? "Select a run to rerun"
+                        : checkedRuns.size > 1
+                          ? "Rerun supports one run at a time"
+                          : `Rerun ${[...checkedRuns][0]}`
+                    }
+                    className={`text-[10px] px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 ${
+                      open
+                        ? "border-indigo-400 text-indigo-200 bg-indigo-500/15"
+                        : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]"
+                    }`}
+                  >
+                    ↻ Rerun
+                    <span aria-hidden className="text-[10px] opacity-70">
+                      ▾
+                    </span>
+                  </button>
+                )}
+              />
+              <ActionMenu
+                align="end"
                 title={
                   checkedRuns.size === 1
                     ? "Delete this run?"
@@ -963,6 +1059,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 setFocusedColumn("nodes");
                 selectStep(nodeId, stepId);
               }}
+              reusedNodeIDs={reusedNodeIDs ?? undefined}
             />
           </div>
         )}
@@ -993,6 +1090,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   : null
               }
               onConsumePendingLogFocus={() => setPendingLogFocus(null)}
+              reusedNodeIDs={reusedNodeIDs ?? undefined}
+              reusedPriorRunID={reusedPriorRunID}
             />
           </div>
         )}
@@ -1453,6 +1552,7 @@ function NodesList({
   focusedColumnActive,
   onSelect,
   onSelectStep,
+  reusedNodeIDs,
 }: {
   nodes: RunNode[];
   selectedNode: string | null;
@@ -1461,6 +1561,10 @@ function NodesList({
   focusedColumnActive?: boolean;
   onSelect: (id: string | null) => void;
   onSelectStep: (nodeId: string, stepId: string | null) => void;
+  // Node ids the orchestrator rehydrated from a prior attempt.
+  // Drives the teal "reused" dot color so the sidebar matches the
+  // DAG's REUSED treatment.
+  reusedNodeIDs?: Set<string>;
 }) {
   const groups = partitionByGroup(nodes);
   // Collapse state is keyed on the group name and driven by the
@@ -1521,6 +1625,7 @@ function NodesList({
               onToggleExpand={() => toggleNode(n.id)}
               onSelect={onSelect}
               onSelectStep={onSelectStep}
+              reused={reusedNodeIDs?.has(n.id)}
             />
           ));
         }
@@ -1554,6 +1659,7 @@ function NodesList({
                     onToggleExpand={() => toggleNode(n.id)}
                     onSelect={onSelect}
                     onSelectStep={onSelectStep}
+                    reused={reusedNodeIDs?.has(n.id)}
                   />
                 ))}
               </div>
@@ -1638,6 +1744,7 @@ function NodeRow({
   onToggleExpand,
   onSelect,
   onSelectStep,
+  reused,
 }: {
   n: RunNode;
   selected: boolean;
@@ -1649,9 +1756,12 @@ function NodeRow({
   onToggleExpand?: () => void;
   onSelect: (id: string | null) => void;
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
+  // True when the orchestrator rehydrated this node from the source
+  // attempt instead of re-executing it.
+  reused?: boolean;
 }) {
   const label = n.id.length > 20 ? n.id.slice(0, 19) + "…" : n.id;
-  const statusLabel = n.outcome || n.status;
+  const statusLabel = reused ? "reused" : n.outcome || n.status;
   const steps = n.work?.steps ?? [];
   const hasSteps = steps.length > 0;
   return (
@@ -1688,7 +1798,8 @@ function NodeRow({
             <span className="w-3 shrink-0" />
           )}
           <span
-            className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status)}`}
+            className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status, reused)}`}
+            title={reused ? "Reused from prior attempt" : undefined}
           />
           <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
           {(() => {
@@ -2205,6 +2316,8 @@ function RunDetailPane({
   focusedTab,
   pendingLogFocus,
   onConsumePendingLogFocus,
+  reusedNodeIDs,
+  reusedPriorRunID,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -2222,6 +2335,11 @@ function RunDetailPane({
   // focuses the matching line; consumed once via onConsumePendingLogFocus.
   pendingLogFocus?: { nodeID: string; line: number } | null;
   onConsumePendingLogFocus?: () => void;
+  // Set of node ids the orchestrator rehydrated from a prior attempt
+  // (drives the DAG REUSED pill + teal status dot). Computed at the
+  // page level so the sidebar NodesList sees the same data.
+  reusedNodeIDs?: Set<string>;
+  reusedPriorRunID?: string | null;
 }) {
   const selected = node;
   const selectedIsRunning =
@@ -2667,6 +2785,7 @@ function RunDetailPane({
           >
             #{run.id}
           </span>
+          <RerunModeChip run={run} />
           <span className="ml-auto flex items-center gap-2">
             <AttemptsDropdown currentRunID={run.id} />
             {runIsActive && <CancelButton runId={run.id} onDone={onRefresh} />}
@@ -2681,6 +2800,12 @@ function RunDetailPane({
         </div>
 
         <div className="px-4 pb-2">
+          <ReuseSummary
+            run={run}
+            nodes={nodes}
+            reusedIDs={reusedNodeIDs ?? null}
+            priorRunID={reusedPriorRunID ?? null}
+          />
           <DebugPausePanel runID={run.id} runStatus={run.status} />
         </div>
 
@@ -2845,6 +2970,7 @@ function RunDetailPane({
               runId={run.id}
               findMatched={findMatchedNodesByName}
               findMatchedSteps={findMatchedStepsByName}
+              reusedNodeIDs={reusedNodeIDs ?? undefined}
             />
           </div>
         )}
@@ -3942,6 +4068,7 @@ function DAG({
   runId,
   findMatched,
   findMatchedSteps,
+  reusedNodeIDs,
 }: {
   nodes: RunNode[];
   selected: string | null;
@@ -3951,6 +4078,9 @@ function DAG({
   runId?: string;
   findMatched?: Set<string>;
   findMatchedSteps?: Set<string>;
+  // Node ids the orchestrator rehydrated from the source attempt
+  // (only populated on retry-of runs). Drives the REUSED pill.
+  reusedNodeIDs?: Set<string>;
 }) {
   const dagRouter = useRouter();
   // Auto-scroll the selected node into view when arriving with a
@@ -4578,7 +4708,7 @@ function DAG({
                     cx={14}
                     cy={nodeH / 2}
                     r={4}
-                    className={dagStatusClass(n)}
+                    className={dagStatusClass(n, reusedNodeIDs?.has(n.id))}
                   />
                   <text
                     x={26}
@@ -4605,10 +4735,15 @@ function DAG({
                 {n.outcome === "cached" && !n.approval && (
                   <CachedPill nodeW={p.w} />
                 )}
+                {reusedNodeIDs?.has(n.id) &&
+                  !n.dynamic &&
+                  !n.approval &&
+                  n.outcome !== "cached" && <ReusedPill nodeW={p.w} />}
                 {n.modifiers?.inline &&
                   !n.dynamic &&
                   !n.approval &&
                   n.outcome !== "cached" &&
+                  !reusedNodeIDs?.has(n.id) &&
                   !(n.spawned_pipelines?.length ?? 0) && (
                     <InlinePill nodeW={p.w} />
                   )}
@@ -5825,6 +5960,44 @@ function InlinePill({ nodeW }: { nodeW: number }) {
   );
 }
 
+// ReusedPill marks a node that was rehydrated from the source
+// attempt's success outcome instead of being re-executed in this
+// rerun. Painted in the same emerald family the ReuseSummary banner
+// uses so the two visuals read as one signal. Hidden when a more
+// specific pill claims the top slot (dynamic / approval / cached /
+// cross-pipeline).
+function ReusedPill({ nodeW }: { nodeW: number }) {
+  const pillW = 52;
+  const pillH = 15;
+  const x = (nodeW - pillW) / 2;
+  const y = -6;
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <rect
+        x={x}
+        y={y}
+        width={pillW}
+        height={pillH}
+        rx={pillH / 2}
+        ry={pillH / 2}
+        fill="rgba(52,211,153,0.95)"
+      />
+      <text
+        x={x + pillW / 2}
+        y={y + pillH / 2 + 3.5}
+        textAnchor="middle"
+        fill="rgba(8,28,20,0.95)"
+        fontSize={10}
+        fontWeight={700}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        style={{ letterSpacing: "0.5px" }}
+      >
+        REUSED
+      </text>
+    </g>
+  );
+}
+
 function CachedPill({ nodeW }: { nodeW: number }) {
   const pillW = 52;
   const pillH = 15;
@@ -6046,7 +6219,13 @@ function dagNodeColors(
   return { fill, border };
 }
 
-function dagStatusClass(n: RunNode): string {
+function dagStatusClass(n: RunNode, reused = false): string {
+  // Reused-from-retry nodes have outcome=success but we want them
+  // visually distinct from a fresh success so the operator can tell
+  // at a glance which nodes actually executed in this attempt. Teal
+  // keys off the same emerald family the REUSED pill uses but skews
+  // lighter so the dot reads as "passive carry-forward".
+  if (reused) return "fill-teal-300";
   const k = n.outcome || n.status;
   switch (k) {
     case "success":
@@ -6074,6 +6253,159 @@ function dagStatusClass(n: RunNode): string {
       // pending (no outcome, no running status yet)
       return "fill-slate-600";
   }
+}
+
+// useReusedNodeIDs queries the run's event log for
+// `node_skipped_from_retry` events and returns the set of node ids
+// the orchestrator rehydrated from the source attempt. Empty when
+// the run has no retry_of (it isn't a rerun) or when the run ran in
+// "Rerun all" mode (no rehydration events).
+//
+// Returns null while loading so the caller can render a quiet
+// placeholder instead of flashing an empty state.
+function useReusedNodeIDs(run: Run | null): {
+  ids: Set<string> | null;
+  priorRunID: string | null;
+} {
+  const [ids, setIds] = useState<Set<string> | null>(null);
+  const [priorRunID, setPriorRunID] = useState<string | null>(null);
+  const runID = run?.id ?? null;
+  const retryOf = run?.retry_of ?? null;
+  useEffect(() => {
+    setIds(null);
+    setPriorRunID(null);
+    if (!runID) return;
+    if (!retryOf) {
+      setIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    listRunEvents(runID, { limit: 1000 }).then((events) => {
+      if (cancelled) return;
+      const next = new Set<string>();
+      let prior: string | null = null;
+      for (const e of events) {
+        if (e.kind !== "node_skipped_from_retry") continue;
+        if (e.node_id) next.add(e.node_id);
+        if (!prior && e.payload && typeof e.payload === "object") {
+          const p = e.payload as { prior_run_id?: string };
+          if (p.prior_run_id) prior = p.prior_run_id;
+        }
+      }
+      setIds(next);
+      setPriorRunID(prior ?? retryOf ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runID, retryOf]);
+  return { ids, priorRunID };
+}
+
+// rerunMode reads run.invocation?.flags?.full to distinguish the
+// two retry choices the dashboard offers. Returns "full" / "failed"
+// for runs the orchestrator has already executed (invocation is set
+// at orchestrator.Run startup, so newly-queued runs return null
+// briefly until the subprocess promotes them).
+function rerunMode(run: Run): "full" | "failed" | null {
+  if (!run.retry_of) return null;
+  const flags = run.invocation?.flags;
+  if (!flags) return null;
+  return flags.full === true ? "full" : "failed";
+}
+
+// ReuseSummary confirms what "Rerun from failed" actually skipped.
+// On any run with retry_of set, it counts node_skipped_from_retry
+// events emitted by the orchestrator (one per node rehydrated from
+// the prior attempt) and renders a one-line summary with the exact
+// reused node ids in the tooltip.
+//
+// Hidden when there's no retry_of (the run isn't a rerun) or when
+// the count is zero (the rerun was a "Rerun all" or had nothing
+// passable to reuse).
+function ReuseSummary({
+  run,
+  nodes,
+  reusedIDs,
+  priorRunID,
+}: {
+  run: Run;
+  nodes: RunNode[];
+  reusedIDs: Set<string> | null;
+  priorRunID: string | null;
+}) {
+  if (!run.retry_of) return null;
+  if (reusedIDs === null) return null;
+  const total = nodes.length;
+  const count = reusedIDs.size;
+  const mode = rerunMode(run);
+  if (count === 0) {
+    return (
+      <div className="text-[10px] text-[var(--muted)] py-1">
+        ↻ Rerun of #{priorRunID}
+        {mode === "full"
+          ? " — full rerun (re-executing every node)."
+          : " — no passed nodes were reused (re-executing everything)."}
+      </div>
+    );
+  }
+  const reusedList = [...reusedIDs];
+  return (
+    <Tooltip
+      content={
+        <div className="font-mono text-[10px] max-w-md">
+          <div className="text-[var(--muted)] mb-1">
+            Reused from #{priorRunID}:
+          </div>
+          <ul className="space-y-0.5">
+            {reusedList.map((id) => (
+              <li key={id}>• {id}</li>
+            ))}
+          </ul>
+        </div>
+      }
+    >
+      <div className="text-[11px] py-1 inline-flex items-center gap-1.5 text-emerald-300">
+        <span className="font-semibold">↻ Rerun from failed</span>
+        <span className="text-[var(--muted)]">·</span>
+        <span>
+          reused {count} of {total} nodes from{" "}
+          <span className="font-mono">#{priorRunID}</span>
+        </span>
+      </div>
+    </Tooltip>
+  );
+}
+
+// RerunModeChip surfaces "rerun: all" vs "rerun: from failed" in the
+// run header so the operator can tell which choice the new attempt
+// was launched with. Reads from run.invocation.flags.full (set by
+// the orchestrator at run start). Stays hidden for non-retry runs
+// and for the brief window before the orchestrator has stamped the
+// invocation snapshot.
+function RerunModeChip({ run }: { run: Run }) {
+  const mode = rerunMode(run);
+  if (!mode) return null;
+  const isFull = mode === "full";
+  return (
+    <Tooltip
+      content={
+        isFull
+          ? "Rerun all: every node re-executes from scratch, even ones that passed in the source attempt."
+          : "Rerun from failed: passed nodes are reused from the source attempt; only failed or unreached nodes re-execute."
+      }
+    >
+      <span
+        className={`text-[10px] px-1.5 py-0.5 rounded border font-mono shrink-0 ${
+          isFull
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+            : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+        }`}
+      >
+        ↻ rerun · {isFull ? "all" : "from failed"}
+      </span>
+    </Tooltip>
+  );
 }
 
 // --- action buttons ---
@@ -6171,6 +6503,10 @@ function RetryButton({ runId, onDone }: { runId: string; onDone: () => void }) {
           : `Rerun (from failed) queued as ${fresh.id}`,
         "success",
       );
+      // Let the Attempts dropdown (and any other listeners) refetch
+      // immediately so the new attempt appears without the user
+      // having to navigate away and back.
+      window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));
     } else {
       toast(`Rerun failed for ${runId}`, "error");
     }

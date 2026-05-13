@@ -39,6 +39,16 @@ export default function AttemptsDropdown({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
 
+  // Bumped whenever a "sparkwing:runs-changed" event fires so a
+  // rerun queued from elsewhere on the page refreshes this dropdown
+  // without the user having to navigate away and back.
+  const [bus, setBus] = useState(0);
+  useEffect(() => {
+    const handler = () => setBus((v) => v + 1);
+    window.addEventListener("sparkwing:runs-changed", handler);
+    return () => window.removeEventListener("sparkwing:runs-changed", handler);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     getRunAttempts(currentRunID).then((rows) => {
@@ -48,7 +58,7 @@ export default function AttemptsDropdown({
     return () => {
       cancelled = true;
     };
-  }, [currentRunID, refreshKey]);
+  }, [currentRunID, refreshKey, bus]);
 
   useEffect(() => {
     if (!open) return;
@@ -112,6 +122,7 @@ export default function AttemptsDropdown({
           </div>
           {attempts.map((a, i) => {
             const isCurrent = a.id === currentRunID;
+            const mode = attemptMode(a);
             return (
               <button
                 key={a.id}
@@ -140,6 +151,20 @@ export default function AttemptsDropdown({
                 <span className="text-[var(--muted)] truncate flex-1">
                   {fmtAttemptTime(a)}
                 </span>
+                {mode && (
+                  <span
+                    className={`text-[9px] uppercase font-mono px-1 py-px rounded border shrink-0 ${
+                      mode === "full"
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                        : mode === "failed"
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                          : "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--muted)]"
+                    }`}
+                    title={modeTooltip(mode)}
+                  >
+                    {modeLabel(mode)}
+                  </span>
+                )}
                 {isCurrent && (
                   <span className="text-[10px] uppercase text-amber-300 shrink-0">
                     current
@@ -166,6 +191,46 @@ function statusDot(status: string): string {
       return "bg-indigo-400 animate-pulse";
     default:
       return "bg-slate-500";
+  }
+}
+
+// attemptMode classifies a single run row by how it was started:
+//   - "original"  the root attempt (no retry_of pointer)
+//   - "full"      a retry that ran in Options.Full mode
+//   - "failed"    a retry with skip-passed rehydration ("from failed")
+//   - null        retry_of is set but invocation hasn't been stamped
+//                 yet (the orchestrator writes flags only after the
+//                 subprocess starts), so the mode is genuinely unknown
+//                 for a brief window — render nothing rather than
+//                 mislead.
+type AttemptMode = "original" | "full" | "failed";
+
+function attemptMode(r: Run): AttemptMode | null {
+  if (!r.retry_of) return "original";
+  const flags = r.invocation?.flags;
+  if (!flags) return null;
+  return flags.full === true ? "full" : "failed";
+}
+
+function modeLabel(m: AttemptMode): string {
+  switch (m) {
+    case "original":
+      return "original";
+    case "full":
+      return "all";
+    case "failed":
+      return "from failed";
+  }
+}
+
+function modeTooltip(m: AttemptMode): string {
+  switch (m) {
+    case "original":
+      return "Original run — not a retry.";
+    case "full":
+      return "Rerun all: every node re-executed from scratch.";
+    case "failed":
+      return "Rerun from failed: passed nodes were reused; only failed/unreached nodes re-executed.";
   }
 }
 

@@ -78,6 +78,33 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return
 	}
+	// Pre-allocate the Run row at retry-intake -- mirror handleTrigger
+	// so the dashboard's runs list shows the new attempt instantly,
+	// instead of waiting the ~500ms+compile delay until the consumer
+	// claims the trigger and the orchestrator emits its own CreateRun.
+	// Status starts as "pending"; the orchestrator's CreateRun upsert
+	// promotes it to "running" once the subprocess actually starts.
+	now := time.Now()
+	if err := s.store.CreateRun(r.Context(), store.Run{
+		ID:            newID,
+		Pipeline:      src.Pipeline,
+		Status:        "pending",
+		TriggerSource: "retry",
+		GitBranch:     src.GitBranch,
+		GitSHA:        src.GitSHA,
+		Args:          src.Args,
+		Repo:          src.Repo,
+		RepoURL:       src.RepoURL,
+		GithubOwner:   src.GithubOwner,
+		GithubRepo:    src.GithubRepo,
+		RetryOf:       srcID,
+		RetrySource:   store.RetrySourceManual,
+		CreatedAt:     now,
+		StartedAt:     now,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
+		return
+	}
 	// Reverse pointer on the source row so older runs render a
 	// "retried as #newID" pill. Best-effort.
 	_ = s.store.SetRetriedAs(r.Context(), srcID, newID)
@@ -103,14 +130,14 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	// directly, so the caller doesn't need a round-trip to GetRun.
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"id":          newID,
-		"pipeline":    src.Pipeline,
-		"status":      "running",
-		"trigger":     "retry",
-		"git_branch":  src.GitBranch,
-		"git_sha":     src.GitSHA,
-		"started_at":  time.Now().UTC().Format(time.RFC3339Nano),
-		"duration_ms": 0,
-		"retry_of":    srcID,
+		"id":             newID,
+		"pipeline":       src.Pipeline,
+		"status":         "pending",
+		"trigger_source": "retry",
+		"git_branch":     src.GitBranch,
+		"git_sha":        src.GitSHA,
+		"started_at":     now.UTC().Format(time.RFC3339Nano),
+		"duration_ms":    0,
+		"retry_of":       srcID,
 	})
 }
