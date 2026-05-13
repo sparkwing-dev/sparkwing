@@ -139,6 +139,8 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
 	on := fs.String("on", "", "profile name (default: current default)")
+	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
+	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -148,6 +150,18 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsRetry.Path, rest[0])
 	}
+	// Force callers to make the rerun-scope choice explicit: silent
+	// defaults caused operators to ship "rerun from failed" when they
+	// meant "rerun all" (and vice versa) because the two are visually
+	// indistinguishable in the trigger queue. Requiring one of the
+	// flags makes the intent show up in the shell history.
+	switch {
+	case *fromFailed && *all:
+		return fmt.Errorf("%s: --failed and --all are mutually exclusive", cmdJobsRetry.Path)
+	case !*fromFailed && !*all:
+		return fmt.Errorf("%s: pass --failed (reuse passed nodes) or --all (re-execute everything)", cmdJobsRetry.Path)
+	}
+	full := *all
 	ids, err := collectRunIDs(*runIDs, os.Stdin)
 	if err != nil {
 		return err
@@ -160,26 +174,29 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return err
 	}
 
-	results := make([]runResult, 0, len(ids))
-	for _, srcID := range ids {
-		res := retryOne(ctx, c, srcID)
-		results = append(results, res)
-	}
-	reportErr := reportResults(os.Stdout, "retry", results)
-
 	// Reruns dispatch asynchronously in the localws consumer, so the
-	// CLI returns as soon as the trigger lands. Print the matching
-	// `runs logs --follow` command alongside each new run id so the
-	// operator can hop straight into tailing it from the same
-	// terminal without rebuilding the id by hand.
-	for _, r := range results {
-		if !r.OK || r.NewRunID == "" {
+	// CLI returns as soon as the trigger lands. For each queued
+	// retry, print a single-line "submitted" confirmation followed
+	// by the matching `runs logs --follow` command so the operator
+	// can copy-paste straight into the same terminal. Failures keep
+	// the source id visible so the user can correlate which retry
+	// blew up when several were piped in at once.
+	failures := 0
+	for _, srcID := range ids {
+		newID, err := c.RetryRun(ctx, srcID, full)
+		if err != nil {
+			failures++
+			fmt.Fprintf(os.Stderr, "rerun of %s failed: %v\n", srcID, err)
 			continue
 		}
+		fmt.Fprintf(os.Stdout, "run %s submitted successfully\n", newID)
 		fmt.Fprintf(os.Stdout, "follow: sparkwing runs logs --run %s --follow%s\n",
-			r.NewRunID, profileSuffix(*on))
+			newID, profileSuffix(*on))
 	}
-	return reportErr
+	if failures > 0 {
+		return fmt.Errorf("retry: %d of %d failed", failures, len(ids))
+	}
+	return nil
 }
 
 // profileSuffix renders the trailing ` --on <name>` segment for hint

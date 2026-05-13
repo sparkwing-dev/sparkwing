@@ -327,7 +327,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 				"logs":   "sparkwing runs logs --run " + runID,
 			}
 			if finalStatus == "failed" {
-				hints["retry"] = "sparkwing runs retry --run " + runID
+				// --failed is the safe default (reuse passed nodes,
+				// re-execute only what broke). `runs retry` requires
+				// an explicit --failed or --all so the hint embeds
+				// the choice the user is most likely to want next.
+				hints["retry"] = "sparkwing runs retry --failed --run " + runID
 			}
 			attrs["hints"] = hints
 		}

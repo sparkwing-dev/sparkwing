@@ -248,7 +248,7 @@ export default function SummaryPanel({
       ? [
           {
             label: "retry",
-            cmd: hints.retry ?? `sparkwing runs retry --run ${run.id}`,
+            cmd: hints.retry ?? `sparkwing runs retry --failed --run ${run.id}`,
           },
         ]
       : []),

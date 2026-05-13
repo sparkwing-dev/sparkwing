@@ -1926,10 +1926,16 @@ var cmdJobsRetry = Command{
 	Path:     "sparkwing runs retry",
 	Synopsis: "Trigger fresh runs copying pipeline + args from old ones",
 	Description: `Issues a new trigger per source run with the same pipeline, args,
-branch, and SHA. Each new run is tagged with source=retry:<old-id>
-and retry_of=<old-id> so the orchestrator's skip-passed
-rehydration fires: nodes that passed in the source run are reused,
-only the failed / unreached nodes re-execute.
+branch, and SHA. Each new run is tagged with retry_of=<old-id>.
+
+Pick a rerun scope explicitly:
+  --failed   reuse cached/passed nodes from the source run;
+             re-execute only the failed or unreached subset.
+  --all      ignore prior outcomes and re-execute every node.
+
+One of --failed or --all is required -- the silent default
+caused operators to ship a partial rerun when they meant a full
+one (and vice versa).
 
 Pass --run once per source id (repeatable). Use --run - to read ids
 from stdin, one per line. Failures on individual ids don't abort
@@ -1937,12 +1943,15 @@ the batch; the verb prints a per-id status line and exits non-zero
 only when at least one id failed.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Source run id (repeatable; use --run - to read ids from stdin)", Group: "Input"},
+		{Name: "failed", Desc: "Rerun from failed: reuse passed nodes, re-execute only failed/unreached", ConflictsWith: []string{"all"}, Group: "Input"},
+		{Name: "all", Desc: "Rerun all: re-execute every node from scratch", ConflictsWith: []string{"failed"}, Group: "Input"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Retry one run on prod", "sparkwing runs retry --run run-... --on prod"},
-		{"Retry every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --run - --on prod"},
+		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-..."},
+		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-..."},
+		{"Rerun every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --on prod"},
 	},
 }
 

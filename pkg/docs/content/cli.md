@@ -83,7 +83,7 @@ Inspect and manage runs. Reads from the local SQLite store by default; `--on <pr
 | `sparkwing runs wait --run ID` | Block until the run reaches a terminal state |
 | `sparkwing runs find --pipeline NAME [--status ...] [--since DUR]` | Search runs; exit non-zero if none match |
 | `sparkwing runs get --run ID [-o json]` | Full run record as JSON |
-| `sparkwing runs retry --run ID` | Re-run a failed / cancelled run, carrying args forward |
+| `sparkwing runs retry {--failed\|--all} --run ID` | Re-run a failed / cancelled run; `--failed` reuses passed nodes, `--all` re-executes everything |
 | `sparkwing runs cancel --run ID` | Cancel a running run |
 | `sparkwing runs prune [--older-than DUR] [--dry-run]` | Delete runs + their log files |
 

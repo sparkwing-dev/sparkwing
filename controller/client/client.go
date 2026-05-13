@@ -587,6 +587,43 @@ func (c *Client) CancelRun(ctx context.Context, runID string) error {
 	}
 }
 
+// RetryRun queues a fresh run rerunning the named source. Returns
+// the new run id. Pass full=true to opt into "rerun all" mode
+// (re-execute every node, ignoring skip-passed rehydration); the
+// default false picks "rerun from failed" so passed nodes reuse
+// their prior outputs.
+//
+// ErrNotFound when srcRunID doesn't exist.
+func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error) {
+	path := fmt.Sprintf("/api/v1/runs/%s/retry", url.PathEscape(srcRunID))
+	if full {
+		path += "?full=1"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusAccepted, http.StatusCreated:
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return "", err
+		}
+		return body.ID, nil
+	case http.StatusNotFound:
+		return "", store.ErrNotFound
+	default:
+		return "", readHTTPError(resp)
+	}
+}
+
 // DeleteRun removes a run (and its nodes/events/trigger row).
 // Idempotent: missing ids return nil.
 func (c *Client) DeleteRun(ctx context.Context, runID string) error {
