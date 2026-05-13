@@ -37,7 +37,7 @@ import (
 //
 //	Cross-cutting
 //	  Annotate (node-level summaries)    .................. every step
-//	  Summary (markdown step summary)    .................. deploy/rollout
+//	  Summary (markdown step summary)    .................. build/package, deploy/rollout, smoke-test, metrics-check
 //
 // Each step sleeps briefly so every node and step renders as its own
 // bar in the dashboard waterfall. Total run ~4-6s.
@@ -365,6 +365,13 @@ func smokeTestFn(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Annotate(ctx, "smoke-test: 3/3 probes passed")
+	sparkwing.Summary(ctx, `## Smoke test
+
+- [x] `+"`GET /healthz`"+` → 200 OK (uptime 4s)
+- [x] `+"`GET /api/v1/version`"+` → 200 OK (sha abc1234)
+- [x] `+"`POST /api/v1/echo`"+` → 200 OK
+
+**3/3 probes passed.**`)
 	return nil
 }
 
@@ -378,6 +385,14 @@ func metricsCheckFn(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Annotate(ctx, "metrics-check: p95=42ms · err=0% · within SLO")
+	sparkwing.Summary(ctx, `## Metrics check
+
+| signal | value | threshold | status |
+|---|---|---|---|
+| p95 latency | 42ms | 500ms | ✓ |
+| error rate | 0.0% | 1.0% | ✓ |
+
+Within SLO.`)
 	return nil
 }
 
@@ -491,6 +506,20 @@ func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		}
 		out.Digest = "sha256:0fa1c0ffee..."
 		sparkwing.Annotate(ctx, fmt.Sprintf("packaged %s · %s", out.Tag, out.Digest))
+		sparkwing.Summary(ctx, fmt.Sprintf(`## Build artifact
+
+**Image** `+"`%s`"+`
+**Digest** `+"`%s`"+`
+**Size** %d MiB (stripped from %d MiB)
+
+### Layers
+| layer | size |
+|---|---|
+| base os | 18.2 MiB |
+| runtime deps | 7.4 MiB |
+| app binary | 9.7 MiB |
+| config | 0.3 MiB |`,
+			out.Tag, out.Digest, out.SizeMB-5, out.SizeMB))
 		return out, nil
 	}).Needs(strip), nil
 }
