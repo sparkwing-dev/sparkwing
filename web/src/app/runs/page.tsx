@@ -3131,83 +3131,88 @@ function RunAnnotationsList({
     if (match) return "bg-fuchsia-400/15 ring-1 ring-fuchsia-400/40";
     return "";
   };
+  // Flat per-annotation row: `<node> › <step?> › <text>`. Same
+  // data-find-key shape as before so the cursor walker still scrolls
+  // each match into view individually.
+  type Row =
+    | { kind: "node"; nodeID: string; idx: number; text: string; key: string }
+    | {
+        kind: "step";
+        nodeID: string;
+        stepID: string;
+        idx: number;
+        text: string;
+        key: string;
+      };
+  const rows: Row[] = [];
+  for (const g of groups) {
+    for (const a of g.nodeAnnos) {
+      rows.push({
+        kind: "node",
+        nodeID: g.node.id,
+        idx: a.idx,
+        text: a.text,
+        key: `node-anno::${g.node.id}::${a.idx}`,
+      });
+    }
+    for (const sg of g.stepAnnos) {
+      sg.annos.forEach((text, i) => {
+        rows.push({
+          kind: "step",
+          nodeID: g.node.id,
+          stepID: sg.stepID,
+          idx: i,
+          text,
+          key: `step-anno::${g.node.id}::${sg.stepID}::${i}`,
+        });
+      });
+    }
+  }
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1">
       <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
         Annotations ({total})
       </div>
-      {groups.map((g) => (
-        <div
-          key={g.node.id}
-          className="border border-[var(--border)] rounded p-2 bg-[#0d1117]"
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(g.node.outcome, g.node.status)}`}
-            />
-            <button
-              onClick={() => onSelectNode(g.node.id)}
-              className="font-mono text-xs text-[var(--accent)] hover:underline truncate"
-              title={`select ${g.node.id}`}
+      <ul className="flex flex-col">
+        {rows.map((r) => {
+          const match =
+            r.kind === "node"
+              ? (findMatchedNodeAnnos?.get(r.nodeID)?.has(r.idx) ?? false)
+              : (findMatchedStepAnnos
+                  ?.get(`${r.nodeID}::${r.stepID}`)
+                  ?.has(r.idx) ?? false);
+          return (
+            <li
+              key={r.key}
+              data-find-key={r.key}
+              className={`font-mono text-[11px] flex items-center gap-1.5 px-1 py-0.5 rounded ${annoCls(r.key, match)}`}
             >
-              {g.node.id}
-            </button>
-            <span className="text-[10px] font-mono text-[var(--muted)] ml-auto">
-              {g.total}
-            </span>
-          </div>
-          {g.nodeAnnos.length > 0 && (
-            <ul className="flex flex-col gap-0.5 pl-3.5 mb-1">
-              {g.nodeAnnos.map((a) => {
-                const key = `node-anno::${g.node.id}::${a.idx}`;
-                const match =
-                  findMatchedNodeAnnos?.get(g.node.id)?.has(a.idx) ?? false;
-                return (
-                  <li
-                    key={a.idx}
-                    data-find-key={key}
-                    className={`font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2 px-1 rounded ${annoCls(key, match)}`}
+              <button
+                onClick={() => onSelectNode(r.nodeID)}
+                className="text-[var(--accent)] hover:underline shrink-0 truncate max-w-[10rem]"
+                title={`select ${r.nodeID}`}
+              >
+                {r.nodeID}
+              </button>
+              <span className="text-[var(--muted)] shrink-0">›</span>
+              {r.kind === "step" && (
+                <>
+                  <span
+                    className="text-violet-300 shrink-0 truncate max-w-[10rem]"
+                    title={`step ${r.stepID}`}
                   >
-                    <span className="text-cyan-300 shrink-0">›</span>
-                    <span className="whitespace-pre-wrap break-words">
-                      {a.text}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {g.stepAnnos.map((sg) => (
-            <div key={sg.stepID} className="pl-3.5 mb-1">
-              <div className="text-[10px] text-[var(--muted)] font-mono mb-0.5">
-                step{" "}
-                <span className="text-[var(--foreground)]">{sg.stepID}</span>
-              </div>
-              <ul className="flex flex-col gap-0.5 pl-3.5">
-                {sg.annos.map((a, i) => {
-                  const key = `step-anno::${g.node.id}::${sg.stepID}::${i}`;
-                  const match =
-                    findMatchedStepAnnos
-                      ?.get(`${g.node.id}::${sg.stepID}`)
-                      ?.has(i) ?? false;
-                  return (
-                    <li
-                      key={i}
-                      data-find-key={key}
-                      className={`font-mono text-[11px] text-[var(--foreground)] flex items-start gap-2 px-1 rounded ${annoCls(key, match)}`}
-                    >
-                      <span className="text-cyan-300 shrink-0">›</span>
-                      <span className="whitespace-pre-wrap break-words">
-                        {a}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </div>
-      ))}
+                    {r.stepID}
+                  </span>
+                  <span className="text-[var(--muted)] shrink-0">›</span>
+                </>
+              )}
+              <span className="text-[var(--foreground)] truncate flex-1">
+                {r.text}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
