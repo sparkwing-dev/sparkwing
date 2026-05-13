@@ -308,7 +308,7 @@ function StepBucket({
             setExpanded(!expanded);
           }
         }}
-        className="sticky top-[3.5rem] z-10 w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b]/50 transition-colors cursor-pointer bg-[#0d1117]"
+        className="sticky top-[3.5rem] z-10 w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b] transition-colors cursor-pointer bg-[#0d1117]"
       >
         <span className="w-4 text-center text-[var(--muted)]">
           {expanded ? "▾" : "▸"}
