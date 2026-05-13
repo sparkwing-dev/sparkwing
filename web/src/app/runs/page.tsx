@@ -1843,28 +1843,38 @@ const FullRunRow = memo(function FullRunRow({
   return (
     <div className="grid grid-cols-[minmax(20rem,40rem)_minmax(0,1fr)] gap-6 items-start">
       {meta}
-      <div
-        className="min-w-0 text-[11px] font-mono truncate space-y-0.5"
-        title={r.error || r.status}
-      >
+      <div className="min-w-0 text-[11px] font-mono truncate">
         {r.error ? (
-          <div className="text-red-400 truncate">error: {r.error}</div>
-        ) : (
-          <div className="text-[var(--muted)]">{r.status}</div>
-        )}
-        {!!r.annotation_count && r.annotation_count > 0 && r.top_annotation && (
-          <div
-            className="text-cyan-300/90 truncate"
-            title={`${r.annotation_count} annotation${r.annotation_count === 1 ? "" : "s"}: ${r.top_annotation}`}
+          <Tooltip
+            content={
+              <span className="whitespace-pre-wrap break-words">{r.error}</span>
+            }
           >
-            › {r.top_annotation}
-            {r.annotation_count > 1 && (
-              <span className="text-[var(--muted)] ml-1">
-                (+{r.annotation_count - 1})
-              </span>
-            )}
-          </div>
-        )}
+            <div className="text-red-400 truncate">error: {r.error}</div>
+          </Tooltip>
+        ) : r.annotation_count && r.top_annotation ? (
+          <Tooltip
+            content={
+              <ul className="font-mono whitespace-pre-wrap break-words space-y-0.5">
+                {(r.annotations && r.annotations.length > 0
+                  ? r.annotations
+                  : [r.top_annotation]
+                ).map((a, i) => (
+                  <li key={i}>› {a}</li>
+                ))}
+              </ul>
+            }
+          >
+            <div className="text-cyan-300/90 truncate">
+              › {r.top_annotation}
+              {r.annotation_count > 1 && (
+                <span className="text-[var(--muted)] ml-1">
+                  (+{r.annotation_count - 1})
+                </span>
+              )}
+            </div>
+          </Tooltip>
+        ) : null}
       </div>
     </div>
   );

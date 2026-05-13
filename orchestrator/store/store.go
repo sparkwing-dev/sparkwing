@@ -438,6 +438,10 @@ func (s *Store) migrate() error {
 		// can render a chip without a per-row aggregate query.
 		"annotation_count": "INTEGER NOT NULL DEFAULT 0",
 		"top_annotation":   "TEXT NOT NULL DEFAULT ''",
+		// JSON array of every annotation message on the run, in
+		// append order. Lets the dashboard show all of them in a
+		// hover tooltip without an extra per-row fetch.
+		"annotations_json": "BLOB",
 		// Invocation snapshot: a single BLOB captures the same
 		// shape that flows into run_start.attrs (binary_source, cwd,
 		// flags, args, reproducer, inputs_hash, hints, etc.) so the
@@ -487,38 +491,93 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// backfillRunAnnotationRollup populates the runs.annotation_count and
-// runs.top_annotation columns for rows that predate the live-bump
-// writes in AppendNodeAnnotation / AppendStepAnnotation. Idempotent:
-// only rows whose count is still 0 get re-computed, and the
-// computation yields 0 for runs that genuinely have no annotations.
-// Runs into a no-op the second time around.
+// backfillRunAnnotationRollup populates the runs annotation columns
+// from per-node + per-step annotations for rows that predate the
+// live-bump writes in AppendNodeAnnotation / AppendStepAnnotation.
+// Idempotent: only rows whose count is still 0 get re-computed, and
+// the computation yields 0 for runs that genuinely have no
+// annotations, so this is a no-op the second time around.
 func (s *Store) backfillRunAnnotationRollup() error {
-	_, err := s.db.Exec(`
-UPDATE runs SET
-  annotation_count = COALESCE((
-    SELECT SUM(json_array_length(annotations_json))
-    FROM (
-      SELECT annotations_json FROM nodes
-       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
-      UNION ALL
-      SELECT annotations_json FROM node_steps
-       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
-    )
-  ), 0),
-  top_annotation = COALESCE((
-    SELECT json_extract(annotations_json, '$[' || (json_array_length(annotations_json) - 1) || ']')
-    FROM (
-      SELECT annotations_json FROM nodes
-       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
-      UNION ALL
-      SELECT annotations_json FROM node_steps
-       WHERE run_id = runs.id AND annotations_json IS NOT NULL AND annotations_json != ''
-    )
-    LIMIT 1
-  ), '')
-WHERE annotation_count = 0
-`)
+	rows, err := s.db.Query(`SELECT id FROM runs WHERE annotation_count = 0`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		gathered, err := s.gatherRunAnnotations(id)
+		if err != nil {
+			return err
+		}
+		if len(gathered) == 0 {
+			continue
+		}
+		blob, _ := json.Marshal(gathered)
+		if _, err := s.db.Exec(`
+UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
+WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// gatherRunAnnotations reads every annotation across the run's nodes
+// and steps in append order. Order is by table then natural row
+// order — close to event order in practice.
+func (s *Store) gatherRunAnnotations(runID string) ([]string, error) {
+	var out []string
+	rows, err := s.db.Query(`
+SELECT annotations_json FROM nodes WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''
+UNION ALL
+SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''`,
+		runID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var blob []byte
+		if err := rows.Scan(&blob); err != nil {
+			return nil, err
+		}
+		var list []string
+		if err := json.Unmarshal(blob, &list); err != nil {
+			continue
+		}
+		out = append(out, list...)
+	}
+	return out, nil
+}
+
+// appendRunAnnotation appends one entry to runs.annotations_json
+// inside the supplied transaction. Caller is responsible for the
+// surrounding txn lifecycle so the per-node/per-step write and the
+// run-row rollup stay in sync.
+func appendRunAnnotation(tx *sql.Tx, runID, msg string) error {
+	var blob []byte
+	err := tx.QueryRow(`SELECT annotations_json FROM runs WHERE id = ?`, runID).Scan(&blob)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var list []string
+	if len(blob) > 0 {
+		_ = json.Unmarshal(blob, &list)
+	}
+	list = append(list, msg)
+	next, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE id = ?`, next, runID)
 	return err
 }
 
@@ -603,8 +662,9 @@ type Run struct {
 	// Annotation rollup surfaced to list views. Updated server-side on
 	// each sparkwing.Annotate call; the dashboard renders these
 	// without needing a per-row aggregate query.
-	AnnotationCount int    `json:"annotation_count,omitempty"`
-	TopAnnotation   string `json:"top_annotation,omitempty"`
+	AnnotationCount int      `json:"annotation_count,omitempty"`
+	TopAnnotation   string   `json:"top_annotation,omitempty"`
+	Annotations     []string `json:"annotations,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
@@ -697,7 +757,7 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -757,7 +817,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
@@ -801,7 +861,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -859,7 +919,7 @@ type rowScanner interface {
 
 func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
-	var argsJSON, planJSON, invocationJSON []byte
+	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
 	var finishedNS sql.NullInt64
 	var parent sql.NullString
@@ -869,7 +929,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
-		&r.AnnotationCount, &r.TopAnnotation)
+		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -892,6 +952,9 @@ func scanRun(rs rowScanner) (*Run, error) {
 	}
 	if len(invocationJSON) > 0 {
 		_ = json.Unmarshal(invocationJSON, &r.Invocation)
+	}
+	if len(annotationsJSON) > 0 {
+		_ = json.Unmarshal(annotationsJSON, &r.Annotations)
 	}
 	r.PlanSnapshot = planJSON
 	return &r, nil
@@ -1130,6 +1193,9 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 		msg, runID); err != nil {
 		return err
 	}
+	if err := appendRunAnnotation(tx, runID, msg); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -1286,6 +1352,9 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE id = ?`,
 		msg, runID); err != nil {
+		return err
+	}
+	if err := appendRunAnnotation(tx, runID, msg); err != nil {
 		return err
 	}
 	return tx.Commit()

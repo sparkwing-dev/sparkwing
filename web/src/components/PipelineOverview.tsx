@@ -784,33 +784,50 @@ function RecentRuns({
 }
 
 function RunSummary({ run }: { run: Run }) {
-  const text = run.error || run.status;
-  if (!text) return <span />;
-  const tone = run.error ? "text-red-400" : "text-[var(--muted)]";
-  const annotation =
-    run.annotation_count && run.top_annotation ? run.top_annotation : null;
-  return (
-    <div className="min-w-0 pl-4 space-y-0.5">
-      <div className={`truncate font-mono text-[11px] ${tone}`}>
-        <Tooltip content={text}>
-          <span>{text}</span>
+  if (run.error) {
+    return (
+      <div className="min-w-0 pl-4">
+        <Tooltip
+          content={
+            <span className="whitespace-pre-wrap break-words">{run.error}</span>
+          }
+        >
+          <div className="truncate font-mono text-[11px] text-red-400">
+            {run.error}
+          </div>
         </Tooltip>
       </div>
-      {annotation && (
-        <div
-          className="truncate font-mono text-[11px] text-cyan-300/90"
-          title={`${run.annotation_count} annotation${run.annotation_count === 1 ? "" : "s"}: ${annotation}`}
+    );
+  }
+  if (run.annotation_count && run.top_annotation) {
+    const list =
+      run.annotations && run.annotations.length > 0
+        ? run.annotations
+        : [run.top_annotation];
+    return (
+      <div className="min-w-0 pl-4">
+        <Tooltip
+          content={
+            <ul className="font-mono whitespace-pre-wrap break-words space-y-0.5">
+              {list.map((a, i) => (
+                <li key={i}>› {a}</li>
+              ))}
+            </ul>
+          }
         >
-          › {annotation}
-          {(run.annotation_count ?? 0) > 1 && (
-            <span className="text-[var(--muted)] ml-1">
-              (+{(run.annotation_count ?? 1) - 1})
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
+          <div className="truncate font-mono text-[11px] text-cyan-300/90">
+            › {run.top_annotation}
+            {run.annotation_count > 1 && (
+              <span className="text-[var(--muted)] ml-1">
+                (+{run.annotation_count - 1})
+              </span>
+            )}
+          </div>
+        </Tooltip>
+      </div>
+    );
+  }
+  return <span />;
 }
 
 function RunTimestampBlock({ run }: { run: Run }) {

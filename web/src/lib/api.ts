@@ -157,6 +157,9 @@ export interface Run {
   // load run detail to surface them.
   annotation_count?: number;
   top_annotation?: string;
+  // Full list of annotation messages in append order. Lets hover
+  // tooltips show every annotation without an extra fetch.
+  annotations?: string[];
   // Invocation: snapshot of how the run was started, persisted on the
   // run row at CreateRun time. Mirrors the orchestrator's
   // run_start.attrs payload (see orchestrator/orchestrator.go's
