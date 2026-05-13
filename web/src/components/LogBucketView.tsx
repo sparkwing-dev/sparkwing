@@ -313,7 +313,10 @@ function StepBucket({
     <div
       ref={wrapperRef}
       data-step-id={dataStep ?? undefined}
-      className={`border-b border-[var(--border)] last:border-b-0 ${section.status === "failed" ? "bg-red-500/5" : ""}`}
+      // scroll-mt-14 matches the step header's sticky top (3.5rem) so
+      // scrollIntoView leaves room for the AllNodesLogs node header
+      // and LogBucketView toolbar that sit above it.
+      className={`border-b border-[var(--border)] last:border-b-0 scroll-mt-14 ${section.status === "failed" ? "bg-red-500/5" : ""}`}
     >
       {/* Header is a div, not a button, so the inline CopyButton can
         sit inside it without nesting button elements (invalid HTML).
