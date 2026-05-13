@@ -677,6 +677,15 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		Line     int    `json:"line"`
 		Content  string `json:"content"`
 	}
+	type runMeta struct {
+		Status     string `json:"status"`
+		Pipeline   string `json:"pipeline"`
+		StartedAt  string `json:"started_at,omitempty"`
+		FinishedAt string `json:"finished_at,omitempty"`
+		GitBranch  string `json:"git_branch,omitempty"`
+		GitSHA     string `json:"git_sha,omitempty"`
+		Error      string `json:"error,omitempty"`
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		if q == "" {
@@ -714,6 +723,12 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
+		runs = applyGrepExcludes(runs, grepExcludes{
+			pipelines:   r.URL.Query()["npipeline"],
+			statuses:    r.URL.Query()["nstatus"],
+			branches:    r.URL.Query()["nbranch"],
+			shaPrefixes: r.URL.Query()["nsha"],
+		})
 		branches := r.URL.Query()["branch"]
 		shaPrefixes := r.URL.Query()["sha"]
 		if len(branches) > 0 || len(shaPrefixes) > 0 {
@@ -784,17 +799,93 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		wg.Wait()
 		var matches []match
 		total := 0
+		hitRuns := map[string]bool{}
 		for _, res := range results {
 			total += res.count
+			for _, m := range res.matches {
+				hitRuns[m.RunID] = true
+			}
 			matches = append(matches, res.matches...)
+		}
+		runIndex := make(map[string]*store.Run, len(runs))
+		for _, run := range runs {
+			runIndex[run.ID] = run
+		}
+		runsMeta := make(map[string]runMeta, len(hitRuns))
+		for id := range hitRuns {
+			run := runIndex[id]
+			if run == nil {
+				continue
+			}
+			runsMeta[id] = runMeta{
+				Status:     run.Status,
+				Pipeline:   run.Pipeline,
+				StartedAt:  run.StartedAt.Format(time.RFC3339Nano),
+				FinishedAt: timeOrEmptyPtr(run.FinishedAt),
+				GitBranch:  run.GitBranch,
+				GitSHA:     run.GitSHA,
+				Error:      run.Error,
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"query":        q,
 			"matches":      matches,
+			"runs":         runsMeta,
 			"total":        total,
 			"runs_scanned": len(runs),
 		})
 	}
+}
+
+func timeOrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
+}
+
+func timeOrEmptyPtr(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
+}
+
+type grepExcludes struct {
+	pipelines   []string
+	statuses    []string
+	branches    []string
+	shaPrefixes []string
+}
+
+func applyGrepExcludes(runs []*store.Run, ex grepExcludes) []*store.Run {
+	if len(ex.pipelines)+len(ex.statuses)+len(ex.branches)+len(ex.shaPrefixes) == 0 {
+		return runs
+	}
+	out := runs[:0]
+	for _, run := range runs {
+		if containsExact(ex.pipelines, run.Pipeline) {
+			continue
+		}
+		if containsExact(ex.statuses, run.Status) {
+			continue
+		}
+		if containsExact(ex.branches, run.GitBranch) {
+			continue
+		}
+		excludedBySHA := false
+		for _, p := range ex.shaPrefixes {
+			if p != "" && strings.HasPrefix(run.GitSHA, p) {
+				excludedBySHA = true
+				break
+			}
+		}
+		if excludedBySHA {
+			continue
+		}
+		out = append(out, run)
+	}
+	return out
 }
 
 // filterRunsByBranchSHA mirrors the CLI's --branch / --sha narrowing.

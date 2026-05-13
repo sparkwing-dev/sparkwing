@@ -489,18 +489,33 @@ export interface RunsGrepMatch {
   content: string;
 }
 
+export interface RunsGrepRunMeta {
+  status: string;
+  pipeline: string;
+  started_at?: string;
+  finished_at?: string;
+  git_branch?: string;
+  git_sha?: string;
+  error?: string;
+}
+
 export interface RunsGrepResponse {
   query: string;
   matches: RunsGrepMatch[];
+  runs: Record<string, RunsGrepRunMeta>;
   total: number;
   runs_scanned: number;
 }
 
 export interface RunsGrepOpts {
   pipelines?: string[];
+  excludePipelines?: string[];
   statuses?: string[];
+  excludeStatuses?: string[];
   branches?: string[];
+  excludeBranches?: string[];
   shaPrefixes?: string[];
+  excludeShaPrefixes?: string[];
   since?: string;
   limit?: number;
   maxMatches?: number;
@@ -516,9 +531,13 @@ export async function searchRunsGrep(
 ): Promise<RunsGrepResponse> {
   const params = new URLSearchParams({ q: query });
   for (const p of opts.pipelines ?? []) params.append("pipeline", p);
+  for (const p of opts.excludePipelines ?? []) params.append("npipeline", p);
   for (const s of opts.statuses ?? []) params.append("status", s);
+  for (const s of opts.excludeStatuses ?? []) params.append("nstatus", s);
   for (const b of opts.branches ?? []) params.append("branch", b);
+  for (const b of opts.excludeBranches ?? []) params.append("nbranch", b);
   for (const s of opts.shaPrefixes ?? []) params.append("sha", s);
+  for (const s of opts.excludeShaPrefixes ?? []) params.append("nsha", s);
   if (opts.since) params.set("since", opts.since);
   if (opts.limit) params.set("limit", String(opts.limit));
   if (opts.maxMatches !== undefined)
@@ -527,7 +546,7 @@ export async function searchRunsGrep(
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) {
-    return { query, matches: [], total: 0, runs_scanned: 0 };
+    return { query, matches: [], runs: {}, total: 0, runs_scanned: 0 };
   }
   return res.json();
 }

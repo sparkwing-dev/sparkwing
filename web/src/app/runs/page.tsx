@@ -45,6 +45,7 @@ import {
   type NodeWorkStep,
   type RunLogMatch,
   type RunsGrepMatch,
+  type RunsGrepRunMeta,
   type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
@@ -153,20 +154,27 @@ export default function PipelinesPage() {
   );
 }
 
+type RunsView = "activity" | "pipelines" | "search";
+
 function RunsRoute() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const view: "activity" | "pipelines" =
-    searchParams.get("view") === "pipelines" ? "pipelines" : "activity";
+  const rawView = searchParams.get("view");
+  const view: RunsView =
+    rawView === "pipelines"
+      ? "pipelines"
+      : rawView === "search"
+        ? "search"
+        : "activity";
 
-  const setView = (next: "activity" | "pipelines") => {
+  const setView = (next: RunsView) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (next === "pipelines") {
-      params.set("view", "pipelines");
-      params.delete("node");
-    } else {
+    if (next === "activity") {
       params.delete("view");
+    } else {
+      params.set("view", next);
     }
+    if (next !== "activity") params.delete("node");
     const qs = params.toString();
     router.push(qs ? `/runs?${qs}` : "/runs");
   };
@@ -179,19 +187,22 @@ function RunsRoute() {
         onClick={() => setView("activity")}
       />
       <PivotTab
-        label="By pipeline"
+        label="Overview"
         active={view === "pipelines"}
         onClick={() => setView("pipelines")}
+      />
+      <PivotTab
+        label="Search"
+        active={view === "search"}
+        onClick={() => setView("search")}
       />
       <span className="mx-2 h-5 w-px bg-[var(--border)]" />
     </div>
   );
 
-  return view === "pipelines" ? (
-    <PipelineOverview pivotTabs={pivotTabs} />
-  ) : (
-    <Pipelines pivotTabs={pivotTabs} />
-  );
+  if (view === "pipelines") return <PipelineOverview pivotTabs={pivotTabs} />;
+  if (view === "search") return <RunsSearchView pivotTabs={pivotTabs} />;
+  return <Pipelines pivotTabs={pivotTabs} />;
 }
 
 function PivotTab({
@@ -264,54 +275,28 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
-  // Cross-run grep: pattern + result set + loading/error flags. The
-  // request reuses whatever filter chips are already active so the
-  // candidate set matches what the user is looking at.
-  const [grepMode, setGrepMode] = useState(false);
-  const [grepQuery, setGrepQuery] = useState("");
-  const [grepSince, setGrepSince] = useState("24h");
-  const [grepResults, setGrepResults] = useState<RunsGrepMatch[] | null>(null);
-  const [grepLoading, setGrepLoading] = useState(false);
-  const [grepError, setGrepError] = useState<string | null>(null);
-  const [grepRunsScanned, setGrepRunsScanned] = useState(0);
-  // When set, RunDetailPane consumes it once on mount: switches to
-  // the Logs tab, selects the node, and focuses the line. Lets a grep
-  // result click deep-link into the matching line without lifting the
-  // entire tab/log-focus state out of RunDetailPane.
+  // When set, RunDetailPane consumes it once: switches to Logs tab,
+  // selects the node, and focuses the line. Used by the Search view
+  // to deep-link a result click into the Activity view via
+  // sessionStorage hand-off.
   const [pendingLogFocus, setPendingLogFocus] = useState<{
     nodeID: string;
     line: number;
   } | null>(null);
-  const runGrep = useCallback(
-    async (pattern: string) => {
-      if (!pattern.trim()) {
-        setGrepResults(null);
-        setGrepRunsScanned(0);
-        return;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = sessionStorage.getItem("sparkwing.searchResultFocus");
+    if (!raw) return;
+    sessionStorage.removeItem("sparkwing.searchResultFocus");
+    try {
+      const parsed = JSON.parse(raw) as { nodeID: string; line: number };
+      if (parsed.nodeID && typeof parsed.line === "number") {
+        setPendingLogFocus(parsed);
       }
-      setGrepLoading(true);
-      setGrepError(null);
-      try {
-        const resp = await searchRunsGrep(pattern, {
-          pipelines: filterState.filterPipeline,
-          statuses: filterState.filterStatus,
-          branches: filterState.filterBranch,
-          shaPrefixes: filterState.filterCommit,
-          since: grepSince || undefined,
-          limit: 200,
-          maxMatches: 10,
-        });
-        setGrepResults(resp.matches);
-        setGrepRunsScanned(resp.runs_scanned);
-      } catch (e) {
-        setGrepError(e instanceof Error ? e.message : String(e));
-        setGrepResults([]);
-      } finally {
-        setGrepLoading(false);
-      }
-    },
-    [filterState, grepSince],
-  );
+    } catch {
+      // ignore malformed handoff
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     const [runList, meta] = await Promise.all([
@@ -721,17 +706,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           onClearAll={() => clearAllFilters(filterState)}
           trailingActions={
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setGrepMode((v) => !v)}
-                title="search log bodies across runs (matches the active filters)"
-                className={`text-[10px] px-2 py-1 rounded border transition-colors ${
-                  grepMode
-                    ? "border-fuchsia-400 text-fuchsia-300 bg-fuchsia-500/10"
-                    : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]"
-                }`}
-              >
-                ⌕ Search logs
-              </button>
               {topLevel.length > 0 && (
                 <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted)] cursor-pointer shrink-0">
                   <input
@@ -792,40 +766,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         />
       </div>
 
-      {grepMode && (
-        <GrepPanel
-          query={grepQuery}
-          setQuery={setGrepQuery}
-          since={grepSince}
-          setSince={setGrepSince}
-          onSubmit={() => runGrep(grepQuery)}
-          results={grepResults}
-          loading={grepLoading}
-          error={grepError}
-          runsScanned={grepRunsScanned}
-          activeFilters={{
-            pipelines: filterState.filterPipeline,
-            statuses: filterState.filterStatus,
-            branches: filterState.filterBranch,
-            commits: filterState.filterCommit,
-          }}
-          onResultClick={(m) => {
-            selectRun(m.run_id);
-            selectNode(m.node_id);
-            setPendingLogFocus({ nodeID: m.node_id, line: m.line });
-            setGrepMode(false);
-          }}
-          onClose={() => {
-            setGrepMode(false);
-            setGrepResults(null);
-            setGrepRunsScanned(0);
-          }}
-        />
-      )}
-
-      <div
-        className={`flex flex-1 overflow-hidden ${grepMode ? "hidden" : ""}`}
-      >
+      <div className="flex flex-1 overflow-hidden">
         {/* Left: Runs list. Collapses to a sidebar when a run is
           selected; expands to fill the screen otherwise. */}
         <div
@@ -1124,64 +1065,133 @@ function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
   return "success";
 }
 
-// GrepPanel is the cross-run log search view that replaces the runs
-// list when "Search logs" is toggled on. Submits to /api/v1/runs/grep
-// using the page's active filter chips as the candidate set, then
-// renders RUN / NODE / LINE / TEXT rows. Clicking a row exits grep
-// mode and deep-links into that run, scrolling Logs to the matching
-// line.
-function GrepPanel({
-  query,
-  setQuery,
-  since,
-  setSince,
-  onSubmit,
-  results,
-  loading,
-  error,
-  runsScanned,
-  activeFilters,
-  onResultClick,
-  onClose,
-}: {
-  query: string;
-  setQuery: (v: string) => void;
-  since: string;
-  setSince: (v: string) => void;
-  onSubmit: () => void;
-  results: RunsGrepMatch[] | null;
-  loading: boolean;
-  error: string | null;
-  runsScanned: number;
-  activeFilters: {
-    pipelines: string[];
-    statuses: string[];
-    branches: string[];
-    commits: string[];
+// RunsSearchView is the Search pivot: a dedicated cross-run log grep
+// page. Filter chips are shared with the Activity view (same
+// useUrlFilterState hook backs them) so the candidate set survives
+// pivot changes. Clicking a result navigates to the Activity view
+// with the run/node opened and the Logs tab scrolled to the matching
+// line; the line target hands off via sessionStorage so the URL
+// stays clean.
+function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const filterState = useUrlFilterState();
+  const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
+  const [pipelineMeta, setPipelineMeta] = useState<
+    Record<string, PipelineMeta>
+  >({});
+  const [runs, setRuns] = useState<Run[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getRuns({ limit: RUNS_WINDOW }), getPipelines()])
+      .then(([rs, meta]) => {
+        if (cancelled) return;
+        setRuns(rs);
+        setPipelineMeta(meta);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const options = computeOptions(runs, pipelineMeta);
+  const groups = buildGroupsFromState(filterState, options);
+  const dateGroup = {
+    startedAfter: filterState.startedAfter,
+    startedBefore: filterState.startedBefore,
+    finishedAfter: filterState.finishedAfter,
+    finishedBefore: filterState.finishedBefore,
+    setStartedAfter: filterState.setStartedAfter,
+    setStartedBefore: filterState.setStartedBefore,
+    setFinishedAfter: filterState.setFinishedAfter,
+    setFinishedBefore: filterState.setFinishedBefore,
   };
-  onResultClick: (m: RunsGrepMatch) => void;
-  onClose: () => void;
-}) {
-  const filterChips: { label: string; values: string[] }[] = [
-    { label: "pipeline", values: activeFilters.pipelines },
-    { label: "status", values: activeFilters.statuses },
-    { label: "branch", values: activeFilters.branches },
-    { label: "commit", values: activeFilters.commits },
-  ].filter((g) => g.values.length > 0);
+
+  // The grep query lives in the URL (?q=…) so the search survives
+  // refresh and is shareable.
+  const initialQuery = searchParams.get("q") || "";
+  const [query, setQuery] = useState(initialQuery);
+  const [since, setSince] = useState("24h");
+  const [results, setResults] = useState<RunsGrepMatch[] | null>(null);
+  const [runsMap, setRunsMap] = useState<Record<string, RunsGrepRunMeta>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [runsScanned, setRunsScanned] = useState(0);
+  const submit = useCallback(async () => {
+    const q = query.trim();
+    if (!q) {
+      setResults(null);
+      setRunsMap({});
+      setRunsScanned(0);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await searchRunsGrep(q, {
+        pipelines: filterState.filterPipeline,
+        excludePipelines: filterState.excludePipeline,
+        statuses: filterState.filterStatus,
+        excludeStatuses: filterState.excludeStatus,
+        branches: filterState.filterBranch,
+        excludeBranches: filterState.excludeBranch,
+        shaPrefixes: filterState.filterCommit,
+        excludeShaPrefixes: filterState.excludeCommit,
+        since: since || undefined,
+        limit: 200,
+        maxMatches: 10,
+      });
+      setResults(resp.matches);
+      setRunsMap(resp.runs);
+      setRunsScanned(resp.runs_scanned);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [query, since, filterState]);
+  const onResultClick = (m: RunsGrepMatch) => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(
+        "sparkwing.searchResultFocus",
+        JSON.stringify({ nodeID: m.node_id, line: m.line }),
+      );
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("view");
+    params.set("run", m.run_id);
+    params.delete("q");
+    router.push(`/runs?${params.toString()}`);
+  };
   const byRun = new Map<string, RunsGrepMatch[]>();
-  for (const m of results ?? []) {
-    const arr = byRun.get(m.run_id) ?? [];
-    arr.push(m);
-    byRun.set(m.run_id, arr);
-  }
   const runOrder: string[] = [];
   for (const m of results ?? []) {
-    if (!runOrder.includes(m.run_id)) runOrder.push(m.run_id);
+    if (!byRun.has(m.run_id)) {
+      byRun.set(m.run_id, []);
+      runOrder.push(m.run_id);
+    }
+    byRun.get(m.run_id)!.push(m);
   }
   return (
-    <div className="flex flex-col flex-1 overflow-hidden border-b border-[var(--border)]">
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <div
+        ref={filterRef}
+        className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
+      >
+        {pivotTabs}
+        <FullFilterBar
+          openDropdown={openDropdown}
+          setOpenDropdown={setOpenDropdown}
+          groups={groups}
+          dateGroup={dateGroup}
+          searchText={filterState.filterText}
+          setSearchText={filterState.setFilterText}
+          onClearAll={() => clearAllFilters(filterState)}
+        />
+      </div>
       <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--border)] bg-[var(--surface)] shrink-0">
-        <span className="text-fuchsia-300 font-mono text-xs">⌕ grep</span>
+        <span className="text-fuchsia-300 font-mono text-xs">⌕ search</span>
         <input
           autoFocus
           type="text"
@@ -1190,12 +1200,10 @@ function GrepPanel({
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              onSubmit();
-            } else if (e.key === "Escape") {
-              onClose();
+              submit();
             }
           }}
-          placeholder="substring to match across recent log bodies"
+          placeholder="substring across log bodies — uses the filters above as the candidate set"
           className="flex-1 text-xs font-mono px-2 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)]"
         />
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
@@ -1207,7 +1215,7 @@ function GrepPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                onSubmit();
+                submit();
               }
             }}
             placeholder="24h"
@@ -1215,33 +1223,13 @@ function GrepPanel({
           />
         </label>
         <button
-          onClick={onSubmit}
+          onClick={submit}
           disabled={loading || !query.trim()}
           className="text-[10px] px-2 py-1 rounded border border-fuchsia-400/60 text-fuchsia-300 hover:bg-fuchsia-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? "searching…" : "search"}
         </button>
-        <button
-          onClick={onClose}
-          title="close grep (Esc)"
-          className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)] transition-colors"
-        >
-          ✕ close
-        </button>
       </div>
-      {filterChips.length > 0 && (
-        <div className="flex items-center flex-wrap gap-1.5 px-4 py-1.5 border-b border-[var(--border)] bg-[#0d1117] shrink-0 text-[10px]">
-          <span className="text-[var(--muted)]">candidate set:</span>
-          {filterChips.map((g) => (
-            <span
-              key={g.label}
-              className="font-mono px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted)]"
-            >
-              {g.label}: {g.values.join(",")}
-            </span>
-          ))}
-        </div>
-      )}
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {error && (
           <div className="text-xs font-mono text-red-400 mb-3">
@@ -1251,7 +1239,8 @@ function GrepPanel({
         {results === null && !loading && !error && (
           <div className="text-xs text-[var(--muted)]">
             Type a substring and press Enter. Searches the displayed log body
-            (msg fields), not raw NDJSON framing.
+            (msg fields) across recent runs; the filter chips above narrow which
+            runs get scanned.
           </div>
         )}
         {results !== null && results.length === 0 && !loading && (
@@ -1269,22 +1258,57 @@ function GrepPanel({
             <div className="flex flex-col gap-3">
               {runOrder.map((runID) => {
                 const ms = byRun.get(runID) ?? [];
+                const meta = runsMap[runID];
+                const statusCls = meta
+                  ? meta.status === "failed"
+                    ? "text-red-400"
+                    : meta.status === "running"
+                      ? "text-indigo-400"
+                      : meta.status === "success"
+                        ? "text-green-400"
+                        : "text-[var(--muted)]"
+                  : "text-[var(--muted)]";
                 return (
                   <div
                     key={runID}
                     className="border border-[var(--border)] rounded bg-[#0d1117]"
                   >
-                    <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)]">
-                      <span className="font-mono text-xs text-[var(--accent)]">
+                    <div className="flex items-center flex-wrap gap-2 px-2 py-1.5 border-b border-[var(--border)] text-xs font-mono">
+                      {meta && (
+                        <span className={`uppercase shrink-0 ${statusCls}`}>
+                          {meta.status}
+                        </span>
+                      )}
+                      <span className="text-[var(--accent)] shrink-0">
                         {runID}
                       </span>
-                      <span className="font-mono text-[10px] text-violet-300">
-                        {ms[0].pipeline}
+                      <span className="text-violet-300 shrink-0">
+                        {meta?.pipeline ?? ms[0].pipeline}
                       </span>
-                      <span className="ml-auto font-mono text-[10px] text-[var(--muted)]">
+                      {meta?.git_branch && (
+                        <span className="text-amber-400 text-[10px] shrink-0">
+                          ⎇ {meta.git_branch}
+                        </span>
+                      )}
+                      {meta?.git_sha && (
+                        <span className="text-cyan-400 text-[10px] shrink-0">
+                          {meta.git_sha.slice(0, 7)}
+                        </span>
+                      )}
+                      {meta?.started_at && (
+                        <span className="text-[var(--muted)] text-[10px] shrink-0">
+                          {fmtAgo(meta.started_at)}
+                        </span>
+                      )}
+                      <span className="ml-auto text-[var(--muted)] text-[10px] shrink-0">
                         {ms.length} match{ms.length === 1 ? "" : "es"}
                       </span>
                     </div>
+                    {meta?.error && (
+                      <div className="px-2 py-1 border-b border-[var(--border)] text-[11px] font-mono text-red-300/90 truncate">
+                        error: {meta.error}
+                      </div>
+                    )}
                     <div className="divide-y divide-[var(--border)]">
                       {ms.map((m, i) => (
                         <div
@@ -2429,7 +2453,7 @@ function RunDetailPane({
     line: number;
   } | null>(null);
   // Cross-run grep deep link: arriving with a pendingLogFocus means
-  // the user clicked a result row in the GrepPanel. Switch to Logs,
+  // the user clicked a result row in the Search view. Switch to Logs,
   // wire the focus through so the line scrolls into view, then clear
   // the pending state so a tab change won't re-fire it.
   useEffect(() => {
