@@ -2906,8 +2906,10 @@ function AllNodesLogs({
           >
             <div
               onClick={() => toggle(n.id)}
-              className={`sticky top-0 z-30 flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[#1e293b] transition-colors rounded-t ${
-                flashing.has(n.id) ? "bg-purple-500/40" : "bg-[#0d1117]"
+              className={`sticky top-0 z-30 flex items-center gap-2 px-2 py-1.5 cursor-pointer transition-colors rounded-t ${
+                flashing.has(n.id)
+                  ? "bg-purple-500/40"
+                  : "bg-[#0d1117] hover:bg-[#1e293b]"
               }`}
             >
               <span className="text-[var(--muted)] w-3 text-center text-xs">
