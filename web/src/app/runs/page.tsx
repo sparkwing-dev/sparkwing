@@ -2788,6 +2788,9 @@ function AllNodesLogs({
   findMatchedLogsByNode?: Map<string, Set<number>>;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Brief purple flash on collapse so the user can locate the now-
+  // collapsed header — handy when it isn't pinned at the top.
+  const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     const wasOpen = expanded.has(id);
     const wrapper = document.querySelector(
@@ -2806,6 +2809,20 @@ function AllNodesLogs({
       else next.add(id);
       return next;
     });
+    if (wasOpen) {
+      setFlashing((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setTimeout(() => {
+        setFlashing((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 700);
+    }
     if (wasOpen && wasStuck) {
       requestAnimationFrame(() => {
         wrapper?.scrollIntoView({ block: "start", behavior: "auto" });
@@ -2884,16 +2901,14 @@ function AllNodesLogs({
             key={n.id}
             data-log-node-id={n.id}
             className={`border rounded bg-[#0d1117] ${
-              isFocus
-                ? "border-violet-400"
-                : n.outcome === "failed"
-                  ? "border-red-500/60"
-                  : "border-[var(--border)]"
+              isFocus ? "border-violet-400" : "border-[var(--border)]"
             }`}
           >
             <div
               onClick={() => toggle(n.id)}
-              className="sticky top-0 z-30 flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[#1e293b] transition-colors bg-[#0d1117] rounded-t"
+              className={`sticky top-0 z-30 flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[#1e293b] transition-colors rounded-t ${
+                flashing.has(n.id) ? "bg-purple-500/40" : "bg-[#0d1117]"
+              }`}
             >
               <span className="text-[var(--muted)] w-3 text-center text-xs">
                 {open ? "▾" : "▸"}

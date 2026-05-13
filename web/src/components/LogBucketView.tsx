@@ -251,6 +251,7 @@ function StepBucket({
   // to its sticky resting position. Otherwise the section's height
   // shrinks under the user's cursor and they lose their place.
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [flashing, setFlashing] = useState(false);
   const setExpanded = (next: boolean) => {
     const wrapper = wrapperRef.current;
     const header = wrapper?.firstElementChild as HTMLElement | null;
@@ -264,6 +265,10 @@ function StepBucket({
     }
     if (onToggle) onToggle();
     else setLocalExpanded(next);
+    if (!next) {
+      setFlashing(true);
+      setTimeout(() => setFlashing(false), 700);
+    }
     if (!next && wasStuck) {
       requestAnimationFrame(() => {
         wrapper?.scrollIntoView({ block: "start", behavior: "auto" });
@@ -331,7 +336,9 @@ function StepBucket({
             setExpanded(!expanded);
           }
         }}
-        className="sticky top-[3.5rem] z-10 w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b] transition-colors cursor-pointer bg-[#0d1117]"
+        className={`sticky top-[3.5rem] z-10 w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b] transition-colors cursor-pointer ${
+          flashing ? "bg-purple-500/40" : "bg-[#0d1117]"
+        }`}
       >
         <span className="w-4 text-center text-[var(--muted)]">
           {expanded ? "▾" : "▸"}
