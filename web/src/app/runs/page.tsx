@@ -4730,35 +4730,100 @@ function DAG({
                 >
                   {fmtMs(nodeDuration(n))}
                 </text>
-                {n.dynamic && <DynamicPill nodeW={p.w} />}
-                {n.approval && <ApprovalPill n={n} nodeW={p.w} />}
-                {n.outcome === "cached" && !n.approval && (
-                  <CachedPill nodeW={p.w} />
-                )}
-                {reusedNodeIDs?.has(n.id) &&
-                  !n.dynamic &&
-                  !n.approval &&
-                  n.outcome !== "cached" && <ReusedPill nodeW={p.w} />}
-                {n.modifiers?.inline &&
-                  !n.dynamic &&
-                  !n.approval &&
-                  n.outcome !== "cached" &&
-                  !reusedNodeIDs?.has(n.id) &&
-                  !(n.spawned_pipelines?.length ?? 0) && (
-                    <InlinePill nodeW={p.w} />
-                  )}
-                {(n.spawned_pipelines?.length ?? 0) > 0 &&
-                  !n.dynamic &&
-                  !n.approval &&
-                  n.outcome !== "cached" && (
-                    <CrossPipelinePill
-                      nodeW={p.w}
-                      pipelines={n.spawned_pipelines!}
-                      onOpen={(runID) =>
-                        dagRouter.push(`?run=${encodeURIComponent(runID)}`)
-                      }
-                    />
-                  )}
+                {(() => {
+                  // Top-pill stack. Each pill type self-reports its
+                  // width so the layout pass can lay them out side-by-
+                  // side, centered as a group, instead of having every
+                  // pill self-center and clobber its neighbours. The
+                  // priority order below is also the left-to-right
+                  // visual order on the node (most important read
+                  // first): state markers (dynamic / approval) on the
+                  // left, lineage hints (reused / cached) in the
+                  // middle, structural markers (inline / spawn) on
+                  // the right.
+                  type TopPill =
+                    | { kind: "dynamic"; w: number }
+                    | { kind: "approval"; w: number }
+                    | { kind: "reused"; w: number }
+                    | { kind: "cached"; w: number }
+                    | { kind: "inline"; w: number }
+                    | { kind: "spawned"; w: number };
+                  const pills: TopPill[] = [];
+                  if (n.dynamic) {
+                    pills.push({ kind: "dynamic", w: DYNAMIC_PILL_W });
+                  }
+                  if (n.approval) {
+                    pills.push({ kind: "approval", w: approvalPillWidth(n) });
+                  }
+                  if (reusedNodeIDs?.has(n.id)) {
+                    pills.push({ kind: "reused", w: REUSED_PILL_W });
+                  }
+                  if (n.outcome === "cached") {
+                    pills.push({ kind: "cached", w: CACHED_PILL_W });
+                  }
+                  if (n.modifiers?.inline) {
+                    pills.push({ kind: "inline", w: INLINE_PILL_W });
+                  }
+                  if ((n.spawned_pipelines?.length ?? 0) > 0) {
+                    pills.push({
+                      kind: "spawned",
+                      w: crossPipelinePillWidth(n.spawned_pipelines!),
+                    });
+                  }
+                  if (pills.length === 0) return null;
+                  const gap = 4;
+                  const totalW =
+                    pills.reduce((acc, p) => acc + p.w, 0) +
+                    gap * (pills.length - 1);
+                  let cursor = (p.w - totalW) / 2;
+                  const out: React.ReactElement[] = [];
+                  for (const pl of pills) {
+                    const x = cursor;
+                    cursor += pl.w + gap;
+                    switch (pl.kind) {
+                      case "dynamic":
+                        out.push(
+                          <DynamicPill key="dynamic" nodeW={p.w} x={x} />,
+                        );
+                        break;
+                      case "approval":
+                        out.push(
+                          <ApprovalPill
+                            key="approval"
+                            n={n}
+                            nodeW={p.w}
+                            x={x}
+                          />,
+                        );
+                        break;
+                      case "reused":
+                        out.push(<ReusedPill key="reused" nodeW={p.w} x={x} />);
+                        break;
+                      case "cached":
+                        out.push(<CachedPill key="cached" nodeW={p.w} x={x} />);
+                        break;
+                      case "inline":
+                        out.push(<InlinePill key="inline" nodeW={p.w} x={x} />);
+                        break;
+                      case "spawned":
+                        out.push(
+                          <CrossPipelinePill
+                            key="spawned"
+                            nodeW={p.w}
+                            x={x}
+                            pipelines={n.spawned_pipelines!}
+                            onOpen={(runID) =>
+                              dagRouter.push(
+                                `?run=${encodeURIComponent(runID)}`,
+                              )
+                            }
+                          />,
+                        );
+                        break;
+                    }
+                  }
+                  return out;
+                })()}
                 {(() => {
                   const annos = collectNodeAnnotations(n);
                   if (annos.length === 0) return null;
@@ -5799,13 +5864,16 @@ function NodeBadge({
 // on a DAG node whose shape is runtime-variable. Centered along the
 // top edge of the node, overhanging upward -- keeps the pill from
 // clipping the left or right SVG boundary regardless of column.
-function DynamicPill({ nodeW }: { nodeW: number }) {
-  const pillW = 56;
+// DynamicPill width is exported so the top-pill layout can budget
+// space for the badge before painting. See PILL_W.
+const DYNAMIC_PILL_W = 56;
+function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
+  const pillW = DYNAMIC_PILL_W;
   const pillH = 15;
-  // Horizontally centered, sitting just above + straddling the top
-  // border of the node so it reads as a badge attached to the node
-  // rather than a floating annotation.
-  const x = (nodeW - pillW) / 2;
+  // Horizontally centered when no override, or anchored to the x
+  // assigned by the layout pass when multiple pills stack on the
+  // top edge.
+  const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   return (
     <g style={{ pointerEvents: "none" }}>
@@ -5845,11 +5913,23 @@ function DynamicPill({ nodeW }: { nodeW: number }) {
 //   - solid green "APPROVED" or red "DENIED" once resolved
 // Stays visible at every stage so the DAG always shows which nodes
 // are human gates, not only when someone is currently blocked.
-function ApprovalPill({ n, nodeW }: { n: RunNode; nodeW: number }) {
+function approvalPillWidth(n: RunNode): number {
+  const { label } = approvalPillVisuals(n);
+  return label === "AWAITING" ? 60 : label === "APPROVAL" ? 58 : 64;
+}
+function ApprovalPill({
+  n,
+  nodeW,
+  x: xOverride,
+}: {
+  n: RunNode;
+  nodeW: number;
+  x?: number;
+}) {
   const { label, fill, pulse } = approvalPillVisuals(n);
-  const pillW = label === "AWAITING" ? 60 : label === "APPROVAL" ? 58 : 64;
+  const pillW = approvalPillWidth(n);
   const pillH = 15;
-  const x = (nodeW - pillW) / 2;
+  const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   return (
     <g style={{ pointerEvents: "none" }}>
@@ -5928,10 +6008,11 @@ function approvalPillVisuals(n: RunNode): {
 // shows up as a lightweight slate pill (no hue commitment). Hidden
 // when a more specific pill (dynamic / approval / cached / cross-
 // pipeline) takes the top slot for this node.
-function InlinePill({ nodeW }: { nodeW: number }) {
-  const pillW = 48;
+const INLINE_PILL_W = 48;
+function InlinePill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
+  const pillW = INLINE_PILL_W;
   const pillH = 15;
-  const x = (nodeW - pillW) / 2;
+  const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   return (
     <g style={{ pointerEvents: "none" }}>
@@ -5966,10 +6047,11 @@ function InlinePill({ nodeW }: { nodeW: number }) {
 // uses so the two visuals read as one signal. Hidden when a more
 // specific pill claims the top slot (dynamic / approval / cached /
 // cross-pipeline).
-function ReusedPill({ nodeW }: { nodeW: number }) {
-  const pillW = 52;
+const REUSED_PILL_W = 52;
+function ReusedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
+  const pillW = REUSED_PILL_W;
   const pillH = 15;
-  const x = (nodeW - pillW) / 2;
+  const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   return (
     <g style={{ pointerEvents: "none" }}>
@@ -5998,10 +6080,11 @@ function ReusedPill({ nodeW }: { nodeW: number }) {
   );
 }
 
-function CachedPill({ nodeW }: { nodeW: number }) {
-  const pillW = 52;
+const CACHED_PILL_W = 52;
+function CachedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
+  const pillW = CACHED_PILL_W;
   const pillH = 15;
-  const x = (nodeW - pillW) / 2;
+  const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   return (
     <g style={{ pointerEvents: "none" }}>
@@ -6036,20 +6119,27 @@ function CachedPill({ nodeW }: { nodeW: number }) {
 // pill width is stable across pipeline names. Clicking the pill
 // jumps to the spawned run — for multi-spawn nodes it routes to the
 // first child; the hover tooltip lists the full set.
+function crossPipelinePillWidth(pipelines: SpawnedPipelineRef[]): number {
+  const label =
+    pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
+  return Math.max(48, 12 + label.length * 6);
+}
 function CrossPipelinePill({
   nodeW,
   pipelines,
   onOpen,
+  x: xOverride,
 }: {
   nodeW: number;
   pipelines: SpawnedPipelineRef[];
   onOpen?: (runID: string) => void;
+  x?: number;
 }) {
   const label =
     pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
   const pillH = 15;
-  const pillW = Math.max(48, 12 + label.length * 6);
-  const x = (nodeW - pillW) / 2;
+  const pillW = crossPipelinePillWidth(pipelines);
+  const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   const first = pipelines[0];
   const tip = pipelines
