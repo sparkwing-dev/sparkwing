@@ -313,6 +313,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   // sessionStorage hand-off.
   const [pendingLogFocus, setPendingLogFocus] = useState<{
     nodeID: string;
+    stepID: string | null;
     line: number;
   } | null>(null);
   useEffect(() => {
@@ -321,9 +322,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     if (!raw) return;
     sessionStorage.removeItem("sparkwing.searchResultFocus");
     try {
-      const parsed = JSON.parse(raw) as { nodeID: string; line: number };
+      const parsed = JSON.parse(raw) as {
+        nodeID: string;
+        stepID?: string | null;
+        line: number;
+      };
       if (parsed.nodeID && typeof parsed.line === "number") {
-        setPendingLogFocus(parsed);
+        setPendingLogFocus({
+          nodeID: parsed.nodeID,
+          stepID: parsed.stepID ?? null,
+          line: parsed.line,
+        });
       }
     } catch {
       // ignore malformed handoff
@@ -1364,9 +1373,17 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, []);
   const onResultClick = (m: RunsGrepMatch) => {
     if (typeof window !== "undefined") {
+      // step_id rides along so the receiving page can drill into
+      // the matching step bucket; without it the Logs view picks
+      // the node section but the user still has to expand the
+      // correct step manually.
       sessionStorage.setItem(
         "sparkwing.searchResultFocus",
-        JSON.stringify({ nodeID: m.node_id, line: m.line }),
+        JSON.stringify({
+          nodeID: m.node_id,
+          stepID: m.step_id ?? null,
+          line: m.line,
+        }),
       );
     }
     // Keep gq + gsince in the URL so the browser back button drops
@@ -2333,7 +2350,11 @@ function RunDetailPane({
   focusedTab: TabKey | null;
   // Cross-run grep deep link. When set, switches to the Logs tab and
   // focuses the matching line; consumed once via onConsumePendingLogFocus.
-  pendingLogFocus?: { nodeID: string; line: number } | null;
+  pendingLogFocus?: {
+    nodeID: string;
+    stepID: string | null;
+    line: number;
+  } | null;
   onConsumePendingLogFocus?: () => void;
   // Set of node ids the orchestrator rehydrated from a prior attempt
   // (drives the DAG REUSED pill + teal status dot). Computed at the
@@ -2722,15 +2743,29 @@ function RunDetailPane({
     line: number;
   } | null>(null);
   // Cross-run grep deep link: arriving with a pendingLogFocus means
-  // the user clicked a result row in the Search view. Switch to Logs,
-  // wire the focus through so the line scrolls into view, then clear
-  // the pending state so a tab change won't re-fire it.
+  // the user clicked a result row in the Search view. Land on the
+  // Logs tab AND drive the same selection callbacks a regular row
+  // click fires so the sidebar Nodes column highlights the match
+  // and the LogBucketView opens the right step automatically.
+  // Without firing onSelectNode/onSelectStep here, the Logs section
+  // expanded but neither the sidebar nor the step bucket reflected
+  // which result the user clicked.
   useEffect(() => {
     if (!pendingLogFocus) return;
     setTab("logs");
     setFindLogFocus(pendingLogFocus);
+    onSelectNode(pendingLogFocus.nodeID);
+    if (pendingLogFocus.stepID) {
+      onSelectStep(pendingLogFocus.nodeID, pendingLogFocus.stepID);
+    }
     onConsumePendingLogFocus?.();
-  }, [pendingLogFocus, setTab, onConsumePendingLogFocus]);
+  }, [
+    pendingLogFocus,
+    setTab,
+    onConsumePendingLogFocus,
+    onSelectNode,
+    onSelectStep,
+  ]);
   // Clear the focus when the query clears so a stale jump doesn't
   // ride into the next session.
   useEffect(() => {
