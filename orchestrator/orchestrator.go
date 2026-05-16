@@ -130,6 +130,31 @@ type Options struct {
 	// ArtifactStore receives the final run-state NDJSON dump
 	// (runs/<runID>/state.ndjson) after RunLocal exits.
 	ArtifactStore storage.ArtifactStore
+
+	// JobRunnerOverrides forces specific plan-node ids onto specific
+	// runner names (from runners.yaml). Validated at run start: the
+	// id must match a node in the plan, the runner must exist, and
+	// its advertised labels must satisfy the job's Requires terms.
+	// Empty leaves runner selection to the regular Prefers /
+	// WhenRunner resolution.
+	JobRunnerOverrides map[string]string
+
+	// GlobalPrefers prepends bias terms to every job's Prefers list
+	// at snapshot time. The job's own Prefers stay first (job-level
+	// wins on tie). Terms use the same comma-OR syntax as Job.Prefers.
+	GlobalPrefers []string
+
+	// BackendsEnv, when non-empty, forces a specific environments:
+	// entry from backends.yaml. Skips auto-detect. Validated against
+	// the resolved File at run start.
+	BackendsEnv string
+
+	// BackendsConfig, when non-empty, names an extra backends.yaml
+	// fragment to layer underneath repo+user defaults. The outer
+	// wing CLI uses this to forward profile-derived storage settings
+	// to the child without going through the deprecated env-var
+	// shim. The file is expected to be cleaned up by the caller.
+	BackendsConfig string
 }
 
 // DebugDirectives is the ephemeral pause surface for one run.
@@ -168,6 +193,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q is not registered", opts.Pipeline)
+	}
+
+	// Pre-flight validation that doesn't need the plan or run row.
+	// These errors fire before CreateRun so the failure mode is
+	// loud, fast, and leaves no orphan run state behind.
+	if err := validateTargetSelection(opts); err != nil {
+		return nil, err
 	}
 
 	runID := opts.RunID
@@ -259,11 +291,24 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
+	// Per-job runner override validation: ids must exist in the
+	// resolved plan and the named runners must satisfy the job's
+	// Requires terms. Fails before the snapshot persists so the
+	// run record never reflects an unreachable selection.
+	if err := validateJobOverrides(opts, plan); err != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
+
 	// Pre-build the per-run snapshot metadata (target, resolved
 	// Config json, SecretsField) so the cluster pod can rehydrate
 	// PipelineConfig and re-resolve PipelineSecrets without re-
 	// reading pipelines.yaml on its end.
-	snapMeta := planSnapshotMeta{Target: opts.Target}
+	snapMeta := planSnapshotMeta{
+		Target:             opts.Target,
+		GlobalPrefers:      opts.GlobalPrefers,
+		JobRunnerOverrides: opts.JobRunnerOverrides,
+	}
 	if pipeCfg != nil {
 		raw, merr := json.Marshal(pipeCfg)
 		if merr != nil {
@@ -336,6 +381,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// binding (Target.Source -> sources.yaml entry) wins when both
 	// SparkwingDir and a target-source name are available; otherwise
 	// fall back to Options.SecretSource (the pre-step-8 path).
+	//
+	// Cross-source-type guard: a laptop-only source bound to a
+	// target dispatched on a non-local runner is rejected loudly
+	// here so the run fails before any pod spins up.
+	if err := validateSourceRunnerPortability(opts, r); err != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", rerr.Error())
 		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil
@@ -2178,6 +2231,20 @@ type planSnapshot struct {
 	// SecretResolver. Values are never persisted -- secrets are
 	// re-resolved on the pod side, never shipped across the wire.
 	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
+
+	// GlobalPrefers carries the --prefer terms the operator passed
+	// at run start so the cluster pool dispatcher applies the same
+	// bias when claiming jobs. The in-process orchestrator uses one
+	// runner today, so this is consumed only by cluster-side
+	// dispatchers; persisting it on the snapshot keeps the surface
+	// honest across venues.
+	GlobalPrefers []string `json:"global_prefers,omitempty"`
+
+	// JobRunnerOverrides forces specific node ids onto specific
+	// runner names. Surface lives here for the same reason as
+	// GlobalPrefers: cluster-side dispatchers honor the override
+	// when claiming the named node.
+	JobRunnerOverrides map[string]string `json:"job_runner_overrides,omitempty"`
 }
 
 type snapshotNode struct {
@@ -2281,18 +2348,22 @@ type snapshotSpawnEach struct {
 // when it picks up a node. Zero-value omits the fields from the
 // emitted JSON.
 type planSnapshotMeta struct {
-	Target         string
-	PipelineConfig json.RawMessage
-	Secrets        pipelines.SecretsField
+	Target             string
+	PipelineConfig     json.RawMessage
+	Secrets            pipelines.SecretsField
+	GlobalPrefers      []string
+	JobRunnerOverrides map[string]string
 }
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
 	snap := planSnapshot{
-		Pipeline:       rc.Pipeline,
-		RunID:          rc.RunID,
-		Target:         meta.Target,
-		PipelineConfig: meta.PipelineConfig,
-		Secrets:        meta.Secrets,
+		Pipeline:           rc.Pipeline,
+		RunID:              rc.RunID,
+		Target:             meta.Target,
+		PipelineConfig:     meta.PipelineConfig,
+		Secrets:            meta.Secrets,
+		GlobalPrefers:      meta.GlobalPrefers,
+		JobRunnerOverrides: meta.JobRunnerOverrides,
 	}
 	// Surface the registered venue at the snapshot top so agents
 	// reading --explain JSON honor the dispatch constraint

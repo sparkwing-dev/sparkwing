@@ -21,7 +21,7 @@ import (
 // Adding a new Command means adding it here too -- the
 // TestAllCommandsAreRegistered guard test fails CI if anyone forgets.
 var allCommands = []*Command{
-	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdRun,
+	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,

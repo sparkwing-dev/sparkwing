@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -25,14 +27,28 @@ import (
 // caller (e.g. cluster worker plumbing) take precedence over the
 // resolved configuration.
 func ApplyBackendsConfig(ctx context.Context, opts *Options) error {
-	file, err := backends.ResolveWithEnv(opts.SparkwingDir)
+	file, err := backends.ResolveWithEnvAndOverlay(opts.SparkwingDir, opts.BackendsConfig)
 	if err != nil {
 		return fmt.Errorf("backends.yaml: %w", err)
 	}
 
 	target := decodeTargetBackend(opts.PipelineYAML, opts.Target)
 
-	envName, _, _ := backends.DetectEnvironment(file)
+	var envName string
+	if opts.BackendsEnv != "" {
+		if _, ok := file.Environments[opts.BackendsEnv]; !ok {
+			names := make([]string, 0, len(file.Environments))
+			for n := range file.Environments {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			return fmt.Errorf("--backends-env %q is not declared in backends.yaml (available: %s)",
+				opts.BackendsEnv, strings.Join(names, ", "))
+		}
+		envName = opts.BackendsEnv
+	} else {
+		envName, _, _ = backends.DetectEnvironment(file)
+	}
 	eff := backends.Effective(file, envName, target)
 
 	if opts.ArtifactStore == nil && eff.Cache != nil {

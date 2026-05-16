@@ -97,10 +97,11 @@ func TestWingFlagDocs_ReturnsCopy(t *testing.T) {
 // drift the help layout.
 func TestWingFlagDocs_GroupsAreKnown(t *testing.T) {
 	known := map[string]bool{
-		"Source": true,
-		"Range":  true,
-		"Safety": true,
-		"System": true,
+		"Source":    true,
+		"Range":     true,
+		"Safety":    true,
+		"System":    true,
+		"Selection": true,
 	}
 	for _, d := range WingFlagDocs() {
 		if !known[d.Group] {

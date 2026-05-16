@@ -77,6 +77,27 @@ type wingFlags struct {
 	allowDestructive bool
 	allowProd        bool
 	allowMoney       bool
+	// forTarget picks the pipelines.yaml target the run resolves
+	// against. Empty means "use the single declared target if there's
+	// one, else no target."
+	forTarget string
+	// jobOverrides forces specific plan-node ids onto specific
+	// runners. Each entry is "<jobID>=<runnerName>". Repeated --job
+	// for the same id is rejected by the inner orchestrator.
+	jobOverrides []string
+	// preferLabels biases runner preferences across the run. Each
+	// entry is one label term (comma-OR within); --prefer composes
+	// with each job's own Prefers (job-level wins on tie).
+	preferLabels []string
+	// backendsEnv forces a specific environments: entry from
+	// backends.yaml, skipping auto-detect. Validated against the
+	// resolved file at run start.
+	backendsEnv string
+	// backendsConfig points at a (possibly synthesized) backends.yaml
+	// fragment the inner binary layers underneath defaults. Used by
+	// the outer CLI to forward profile-derived storage settings to
+	// the child without going through the deprecated env-var shim.
+	backendsConfig string
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -145,6 +166,11 @@ var wingTokenSpecs = []wingTokenSpec{
 	{tok: "--allow-money", takesValue: false},
 	{tok: "-C", takesValue: true},
 	{tok: "--change-directory", takesValue: true},
+	{tok: "--for", takesValue: true},
+	{tok: "--job", takesValue: true},
+	{tok: "--prefer", takesValue: true},
+	{tok: "--backends-env", takesValue: true},
+	{tok: "--backends-config", takesValue: true},
 }
 
 // classifyWingFlag returns (spec, ok) for a token that matches a
@@ -433,6 +459,61 @@ func parseWingFlags(args []string) (wingFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--change-directory="):
 			wf.changeDir = strings.TrimPrefix(a, "--change-directory=")
+			i++
+		case a == "--for":
+			if i+1 < len(args) {
+				wf.forTarget = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--for="):
+			wf.forTarget = strings.TrimPrefix(a, "--for=")
+			i++
+		case a == "--job":
+			if i+1 < len(args) {
+				wf.jobOverrides = append(wf.jobOverrides, args[i+1])
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--job="):
+			wf.jobOverrides = append(wf.jobOverrides, strings.TrimPrefix(a, "--job="))
+			i++
+		case a == "--prefer":
+			if i+1 < len(args) {
+				wf.preferLabels = append(wf.preferLabels, args[i+1])
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--prefer="):
+			wf.preferLabels = append(wf.preferLabels, strings.TrimPrefix(a, "--prefer="))
+			i++
+		case a == "--backends-env":
+			if i+1 < len(args) {
+				wf.backendsEnv = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--backends-env="):
+			wf.backendsEnv = strings.TrimPrefix(a, "--backends-env=")
+			i++
+		case a == "--backends-config":
+			if i+1 < len(args) {
+				wf.backendsConfig = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--backends-config="):
+			wf.backendsConfig = strings.TrimPrefix(a, "--backends-config=")
 			i++
 		default:
 			pass = append(pass, a)

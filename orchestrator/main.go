@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"golang.org/x/term"
 )
@@ -65,6 +66,19 @@ func Main() {
 	pipeline := args[0]
 	rest := args[1:]
 
+	// `<pipeline> config` is a pure inspection subverb: print the
+	// layered Config + declared Secrets for the selected target,
+	// no Plan, no dispatch. Honors SPARKWING_FOR (the --for value
+	// the outer CLI forwarded). Recognized before --help so
+	// `wing X config --help` is a future extension point if needed.
+	if len(rest) > 0 && rest[0] == "config" {
+		if err := runPipelineConfigInspect(pipeline, rest[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, pipeline+":", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// --help short-circuits before typed-flag parsing.
 	for _, tok := range rest {
 		if tok == "-h" || tok == "--help" {
@@ -113,19 +127,42 @@ func Main() {
 		os.Exit(1)
 	}
 
+	// Load the on-disk pipelines.yaml entry (if any) so target /
+	// source / backend overlays resolve at run start. A missing
+	// pipelines.yaml is not an error -- pipelines that don't declare
+	// targets or values still work the same way they did before
+	// step 6 landed.
+	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
+
 	delegate := selectLocalRenderer()
 	opts := Options{
-		Pipeline:    pipeline,
-		Args:        argsMap,
-		Git:         detectGit(),
-		Delegate:    delegate,
-		Debug:       readDebugDirectivesFromEnv(),
-		RetryOf:     os.Getenv("SPARKWING_RETRY_OF"),
-		Full:        os.Getenv("SPARKWING_RETRY_FULL") == "1",
-		StartAt:     os.Getenv("SPARKWING_START_AT"),
-		StopAt:      os.Getenv("SPARKWING_STOP_AT"),
-		DryRun:      os.Getenv("SPARKWING_DRY_RUN") == "1",
-		MaxParallel: runtime.NumCPU(),
+		Pipeline:       pipeline,
+		Args:           argsMap,
+		Git:            detectGit(),
+		Delegate:       delegate,
+		Debug:          readDebugDirectivesFromEnv(),
+		RetryOf:        os.Getenv("SPARKWING_RETRY_OF"),
+		Full:           os.Getenv("SPARKWING_RETRY_FULL") == "1",
+		StartAt:        os.Getenv("SPARKWING_START_AT"),
+		StopAt:         os.Getenv("SPARKWING_STOP_AT"),
+		DryRun:         os.Getenv("SPARKWING_DRY_RUN") == "1",
+		MaxParallel:    runtime.NumCPU(),
+		Target:         os.Getenv("SPARKWING_FOR"),
+		BackendsEnv:    os.Getenv("SPARKWING_BACKENDS_ENV"),
+		BackendsConfig: os.Getenv("SPARKWING_BACKENDS_CONFIG"),
+		PipelineYAML:   pipelineYAML,
+		SparkwingDir:   sparkwingDir,
+	}
+	if v := os.Getenv("SPARKWING_JOB_OVERRIDES"); v != "" {
+		overrides, perr := parseJobOverridesEnv(v)
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, "wing: --job:", perr)
+			os.Exit(2)
+		}
+		opts.JobRunnerOverrides = overrides
+	}
+	if v := os.Getenv("SPARKWING_PREFER"); v != "" {
+		opts.GlobalPrefers = splitSemicolonClean(v)
 	}
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "wing:", applyErr)
@@ -547,6 +584,68 @@ func readDebugDirectivesFromEnv() DebugDirectives {
 		d.PauseOnFailure = true
 	}
 	return d
+}
+
+// loadPipelineYAML walks up from cwd looking for
+// .sparkwing/pipelines.yaml and returns the entry for the named
+// pipeline (nil when there's no pipelines.yaml or the pipeline isn't
+// listed). Also returns the resolved .sparkwing/ directory so the
+// orchestrator can consult sources.yaml / backends.yaml from the
+// same root.
+func loadPipelineYAML(pipeline string) (*pipelines.Pipeline, string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, ""
+	}
+	sparkwingDir, cfg, err := pipelines.Discover(cwd)
+	if err != nil || cfg == nil {
+		return nil, sparkwingDir
+	}
+	return cfg.Find(pipeline), sparkwingDir
+}
+
+// parseJobOverridesEnv parses SPARKWING_JOB_OVERRIDES (semi-colon
+// separated "id=runner" pairs) into the map shape Options expects.
+// Duplicate ids are rejected so two --job entries naming the same
+// job surface as an error instead of silently last-write-wins.
+func parseJobOverridesEnv(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, entry := range strings.Split(raw, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 || eq == len(entry)-1 {
+			return nil, fmt.Errorf("--job entry %q must be ID=RUNNER", entry)
+		}
+		id := strings.TrimSpace(entry[:eq])
+		runner := strings.TrimSpace(entry[eq+1:])
+		if id == "" || runner == "" {
+			return nil, fmt.Errorf("--job entry %q must be ID=RUNNER", entry)
+		}
+		if _, ok := out[id]; ok {
+			return nil, fmt.Errorf("--job %s specified twice", id)
+		}
+		out[id] = runner
+	}
+	return out, nil
+}
+
+// splitSemicolonClean splits raw on ';' and drops empty entries.
+// Used for SPARKWING_PREFER which uses ';' as the delimiter so
+// commas inside a label term (the comma-OR syntax) don't get
+// mistaken for a separator.
+func splitSemicolonClean(s string) []string {
+	parts := strings.Split(s, ";")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func splitCommaClean(s string) []string {

@@ -980,6 +980,38 @@ dispatch.`,
 	},
 }
 
+// cmdRunConfig documents the `<pipeline> config` inspection subverb.
+// Implemented by the inner pipeline binary (orchestrator/main.go's
+// dispatch), so this entry exists primarily for --help discoverability
+// and shell completion.
+var cmdRunConfig = Command{
+	Path:     "sparkwing run config",
+	Synopsis: "Print the resolved Config struct + declared Secrets for a pipeline + target",
+	Description: `Pure inspection: resolves the pipeline's typed Config
+struct through the same layering ` + "`sparkwing run`" + ` uses
+(struct defaults < pipelines.yaml values.base < per-target values)
+and prints each field's resolved value alongside which layer
+contributed it. Also lists every declared Secret with its source
+binding -- useful before driving destructive ` + "`--for prod`" + `
+runs to confirm you'd hit the right vault.
+
+Honors --for (the target selection). No Plan() runs, nothing
+dispatches, nothing mutates.
+
+Invocation: ` + "`sparkwing run <pipeline> config --for <target>`" + ` --
+the pipeline binary handles the subverb directly.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Inspect the staging config", "sparkwing run release config --for staging"},
+		{"Agent-readable form", "sparkwing run release config --for prod --json"},
+	},
+	HideFromComplete: true,
+}
+
 // cmdRun is the top-level invoke verb: `sparkwing run <pipeline>`.
 // Takes the pipeline name as a positional (the deliberate exception
 // to the otherwise-flag-only sparkwing surface) because typing the

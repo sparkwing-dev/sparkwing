@@ -274,21 +274,51 @@ func runWing(args []string) error {
 		if wf.workers > 0 {
 			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", wf.workers))
 		}
-		var profLogStore, profArtStore string
+		// User-set SPARKWING_*_STORE env vars are forwarded verbatim so
+		// the inner shim still translates them (and warns once). Profile-
+		// derived values are materialized into a temp backends.yaml and
+		// passed via --backends-config so the warning fires only when an
+		// operator actually set the env var themselves.
+		if v := os.Getenv("SPARKWING_LOG_STORE"); v != "" {
+			env = append(env, "SPARKWING_LOG_STORE="+v)
+		}
+		if v := os.Getenv("SPARKWING_ARTIFACT_STORE"); v != "" {
+			env = append(env, "SPARKWING_ARTIFACT_STORE="+v)
+		}
 		if wf.on != "" {
 			prof, err := resolveProfile(wf.on)
 			if err != nil {
 				return err
 			}
-			profLogStore = prof.LogStore
-			profArtStore = prof.ArtifactStore
+			path, cleanup, err := writeProfileBackendsConfig(prof.LogStore, prof.ArtifactStore)
+			if err != nil {
+				return fmt.Errorf("--on %s: materialize backends config: %w", wf.on, err)
+			}
+			if path != "" {
+				defer cleanup()
+				if wf.backendsConfig == "" {
+					wf.backendsConfig = path
+				}
+			}
 		}
-		if v := firstNonEmptyStr(os.Getenv("SPARKWING_LOG_STORE"), profLogStore); v != "" {
-			env = append(env, "SPARKWING_LOG_STORE="+v)
-		}
-		if v := firstNonEmptyStr(os.Getenv("SPARKWING_ARTIFACT_STORE"), profArtStore); v != "" {
-			env = append(env, "SPARKWING_ARTIFACT_STORE="+v)
-		}
+	}
+
+	// Forward the new selection flags as env vars; the inner
+	// orchestrator/main.go lifts these onto Options at run start.
+	if wf.forTarget != "" {
+		env = append(env, "SPARKWING_FOR="+wf.forTarget)
+	}
+	if len(wf.jobOverrides) > 0 {
+		env = append(env, "SPARKWING_JOB_OVERRIDES="+strings.Join(wf.jobOverrides, ";"))
+	}
+	if len(wf.preferLabels) > 0 {
+		env = append(env, "SPARKWING_PREFER="+strings.Join(wf.preferLabels, ";"))
+	}
+	if wf.backendsEnv != "" {
+		env = append(env, "SPARKWING_BACKENDS_ENV="+wf.backendsEnv)
+	}
+	if wf.backendsConfig != "" {
+		env = append(env, "SPARKWING_BACKENDS_CONFIG="+wf.backendsConfig)
 	}
 
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
@@ -350,6 +380,16 @@ func runSparkwing(args []string) error {
 		return runInternalCompleteHint(args[1:])
 	case "_complete-pipeline-flags":
 		return runInternalCompletePipelineFlags(args[1:])
+	case "_complete-targets":
+		return runInternalCompleteTargets(args[1:])
+	case "_complete-runners":
+		return runInternalCompleteRunners(args[1:])
+	case "_complete-runner-labels":
+		return runInternalCompleteRunnerLabels(args[1:])
+	case "_complete-backends-envs":
+		return runInternalCompleteBackendsEnvs(args[1:])
+	case "_complete-profiles-for-pipeline":
+		return runInternalCompleteProfilesForPipeline(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdSparkwing, os.Stdout)
 		return nil

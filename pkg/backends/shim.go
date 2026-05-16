@@ -109,9 +109,28 @@ func ApplyLegacyEnvShim(file File) File {
 // BuiltinEnvironments, then applies ApplyLegacyEnvShim. Returns the
 // fully-prepared File suitable for DetectEnvironment + Effective.
 func ResolveWithEnv(sparkwingDir string) (File, error) {
+	return ResolveWithEnvAndOverlay(sparkwingDir, "")
+}
+
+// ResolveWithEnvAndOverlay extends ResolveWithEnv with an extra
+// File loaded from overlayPath that sits ABOVE the repo+user merge
+// but BELOW environment auto-detect rules. Used by the outer wing
+// CLI to forward profile-derived storage settings to the child via
+// a synthesized temp yaml file (avoids the SPARKWING_*_STORE shim
+// path so the deprecation warning only fires for user-set env vars).
+// Empty overlayPath behaves identically to ResolveWithEnv.
+func ResolveWithEnvAndOverlay(sparkwingDir, overlayPath string) (File, error) {
 	file, err := Resolve(sparkwingDir)
 	if err != nil {
 		return File{}, err
+	}
+	if overlayPath != "" {
+		overlay, oerr := Load(overlayPath)
+		if oerr != nil {
+			return File{}, fmt.Errorf("backends overlay %s: %w", overlayPath, oerr)
+		}
+		// Overlay wins per non-zero field over the repo+user merge.
+		file = Merge(overlay, file)
 	}
 	file = Merge(file, BuiltinEnvironments())
 	file = ApplyLegacyEnvShim(file)

@@ -61,8 +61,13 @@ var wingFlagDocs = []WingFlagDoc{
 	{Name: "allow-destructive", Desc: "Authorize dispatch when the plan reaches a Destructive-marked step", Group: "Safety"},
 	{Name: "allow-prod", Desc: "Authorize dispatch when the plan reaches a AffectsProduction-marked step", Group: "Safety"},
 	{Name: "allow-money", Desc: "Authorize dispatch when the plan reaches a CostsMoney-marked step", Group: "Safety"},
+	// Selection: which target / runner / preferences resolve this run.
+	{Name: "for", Argument: "TARGET", Desc: "Pick the pipeline target to run against (Config + Source binding follow)", Group: "Selection"},
+	{Name: "job", Argument: "ID=RUNNER", Desc: "Force one job to a specific runner (repeatable; must satisfy that job's Requires)", Group: "Selection"},
+	{Name: "prefer", Argument: "LABEL", Desc: "Bias runner selection by label across the run (repeatable; loses to a job's own Prefers)", Group: "Selection"},
 	// System: where the work runs.
 	{Name: "on", Argument: "NAME", Desc: "Dispatch on a remote controller instead of running locally", Group: "System"},
+	{Name: "backends-env", Argument: "NAME", Desc: "Force a specific environments: entry from backends.yaml (skips auto-detect)", Group: "System"},
 }
 
 // WingFlagDocs returns the canonical wing-owned flag documentation.

@@ -45,6 +45,11 @@ var reservedFlagNames = []string{
 	"allow-destructive",
 	"allow-prod",
 	"allow-money",
+	"for",
+	"job",
+	"prefer",
+	"backends-env",
+	"backends-config",
 }
 
 // ReservedFlagNames returns the wing-owned flag names a pipeline Args

@@ -563,10 +563,23 @@ _sparkwing() {
         return
     fi
 
-    # Value completion: --on <TAB> -> profile names.
+    # Value completion: --on <TAB> -> profile names, optionally
+    # filtered to those whose default_runner sits in the pipeline's
+    # allowed runner set when the pipeline is known.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--on" ]]; then
+        local pipe=""
+        if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
+            pipe="${swpath[2]}"
+        elif (( ${#swpath[@]} >= 1 )) && [[ "${swpath[1]}" == "wing" ]]; then
+            pipe="${swpath[2]:-}"
+        fi
         local -a profs
-        profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
+        if [[ -n "$pipe" ]]; then
+            profs=( ${(f)"$(sparkwing _complete-profiles-for-pipeline "$pipe" 2>/dev/null)"} )
+        fi
+        if (( ${#profs[@]} == 0 )); then
+            profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
+        fi
         _describe -t profiles 'profile' profs
         return
     fi
@@ -576,6 +589,67 @@ _sparkwing() {
     # cursor, so describe/explain/new all share the same menu.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--pipeline" ]]; then
         _sparkwing_complete_pipelines
+        return
+    fi
+
+    # Value completion: --for <TAB> -> the pipeline's declared targets.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--for" ]]; then
+        local pipe=""
+        if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
+            pipe="${swpath[2]}"
+        elif (( ${#swpath[@]} >= 1 )) && [[ "${swpath[1]}" == "wing" ]]; then
+            pipe="${swpath[2]:-}"
+        fi
+        if [[ -n "$pipe" ]]; then
+            local -a tgts
+            tgts=( ${(f)"$(sparkwing _complete-targets "$pipe" 2>/dev/null)"} )
+            _describe -t targets 'target' tgts
+        fi
+        return
+    fi
+
+    # Value completion: --backends-env <TAB> -> environments declared
+    # in backends.yaml (after built-in merge).
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--backends-env" ]]; then
+        local -a envs
+        envs=( ${(f)"$(sparkwing _complete-backends-envs 2>/dev/null)"} )
+        _describe -t environments 'environment' envs
+        return
+    fi
+
+    # Value completion: --prefer <TAB> -> label union across runners
+    # the pipeline can target.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--prefer" ]]; then
+        local pipe=""
+        if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
+            pipe="${swpath[2]}"
+        elif (( ${#swpath[@]} >= 1 )) && [[ "${swpath[1]}" == "wing" ]]; then
+            pipe="${swpath[2]:-}"
+        fi
+        local -a labs
+        labs=( ${(f)"$(sparkwing _complete-runner-labels "$pipe" 2>/dev/null)"} )
+        _describe -t labels 'label' labs
+        return
+    fi
+
+    # Value completion: --job <TAB> -> runner names from runners.yaml.
+    # Job ids are only known after Plan() runs; we offer runner names
+    # so operators can type --job ID=<TAB> and at least get the
+    # right-hand side populated. The full ID=runner completion would
+    # need a Plan dry-run from the completion shell.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--job" ]]; then
+        local -a runs
+        runs=( ${(f)"$(sparkwing _complete-runners 2>/dev/null)"} )
+        _describe -t runners 'runner (use as ID=RUNNER)' runs
+        return
+    fi
+
+    # Value completion: --default-runner <TAB> -> runner names.
+    # Used by sparkwing configure profiles add/set --default-runner.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--default-runner" ]]; then
+        local -a runs
+        runs=( ${(f)"$(sparkwing _complete-runners 2>/dev/null)"} )
+        _describe -t runners 'runner' runs
         return
     fi
 
