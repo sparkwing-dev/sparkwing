@@ -13,6 +13,16 @@ type Runner interface {
 	RunNode(ctx context.Context, req Request) Result
 }
 
+// LabelAdvertiser is an optional interface a Runner can implement to
+// expose the labels it satisfies. The orchestrator consults it when
+// evaluating Job.WhenRunner: a job whose WhenRunner labels cannot be
+// matched by the active runner is silently skipped at dispatch time.
+// Runners that do not implement this interface are treated as
+// matching anything, preserving the pre-WhenRunner behavior.
+type LabelAdvertiser interface {
+	AdvertisedLabels() []string
+}
+
 // Request is the work handed to a runner. Cluster runners ignore the
 // in-process fields (Node, Delegate) and reconstruct pod-side.
 type Request struct {

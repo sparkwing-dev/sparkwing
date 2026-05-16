@@ -240,6 +240,23 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	return g
 }
 
+// Prefers biases runner selection for every member. See Job.Prefers.
+func (g *JobGroup) Prefers(labels ...string) *JobGroup {
+	for _, m := range g.Members() {
+		m.Prefers(labels...)
+	}
+	return g
+}
+
+// WhenRunner marks every member as conditional on the dispatching
+// runner advertising the listed labels. See Job.WhenRunner.
+func (g *JobGroup) WhenRunner(labels ...string) *JobGroup {
+	for _, m := range g.Members() {
+		m.WhenRunner(labels...)
+	}
+	return g
+}
+
 // SkipIf registers a predicate on every member. See Job.SkipIf.
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup {
 	for _, m := range g.Members() {

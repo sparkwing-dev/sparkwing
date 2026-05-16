@@ -46,7 +46,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 		NodeID:      child.ID(),
 		Status:      "pending",
 		Deps:        child.DepIDs(),
-		NeedsLabels: child.RequiresLabels(),
+		NeedsLabels: effectiveClaimLabels(child),
 	}); err != nil {
 		return nil, fmt.Errorf("orchestrator: persist spawn child row %q: %w", childID, err)
 	}

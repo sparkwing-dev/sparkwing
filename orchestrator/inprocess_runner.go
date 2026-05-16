@@ -19,15 +19,47 @@ import (
 // state. Stateless beyond Backends.
 type InProcessRunner struct {
 	backends Backends
+	labels   []string
 }
 
 // NewInProcessRunner builds a runner over Backends; lifecycle is
-// caller-owned.
+// caller-owned. The runner advertises a "local" label by default so
+// jobs declaring WhenRunner("local") dispatch through it.
 func NewInProcessRunner(backends Backends) *InProcessRunner {
-	return &InProcessRunner{backends: backends}
+	return &InProcessRunner{backends: backends, labels: []string{"local"}}
+}
+
+// AdvertisedLabels implements runner.LabelAdvertiser. The default set
+// is ["local"]; callers wiring an in-process runner with additional
+// capabilities (a USB-attached device, a specific OS) can override
+// via SetLabels before the orchestrator dispatch loop starts.
+func (r *InProcessRunner) AdvertisedLabels() []string {
+	out := make([]string, len(r.labels))
+	copy(out, r.labels)
+	return out
+}
+
+// SetLabels replaces the advertised label set. Intended for callers
+// that wire an InProcessRunner outside NewInProcessRunner's defaults
+// (host-side runners with hardware affinity, test fixtures pinning a
+// custom label set). The orchestrator's WhenRunner evaluation reads
+// the labels via AdvertisedLabels.
+func (r *InProcessRunner) SetLabels(labels []string) {
+	if len(labels) == 0 {
+		r.labels = nil
+		return
+	}
+	r.labels = make([]string, 0, len(labels))
+	for _, l := range labels {
+		if l == "" {
+			continue
+		}
+		r.labels = append(r.labels, l)
+	}
 }
 
 var _ runner.Runner = (*InProcessRunner)(nil)
+var _ runner.LabelAdvertiser = (*InProcessRunner)(nil)
 
 // runJobBody executes the node's materialized Work as a step DAG.
 // Returns the typed output of the *WorkStep the Job's Work returned

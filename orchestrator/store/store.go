@@ -1634,18 +1634,39 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 	return nil, ErrNotFound
 }
 
-// labelsSatisfied reports whether every label in needed appears in
-// have. Empty or nil needed matches any have (including empty).
+// labelsSatisfied reports whether the have label set satisfies the
+// needed label expression. Each entry in needed is a single term;
+// within a term, comma-separated values are alternatives (OR), and
+// across terms results compose with AND. Empty or nil needed matches
+// any have (including empty). Mirrors sparkwing.MatchLabels; kept
+// in-package to avoid an import cycle between store and sparkwing.
 func labelsSatisfied(needed []string, have map[string]struct{}) bool {
-	for _, l := range needed {
-		if l == "" {
+	for _, term := range needed {
+		if term == "" {
 			continue
 		}
-		if _, ok := have[l]; !ok {
+		if !labelTermSatisfied(term, have) {
 			return false
 		}
 	}
 	return true
+}
+
+func labelTermSatisfied(term string, have map[string]struct{}) bool {
+	if !strings.ContainsRune(term, ',') {
+		_, ok := have[strings.TrimSpace(term)]
+		return ok
+	}
+	for _, alt := range strings.Split(term, ",") {
+		alt = strings.TrimSpace(alt)
+		if alt == "" {
+			continue
+		}
+		if _, ok := have[alt]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.

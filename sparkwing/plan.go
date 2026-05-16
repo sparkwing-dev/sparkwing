@@ -373,9 +373,23 @@ type JobNode struct {
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
 
-	// requires restricts the node to runners advertising all listed
-	// labels. Empty = any runner may claim.
+	// requires restricts the job to runners advertising every listed
+	// term (AND across terms, OR within a term -- see MatchLabels).
+	// Empty = any runner may claim.
 	requires []string
+
+	// prefers biases runner selection when more than one runner
+	// satisfies requires. Walked in declaration order: the first term
+	// any candidate runner advertises wins. No effect on eligibility.
+	prefers []string
+
+	// whenRunner marks the job as conditional on the dispatching
+	// runner advertising the listed labels (same comma-OR / AND
+	// semantics as requires). When no available runner satisfies
+	// these labels the job is skipped at dispatch time and Needs
+	// treats it as satisfied. When a runner does match, these
+	// labels behave as an additional requires term for that job.
+	whenRunner []string
 
 	// inline marks lightweight nodes for in-process execution on the
 	// dispatcher, bypassing the configured Runner. Opt-in via
@@ -884,40 +898,124 @@ func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
 // AfterRunHooks returns the node's registered post-run hooks.
 func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 
-// Requires restricts this node to runners advertising every label in
-// the given set. Semantics are AND, not OR: .Requires("arm64", "laptop")
-// requires both labels; a runner advertising a superset still matches.
-// To express OR, author separate nodes.
+// Requires restricts this job to runners advertising every term in
+// the given set. Each argument is one term; within a term,
+// comma-separated values are alternatives (OR). Across terms, terms
+// compose with AND. A runner advertising a superset of the matched
+// alternatives still matches.
 //
 // Labels are equality strings; common conventions are bare tags
-// ("laptop", "gpu") or key=value ("arch=arm64"). Calling Requires with
-// no arguments clears any previously-set labels.
+// ("laptop", "gpu") or key=value ("arch=arm64"). Calling Requires
+// with no arguments clears any previously-set labels.
 //
-//	plan.Add("train", &Train{}).Requires("gpu")
-//	plan.Add("package-arm", &Package{}).Requires("arch=arm64", "trusted")
+//	sw.Job(plan, "train",      &Train{}).Requires("gpu")
+//	sw.Job(plan, "package",    &Package{}).Requires("arch=arm64", "trusted")
+//	sw.Job(plan, "build-x",    &Build{}).Requires("os=linux,macos")        // OR
+//	sw.Job(plan, "build-y",    &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
+//
+// A job that no runner can satisfy fails the run at validation; this
+// is the hard rail. For soft eligibility ("only run if a matching
+// runner exists"), use WhenRunner. For preference without a hard
+// constraint, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
-	if len(labels) == 0 {
-		n.requires = nil
-		return n
+	n.requires = normalizeLabels(labels)
+	return n
+}
+
+// RequiresLabels returns the terms declared via Requires.
+func (n *JobNode) RequiresLabels() []string {
+	return copyLabels(n.requires)
+}
+
+// Prefers biases runner selection when more than one runner satisfies
+// Requires. Each argument is one term with the same comma-OR / AND
+// semantics as Requires. The scheduler walks the terms in declaration
+// order and picks the first runner whose labels match any term. With
+// no preference, selection falls through to the profile default or
+// the first-available runner.
+//
+// Prefers never fails a run on its own: if no runner matches any
+// preference term the job still dispatches via the default selection.
+//
+//	sw.Job(plan, "integration", &Integration{}).
+//	    Requires("os=linux").
+//	    Prefers("cloud-linux")
+//
+// Calling Prefers with no arguments clears any previously-set
+// preferences.
+//
+// Preferences are persisted on the dispatch snapshot so plan
+// renderers and dashboards see them; the in-process orchestrator
+// dispatches through a single configured runner today, so Prefers
+// becomes meaningful when more than one runner can satisfy Requires
+// and claim the job.
+func (n *JobNode) Prefers(labels ...string) *JobNode {
+	n.prefers = normalizeLabels(labels)
+	return n
+}
+
+// PrefersLabels returns the terms declared via Prefers.
+func (n *JobNode) PrefersLabels() []string {
+	return copyLabels(n.prefers)
+}
+
+// WhenRunner marks the job as conditional on the dispatching runner
+// advertising the listed labels (same comma-OR / AND semantics as
+// Requires). When the orchestrator's active runner cannot satisfy the
+// terms the job is silently skipped at dispatch time and downstream
+// Needs treats it as satisfied -- useful for preflight checks scoped
+// to a particular environment ("only run aws-sso-login when dispatching
+// locally"). When a runner does match, the labels behave as an
+// additional Requires term for that job's dispatch.
+//
+//	preflight := sw.Job(plan, "preflight-sso", &CheckSSOLogin{}).
+//	    WhenRunner("local")
+//	sw.Job(plan, "build", &Build{}).Needs(preflight)
+//
+// Calling WhenRunner with no arguments clears any previously-set
+// labels.
+//
+// Evaluation happens at dispatch time against the orchestrator's
+// configured runner. A runner that does not advertise labels (via
+// the LabelAdvertiser optional interface) is treated as matching
+// anything, so pipelines that adopt WhenRunner keep working without
+// label configuration on every runner.
+func (n *JobNode) WhenRunner(labels ...string) *JobNode {
+	n.whenRunner = normalizeLabels(labels)
+	return n
+}
+
+// WhenRunnerLabels returns the terms declared via WhenRunner.
+func (n *JobNode) WhenRunnerLabels() []string {
+	return copyLabels(n.whenRunner)
+}
+
+// normalizeLabels strips empty entries from a label list. Returns
+// nil for an empty (or all-empty) input so default-value semantics
+// match across Requires / Prefers / WhenRunner.
+func normalizeLabels(in []string) []string {
+	if len(in) == 0 {
+		return nil
 	}
-	out := make([]string, 0, len(labels))
-	for _, l := range labels {
+	out := make([]string, 0, len(in))
+	for _, l := range in {
 		if l == "" {
 			continue
 		}
 		out = append(out, l)
 	}
-	n.requires = out
-	return n
-}
-
-// RequiresLabels returns the labels declared via Requires.
-func (n *JobNode) RequiresLabels() []string {
-	if len(n.requires) == 0 {
+	if len(out) == 0 {
 		return nil
 	}
-	out := make([]string, len(n.requires))
-	copy(out, n.requires)
+	return out
+}
+
+func copyLabels(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
 	return out
 }
 

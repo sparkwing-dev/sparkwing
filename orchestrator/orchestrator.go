@@ -236,7 +236,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			NodeID:      n.ID(),
 			Status:      "pending",
 			Deps:        n.DepIDs(),
-			NeedsLabels: n.RequiresLabels(),
+			NeedsLabels: effectiveClaimLabels(n),
 		}); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
@@ -471,7 +471,7 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 			NodeID:      rec.ID(),
 			Status:      "pending",
 			Deps:        rec.DepIDs(),
-			NeedsLabels: rec.RequiresLabels(),
+			NeedsLabels: effectiveClaimLabels(rec),
 		})
 		state.scheduleNode(rec)
 		seen[rec.ID()] = true
@@ -1314,7 +1314,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 			NodeID:      child.ID(),
 			Status:      "pending",
 			Deps:        child.DepIDs(),
-			NeedsLabels: child.RequiresLabels(),
+			NeedsLabels: effectiveClaimLabels(child),
 		}); err != nil {
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 				fmt.Sprintf("ExpandFrom(%s): store child %s: %v", exp.Source.ID(), child.ID(), err))
@@ -1467,15 +1467,31 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		return
 	}
 
-	// Mark started just before the runner dispatch loop so cancelled-
-	// by-upstream and skipped-by-predicate nodes (handled above) don't
-	// inherit a duration from the time they spent waiting on deps.
-	s.markStarted(node.ID())
-
 	activeRunner := s.runner
 	if node.IsInline() {
 		activeRunner = s.inlineRunner
 	}
+
+	// WhenRunner: skip the job when the active runner cannot satisfy
+	// the eligibility labels. Runners that do not implement
+	// LabelAdvertiser are treated as matching anything, preserving
+	// behavior for runners (cluster pool dispatchers, custom test
+	// runners) that have not opted in to advertisement.
+	if labels := node.WhenRunnerLabels(); len(labels) > 0 {
+		if adv, ok := activeRunner.(runner.LabelAdvertiser); ok {
+			if !sparkwing.MatchLabels(labels, adv.AdvertisedLabels()) {
+				s.markSkipped(node.ID(),
+					fmt.Sprintf("WhenRunner labels %v not satisfied by active runner %v",
+						labels, adv.AdvertisedLabels()))
+				return
+			}
+		}
+	}
+
+	// Mark started just before the runner dispatch loop so cancelled-
+	// by-upstream and skipped-by-predicate nodes (handled above) don't
+	// inherit a duration from the time they spent waiting on deps.
+	s.markStarted(node.ID())
 	runnerCtx := sparkwing.WithSpawnHandler(s.resolverCtx, s.newSpawnHandler(node.ID()))
 
 	// Node-level auto-retry: re-dispatch the whole runner on infra
@@ -2084,6 +2100,8 @@ type snapshotModifiers struct {
 	RetryAuto       bool     `json:"retry_auto,omitempty"`
 	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
 	RunsOn          []string `json:"runs_on,omitempty"`
+	Prefers         []string `json:"prefers,omitempty"`
+	WhenRunner      []string `json:"when_runner,omitempty"`
 	CacheKey        string   `json:"cache_key,omitempty"`
 	CacheMax        int      `json:"cache_max,omitempty"`
 	CacheOnLimit    string   `json:"cache_on_limit,omitempty"`
@@ -2222,6 +2240,35 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 	return json.Marshal(snap)
 }
 
+// effectiveClaimLabels is the combined Requires + WhenRunner label
+// list persisted on the store row. Pool runners polling
+// ClaimNextReadyNode filter against this set, so a WhenRunner term is
+// enforced for any runner whose advertisement is consulted by the
+// claim path. The orchestrator separately gates WhenRunner up-front
+// (see runOneNode) against the active runner via LabelAdvertiser, so
+// the in-process path doesn't depend on the claim-time filter.
+func effectiveClaimLabels(n *sparkwing.JobNode) []string {
+	req := n.RequiresLabels()
+	when := n.WhenRunnerLabels()
+	if len(when) == 0 {
+		return req
+	}
+	out := make([]string, 0, len(req)+len(when))
+	out = append(out, req...)
+	seen := make(map[string]struct{}, len(req))
+	for _, l := range req {
+		seen[l] = struct{}{}
+	}
+	for _, l := range when {
+		if _, ok := seen[l]; ok {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	return out
+}
+
 // nodeModifiersSnapshot extracts the Plan-layer modifiers a renderer
 // cares about. Returns nil when nothing is set so JSON omits the
 // field entirely.
@@ -2233,6 +2280,8 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 		RetryAuto:       rc.Auto,
 		TimeoutMS:       n.TimeoutDuration().Milliseconds(),
 		RunsOn:          n.RequiresLabels(),
+		Prefers:         n.PrefersLabels(),
+		WhenRunner:      n.WhenRunnerLabels(),
 		Inline:          n.IsInline(),
 		Optional:        n.IsOptional(),
 		ContinueOnError: n.IsContinueOnError(),
@@ -2261,6 +2310,8 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		!m.RetryAuto &&
 		m.TimeoutMS == 0 &&
 		len(m.RunsOn) == 0 &&
+		len(m.Prefers) == 0 &&
+		len(m.WhenRunner) == 0 &&
 		m.CacheKey == "" &&
 		m.CacheMax == 0 &&
 		m.CacheOnLimit == "" &&
