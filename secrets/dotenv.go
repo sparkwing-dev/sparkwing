@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // DefaultDotenvPath returns the location of the laptop's masked
@@ -62,9 +64,10 @@ func NewDotenvSourcePaths(secretsPath, configPath string) *DotenvSource {
 }
 
 // ErrSecretMissing means the source has no entry for this name.
-// Distinct from "source unreachable" so the resolver can produce a
-// clear error at the call site.
-var ErrSecretMissing = errors.New("secret not set")
+// Re-exports the canonical sparkwing.ErrSecretMissing so existing
+// callers that errors.Is against this name keep working without
+// importing sparkwing directly.
+var ErrSecretMissing = sparkwing.ErrSecretMissing
 
 // Read returns the value + masked flag for `name`, or ErrSecretMissing
 // when neither file holds an entry. The first call lazy-loads both

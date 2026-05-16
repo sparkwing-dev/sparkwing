@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -92,6 +93,21 @@ type Options struct {
 	// SecretSource is wrapped in a per-run cache and installed as the
 	// SecretResolver. Nil means Secret() errors.
 	SecretSource secrets.Source
+
+	// PipelineYAML is the on-disk pipelines.yaml entry for this run's
+	// pipeline. When non-nil, the orchestrator resolves Config and
+	// Secrets via the SDK helpers (sparkwing.ResolvePipelineConfig /
+	// ResolvePipelineSecrets) before invoking the registration, so
+	// step bodies can read the typed values through
+	// sparkwing.PipelineConfig[T](ctx) / PipelineSecrets[T](ctx).
+	// Nil leaves both surfaces empty (existing pipelines unaffected).
+	PipelineYAML *pipelines.Pipeline
+
+	// Target is the --for selection. Empty means "no target", which
+	// layers values from PipelineYAML.Values.Base only. The CLI
+	// surface for --for lands in a later step; this field is the
+	// already-resolved value.
+	Target string
 
 	// MaxParallel caps concurrent node execution. Zero = unbounded
 	// (cluster default); local mode sets NumCPU. The cap applies only
@@ -212,6 +228,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		masker.Register(v)
 	}
 
+	// Resolve the typed Config struct before Plan runs so pipelines
+	// can read PipelineConfig[T](ctx) from their Plan() body. Secrets
+	// are resolved later, after the SecretResolver is installed; Plan
+	// is not expected to read PipelineSecrets (the plan-time guard
+	// blocks Secret/Config calls anyway).
+	pipeCfg, err := sparkwing.ResolvePipelineConfig(reg, opts.PipelineYAML, opts.Target)
+	if err != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
+	if pipeCfg != nil {
+		ctx = sparkwing.WithPipelineConfig(ctx, pipeCfg)
+	}
+
 	// Plan build (parse Args -> typed Inputs -> Plan). Failures fail
 	// the run with no nodes dispatched.
 	plan, err := reg.Invoke(ctx, opts.Args, rc)
@@ -279,6 +309,19 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.SecretSource != nil {
 		ctx = sparkwing.WithSecretResolver(ctx,
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
+	}
+	// Fail-fast resolution of the pipeline's declared secrets union
+	// (yaml SecretsField + Secrets() struct fields). Required entries
+	// must resolve before any job dispatches; optional entries
+	// tolerate a missing source. Skipped when neither side declared
+	// anything.
+	pipeSec, err := sparkwing.ResolvePipelineSecrets(ctx, reg, opts.PipelineYAML)
+	if err != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
+	if pipeSec != nil {
+		ctx = sparkwing.WithPipelineSecrets(ctx, pipeSec)
 	}
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 

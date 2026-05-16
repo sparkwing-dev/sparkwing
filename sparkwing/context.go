@@ -96,6 +96,8 @@ const (
 	keySpawnHandler
 	keyInputs
 	keyStep
+	keyPipelineConfig
+	keyPipelineSecrets
 )
 
 // WithLogger returns a derived context carrying the given logger.

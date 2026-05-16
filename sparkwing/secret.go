@@ -2,8 +2,20 @@ package sparkwing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+// ErrSecretMissing classifies a "no entry for this name" outcome from
+// a SecretResolver as distinct from a transport / authorization error.
+// SDK helpers like ResolvePipelineSecrets treat optional fields whose
+// resolver error matches this sentinel as silently empty; other
+// errors surface as run-start failures.
+//
+// The canonical instance lives here; the secrets package re-exports
+// the same value so existing callers that say
+// `errors.Is(err, secrets.ErrSecretMissing)` keep working unchanged.
+var ErrSecretMissing = errors.New("sparkwing: secret not found")
 
 // SecretResolver resolves a stored value to (plain, masked) at the
 // moment of the call. The orchestrator installs a resolver on the

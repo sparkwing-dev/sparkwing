@@ -102,7 +102,7 @@ func TestSecret_MissingNameFailsTheJob(t *testing.T) {
 	if gerr != nil {
 		t.Fatalf("GetNode: %v", gerr)
 	}
-	if !strings.Contains(node.Error, "secret not set") {
+	if !strings.Contains(node.Error, "secret not found") {
 		t.Fatalf("node error = %q, want one mentioning the missing secret", node.Error)
 	}
 	if observedToken != "before" {
