@@ -60,6 +60,26 @@ type Profile struct {
 	// profiles should leave this zero so the gate stays loud.
 	// Defaults are zero everywhere; the field is opt-in.
 	AutoAllow AutoAllow `yaml:"auto_allow,omitempty"`
+
+	// DefaultRunner names the runner the scheduler picks when a
+	// job's Prefers produce no match and more than one runner
+	// satisfies its Requires. The name must resolve in runners.yaml
+	// at dispatch time -- this layer does no validation against it,
+	// because runners.yaml may not exist when a profile is being
+	// authored. Empty means "local"; consume via
+	// EffectiveDefaultRunner so the fallback lives in one place.
+	DefaultRunner string `yaml:"default_runner,omitempty"`
+}
+
+// EffectiveDefaultRunner returns the profile's declared
+// default_runner, or "local" when unset. Callers should reach for
+// this rather than the raw field so the unset-means-local rule lives
+// in one place. Nil-safe: a nil profile resolves to "local" too.
+func (p *Profile) EffectiveDefaultRunner() string {
+	if p == nil || p.DefaultRunner == "" {
+		return "local"
+	}
+	return p.DefaultRunner
 }
 
 // AutoAllow is the per-marker pre-authorization block declared

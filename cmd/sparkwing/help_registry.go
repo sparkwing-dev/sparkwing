@@ -1218,12 +1218,14 @@ profile registered, it's auto-set as the default.`,
 		{Name: "logs", Argument: "URL", Desc: "Logs-service base URL", Group: "Connection"},
 		{Name: "token", Argument: "TOKEN", Desc: "Bearer token (omit for local/unauthed stacks)", Group: "Connection"},
 		{Name: "gitcache", Argument: "URL", Desc: "gitcache URL (fleet-worker uses this)", Group: "Connection"},
+		{Name: "default-runner", Argument: "NAME", Desc: "Runner name to pick when a job's Prefers don't match and several runners satisfy Requires (omit for local)", Group: "Dispatch"},
 		{Name: "default", Desc: "Set this profile as the default", Group: "System"},
 	},
-	GroupOrder: []string{"Input", "Connection", "System", "Other"},
+	GroupOrder: []string{"Input", "Connection", "Dispatch", "System", "Other"},
 	Examples: []Example{
 		{"Add a prod profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
 		{"Add a local profile without auth", "sparkwing configure profiles add --name local --controller http://127.0.0.1:4344"},
+		{"Add a profile that defaults to a cluster runner", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN --default-runner cloud-linux"},
 	},
 }
 
@@ -1306,11 +1308,13 @@ clears the token (empty value, not an omitted flag). Use
 		{Name: "logs", Argument: "URL", Desc: "New logs-service URL", Group: "Connection"},
 		{Name: "token", Argument: "TOKEN", Desc: "New bearer token (empty string clears)", Group: "Connection"},
 		{Name: "gitcache", Argument: "URL", Desc: "New gitcache URL", Group: "Connection"},
+		{Name: "default-runner", Argument: "NAME", Desc: "Runner name (empty clears, falls back to local)", Group: "Dispatch"},
 	},
-	GroupOrder: []string{"Input", "Connection", "System", "Other"},
+	GroupOrder: []string{"Input", "Connection", "Dispatch", "System", "Other"},
 	Examples: []Example{
 		{"Rotate a profile's token", "sparkwing configure profiles set --name prod --token $NEW_TOKEN"},
 		{"Clear a stale logs URL", `sparkwing profiles set --name prod --logs=""`},
+		{"Point a profile at a different default runner", "sparkwing configure profiles set --name prod --default-runner cloud-gpu"},
 	},
 }
 

@@ -68,6 +68,7 @@ func runProfilesAdd(args []string) error {
 	logs := fs.String("logs", "", "logs-service base URL (optional)")
 	token := fs.String("token", "", "bearer token (optional -- omit for local/unauthed stacks)")
 	gitcache := fs.String("gitcache", "", "gitcache URL (optional; fleet-worker uses this)")
+	defaultRunner := fs.String("default-runner", "", "runner name to dispatch to when a job's Prefers don't match and several runners satisfy Requires (omit for local)")
 	makeDefault := fs.Bool("default", false, "set this profile as the default")
 	if err := parseAndCheck(cmdProfilesAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -84,11 +85,12 @@ func runProfilesAdd(args []string) error {
 		return fmt.Errorf("profiles add: %q already exists (use `profiles remove` first, or `profiles duplicate` into a new name)", *name)
 	}
 	cfg.Profiles[*name] = &profile.Profile{
-		Name:       *name,
-		Controller: *controller,
-		Logs:       *logs,
-		Token:      *token,
-		Gitcache:   *gitcache,
+		Name:          *name,
+		Controller:    *controller,
+		Logs:          *logs,
+		Token:         *token,
+		Gitcache:      *gitcache,
+		DefaultRunner: *defaultRunner,
 	}
 	// Auto-set as default when it's the first profile. The implicit
 	// behavior matches what new users expect: "I added one profile,
@@ -174,6 +176,7 @@ func runProfilesShow(args []string) error {
 		fmt.Fprintf(os.Stdout, "token:      %s\n", redactToken(p.Token))
 	}
 	fmt.Fprintf(os.Stdout, "gitcache:   %s\n", emptyDash(p.Gitcache))
+	fmt.Fprintf(os.Stdout, "default_runner: %s\n", p.EffectiveDefaultRunner())
 	if cfg.Default == p.Name {
 		fmt.Fprintln(os.Stdout, "default:    yes")
 	}
@@ -246,6 +249,7 @@ func runProfilesSet(args []string) error {
 	logs := fs.String("logs", "", "new logs-service URL")
 	token := fs.String("token", "", "new bearer token")
 	gitcache := fs.String("gitcache", "", "new gitcache URL")
+	defaultRunner := fs.String("default-runner", "", "runner name to dispatch to when a job's Prefers don't match and several runners satisfy Requires (empty clears, falls back to local)")
 	if err := parseAndCheck(cmdProfilesSet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -275,6 +279,9 @@ func runProfilesSet(args []string) error {
 	}
 	if fs.Changed("gitcache") {
 		p.Gitcache = *gitcache
+	}
+	if fs.Changed("default-runner") {
+		p.DefaultRunner = *defaultRunner
 	}
 	if err := profile.Save(path, cfg); err != nil {
 		return err
