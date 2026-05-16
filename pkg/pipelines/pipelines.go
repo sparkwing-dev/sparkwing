@@ -126,9 +126,9 @@ type TargetBackend struct {
 // enforces that. Neither set defaults to Required=true at parse time
 // to match the bare-string legacy semantics.
 type SecretEntry struct {
-	Name     string `yaml:"name"`
-	Required bool   `yaml:"required,omitempty"`
-	Optional bool   `yaml:"optional,omitempty"`
+	Name     string `yaml:"name" json:"name"`
+	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
+	Optional bool   `yaml:"optional,omitempty" json:"optional,omitempty"`
 }
 
 // SecretsField is the polymorphic shape of the secrets: list. The

@@ -33,7 +33,7 @@ func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "parent", snapshotParentJob{}).Retry(2)
 
-	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"})
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestMarshalPlanSnapshot_DetectsSpawnCycle(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "root", snapshotCycleA{})
 
-	_, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"})
+	_, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
 	if err == nil {
 		t.Fatalf("expected cycle error, got nil")
 	}
@@ -133,7 +133,7 @@ func TestMarshalPlanSnapshot_EmitsStepGroupsInDeclarationOrder(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "grouped", snapshotGroupSteps{})
 
-	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"})
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestMarshalPlanSnapshot_RendersSpawnEachTemplate(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "each", snapshotForEachJob{})
 
-	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"})
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
 	if err != nil {
 		t.Fatalf("marshalPlanSnapshot: %v", err)
 	}

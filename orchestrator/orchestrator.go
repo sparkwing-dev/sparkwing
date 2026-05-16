@@ -109,6 +109,15 @@ type Options struct {
 	// already-resolved value.
 	Target string
 
+	// SparkwingDir, when non-empty, is the resolved .sparkwing/
+	// directory the orchestrator consults for sources.yaml. When the
+	// chosen target binds to a named source (Target.Source) or the
+	// sources.yaml default applies, the orchestrator constructs the
+	// appropriate SecretResolver via sparkwing.NewSecretResolverFromSource
+	// and installs it. Empty leaves the existing SecretSource path
+	// untouched.
+	SparkwingDir string
+
 	// MaxParallel caps concurrent node execution. Zero = unbounded
 	// (cluster default); local mode sets NumCPU. The cap applies only
 	// to active execution; dep-wait goroutines are uncapped.
@@ -250,8 +259,25 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
+	// Pre-build the per-run snapshot metadata (target, resolved
+	// Config json, SecretsField) so the cluster pod can rehydrate
+	// PipelineConfig and re-resolve PipelineSecrets without re-
+	// reading pipelines.yaml on its end.
+	snapMeta := planSnapshotMeta{Target: opts.Target}
+	if pipeCfg != nil {
+		raw, merr := json.Marshal(pipeCfg)
+		if merr != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("marshal pipeline config: %v", merr))
+			return &Result{RunID: runID, Status: "failed", Error: merr}, nil
+		}
+		snapMeta.PipelineConfig = raw
+	}
+	if opts.PipelineYAML != nil {
+		snapMeta.Secrets = opts.PipelineYAML.Secrets
+	}
+
 	// Snapshot only the DAG; outputs stream into the nodes table.
-	snapshot, err := marshalPlanSnapshot(plan, rc)
+	snapshot, err := marshalPlanSnapshot(plan, rc, snapMeta)
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan snapshot: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
@@ -302,11 +328,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if r == nil {
 		r = NewInProcessRunner(backends)
 	}
-	// Lazy resolver: cache + masker installed only when SecretSource
-	// is supplied. Masker is also stashed on ctx so loggers can pull
+	// Lazy resolver: cache + masker installed only when a source is
+	// available. Masker is also stashed on ctx so loggers can pull
 	// it without a signature change.
 	ctx = secrets.WithMasker(ctx, masker)
-	if opts.SecretSource != nil {
+	// Pick the SecretResolver for this run. The per-target source
+	// binding (Target.Source -> sources.yaml entry) wins when both
+	// SparkwingDir and a target-source name are available; otherwise
+	// fall back to Options.SecretSource (the pre-step-8 path).
+	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", rerr.Error())
+		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil
+	} else if resolver != nil {
+		ctx = sparkwing.WithSecretResolver(ctx,
+			secrets.NewCached(resolver, masker).AsResolver())
+	} else if opts.SecretSource != nil {
 		ctx = sparkwing.WithSecretResolver(ctx,
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
 	}
@@ -333,7 +369,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		go runLocalTriggerLoop(consumerCtx, ls.st, runID, nil)
 	}
 
-	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel)
+	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta)
 
 	finalStatus := "success"
 	errMsg := ""
@@ -468,7 +504,7 @@ func DumpRunState(ctx context.Context, st *store.Store, runID string, art storag
 // dispatch runs nodes in parallel where deps allow. Failed upstreams
 // produce Cancelled downstreams (reason "upstream-failed"). OnFailure
 // recoveries dispatch only when their parent fails.
-func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int) error {
+func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta) error {
 	runStart := time.Now()
 
 	// Plan-level .Cache() gates the whole run before any dispatch.
@@ -488,6 +524,7 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	defer func() { planRelease(planReleaseOutcome) }()
 
 	state := newDispatchState(ctx, backends, r, runID, plan, delegate, debug, retryOf, masker, maxParallel)
+	state.snapMeta = snapMeta
 
 	// Skip-passed: pre-seed succeeded nodes from the prior run so
 	// runOneNode short-circuits them.
@@ -1000,6 +1037,13 @@ type dispatchState struct {
 	// nodes bypass the cap.
 	sem chan struct{}
 
+	// snapMeta carries the run-level Target / PipelineConfig /
+	// SecretsField that the cluster pod reads back to rehydrate
+	// PipelineConfig and re-resolve PipelineSecrets. Captured at run
+	// start so the mid-run snapshot re-marshal (after dynamic
+	// expansion) preserves these fields.
+	snapMeta planSnapshotMeta
+
 	wg sync.WaitGroup
 }
 
@@ -1364,8 +1408,11 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		}
 		s.scheduleNode(child)
 	}
-	// Snapshot now so dashboards see the expanded DAG.
-	if snap, merr := marshalPlanSnapshot(s.plan, sparkwing.RunContext{Pipeline: "", RunID: s.runID}); merr == nil {
+	// Snapshot now so dashboards see the expanded DAG. Preserve the
+	// run-level metadata (target / pipeline config / secrets) the
+	// initial snapshot carried so the cluster pod's rehydration path
+	// keeps working after dynamic expansion.
+	if snap, merr := marshalPlanSnapshot(s.plan, sparkwing.RunContext{Pipeline: "", RunID: s.runID}, s.snapMeta); merr == nil {
 		_ = s.backends.State.UpdatePlanSnapshot(s.ctx, s.runID, snap)
 	}
 
@@ -2108,6 +2155,26 @@ type planSnapshot struct {
 	// a separate `--describe` round-trip.
 	Venue string         `json:"venue,omitempty"`
 	Nodes []snapshotNode `json:"nodes"`
+
+	// Target is the --for selection that was resolved at run start.
+	// Empty when no target was selected. Carried in the snapshot so
+	// cluster pod-side replay (orchestrator/run_node.go) sees the
+	// same target the orchestrator used.
+	Target string `json:"target,omitempty"`
+
+	// PipelineConfig is the resolved Config struct (json-encoded)
+	// returned by sparkwing.ResolvePipelineConfig. The cluster pod
+	// re-installs this via WithPipelineConfig after decoding into
+	// the pipeline's typed struct via reg.instance().Config().
+	// Empty when the pipeline does not implement ConfigProvider.
+	PipelineConfig json.RawMessage `json:"pipeline_config,omitempty"`
+
+	// Secrets is the typed declaration the pipelines.yaml file
+	// shipped (name + required/optional). The cluster pod uses it
+	// to drive ResolvePipelineSecrets against the pod's existing
+	// SecretResolver. Values are never persisted -- secrets are
+	// re-resolved on the pod side, never shipped across the wire.
+	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
 }
 
 type snapshotNode struct {
@@ -2206,10 +2273,23 @@ type snapshotSpawnEach struct {
 	Note             string        `json:"note,omitempty"`
 }
 
-func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, error) {
+// planSnapshotMeta carries the run-level fields the cluster pod
+// needs to rehydrate PipelineConfig and re-resolve PipelineSecrets
+// when it picks up a node. Zero-value omits the fields from the
+// emitted JSON.
+type planSnapshotMeta struct {
+	Target         string
+	PipelineConfig json.RawMessage
+	Secrets        pipelines.SecretsField
+}
+
+func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
 	snap := planSnapshot{
-		Pipeline: rc.Pipeline,
-		RunID:    rc.RunID,
+		Pipeline:       rc.Pipeline,
+		RunID:          rc.RunID,
+		Target:         meta.Target,
+		PipelineConfig: meta.PipelineConfig,
+		Secrets:        meta.Secrets,
 	}
 	// Surface the registered venue at the snapshot top so agents
 	// reading --explain JSON honor the dispatch constraint

@@ -362,7 +362,7 @@ func printPipelinePlan(pipeline string, rest []string) error {
 	if err != nil {
 		return fmt.Errorf("build plan: %w", err)
 	}
-	snap, err := marshalPlanSnapshot(plan, rc)
+	snap, err := marshalPlanSnapshot(plan, rc, planSnapshotMeta{})
 	if err != nil {
 		return fmt.Errorf("marshal plan: %w", err)
 	}

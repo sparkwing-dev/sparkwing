@@ -140,6 +140,31 @@ func RunNodeOnce(
 		ctx = sparkwing.WithInputs(ctx, in)
 	}
 
+	// Pod-side install of the PipelineConfig the orchestrator already
+	// resolved (Values.Base + Target.Values layering happened on the
+	// controller side). The snapshot carries the resolved struct as
+	// JSON; we decode it back into the typed struct produced by the
+	// pipeline's Config() factory. Failure leaves the accessor nil --
+	// step bodies that depend on it will hit the same nil they would
+	// have hit in the pre-step-7 world.
+	if cfg, cerr := rehydratePipelineConfig(run.PlanSnapshot, reg); cerr != nil {
+		logger.Warn("pod: rehydrate pipeline config", "err", cerr)
+	} else if cfg != nil {
+		ctx = sparkwing.WithPipelineConfig(ctx, cfg)
+	}
+
+	// Pod-side re-resolution of PipelineSecrets via the controller's
+	// HTTP secret store (the resolver installed above). Reads the
+	// SecretsField the orchestrator persisted in the snapshot; the
+	// resolver itself is the pod's existing controller-backed source,
+	// so secret values stay on the pod and never cross the wire as
+	// part of the snapshot.
+	if sec, serr := rehydratePipelineSecrets(ctx, run.PlanSnapshot, reg); serr != nil {
+		logger.Warn("pod: rehydrate pipeline secrets", "err", serr)
+	} else if sec != nil {
+		ctx = sparkwing.WithPipelineSecrets(ctx, sec)
+	}
+
 	// Pod-side twin of dispatchState.pipelineRef.
 	ctx = sparkwing.WithPipelineResolver(ctx, sparkwing.PipelineResolverFunc(
 		func(innerCtx context.Context, pipeline, refNode string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
