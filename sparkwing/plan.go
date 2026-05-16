@@ -186,13 +186,15 @@ func newNode(caller, id string, job Workable) *JobNode {
 		outType = declared
 	}
 
-	return &JobNode{
+	n := &JobNode{
 		id:         id,
 		job:        job,
 		work:       w,
 		resultStep: resultStep,
 		outType:    outType,
 	}
+	applyWorkableLabels(n, job)
+	return n
 }
 
 // NewDetachedNode builds a node with full Job-equivalent validation
