@@ -35,7 +35,7 @@ docker, or the runner pod's DinD). They survive image-layer
 invalidation - exactly the opposite of a `COPY`-cached `RUN go build`.
 
 Same pattern works for Rust (`/usr/local/cargo/registry`,
-`/app/target`), Node (`/app/node_modules`), Maven (`~/.m2`), etc.
+`/app/target`), Job (`/app/node_modules`), Maven (`~/.m2`), etc.
 
 ## 2. Don't push to registries you don't need
 

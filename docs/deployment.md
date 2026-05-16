@@ -54,7 +54,7 @@ author. Common patterns:
 ### kubectl (simple, works everywhere)
 
 ```go
-func (j *DeployJob) Run(ctx context.Context) error {
+func (j *Deploy) Run(ctx context.Context) error {
     _, err := sparkwing.Bash(ctx, "kubectl rollout restart deploy/myapp -n default").Run()
     return err
 }
@@ -65,7 +65,7 @@ func (j *DeployJob) Run(ctx context.Context) error {
 Push updated image tags to a gitops repo, let ArgoCD sync:
 
 ```go
-func (j *DeployJob) Work() *sw.Work {
+func (j *Deploy) Work() *sw.Work {
     w := sw.NewWork()
     update := w.Step("update-gitops", func(ctx context.Context) error {
         return patchKustomization(ctx)

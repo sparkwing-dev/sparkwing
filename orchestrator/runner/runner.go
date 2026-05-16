@@ -24,7 +24,7 @@ type Request struct {
 	Trigger  sparkwing.TriggerInfo
 
 	// Node is set for in-process runners; cluster runners leave nil.
-	Node *sparkwing.Node
+	Node *sparkwing.JobNode
 
 	// Delegate mirrors log lines; in-process only.
 	Delegate sparkwing.Logger

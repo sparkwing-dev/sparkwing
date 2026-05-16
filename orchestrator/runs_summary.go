@@ -202,7 +202,7 @@ func aggregateModifiers(nodes []*store.Node, dmap map[string]*api.Decorations) [
 			add("Timeout", n.NodeID)
 		}
 		if len(m.RunsOn) > 0 {
-			add("RunsOn", n.NodeID)
+			add("Requires", n.NodeID)
 		}
 		if m.CacheKey != "" {
 			add("Cache", n.NodeID)

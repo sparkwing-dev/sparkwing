@@ -5,7 +5,7 @@ or human is likely to call from a `.sparkwing/jobs/*.go` file. Type
 signatures and one-line summaries - designed to be loaded once at the
 start of a pipeline-authoring task.
 
-For the conceptual tour (Plan, Node, Job, Work, modifiers,
+For the conceptual tour (Plan, Job, Job, Work, modifiers,
 `pipelines.yaml` shape), read [pipelines](pipelines.md). This page is
 the authoritative SDK reference for the `sparkwing` Go package.
 
@@ -37,7 +37,7 @@ tab-completing `Job` shows every way to put a Job into the run
 | Layer | Mutate (free funcs) | Read (methods) |
 |---|---|---|
 | Plan | `sw.Job(plan, id, x)` | `plan.Nodes()` |
-| Plan | `sw.JobFanOut(plan, name, items, fn)` | `plan.Node(id)` |
+| Plan | `sw.JobFanOut(plan, name, items, fn)` | `plan.Job(id)` |
 | Plan | `sw.JobFanOutDynamic(plan, name, source, fn)` | `plan.LintWarnings()` |
 | Plan | `sw.JobApproval(plan, id, cfg)` | `plan.Expansions()` |
 | Plan | `sw.GroupJobs(plan, name, members...)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
@@ -50,11 +50,11 @@ tab-completing `Job` shows every way to put a Job into the run
 
 ## The two-layer model
 
-Sparkwing has two DAGs: **Plan / Node** (the outer DAG, units of
+Sparkwing has two DAGs: **Plan / Job** (the outer DAG, units of
 dispatch) and **Work / WorkStep** (the inner DAG, units of work
-within one Node's runner). Plan-only modifiers - Retry, Timeout,
-OnFailure, Cache, RunsOn, BeforeRun / AfterRun, Approval, Inline -
-live on `*Node`. The inner DAG carries `Needs` and `SkipIf` only.
+within one Job's runner). Plan-only modifiers - Retry, Timeout,
+OnFailure, Cache, Requires, BeforeRun / AfterRun, Approval, Inline -
+live on `*Job`. The inner DAG carries `Needs` and `SkipIf` only.
 
 Every Job's `Work()` runs at Plan-time, so renderers
 (`sparkwing pipeline explain`, the dashboard) walk the full reachable
@@ -239,7 +239,7 @@ Annotate(ctx, msg)                        // persistent node-level summary
 ```
 
 `Annotate` differs from the four log helpers: the message is appended
-to a persistent `annotations` list on the Node row instead of (only)
+to a persistent `annotations` list on the Job row instead of (only)
 appearing in the run log. The dashboard surfaces these summaries
 next to the node so operators see "processed 1,234 records · 12
 failed" without opening the log view. Multiple calls per node
@@ -248,7 +248,7 @@ accumulate; calls outside a node context are a silent no-op.
 Per-level methods only -- the level lives in the verb name, no
 level-as-string arg. Same printf-style format-args contract across
 all four. Each call goes through the `Logger` installed in ctx and
-is stamped with the current Node and Job-stack envelope.
+is stamped with the current Job and Job-stack envelope.
 
 Step boundaries are emitted automatically by `RunWork` as structured
 `step_start` / `step_end` events; the renderer surfaces them as a
@@ -288,11 +288,11 @@ for the moment a Plan starts branching on trigger source / SHA.
 Free-function adders (writes; mutate the Plan):
 
 ```
-sw.Job(plan, id, x any) *Node                                                 // register a Job: x is sw.Workable or func(ctx) error
-sw.JobFanOut[T](plan, name, items, fn) *NodeGroup                             // Plan-time static fan-out
-sw.JobFanOutDynamic[T](plan, name, source, fn) *NodeGroup                     // runtime fan-out after source completes
+sw.Job(plan, id, x any) *Job                                                 // register a Job: x is sw.Workable or func(ctx) error
+sw.JobFanOut[T](plan, name, items, fn) *JobGroup                             // Plan-time static fan-out
+sw.JobFanOutDynamic[T](plan, name, source, fn) *JobGroup                     // runtime fan-out after source completes
 sw.JobApproval(plan, id, cfg) *ApprovalGate                                   // human-decision gate (see "Approval gates")
-sw.GroupJobs(plan, name, members...) *NodeGroup                               // named cluster + Needs target (name="" = unnamed)
+sw.GroupJobs(plan, name, members...) *JobGroup                               // named cluster + Needs target (name="" = unnamed)
 sw.RefTo[T](node) sw.Ref[T]                                                   // typed Ref into node's typed output
 ```
 
@@ -303,9 +303,9 @@ case. Reflection at register time accepts either form. Anything else
 panics at materialize time.
 
 Approval gates register through `sw.JobApproval` and return an
-`*ApprovalGate` -- a narrower modifier surface than `*Node` so the
+`*ApprovalGate` -- a narrower modifier surface than `*Job` so the
 modifiers that don't apply to gates (`Retry`, `Timeout`, `Cache`,
-`RunsOn`, `Inline`) are physically absent and a misuse is a compile
+`Requires`, `Inline`) are physically absent and a misuse is a compile
 error rather than a runtime surprise:
 
 ```go
@@ -315,39 +315,39 @@ approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
     OnExpiry: sw.ApprovalFail,
 }).Needs(integStg)
 
-sw.Job(plan, "deploy-prod", &DeployJob{}).Needs(approve)
+sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
 ```
 
 Available modifiers on `*ApprovalGate`: `Needs`, `NeedsOptional`,
 `OnFailure`, `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`,
-`ContinueOnError`. Plus `Node()` as the escape hatch when an author
-genuinely needs the underlying `*Node`.
+`ContinueOnError`. Plus `Job()` as the escape hatch when an author
+genuinely needs the underlying `*Job`.
 
 `OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
 `sw.ApprovalDeny`, `sw.ApprovalApprove`. Unknown values panic at
 plan time. (Named `OnExpiry` rather than `OnTimeout` to keep it
-distinct from `Node.Timeout()`, which bounds per-attempt execution.)
+distinct from `Job.Timeout()`, which bounds per-attempt execution.)
 
 Plan accessors (reads; methods on `*Plan`):
 
 ```
-plan.Nodes() []*Node                               // all registered nodes, in declaration order
-plan.Node(id) *Node                                // lookup by id, nil if absent
+plan.Nodes() []*Job                               // all registered nodes, in declaration order
+plan.Job(id) *Job                                // lookup by id, nil if absent
 plan.LintWarnings() []sw.LintWarning               // non-fatal Plan-time advisories
 plan.Expansions() []sw.Expansion                   // dynamic fan-out generators
 plan.IsDynamicNode(id) bool                        // dynamic source or .Dynamic()
 plan.GroupSourceIDs(id) []string                   // ExpandFrom group's source nodes
 ```
 
-Node modifiers (chainable on `*Node`):
+Job modifiers (chainable on `*Job`):
 
 ```
-node.Needs(deps...) *Node                          // dependency edges
-node.Env(key, value) *Node                         // per-node env var
-group.Needs(deps...) *NodeGroup                    // every member depends on deps; same chainable surface as *Node
+node.Needs(deps...) *Job                          // dependency edges
+node.Env(key, value) *Job                         // per-node env var
+group.Needs(deps...) *JobGroup                    // every member depends on deps; same chainable surface as *Job
 ```
 
-`sw.GroupJobs(plan, name, members...)` returns a `*NodeGroup` that is
+`sw.GroupJobs(plan, name, members...)` returns a `*JobGroup` that is
 both a `Needs` target (a downstream `Needs(group)` depends on every
 member) and a dashboard cluster (members fold under the name; one
 arrow draws into the cluster instead of one-per-member). An empty
@@ -355,14 +355,14 @@ name means "structural collection only" -- still a Needs target,
 but no UI cluster. The Work-layer twin is `sw.GroupSteps(w, name,
 steps...)`.
 
-Common Plan-layer modifiers (chainable on `*Node`):
+Common Plan-layer modifiers (chainable on `*Job`):
 
 ```
 .Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
 .Timeout(d)                        // hard kill after d
 .OnFailure(id, job)                // run a recovery node if this node fails
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
-.RunsOn(labels...)                 // require runner labels (AND semantics)
+.Requires(labels...)                 // require runner labels (AND semantics)
 .Cache(CacheOptions{...})          // coordination + memoization
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
@@ -379,19 +379,19 @@ type Workable interface {
 }
 ```
 
-Every Node carries a Workable (a struct that exposes its inner DAG
+Every Job carries a Workable (a struct that exposes its inner DAG
 via `Work`). The orchestrator constructs the `*Work` and passes it
 in -- authors don't call `NewWork()`. The returned `*WorkStep` (or
-`nil` for an untyped Job) is the Node's typed output: the
+`nil` for an untyped Job) is the Job's typed output: the
 result-step contract is enforced on Work's return value, not on a
 separate `SetResult` call.
 
 For Jobs with no typed output, return `nil`:
 
 ```go
-type BuildJob struct{ sw.Base }
+type Build struct{ sw.Base }
 
-func (j *BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
     fetch := sw.Step(w, "fetch", j.fetch)
     sw.Step(w, "compile", j.compile).Needs(fetch)
     return nil, nil
@@ -555,7 +555,7 @@ output, you don't need `StepGet` at all -- just return the step
 from `Work`:
 
 ```go
-func (j *BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
     return sw.Step(w, "run", j.run), nil
 }
 ```
@@ -567,28 +567,28 @@ field. The constructor in `Plan()` carries the routing detail:
 
 | Routing | Constructor | What it does |
 |---|---|---|
-| In-run sibling | `sw.RefTo[T](node)` | Read a `*Node` in the same DAG. Implies a `Needs()` edge. |
+| In-run sibling | `sw.RefTo[T](node)` | Read a `*Job` in the same DAG. Implies a `Needs()` edge. |
 | Cross-pipeline, passive | `sw.RefToLastRun[T](pipeline, nodeID, opts...)` | Read another pipeline's latest successful run. Does not trigger. |
 | Cross-pipeline, active | `sw.RunAndAwait[Out, In](ctx, ...)` (free fn) | Trigger a fresh run of another pipeline, wait, return its output. |
 
 ```go
-type BuildJob struct {
+type Build struct {
     sw.Base
     sw.Produces[BuildOut]      // declares the contract on the struct
 }
 
-func (j *BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
     return sw.Step(w, "run", j.run), nil  // returned step IS the Job's typed output
 }
 
-type DeployJob struct {
+type Deploy struct {
     sw.Base
     Build    sw.Ref[BuildOut]   // in-run
     Manifest sw.Ref[Manifest]   // cross-pipeline, same field type
 }
 
-build := sw.Job(plan, "build", &BuildJob{})
-sw.Job(plan, "deploy", &DeployJob{
+build := sw.Job(plan, "build", &Build{})
+sw.Job(plan, "deploy", &Deploy{
     Build:    sw.RefTo[BuildOut](build),                                 // wires the Needs edge
     Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
                   sw.MaxAge(24*time.Hour)),                              // staleness guard
@@ -630,6 +630,36 @@ MustSecret(ctx, name) string             // panic on miss
 Config(ctx, name) (string, error)        // unmasked config value
 MustConfig(ctx, name) string             // panic on miss
 ```
+
+**Call from step bodies or CacheKey functions, not from `Plan()`.**
+The orchestrator installs the resolver on the run ctx at dispatch
+time, *after* every pipeline's `Plan()` has returned. Calling
+`Secret`/`Config` (or their `Must*` forms) from inside `Plan()`
+returns `no resolver installed` / panics. This is consistent with the
+"Plan() must be pure" rule above: `Plan()` declares the graph; values
+are resolved when the graph runs.
+
+```go
+// Wrong: reads config at Plan time -- no resolver installed yet.
+func (b *Build) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    region := sw.MustConfig(ctx, "REGION") // panics
+    sw.Job(plan, "build", func(_ context.Context) error { return doBuild(region) })
+    return nil
+}
+
+// Right: defer the lookup into the step body.
+func (b *Build) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    sw.Job(plan, "build", func(ctx context.Context) error {
+        region, err := sw.Config(ctx, "REGION")
+        if err != nil { return err }
+        return doBuild(region)
+    })
+    return nil
+}
+```
+
+CacheKey functions also run at dispatch time, so they may call
+`Secret`/`Config` directly.
 
 Register a custom resolver for tests:
 `WithSecretResolver(ctx, SecretResolverFunc(...))`.
@@ -807,5 +837,5 @@ Empty `Key` is a no-op.
 - `sparkwing docs read --topic sdk` - this page
 - `sparkwing docs all` - every doc concatenated (one stdout dump for agents)
 - `sparkwing pipeline explain --name X [--json]` - render the full
-  Plan -> Node -> Work -> Step tree before running
+  Plan -> Job -> Work -> Step tree before running
 - [`pipelines.md`](pipelines.md) - the conceptual Plan/Work tour

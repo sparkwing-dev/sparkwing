@@ -36,8 +36,8 @@ func TestSummary_EmitsStructuredRecord(t *testing.T) {
 			if got, _ := r.Attrs["markdown"].(string); got != tc.md {
 				t.Errorf("Attrs[markdown] = %q, want %q", got, tc.md)
 			}
-			if r.Node != "deploy" {
-				t.Errorf("Node = %q, want %q", r.Node, "deploy")
+			if r.JobID != "deploy" {
+				t.Errorf("JobID = %q, want %q", r.JobID, "deploy")
 			}
 			if r.TS.IsZero() {
 				t.Error("TS should be set")
@@ -64,7 +64,7 @@ func TestSummary_CarriesStepFromContext(t *testing.T) {
 	if r.Step != "rollout" {
 		t.Errorf("Step = %q, want %q", r.Step, "rollout")
 	}
-	if r.Node != "deploy" {
-		t.Errorf("Node = %q, want %q", r.Node, "deploy")
+	if r.JobID != "deploy" {
+		t.Errorf("JobID = %q, want %q", r.JobID, "deploy")
 	}
 }

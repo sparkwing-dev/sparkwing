@@ -26,7 +26,7 @@ The scope set for v1:
 | `nodes.claim`   | POST `/nodes/claim`, `mark-ready`, `revoke-ready`, `heartbeat`; GET `nodes/{id}`, `nodes/{id}/output`, POST `/nodes/{nid}/metrics` |
 | `logs.read`     | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`    | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
-| `admin`         | tokens CRUD, cache PUT, state mutation (Create/Start/Finish Node, Events, Locks, Pool, etc.)        |
+| `admin`         | tokens CRUD, cache PUT, state mutation (Create/Start/Finish Job, Events, Locks, Pool, etc.)        |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.

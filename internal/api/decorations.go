@@ -18,7 +18,7 @@ import (
 // to an empty object (or, when the wrapper opts not to attach one,
 // is omitted entirely from the wrapped node response).
 type Decorations struct {
-	// Groups is every named *NodeGroup this node belongs to (declared
+	// Groups is every named *JobGroup this job belongs to (declared
 	// via sparkwing.GroupJobs(plan, name, members...)). Empty for
 	// ungrouped nodes; the dashboard renders those flat.
 	Groups []string `json:"groups,omitempty"`
@@ -40,7 +40,7 @@ type Decorations struct {
 	OnFailureOf string `json:"on_failure_of,omitempty"`
 	// Modifiers carries the node's active Plan-layer modifiers so the
 	// dashboard can render the dispatch envelope (Retry / Timeout /
-	// RunsOn / Cache / Inline / hook presence) inline with the node
+	// Requires / Cache / Inline / hook presence) inline with the node
 	// card.
 	Modifiers *NodeModifiers `json:"modifiers,omitempty"`
 	// ApprovalState carries the runtime resolution of an approval

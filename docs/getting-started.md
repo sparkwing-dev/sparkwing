@@ -170,14 +170,14 @@ import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 type BuildDeploy struct{ sw.Base }
 
 func (p *BuildDeploy) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-    test := sw.Job(plan, "test", &TestJob{})
-    sw.Job(plan, "build", &BuildJob{}).Needs(test)
+    test := sw.Job(plan, "test", &Test{})
+    sw.Job(plan, "build", &Build{}).Needs(test)
     return nil
 }
 
-type TestJob struct{ sw.Base }
+type Test struct{ sw.Base }
 
-func (j *TestJob) Work() *sw.Work {
+func (j *Test) Work() *sw.Work {
     w := sw.NewWork()
     w.Step("run", func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "go test ./...").Run()
@@ -186,9 +186,9 @@ func (j *TestJob) Work() *sw.Work {
     return w
 }
 
-type BuildJob struct{ sw.Base }
+type Build struct{ sw.Base }
 
-func (j *BuildJob) Work() *sw.Work {
+func (j *Build) Work() *sw.Work {
     w := sw.NewWork()
     w.Step("run", func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "docker build -t myapp .").Run()

@@ -24,7 +24,7 @@ import (
 //
 //	type MyPipe struct{}
 //	func (MyPipe) Plan(ctx context.Context, plan *sw.Plan, in Inputs, rc sw.RunContext) error {
-//	    sw.Job(plan, "lint", &LintJob{})
+//	    sw.Job(plan, "lint", &Lint{})
 //	    return nil
 //	}
 //

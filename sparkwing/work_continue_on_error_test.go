@@ -85,7 +85,7 @@ func TestRunWork_OptionalMasksRollup(t *testing.T) {
 
 // TestRunWork_ContinueOnErrorLetsDependentsRun pins the cascade
 // rule: a ContinueOnError step's dependents still dispatch (mirrors
-// Plan-layer Node.ContinueOnError). Without the flag, dependents
+// Plan-layer Job.ContinueOnError). Without the flag, dependents
 // cascade-skip and never run.
 func TestRunWork_ContinueOnErrorLetsDependentsRun(t *testing.T) {
 	w := NewWork()
@@ -126,7 +126,7 @@ func TestRunWork_DefaultCascadeSkipsDependents(t *testing.T) {
 
 // TestWorkStep_OptionalImpliesContinueOnError pins the convenience:
 // Optional() sets both fields so the surface stays consistent with
-// Node.Optional at the Plan layer.
+// Job.Optional at the Plan layer.
 func TestWorkStep_OptionalImpliesContinueOnError(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "x", func(context.Context) error { return nil }).Optional()

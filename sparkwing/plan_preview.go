@@ -216,7 +216,7 @@ func PreviewPlan(plan *Plan, pipeline string, resolvedArgs map[string]string, op
 // recovery target; "" for ordinary plan nodes. PreviewPlan threads
 // this in from its own walk rather than reaching into n, matching
 // how marshalPlanSnapshot encodes recovery nodes.
-func previewNode(ctx context.Context, n *Node, onFailureOf string, opts PreviewOptions) PreviewNode {
+func previewNode(ctx context.Context, n *JobNode, onFailureOf string, opts PreviewOptions) PreviewNode {
 	pn := PreviewNode{
 		ID:          n.ID(),
 		Deps:        append([]string(nil), n.DepIDs()...),

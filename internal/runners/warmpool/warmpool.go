@@ -103,7 +103,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	waitDeadline := time.Now().Add(r.cfg.ClaimWaitTimeout)
 	// Throttle the "no matching runner" warning. Labeled nodes block
 	// indefinitely waiting for a matching runner; we log once per
-	// minute so a misconfigured RunsOn is visible without spamming.
+	// minute so a misconfigured Requires is visible without spamming.
 	const unmatchableLogEvery = time.Minute
 	var lastUnmatchableLog time.Time
 
@@ -134,17 +134,17 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				claimedSeen = true
 				continue
 			}
-			// Labeled nodes (RunsOn) skip the K8sRunner fallback:
+			// Labeled jobs (Requires) skip the K8sRunner fallback:
 			// fallback Jobs don't advertise labels, so handing them a
 			// labeled node defeats the point. Block on the warm pool
 			// until a matching runner connects; periodically warn so
-			// an unmatchable RunsOn is visible to the operator.
+			// an unmatchable Requires is visible to the operator.
 			if len(n.NeedsLabels) > 0 {
 				if time.Since(lastUnmatchableLog) >= unmatchableLogEvery {
 					r.logger.Warn("warmpool: labeled node unclaimed",
 						"run_id", req.RunID, "node_id", req.NodeID,
 						"needs_labels", n.NeedsLabels,
-						"hint", "no warm runner advertises these labels; start a runner with --label matching or remove .RunsOn()")
+						"hint", "no warm runner advertises these labels; start a runner with --label matching or remove .Requires()")
 					lastUnmatchableLog = time.Now()
 				}
 				continue

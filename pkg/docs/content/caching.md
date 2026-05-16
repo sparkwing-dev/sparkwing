@@ -1,13 +1,13 @@
 # Caching
 
 The current cache model is content-addressed **node** caching via the
-`*Node.CacheKey(fn)` modifier plus a top-level `sparkwing.Key(...)`
+`*Job.CacheKey(fn)` modifier plus a top-level `sparkwing.Key(...)`
 builder. See [sdk.md](sdk.md) for the modifier reference and
 [pipelines.md](pipelines.md) for usage in the Plan/Work model.
 
 Sparkwing caches at two levels:
 
-1. **Node-level content-addressed caching.** Each node in a Plan can
+1. **Job-level content-addressed caching.** Each node in a Plan can
    declare a `CacheKey`. The orchestrator substitutes the first
    completed node with the same key -- same code, same inputs, same
    output, zero re-execution.
@@ -20,7 +20,7 @@ This doc is about (1).
 ## The model
 
 ```go
-build := sw.Job(plan, "build", &BuildJob{}).Cache(sw.CacheOptions{
+build := sw.Job(plan, "build", &Build{}).Cache(sw.CacheOptions{
     Key: "build",
     CacheKey: func(ctx context.Context) sw.CacheKey {
         return sw.Key("build", target, sourceDigest.Get(ctx))
@@ -76,7 +76,7 @@ node had just completed. Downstream nodes observe no difference.
 - **No partial-node caching.** The old `step.SaveCache` lets you skip
   one step inside a job. That is not expressible today; split the
   cachable work into its own node.
-- **Cache retention.** Node outputs are persisted in the runs store
+- **Cache retention.** Job outputs are persisted in the runs store
   under the key's row; the runs store does not GC automatically. There
   is no TTL knob yet.
 - **No dependency caching helper.** The old `step.SaveCache("ruby-gems", ...)`

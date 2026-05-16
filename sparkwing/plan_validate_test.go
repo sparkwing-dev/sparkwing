@@ -150,7 +150,7 @@ func TestPlanValidate_StringMatchingExistingStep_NoPanic(t *testing.T) {
 	}
 }
 
-// --- Plan-level (Node.Needs) ---
+// --- Plan-level (Job.Needs) ---
 
 type planTypoPipe struct{ sparkwing.Base }
 
@@ -168,7 +168,7 @@ func TestPlanValidate_NodeNeedsTypo_Suggests(t *testing.T) {
 	expectPanic(t, func() {
 		_, _ = reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "plan-validate-node-typo"})
 	}, func(msg string) {
-		for _, want := range []string{`Node "compile"`, `"fetchh"`, `did you mean "fetch"`} {
+		for _, want := range []string{`Job "compile"`, `"fetchh"`, `did you mean "fetch"`} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("panic missing %q\nfull: %s", want, msg)
 			}

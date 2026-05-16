@@ -125,10 +125,10 @@ func (j *stubJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// buildNode returns a *sparkwing.Node carrying the given job, with
+// buildNode returns a *sparkwing.JobNode carrying the given job, with
 // any modifiers callers want to set up. Lives here so tests don't
 // have to spin a full Plan when only one node is needed.
-func buildNode(t *testing.T, id string, job sparkwing.Workable) *sparkwing.Node {
+func buildNode(t *testing.T, id string, job sparkwing.Workable) *sparkwing.JobNode {
 	t.Helper()
 	return sparkwing.Job(sparkwing.NewPlan(), id, job)
 }

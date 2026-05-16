@@ -328,7 +328,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	logger.Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Event: "exec_start",
 		Msg:   "$ " + display,
 	}))
@@ -415,7 +415,7 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 		logger.Emit(recordEnvelope(ctx, LogRecord{
 			TS:    time.Now(),
 			Level: level,
-			Node:  node,
+			JobID: node,
 			Event: "exec_line",
 			Msg:   line,
 		}))

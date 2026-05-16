@@ -14,10 +14,10 @@ func TestApproval_CreatesGateNode(t *testing.T) {
 		Timeout:  2 * time.Hour,
 		OnExpiry: ApprovalDeny,
 	})
-	if !gate.Node().IsApproval() {
+	if !gate.Job().IsApproval() {
 		t.Fatalf("IsApproval = false")
 	}
-	cfg := gate.Node().ApprovalConfig()
+	cfg := gate.Job().ApprovalConfig()
 	if cfg == nil {
 		t.Fatalf("ApprovalConfig is nil")
 	}
@@ -30,8 +30,8 @@ func TestApproval_CreatesGateNode(t *testing.T) {
 	if cfg.OnExpiry != ApprovalDeny {
 		t.Errorf("OnExpiry = %q", cfg.OnExpiry)
 	}
-	if plan.Node("approve-prod") != gate.Node() {
-		t.Errorf("plan.Node mismatch")
+	if plan.Job("approve-prod") != gate.Job() {
+		t.Errorf("plan.Job mismatch")
 	}
 }
 
@@ -41,7 +41,7 @@ func TestApproval_ZeroValueIsEmptyPolicy(t *testing.T) {
 	// The zero value of ApprovalTimeoutPolicy is "". The orchestrator
 	// treats it as ApprovalFail at dispatch time -- authors who want
 	// the default leave OnExpiry unset.
-	if got := gate.Node().ApprovalConfig().OnExpiry; got != "" {
+	if got := gate.Job().ApprovalConfig().OnExpiry; got != "" {
 		t.Fatalf("default OnExpiry = %q, want zero value", got)
 	}
 }
@@ -101,7 +101,7 @@ func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
 }
 
 // ApprovalGate exposes only the gate-appropriate modifiers.
-// .Inline() / .Retry() / .Timeout() / .Cache() / .RunsOn() are not
+// .Inline() / .Retry() / .Timeout() / .Cache() / .Requires() are not
 // methods on *ApprovalGate -- the type system makes that class of
 // mistake a compile error rather than a runtime panic / silent
 // no-op. The negative cases would not compile, which is the point;
@@ -112,7 +112,7 @@ func TestApproval_GateNeedsAndChain(t *testing.T) {
 	gate := JobApproval(plan, "approve", ApprovalConfig{Message: "?"}).
 		Needs(upstream).
 		SkipIf(func(context.Context) bool { return false })
-	if got := gate.Node().DepIDs(); len(got) != 1 || got[0] != "build" {
+	if got := gate.Job().DepIDs(); len(got) != 1 || got[0] != "build" {
 		t.Fatalf("gate deps = %v, want [build]", got)
 	}
 	// Downstream nodes can take *ApprovalGate as a Needs target too.

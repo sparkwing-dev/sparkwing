@@ -108,8 +108,8 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	if rec.TS.IsZero() {
 		rec.TS = time.Now()
 	}
-	if rec.Node == "" {
-		rec.Node = l.nodeID
+	if rec.JobID == "" {
+		rec.JobID = l.nodeID
 	}
 
 	// Mirror first so a logs-service outage doesn't hide the line.

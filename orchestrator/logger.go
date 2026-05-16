@@ -45,8 +45,8 @@ func (l *nodeLogger) Emit(rec sparkwing.LogRecord) {
 	if rec.TS.IsZero() {
 		rec.TS = time.Now()
 	}
-	if rec.Node == "" {
-		rec.Node = l.nodeID
+	if rec.JobID == "" {
+		rec.JobID = l.nodeID
 	}
 	l.mu.Lock()
 	_ = l.enc.Encode(&rec)
@@ -185,14 +185,14 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 	if rec.Level == "error" {
 		sink = p.errW
 	}
-	nodeHue := p.hueFor(rec.Node)
+	nodeHue := p.hueFor(rec.JobID)
 
 	// Decide collapse before flushing: if this event is the merge
 	// candidate for a buffered one, render the combined line and
 	// return without flushing or re-handling.
-	if rec.Event == "step_start" && p.pendingNodeStart != nil && p.pendingNodeStart.Node == rec.Node {
-		nh := p.hueFor(p.pendingNodeStart.Node)
-		head := p.color("▶ "+p.pendingNodeStart.Node, ansiBold+nh)
+	if rec.Event == "step_start" && p.pendingNodeStart != nil && p.pendingNodeStart.JobID == rec.JobID {
+		nh := p.hueFor(p.pendingNodeStart.JobID)
+		head := p.color("▶ "+p.pendingNodeStart.JobID, ansiBold+nh)
 		stepGlyph := p.color("●", ansiBlue)
 		stepName := p.color(rec.Msg, ansiBlue)
 		fmt.Fprintln(sink, head+"  "+stepGlyph+" "+stepName)
@@ -210,7 +210,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 	// from a different step still flushes normally.
 	if p.pendingStepEnd != nil &&
 		rec.Level == "error" &&
-		rec.Node == p.pendingStepEnd.Node &&
+		rec.JobID == p.pendingStepEnd.JobID &&
 		(rec.Step == "" || rec.Step == p.pendingStepEnd.Msg) &&
 		rec.Event == "" {
 		fmt.Fprint(sink, p.breadcrumb(rec, nodeHue))
@@ -228,7 +228,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		return
 	}
 
-	if rec.Event == "node_end" && p.pendingStepEnd != nil && p.pendingStepEnd.Node == rec.Node {
+	if rec.Event == "node_end" && p.pendingStepEnd != nil && p.pendingStepEnd.JobID == rec.JobID {
 		// node_end's outcome wins for the glyph (it's the authoritative
 		// node-level result); the step name from pendingStepEnd is
 		// appended as a dim suffix so the operator sees what the node
@@ -236,8 +236,8 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		outcome, _ := rec.Attrs["outcome"].(string)
 		durMS, _ := asMillis(rec.Attrs["duration_ms"])
 		glyph, code := outcomeIcon(outcome)
-		nh := p.hueFor(rec.Node)
-		line := p.color(glyph, code) + " " + p.color(rec.Node, nh) +
+		nh := p.hueFor(rec.JobID)
+		line := p.color(glyph, code) + " " + p.color(rec.JobID, nh) +
 			p.color(" › ", ansiDim) + p.color(p.pendingStepEnd.Msg, ansiDim)
 		if durMS > 0 {
 			line += " " + p.color(fmt.Sprintf("(%s)", fmtDuration(durMS)), code)
@@ -264,7 +264,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 
 	switch rec.Event {
 	case "node_start":
-		p.nodeStart[rec.Node] = rec.TS
+		p.nodeStart[rec.JobID] = rec.TS
 		// Buffer; flushed by the next event (collapsed if it's
 		// step_start for the same node, stand-alone otherwise).
 		recCopy := rec
@@ -280,7 +280,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		}
 		icon, code := outcomeIcon(outcome)
 		head := p.color(icon, code)
-		name := p.color(rec.Node, nodeHue)
+		name := p.color(rec.JobID, nodeHue)
 		tail := p.color(fmt.Sprintf("(%s)", fmtDuration(durMS)), code)
 		fmt.Fprintln(sink, head+" "+name+" "+tail)
 	case "step_start":
@@ -355,12 +355,12 @@ func (p *PrettyRenderer) flushPending(sink io.Writer) {
 		p.pendingRunStart = nil
 	}
 	if p.pendingNodeStart != nil {
-		nh := p.hueFor(p.pendingNodeStart.Node)
-		fmt.Fprintln(sink, p.color("▶ "+p.pendingNodeStart.Node, ansiBold+nh))
+		nh := p.hueFor(p.pendingNodeStart.JobID)
+		fmt.Fprintln(sink, p.color("▶ "+p.pendingNodeStart.JobID, ansiBold+nh))
 		p.pendingNodeStart = nil
 	}
 	if p.pendingStepEnd != nil {
-		nh := p.hueFor(p.pendingStepEnd.Node)
+		nh := p.hueFor(p.pendingStepEnd.JobID)
 		p.writeStepEnd(sink, *p.pendingStepEnd, nh)
 		p.pendingStepEnd = nil
 	}
@@ -389,12 +389,12 @@ func (p *PrettyRenderer) Flush() {
 // frame just before the message; Job/JobStack frames are ancestors
 // of either the step or the message itself when there's no step.
 func (p *PrettyRenderer) breadcrumb(rec sparkwing.LogRecord, nodeHue string) string {
-	if rec.Node == "" && rec.Job == "" && rec.Step == "" {
+	if rec.JobID == "" && rec.Job == "" && rec.Step == "" {
 		return ""
 	}
 	var b strings.Builder
-	if rec.Node != "" {
-		b.WriteString(p.color(rec.Node, nodeHue))
+	if rec.JobID != "" {
+		b.WriteString(p.color(rec.JobID, nodeHue))
 	}
 	for _, frame := range rec.JobStack {
 		b.WriteString(p.color(" › ", ansiDim))

@@ -36,8 +36,8 @@ func TestAnnotate_EmitsStructuredRecord(t *testing.T) {
 			if got, _ := r.Attrs["message"].(string); got != tc.msg {
 				t.Errorf("Attrs[message] = %q, want %q", got, tc.msg)
 			}
-			if r.Node != "ingest" {
-				t.Errorf("Node = %q, want %q", r.Node, "ingest")
+			if r.JobID != "ingest" {
+				t.Errorf("JobID = %q, want %q", r.JobID, "ingest")
 			}
 			if r.TS.IsZero() {
 				t.Error("TS should be set")

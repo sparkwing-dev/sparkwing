@@ -25,7 +25,7 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		r.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "info",
-			Node:  "build",
+			JobID: "build",
 			Event: "step_start",
 			Msg:   "compile",
 			Attrs: map[string]any{"step": "compile"},
@@ -55,7 +55,7 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		r.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "info",
-			Node:  "build",
+			JobID: "build",
 			Event: "step_end",
 			Msg:   "compile",
 			Attrs: map[string]any{
@@ -67,7 +67,7 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		r.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "info",
-			Node:  "build",
+			JobID: "build",
 			Event: "step_start",
 			Msg:   "test",
 		})
@@ -86,7 +86,7 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		r.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "error",
-			Node:  "build",
+			JobID: "build",
 			Event: "step_end",
 			Msg:   "push",
 			Attrs: map[string]any{
@@ -99,7 +99,7 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		r.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "info",
-			Node:  "build",
+			JobID: "build",
 			Event: "step_start",
 			Msg:   "next",
 		})
@@ -122,11 +122,11 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		var buf bytes.Buffer
 		r := NewPrettyRendererTo(&buf, false)
 		r.Emit(sparkwing.LogRecord{
-			TS: time.Now(), Level: "info", Node: "build",
+			TS: time.Now(), Level: "info", JobID: "build",
 			Event: "node_start",
 		})
 		r.Emit(sparkwing.LogRecord{
-			TS: time.Now(), Level: "info", Node: "build",
+			TS: time.Now(), Level: "info", JobID: "build",
 			Event: "step_start", Msg: "compile",
 		})
 		got := buf.String()
@@ -149,12 +149,12 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		var buf bytes.Buffer
 		r := NewPrettyRendererTo(&buf, false)
 		r.Emit(sparkwing.LogRecord{
-			TS: time.Now(), Level: "error", Node: "build",
+			TS: time.Now(), Level: "error", JobID: "build",
 			Event: "step_end", Msg: "run",
 			Attrs: map[string]any{"outcome": "failed", "duration_ms": int64(1200)},
 		})
 		r.Emit(sparkwing.LogRecord{
-			TS: time.Now(), Level: "info", Node: "build",
+			TS: time.Now(), Level: "info", JobID: "build",
 			Event: "node_end",
 			Attrs: map[string]any{"outcome": "failed", "duration_ms": int64(1200)},
 		})
@@ -182,7 +182,7 @@ func TestPrettyRenderer_StepEvents(t *testing.T) {
 		r.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "info",
-			Node:  "build",
+			JobID: "build",
 			Event: "step_skipped",
 			Msg:   "deploy",
 			Attrs: map[string]any{

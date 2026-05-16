@@ -121,13 +121,13 @@ func TestRefToLastRun_NoOptions(t *testing.T) {
 // helper should find Ref[T] fields whose Pipeline is non-empty
 // (cross-pipeline routing) and skip in-run refs (Pipeline empty).
 func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
-	type Job struct {
+	type JobNode struct {
 		Build    Ref[buildOut]
 		NotARef  string
 		InRun    Ref[buildOut] // Pipeline=="" -> in-run, excluded
 		Unfilled Ref[buildOut] // empty everywhere, excluded
 	}
-	job := &Job{
+	job := &JobNode{
 		Build: RefToLastRun[buildOut]("build", "artifact", MaxAge(1*time.Hour)),
 		InRun: Ref[buildOut]{NodeID: "sibling"},
 	}

@@ -242,7 +242,7 @@ func RunNodeOnce(
 			}
 		}))
 
-	node := plan.Node(nodeID)
+	node := plan.Job(nodeID)
 	if node == nil {
 		for _, exp := range plan.Expansions() {
 			children := invokeGeneratorForPod(ctx, exp)
@@ -339,7 +339,7 @@ func runNodeCLI(args []string) error {
 // invokeGeneratorForPod runs one ExpandFrom generator under panic
 // recovery; panics yield an empty slice so the caller tries the next
 // expansion.
-func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []*sparkwing.Node) {
+func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []*sparkwing.JobNode) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = nil

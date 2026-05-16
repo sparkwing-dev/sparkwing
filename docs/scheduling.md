@@ -14,18 +14,18 @@ filters out agents the job is incompatible with, then picks the
 best-scoring match. If nothing matches in time the job fails with a
 queue-timeout error.
 
-## Per-node `.RunsOn()` (Go SDK)
+## Per-node `.Requires()` (Go SDK)
 
 Alongside the pipeline-level `runs_on` block (below), individual nodes
-can declare runner labels from Go code via the `.RunsOn()` modifier on
-`*sparkwing.Node`:
+can declare runner labels from Go code via the `.Requires()` modifier on
+`*sparkwing.JobNode`:
 
 ```go
-sw.Job(plan, "train", &TrainJob{}).RunsOn("gpu")
-sw.Job(plan, "package-arm", &PackageJob{}).RunsOn("arch=arm64", "trusted")
+sw.Job(plan, "train", &Train{}).Requires("gpu")
+sw.Job(plan, "package-arm", &Package{}).Requires("arch=arm64", "trusted")
 ```
 
-**AND semantics.** A node declaring `.RunsOn("arm64", "laptop")` is
+**AND semantics.** A node declaring `.Requires("arm64", "laptop")` is
 claimable only by a warm runner whose `--label` set contains BOTH
 `arm64` and `laptop`. A runner advertising a superset (e.g. also
 `trusted`) still matches. To express OR, author separate nodes. There
@@ -36,7 +36,7 @@ literal equality strings.
 labels, the node blocks indefinitely. The orchestrator logs a warning
 once per minute naming the unclaimed label set. The escape hatch is
 either: start a runner with `--label` matching, or remove the
-`.RunsOn()` modifier and retry the run.
+`.Requires()` modifier and retry the run.
 
 **Where labels come from.** Runners advertise labels at claim time via
 the `wing runner --label` flag (repeatable), or the pod spec argv in
@@ -45,10 +45,10 @@ filters candidate nodes whose `needs_labels` is a subset of the
 runner's advertised set.
 
 **Relationship to `pipelines.yaml` `runs_on`.** The YAML block is the
-legacy trigger-level selector (see below); `.RunsOn()` is a node-level
+legacy trigger-level selector (see below); `.Requires()` is a node-level
 modifier that writes `needs_labels` directly on the node row. Both can
 coexist -- the YAML filters which agent picks up the TRIGGER, while
-`.RunsOn()` filters which warm runner claims each NODE inside the run.
+`.Requires()` filters which warm runner claims each NODE inside the run.
 
 ## Pipeline `runs_on`
 

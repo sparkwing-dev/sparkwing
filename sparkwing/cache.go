@@ -28,7 +28,7 @@ const (
 	// arrivals after leader completion run fresh. Add CacheKey to
 	// enable memoization across time.
 	//
-	// Node-level only; rejected on Plan.Cache().
+	// Job-level only; rejected on Plan.Cache().
 	Coalesce OnLimitPolicy = "coalesce"
 
 	// Skip: new arrival succeeds immediately as a no-op without
@@ -62,7 +62,7 @@ const DefaultCacheTTL = 7 * 24 * time.Hour
 const MaxCacheTTL = 35 * 24 * time.Hour
 
 // CacheOptions configures the deduplication / coordination behavior
-// of a Node or Plan. A node/plan with no Cache() call has no
+// of a Job or Plan. A node/plan with no Cache() call has no
 // coordination. Setting Key enables coordination; other fields are
 // optional and fall back to sensible defaults.
 type CacheOptions struct {
@@ -197,7 +197,7 @@ func (o *CacheOptions) validate(ctx string, isPlan bool) {
 //	    },
 //	    CacheTTL: 24 * time.Hour,
 //	})
-func (n *Node) Cache(opts CacheOptions) *Node {
+func (n *JobNode) Cache(opts CacheOptions) *JobNode {
 	if !opts.HasKey() {
 		opts.rejectTypoShape("node " + n.id)
 		n.cache = CacheOptions{}
@@ -210,7 +210,7 @@ func (n *Node) Cache(opts CacheOptions) *Node {
 
 // CacheOpts returns the node's currently-set CacheOptions, or the
 // zero value when .Cache() was not called.
-func (n *Node) CacheOpts() CacheOptions { return n.cache }
+func (n *JobNode) CacheOpts() CacheOptions { return n.cache }
 
 // Cache applies the given options to the entire plan. The lock is
 // acquired before any node dispatches and released when the plan

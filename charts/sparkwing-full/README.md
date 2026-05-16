@@ -156,7 +156,7 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret. | `""` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
-| `sparkwing-runner-bundle.runner.labels` | `RunsOn` labels. | `[cluster]` |
+| `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 
 ## Auth
 

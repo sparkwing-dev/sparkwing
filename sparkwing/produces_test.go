@@ -166,8 +166,8 @@ func TestOutput_WiresFromMarker(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	n := sparkwing.Job(plan, "build", &producedJob{})
 	ref := sparkwing.RefTo[buildOut](n)
-	if ref.Node() != "build" {
-		t.Fatalf("Ref.Node() = %q, want build", ref.Node())
+	if ref.Job() != "build" {
+		t.Fatalf("Ref.Job() = %q, want build", ref.Job())
 	}
 }
 

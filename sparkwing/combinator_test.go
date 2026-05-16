@@ -34,7 +34,7 @@ func TestJobFanOut_StaticMembers(t *testing.T) {
 		t.Fatalf("members = %v, want %v", got, want)
 	}
 	for _, id := range want {
-		if plan.Node(id) == nil {
+		if plan.Job(id) == nil {
 			t.Fatalf("plan should contain node %q", id)
 		}
 	}
@@ -92,24 +92,24 @@ func TestGroup_RetryAndTimeoutApplyToEveryMember(t *testing.T) {
 }
 
 // TestGroupModifiersMirrorNode is the drift-protection guard.
-// Every chainable *Node modifier (one returning *Node) should have a
-// *NodeGroup counterpart returning *NodeGroup, applied uniformly to
+// Every chainable *JobNode modifier (one returning *JobNode) should have a
+// *JobGroup counterpart returning *JobGroup, applied uniformly to
 // every member. OnFailure is intentionally exempt: recovery handlers
 // are per-node by intent.
 func TestGroupModifiersMirrorNode(t *testing.T) {
 	exempt := map[string]bool{
 		// Recovery handlers are per-node by intent.
 		"OnFailure": true,
-		// Dynamic() hand-marks a Node for renderer purposes; Group
+		// Dynamic() hand-marks a Job for renderer purposes; Group
 		// dynamism is already a structural property (JobFanOutDynamic
 		// produces a dynamic group; static helpers don't).
 		"Dynamic": true,
 		// OnFailureNode is a getter that accidentally matches the
-		// chainable shape (returns *Node).
+		// chainable shape (returns *JobNode).
 		"OnFailureNode": true,
 	}
-	nodeChainable := chainableMethods(reflect.TypeOf(&sparkwing.Node{}))
-	groupChainable := chainableMethods(reflect.TypeOf(&sparkwing.NodeGroup{}))
+	nodeChainable := chainableMethods(reflect.TypeOf(&sparkwing.JobNode{}))
+	groupChainable := chainableMethods(reflect.TypeOf(&sparkwing.JobGroup{}))
 	groupSet := map[string]bool{}
 	for _, m := range groupChainable {
 		groupSet[m] = true
@@ -119,7 +119,7 @@ func TestGroupModifiersMirrorNode(t *testing.T) {
 			continue
 		}
 		if !groupSet[name] {
-			t.Errorf("chainable Node.%s has no Group counterpart (add it to combinator.go or update the exempt list)", name)
+			t.Errorf("chainable Job.%s has no Group counterpart (add it to combinator.go or update the exempt list)", name)
 		}
 	}
 }

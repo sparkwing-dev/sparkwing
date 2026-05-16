@@ -36,7 +36,7 @@ type deployJob struct {
 
 func (d *deployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "run", func(ctx context.Context) error {
-		_ = d.Build.Node()
+		_ = d.Build.Job()
 		return nil
 	})
 	return nil, nil
@@ -51,7 +51,7 @@ func TestPlanJobAndNeeds(t *testing.T) {
 	if got := len(plan.Nodes()); got != 2 {
 		t.Fatalf("expected 2 nodes, got %d", got)
 	}
-	d := plan.Node("deploy")
+	d := plan.Job("deploy")
 	if d == nil {
 		t.Fatal("deploy node missing")
 	}
@@ -63,7 +63,7 @@ func TestPlanJobAndNeeds(t *testing.T) {
 func TestTypedJobOutput(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	build := sparkwing.Job(plan, "build", &buildJob{})
-	if sparkwing.RefTo[buildOut](build).Node() != "build" {
+	if sparkwing.RefTo[buildOut](build).Job() != "build" {
 		t.Fatalf("typed Ref not wired to node id")
 	}
 	if build.OutputType() == nil {
@@ -102,10 +102,10 @@ func TestPlanGroup_NamedMembership(t *testing.T) {
 	if got := len(publish.DepIDs()); got != 2 {
 		t.Fatalf("publish should depend on both group members, got deps %v", publish.DepIDs())
 	}
-	if names := plan.NodeGroupNames("lint"); len(names) != 1 || names[0] != "safety" {
+	if names := plan.JobGroupNames("lint"); len(names) != 1 || names[0] != "safety" {
 		t.Fatalf("lint group memberships: got %v, want [safety]", names)
 	}
-	if names := plan.NodeGroupNames("other"); len(names) != 0 {
+	if names := plan.JobGroupNames("other"); len(names) != 0 {
 		t.Fatalf("other should have no group memberships, got %v", names)
 	}
 }
@@ -116,7 +116,7 @@ func TestPlanGroup_UnnamedSkipped(t *testing.T) {
 	b := sparkwing.Job(plan, "b", jobFnNoop())
 	_ = sparkwing.GroupJobs(plan, "", a, b)
 	_ = sparkwing.GroupJobs(plan, "", a, b)
-	if names := plan.NodeGroupNames("a"); len(names) != 0 {
+	if names := plan.JobGroupNames("a"); len(names) != 0 {
 		t.Fatalf("unnamed groups should not contribute memberships, got %v", names)
 	}
 }
@@ -128,7 +128,7 @@ func TestPlanGroup_MultiMembership(t *testing.T) {
 	c := sparkwing.Job(plan, "c", jobFnNoop())
 	_ = sparkwing.GroupJobs(plan, "g1", a, b)
 	_ = sparkwing.GroupJobs(plan, "g2", a, c)
-	names := plan.NodeGroupNames("a")
+	names := plan.JobGroupNames("a")
 	if len(names) != 2 || names[0] != "g1" || names[1] != "g2" {
 		t.Fatalf("a memberships: got %v, want [g1 g2]", names)
 	}
@@ -183,7 +183,7 @@ func TestRegisterAndInvoke_Planner(t *testing.T) {
 	if len(plan.Nodes()) != 2 {
 		t.Fatalf("expected 2 nodes, got %d", len(plan.Nodes()))
 	}
-	two := plan.Node("two")
+	two := plan.Job("two")
 	if two == nil || len(two.DepIDs()) != 1 || two.DepIDs()[0] != "one" {
 		t.Fatalf("two should depend on one")
 	}

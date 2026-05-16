@@ -203,7 +203,7 @@ func emitStepSkippedWithReason(ctx context.Context, stepID, reason string) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Event: "step_skipped",
 		Msg:   stepID,
 		Attrs: map[string]any{

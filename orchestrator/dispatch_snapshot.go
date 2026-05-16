@@ -47,7 +47,7 @@ var envAllowExact = map[string]bool{
 // writeDispatchSnapshot captures the dispatch frame for one
 // (run, node, attempt). Called before BeforeRun so replays re-run
 // hooks and pick up rotated secrets lazily.
-func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID string, node *sparkwing.Node) error {
+func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID string, node *sparkwing.JobNode) error {
 	scalar, err := json.Marshal(node.Job())
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)
@@ -84,7 +84,7 @@ func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID strin
 	}
 
 	var labelsBytes []byte
-	if labels := node.RunsOnLabels(); len(labels) > 0 {
+	if labels := node.RequiresLabels(); len(labels) > 0 {
 		labelsBytes, _ = json.Marshal(labels)
 	}
 
@@ -115,7 +115,7 @@ func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID strin
 
 // collectDispatchEnv layers env (last-wins): allowlisted os.Environ,
 // synthesized run-context vars, then node.EnvMap. run may be nil.
-func collectDispatchEnv(node *sparkwing.Node, runID string, run *store.Run) map[string]string {
+func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) map[string]string {
 	out := map[string]string{}
 	for _, kv := range os.Environ() {
 		i := strings.IndexByte(kv, '=')

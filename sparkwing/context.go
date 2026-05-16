@@ -48,15 +48,15 @@ func (r RunContext) TriggerEnv(key string) string {
 // LogRecord is the structured unit every Logger receives. The
 // orchestrator persists records as JSONL on disk. Msg is allowed to
 // contain raw ANSI from child processes; envelope fields (Level,
-// Event, Node, Job, JobStack) never do.
+// Event, JobID, Job, JobStack) never do.
 //
 // Job / JobStack form a trace: Job is the innermost frame (typically
-// the Node's id) and JobStack is the chain of its ancestors outer →
-// inner.
+// the dispatched Job's id) and JobStack is the chain of its ancestors
+// outer → inner.
 type LogRecord struct {
 	TS       time.Time      `json:"ts"`
 	Level    string         `json:"level,omitempty"` // "info" | "warn" | "error"
-	Node     string         `json:"node,omitempty"`  // set by nodeLogger on writes to disk + delegate
+	JobID    string         `json:"node,omitempty"`  // set by jobLogger on writes to disk + delegate; wire tag stays "node" for log-format compat
 	Job      string         `json:"job,omitempty"`   // innermost Job frame
 	JobStack []string       `json:"job_stack,omitempty"`
 	Step     string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
@@ -208,8 +208,8 @@ func Error(ctx context.Context, format string, args ...any) {
 }
 
 // Annotate records a persistent, human-readable summary string on the
-// currently-executing Node. Unlike Info, which writes to the run log,
-// annotations are stored on the Node row itself and surface on the
+// currently-executing Job. Unlike Info, which writes to the run log,
+// annotations are stored on the Job row itself and surface on the
 // dashboard alongside the node's status -- a place for the step to
 // say "processed 1,234 records · 12 failed" without an operator
 // having to dig through logs.
@@ -221,7 +221,7 @@ func Error(ctx context.Context, format string, args ...any) {
 //
 // Example:
 //
-//	func (j *IngestJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+//	func (j *Ingest) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 //	    return sparkwing.Step(w, "ingest", func(ctx context.Context) error {
 //	        ok, failed := ingest(ctx)
 //	        sparkwing.Annotate(ctx, fmt.Sprintf("processed %d records · %d failed", ok, failed))
@@ -232,7 +232,7 @@ func Annotate(ctx context.Context, msg string) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Event: EventNodeAnnotation,
 		Msg:   msg,
 		Attrs: map[string]any{"message": msg},
@@ -245,7 +245,7 @@ func Annotate(ctx context.Context, msg string) {
 const EventNodeAnnotation = "node_annotation"
 
 // Summary records a persistent markdown run summary on the
-// currently-executing Node or Step. Unlike Annotate, which appends a
+// currently-executing Job or Step. Unlike Annotate, which appends a
 // short scannable line, Summary stores a larger overwrite-on-write
 // markdown blob -- the GitHub-Actions step-summary analogue.
 //
@@ -262,7 +262,7 @@ const EventNodeAnnotation = "node_annotation"
 //
 // Example:
 //
-//	func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+//	func (j *Deploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 //	    return sparkwing.Step(w, "deploy", func(ctx context.Context) error {
 //	        out, err := deploy(ctx)
 //	        sparkwing.Summary(ctx, fmt.Sprintf("## Deployed\n- version: `%s`\n- replicas: %d", out.Version, out.Replicas))
@@ -273,7 +273,7 @@ func Summary(ctx context.Context, markdown string) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Event: EventNodeSummary,
 		Msg:   markdown,
 		Attrs: map[string]any{"markdown": markdown},
@@ -299,7 +299,7 @@ func emitLevel(ctx context.Context, level, format string, args ...any) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: level,
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Msg:   fmt.Sprintf(format, args...),
 	}))
 }

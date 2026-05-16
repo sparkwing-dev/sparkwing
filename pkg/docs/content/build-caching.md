@@ -136,7 +136,7 @@ network is fast (AWS to npm CDN), or the packages aren't in the cache yet
 Always use BuildKit cache mounts for package managers:
 
 ```dockerfile
-# Node
+# Job
 RUN --mount=type=cache,target=/root/.npm npm ci
 
 # Ruby

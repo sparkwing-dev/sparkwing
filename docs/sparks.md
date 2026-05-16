@@ -31,7 +31,7 @@ primitives.
 - Git: `ShortCommit`, `IsDirty`, `FilesetHash`, `CurrentBranch`, `Tags`, `PushTag`
 - Services: `WithServices` (docker-run backed sidecars)
 - Approval: stubbed call-site (`sparkwing.Approval`, panics until designed)
-- Plan / modifiers: `ExpandFrom`, `CacheKey`, `RunsOn`, `AwaitPipelineJob`,
+- Plan / modifiers: `ExpandFrom`, `CacheKey`, `Requires`, `AwaitPipelineJob`,
   typed `Ref[T]` outputs
 
 **In a sparks library:** anything with deep opinions on specific tooling.

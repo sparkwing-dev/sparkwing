@@ -83,20 +83,20 @@ Webhook delivery is handled by the controller - see
 Sparkwing has two DAG layers, and almost every pipeline-authoring choice
 is a layer choice. Internalize this before reading the recipes below.
 
-- **Plan / Node** is the *outer* DAG - units of dispatch. Each Node runs
+- **Plan / Job** is the *outer* DAG - units of dispatch. Each Job runs
   on its own runner: a separate pod in cluster mode, a separate
   goroutine slot in local mode. Nodes carry the dispatch envelope -
-  `Retry`, `Timeout`, `OnFailure`, `Cache`, `RunsOn`, `BeforeRun` /
-  `AfterRun`, `Approval` gating - because each Node *is* the unit the
+  `Retry`, `Timeout`, `OnFailure`, `Cache`, `Requires`, `BeforeRun` /
+  `AfterRun`, `Approval` gating - because each Job *is* the unit the
   scheduler can retry, time out, or route to a labeled runner.
 - **Work / WorkStep** is the *inner* DAG - units of work *within* one
-  Node's runner. Steps share the Node's runner, filesystem, environment,
+  Job's runner. Steps share the Job's runner, filesystem, environment,
   and ctx. They have `Needs` for ordering and `SkipIf` for predicates;
-  they do **not** carry Node-only modifiers (Retry, Timeout, ...).
-  Promote a step to a Node via `SpawnNode` if it needs one.
+  they do **not** carry Job-only modifiers (Retry, Timeout, ...).
+  Promote a step to a Job via `JobSpawn` if it needs one.
 
 Each pipeline implements `Plan(ctx, plan *sw.Plan, in T, rc sw.RunContext) error`
-which registers nodes on the passed-in `*Plan` (the outer DAG). Each Node carries a `Job` whose `Work()`
+which registers nodes on the passed-in `*Plan` (the outer DAG). Each Job carries a `Job` whose `Work()`
 method returns the inner DAG. Both DAGs are materialized at Plan-time
 - the orchestrator walks the entire reachable tree (including spawn
 targets) before any dispatch begins, so `pipeline explain` and the
@@ -116,7 +116,7 @@ dashboard render the full structure before the run starts.
 The verb tells you the cost. The Plan-layer `Job*` adders are cheap;
 the Work-layer `JobSpawn*` adders flag the layer jump and the
 suspended-runner cost. Reach for `JobSpawn` when you genuinely need
-Node-only modifiers (Retry, RunsOn, distinct runner) on a unit
+Job-only modifiers (Retry, Requires, distinct runner) on a unit
 decided mid-execution; otherwise stay inside Work.
 
 ## Trivial single-step jobs
@@ -169,7 +169,7 @@ func (j *Build) run(ctx context.Context) (BuildOut, error) {
 
 build := sw.Job(plan, "build", &Build{})
 buildRef := sparkwing.RefTo[BuildOut](build)
-sw.Job(plan, "deploy", &DeployJob{Build: buildRef}).Needs(build)
+sw.Job(plan, "deploy", &Deploy{Build: buildRef}).Needs(build)
 ```
 
 ## Multi-step jobs
@@ -181,18 +181,18 @@ result step (or `nil` for an untyped Job). Each `sw.Step` is a unit
 of work; `Needs` declares ordering.
 
 ```go
-type BuildJob struct{ sparkwing.Base }
+type Build struct{ sparkwing.Base }
 
-func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *Build) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     fetch    := sw.Step(w, "fetch",    j.fetch)
     validate := sw.Step(w, "validate", j.validate)
     sw.Step(w, "compile", j.compile).Needs(fetch, validate)
     return nil, nil  // untyped Job; no result step
 }
 
-func (j *BuildJob) fetch(ctx context.Context) error    { return j.gitFetch(ctx) }
-func (j *BuildJob) validate(ctx context.Context) error { return j.checkGoMod(ctx) }
-func (j *BuildJob) compile(ctx context.Context) error  { return j.goBuild(ctx) }
+func (j *Build) fetch(ctx context.Context) error    { return j.gitFetch(ctx) }
+func (j *Build) validate(ctx context.Context) error { return j.checkGoMod(ctx) }
+func (j *Build) compile(ctx context.Context) error  { return j.goBuild(ctx) }
 ```
 
 The DAG is built entirely from `.Needs()` chains. For sequential
@@ -200,7 +200,7 @@ steps, chain Needs directly; there is no separate `Sequence`
 combinator:
 
 ```go
-func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *Deploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     a := sw.Step(w, "render-manifests", j.render)
     b := sw.Step(w, "argo-sync",        j.sync).Needs(a)
     sw.Step(w, "verify",                j.verify).Needs(b)
@@ -212,7 +212,7 @@ For named clustering of related steps -- the dashboard's Work view
 folds members under one collapsible header -- use `sw.GroupSteps`:
 
 ```go
-func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *Deploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     fetch := sw.Step(w, "fetch", j.fetch)
 
     safety := sw.GroupSteps(w, "safety",
@@ -237,7 +237,7 @@ value IS the Job's output -- declare the step with a typed signature
 and return it from `Work`:
 
 ```go
-func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *Build) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     return sw.Step(w, "compile", j.compile), nil
 }
 ```
@@ -252,7 +252,7 @@ same Work read intermediate values, use `sw.StepGet[T](ctx, step)`
 inside the consuming step's body:
 
 ```go
-func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *Deploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     tags := sw.Step(w, "compute-tags", func(ctx context.Context) (Tags, error) {
         return loadTags(ctx)
     })
@@ -284,7 +284,7 @@ and a single `Needs(group)` target downstream.
 
 ### Static: `JobFanOut` (slice in hand at Plan-time)
 
-`sw.JobFanOut[T]` registers one Node per element of a slice
+`sw.JobFanOut[T]` registers one Job per element of a slice
 already known when `Plan()` runs:
 
 ```go
@@ -292,17 +292,17 @@ images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string
     return "build-" + img.Name, &BuildImage{Image: img}
 }).Needs(webBuild, discover).Retry(2)
 
-sw.Job(plan, "artifact", &ArtifactJob{}).Needs(images)
+sw.Job(plan, "artifact", &Artifact{}).Needs(images)
 ```
 
 The chained `.Needs(...)` / `.Retry(...)` apply to every member; see
 *Group modifiers* below.
 
-### Runtime: `JobFanOutDynamic` (slice produced by an upstream Node)
+### Runtime: `JobFanOutDynamic` (slice produced by an upstream Job)
 
-`sw.JobFanOutDynamic[T]` materializes one Plan-level Node per
-element of an upstream typed Node's output slice. Each fan-out child is
-a fresh Node with its own dispatch envelope:
+`sw.JobFanOutDynamic[T]` materializes one Plan-level Job per
+element of an upstream typed Job's output slice. Each fan-out child is
+a fresh Job with its own dispatch envelope:
 
 ```go
 type ListShards struct {
@@ -325,24 +325,24 @@ sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, sw.W
 })
 ```
 
-`JobFanOutDynamic` runs at Plan-time-after-source: the source Node runs
+`JobFanOutDynamic` runs at Plan-time-after-source: the source Job runs
 and exits, *then* the orchestrator builds children from the resolved
 output. The source runner is not held during the fan-out - no
 stranded compute.
 
 ### Group modifiers
 
-`*Group` mirrors the chainable surface of `*Node` (Needs, Retry,
-Timeout, RunsOn, SkipIf, Env, Inline, ContinueOnError, Optional,
+`*Group` mirrors the chainable surface of `*Job` (Needs, Retry,
+Timeout, Requires, SkipIf, Env, Inline, ContinueOnError, Optional,
 BeforeRun, AfterRun, Cache, NeedsOptional). Each call delegates to
 every member and returns the same `*Group` for chaining. `OnFailure`
-is intentionally per-Node; group-level recovery has unclear semantics.
+is intentionally per-Job; group-level recovery has unclear semantics.
 
 ## Layer escape: JobSpawn
 
-When a unit of work decided *mid-Work* needs a Node-only modifier
-(Retry, RunsOn, distinct runner, separate cache key), promote it via
-`sw.JobSpawn`. The spawning runner suspends until the spawned Node
+When a unit of work decided *mid-Work* needs a Job-only modifier
+(Retry, Requires, distinct runner, separate cache key), promote it via
+`sw.JobSpawn`. The spawning runner suspends until the spawned Job
 completes:
 
 ```go
@@ -356,7 +356,7 @@ func (j *ScanJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 ```
 
-The spawned Node id is namespaced as `parent/spawnID`
+The spawned Job id is namespaced as `parent/spawnID`
 (e.g. `scan/compliance`) so logs and the run history don't collide.
 
 `sw.JobSpawnEach(w, items, fn)` is the cardinality-many variant. The
@@ -366,7 +366,7 @@ across the entire fan-out:
 
 ```go
 sw.JobSpawnEach(w, targets, func(target string) (string, sw.Workable) {
-    return "deploy-" + target, &DeployJob{Target: target}
+    return "deploy-" + target, &Deploy{Target: target}
 }).Needs(buildStep)
 ```
 
@@ -379,11 +379,11 @@ suspended-runner cost) at the call site.
 
 | Modifier | Layer | Notes |
 |---|---|---|
-| `Retry(n, opts...)` | Plan only | `RetryBackoff(d)` + `RetryAuto()` options; `RetryAuto` re-dispatches the whole Node |
+| `Retry(n, opts...)` | Plan only | `RetryBackoff(d)` + `RetryAuto()` options; `RetryAuto` re-dispatches the whole Job |
 | `Timeout` | Plan only | per-attempt cap |
 | `OnFailure(id, job)` | Plan only | constructs a detached recovery node fired on parent failure |
 | `Cache` | Plan only | content-addressed result memoization |
-| `RunsOn(labels...)` | Plan only | scheduler routes by runner label |
+| `Requires(labels...)` | Plan only | scheduler routes by runner label |
 | `BeforeRun` / `AfterRun` | Plan only | runner lifecycle hooks |
 | `Approval` | Plan only | gates dispatch on a human decision |
 | `Inline()` | Plan only | bypass the runner entirely |
@@ -391,22 +391,22 @@ suspended-runner cost) at the call site.
 | `Dynamic()` | Plan only | flag for renderers |
 | `Needs` | both | ordering inside its layer |
 | `SkipIf` | both | skip predicate |
-| typed output | both | `Ref[T]` (Node) / `*WorkStep` returned from `Work` (Work) |
+| typed output | both | `Ref[T]` (Job) / `*WorkStep` returned from `Work` (Work) |
 
-A Step that needs Retry / Timeout / RunsOn is the canonical signal
-to promote it to a Node via `sw.JobSpawn`.
+A Step that needs Retry / Timeout / Requires is the canonical signal
+to promote it to a Job via `sw.JobSpawn`.
 
 ## Scheduling modifiers
 
 ### `.Inline()`
 
-Marks a Node for in-process execution on the dispatcher (the
+Marks a Job for in-process execution on the dispatcher (the
 controller in cluster mode, the laptop binary in local mode). Bypasses
 the configured Runner so no pod / warm-runner spin-up cost is paid.
 
 ```go
-sw.Job(plan, "setup", &SetupJob{}).Inline()
-sw.Job(plan, "summarize", &SummaryJob{}).Needs(deploys).Inline()
+sw.Job(plan, "setup", &Setup{}).Inline()
+sw.Job(plan, "summarize", &Summarize{}).Needs(deploys).Inline()
 ```
 
 Reach for it on genuinely lightweight glue (setup checks, fan-in
@@ -414,12 +414,12 @@ summaries) that would otherwise burn seconds of runner boot for a few
 hundred ms of work. It is **not** a general "faster" knob: inline
 nodes share the dispatcher's goroutine pool, so a long inline job
 delays every other node's scheduling. Keep inline work under a second
-or two. `.Inline()` on an approval gate panics. `.RunsOn` labels are
+or two. `.Inline()` on an approval gate panics. `.Requires` labels are
 ignored for inline nodes.
 
 ### `.Dynamic()`
 
-Annotates a Node whose downstream work is runtime-variable - the
+Annotates a Job whose downstream work is runtime-variable - the
 common case is `RunAndAwait` or external task enqueueing. Purely
 a signal to readers: the plan preview shows `[dynamic]` so reviewers
 know to inspect the run for the actual child nodes. `JobFanOutDynamic`
@@ -441,28 +441,28 @@ sw.Job(plan, "security-scan", &SecurityScanJob{}).Group("safety")
 
 Every Job's `Work()` runs during the Pipeline's `Plan()`, not at
 runner dispatch. The orchestrator walks the entire reachable nested
-DAG - including transitive `SpawnNode` targets - before any node runs.
+DAG - including transitive `JobSpawn` targets - before any node runs.
 What stays runtime-dynamic is bounded:
 
-- Which Nodes execute (Plan-time branching on `in`, Node `SkipIf`).
+- Which Nodes execute (Plan-time branching on `in`, Job `SkipIf`).
 - Which Steps execute (intra-Work `SkipIf`).
-- Whether each `SpawnNode` fires and with what arguments.
+- Whether each `JobSpawn` fires and with what arguments.
 - `JobFanOutDynamic` cardinality (count and keys come from the source's
   runtime output; the per-item shape is known).
 
 Because the structure is reachable from source, `sparkwing pipeline
-explain --name X` and the dashboard render the full Plan -> Node ->
-Work -> Step tree before anything runs. The dashboard's per-Node card
+explain --name X` and the dashboard render the full Plan -> Job ->
+Work -> Step tree before anything runs. The dashboard's per-Job card
 exposes a collapsible **Work** section showing inner steps and spawn
 declarations as placeholders (filled in once spawned children
 appear).
 
 The cost-grid table above is the load-bearing artifact for an agent
-reader - load it before designing a multi-Node pipeline.
+reader - load it before designing a multi-Job pipeline.
 
 ## Cache
 
-`.Cache(CacheOptions{...})` turns a Node into a content-addressed
+`.Cache(CacheOptions{...})` turns a Job into a content-addressed
 cache entry plus a coordination primitive. The orchestrator computes
 the key after upstream deps complete, looks it up across runs, and
 short-circuits the job on a hit, replaying the cached output without
@@ -470,7 +470,7 @@ running. Misses execute normally and record `(key -> output)` on
 success.
 
 ```go
-build := sw.Job[BuildOut](plan, "build", &BuildJob{}).
+build := sw.Job[BuildOut](plan, "build", &Build{}).
     Cache(sparkwing.CacheOptions{
         Key:     "build",
         OnLimit: sparkwing.Coalesce,
@@ -496,13 +496,13 @@ notifications, gitops commits). Caching replays the return value, not
 the external world - a "cached" deploy did not actually deploy
 anything. Cache pure builds, test runs against content-addressed
 sources, and artifact packaging; gate external side effects with
-`.Needs` on the cached Node.
+`.Needs` on the cached Job.
 
 ## Approval gates
 
 Pause a run and wait for a human decision by registering a gate via
 `sw.JobApproval`. The orchestrator routes approval nodes through the
-approval-waiter flow, flipping the Node to `approval_pending`,
+approval-waiter flow, flipping the Job to `approval_pending`,
 writing an approvals row, and blocking until the dashboard, CLI, or
 the configured timeout resolves it.
 
@@ -512,14 +512,14 @@ approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
     Timeout:  2 * time.Hour,
     OnExpiry: sw.ApprovalFail,
 }).Needs(integStg)
-sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
+sw.Job(plan, "deploy-prod", &Deploy{Env: "prod"}).Needs(approve)
 ```
 
 `sw.JobApproval` returns `*ApprovalGate`, a narrower handle than
-`*Node` -- only the modifiers that make sense for a human gate are
+`*Job` -- only the modifiers that make sense for a human gate are
 methods on it (`Needs`, `NeedsOptional`, `OnFailure`, `BeforeRun`,
 `AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`). Modifiers
-that don't apply to gates -- `Retry`, `Timeout`, `Cache`, `RunsOn`,
+that don't apply to gates -- `Retry`, `Timeout`, `Cache`, `Requires`,
 `Inline` -- are physically absent, so misuse is a compile error
 rather than a runtime panic / silent no-op.
 
@@ -533,7 +533,7 @@ rather than a runtime panic / silent no-op.
 - `OnExpiry` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
   or `sw.ApprovalApprove`. Unrecognised values panic at plan time.
   Named `OnExpiry` (not `OnTimeout`) so it doesn't read like
-  `Node.Timeout()`, which is unrelated.
+  `Job.Timeout()`, which is unrelated.
 
 Resolution paths:
 
@@ -550,7 +550,7 @@ In local (`wing <pipeline>`) mode the orchestrator lives in the same
 process as the CLI invocation. Close the terminal while a gate is
 waiting and the waiter goroutine dies with it: the approvals row
 stays on disk and can still be resolved from the dashboard, but
-nothing transitions the Node out of `approval_pending` and the run
+nothing transitions the Job out of `approval_pending` and the run
 stays `running` forever. Workaround: re-run, or keep `sparkwing
 dashboard start` up so the dispatcher lives in the long-lived local
 web server. Cluster mode has the same property via the controller
@@ -574,8 +574,8 @@ If you're reading old jobs that don't compile, here's the rename map:
 | `sparkwing.Out(w, id, fn) + .Get(ctx)` | `sw.Step(w, id, fn) + sw.StepGet[T](ctx, step)` |
 | `sparkwing.Result(w, id, fn) + return w` | `return sw.Step(w, id, fn), nil` |
 | `w.SetResult(step)` | return `step` from `Work` |
-| `w.SpawnNode(id, &J{})` | `sw.JobSpawn(w, id, &J{})` |
-| `w.SpawnNodeForEach(items, fn)` | `sw.JobSpawnEach(w, items, fn)` |
+| `w.JobSpawn(id, &J{})` | `sw.JobSpawn(w, id, &J{})` |
+| `w.JobSpawnEach(items, fn)` | `sw.JobSpawnEach(w, items, fn)` |
 | `sw.Approval(plan, id, cfg)` | `sw.JobApproval(plan, id, cfg)` |
 | `sw.Group(plan, name, ...)` | `sw.GroupJobs(plan, name, ...)` |
 | `sw.JobFn(fn)` | (gone) -- pass `fn` directly to `sw.Job` |

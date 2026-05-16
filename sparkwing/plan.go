@@ -15,13 +15,13 @@ import (
 // Parallel combinators.
 type Plan struct {
 	mu         sync.Mutex
-	nodes      []*Node
-	byID       map[string]*Node
+	nodes      []*JobNode
+	byID       map[string]*JobNode
 	expansions []Expansion
-	// groups tracks every *NodeGroup declared via sw.Group in
+	// groups tracks every *JobGroup declared via sw.Group in
 	// declaration order. Unnamed groups are tracked too but contribute
 	// no name to membership output.
-	groups []*NodeGroup
+	groups []*JobGroup
 
 	cache CacheOptions
 
@@ -45,7 +45,7 @@ type LintWarning struct {
 
 // NewPlan returns an empty Plan.
 func NewPlan() *Plan {
-	return &Plan{byID: map[string]*Node{}}
+	return &Plan{byID: map[string]*JobNode{}}
 }
 
 // Inputs returns the parsed Inputs value the orchestrator handed to
@@ -75,16 +75,16 @@ func (p *Plan) setInputs(in any) {
 // Nodes returns the plan's nodes in insertion order. For plans with
 // dynamic expansion, returned slice reflects the current state; new
 // nodes appear once their generator fires.
-func (p *Plan) Nodes() []*Node {
+func (p *Plan) Nodes() []*JobNode {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]*Node, len(p.nodes))
+	out := make([]*JobNode, len(p.nodes))
 	copy(out, p.nodes)
 	return out
 }
 
-// Node returns the node with the given ID, or nil if absent.
-func (p *Plan) Node(id string) *Node {
+// Job returns the node with the given ID, or nil if absent.
+func (p *Plan) Job(id string) *JobNode {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.byID[id]
@@ -103,18 +103,18 @@ func (p *Plan) Expansions() []Expansion {
 // accessible via closure-captured Ref.Get(ctx). Return the list of
 // children to materialize; each will automatically depend on the
 // source node.
-type ExpandGenerator func(ctx context.Context) []*Node
+type ExpandGenerator func(ctx context.Context) []*JobNode
 
 // Expansion ties a source node to its generator and resulting group.
 type Expansion struct {
-	Source *Node
-	Group  *NodeGroup
+	Source *JobNode
+	Group  *JobGroup
 	Gen    ExpandGenerator
 }
 
-// newNode builds a detached *Node from (id, job). Shared by Job
+// newNode builds a detached *JobNode from (id, job). Shared by Job
 // (which then registers on the plan), JobFanOutDynamic children,
-// Node.OnFailure recovery nodes, and the orchestrator's SpawnNode
+// Job.OnFailure recovery nodes, and the orchestrator's SpawnNode
 // dispatch path -- every caller that needs a node before it has a
 // home in p.nodes / p.byID.
 //
@@ -125,7 +125,7 @@ type Expansion struct {
 // caller is the verb the user typed (e.g. "Job", "OnFailure"); it
 // shows up in panic messages so the error points at the user's call
 // site, not this helper.
-func newNode(caller, id string, job Workable) *Node {
+func newNode(caller, id string, job Workable) *JobNode {
 	if id == "" {
 		panic(fmt.Sprintf("sparkwing: %s: id must not be empty", caller))
 	}
@@ -148,7 +148,7 @@ func newNode(caller, id string, job Workable) *Node {
 				caller, id, app.cfg.OnExpiry))
 		}
 		cfg := app.cfg
-		return &Node{
+		return &JobNode{
 			id:       id,
 			job:      job,
 			approval: &cfg,
@@ -186,7 +186,7 @@ func newNode(caller, id string, job Workable) *Node {
 		outType = declared
 	}
 
-	return &Node{
+	return &JobNode{
 		id:         id,
 		job:        job,
 		work:       w,
@@ -201,7 +201,7 @@ func newNode(caller, id string, job Workable) *Node {
 // dispatch path, where the child node is created at runtime and
 // spliced in via Plan.InsertChild after the parent suspends. Use
 // sparkwing.Job from pipeline code.
-func NewDetachedNode(id string, job Workable) *Node {
+func NewDetachedNode(id string, job Workable) *JobNode {
 	return newNode("NewDetachedNode", id, job)
 }
 
@@ -209,7 +209,7 @@ func NewDetachedNode(id string, job Workable) *Node {
 // wiring any dependency. Used by the SpawnNode dispatch path: the
 // spawning runner is suspended waiting on the child's outcome, so
 // adding child.Needs(parent) would deadlock.
-func (p *Plan) InsertChild(child *Node) error {
+func (p *Plan) InsertChild(child *JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if child == nil {
@@ -226,7 +226,7 @@ func (p *Plan) InsertChild(child *Node) error {
 // InsertExpanded splices dynamically generated children into the plan.
 // Each child automatically gets Needs(source). Called by the
 // orchestrator.
-func (p *Plan) InsertExpanded(source *Node, children []*Node) error {
+func (p *Plan) InsertExpanded(source *JobNode, children []*JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, child := range children {
@@ -278,7 +278,7 @@ func (p *Plan) InsertExpanded(source *Node, children []*Node) error {
 //	    Message: "Promote build to prod?",
 //	    Timeout: 2 * time.Hour,
 //	}).Needs(integStg)
-func Job(p *Plan, id string, x any) *Node {
+func Job(p *Plan, id string, x any) *JobNode {
 	if p == nil {
 		panic("sparkwing: Job: plan must be non-nil")
 	}
@@ -343,9 +343,9 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 	return w, resultStep
 }
 
-// Node is a single entry in the Plan. It wraps a user-authored job
+// Job is a single entry in the Plan. It wraps a user-authored job
 // plus dispatch modifiers.
-type Node struct {
+type JobNode struct {
 	id         string
 	job        Workable
 	work       *Work     // materialized inner DAG; empty for Approval gates
@@ -362,7 +362,7 @@ type Node struct {
 	retryAuto     bool
 	timeout       time.Duration // per-attempt; zero = unlimited
 
-	onFailure *Node // dispatched when this node fails
+	onFailure *JobNode // dispatched when this node fails
 
 	// Multiple skipIf predicates accumulate with OR semantics.
 	skipIf        []SkipPredicate
@@ -373,9 +373,9 @@ type Node struct {
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
 
-	// runsOn restricts the node to runners advertising all listed
+	// requires restricts the node to runners advertising all listed
 	// labels. Empty = any runner may claim.
-	runsOn []string
+	requires []string
 
 	// inline marks lightweight nodes for in-process execution on the
 	// dispatcher, bypassing the configured Runner. Opt-in via
@@ -394,7 +394,7 @@ type Node struct {
 
 	// Dynamic-group dependencies resolve at dispatch time rather than
 	// plan construction.
-	needsGroups []*NodeGroup
+	needsGroups []*JobGroup
 
 	// approval is non-nil when the node's job is an approval gate; the
 	// orchestrator routes these through the approval waiter.
@@ -403,7 +403,7 @@ type Node struct {
 
 // ApprovalConfig describes a manual approval gate. Authors fill it
 // out and pass it to sw.JobApproval; the orchestrator reads it back
-// via Node.ApprovalConfig when routing the gate to the approval-
+// via Job.ApprovalConfig when routing the gate to the approval-
 // waiter flow.
 //
 //	approve := sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
@@ -411,7 +411,7 @@ type Node struct {
 //	    Timeout:  2 * time.Hour,
 //	    OnExpiry: sparkwing.ApprovalFail,
 //	}).Needs(integStg)
-//	sw.Job(plan, "deploy-prod", &DeployJob{Env: "prod"}).Needs(approve)
+//	sw.Job(plan, "deploy-prod", &Deploy{Env: "prod"}).Needs(approve)
 type ApprovalConfig struct {
 	// Message is the operator-facing prompt shown in the dashboard /
 	// CLI. Empty falls back to a generic "Approve <node>?" in the UI.
@@ -423,7 +423,7 @@ type ApprovalConfig struct {
 	// elapses. The zero value is ApprovalFail ("something went wrong,
 	// the gate wasn't answered"). ApprovalDeny treats no-answer as a
 	// soft "no" and ApprovalApprove as a soft "yes". Named OnExpiry
-	// rather than OnTimeout to avoid confusion with Node.Timeout(),
+	// rather than OnTimeout to avoid confusion with Job.Timeout(),
 	// which is unrelated (per-attempt execution budget).
 	OnExpiry ApprovalTimeoutPolicy
 }
@@ -452,24 +452,24 @@ const (
 )
 
 // IsApproval reports whether the node is an approval gate.
-func (n *Node) IsApproval() bool { return n.approval != nil }
+func (n *JobNode) IsApproval() bool { return n.approval != nil }
 
 // ApprovalConfig returns the per-node approval configuration, or nil
 // for non-approval nodes. Used by the orchestrator to route gate
 // nodes through the approval waiter; pipeline authors don't usually
 // call this.
-func (n *Node) ApprovalConfig() *ApprovalConfig { return n.approval }
+func (n *JobNode) ApprovalConfig() *ApprovalConfig { return n.approval }
 
 // ApprovalGate is the handle returned by sw.JobApproval. It exposes a
-// narrower modifier surface than *Node -- only the modifiers that
+// narrower modifier surface than *JobNode -- only the modifiers that
 // make sense for a human gate (Needs, NeedsOptional, OnFailure
 // recovery, BeforeRun/AfterRun hooks, SkipIf, Optional,
 // ContinueOnError). Modifiers that don't apply to gates -- Retry,
-// Timeout, Cache, RunsOn, Inline, Dynamic -- are physically absent
+// Timeout, Cache, Requires, Inline, Dynamic -- are physically absent
 // from this type, so authoring those mistakes is a compile error
 // rather than the previous mix of panics and silent no-ops.
 type ApprovalGate struct {
-	n *Node
+	n *JobNode
 }
 
 // JobApproval registers a manual approval gate under id and returns
@@ -480,7 +480,7 @@ type ApprovalGate struct {
 // resolve per cfg.OnExpiry.
 //
 // The verb is named JobApproval (not Approval) to keep the Job-prefix
-// convention: every Plan-layer verb that adds a Node carries the
+// convention: every Plan-layer verb that adds a Job carries the
 // Job- prefix so tab-complete on Job* surfaces the full set.
 //
 // Panics if id is empty or already registered, or if cfg.OnExpiry is
@@ -491,7 +491,7 @@ type ApprovalGate struct {
 //	    Timeout:  2 * time.Hour,
 //	    OnExpiry: sparkwing.ApprovalFail,
 //	}).Needs(integStg)
-//	sw.Job(plan, "deploy-prod", &DeployJob{}).Needs(approve)
+//	sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
 func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
 	if p == nil {
 		panic("sparkwing: JobApproval: plan must be non-nil")
@@ -505,18 +505,18 @@ func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
 	return &ApprovalGate{n: n}
 }
 
-// Node returns the underlying *Node. Pipeline authors should rarely
+// Job returns the underlying *JobNode. Pipeline authors should rarely
 // need this -- the gate's own methods cover the expected modifier
 // surface; this is the escape hatch for orchestrator-internal code
-// (or for the "I really want a Node-level modifier" case).
-func (g *ApprovalGate) Node() *Node { return g.n }
+// (or for the "I really want a Job-level modifier" case).
+func (g *ApprovalGate) Job() *JobNode { return g.n }
 
 // ID returns the gate's node id.
 func (g *ApprovalGate) ID() string { return g.n.id }
 
 // Needs declares hard upstream dependencies on the gate. Accepts the
-// same shapes as Node.Needs (*Node, *NodeGroup, *ApprovalGate, string
-// IDs, []*Node).
+// same shapes as Job.Needs (*JobNode, *JobGroup, *ApprovalGate, string
+// IDs, []*JobNode).
 func (g *ApprovalGate) Needs(deps ...any) *ApprovalGate {
 	g.n.Needs(deps...)
 	return g
@@ -605,27 +605,27 @@ type BeforeRunFn func(ctx context.Context) error
 type AfterRunFn func(ctx context.Context, err error)
 
 // ID returns the node's identifier.
-func (n *Node) ID() string { return n.id }
+func (n *JobNode) ID() string { return n.id }
 
 // Job returns the underlying user-authored job struct.
-func (n *Node) Job() Workable { return n.job }
+func (n *JobNode) Job() Workable { return n.job }
 
 // Work returns the materialized inner DAG for the node's job. Empty
 // for Approval gates (their Work is never executed).
-func (n *Node) Work() *Work { return n.work }
+func (n *JobNode) Work() *Work { return n.work }
 
 // ResultStep returns the *WorkStep the Job designated as its typed
 // output via Work's return value, or nil for untyped Jobs.
-func (n *Node) ResultStep() *WorkStep { return n.resultStep }
+func (n *JobNode) ResultStep() *WorkStep { return n.resultStep }
 
 // Needs declares hard upstream dependencies. The orchestrator will not
 // dispatch this node until every named dependency is satisfied.
 //
-// Accepts *Node, *NodeGroup, []*Node, or string IDs.
-func (n *Node) Needs(deps ...any) *Node {
+// Accepts *JobNode, *JobGroup, []*JobNode, or string IDs.
+func (n *JobNode) Needs(deps ...any) *JobNode {
 	for _, d := range deps {
 		switch v := d.(type) {
-		case *Node:
+		case *JobNode:
 			if v != nil {
 				n.addNeed(v.id)
 			}
@@ -633,7 +633,7 @@ func (n *Node) Needs(deps ...any) *Node {
 			if v != nil && v.n != nil {
 				n.addNeed(v.n.id)
 			}
-		case *NodeGroup:
+		case *JobGroup:
 			if v != nil {
 				if v.dynamic {
 					// Resolve membership at dispatch, after the
@@ -649,14 +649,14 @@ func (n *Node) Needs(deps ...any) *Node {
 			if v != "" {
 				n.addNeed(v)
 			}
-		case []*Node:
+		case []*JobNode:
 			for _, vv := range v {
 				if vv != nil {
 					n.addNeed(vv.id)
 				}
 			}
 		default:
-			panic(fmt.Sprintf("sparkwing: Node.Needs: unsupported dep type %T", d))
+			panic(fmt.Sprintf("sparkwing: Job.Needs: unsupported dep type %T", d))
 		}
 	}
 	return n
@@ -664,9 +664,9 @@ func (n *Node) Needs(deps ...any) *Node {
 
 // NeedsGroups returns any dynamic groups (from ExpandFrom) this node
 // is waiting on.
-func (n *Node) NeedsGroups() []*NodeGroup { return n.needsGroups }
+func (n *JobNode) NeedsGroups() []*JobGroup { return n.needsGroups }
 
-func (n *Node) addNeed(id string) {
+func (n *JobNode) addNeed(id string) {
 	if slices.Contains(n.needs, id) {
 		return
 	}
@@ -676,14 +676,14 @@ func (n *Node) addNeed(id string) {
 // DepIDs returns the node IDs this node depends on. Includes both
 // explicit Needs entries and Ref-derived edges (populated at plan
 // finalization by the orchestrator).
-func (n *Node) DepIDs() []string {
+func (n *JobNode) DepIDs() []string {
 	out := make([]string, len(n.needs))
 	copy(out, n.needs)
 	return out
 }
 
 // Env sets a per-node environment variable. Overrides any inherited value.
-func (n *Node) Env(key, value string) *Node {
+func (n *JobNode) Env(key, value string) *JobNode {
 	if n.env == nil {
 		n.env = map[string]string{}
 	}
@@ -692,13 +692,13 @@ func (n *Node) Env(key, value string) *Node {
 }
 
 // EnvMap returns the node's declared environment. Callers must not mutate.
-func (n *Node) EnvMap() map[string]string { return n.env }
+func (n *JobNode) EnvMap() map[string]string { return n.env }
 
 // OutputType returns the concrete Go type of the job's Run output, or
 // nil if the job's Run returns no value beyond error.
-func (n *Node) OutputType() reflect.Type { return n.outType }
+func (n *JobNode) OutputType() reflect.Type { return n.outType }
 
-// RetryConfig is the resolved retry envelope for a Node. Attempts ==
+// RetryConfig is the resolved retry envelope for a Job. Attempts ==
 // 0 means no retry. Auto=true switches in-runner step re-run to
 // whole-node re-dispatch.
 type RetryConfig struct {
@@ -733,11 +733,11 @@ func RetryAuto() RetryOption {
 // additional times on failure. Zero (the default) means no retry.
 // Cancelled nodes are never retried.
 //
-//	sw.Job(plan, "flaky-test", &TestJob{}).Retry(2)
-//	sw.Job(plan, "flaky-test", &TestJob{}).Retry(3, sw.RetryBackoff(500*time.Millisecond))
-//	sw.Job(plan, "push", &PushJob{}).Retry(2, sw.RetryAuto())
-//	sw.Job(plan, "push", &PushJob{}).Retry(2, sw.RetryBackoff(5*time.Second), sw.RetryAuto())
-func (n *Node) Retry(attempts int, opts ...RetryOption) *Node {
+//	sw.Job(plan, "flaky-test", &Test{}).Retry(2)
+//	sw.Job(plan, "flaky-test", &Test{}).Retry(3, sw.RetryBackoff(500*time.Millisecond))
+//	sw.Job(plan, "push", &Push{}).Retry(2, sw.RetryAuto())
+//	sw.Job(plan, "push", &Push{}).Retry(2, sw.RetryBackoff(5*time.Second), sw.RetryAuto())
+func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode {
 	if attempts < 0 {
 		attempts = 0
 	}
@@ -754,7 +754,7 @@ func (n *Node) Retry(attempts int, opts ...RetryOption) *Node {
 // Timeout caps the per-attempt duration. Exceeding the timeout
 // cancels the job's context, returns an ExecError, and is treated
 // as a normal failure (eligible for retries).
-func (n *Node) Timeout(d time.Duration) *Node {
+func (n *JobNode) Timeout(d time.Duration) *JobNode {
 	n.timeout = d
 	return n
 }
@@ -766,7 +766,7 @@ func (n *Node) Timeout(d time.Duration) *Node {
 //
 // Accepts the same argument shapes as sparkwing.Job (a Workable struct
 // or a bare func(ctx) error closure).
-func (n *Node) OnFailure(id string, x any) *Node {
+func (n *JobNode) OnFailure(id string, x any) *JobNode {
 	job := coerceJobArg("OnFailure", id, x)
 	n.onFailure = newNode("OnFailure", id, job)
 	return n
@@ -774,7 +774,7 @@ func (n *Node) OnFailure(id string, x any) *Node {
 
 // RetryConfig returns the resolved retry envelope. A zero-value
 // RetryConfig means no retry.
-func (n *Node) RetryConfig() RetryConfig {
+func (n *JobNode) RetryConfig() RetryConfig {
 	return RetryConfig{
 		Attempts: n.retryAttempts,
 		Backoff:  n.retryBackoff,
@@ -784,11 +784,11 @@ func (n *Node) RetryConfig() RetryConfig {
 
 // TimeoutDuration returns the configured per-attempt timeout, or zero
 // if unlimited.
-func (n *Node) TimeoutDuration() time.Duration { return n.timeout }
+func (n *JobNode) TimeoutDuration() time.Duration { return n.timeout }
 
 // OnFailureNode returns the recovery node registered via OnFailure, or
 // nil if none.
-func (n *Node) OnFailureNode() *Node { return n.onFailure }
+func (n *JobNode) OnFailureNode() *JobNode { return n.onFailure }
 
 // OnFailureNodeID returns the ID of the recovery node registered via
 // OnFailure, or "" if none. Mirrors OnFailureNode() but returns just
@@ -796,7 +796,7 @@ func (n *Node) OnFailureNode() *Node { return n.onFailure }
 // orchestrator's snapshot encoder, dashboard renderers) can surface
 // the failure-branch attachment without dereferencing the unexported
 // onFailure field.
-func (n *Node) OnFailureNodeID() string {
+func (n *JobNode) OnFailureNodeID() string {
 	if n.onFailure == nil {
 		return ""
 	}
@@ -804,13 +804,13 @@ func (n *Node) OnFailureNodeID() string {
 }
 
 // SkipOption configures a SkipIf registration.
-type SkipOption func(*Node)
+type SkipOption func(*JobNode)
 
 // SkipBudget overrides the per-predicate evaluation budget. Zero
 // uses the orchestrator's default. The budget is per-node, not
 // per-predicate: the last SkipBudget on a node wins.
 func SkipBudget(d time.Duration) SkipOption {
-	return func(n *Node) {
+	return func(n *JobNode) {
 		if d < 0 {
 			d = 0
 		}
@@ -825,9 +825,9 @@ func SkipBudget(d time.Duration) SkipOption {
 //
 // Typed upstream output is consumed via closure capture + Ref.Get:
 //
-//	setup := sw.Job(plan, "setup", &SetupJob{})
+//	setup := sw.Job(plan, "setup", &Setup{})
 //	setupOut := sw.RefTo[SetupOutput](setup)
-//	sw.Job(plan, "deploy", &DeployJob{}).
+//	sw.Job(plan, "deploy", &Deploy{}).
 //	    Needs(setup).
 //	    SkipIf(func(ctx context.Context) bool {
 //	        return setupOut.Get(ctx).SkipDeploy
@@ -838,7 +838,7 @@ func SkipBudget(d time.Duration) SkipOption {
 // default 30s budget; pass SkipBudget(d) to override:
 //
 //	deploy.SkipIf(pred, sparkwing.SkipBudget(2*time.Minute))
-func (n *Node) SkipIf(fn SkipPredicate, opts ...SkipOption) *Node {
+func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode {
 	if fn != nil {
 		n.skipIf = append(n.skipIf, fn)
 	}
@@ -851,16 +851,16 @@ func (n *Node) SkipIf(fn SkipPredicate, opts ...SkipOption) *Node {
 }
 
 // SkipPredicates returns the node's registered skip predicates.
-func (n *Node) SkipPredicates() []SkipPredicate { return n.skipIf }
+func (n *JobNode) SkipPredicates() []SkipPredicate { return n.skipIf }
 
 // SkipIfBudget returns the configured per-predicate evaluation budget,
 // or zero for the orchestrator's default.
-func (n *Node) SkipIfBudget() time.Duration { return n.skipIfTimeout }
+func (n *JobNode) SkipIfBudget() time.Duration { return n.skipIfTimeout }
 
 // BeforeRun registers a hook to run once before the node's Run method
 // on the first attempt. A non-nil error fails the node without
 // invoking Run and without retrying.
-func (n *Node) BeforeRun(fn BeforeRunFn) *Node {
+func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode {
 	if fn != nil {
 		n.beforeRun = append(n.beforeRun, fn)
 	}
@@ -871,7 +871,7 @@ func (n *Node) BeforeRun(fn BeforeRunFn) *Node {
 // including after all retries. The hook receives the final error
 // (nil on success); its own failure is logged but does not change
 // the node's outcome.
-func (n *Node) AfterRun(fn AfterRunFn) *Node {
+func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 	if fn != nil {
 		n.afterRun = append(n.afterRun, fn)
 	}
@@ -879,25 +879,25 @@ func (n *Node) AfterRun(fn AfterRunFn) *Node {
 }
 
 // BeforeRunHooks returns the node's registered pre-run hooks.
-func (n *Node) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
+func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
 
 // AfterRunHooks returns the node's registered post-run hooks.
-func (n *Node) AfterRunHooks() []AfterRunFn { return n.afterRun }
+func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 
-// RunsOn restricts this node to runners advertising every label in
-// the given set. Semantics are AND, not OR: .RunsOn("arm64", "laptop")
+// Requires restricts this node to runners advertising every label in
+// the given set. Semantics are AND, not OR: .Requires("arm64", "laptop")
 // requires both labels; a runner advertising a superset still matches.
 // To express OR, author separate nodes.
 //
 // Labels are equality strings; common conventions are bare tags
-// ("laptop", "gpu") or key=value ("arch=arm64"). Calling RunsOn with
+// ("laptop", "gpu") or key=value ("arch=arm64"). Calling Requires with
 // no arguments clears any previously-set labels.
 //
-//	plan.Add("train", &TrainJob{}).RunsOn("gpu")
-//	plan.Add("package-arm", &PackageJob{}).RunsOn("arch=arm64", "trusted")
-func (n *Node) RunsOn(labels ...string) *Node {
+//	plan.Add("train", &Train{}).Requires("gpu")
+//	plan.Add("package-arm", &Package{}).Requires("arch=arm64", "trusted")
+func (n *JobNode) Requires(labels ...string) *JobNode {
 	if len(labels) == 0 {
-		n.runsOn = nil
+		n.requires = nil
 		return n
 	}
 	out := make([]string, 0, len(labels))
@@ -907,17 +907,17 @@ func (n *Node) RunsOn(labels ...string) *Node {
 		}
 		out = append(out, l)
 	}
-	n.runsOn = out
+	n.requires = out
 	return n
 }
 
-// RunsOnLabels returns the labels declared via RunsOn.
-func (n *Node) RunsOnLabels() []string {
-	if len(n.runsOn) == 0 {
+// RequiresLabels returns the labels declared via Requires.
+func (n *JobNode) RequiresLabels() []string {
+	if len(n.requires) == 0 {
 		return nil
 	}
-	out := make([]string, len(n.runsOn))
-	copy(out, n.runsOn)
+	out := make([]string, len(n.requires))
+	copy(out, n.requires)
 	return out
 }
 
@@ -935,14 +935,14 @@ func (n *Node) RunsOnLabels() []string {
 //   - Retry / Timeout / CacheKey still apply; only runner placement
 //     changes.
 //
-//   - RunsOn labels are ignored for inline nodes (there's no runner
-//     to match). Combining Inline() + RunsOn() is a config warning.
+//   - Requires labels are ignored for inline nodes (there's no runner
+//     to match). Combining Inline() + Requires() is a config warning.
 //
-//     plan.Add("setup", &SetupJob{}).Inline()
-//     plan.Add("summarize", &SummaryJob{}).Needs(testBuckets).Inline()
-func (n *Node) Inline() *Node {
+//     plan.Add("setup", &Setup{}).Inline()
+//     plan.Add("summarize", &Summarize{}).Needs(testBuckets).Inline()
+func (n *JobNode) Inline() *JobNode {
 	if n.approval != nil {
-		panic(fmt.Sprintf("sparkwing: Node.Inline: approval gate %q cannot be inlined; approvals are long-lived by design", n.id))
+		panic(fmt.Sprintf("sparkwing: Job.Inline: approval gate %q cannot be inlined; approvals are long-lived by design", n.id))
 	}
 	n.inline = true
 	return n
@@ -951,12 +951,12 @@ func (n *Node) Inline() *Node {
 // IsInline reports whether the node was marked for orchestrator-local
 // execution via Inline(). The dispatcher uses this to route the node
 // to the in-process runner regardless of the configured Runner.
-func (n *Node) IsInline() bool { return n.inline }
+func (n *JobNode) IsInline() bool { return n.inline }
 
-// NodeGroupNames returns the names of every declared *NodeGroup whose
+// JobGroupNames returns the names of every declared *JobGroup whose
 // members include the given node. Unnamed groups are skipped. Order
 // is declaration order; duplicates are collapsed.
-func (p *Plan) NodeGroupNames(id string) []string {
+func (p *Plan) JobGroupNames(id string) []string {
 	if len(p.groups) == 0 {
 		return nil
 	}
@@ -985,7 +985,7 @@ func (p *Plan) NodeGroupNames(id string) []string {
 // non-ExpandFrom cases. Dynamic is purely a signal to readers.
 //
 //	plan.Add("orchestrate", &OrchestrateJob{}).Dynamic()
-func (n *Node) Dynamic() *Node {
+func (n *JobNode) Dynamic() *JobNode {
 	n.dynamic = true
 	return n
 }
@@ -993,17 +993,17 @@ func (n *Node) Dynamic() *Node {
 // IsDynamic reports whether .Dynamic() was called. For the effective-
 // dynamic status (which includes ExpandFrom sources), use
 // Plan.IsDynamicNode(id).
-func (n *Node) IsDynamic() bool { return n.dynamic }
+func (n *JobNode) IsDynamic() bool { return n.dynamic }
 
 // GroupSourceIDs returns the ids of the source nodes backing any
 // ExpandFrom Groups this node waits on via Needs(group). Returns nil
 // when the node has no dynamic-group deps.
 func (p *Plan) GroupSourceIDs(id string) []string {
-	n := p.Node(id)
+	n := p.Job(id)
 	if n == nil || len(n.needsGroups) == 0 {
 		return nil
 	}
-	want := make(map[*NodeGroup]bool, len(n.needsGroups))
+	want := make(map[*JobGroup]bool, len(n.needsGroups))
 	for _, g := range n.needsGroups {
 		want[g] = true
 	}
@@ -1019,7 +1019,7 @@ func (p *Plan) GroupSourceIDs(id string) []string {
 // IsDynamicNode reports whether the node should render as dynamic:
 // .Dynamic() was called or it's the source of an ExpandFrom expansion.
 func (p *Plan) IsDynamicNode(id string) bool {
-	n := p.Node(id)
+	n := p.Job(id)
 	if n != nil && n.dynamic {
 		return true
 	}
@@ -1034,34 +1034,34 @@ func (p *Plan) IsDynamicNode(id string) bool {
 // ContinueOnError tells the orchestrator that downstream dependents
 // should proceed even when this node fails. The run as a whole still
 // reports as failed (use Optional to also suppress run-level failure).
-func (n *Node) ContinueOnError() *Node {
+func (n *JobNode) ContinueOnError() *JobNode {
 	n.continueOnError = true
 	return n
 }
 
 // IsContinueOnError reports whether downstream should ignore this
 // node's failure for dispatch purposes.
-func (n *Node) IsContinueOnError() bool { return n.continueOnError }
+func (n *JobNode) IsContinueOnError() bool { return n.continueOnError }
 
 // Optional marks the node as non-essential: a failure is logged as a
 // warning and does not count toward the run's overall success/fail
 // outcome. Implies ContinueOnError.
-func (n *Node) Optional() *Node {
+func (n *JobNode) Optional() *JobNode {
 	n.optional = true
 	n.continueOnError = true
 	return n
 }
 
 // IsOptional reports whether the node is marked non-essential.
-func (n *Node) IsOptional() bool { return n.optional }
+func (n *JobNode) IsOptional() bool { return n.optional }
 
 // NeedsOptional declares upstream dependencies that may or may not be
 // present in the plan. Unknown IDs are silently dropped; known IDs
 // behave like Needs. Accepts the same shapes as Needs.
-func (n *Node) NeedsOptional(deps ...any) *Node {
+func (n *JobNode) NeedsOptional(deps ...any) *JobNode {
 	for _, d := range deps {
 		switch v := d.(type) {
-		case *Node:
+		case *JobNode:
 			if v != nil {
 				n.needsOptional = append(n.needsOptional, v.id)
 			}
@@ -1069,7 +1069,7 @@ func (n *Node) NeedsOptional(deps ...any) *Node {
 			if v != nil && v.n != nil {
 				n.needsOptional = append(n.needsOptional, v.n.id)
 			}
-		case *NodeGroup:
+		case *JobGroup:
 			if v != nil {
 				for _, m := range v.members {
 					n.needsOptional = append(n.needsOptional, m.id)
@@ -1079,7 +1079,7 @@ func (n *Node) NeedsOptional(deps ...any) *Node {
 			if v != "" {
 				n.needsOptional = append(n.needsOptional, v)
 			}
-		case []*Node:
+		case []*JobNode:
 			for _, vv := range v {
 				if vv != nil {
 					n.needsOptional = append(n.needsOptional, vv.id)
@@ -1091,7 +1091,7 @@ func (n *Node) NeedsOptional(deps ...any) *Node {
 }
 
 // OptionalDepIDs returns the IDs declared via NeedsOptional.
-func (n *Node) OptionalDepIDs() []string {
+func (n *JobNode) OptionalDepIDs() []string {
 	out := make([]string, len(n.needsOptional))
 	copy(out, n.needsOptional)
 	return out

@@ -27,13 +27,13 @@ import (
 // The two routings are distinguished internally by whether
 // Pipeline is set; from the call site, .Get(ctx) looks identical:
 //
-//	type DeployJob struct {
+//	type Deploy struct {
 //	    sparkwing.Base
 //	    Build    sparkwing.Ref[BuildOut]   // in-run
 //	    Manifest sparkwing.Ref[Manifest]   // cross-pipeline
 //	}
 //
-//	func (j *DeployJob) Run(ctx context.Context) error {
+//	func (j *Deploy) Run(ctx context.Context) error {
 //	    b := j.Build.Get(ctx)
 //	    m := j.Manifest.Get(ctx)
 //	    return deploy(ctx, b, m)
@@ -54,8 +54,8 @@ type Ref[T any] struct {
 	MaxAge time.Duration
 }
 
-// Node returns the upstream node id this reference points at.
-func (r Ref[T]) Node() string { return r.NodeID }
+// Job returns the upstream node id this reference points at.
+func (r Ref[T]) Job() string { return r.NodeID }
 
 // Get resolves the reference to a typed T value. Behavior depends
 // on the routing:
@@ -140,13 +140,13 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) T {
 // against it at Plan time so type mismatches panic with a
 // node-id-tagged message before any step runs.
 //
-//	build := sw.Job(plan, "build", &BuildJob{}) // BuildJob embeds Produces[BuildOut]
+//	build := sw.Job(plan, "build", &Build{}) // Build embeds Produces[BuildOut]
 //	buildRef := sw.RefTo[BuildOut](build)
-//	sw.Job(plan, "deploy", &DeployJob{Build: buildRef}).Needs(build)
+//	sw.Job(plan, "deploy", &Deploy{Build: buildRef}).Needs(build)
 //
 // RefTo[T] panics when the job does not embed Produces[T] or T does
 // not match the marker's declared type.
-func RefTo[T any](n *Node) Ref[T] {
+func RefTo[T any](n *JobNode) Ref[T] {
 	var zero T
 	want := reflect.TypeOf(zero)
 	got := n.OutputType()
@@ -188,12 +188,12 @@ func MaxAge(d time.Duration) RefOption {
 // packages. The contract is the wire shape: pipeline name + JSON
 // output schema.
 //
-//	type DeployJob struct {
+//	type Deploy struct {
 //	    sparkwing.Base
 //	    Build sparkwing.Ref[BuildOut]
 //	}
 //
-//	sw.Job(plan, "deploy", &DeployJob{
+//	sw.Job(plan, "deploy", &Deploy{
 //	    Build: sw.RefToLastRun[BuildOut]("build-pipeline", "artifact",
 //	        sw.MaxAge(24*time.Hour),
 //	    ),

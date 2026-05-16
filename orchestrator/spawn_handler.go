@@ -32,7 +32,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 	}
 
 	childID := parentNodeID + "/" + spawnID
-	if h.state.plan.Node(childID) != nil {
+	if h.state.plan.Job(childID) != nil {
 		return nil, fmt.Errorf("orchestrator: SpawnNode id collision: %q already in plan", childID)
 	}
 
@@ -46,7 +46,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 		NodeID:      child.ID(),
 		Status:      "pending",
 		Deps:        child.DepIDs(),
-		NeedsLabels: child.RunsOnLabels(),
+		NeedsLabels: child.RequiresLabels(),
 	}); err != nil {
 		return nil, fmt.Errorf("orchestrator: persist spawn child row %q: %w", childID, err)
 	}

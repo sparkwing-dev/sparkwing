@@ -32,7 +32,7 @@ var _ runner.Runner = (*InProcessRunner)(nil)
 // runJobBody executes the node's materialized Work as a step DAG.
 // Returns the typed output of the *WorkStep the Job's Work returned
 // (nil for untyped Jobs).
-func runJobBody(ctx context.Context, node *sparkwing.Node) (any, error) {
+func runJobBody(ctx context.Context, node *sparkwing.JobNode) (any, error) {
 	w := node.Work()
 	if w == nil {
 		return nil, fmt.Errorf("sparkwing: node %q has no Work; non-approval nodes must be registered via plan.Job", node.ID())
@@ -91,7 +91,7 @@ func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runne
 }
 
 // executeNode runs the job with modifiers + hooks and persists state.
-func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *sparkwing.Node, delegate sparkwing.Logger) (any, error) {
+func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	nlog, err := r.backends.Logs.OpenNodeLog(runID, node.ID(), delegate)
 	if err != nil {
 		return nil, err

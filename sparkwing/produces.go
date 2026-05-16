@@ -8,7 +8,7 @@ import "reflect"
 // rejects mismatches; downstream consumers read the contract via
 // sw.RefTo[T](node).
 //
-//	type BuildJob struct {
+//	type Build struct {
 //	    sw.Base
 //	    sw.Produces[BuildOutput]
 //	    // ... fields ...

@@ -16,7 +16,7 @@ func TestFormatPlain_IncludesStepWhenSet(t *testing.T) {
 	rec := sparkwing.LogRecord{
 		TS:    ts,
 		Level: "info",
-		Node:  "deploy",
+		JobID: "deploy",
 		Step:  "canary",
 		Msg:   "rolling 5%",
 	}
@@ -33,7 +33,7 @@ func TestFormatPlain_NodeOnlyWhenNoStep(t *testing.T) {
 	rec := sparkwing.LogRecord{
 		TS:    ts,
 		Level: "info",
-		Node:  "build",
+		JobID: "build",
 		Msg:   "starting",
 	}
 	out := formatPlain(rec)

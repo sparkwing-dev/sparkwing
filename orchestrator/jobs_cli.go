@@ -959,11 +959,11 @@ func formatPlain(rec sparkwing.LogRecord) string {
 		lvl = "info"
 	}
 	prefix := ts + " " + lvl
-	if rec.Node != "" {
+	if rec.JobID != "" {
 		if rec.Step != "" {
-			prefix += " " + rec.Node + "/" + rec.Step
+			prefix += " " + rec.JobID + "/" + rec.Step
 		} else {
-			prefix += " " + rec.Node
+			prefix += " " + rec.JobID
 		}
 	}
 	if rec.Event != "" {

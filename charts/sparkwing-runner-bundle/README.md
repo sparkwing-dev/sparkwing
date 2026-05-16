@@ -88,7 +88,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.tokenSecret.name` | Existing Secret holding the bearer token. | `""` |
 | `controller.tokenSecret.key` | Key inside the Secret. | `token` |
 | `runner.replicas` | Pool size. | `2` |
-| `runner.labels` | `--label` flags for `RunsOn` matching. | `[cluster]` |
+| `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |

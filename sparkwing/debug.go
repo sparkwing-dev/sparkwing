@@ -44,7 +44,7 @@ func Debug(ctx context.Context, format string, args ...any) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "debug",
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Msg:   fmt.Sprintf(format, args...),
 	}))
 }

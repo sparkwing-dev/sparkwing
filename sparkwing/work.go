@@ -30,7 +30,7 @@ type Workable interface {
 // Steps with Needs / SkipIf, plus Sequence / Parallel combinators and
 // Spawn primitives for layer escape.
 //
-// Build via NewWork. The orchestrator calls Job.Work() once per Node
+// Build via NewWork. The orchestrator calls Job.Work() once per Job
 // at Plan-time and walks the entire reachable graph (including Spawn
 // targets) before any dispatch.
 type Work struct {
@@ -265,7 +265,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 // The returned *SpawnHandle accepts .Needs to declare which Steps must
 // complete before the spawn fires, and .Get(ctx) for typed output.
 //
-// "Spawn" is a lifecycle suffix here -- the verb adds a Plan Node
+// "Spawn" is a lifecycle suffix here -- the verb adds a Plan Job
 // from inside Work, hence the Job- prefix.
 //
 // Accepts the same argument shapes as sparkwing.Job's third arg
@@ -408,10 +408,10 @@ func coerceSpawnEachJob(v any) Workable {
 }
 
 // WorkStep is one unit of work inside a Work. Steps are not Jobs;
-// they run inside the Node's runner process and share its filesystem,
-// environment, and ctx. Node-only modifiers (Retry, Timeout, OnFailure,
-// Cache, RunsOn, BeforeRun/AfterRun) are deliberately absent on
-// WorkStep -- promote to a Node via JobSpawn if you need them.
+// they run inside the Job's runner process and share its filesystem,
+// environment, and ctx. Job-only modifiers (Retry, Timeout, OnFailure,
+// Cache, Requires, BeforeRun/AfterRun) are deliberately absent on
+// WorkStep -- promote to a Job via JobSpawn if you need them.
 type WorkStep struct {
 	id              string
 	fn              func(ctx context.Context) (any, error)
@@ -539,7 +539,7 @@ func (s *WorkStep) SkipPredicates() []SkipPredicate { return s.skipIf }
 // rest of the Work: in-flight sibling steps are not cancelled, and
 // downstream steps that .Needs() this one still dispatch. The Job's
 // overall outcome still reports the failure unless the step is also
-// marked Optional. Mirrors Node.ContinueOnError at the Plan layer.
+// marked Optional. Mirrors Job.ContinueOnError at the Plan layer.
 //
 //	a := sw.Step(w, "scan-a", scanA).ContinueOnError()
 //	b := sw.Step(w, "scan-b", scanB).ContinueOnError() // runs even if a fails
@@ -556,7 +556,7 @@ func (s *WorkStep) IsContinueOnError() bool { return s.continueOnError }
 // Optional marks the step as non-essential: a failure is recorded
 // (still visible in logs and step status) but does not count toward
 // the Job's rollup outcome. Implies ContinueOnError. Mirrors
-// Node.Optional at the Plan layer.
+// Job.Optional at the Plan layer.
 //
 //	sw.Step(w, "best-effort-metrics", emitMetrics).Optional()
 func (s *WorkStep) Optional() *WorkStep {
@@ -704,7 +704,7 @@ type SpawnSpec struct {
 }
 
 // ID returns the spawn's local id (not the eventual Plan node id, which
-// is namespaced by the spawning Node).
+// is namespaced by the spawning Job).
 func (s *SpawnSpec) ID() string { return s.id }
 
 // Job returns the spawn's target.

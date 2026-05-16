@@ -13,9 +13,9 @@ import (
 //
 // For each successful WorkStep the typed output is recorded via
 // MarkDone so downstream sparkwing.StepGet[T](ctx, step) calls resolve.
-// RunWork itself returns (nil, err); the Node's typed output is
+// RunWork itself returns (nil, err); the Job's typed output is
 // recorded on the *WorkStep the Job's Work returned and read back by
-// the orchestrator via Node.ResultStep().Output().
+// the orchestrator via Job.ResultStep().Output().
 //
 // SpawnNode declarations dispatch through the SpawnHandler installed
 // in ctx; the spawning runner remains alive across the child's
@@ -476,7 +476,7 @@ func emitStepEvent(ctx context.Context, stepID, event string, elapsed time.Durat
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: level,
-		Node:  NodeFromContext(ctx),
+		JobID: NodeFromContext(ctx),
 		Event: event,
 		Msg:   stepID,
 		Attrs: attrs,

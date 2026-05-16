@@ -257,7 +257,7 @@ export interface Node {
   on_failure_of?: string;
   // Active Plan-layer modifiers from the snapshot. Drives the
   // dispatch-envelope chips beside each node id (Retry, Timeout,
-  // RunsOn, Cache, Inline). Optional fields are omitted on the wire
+  // Requires, Cache, Inline). Optional fields are omitted on the wire
   // when unset.
   modifiers?: NodeModifiers;
   // Inner DAG (Steps + SpawnNode declarations). Populated for nodes

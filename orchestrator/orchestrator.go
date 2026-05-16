@@ -236,7 +236,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			NodeID:      n.ID(),
 			Status:      "pending",
 			Deps:        n.DepIDs(),
-			NeedsLabels: n.RunsOnLabels(),
+			NeedsLabels: n.RequiresLabels(),
 		}); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
@@ -471,7 +471,7 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 			NodeID:      rec.ID(),
 			Status:      "pending",
 			Deps:        rec.DepIDs(),
-			NeedsLabels: rec.RunsOnLabels(),
+			NeedsLabels: rec.RequiresLabels(),
 		})
 		state.scheduleNode(rec)
 		seen[rec.ID()] = true
@@ -511,17 +511,17 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 		return
 	}
 	for _, n := range plan.Nodes() {
-		if n.IsInline() && len(n.RunsOnLabels()) > 0 {
+		if n.IsInline() && len(n.RequiresLabels()) > 0 {
 			delegate.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
 				Level: "warn",
-				Node:  n.ID(),
+				JobID: n.ID(),
 				Event: "plan_warn",
-				Msg:   "Inline() and RunsOn() are set on the same node — RunsOn labels are ignored for inline execution",
+				Msg:   "Inline() and Requires() are set on the same job — Requires labels are ignored for inline execution",
 				Attrs: map[string]any{
 					"inline":      true,
-					"runs_on":     n.RunsOnLabels(),
-					"ignored_key": "runs_on",
+					"requires":    n.RequiresLabels(),
+					"ignored_key": "requires",
 				},
 			})
 		}
@@ -755,7 +755,7 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 		if n.IsApproval() {
 			row["approval"] = true
 		}
-		if gs := plan.NodeGroupNames(n.ID()); len(gs) > 0 {
+		if gs := plan.JobGroupNames(n.ID()); len(gs) > 0 {
 			row["groups"] = gs
 		}
 		// ExpandFrom fan-in edges: expose the source so the plan
@@ -809,7 +809,7 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 // the same DAG shape produce the same hash regardless of which run
 // emitted them. Mirrors orchestrator/receipt's plan_hash so an agent
 // can compare a live run_plan record against a post-hoc receipt.
-func planTopologyHash(nodes []*sparkwing.Node) string {
+func planTopologyHash(nodes []*sparkwing.JobNode) string {
 	type edge struct {
 		ID   string   `json:"id"`
 		Deps []string `json:"deps"`
@@ -1255,7 +1255,7 @@ func (s *dispatchState) lookupDoneCh(id string) (chan struct{}, bool) {
 }
 
 // scheduleNode spawns the per-node dispatch goroutine.
-func (s *dispatchState) scheduleNode(node *sparkwing.Node) {
+func (s *dispatchState) scheduleNode(node *sparkwing.JobNode) {
 	done := s.ensureDoneCh(node.ID())
 	s.wg.Add(1)
 	go func() {
@@ -1314,7 +1314,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 			NodeID:      child.ID(),
 			Status:      "pending",
 			Deps:        child.DepIDs(),
-			NeedsLabels: child.RunsOnLabels(),
+			NeedsLabels: child.RequiresLabels(),
 		}); err != nil {
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 				fmt.Sprintf("ExpandFrom(%s): store child %s: %v", exp.Source.ID(), child.ID(), err))
@@ -1346,7 +1346,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 }
 
 // invokeGenerator runs the user closure under panic recovery.
-func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwing.Node, err error) {
+func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwing.JobNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
@@ -1358,7 +1358,7 @@ func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwi
 
 // runOneNode coordinates per-node dispatch: deps/groups/OnFailure
 // waits, dispatch decision, hand-off to the Runner.
-func (s *dispatchState) runOneNode(node *sparkwing.Node) {
+func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	// Skip-passed short-circuit; rehydrateFromRetry already seeded.
 	if _, prerendered := s.getOutcome(node.ID()); prerendered {
 		return
@@ -1437,7 +1437,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.Node) {
 		if !ok || oc.OK() {
 			continue
 		}
-		upstream := s.plan.Node(depID)
+		upstream := s.plan.Job(depID)
 		if upstream != nil && upstream.IsContinueOnError() {
 			continue
 		}
@@ -1627,7 +1627,7 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 
 // runApprovalGate writes the approvals row and blocks until resolved.
 // Approved -> Success; Denied -> Failed; timeout per ApprovalOnTimeout.
-func (s *dispatchState) runApprovalGate(node *sparkwing.Node) runner.Result {
+func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	cfg := node.ApprovalConfig()
 	if cfg == nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("approval node %q has nil config", node.ID())}
@@ -1858,7 +1858,7 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 
 // invokeRecoveryRunner runs a recovery node via the in-process
 // job-only path; cluster runners fall back to full RunNode.
-func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.Node) runner.Result {
+func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode) runner.Result {
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
 		out, err := ipr.executeNode(s.resolverCtx, s.runID, node, s.delegate)
 		if err != nil {
@@ -1878,7 +1878,7 @@ func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.Node) runner.Result
 
 // runWithCap gates non-inline RunNode against the MaxParallel sem.
 // Nil sem or inline node = no cap.
-func (s *dispatchState) runWithCap(node *sparkwing.Node, fn func() runner.Result) runner.Result {
+func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func() runner.Result) runner.Result {
 	if s.sem == nil || node.IsInline() {
 		return fn()
 	}
@@ -1983,7 +1983,7 @@ const defaultPredicateTimeout = 30 * time.Second
 
 // evalSkipPredicates returns (reason, true) on the first true predicate.
 // Errors/panics/timeouts don't skip — run the work and let the job decide.
-func evalSkipPredicates(ctx context.Context, node *sparkwing.Node) (string, bool) {
+func evalSkipPredicates(ctx context.Context, node *sparkwing.JobNode) (string, bool) {
 	preds := node.SkipPredicates()
 	if len(preds) == 0 {
 		return "", false
@@ -2170,7 +2170,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 			ID:      n.ID(),
 			Deps:    n.DepIDs(),
 			Env:     n.EnvMap(),
-			Groups:  p.NodeGroupNames(n.ID()),
+			Groups:  p.JobGroupNames(n.ID()),
 			Dynamic: p.IsDynamicNode(n.ID()),
 		}
 		if cfg := n.ApprovalConfig(); cfg != nil {
@@ -2205,7 +2205,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 			ID:          rec.ID(),
 			Deps:        rec.DepIDs(),
 			Env:         rec.EnvMap(),
-			Groups:      p.NodeGroupNames(rec.ID()),
+			Groups:      p.JobGroupNames(rec.ID()),
 			OnFailureOf: n.ID(),
 			Modifiers:   nodeModifiersSnapshot(rec),
 		}
@@ -2225,14 +2225,14 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext) ([]byte, er
 // nodeModifiersSnapshot extracts the Plan-layer modifiers a renderer
 // cares about. Returns nil when nothing is set so JSON omits the
 // field entirely.
-func nodeModifiersSnapshot(n *sparkwing.Node) *snapshotModifiers {
+func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	rc := n.RetryConfig()
 	m := snapshotModifiers{
 		Retry:           rc.Attempts,
 		RetryBackoffMS:  rc.Backoff.Milliseconds(),
 		RetryAuto:       rc.Auto,
 		TimeoutMS:       n.TimeoutDuration().Milliseconds(),
-		RunsOn:          n.RunsOnLabels(),
+		RunsOn:          n.RequiresLabels(),
 		Inline:          n.IsInline(),
 		Optional:        n.IsOptional(),
 		ContinueOnError: n.IsContinueOnError(),

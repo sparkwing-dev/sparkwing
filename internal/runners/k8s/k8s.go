@@ -65,7 +65,7 @@ type Config struct {
 
 	// NodeSelector + Tolerations let the caller pin runner pods to a
 	// specific pool (GPU nodes, spot nodes, etc.). v1 copies the same
-	// selector to every Job; RunsOn-style per-node routing lands in a
+	// selector to every Job; Requires-style per-job routing lands in a
 	// later session.
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration

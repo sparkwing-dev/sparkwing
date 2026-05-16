@@ -98,7 +98,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)
 	}
 
-	target := plan.Node(nodeID)
+	target := plan.Job(nodeID)
 	if target == nil {
 		for _, exp := range plan.Expansions() {
 			children := invokeGeneratorForPod(ctx, exp)

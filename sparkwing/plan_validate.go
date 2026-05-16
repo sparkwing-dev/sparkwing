@@ -70,7 +70,7 @@ func planStepIDs(p *Plan) map[string]struct{} {
 // intended predecessor.
 //
 // What gets validated:
-//   - Plan-level: every Node's Needs string IDs must match a node
+//   - Plan-level: every Job's Needs string IDs must match a node
 //     declared on the same Plan.
 //   - Work-level: every WorkStep / SpawnHandle / SpawnGroup's Needs
 //     string IDs must match a step or spawn registered on the same
@@ -92,8 +92,8 @@ func validateRefs(p *Plan) {
 	}
 }
 
-// validatePlanRefs flags Node.Needs strings that don't resolve to a
-// declared node on the same Plan. Handle-typed Needs(*Node) entries
+// validatePlanRefs flags Job.Needs strings that don't resolve to a
+// declared node on the same Plan. Handle-typed Needs(*JobNode) entries
 // are guaranteed valid because the handle was returned by
 // plan.Job() which registered it.
 func validatePlanRefs(p *Plan) {
@@ -107,7 +107,7 @@ func validatePlanRefs(p *Plan) {
 				continue
 			}
 			panic(unknownRefMessage(
-				fmt.Sprintf("Node %q .Needs(%q)", n.ID(), depID),
+				fmt.Sprintf("Job %q .Needs(%q)", n.ID(), depID),
 				"plan node",
 				depID,
 				known,

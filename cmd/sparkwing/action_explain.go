@@ -448,7 +448,7 @@ func nodeModifiersSuffix(n *planSnapshotNode) string {
 			bits = append(bits, "Timeout="+(time.Duration(m.TimeoutMS)*time.Millisecond).String())
 		}
 		if len(m.RunsOn) > 0 {
-			bits = append(bits, "RunsOn="+strings.Join(m.RunsOn, ","))
+			bits = append(bits, "Requires="+strings.Join(m.RunsOn, ","))
 		}
 		if m.CacheKey != "" {
 			s := "Cache=" + m.CacheKey

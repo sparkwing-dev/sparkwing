@@ -31,15 +31,15 @@ func (s *stdoutLogger) Emit(rec sparkwing.LogRecord) {
 		out = os.Stderr
 	}
 	prefix := ""
-	if rec.Node != "" {
-		prefix = rec.Node + " │ "
+	if rec.JobID != "" {
+		prefix = rec.JobID + " │ "
 	}
 	switch rec.Event {
 	case "node_start":
-		fmt.Fprintf(out, "▶ %s\n", rec.Node)
+		fmt.Fprintf(out, "▶ %s\n", rec.JobID)
 	case "node_end":
 		outcome, _ := rec.Attrs["outcome"].(string)
-		fmt.Fprintf(out, "◀ %s %s\n", rec.Node, outcome)
+		fmt.Fprintf(out, "◀ %s %s\n", rec.JobID, outcome)
 	default:
 		fmt.Fprintln(out, prefix+rec.Msg)
 	}
