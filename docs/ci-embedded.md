@@ -38,25 +38,30 @@ jobs:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION:            us-west-2
-          SPARKWING_LOG_STORE:      s3://my-team-sparkwing/logs
-          SPARKWING_ARTIFACT_STORE: s3://my-team-sparkwing/cache
         run: sparkwing run release-prod --mode=ci-embedded --workers=4
 ```
+
+Cache and logs destinations come from `.sparkwing/backends.yaml`,
+which auto-detects GHA via the built-in `environments.gha` rule.
+See [storage backends](backends) for the configuration shape.
 
 A pipeline node that fails fails the GHA job (exit code propagates).
 
 ## How it works
 
 1. `--mode=ci-embedded` plumbs through `wing` -> the pipeline binary
-   via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`,
-   `SPARKWING_LOG_STORE`, `SPARKWING_ARTIFACT_STORE`).
-2. The orchestrator opens local SQLite for fast lifecycle writes.
-3. Per-node log lines route to the configured `LogStore` (S3 or fs)
-   instead of `~/.sparkwing/runs/<id>/`.
-4. When the pipeline exits, run + node records are serialized to
-   NDJSON and uploaded to `<artifact-store>/runs/<runID>/state.ndjson`.
-5. A dashboard configured with `--log-store s3://...` and
-   `--artifact-store s3://...` reads everything back.
+   via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
+2. The orchestrator resolves cache and logs through
+   `.sparkwing/backends.yaml`. In GHA the built-in `gha` environment
+   rule matches and the `environments.gha` block selects (e.g.) S3.
+3. SQLite handles fast lifecycle writes; state goes to the configured
+   state backend if declared.
+4. Per-node log lines route to the resolved `Logs` backend instead
+   of `~/.sparkwing/runs/<id>/`.
+5. When the pipeline exits, run + node records are serialized to
+   NDJSON and uploaded to `<cache>/runs/<runID>/state.ndjson`.
+6. A dashboard configured with the matching backends reads
+   everything back.
 
 ## Flags
 
@@ -64,11 +69,12 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | ---- | ------- | ----------- |
 | `--mode=ci-embedded` | (off) | Enables this mode. |
 | `--workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. GHA hosted runners are 2-CPU; setting `--workers=4` on small VMs over-subscribes -- pick deliberately. |
-| `--on PROFILE` | (off) | Reads `log_store` + `artifact_store` from `~/.config/sparkwing/profiles.yaml`. Use this on a laptop; CI VMs typically use env vars instead. |
+| `--on PROFILE` | (off) | Selects a controller profile from `~/.config/sparkwing/profiles.yaml`. |
 
-`SPARKWING_LOG_STORE` and `SPARKWING_ARTIFACT_STORE` env vars override
-the profile fields when both are set, so a CI step can spot-check a
-different bucket without rewriting the profile.
+> `SPARKWING_LOG_STORE` and `SPARKWING_ARTIFACT_STORE` env vars are
+> deprecated. When set they fill the `defaults.logs` / `defaults.cache`
+> slots and a one-shot warning prints on stderr. Migrate to
+> [backends.yaml](backends).
 
 ### Recommended: `SPARKWING_NO_SPARKS_RESOLVE=1` in CI
 
@@ -193,12 +199,21 @@ steps:
   - label: "release"
     command: |
       sparkwing run release-prod --mode=ci-embedded --workers=4
-    env:
-      SPARKWING_LOG_STORE: s3://my-team-sparkwing/logs
-      SPARKWING_ARTIFACT_STORE: s3://my-team-sparkwing/cache
     plugins:
       - aws-credentials#v1.0:
           role: arn:aws:iam::1234:role/buildkite-sparkwing
+```
+
+Cache and logs come from `.sparkwing/backends.yaml`. Buildkite
+doesn't have a built-in detect rule out of the box; declare your
+own environment if you want a Buildkite-specific overlay:
+
+```yaml
+environments:
+  buildkite:
+    detect: { env_var: BUILDKITE, equals: "true" }
+    cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
+    logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
 ```
 
 ## GitLab CI
@@ -211,10 +226,10 @@ release:
     - curl -fsSL https://sparkwing.dev/install.sh | sh
   script:
     - sparkwing run release-prod --mode=ci-embedded --workers=4
-  variables:
-    SPARKWING_LOG_STORE: s3://my-team-sparkwing/logs
-    SPARKWING_ARTIFACT_STORE: s3://my-team-sparkwing/cache
 ```
+
+Declare a `gitlab` environment in `.sparkwing/backends.yaml` keyed
+off `GITLAB_CI=true` if you want a GitLab-specific overlay.
 
 ## Related
 

@@ -37,6 +37,7 @@ docs/
   scheduling.md          runner labels, taints, tolerations, runs_on
   warm-pool.md           warm PVC pool
   caching.md             node-level CacheKey modifier
+  backends.md            backends.yaml: cache / logs / state destinations
   build-caching.md       Docker / BuildKit / proxy caching layers
   fast-builds.md         performance best practices
   gitcache.md            sparkwing-cache: git HTTP, blobs, package proxy

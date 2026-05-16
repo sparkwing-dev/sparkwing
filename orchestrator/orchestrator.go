@@ -439,6 +439,9 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if opts.SecretSource == nil {
 		opts.SecretSource = secrets.NewDotenvSource("")
 	}
+	if err := ApplyBackendsConfig(ctx, &opts); err != nil {
+		return nil, fmt.Errorf("backends: %w", err)
+	}
 	backends := LocalBackends(paths, st)
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)

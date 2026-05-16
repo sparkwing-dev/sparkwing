@@ -1,14 +1,22 @@
 # Example GitHub Actions workflow that runs a sparkwing pipeline in
-# ci-embedded mode. Logs + final run state go to S3 so a dashboard
-# elsewhere can replay the run.
+# ci-embedded mode. Cache and logs go to S3 so a dashboard elsewhere
+# can replay the run.
 #
 # Setup:
 # 1. Add AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY repository secrets
-#    with permissions to PUT/GET/DELETE on the bucket below.
-# 2. Adjust SPARKWING_LOG_STORE and SPARKWING_ARTIFACT_STORE to your
-#    bucket and prefix layout.
-# 3. Make sure your repo has a .sparkwing/ directory with the pipeline
-#    you want to run (e.g. release-prod).
+#    with permissions to PUT/GET/DELETE on the bucket.
+# 2. Declare the GHA bucket in .sparkwing/backends.yaml:
+#
+#      environments:
+#        gha:
+#          detect: { env_var: GITHUB_ACTIONS, equals: "true" }
+#          cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
+#          logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
+#
+#    The built-in `gha` detect rule fires automatically; the entry
+#    above contributes the surfaces.
+# 3. Make sure your repo has a .sparkwing/ directory with the
+#    pipeline you want to run (e.g. release-prod).
 
 name: ci-embedded
 on:
@@ -35,8 +43,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: us-west-2
-          SPARKWING_LOG_STORE: s3://my-team-sparkwing/logs
-          SPARKWING_ARTIFACT_STORE: s3://my-team-sparkwing/cache
           # Skip sparks resolution at run time -- trust the committed
           # .resolved.mod overlay. Refresh by running
           # `sparkwing pipeline sparks update` locally and committing

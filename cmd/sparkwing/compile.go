@@ -50,14 +50,17 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 		return bincache.ExecReplace(binPath, args, sparkwingDir, env)
 	}
 
-	// 2a) Pluggable ArtifactStore cache. When
-	// SPARKWING_ARTIFACT_STORE is set, fetch bin/<hash> through the
-	// pluggable backend (fs / s3 / sparkwing-cache HTTP). This is
-	// the "ci-embedded runs without Go" path: a separate publish job
-	// pre-uploaded the binary, runners curl it back. Falls through to
-	// (2b) on miss or error.
-	if asURL := os.Getenv("SPARKWING_ARTIFACT_STORE"); asURL != "" {
-		if as, err := storeurl.OpenArtifactStore(context.Background(), asURL); err == nil {
+	// 2a) Pluggable ArtifactStore cache: fetch bin/<hash> via the
+	// effective cache backend from .sparkwing/backends.yaml (with
+	// SPARKWING_ARTIFACT_STORE honored via the deprecation shim).
+	// This is the "ci-embedded runs without Go" path: a separate
+	// publish job pre-uploaded the binary, runners curl it back.
+	// Falls through to (2b) on miss or error. Per-target Backend
+	// overlays aren't available here -- compile runs before
+	// pipeline-aware orchestrator init -- so only defaults and the
+	// auto-detected environment apply.
+	if cache := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
+		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache); err == nil {
 			if err := bincache.FetchFromArtifactStore(context.Background(), as, key, binPath); err == nil {
 				ensureDescribeCache(sparkwingDir, binPath)
 				env = append(env, "SPARKWING_BINARY_SOURCE=artifact-store")
@@ -66,7 +69,7 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 				slog.Default().Warn("artifact-store fetch failed", "err", err, "hash", key)
 			}
 		} else {
-			slog.Default().Warn("artifact-store open failed", "err", err, "url", asURL)
+			slog.Default().Warn("artifact-store open failed", "err", err, "type", cache.Type)
 		}
 	}
 
