@@ -68,6 +68,15 @@ pipelines:
 	if len(p.Secrets) != 2 {
 		t.Fatalf("secrets count = %d", len(p.Secrets))
 	}
+	// Legacy bare-string form maps to typed entries with Required=true.
+	for _, e := range p.Secrets {
+		if e.Name == "" {
+			t.Fatalf("legacy bare-string secret produced empty Name: %+v", e)
+		}
+		if !e.Required {
+			t.Fatalf("legacy bare-string secret should be Required, got %+v", e)
+		}
+	}
 	if len(p.Tags) != 2 {
 		t.Fatalf("tags count = %d", len(p.Tags))
 	}
