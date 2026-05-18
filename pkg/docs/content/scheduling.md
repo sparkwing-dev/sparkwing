@@ -97,7 +97,7 @@ value of, say, `gpu`.
 Agents register themselves with the controller on every poll, sending
 their labels and taints in the URL.
 
-### From `~/.config/sparkwing/config.yaml`
+### From `~/.config/sparkwing/profiles.yaml`
 
 ```yaml
 default_profile: local

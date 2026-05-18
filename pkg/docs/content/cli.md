@@ -20,7 +20,6 @@ Wing-owned flags (consumed before the pipeline sees them):
 |---|---|
 | `--on <profile>` | Dispatch remotely via the profile's controller instead of running locally |
 | `--from <ref>` | Compile from a git ref (branch/tag/SHA) instead of the working tree |
-| `--config <preset>` | Apply a named preset from `.sparkwing/config.yaml` |
 | `--verbose`, `-v` | Set `SPARKWING_LOG_LEVEL=debug` on the pipeline binary |
 
 All other `--flag value` tokens are forwarded to the pipeline binary and parsed against the pipeline's typed `Args` struct.

@@ -705,7 +705,7 @@ _sparkwing_complete_flags() {
     # Pipeline-specific flags go FIRST so the "Pipeline Args" group
     # renders at the top of the menu -- operators can tab-cycle
     # directly to the per-pipeline knobs without scrolling past the
-    # sparkwing-owned plumbing (--sw-on/--sw-from/--sw-config/...)
+    # sparkwing-owned plumbing (--sw-on/--sw-from/--sw-retry-of/...)
     # every time. "sparkwing run <pipeline> --<TAB>" is the only path
     # that carries a pipeline name at a known position (leaf "run",
     # pipeline at $2).

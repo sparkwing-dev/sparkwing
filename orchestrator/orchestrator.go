@@ -827,15 +827,12 @@ func buildRunFlags(opts Options) map[string]any {
 		flags["allow_money"] = true
 	}
 	// Sparkwing-dispatch flags forwarded only for the run-record breadcrumb.
-	// `from` / `config` / `no_update` are consumed by the sparkwing run
-	// dispatcher before exec, so the pipeline binary never lifts them
-	// onto Options -- but knowing they were set is still load-bearing
-	// for reproducibility.
+	// `from` / `no_update` are consumed by the sparkwing run dispatcher
+	// before exec, so the pipeline binary never lifts them onto
+	// Options -- but knowing they were set is still load-bearing for
+	// reproducibility.
 	if v := os.Getenv("SPARKWING_FROM"); v != "" {
 		flags["from"] = v
-	}
-	if v := os.Getenv("SPARKWING_CONFIG"); v != "" {
-		flags["config"] = v
 	}
 	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
 		flags["no_update"] = true

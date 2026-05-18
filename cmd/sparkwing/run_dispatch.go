@@ -41,7 +41,6 @@ func atoiNonNeg(s string) (int, error) {
 type runFlags struct {
 	from      string
 	on        string
-	config    string
 	retryOf   string
 	fullRetry bool
 	noUpdate  bool
@@ -178,17 +177,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case a == "--sw-full":
 			wf.fullRetry = true
-			i++
-		case a == "--sw-config":
-			if i+1 < len(args) {
-				wf.config = args[i+1]
-				i += 2
-				continue
-			}
-			pass = append(pass, a)
-			i++
-		case strings.HasPrefix(a, "--sw-config="):
-			wf.config = strings.TrimPrefix(a, "--sw-config=")
 			i++
 		case a == "--sw-no-update":
 			wf.noUpdate = true

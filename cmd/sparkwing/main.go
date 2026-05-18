@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingconfig"
 	"github.com/sparkwing-dev/sparkwing/profile"
 	"github.com/sparkwing-dev/sparkwing/repos"
 )
@@ -113,23 +112,6 @@ func dispatchRun(args []string) error {
 	// Auto-register so cross-repo RunAndAwait can resolve names without
 	// a hardcoded WithFreshRepo. Errors dropped: read-only home shouldn't break dispatch.
 	_ = repos.AutoRegister(filepath.Dir(dir))
-
-	// --config PRESET: explicit flags always win over the preset.
-	if wf.config != "" {
-		preset, found, perr := wingconfig.Resolve(dir, wf.config)
-		if perr != nil {
-			return fmt.Errorf("--config %s: %w", wf.config, perr)
-		}
-		if !found {
-			return fmt.Errorf("--config %s: preset not found in .sparkwing/config.yaml or ~/.config/sparkwing/config.yaml", wf.config)
-		}
-		if wf.on == "" {
-			wf.on = preset.On
-		}
-		if wf.from == "" {
-			wf.from = preset.From
-		}
-	}
 
 	// Pipeline-level dispatch gating now flows through the runner
 	// resolution rule: pipelines.yaml declares which runners a
@@ -226,15 +208,11 @@ func dispatchRun(args []string) error {
 	// Forward pre-flight sparkwing flags as env vars purely so
 	// emitRunStart can surface them on run_start.attrs.flags. The
 	// pipeline binary itself doesn't read these (--sw-from is
-	// consumed before exec via setupFromRef, --sw-config is resolved
-	// into other flags above, --sw-no-update gates sparks resolve in
-	// compile.go) -- they appear only as reproducibility breadcrumbs
-	// in the run record.
+	// consumed before exec via setupFromRef, --sw-no-update gates
+	// sparks resolve in compile.go) -- they appear only as
+	// reproducibility breadcrumbs in the run record.
 	if wf.from != "" {
 		env = append(env, "SPARKWING_FROM="+wf.from)
-	}
-	if wf.config != "" {
-		env = append(env, "SPARKWING_CONFIG="+wf.config)
 	}
 	if wf.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")

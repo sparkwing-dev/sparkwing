@@ -172,8 +172,8 @@ var cmdConfigureInit = Command{
 	Description: `Idempotent setup + status command for laptop-level
 sparkwing config. Creates ~/.config/sparkwing/ if it doesn't exist,
 then reports which config files are present (profiles.yaml,
-repos.yaml, config.yaml, secrets.env), the running CLI + Go
-toolchain version, and a curated list of next-step commands.
+repos.yaml, secrets.env), the running CLI + Go toolchain version,
+and a curated list of next-step commands.
 
 Pairs with the per-project flow: use this one on a fresh laptop
 after install, then run 'sparkwing pipeline new --name <name>'

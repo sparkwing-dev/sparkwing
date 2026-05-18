@@ -52,7 +52,6 @@ type SparkwingFlagDoc struct {
 var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-change-directory", Short: "C", Argument: "PATH", Desc: "Re-anchor .sparkwing/ discovery to PATH (mirrors `git -C` / `make -C`)", Group: "System"},
 	{Name: "sw-from", Argument: "REF", Desc: "Compile from a git ref (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
-	{Name: "sw-config", Argument: "PRESET", Desc: "Apply a named preset from .sparkwing/config.yaml or ~/.config/sparkwing/config.yaml", Group: "System"},
 	{Name: "sw-retry-of", Argument: "RUN_ID", Desc: "Retry a prior run: skip nodes that passed, re-run the rest", Group: "System", Hot: true},
 	{Name: "sw-full", Desc: "With --sw-retry-of, disable skip-passed so every node re-runs from scratch", Group: "System"},
 	{Name: "sw-verbose", Short: "v", Desc: "Enable debug logging from the orchestrator (equivalent to SPARKWING_LOG_LEVEL=debug)", Group: "System"},

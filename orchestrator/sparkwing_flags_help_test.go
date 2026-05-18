@@ -24,7 +24,6 @@ func TestPrintSparkwingFlagsSection_ContainsArcFlags(t *testing.T) {
 
 	mustContain(t, out, "--sw-on")
 	mustContain(t, out, "--sw-from")
-	mustContain(t, out, "--sw-config")
 	mustContain(t, out, "--sw-retry-of")
 
 	mustContain(t, out, "SPARKWING FLAGS")

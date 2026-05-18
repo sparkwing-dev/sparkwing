@@ -105,7 +105,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 	}
 	// Advanced flags: must NOT appear in default --help, must appear in --help-all.
 	advancedFlags := []string{
-		"--sw-config", "--sw-change-directory", "--sw-verbose", "--sw-full",
+		"--sw-change-directory", "--sw-verbose", "--sw-full",
 		"--sw-allow-destructive", "--sw-allow-prod", "--sw-allow-money",
 		"--sw-job", "--sw-prefer", "--sw-backends-env",
 	}
