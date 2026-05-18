@@ -635,6 +635,7 @@ func wingFlagSpecsFromDocs() []FlagSpec {
 			Argument: d.Argument,
 			Desc:     d.Desc,
 			Group:    d.Group,
+			Hot:      d.Hot,
 		})
 	}
 	return out

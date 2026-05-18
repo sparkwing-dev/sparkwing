@@ -82,11 +82,11 @@ func TestBindFlagsDefaults(t *testing.T) {
 	}
 }
 
-// TestWingHelpListsArcFlags pins that `wing --help` and `sparkwing
-// run --help` must enumerate the wing-level flags. The wing-flag
-// list is sourced from sparkwing.WingFlagDocs() so adding a flag in
-// the SDK surfaces it here automatically; this test is the
-// regression guard.
+// TestWingHelpListsArcFlags pins which wing-level flags surface in
+// `--help` (the hot tier) and which only surface in `--help-all`
+// (the advanced tier). The wing-flag list is sourced from
+// sparkwing.WingFlagDocs() so a flag added in the SDK propagates
+// here automatically.
 func TestWingHelpListsArcFlags(t *testing.T) {
 	cases := []struct {
 		name string
@@ -96,28 +96,63 @@ func TestWingHelpListsArcFlags(t *testing.T) {
 		{"sparkwing run", cmdRun},
 		{"sparkwing pipeline run", cmdPipelineRun},
 	}
-	mustContain := []string{
-		// Range-resume.
+	// Hot flags: must appear in default --help output.
+	hotFlags := []string{
+		"--from", "--retry-of",
 		"--start-at", "--stop-at",
-		// Dry-run.
 		"--dry-run",
-		// Blast-radius escape hatches.
+		"--for", "--on",
+		"--help-all", // the escape hatch must be discoverable from --help
+	}
+	// Advanced flags: must NOT appear in default --help, must appear in --help-all.
+	advancedFlags := []string{
+		"--config", "--change-directory", "--verbose", "--full",
 		"--allow-destructive", "--allow-prod", "--allow-money",
-		// Pre-existing staples (regression guard).
-		"--from", "--config", "--retry-of", "--on",
+		"--job", "--prefer", "--backends-env",
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name+" default", func(t *testing.T) {
 			var buf bytes.Buffer
 			PrintHelp(tc.cmd, &buf)
 			out := buf.String()
-			for _, f := range mustContain {
+			for _, f := range hotFlags {
 				if !strings.Contains(out, f) {
-					t.Errorf("expected %s --help to list %s; got:\n%s", tc.name, f, out)
+					t.Errorf("expected default %s --help to list %s; got:\n%s", tc.name, f, out)
+				}
+			}
+			for _, f := range advancedFlags {
+				if containsFlagRow(out, f) {
+					t.Errorf("default %s --help leaked advanced flag %s; got:\n%s", tc.name, f, out)
+				}
+			}
+		})
+		t.Run(tc.name+" --help-all", func(t *testing.T) {
+			var buf bytes.Buffer
+			printHelpWithFlags(tc.cmd, &buf, visibleFlagsForHelp(tc.cmd, true))
+			out := buf.String()
+			for _, f := range append(hotFlags, advancedFlags...) {
+				if !containsFlagRow(out, f) {
+					t.Errorf("expected %s --help-all to list %s; got:\n%s", tc.name, f, out)
 				}
 			}
 		})
 	}
+}
+
+// containsFlagRow returns true when out contains a help-formatted
+// flag row for f — i.e., a single line that includes both the flag
+// name and an [optional]/[required] tag. Excludes mentions of the
+// flag in DESCRIPTION prose where tags are absent.
+func containsFlagRow(out, flagName string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, flagName) {
+			continue
+		}
+		if strings.Contains(line, "[optional]") || strings.Contains(line, "[required]") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {

@@ -32,6 +32,10 @@ type WingFlagDoc struct {
 	// "System". Per-pipeline help uses this to section the footer;
 	// `wing --help` uses it via FlagSpec.Group.
 	Group string
+	// Hot marks flags an operator reaches for on most runs. Default
+	// --help and tab-completion menus filter to Hot=true entries to
+	// keep the surface small; the long tail surfaces via --help-all.
+	Hot bool
 }
 
 // wingFlagDocs is the canonical documentation source for wing-owned
@@ -48,25 +52,25 @@ type WingFlagDoc struct {
 var wingFlagDocs = []WingFlagDoc{
 	// Source: where + what to compile.
 	{Name: "change-directory", Short: "C", Argument: "PATH", Desc: "Re-anchor .sparkwing/ discovery to PATH (mirrors `git -C` / `make -C`)", Group: "Source"},
-	{Name: "from", Argument: "REF", Desc: "Compile from a git ref (branch/tag/SHA) instead of the working tree", Group: "Source"},
+	{Name: "from", Argument: "REF", Desc: "Compile from a git ref (branch/tag/SHA) instead of the working tree", Group: "Source", Hot: true},
 	{Name: "config", Argument: "PRESET", Desc: "Apply a named preset from .sparkwing/config.yaml or ~/.config/sparkwing/config.yaml", Group: "Source"},
-	{Name: "retry-of", Argument: "RUN_ID", Desc: "Retry a prior run: skip nodes that passed, re-run the rest", Group: "Source"},
+	{Name: "retry-of", Argument: "RUN_ID", Desc: "Retry a prior run: skip nodes that passed, re-run the rest", Group: "Source", Hot: true},
 	{Name: "full", Desc: "With --retry-of, disable skip-passed so every node re-runs from scratch", Group: "Source"},
 	{Name: "verbose", Short: "v", Desc: "Enable debug logging from the orchestrator (equivalent to SPARKWING_LOG_LEVEL=debug)", Group: "Source"},
 	// Range: which subset of the DAG runs.
-	{Name: "start-at", Argument: "STEP", Desc: "Start the run at STEP, skipping every step before it", Group: "Range"},
-	{Name: "stop-at", Argument: "STEP", Desc: "Stop the run after STEP, skipping every step beyond it", Group: "Range"},
+	{Name: "start-at", Argument: "STEP", Desc: "Start the run at STEP, skipping every step before it", Group: "Range", Hot: true},
+	{Name: "stop-at", Argument: "STEP", Desc: "Stop the run after STEP, skipping every step beyond it", Group: "Range", Hot: true},
 	// Safety: blast-radius gates + dry-run.
-	{Name: "dry-run", Desc: "Run each step's dry-run probe instead of its apply Fn; no mutation", Group: "Safety"},
+	{Name: "dry-run", Desc: "Run each step's dry-run probe instead of its apply Fn; no mutation", Group: "Safety", Hot: true},
 	{Name: "allow-destructive", Desc: "Authorize dispatch when the plan reaches a Destructive-marked step", Group: "Safety"},
 	{Name: "allow-prod", Desc: "Authorize dispatch when the plan reaches a AffectsProduction-marked step", Group: "Safety"},
 	{Name: "allow-money", Desc: "Authorize dispatch when the plan reaches a CostsMoney-marked step", Group: "Safety"},
 	// Selection: which target / runner / preferences resolve this run.
-	{Name: "for", Argument: "TARGET", Desc: "Pick the pipeline target to run against (Config + Source binding follow)", Group: "Selection"},
+	{Name: "for", Argument: "TARGET", Desc: "Pick the pipeline target to run against (Config + Source binding follow)", Group: "Selection", Hot: true},
 	{Name: "job", Argument: "ID=RUNNER", Desc: "Force one job to a specific runner (repeatable; must satisfy that job's Requires)", Group: "Selection"},
 	{Name: "prefer", Argument: "LABEL", Desc: "Bias runner selection by label across the run (repeatable; loses to a job's own Prefers)", Group: "Selection"},
 	// System: where the work runs.
-	{Name: "on", Argument: "NAME", Desc: "Dispatch on a remote controller instead of running locally", Group: "System"},
+	{Name: "on", Argument: "NAME", Desc: "Dispatch on a remote controller instead of running locally", Group: "System", Hot: true},
 	{Name: "backends-env", Argument: "NAME", Desc: "Force a specific environments: entry from backends.yaml (skips auto-detect)", Group: "System"},
 }
 

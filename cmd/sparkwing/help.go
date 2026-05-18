@@ -52,6 +52,12 @@ type FlagSpec struct {
 
 	// Hidden flags are parsed/validated but absent from help and completion.
 	Hidden bool
+
+	// Hot marks the flag as part of the default --help / tab-completion
+	// surface. When any flag on a command is Hot, the default help
+	// renders only Hot flags (plus --help / --help-all). --help-all
+	// bypasses the filter and shows everything.
+	Hot bool
 }
 
 type PosArg struct {
@@ -96,6 +102,14 @@ var helpFlag = FlagSpec{
 	Short: "h",
 	Desc:  "Show help for this command and exit",
 	Group: "Other",
+	Hot:   true,
+}
+
+var helpAllFlag = FlagSpec{
+	Name:  "help-all",
+	Desc:  "Show every flag, including infrequently-used advanced ones",
+	Group: "Other",
+	Hot:   true,
 }
 
 // errHelpRequested = the user passed -h / --help; handlers should bail.
@@ -108,6 +122,9 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	if fs.Lookup("help") == nil {
 		fs.BoolP("help", "h", false, helpFlag.Desc)
 	}
+	if fs.Lookup("help-all") == nil {
+		fs.Bool("help-all", false, helpAllFlag.Desc)
+	}
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -119,6 +136,10 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	}
 
 	if v, err := fs.GetBool("help"); err == nil && v {
+		renderHelp(cmd, args, os.Stdout)
+		return errHelpRequested
+	}
+	if v, err := fs.GetBool("help-all"); err == nil && v {
 		renderHelp(cmd, args, os.Stdout)
 		return errHelpRequested
 	}
@@ -158,6 +179,10 @@ func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 }
 
 func PrintHelp(cmd Command, w io.Writer) {
+	printHelpWithFlags(cmd, w, visibleFlagsForHelp(cmd, false))
+}
+
+func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 	if cmd.Synopsis != "" {
 		fmt.Fprintln(w, cmd.Synopsis)
 		fmt.Fprintln(w)
@@ -220,16 +245,6 @@ func PrintHelp(cmd Command, w io.Writer) {
 		fmt.Fprintln(w)
 	}
 
-	var flags []FlagSpec
-	for _, f := range cmd.Flags {
-		if f.Hidden {
-			continue
-		}
-		flags = append(flags, f)
-	}
-	if !hasFlagNamed(flags, "help") {
-		flags = append(flags, helpFlag)
-	}
 	groups := groupFlagsForHelp(flags, cmd.GroupOrder)
 	for _, g := range groups {
 		fmt.Fprintln(w, strings.ToUpper(g.name))
@@ -549,7 +564,56 @@ func renderHelp(cmd Command, args []string, w io.Writer) {
 		_ = enc.Encode(toCommandJSON(&cmd))
 		return
 	}
+	if wantsAllFlags(args) {
+		printHelpWithFlags(cmd, w, visibleFlagsForHelp(cmd, true))
+		return
+	}
 	PrintHelp(cmd, w)
+}
+
+// wantsAllFlags returns true when args carries --help-all (the
+// explicit "show every flag" signal). Tab-completion uses
+// visibleFlagsForHelp(cmd, false) and never asks for the all-set;
+// only the --help-all subcommand pathway flips this on.
+func wantsAllFlags(args []string) bool {
+	for _, a := range args {
+		if a == "--help-all" {
+			return true
+		}
+	}
+	return false
+}
+
+// visibleFlagsForHelp returns the flag set that should render in
+// --help and tab-completion menus. When allFlags is false AND at
+// least one of cmd.Flags is Hot, the result filters down to Hot
+// flags (plus helpFlag + helpAllFlag). When allFlags is true or no
+// flag is marked Hot, the result is every non-Hidden flag.
+func visibleFlagsForHelp(cmd Command, allFlags bool) []FlagSpec {
+	hasHot := false
+	for _, f := range cmd.Flags {
+		if f.Hot {
+			hasHot = true
+			break
+		}
+	}
+	var out []FlagSpec
+	for _, f := range cmd.Flags {
+		if f.Hidden {
+			continue
+		}
+		if hasHot && !allFlags && !f.Hot {
+			continue
+		}
+		out = append(out, f)
+	}
+	if !hasFlagNamed(out, "help") {
+		out = append(out, helpFlag)
+	}
+	if hasHot && !hasFlagNamed(out, "help-all") {
+		out = append(out, helpAllFlag)
+	}
+	return out
 }
 
 func wantsJSONHelp(args []string) bool {
