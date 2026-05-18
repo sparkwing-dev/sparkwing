@@ -953,6 +953,37 @@ _wing() {
         _describe -t profiles 'profile' profs
         return
     fi
+    # 'wing <pipeline> --for <TAB>' -> the pipeline's declared targets.
+    if [[ ${CURRENT} -ge 3 && "${words[CURRENT-1]}" == "--for" ]]; then
+        local -a tgts
+        tgts=( ${(f)"$(sparkwing _complete-targets "${words[2]}" 2>/dev/null)"} )
+        _describe -t targets 'target' tgts
+        return
+    fi
+    # 'wing <pipeline> --backends-env <TAB>' -> environments declared in
+    # backends.yaml (after built-in merge).
+    if [[ ${CURRENT} -ge 3 && "${words[CURRENT-1]}" == "--backends-env" ]]; then
+        local -a envs
+        envs=( ${(f)"$(sparkwing _complete-backends-envs 2>/dev/null)"} )
+        _describe -t environments 'environment' envs
+        return
+    fi
+    # 'wing <pipeline> --prefer <TAB>' -> label union across runners
+    # the pipeline can target.
+    if [[ ${CURRENT} -ge 3 && "${words[CURRENT-1]}" == "--prefer" ]]; then
+        local -a labs
+        labs=( ${(f)"$(sparkwing _complete-runner-labels "${words[2]}" 2>/dev/null)"} )
+        _describe -t labels 'label' labs
+        return
+    fi
+    # 'wing <pipeline> --job <TAB>' -> runner names (operator types
+    # --job ID=<TAB> to fill the runner half).
+    if [[ ${CURRENT} -ge 3 && "${words[CURRENT-1]}" == "--job" ]]; then
+        local -a runs
+        runs=( ${(f)"$(sparkwing _complete-runners 2>/dev/null)"} )
+        _describe -t runners 'runner (use as ID=RUNNER)' runs
+        return
+    fi
     # Everything else after a pipeline name -> wing-owned flags
     # (--on/--from/--config/--help) merged with the pipeline's
     # typed flags from the describe cache. Offered on bare <TAB> as
