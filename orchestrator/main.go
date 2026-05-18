@@ -190,7 +190,14 @@ func Main() {
 	// `runs logs --follow` without a terminal event. Keep the
 	// non-zero exit so wrapper scripts still see the failure.
 	_ = delegate
-	if res.Status != "success" {
+	if res != nil && res.Error != nil {
+		// Run-lifecycle failures (validator rejections, FinishRun-recorded
+		// errors) come back as Result.Error with a nil Go error from
+		// RunLocal. Surface them so the operator isn't left with a
+		// silent exit-1.
+		fmt.Fprintln(os.Stderr, "run:", res.Error)
+	}
+	if res != nil && res.Status != "success" {
 		os.Exit(1)
 	}
 }
