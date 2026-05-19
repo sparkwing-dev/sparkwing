@@ -124,9 +124,9 @@ func dispatchRun(args []string) error {
 	// label the operator hasn't authorized via --sw-allow (or
 	// --sw-dry-run, which bypasses every gate per the safe-mode
 	// contract). A profile-level auto_allow can pre-authorize
-	// specific labels for a low-stakes environment. A cold cache or
-	// older binary silently degrades to "no labels detected, no gate
-	// fires" -- the next --describe refresh populates the cache.
+	// specific labels for a low-stakes environment. A cold cache
+	// degrades to "no labels detected, no gate fires"; the next
+	// --describe refresh populates it.
 	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
 		var prof *profile.Profile
 		if wf.on != "" {
