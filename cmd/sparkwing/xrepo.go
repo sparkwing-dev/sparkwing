@@ -18,7 +18,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
 
 func runXrepo(args []string) error {

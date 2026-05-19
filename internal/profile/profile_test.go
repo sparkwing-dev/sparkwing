@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 func TestLoad_MissingFile(t *testing.T) {

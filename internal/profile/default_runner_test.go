@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 func TestEffectiveDefaultRunner_NilProfile(t *testing.T) {

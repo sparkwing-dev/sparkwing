@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
 
 // pipelinesResponse mirrors the shape the dashboard's TriggerForm

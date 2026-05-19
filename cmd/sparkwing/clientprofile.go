@@ -13,7 +13,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 // addProfileFlag registers a `--on <name>` flag on fs. The returned

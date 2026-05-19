@@ -4,6 +4,17 @@
 
 ### Changed
 
+- Moved several packages to clarify the public/private boundary:
+  - `logutil`, `bincache`, `otelutil`, `profile`, `repos` →
+    `internal/` (implementation detail, no external stability
+    promise).
+  - `controller/client` → `pkg/controller/client` (intended-public
+    HTTP client lib; stability promise).
+
+  No public API change to any moved package; only the import path.
+  Sibling repos that imported the moved top-level packages directly
+  (sparks-core, moonborn-ws, okbot, moonborn-web, rangz-web) will
+  break on next `go.mod` bump and need their imports updated.
 - Collapsed `internal/local/` into `pkg/controller/`. The same
   control-plane code now serves both laptop and cluster modes; the
   mode is determined by which functional options the consumer sets

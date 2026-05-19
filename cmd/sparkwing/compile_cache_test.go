@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
 // fakeCacheServer is a minimal stand-in for sparkwing-cache /bin/<hash>.

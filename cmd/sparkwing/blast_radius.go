@@ -9,7 +9,7 @@ package main
 import (
 	"sort"
 
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 

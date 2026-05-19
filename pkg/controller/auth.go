@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 // Principal is the request-scoped authenticated identity.

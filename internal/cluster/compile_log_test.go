@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
 // TestShipCompileOutput_PostsToLogsServer verifies that when the

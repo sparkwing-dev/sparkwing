@@ -14,7 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/logs"
 	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 func main() {

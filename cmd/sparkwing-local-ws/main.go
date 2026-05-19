@@ -15,7 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/localws"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 func main() {

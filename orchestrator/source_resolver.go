@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/sources"
-	"github.com/sparkwing-dev/sparkwing/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )

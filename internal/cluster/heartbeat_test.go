@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 // newTriggerHeartbeatServer returns an httptest.Server wired to a

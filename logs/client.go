@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 // Client is the HTTP client for the logs service. Workers use it to
