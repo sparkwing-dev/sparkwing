@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed
+
+- Cluster controller's retry response now returns the canonical
+  shape (`{"status":"pending", "trigger_source":"retry", "started_at":<creation time>}`)
+  matching the laptop controller. Prior cluster behavior used
+  inconsistent field names (`trigger` vs `trigger_source`) and status
+  values (`running` vs `pending`), so dashboards talking to a cluster
+  controller had to special-case the response shape.
+
+### Added
+
+- Cluster controller now exposes `GET /api/v1/runs/{id}/attempts`
+  (the retry-tree listing that powers the dashboard's Attempts
+  dropdown) and supports the `?full=1` query parameter on
+  `POST /api/v1/runs/{id}/retry` for the "rerun all" mode. Behavior
+  matches the laptop controller's surface.
+
+### Changed
+
+- Cluster controller now pre-allocates the Run row in `pending`
+  state before invoking a retry trigger, eliminating the window
+  where the retry has been accepted but no row exists yet. Matches
+  the laptop controller's pre-allocate pattern from
+  `POST /api/v1/triggers`.
+
 ### Removed
 
 - Dropped the `group:` field from `pipelines.yaml` entries and the

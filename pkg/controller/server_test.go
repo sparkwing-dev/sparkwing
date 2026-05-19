@@ -129,6 +129,64 @@ func TestController_RunLifecycle(t *testing.T) {
 	}
 }
 
+// GET /api/v1/runs/{id} returns raw store.Run by default, but with
+// ?include=nodes wraps the response as {run, nodes}. Both shapes
+// must keep working: the dashboard consumes the wrapped form, the
+// CLI + cluster runner consume the unwrapped one.
+func TestController_GetRun_IncludeNodes(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	mustPostJSON(t, base+"/api/v1/runs", store.Run{
+		ID: "run-incl", Pipeline: "p", Status: "running", StartedAt: time.Now(),
+	}, http.StatusCreated)
+	mustPostJSON(t, base+"/api/v1/runs/run-incl/nodes",
+		store.Node{NodeID: "a", Status: "pending"}, http.StatusCreated)
+	mustPostJSON(t, base+"/api/v1/runs/run-incl/nodes",
+		store.Node{NodeID: "b", Status: "pending", Deps: []string{"a"}},
+		http.StatusCreated)
+
+	// Default shape: raw store.Run, no wrapper.
+	resp := mustGet(t, base+"/api/v1/runs/run-incl")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("default get status=%d", resp.StatusCode)
+	}
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode default: %v", err)
+	}
+	if raw["id"] != "run-incl" {
+		t.Errorf("default shape: id=%v want run-incl (run not at top level)", raw["id"])
+	}
+	if _, hasRun := raw["run"]; hasRun {
+		t.Errorf("default shape leaked the {run:...} wrapper: %v", raw)
+	}
+
+	// include=nodes shape: {run, nodes}.
+	resp = mustGet(t, base+"/api/v1/runs/run-incl?include=nodes")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("include get status=%d", resp.StatusCode)
+	}
+	var wrapped map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
+		t.Fatalf("decode wrapped: %v", err)
+	}
+	run, ok := wrapped["run"].(map[string]any)
+	if !ok {
+		t.Fatalf("wrapped.run missing or wrong type: %v", wrapped)
+	}
+	if run["id"] != "run-incl" {
+		t.Errorf("wrapped.run.id=%v want run-incl", run["id"])
+	}
+	nodes, ok := wrapped["nodes"].([]any)
+	if !ok {
+		t.Fatalf("wrapped.nodes missing or wrong type: %v", wrapped)
+	}
+	if len(nodes) != 2 {
+		t.Errorf("wrapped.nodes len=%d want 2", len(nodes))
+	}
+}
+
 // When the run carries a plan snapshot, GET /api/v1/runs/{id}?include=nodes
 // attaches per-node decorations (modifiers, groups, approval,
 // on_failure_of, dynamic, inner-Work tree) under a nested
@@ -251,6 +309,34 @@ func TestController_GetRun_IncludeNodes_NoSnapshot(t *testing.T) {
 	}
 	if wrapped.Nodes[0]["id"] != "a" {
 		t.Errorf("id=%v want a", wrapped.Nodes[0]["id"])
+	}
+}
+
+// The dashboard SPA reads debug pauses via /api/v1/runs/{id}/paused,
+// an alias of GET /api/v1/runs/{id}/debug-pauses. Both routes must
+// return identical shapes.
+func TestController_ListPausesAlias(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	mustPostJSON(t, base+"/api/v1/runs", store.Run{
+		ID: "run-pause", Pipeline: "p", Status: "running", StartedAt: time.Now(),
+	}, http.StatusCreated)
+
+	// Empty list response (no pauses created): both routes return [].
+	resp := mustGet(t, base+"/api/v1/runs/run-pause/paused")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("paused alias status=%d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp = mustGet(t, base+"/api/v1/runs/run-pause/debug-pauses")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("debug-pauses status=%d", resp.StatusCode)
+	}
+	canonicalBody, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, canonicalBody) {
+		t.Errorf("alias body diverges from canonical:\n  alias:    %s\n  canonical: %s",
+			body, canonicalBody)
 	}
 }
 
