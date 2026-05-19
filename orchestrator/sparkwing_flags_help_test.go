@@ -29,22 +29,18 @@ func TestPrintSparkwingFlagsSection_ContainsArcFlags(t *testing.T) {
 	mustContain(t, out, "SPARKWING FLAGS")
 }
 
-// TestPrintSparkwingFlagsSection_GroupsRender pins that every
-// sparkwing-owned flag renders under a single [System] group header.
-// Pipeline-author flag namespace is fully unprefixed and sparkwing
-// flags live under one unified [System] label so the operator only
-// sees two top-level groupings: pipeline args (unprefixed) and
-// sparkwing args (--sw-* under System).
-func TestPrintSparkwingFlagsSection_GroupsRender(t *testing.T) {
+// TestPrintSparkwingFlagsSection_NoGroupHeaders pins that the
+// pipeline-binary help renders flags as one flat list -- no group
+// labels. Pipeline-author args (unprefixed) and sparkwing args
+// (--sw-*) are visually separated by the SPARKWING FLAGS section
+// header alone; further sub-grouping is noise.
+func TestPrintSparkwingFlagsSection_NoGroupHeaders(t *testing.T) {
 	var buf bytes.Buffer
 	printSparkwingFlagsSection(&buf)
 	out := buf.String()
-	if !strings.Contains(out, "[System]") {
-		t.Errorf("expected group label [System] in output:\n%s", out)
-	}
-	for _, label := range []string{"[Source]", "[Range]", "[Safety]", "[Selection]"} {
+	for _, label := range []string{"[System]", "[Source]", "[Range]", "[Safety]", "[Selection]", "[Other]"} {
 		if strings.Contains(out, label) {
-			t.Errorf("did not expect sub-group label %q in output (collapsed under [System]):\n%s", label, out)
+			t.Errorf("did not expect group label %q in flat output:\n%s", label, out)
 		}
 	}
 }

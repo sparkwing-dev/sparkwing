@@ -336,9 +336,8 @@ func printPipelineHelp(pipeline string) error {
 }
 
 // printSparkwingFlagsSection renders the "SPARKWING FLAGS" block of
-// per-pipeline help. Within each group, flags walk in
-// SparkwingFlagDocs order. The trailing hint points users at the
-// top-level help for prose detail.
+// per-pipeline help. Flags walk in SparkwingFlagDocs order. The
+// trailing hint points users at the top-level help for prose detail.
 //
 // Takes io.Writer (not *os.File) so tests can capture into a buffer.
 func printSparkwingFlagsSection(w io.Writer) {
@@ -347,20 +346,7 @@ func printSparkwingFlagsSection(w io.Writer) {
 		return
 	}
 	fmt.Fprintln(w, "SPARKWING FLAGS")
-	// Order groups in declaration order: walk docs once and emit a
-	// blank-line separator the first time a new group appears. Keeps
-	// rendering deterministic without a hardcoded group list.
-	prevGroup := ""
-	first := true
 	for _, d := range docs {
-		if d.Group != prevGroup {
-			if !first {
-				fmt.Fprintln(w)
-			}
-			fmt.Fprintf(w, "  [%s]\n", d.Group)
-			prevGroup = d.Group
-		}
-		first = false
 		head := "--" + d.Name
 		if d.Short != "" {
 			head = "-" + d.Short + ", " + head
@@ -368,7 +354,7 @@ func printSparkwingFlagsSection(w io.Writer) {
 		if d.Argument != "" {
 			head += " " + d.Argument
 		}
-		fmt.Fprintf(w, "    %-30s %s\n", head, d.Desc)
+		fmt.Fprintf(w, "  %-30s %s\n", head, d.Desc)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "See `sparkwing run --help` for prose explanations of each sparkwing flag.")
