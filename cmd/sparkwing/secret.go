@@ -149,7 +149,7 @@ func runSecretGet(args []string) error {
 		val, _, err := src.Read(name)
 		if err != nil {
 			if errors.Is(err, secrets.ErrSecretMissing) {
-				return fmt.Errorf("secret get: %q not set in local store (%s)", name, src.Path())
+				return fmt.Errorf("secret get: %q not set in local store (%s)", name, src.SecretsPath())
 			}
 			return fmt.Errorf("secret get: %w", err)
 		}

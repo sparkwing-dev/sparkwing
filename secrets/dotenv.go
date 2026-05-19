@@ -90,11 +90,6 @@ func (s *DotenvSource) Read(name string) (string, bool, error) {
 	return "", false, ErrSecretMissing
 }
 
-// Path returns the masked-side file path. Kept for backwards-compat
-// with callers that wrote single-file error messages; new
-// code should prefer SecretsPath / ConfigPath.
-func (s *DotenvSource) Path() string { return s.SecretsPath() }
-
 // SecretsPath returns the resolved secrets.env path.
 func (s *DotenvSource) SecretsPath() string {
 	if s.secretsPath != "" {
