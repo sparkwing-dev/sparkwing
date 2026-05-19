@@ -22,7 +22,6 @@ func runPipelineNew(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
 	pipelineName := fs.String("name", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
 	template := fs.String("template", "minimal", "template: minimal (default) | build-test-deploy")
-	group := fs.String("group", "", "group name (surfaces in `sparkwing run <TAB>` section header)")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
@@ -74,9 +73,9 @@ func runPipelineNew(args []string) error {
 
 	switch *template {
 	case "minimal":
-		return scaffoldGoMinimal(sparkwingDir, name, *group, *hidden, *short, bootstrapped)
+		return scaffoldGoMinimal(sparkwingDir, name, *hidden, *short, bootstrapped)
 	case "build-test-deploy":
-		return scaffoldGoBuildTestDeploy(sparkwingDir, name, *group, *hidden, *short, bootstrapped)
+		return scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
 	default:
 		return fmt.Errorf("new: unknown template %q (valid: minimal, build-test-deploy)", *template)
 	}
@@ -173,18 +172,18 @@ func goJobFilename(name string) string {
 // node. Default template: smallest viable shape that still teaches
 // the canonical Plan() entry-point so editing means "add another
 // sparkwing.Job(plan, ...) line", not "refactor a one-step pipeline into Plan()".
-func scaffoldGoMinimal(sparkwingDir, name, group string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, group, hidden, short, minimalTemplate, bootstrapped)
+func scaffoldGoMinimal(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, minimalTemplate, bootstrapped)
 }
 
 // scaffoldGoBuildTestDeploy: build -> test -> deploy 3-node Plan.
-func scaffoldGoBuildTestDeploy(sparkwingDir, name, group string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, group, hidden, short, buildTestDeployTemplate, bootstrapped)
+func scaffoldGoBuildTestDeploy(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, buildTestDeployTemplate, bootstrapped)
 }
 
 // scaffoldGoFromTemplate is the shared write path. SHORTLIT is the
 // strconv.Quote'd literal so quoted user input survives codegen.
-func scaffoldGoFromTemplate(sparkwingDir, name, group string, hidden bool, short, tmpl string, bootstrapped bool) error {
+func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool) error {
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
 	if _, err := os.Stat(file); err == nil {
@@ -201,7 +200,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name, group string, hidden bool, short
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		return err
 	}
-	if err := appendPipelinesYAML(sparkwingDir, name, struct_, group, hidden); err != nil {
+	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden); err != nil {
 		return err
 	}
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
@@ -384,7 +383,7 @@ func init() {
 // round-trip would reflow everything. Risk: the user's file could have
 // exotic yaml that we don't preserve; mitigated by the simplicity of
 // the append (we only add, never modify).
-func appendPipelinesYAML(sparkwingDir, name, entrypoint, group string, hidden bool) error {
+func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool) error {
 	path := filepath.Join(sparkwingDir, "pipelines.yaml")
 	existing, err := os.ReadFile(path)
 	if err != nil {
@@ -396,9 +395,6 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint, group string, hidden bo
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(&b, "\n  - name: %s\n    entrypoint: %s\n", name, entrypoint)
-	if group != "" {
-		fmt.Fprintf(&b, "    group: %s\n", group)
-	}
 	if hidden {
 		b.WriteString("    hidden: true\n")
 	}

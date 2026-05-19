@@ -53,7 +53,7 @@ Per-project surface: list / describe / new pipelines plus the SDK pin (version /
 | `sparkwing pipeline list [-o table\|json\|plain] [--all]` | Enumerate every pipeline in this repo |
 | `sparkwing pipeline describe --name NAME [-o ...]` | Full metadata: args, examples, triggers, help |
 | `sparkwing pipeline discover --query TEXT [-o ...]` | Fuzzy search across names / descriptions / tags, ranked |
-| `sparkwing pipeline new --name NAME [--template minimal\|build-test-deploy] [--group ...] [--hidden] [--short ...]` | Scaffold a new pipeline (refuses to clobber; auto-bootstraps `.sparkwing/` on first use; default template is `minimal` -- pass `--template build-test-deploy` for a build/test/deploy DAG) |
+| `sparkwing pipeline new --name NAME [--template minimal\|build-test-deploy] [--hidden] [--short ...]` | Scaffold a new pipeline (refuses to clobber; auto-bootstraps `.sparkwing/` on first use; default template is `minimal` -- pass `--template build-test-deploy` for a build/test/deploy DAG) |
 | `sparkwing pipeline explain --name NAME [--flag value ...] [-o ...]` | Render the Plan DAG without running; unknown flags forward to the pipeline |
 | `sparkwing pipeline run NAME [--flag value ...]` | Invoke the pipeline (canonical form). `sparkwing run NAME` and `sparkwing NAME` are the positional shortcuts. |
 | `sparkwing pipeline hooks {install\|uninstall\|status}` | Git pre-commit / pre-push hooks for triggers |

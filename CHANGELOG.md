@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Removed
+
+- Dropped the `group:` field from `pipelines.yaml` entries and the
+  matching `--group` flag on `sparkwing pipeline new`. The field had
+  no backing on the `pipelines.Pipeline` struct, so strict YAML
+  parsing rejected any file that used it, breaking
+  `sparkwing pipeline list` and `sparkwing run` tab-complete. Strip
+  `group:` lines from existing `.sparkwing/pipelines.yaml` files.
+  Plan-DAG UI grouping (`Job.Group(...)`, `sw.GroupJobs`, `*Group`,
+  `GroupSteps`) is a separate feature and is unaffected.
+
 ### Changed
 
 - `WorkStep.Destructive()` / `.AffectsProduction()` / `.CostsMoney()` replaced

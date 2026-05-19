@@ -809,8 +809,8 @@ Templates:
 Refuses to clobber: if the name already exists in pipelines.yaml
 the command fails before writing anything.
 
-Supply --group to set the tab-complete section header; --hidden
-to hide from default listings; --short to pre-fill the description.
+Supply --hidden to hide from default listings; --short to pre-fill
+the description.
 
 See also:
   If your pipeline is a single linear shell sequence with no DAG,
@@ -820,14 +820,13 @@ See also:
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "template", Argument: "KIND", Desc: "minimal (one node, default) | build-test-deploy (three-node build->test->deploy DAG)", Default: "minimal", Group: "Scaffold"},
-		{Name: "group", Argument: "NAME", Desc: "Tab-complete section header (e.g. CI, Release)", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
 		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line", Group: "Scaffold"},
 	},
 	GroupOrder: []string{"Target", "Scaffold", "Other"},
 	Examples: []Example{
 		{"Single-node pipeline (default template)", "sparkwing pipeline new --name release"},
-		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name release-all --template build-test-deploy --group Release"},
+		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name release-all --template build-test-deploy"},
 		{"Pre-fill the ShortHelp", `sparkwing pipeline new --name release --short "Cut a release"`},
 	},
 }

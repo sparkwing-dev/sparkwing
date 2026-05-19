@@ -42,7 +42,6 @@ Each entry has:
 - **secrets** - cluster-stored secrets to surface
 - **runs_on** - scheduling constraints for runner selection
   (see [scheduling](scheduling.md))
-- **group** - section header for `sparkwing pipeline list` and tab complete
 - **hidden** - omit from `pipelines list` (still invocable by exact name)
 
 ## Triggers

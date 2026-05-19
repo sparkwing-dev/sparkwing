@@ -8,22 +8,18 @@
 pipelines:
   - name: lint
     entrypoint: Lint
-    group: CI
     tags: [ci, checks]
 
   - name: test
     entrypoint: Test
-    group: CI
     tags: [ci, checks]
 
   - name: static-analysis
     entrypoint: StaticAnalysis
-    group: CI
     tags: [ci, checks]
 
   - name: build
     entrypoint: Build
-    group: Build
     tags: [build]
 
   # release: cuts a sparkwing tag and pushes it. The
@@ -36,7 +32,6 @@ pipelines:
   # --generate-notes`, not a hand-curated CHANGELOG.
   - name: release
     entrypoint: Release
-    group: Release
     tags: [release]
 
   # example: reference pipeline that exercises the two-layer
@@ -46,7 +41,6 @@ pipelines:
   # render in the dashboard.
   - name: example
     entrypoint: Example
-    group: Examples
     tags: [example, docs]
 
   # weather-report: tiny standalone pipeline the example calls via
@@ -54,6 +48,5 @@ pipelines:
   # Hidden from tab-complete; still invokable directly.
   - name: weather-report
     entrypoint: WeatherReport
-    group: Examples
     hidden: true
     tags: [example]
