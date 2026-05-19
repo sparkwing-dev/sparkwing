@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Removed
+
+- `sparkwing.SetDebug` is no longer exported. It was a test-only
+  helper with a single in-tree caller (the package's own
+  `debug_test.go`); it now lives as an unexported `setDebug` in a
+  `_test.go` file. Production code cannot flip the debug flag at
+  runtime; `SPARKWING_DEBUG` at process start is the only supported
+  toggle. Tests outside this module that called `sparkwing.SetDebug`
+  will not compile after this release.
+
+### Changed
+
+- `gofmt -w` sweep across the repo. No semantic change; cleans up
+  drift so future commits aren't noisy with unrelated formatting
+  changes.
+- `sparkwing.SetWorkDir` and `sparkwing.SetGit` godocs updated to
+  reflect their real consumers. `SetWorkDir` stays exported (cross-
+  package tests in `sparkwing/inputs/...` consume it); the doc now
+  names the SDK-test role honestly rather than calling it
+  "intended for tests". `SetGit`'s doc names the two
+  orchestrator boot-time call sites that wire it.
+
 ### Added
 
 - Promoted `orchestrator/store/` to `pkg/store/`. The persisted
