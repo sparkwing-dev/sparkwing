@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // metricSample is the JSON wire type. Field names match the

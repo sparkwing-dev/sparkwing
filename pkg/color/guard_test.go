@@ -33,11 +33,11 @@ import (
 //     (\x1b[H, \x1b[J) for live-status redraws; only run in
 //     interactive mode.
 var allowed = map[string]bool{
-	"pkg/color/color.go":              true,
-	"pkg/color/guard_test.go":         true,
-	"orchestrator/logger.go":          true,
-	"orchestrator/jobs_cli.go":        true,
-	"orchestrator/jobs_cli_remote.go": true,
+	"pkg/color/color.go":                       true,
+	"pkg/color/guard_test.go":                  true,
+	"internal/orchestrator/logger.go":          true,
+	"internal/orchestrator/jobs_cli.go":        true,
+	"internal/orchestrator/jobs_cli_remote.go": true,
 }
 
 // ansiPattern matches both common Go-source representations of an

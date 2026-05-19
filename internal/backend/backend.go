@@ -9,7 +9,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ErrNotSupported is returned by Backend methods that aren't

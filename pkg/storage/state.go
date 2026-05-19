@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/sparkwing-dev/sparkwing/orchestrator/store"
+import "github.com/sparkwing-dev/sparkwing/pkg/store"
 
 // StateStore is the run-record store: runs, nodes, steps, annotations,
 // approvals, concurrency, and the schema migrations the orchestrator

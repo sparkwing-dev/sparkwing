@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ListRunsHandler serves GET /api/v1/runs from the dashboard for

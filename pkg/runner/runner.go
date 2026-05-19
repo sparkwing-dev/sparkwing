@@ -5,7 +5,7 @@
 // every consumer to update their main.go.
 package runner
 
-import "github.com/sparkwing-dev/sparkwing/orchestrator"
+import "github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 
 // Main is the entry point for a user repo's compiled pipeline binary.
 // .sparkwing/main.go calls runner.Main() after blank-importing the

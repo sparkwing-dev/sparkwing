@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // TestSecretsRoundTrip exercises the full HTTP surface: set, get, list

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // stubClaimer implements nodeClaimer for the RunPoolLoop unit tests.

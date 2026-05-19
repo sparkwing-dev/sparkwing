@@ -4,6 +4,12 @@
 
 ### Added
 
+- Promoted `orchestrator/store/` to `pkg/store/`. The persisted
+  run/node/event data model is now explicitly part of the public
+  SDK surface (stability promise): tooling on top of sparkwing
+  (custom dashboards, analytics, audit pipelines, alternative
+  controllers) can import the canonical types without reaching
+  through `orchestrator/`.
 - `pkg/runner` package with `runner.Main()`: the user-facing entry
   point that `.sparkwing/main.go` imports. Wraps `orchestrator.Main()`
   so internal changes to the orchestrator package don't propagate
@@ -11,6 +17,21 @@
 
 ### Changed
 
+- Moved `orchestrator/` to `internal/orchestrator/`. User repos
+  that already migrated to `pkg/runner.Main()` (shipped in the
+  previous release) see no change -- the shim's import updated
+  transparently. User repos still importing
+  `github.com/sparkwing-dev/sparkwing/orchestrator` directly MUST
+  migrate to `github.com/sparkwing-dev/sparkwing/pkg/runner` and
+  call `runner.Main()`. The soft-migration runway ends with this
+  release.
+- Moved `InProcessDispatcher` out of `pkg/controller` into
+  `internal/inprocdispatch/`. `pkg/controller.Dispatcher` interface
+  and `NoopDispatcher` stay public; the in-process implementation
+  (which referenced `orchestrator.Backends` in its public field)
+  is now private, since it has no production callers (only one
+  full-loop test used it). External consumers wiring a controller
+  use `NoopDispatcher` or their own `Dispatcher` implementation.
 - `.sparkwing/main.go` template now imports
   `github.com/sparkwing-dev/sparkwing/pkg/runner` instead of
   `.../orchestrator`. Newly-generated user repos pick up the new

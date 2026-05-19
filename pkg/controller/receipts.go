@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/receipt"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // handleGetRunReceipt computes the receipt for one run on

@@ -9,7 +9,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string) error {

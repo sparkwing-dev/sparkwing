@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
+	"github.com/sparkwing-dev/sparkwing/internal/inprocdispatch"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -144,7 +145,7 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 		Logs:        local.Logs,
 		Concurrency: local.Concurrency,
 	}
-	srv.WithDispatcher(controller.InProcessDispatcher{Backends: backends})
+	srv.WithDispatcher(inprocdispatch.InProcessDispatcher{Backends: backends})
 
 	// Fire the webhook.
 	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
