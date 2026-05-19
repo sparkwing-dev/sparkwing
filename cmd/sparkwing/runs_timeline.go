@@ -19,7 +19,7 @@ func runJobsTimeline(ctx context.Context, paths orchestrator.Paths, args []strin
 	width := fs.Int("width", 60, "bar width in characters")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
 	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-	pretty := fs.Bool("pretty", false, "force the human-readable waterfall even when piped (alias for -o table)")
+	pretty := fs.Bool("pretty", false, "force the human-readable waterfall even when piped (alias for -o pretty)")
 	on := fs.String("on", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsTimeline, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

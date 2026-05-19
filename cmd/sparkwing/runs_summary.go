@@ -17,7 +17,7 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 	runID := fs.String("run", "", "run identifier")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
 	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-	pretty := fs.Bool("pretty", false, "force the human-readable view even when piped (alias for -o table)")
+	pretty := fs.Bool("pretty", false, "force the human-readable view even when piped (alias for -o pretty)")
 	on := fs.String("on", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsSummary, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

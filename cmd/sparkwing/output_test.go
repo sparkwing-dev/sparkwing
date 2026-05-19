@@ -41,14 +41,6 @@ func TestResolveOutputFormat(t *testing.T) {
 			jsonAlias:     true,
 			want:          "json",
 		},
-		// "table" is a back-compat input alias for "pretty"; same path.
-		{
-			name:          "back-compat -o table normalizes to pretty",
-			outFmt:        "table",
-			outputChanged: true,
-			jsonAlias:     false,
-			want:          "pretty",
-		},
 		// Quadrant 2: only --output=json. No --json alias; resolver
 		// returns the explicit value.
 		{

@@ -591,7 +591,7 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-		pretty := fs.Bool("pretty", false, "force the human-readable colored renderer even when stdout isn't a terminal (alias for -o table)")
+		pretty := fs.Bool("pretty", false, "force the human-readable colored renderer even when stdout isn't a terminal (alias for -o pretty)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
 		on := fs.String("on", "",
 			"profile name (cluster mode). Omit to read logs from the local SQLite store.")
@@ -744,13 +744,7 @@ func runJobs(args []string) error {
 // --output=json and "default + --json" should resolve to JSON, not
 // error. Only when BOTH flags are user-set AND disagree do we surface
 // a conflict. Mirrors the kubectl / gh / aws CLI convention.
-//
-// "table" is accepted at the input boundary as a silent back-compat
-// alias for "pretty" so older scripts that pin -o table keep working.
 func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
-	if outFmt == "table" {
-		outFmt = "pretty"
-	}
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:
@@ -784,15 +778,9 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 // -o/--output (e.g. fs.Changed("output")). It distinguishes a
 // default-shaped --output from a user-set one, mirroring the
 // kubectl explicit-bit convention.
-//
-// "table" is accepted at the input boundary as a silent back-compat
-// alias for "pretty".
 func resolveTTYAwareOutput(outFmt string, outputChanged, jsonAlias, prettyAlias bool, cmdPath string) (string, error) {
 	if jsonAlias && prettyAlias {
 		return "", fmt.Errorf("%s: --json and --pretty cannot be combined", cmdPath)
-	}
-	if outFmt == "table" {
-		outFmt = "pretty"
 	}
 	switch outFmt {
 	case "", "pretty", "json", "plain":
