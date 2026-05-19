@@ -82,11 +82,11 @@ func TestBindFlagsDefaults(t *testing.T) {
 	}
 }
 
-// TestRunHelpListsArcFlags pins which sparkwing-owned flags surface
-// in `--help` (the hot tier) and which only surface in `--help-all`
-// (the advanced tier). The flag list is sourced from
-// sparkwing.SparkwingFlagDocs() so a flag added in the SDK propagates
-// here automatically.
+// TestRunHelpListsArcFlags pins that `--help` on the run commands
+// lists every sparkwing-owned flag (hot AND advanced). Tab completion
+// curates to the hot tier; --help is the full-disclosure surface.
+// The flag list is sourced from sparkwing.SparkwingFlagDocs() so a
+// flag added in the SDK propagates here automatically.
 func TestRunHelpListsArcFlags(t *testing.T) {
 	cases := []struct {
 		name string
@@ -95,47 +95,80 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		{"sparkwing run", cmdRun},
 		{"sparkwing pipeline run", cmdPipelineRun},
 	}
-	// Hot flags: must appear in default --help output.
-	hotFlags := []string{
+	allFlags := []string{
+		// Hot tier
 		"--sw-from", "--sw-retry-of",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
 		"--sw-for", "--sw-on",
-		"--help-all", // the escape hatch must be discoverable from --help
-	}
-	// Advanced flags: must NOT appear in default --help, must appear in --help-all.
-	advancedFlags := []string{
+		// Advanced tier — also surface in --help
 		"--sw-change-directory", "--sw-verbose", "--sw-full",
 		"--sw-allow-destructive", "--sw-allow-prod", "--sw-allow-money",
 		"--sw-job", "--sw-prefer", "--sw-backends-env",
 	}
 	for _, tc := range cases {
-		t.Run(tc.name+" default", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			PrintHelp(tc.cmd, &buf)
 			out := buf.String()
-			for _, f := range hotFlags {
-				if !strings.Contains(out, f) {
-					t.Errorf("expected default %s --help to list %s; got:\n%s", tc.name, f, out)
-				}
-			}
-			for _, f := range advancedFlags {
-				if containsFlagRow(out, f) {
-					t.Errorf("default %s --help leaked advanced flag %s; got:\n%s", tc.name, f, out)
-				}
-			}
-		})
-		t.Run(tc.name+" --help-all", func(t *testing.T) {
-			var buf bytes.Buffer
-			printHelpWithFlags(tc.cmd, &buf, visibleFlagsForHelp(tc.cmd, true))
-			out := buf.String()
-			for _, f := range append(hotFlags, advancedFlags...) {
+			for _, f := range allFlags {
 				if !containsFlagRow(out, f) {
-					t.Errorf("expected %s --help-all to list %s; got:\n%s", tc.name, f, out)
+					t.Errorf("expected %s --help to list %s; got:\n%s", tc.name, f, out)
 				}
 			}
 		})
 	}
+}
+
+// TestCompletionFlagsListsHotOnly pins that tab-completion filters to
+// the hot tier — `--sw-allow-destructive` and friends only surface in
+// --help, not in the completion menu.
+func TestCompletionFlagsListsHotOnly(t *testing.T) {
+	hotFlags := []string{
+		"--sw-from", "--sw-retry-of",
+		"--sw-start-at", "--sw-stop-at",
+		"--sw-dry-run",
+		"--sw-for", "--sw-on",
+		"--help",
+	}
+	advancedFlags := []string{
+		"--sw-change-directory", "--sw-verbose", "--sw-full",
+		"--sw-allow-destructive", "--sw-allow-prod", "--sw-allow-money",
+		"--sw-job", "--sw-prefer", "--sw-backends-env",
+	}
+	for _, tc := range []struct {
+		name string
+		cmd  Command
+	}{
+		{"sparkwing run", cmdRun},
+		{"sparkwing pipeline run", cmdPipelineRun},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flags := visibleFlagsForHelp(tc.cmd, true)
+			present := map[string]bool{}
+			for _, f := range flags {
+				present["--"+f.Name] = true
+			}
+			for _, f := range hotFlags {
+				if !present[f] {
+					t.Errorf("completion %s: expected hot flag %s; got %v", tc.name, f, flagNames(flags))
+				}
+			}
+			for _, f := range advancedFlags {
+				if present[f] {
+					t.Errorf("completion %s: leaked advanced flag %s; got %v", tc.name, f, flagNames(flags))
+				}
+			}
+		})
+	}
+}
+
+func flagNames(fs []FlagSpec) []string {
+	out := make([]string, len(fs))
+	for i, f := range fs {
+		out[i] = "--" + f.Name
+	}
+	return out
 }
 
 // containsFlagRow returns true when out contains a help-formatted

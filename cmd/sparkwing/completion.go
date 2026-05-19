@@ -131,7 +131,7 @@ func runInternalCompleteFlags(args []string) error {
 		if !ok {
 			continue
 		}
-		flags := visibleFlagsForHelp(cmd, false)
+		flags := visibleFlagsForHelp(cmd, true)
 		groups := groupFlagsForHelp(flags, cmd.GroupOrder)
 		for _, g := range groups {
 			for _, f := range g.flags {
