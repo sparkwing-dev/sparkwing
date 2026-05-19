@@ -258,16 +258,3 @@ nightly-rebuild:
 it *is* tolerated. Among eligible agents, `us-east` ones score
 higher.
 
-## Backward compatibility
-
-The old single-string `prefer:` and `require:` selectors on `Job` are
-still parsed and AND-combined with `runs_on`. Old DB rows and old
-`pipelines.yaml` files keep working without migration.
-
-```yaml
-# Both styles in one job — both must match.
-old-and-new:
-  prefer: type:listener     # legacy
-  runs_on:
-    require: { os: linux }  # new
-```
