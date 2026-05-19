@@ -11,16 +11,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/secrets"
 )
 
 // End-to-end check that the secret POST/GET round-trip with a
 // configured cipher stores ciphertext on disk but returns the
 // original value to authorized readers.
 
-func newSecretsTestServer(t *testing.T, c *secrets.Cipher) (*httptest.Server, *store.Store) {
+func newSecretsTestServer(t *testing.T, c controller.Cipher) (*httptest.Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "s.db"))

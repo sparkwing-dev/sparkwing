@@ -17,6 +17,20 @@
   path; existing user repos continue to work with the direct
   `orchestrator` import and can migrate at their leisure (or on the
   next regenerate / SDK bump).
+- `pkg/controller.Server.WithSecretsCipher` now takes a
+  `pkg/controller.Cipher` interface instead of a concrete
+  `*secrets.Cipher`. Code that passes a `*secrets.Cipher`
+  continues to work -- the concrete type satisfies the interface
+  via Go's structural typing. External consumers can now supply
+  custom cipher implementations without depending on
+  sparkwing's secrets package.
+- Moved `secrets/` to `internal/secrets/`. The AEAD cipher and
+  helpers are no longer exported from this module; external
+  consumers should implement `pkg/controller.Cipher` (two methods,
+  `Seal` + `Open`) and pass that to `WithSecretsCipher`. Consumers
+  using `secrets.Cipher` directly outside this repo will need to
+  either migrate to implementing `pkg/controller.Cipher` or vendor
+  a copy of the cipher.
 - Promoted `logs/` to `pkg/logs/`. The HTTP logs service and its
   client are now explicitly part of the public API surface
   (stability promise); `pkg/storage/sparkwinglogs/` already

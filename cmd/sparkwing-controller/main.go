@@ -15,11 +15,11 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/secrets"
 )
 
 func main() {
@@ -74,8 +74,13 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		EnableAuthFromStore().
-		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
-		WithSecretsCipher(cipher)
+		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET"))
+	// Wire the cipher only when one was configured; a typed-nil
+	// *secrets.Cipher passed through the Cipher interface would still
+	// register as non-nil at the handler's seam.
+	if cipher != nil {
+		srv = srv.WithSecretsCipher(cipher)
+	}
 	if *poolEnabled {
 		if *poolNamespace == "" {
 			return fmt.Errorf("--pool requires --pool-namespace (or POD_NAMESPACE)")

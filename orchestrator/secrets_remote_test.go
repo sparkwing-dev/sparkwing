@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // sparkwing run --secrets PROF wires through to remoteSecretSource which

@@ -22,10 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/secrets"
 )
 
 // Server owns the route table, the backing store, and the
@@ -55,7 +54,7 @@ type Server struct {
 
 	// secretsCipher, when non-nil, encrypts secret values at rest. Nil
 	// means the controller runs unencrypted (laptop dev).
-	secretsCipher *secrets.Cipher
+	secretsCipher Cipher
 
 	// costPerRunnerHour is the USD rate fed into receipt cost
 	// computation. Zero = unconfigured -> compute_cents=0
@@ -161,8 +160,10 @@ func (s *Server) reconcileBeforeRead(h http.HandlerFunc) http.HandlerFunc {
 
 // WithSecretsCipher binds the controller's secret encryption-at-rest
 // cipher. Reads are no-ops for rows that predate the cipher. Pass nil
-// to keep the controller running unencrypted.
-func (s *Server) WithSecretsCipher(c *secrets.Cipher) *Server {
+// to keep the controller running unencrypted. The parameter is the
+// local Cipher interface; any concrete type satisfying that method
+// set works -- the default implementation lives in internal/secrets.
+func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
 	return s
 }

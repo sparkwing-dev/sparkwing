@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // secretSetReq is the wire body for POST /api/v1/secrets.

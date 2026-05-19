@@ -9,7 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/orchestrator/store"
-	"github.com/sparkwing-dev/sparkwing/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
