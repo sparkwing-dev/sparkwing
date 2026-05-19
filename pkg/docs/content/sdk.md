@@ -463,9 +463,8 @@ dispatch then picks one of three paths:
 - Neither declared -> the step soft-skips with `step_skipped` /
   `skip_reason: no_dry_run_defined`. Existing pipelines keep working
   under `--dry-run` while the contract gap is visible in run logs.
-  When paired with blast-radius markers (`Destructive()`,
-  `AffectsProduction()`, `CostsMoney()`), this soft-skip tightens
-  to a hard refusal.
+  When paired with risk labels (`step.Risk("destructive", "prod", ...)`),
+  this soft-skip tightens to a hard refusal.
 
 For step bodies that need to branch on the mode (e.g. emit a
 structured "would do X" log line for an op without a native
@@ -780,9 +779,7 @@ field, and the full reserved list.
 Current reserved set, from `sparkwing.ReservedFlagNames()`:
 
 ```
-allow-destructive   --allow-destructive  // blast-radius gate
-allow-money         --allow-money        // blast-radius gate
-allow-prod          --allow-prod         // blast-radius gate
+allow               --allow              // risk-label gate
 C, change-directory --change-directory   // re-anchor .sparkwing/ discovery
 config              --config             // named preset from config.yaml
 dry-run             --dry-run            // dry-run dispatch

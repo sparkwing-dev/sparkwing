@@ -103,7 +103,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		"--sw-for", "--sw-on",
 		// Advanced tier — also surface in --help
 		"--sw-change-directory", "--sw-verbose",
-		"--sw-allow-destructive", "--sw-allow-prod", "--sw-allow-money",
+		"--sw-allow",
 		"--sw-job", "--sw-prefer", "--sw-backends-env",
 	}
 	for _, tc := range cases {
@@ -121,7 +121,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 }
 
 // TestCompletionFlagsListsHotOnly pins that tab-completion filters to
-// the hot tier — `--sw-allow-destructive` and friends only surface in
+// the hot tier — `--sw-allow` and friends only surface in
 // --help, not in the completion menu.
 func TestCompletionFlagsListsHotOnly(t *testing.T) {
 	hotFlags := []string{
@@ -133,7 +133,7 @@ func TestCompletionFlagsListsHotOnly(t *testing.T) {
 	}
 	advancedFlags := []string{
 		"--sw-change-directory", "--sw-verbose",
-		"--sw-allow-destructive", "--sw-allow-prod", "--sw-allow-money",
+		"--sw-allow",
 		"--sw-job", "--sw-prefer", "--sw-backends-env",
 	}
 	for _, tc := range []struct {

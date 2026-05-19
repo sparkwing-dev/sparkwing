@@ -427,12 +427,12 @@ type WorkStep struct {
 	// execute under --dry-run unmodified.
 	dryRunFn          func(ctx context.Context) error
 	safeWithoutDryRun bool
-	// Author-declared blast-radius markers. The dispatcher
-	// walks this set per step against the sparkwing-level --allow-*
-	// flags (and bypasses entirely under --dry-run). An empty set
-	// means "no declared blast radius" -- the gate doesn't fire,
-	// preserving zero-behavior-change for existing pipelines.
-	blastRadius []BlastRadius
+	// Author-declared risk labels. The dispatcher walks this set per
+	// step, unions across the plan, and refuses dispatch when any
+	// label is missing from --sw-allow (and bypasses entirely under
+	// --sw-dry-run). An empty set means "no declared risk" -- the
+	// gate doesn't fire.
+	risks []string
 
 	// onTarget restricts the step to runs against the listed
 	// targets. Empty = universal (no constraint). RunWork filters

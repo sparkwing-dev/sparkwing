@@ -66,14 +66,13 @@ type runFlags struct {
 	// an explicit SafeWithoutDryRun marker) soft-skip with reason
 	// `no_dry_run_defined` so the contract gap is visible.
 	dryRun bool
-	// Per-marker escape hatches for the blast-radius gate. Each
-	// authorizes dispatch when the matching marker is declared on
-	// any step. --dry-run bypasses all three regardless. The gate
-	// degrades gracefully (no marker = no block) so pipelines that
-	// predate the gate keep working untouched.
-	allowDestructive bool
-	allowProd        bool
-	allowMoney       bool
+	// allow is the union of risk labels the operator authorizes via
+	// --sw-allow (repeatable; comma-separated allowed). The gate
+	// walks the plan's declared labels, subtracts this set, and
+	// refuses dispatch if any remain. --sw-dry-run bypasses
+	// regardless. The gate degrades gracefully (no labels declared =
+	// no block).
+	allow []string
 	// forTarget picks the pipelines.yaml target the run resolves
 	// against. Empty means "use the single declared target if there's
 	// one, else no target."
@@ -126,6 +125,20 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 		}
 		out[name] = "true"
 		i++
+	}
+	return out
+}
+
+// appendCSV splits a comma-separated value and appends non-empty
+// entries to out. Used by repeatable flags that also accept
+// comma-separated lists (pflag StringSlice semantics).
+func appendCSV(out []string, v string) []string {
+	for _, part := range strings.Split(v, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
 	}
 	return out
 }
@@ -233,23 +246,16 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case a == "--dry-run=false":
 			wf.dryRun = false
 			i++
-		case a == "--sw-allow-destructive", a == "--allow-destructive=true":
-			wf.allowDestructive = true
+		case a == "--sw-allow":
+			if i+1 < len(args) {
+				wf.allow = appendCSV(wf.allow, args[i+1])
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
 			i++
-		case a == "--allow-destructive=false":
-			wf.allowDestructive = false
-			i++
-		case a == "--sw-allow-prod", a == "--allow-prod=true":
-			wf.allowProd = true
-			i++
-		case a == "--allow-prod=false":
-			wf.allowProd = false
-			i++
-		case a == "--sw-allow-money", a == "--allow-money=true":
-			wf.allowMoney = true
-			i++
-		case a == "--allow-money=false":
-			wf.allowMoney = false
+		case strings.HasPrefix(a, "--sw-allow="):
+			wf.allow = appendCSV(wf.allow, strings.TrimPrefix(a, "--sw-allow="))
 			i++
 		case a == "-C", a == "--sw-change-directory":
 			if i+1 < len(args) {

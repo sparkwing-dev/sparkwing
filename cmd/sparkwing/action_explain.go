@@ -83,9 +83,9 @@ type planSnapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
-	// BlastRadius mirrors orchestrator.snapshotStep.BlastRadius:
-	// the author-declared marker set, "" for older binaries.
-	BlastRadius []string `json:"blast_radius,omitempty"`
+	// Risks mirrors orchestrator.snapshotStep.Risks: the
+	// author-declared risk-label set.
+	Risks []string `json:"risks,omitempty"`
 }
 
 type planSnapshotSpawn struct {
@@ -496,12 +496,12 @@ func printWork(w *planSnapshotWork, indent string) {
 		if s.HasSkipIf {
 			marker += " [skip_if]"
 		}
-		// Surface blast-radius markers next to the step id so a
-		// reader scanning explain output sees the contract before
-		// reading the deps. Suppressed when no marker is declared
-		// (the common case).
-		if len(s.BlastRadius) > 0 {
-			marker += " [" + strings.Join(s.BlastRadius, ",") + "]"
+		// Surface risk labels next to the step id so a reader
+		// scanning explain output sees the contract before reading
+		// the deps. Suppressed when no label is declared (the common
+		// case).
+		if len(s.Risks) > 0 {
+			marker += " [" + strings.Join(s.Risks, ",") + "]"
 		}
 		if names := groupByStep[s.ID]; len(names) > 0 {
 			marker += " (groups=" + strings.Join(names, ",") + ")"

@@ -793,10 +793,10 @@ func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 // matches the sparkwing CLI flag names so an agent can echo the map back
 // into a re-invocation.
 //
-// Some flags (allow-destructive, allow-prod, allow-money) are
-// consumed by the sparkwing run dispatcher itself for the blast-radius
-// gate and never reach Options. We pick those up via the SPARKWING_ALLOW_*
-// env vars the dispatcher forwards specifically so they show up here.
+// --sw-allow is consumed by the sparkwing run dispatcher itself for
+// the risk-label gate and never reaches Options. We pick up the
+// authorized labels via SPARKWING_ALLOW (comma-separated) the
+// dispatcher forwards specifically so they show up here.
 func buildRunFlags(opts Options) map[string]any {
 	flags := map[string]any{}
 	if opts.RetryOf != "" {
@@ -817,14 +817,8 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.MaxParallel > 0 {
 		flags["max_parallel"] = opts.MaxParallel
 	}
-	if os.Getenv("SPARKWING_ALLOW_DESTRUCTIVE") == "1" {
-		flags["allow_destructive"] = true
-	}
-	if os.Getenv("SPARKWING_ALLOW_PROD") == "1" {
-		flags["allow_prod"] = true
-	}
-	if os.Getenv("SPARKWING_ALLOW_MONEY") == "1" {
-		flags["allow_money"] = true
+	if v := os.Getenv("SPARKWING_ALLOW"); v != "" {
+		flags["allow"] = v
 	}
 	// Sparkwing-dispatch flags forwarded only for the run-record breadcrumb.
 	// `from` / `no_update` are consumed by the sparkwing run dispatcher
@@ -2406,12 +2400,11 @@ type snapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
-	// BlastRadius is the author-declared marker set on this step,
-	// stringified to canonical wire tokens. Empty when
-	// no marker was declared. Surfaced in the plan snapshot so
-	// `pipeline explain --json` consumers (agents, dashboard) see
-	// the contract alongside the static DAG.
-	BlastRadius []string `json:"blast_radius,omitempty"`
+	// Risks is the author-declared risk-label set on this step.
+	// Empty when no label was declared. Surfaced in the plan
+	// snapshot so `pipeline explain --json` consumers see the
+	// contract alongside the static DAG.
+	Risks []string `json:"risks,omitempty"`
 }
 
 type snapshotSpawn struct {
@@ -2621,19 +2614,12 @@ func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) 
 		out.ResultStep = resultStep.ID()
 	}
 	for _, s := range work.Steps() {
-		var br []string
-		if markers := s.BlastRadius(); len(markers) > 0 {
-			br = make([]string, len(markers))
-			for i, m := range markers {
-				br[i] = m.String()
-			}
-		}
 		out.Steps = append(out.Steps, snapshotStep{
-			ID:          s.ID(),
-			Needs:       s.DepIDs(),
-			IsResult:    s == resultStep,
-			HasSkipIf:   len(s.SkipPredicates()) > 0,
-			BlastRadius: br,
+			ID:        s.ID(),
+			Needs:     s.DepIDs(),
+			IsResult:  s == resultStep,
+			HasSkipIf: len(s.SkipPredicates()) > 0,
+			Risks:     s.Risks(),
 		})
 	}
 	for _, s := range work.Spawns() {

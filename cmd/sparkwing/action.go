@@ -34,15 +34,14 @@ type Pipeline struct {
 	Entrypoint string                  `json:"entrypoint,omitempty"`
 	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
 	Examples   []sparkwing.Example     `json:"examples,omitempty"`
-	// BlastRadius is the union of per-step blast-radius markers
-	// declared anywhere in the pipeline's plan, stringified to the
-	// canonical wire tokens ("destructive" / "production" / "money").
-	// Mirrors sparkwing.DescribePipeline.BlastRadius. omitempty keeps
-	// the wire format quiet for pipelines without markers.
-	BlastRadius []string `json:"blast_radius,omitempty"`
-	// BlastRadiusBySteps is the per-step breakdown of declared
-	// markers. Mirrors sparkwing.DescribePipeline.BlastRadiusBySteps.
-	BlastRadiusBySteps []sparkwing.DescribeStepBlastRadius `json:"blast_radius_by_step,omitempty"`
+	// Risks is the sorted, deduplicated union of per-step risk
+	// labels declared anywhere in the pipeline's plan. Mirrors
+	// sparkwing.DescribePipeline.Risks. omitempty keeps the wire
+	// format quiet for pipelines without risk labels.
+	Risks []string `json:"risks,omitempty"`
+	// RisksBySteps is the per-step breakdown of declared risk
+	// labels. Mirrors sparkwing.DescribePipeline.RisksBySteps.
+	RisksBySteps []sparkwing.DescribeStepRisks `json:"risks_by_step,omitempty"`
 }
 
 // runPipeline dispatches `sparkwing pipeline <verb> [...]`.
@@ -355,10 +354,10 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Help = dp.Help
 				a.Args = dp.Args
 				a.Examples = dp.Examples
-				// Surface blast-radius markers in
+				// Surface risk labels in
 				// `pipeline list / describe -o json`.
-				a.BlastRadius = dp.BlastRadius
-				a.BlastRadiusBySteps = dp.BlastRadiusBySteps
+				a.Risks = dp.Risks
+				a.RisksBySteps = dp.RisksBySteps
 			}
 			seen[p.Name] = struct{}{}
 			out = append(out, a)
@@ -434,6 +433,9 @@ func printPipelineDetail(a *Pipeline) {
 	}
 	if len(a.Tags) > 0 {
 		fmt.Printf("tags:  %s\n", strings.Join(a.Tags, ", "))
+	}
+	if len(a.Risks) > 0 {
+		fmt.Printf("risks: %s\n", strings.Join(a.Risks, ", "))
 	}
 	if len(a.Triggers) > 0 {
 		fmt.Printf("triggers: %s\n", strings.Join(a.Triggers, ", "))

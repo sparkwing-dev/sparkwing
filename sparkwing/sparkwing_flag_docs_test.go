@@ -35,9 +35,7 @@ func TestSparkwingFlagDocs_OrderAndUniqueness(t *testing.T) {
 }
 
 // TestSparkwingFlagDocs_CoversSafetyFlags pins the range-resume,
-// dry-run, and blast-radius flag set the doc list MUST include. A
-// future cleanup that removes one should fail loud here so the help
-// drift doesn't regress.
+// dry-run, and risk-label flag set the doc list MUST include.
 func TestSparkwingFlagDocs_CoversSafetyFlags(t *testing.T) {
 	docs := SparkwingFlagDocs()
 	have := map[string]bool{}
@@ -47,7 +45,7 @@ func TestSparkwingFlagDocs_CoversSafetyFlags(t *testing.T) {
 	mustHave := []string{
 		"sw-start-at", "sw-stop-at",
 		"sw-dry-run",
-		"sw-allow-destructive", "sw-allow-prod", "sw-allow-money",
+		"sw-allow",
 	}
 	for _, f := range mustHave {
 		if !have[f] {

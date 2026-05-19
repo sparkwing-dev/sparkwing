@@ -1,33 +1,34 @@
-// blast-radius dispatch gate. Reads the author-declared per-step
-// markers from the per-repo describe cache and refuses dispatch when
-// a Destructive / AffectsProduction / CostsMoney step is reachable
-// without the matching --allow-* escape (or --dry-run). Stale or
-// missing cache silently degrades to "no markers detected, no gate
-// fires" so the gate is purely additive and never blocks a dispatch
-// the cache hasn't seen -- mirrors the venue gate.
+// Risk-label dispatch gate. Reads the author-declared per-step
+// labels from the per-repo describe cache and refuses dispatch when
+// any reachable step declares a label the operator hasn't authorized
+// via --sw-allow (or --sw-dry-run). Stale or missing cache silently
+// degrades to "no labels detected, no gate fires" so the gate is
+// purely additive and never blocks a dispatch the cache hasn't seen.
 package main
 
 import (
+	"sort"
+
 	"github.com/sparkwing-dev/sparkwing/profile"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// blastRadiusFinding is one marker the gate detected on a specific
-// step. The first finding the dispatcher hits is the one it surfaces
-// in the BlastRadiusBlockedError so the operator sees a concrete
-// step name rather than a hand-wavey "this pipeline is destructive."
-type blastRadiusFinding struct {
+// stepRiskFinding is one risk-label group the gate detected on a
+// specific step. The validator unions every finding's labels and
+// reports the full missing set in one error so the operator can
+// authorize them all in a single retry.
+type stepRiskFinding struct {
 	NodeID string
 	StepID string
-	Marker sparkwing.BlastRadius
+	Labels []string
 }
 
-// lookupCachedBlastRadius returns the per-step marker list for the
+// lookupCachedRisks returns the per-step risk-label list for the
 // named pipeline as stored in the describe cache. Returns nil when
 // the pipeline isn't in the cache or when reading fails -- callers
 // treat empty as "no constraint declared" and proceed without
 // gating, matching the venue gate's degrade-gracefully shape.
-func lookupCachedBlastRadius(sparkwingDir, pipelineName string) []blastRadiusFinding {
+func lookupCachedRisks(sparkwingDir, pipelineName string) []stepRiskFinding {
 	schemas, err := readDescribeCache(sparkwingDir)
 	if err != nil || schemas == nil {
 		return nil
@@ -36,105 +37,103 @@ func lookupCachedBlastRadius(sparkwingDir, pipelineName string) []blastRadiusFin
 		if s.Name != pipelineName {
 			continue
 		}
-		var out []blastRadiusFinding
-		for _, row := range s.BlastRadiusBySteps {
-			for _, m := range row.Markers {
-				br := sparkwing.BlastRadius(m)
-				if !br.IsValid() {
-					// Unknown wire token -- ignore so a future marker
-					// in a newer SDK doesn't accidentally block here.
-					continue
-				}
-				out = append(out, blastRadiusFinding{
-					NodeID: row.NodeID,
-					StepID: row.StepID,
-					Marker: br,
-				})
+		var out []stepRiskFinding
+		for _, row := range s.RisksBySteps {
+			if len(row.Labels) == 0 {
+				continue
 			}
+			out = append(out, stepRiskFinding{
+				NodeID: row.NodeID,
+				StepID: row.StepID,
+				Labels: row.Labels,
+			})
 		}
 		// Fallback to the union list when the per-step breakdown is
-		// empty but the union is populated. This happens for
-		// pipelines whose Plan() can't run under empty args during
-		// --describe but whose union was filled in by a previous
-		// SDK that surfaced both fields. Best-effort -- node/step
-		// ids are unknown so the error message references the
-		// pipeline only.
-		if len(out) == 0 {
-			for _, m := range s.BlastRadius {
-				br := sparkwing.BlastRadius(m)
-				if !br.IsValid() {
-					continue
-				}
-				out = append(out, blastRadiusFinding{Marker: br})
-			}
+		// empty but the union is populated. Step ids are unknown so
+		// the surfaced finding references the pipeline only.
+		if len(out) == 0 && len(s.Risks) > 0 {
+			out = append(out, stepRiskFinding{Labels: s.Risks})
 		}
 		return out
 	}
 	return nil
 }
 
-// enforceBlastRadius is the dispatcher's gate: refuse the run when
-// any reachable step declares a marker the operator hasn't
-// authorized via the matching --allow-* flag. --dry-run bypasses
-// every gate (the safe-mode contract), and a profile-level
-// auto-allow (laptop / kind cluster) can pre-authorize specific
-// markers so a known-safe environment doesn't pester the user.
+// enforceRiskGate is the dispatcher's gate: refuse the run when any
+// reachable step declares a risk label the operator hasn't
+// authorized via --sw-allow. --sw-dry-run bypasses every gate (the
+// safe-mode contract), and a profile-level auto_allow can
+// pre-authorize specific labels so a known-safe environment doesn't
+// pester the user.
 //
-// Returns nil when no marker fires or when every fired marker is
-// authorized. Returns a *sparkwing.BlastRadiusBlockedError on the
-// first refusal so callers can pattern-match.
-func enforceBlastRadius(
+// Returns nil when no findings or when every declared label is
+// authorized. Returns a *sparkwing.RiskBlockedError whose
+// MissingLabels names every unauthorized label in one shot.
+func enforceRiskGate(
 	pipelineName string,
-	findings []blastRadiusFinding,
+	findings []stepRiskFinding,
 	wf runFlags,
 	prof *profile.Profile,
 ) error {
-	// dry-run is the always-safe escape hatch.
-	// Authors declare a DryRunFn (or SafeWithoutDryRun) and the
-	// orchestrator runs the no-mutation body in place of the apply
-	// Fn. Bypassing the gate here matches that contract.
 	if wf.dryRun {
 		return nil
 	}
-	for _, f := range findings {
-		if isMarkerAllowed(f.Marker, wf, prof) {
-			continue
-		}
-		return &sparkwing.BlastRadiusBlockedError{
-			Pipeline: pipelineName,
-			StepID:   f.StepID,
-			Marker:   f.Marker,
+
+	allowed := map[string]bool{}
+	for _, l := range wf.allow {
+		allowed[l] = true
+	}
+	if prof != nil {
+		for _, l := range prof.AutoAllow {
+			allowed[l] = true
 		}
 	}
-	return nil
+
+	missingByStep := map[string][]string{}
+	stepOrder := []string{}
+	stepNodes := map[string]string{}
+	missingUnion := map[string]bool{}
+	for _, f := range findings {
+		for _, label := range f.Labels {
+			if allowed[label] {
+				continue
+			}
+			if _, seen := missingByStep[f.StepID]; !seen {
+				stepOrder = append(stepOrder, f.StepID)
+				stepNodes[f.StepID] = f.NodeID
+			}
+			if !contains(missingByStep[f.StepID], label) {
+				missingByStep[f.StepID] = append(missingByStep[f.StepID], label)
+			}
+			missingUnion[label] = true
+		}
+	}
+	if len(missingUnion) == 0 {
+		return nil
+	}
+
+	// Report the first offending step with the FULL missing union so
+	// the operator can satisfy the gate in one retry.
+	allMissing := make([]string, 0, len(missingUnion))
+	for l := range missingUnion {
+		allMissing = append(allMissing, l)
+	}
+	sort.Strings(allMissing)
+
+	var stepID string
+	if len(stepOrder) > 0 {
+		stepID = stepOrder[0]
+	}
+	return &sparkwing.RiskBlockedError{
+		Pipeline:      pipelineName,
+		StepID:        stepID,
+		MissingLabels: allMissing,
+	}
 }
 
-// isMarkerAllowed reports whether the operator has authorized the
-// given marker via either the sparkwing-level --allow-* flag or the
-// profile's auto_allow declaration. Profile auto-allow is opt-in
-// per-marker so a "production" profile can leave Destructive locked
-// while a "laptop" profile can flip the whole set.
-func isMarkerAllowed(b sparkwing.BlastRadius, wf runFlags, prof *profile.Profile) bool {
-	switch b {
-	case sparkwing.BlastRadiusDestructive:
-		if wf.allowDestructive {
-			return true
-		}
-		if prof != nil && prof.AutoAllow.Destructive {
-			return true
-		}
-	case sparkwing.BlastRadiusAffectsProduction:
-		if wf.allowProd {
-			return true
-		}
-		if prof != nil && prof.AutoAllow.Production {
-			return true
-		}
-	case sparkwing.BlastRadiusCostsMoney:
-		if wf.allowMoney {
-			return true
-		}
-		if prof != nil && prof.AutoAllow.Money {
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
 			return true
 		}
 	}

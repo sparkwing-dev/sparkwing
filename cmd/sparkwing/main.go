@@ -119,16 +119,15 @@ func dispatchRun(args []string) error {
 	// satisfy the job's Requires terms, and a mismatch produces a
 	// clear error at run start. No CLI-side venue check is needed.
 
-	// Blast-radius gate. Walk per-step markers via the describe
-	// cache and refuse dispatch when a Destructive /
-	// AffectsProduction / CostsMoney step is reachable without the
-	// matching --allow-* escape (or --dry-run, which bypasses every
-	// gate per the safe-mode contract). A profile-level auto_allow
-	// can pre-authorize specific markers for a low-stakes
-	// environment. A cold cache or older binary silently degrades
-	// to "no markers detected, no gate fires" -- the next --describe
-	// refresh populates the cache.
-	if findings := lookupCachedBlastRadius(dir, pipelineName); len(findings) > 0 {
+	// Risk-label gate. Walk per-step risk labels via the describe
+	// cache and refuse dispatch when any reachable step declares a
+	// label the operator hasn't authorized via --sw-allow (or
+	// --sw-dry-run, which bypasses every gate per the safe-mode
+	// contract). A profile-level auto_allow can pre-authorize
+	// specific labels for a low-stakes environment. A cold cache or
+	// older binary silently degrades to "no labels detected, no gate
+	// fires" -- the next --describe refresh populates the cache.
+	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
 		var prof *profile.Profile
 		if wf.on != "" {
 			p, perr := resolveProfile(wf.on)
@@ -136,7 +135,7 @@ func dispatchRun(args []string) error {
 				prof = p
 			}
 		}
-		if err := enforceBlastRadius(pipelineName, findings, wf, prof); err != nil {
+		if err := enforceRiskGate(pipelineName, findings, wf, prof); err != nil {
 			return err
 		}
 	}
@@ -182,20 +181,11 @@ func dispatchRun(args []string) error {
 	if wf.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
-	// allow-* gate flags: consumed by the sparkwing run dispatcher for
-	// the blast-radius pre-flight check, but still surfaced on the
-	// run record for reproducibility (an agent re-invoking needs to
-	// know which gates were authorized). Forwarded as env vars; the
-	// orchestrator reads them in emitRunStart and includes the names
-	// in run_start.attrs.flags.
-	if wf.allowDestructive {
-		env = append(env, "SPARKWING_ALLOW_DESTRUCTIVE=1")
-	}
-	if wf.allowProd {
-		env = append(env, "SPARKWING_ALLOW_PROD=1")
-	}
-	if wf.allowMoney {
-		env = append(env, "SPARKWING_ALLOW_MONEY=1")
+	// --sw-allow forwards the operator-authorized risk labels to the
+	// orchestrator. Surfaced on the run record (run_start.attrs.flags)
+	// so an agent re-invoking knows which labels were authorized.
+	if len(wf.allow) > 0 {
+		env = append(env, "SPARKWING_ALLOW="+strings.Join(wf.allow, ","))
 	}
 	// Forward pre-flight sparkwing flags as env vars purely so
 	// emitRunStart can surface them on run_start.attrs.flags. The

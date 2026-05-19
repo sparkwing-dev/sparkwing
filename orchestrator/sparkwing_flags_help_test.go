@@ -18,9 +18,7 @@ func TestPrintSparkwingFlagsSection_ContainsArcFlags(t *testing.T) {
 	mustContain(t, out, "--sw-start-at")
 	mustContain(t, out, "--sw-stop-at")
 	mustContain(t, out, "--sw-dry-run")
-	mustContain(t, out, "--sw-allow-destructive")
-	mustContain(t, out, "--sw-allow-prod")
-	mustContain(t, out, "--sw-allow-money")
+	mustContain(t, out, "--sw-allow")
 
 	mustContain(t, out, "--sw-on")
 	mustContain(t, out, "--sw-from")

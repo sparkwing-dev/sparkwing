@@ -52,14 +52,13 @@ type Profile struct {
 	// reconciliation layers on top.
 	CostPerRunnerHour float64 `yaml:"cost_per_runner_hour,omitempty"`
 
-	// AutoAllow pre-authorizes per-marker blast-radius gates for
-	// this profile. A low-stakes environment (laptop, kind
-	// cluster) can declare `auto_allow: { destructive: true }` so an
-	// operator running `sparkwing run destroy-cluster --on laptop` doesn't
-	// have to pass --allow-destructive every time. Production
-	// profiles should leave this zero so the gate stays loud.
-	// Defaults are zero everywhere; the field is opt-in.
-	AutoAllow AutoAllow `yaml:"auto_allow,omitempty"`
+	// AutoAllow pre-authorizes risk labels for this profile. A
+	// low-stakes environment (laptop, kind cluster) can declare
+	// `auto_allow: [destructive]` so an operator running
+	// `sparkwing run destroy-cluster --on laptop` doesn't have to
+	// pass `--sw-allow destructive` every time. Production profiles
+	// should leave this empty so the gate stays loud.
+	AutoAllow []string `yaml:"auto_allow,omitempty"`
 
 	// DefaultRunner names the runner the scheduler picks when a
 	// job's Prefers produce no match and more than one runner
@@ -80,16 +79,6 @@ func (p *Profile) EffectiveDefaultRunner() string {
 		return "local"
 	}
 	return p.DefaultRunner
-}
-
-// AutoAllow is the per-marker pre-authorization block declared
-// inside a Profile. Each field maps to one BlastRadius marker:
-// destructive (BlastRadiusDestructive), production
-// (BlastRadiusAffectsProduction), money (BlastRadiusCostsMoney).
-type AutoAllow struct {
-	Destructive bool `yaml:"destructive,omitempty"`
-	Production  bool `yaml:"production,omitempty"`
-	Money       bool `yaml:"money,omitempty"`
 }
 
 // Config is the on-disk profiles.yaml file.

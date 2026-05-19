@@ -232,7 +232,9 @@ type pushTagJob struct {
 }
 
 func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
+	sparkwing.Step(w, "run", j.run).
+		DryRun(j.dryRun).
+		Risk("destructive", "prod")
 	return nil, nil
 }
 

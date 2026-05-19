@@ -10,18 +10,17 @@ import (
 )
 
 // The local Pipeline struct used as the wire shape for `pipeline
-// list -o json` and `pipeline describe -o json` must surface
-// blast_radius (union) and blast_radius_by_step (per-step breakdown)
-// when the underlying DescribePipeline declares them. JSON consumers
-// rely on these fields to know which pipelines need
-// --allow-destructive / --allow-production / --allow-money.
-func TestPipelineJSON_SurfacesBlastRadius(t *testing.T) {
+// list -o json` and `pipeline describe -o json` must surface risks
+// (union) and risks_by_step (per-step breakdown) when the underlying
+// DescribePipeline declares them. JSON consumers rely on these
+// fields to know which --sw-allow labels a pipeline needs.
+func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	p := Pipeline{
-		Name:        "cluster-down",
-		BlastRadius: []string{"destructive", "production"},
-		BlastRadiusBySteps: []sparkwing.DescribeStepBlastRadius{
-			{NodeID: "cluster-down", StepID: "terraform-destroy-eks", Markers: []string{"destructive", "production"}},
-			{NodeID: "cluster-down", StepID: "terraform-destroy-nat", Markers: []string{"destructive"}},
+		Name:  "cluster-down",
+		Risks: []string{"destructive", "prod"},
+		RisksBySteps: []sparkwing.DescribeStepRisks{
+			{NodeID: "cluster-down", StepID: "terraform-destroy-eks", Labels: []string{"destructive", "prod"}},
+			{NodeID: "cluster-down", StepID: "terraform-destroy-nat", Labels: []string{"destructive"}},
 		},
 	}
 	raw, err := json.Marshal(p)
@@ -30,11 +29,11 @@ func TestPipelineJSON_SurfacesBlastRadius(t *testing.T) {
 	}
 	got := string(raw)
 	for _, want := range []string{
-		`"blast_radius":["destructive","production"]`,
-		`"blast_radius_by_step":[`,
+		`"risks":["destructive","prod"]`,
+		`"risks_by_step":[`,
 		`"node_id":"cluster-down"`,
 		`"step_id":"terraform-destroy-eks"`,
-		`"markers":["destructive","production"]`,
+		`"labels":["destructive","prod"]`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("JSON missing %q\nfull: %s", want, got)
@@ -42,56 +41,52 @@ func TestPipelineJSON_SurfacesBlastRadius(t *testing.T) {
 	}
 }
 
-// Pipelines without blast-radius markers must omit both fields
-// entirely (omitempty contract). Catalog readers depend on the
-// absent-field signal to mean "no markers declared", not "old CLI
-// version".
-func TestPipelineJSON_OmitsEmptyBlastRadius(t *testing.T) {
+// Pipelines without risk labels must omit both fields entirely
+// (omitempty contract). Catalog readers depend on the absent-field
+// signal to mean "no labels declared".
+func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
 	p := Pipeline{Name: "hello"}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	got := string(raw)
-	if strings.Contains(got, "blast_radius") {
-		t.Errorf("expected no blast_radius keys in payload, got: %s", got)
+	if strings.Contains(got, "risks") {
+		t.Errorf("expected no risks keys in payload, got: %s", got)
 	}
 }
 
 // The catalog copy in gatherPipelinesCatalog is the load-bearing
 // site -- it copies Short / Help / Args / Examples from the cached
-// DescribePipeline schema along with the two blast-radius fields.
-// This test fakes the inner copy to assert the union + per-step
-// both round-trip.
-func TestCatalogCopy_PreservesBlastRadius(t *testing.T) {
+// DescribePipeline schema along with the two risk fields. This test
+// fakes the inner copy to assert the union + per-step both
+// round-trip.
+func TestCatalogCopy_PreservesRisks(t *testing.T) {
 	dp := sparkwing.DescribePipeline{
-		Name:        "cluster-down",
-		Short:       "tear down the cluster",
-		BlastRadius: []string{"destructive", "production"},
-		BlastRadiusBySteps: []sparkwing.DescribeStepBlastRadius{
-			{NodeID: "cluster-down", StepID: "destroy", Markers: []string{"destructive", "production"}},
+		Name:  "cluster-down",
+		Short: "tear down the cluster",
+		Risks: []string{"destructive", "prod"},
+		RisksBySteps: []sparkwing.DescribeStepRisks{
+			{NodeID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}
 	a := Pipeline{Name: dp.Name}
-	// Mirror the copy block in gatherPipelinesCatalog. If a future
-	// edit drops one of these assignments, this test fails -- that
-	// is the regression we want to prevent.
 	a.Short = dp.Short
 	a.Help = dp.Help
 	a.Args = dp.Args
 	a.Examples = dp.Examples
-	a.BlastRadius = dp.BlastRadius
-	a.BlastRadiusBySteps = dp.BlastRadiusBySteps
+	a.Risks = dp.Risks
+	a.RisksBySteps = dp.RisksBySteps
 
-	if got, want := len(a.BlastRadius), 2; got != want {
-		t.Errorf("BlastRadius len = %d, want %d", got, want)
+	if got, want := len(a.Risks), 2; got != want {
+		t.Errorf("Risks len = %d, want %d", got, want)
 	}
-	if got, want := len(a.BlastRadiusBySteps), 1; got != want {
-		t.Errorf("BlastRadiusBySteps len = %d, want %d", got, want)
+	if got, want := len(a.RisksBySteps), 1; got != want {
+		t.Errorf("RisksBySteps len = %d, want %d", got, want)
 	}
-	if a.BlastRadiusBySteps[0].StepID != "destroy" {
-		t.Errorf("BlastRadiusBySteps[0].StepID = %q, want %q",
-			a.BlastRadiusBySteps[0].StepID, "destroy")
+	if a.RisksBySteps[0].StepID != "destroy" {
+		t.Errorf("RisksBySteps[0].StepID = %q, want %q",
+			a.RisksBySteps[0].StepID, "destroy")
 	}
 }
 
