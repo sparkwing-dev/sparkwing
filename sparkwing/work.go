@@ -10,29 +10,28 @@ import (
 
 // Workable is the interface every dispatchable Job satisfies: a struct
 // that exposes its inner DAG via Work(w). The SDK constructs the
-// *Work and passes it in; the author registers steps onto w and
-// returns the *WorkStep designated as the Job's typed output (or
-// nil for an untyped Job). A non-nil error fails Plan-time
-// materialization. Author types embed sparkwing.Base (and
-// optionally sparkwing.Produces[T]); the SDK materializes the inner
-// Work at Plan-time so renderers see the full graph before any
-// dispatch begins.
+// [Work] and passes it in; the author registers steps onto w via
+// [Step] and returns the [WorkStep] designated as the Job's typed
+// output (or nil for an untyped Job). A non-nil error fails Plan-time
+// materialization. Author types embed [Base] (and optionally
+// [Produces][T]); the SDK materializes the inner Work at Plan time
+// so renderers see the full graph before any dispatch begins.
 //
 // For the trivial single-step case pass a func(ctx) error directly to
-// sparkwing.Job; for typed jobs declare a struct embedding
-// sparkwing.Produces[T] and return the typed step's *WorkStep from
-// Work.
+// [Job]; for typed jobs declare a struct embedding [Produces][T] and
+// return the typed step's *WorkStep from Work.
 type Workable interface {
 	Work(w *Work) (*WorkStep, error)
 }
 
-// Work is the inner DAG of a Job. Mirrors Plan at the inner layer:
-// Steps with Needs / SkipIf, plus Sequence / Parallel combinators and
-// Spawn primitives for layer escape.
+// Work is the inner DAG of a Job. Mirrors [Plan] at the inner layer:
+// [WorkStep]s with [WorkStep.Needs] / [WorkStep.SkipIf], plus
+// [GroupSteps] for named bundles and [JobSpawn] / [JobSpawnEach] for
+// layer escape.
 //
-// Build via NewWork. The orchestrator calls Job.Work() once per Job
-// at Plan-time and walks the entire reachable graph (including Spawn
-// targets) before any dispatch.
+// Build via [NewWork]. The orchestrator calls [Workable.Work] once
+// per Job at Plan time and walks the entire reachable graph (including
+// Spawn targets) before any dispatch.
 type Work struct {
 	mu        sync.Mutex
 	steps     []*WorkStep
@@ -407,11 +406,14 @@ func coerceSpawnEachJob(v any) Workable {
 	return job
 }
 
-// WorkStep is one unit of work inside a Work. Steps are not Jobs;
+// WorkStep is one unit of work inside a [Work]. Steps are not Jobs;
 // they run inside the Job's runner process and share its filesystem,
-// environment, and ctx. Job-only modifiers (Retry, Timeout, OnFailure,
-// Cache, Requires, BeforeRun/AfterRun) are deliberately absent on
-// WorkStep -- promote to a Job via JobSpawn if you need them.
+// environment, and ctx. Returned by [Step]; modifier methods
+// ([WorkStep.Needs], [WorkStep.SkipIf], [WorkStep.Risk],
+// [WorkStep.DryRun], [WorkStep.SafeWithoutDryRun]) chain off it.
+// Plan-layer modifiers (Retry, Timeout, OnFailure, Cache, Requires,
+// BeforeRun / AfterRun) are deliberately absent here -- promote to a
+// Job via [JobSpawn] if you need them.
 type WorkStep struct {
 	id              string
 	fn              func(ctx context.Context) (any, error)

@@ -8,6 +8,21 @@ are required.
 
 ## [Unreleased]
 
+### Docs
+
+- Curated godoc for the `sparkwing/` author SDK and `pkg/storage/`
+  public interfaces. Added `doc.go` package overviews to both
+  (two-layer Plan / Work model, registration pattern, and modifier
+  categories for `sparkwing/`; ArtifactStore / LogStore / StateStore
+  contracts and implementation map for `pkg/storage/`). Added
+  `Example*` test functions covering the primary use cases (single-
+  job pipelines, typed cross-step Ref, blast-radius Risk, human
+  approval gates, artifact store round-trip, log tail read).
+  Top-tier types now use `[Type]` cross-reference links so `go doc`
+  and pkg.go.dev render them as navigable. Establishes the
+  documentation style applied across the remaining `pkg/` packages
+  in subsequent commits.
+
 ### Added
 
 - `sparkwing run release` now refuses to ship a version when

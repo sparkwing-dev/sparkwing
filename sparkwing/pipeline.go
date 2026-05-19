@@ -15,8 +15,8 @@ import (
 type Base struct{}
 
 // Registration is the registry's record for one pipeline. Produced
-// by Register[T]; consumed by the orchestrator (via Lookup) and CLI
-// introspection (via Schema).
+// by [Register]; consumed by the orchestrator (via [Lookup]) and CLI
+// introspection (via the [InputSchema] in Schema).
 type Registration struct {
 	// Name is the invocation name (e.g. "lint", "build-test-deploy").
 	Name string

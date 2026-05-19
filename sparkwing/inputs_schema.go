@@ -10,8 +10,10 @@ import (
 )
 
 // Pipeline is the canonical pipeline shape: every pipeline declares a
-// typed Inputs struct and populates a *Plan that the SDK constructs
-// and passes in. Pipelines that take no flags use NoInputs.
+// typed Inputs struct and populates a [Plan] that the SDK constructs
+// and passes in. Pipelines that take no flags use [NoInputs] and are
+// registered with [Register]; the [RunContext] argument carries the
+// run id and pipeline name for the Plan body.
 //
 // The convention is to import sparkwing under the short alias `sw`:
 //

@@ -1,12 +1,3 @@
-// Package storage defines pluggable storage interfaces for the two
-// kinds of data sparkwing pipelines persist: opaque blobs (compiled
-// pipeline binaries, archived source trees) and per-node log streams.
-//
-// Three execution modes target different default backends:
-//
-//	local         filesystem            filesystem
-//	ci-embedded   S3 (or compatible)    S3 (or compatible)
-//	distributed   sparkwing-cache HTTP  sparkwing-logs HTTP
 package storage
 
 import (
@@ -26,7 +17,8 @@ var ErrListNotSupported = errors.New("storage: list not supported")
 // ArtifactStore is a content-addressed blob store. Keys are
 // caller-defined opaque strings. Implementations must tolerate
 // concurrent Put on the same key (last write wins) without data
-// corruption.
+// corruption. Open via [storeurl.OpenArtifactStore]; implementations
+// live in the [fs], [s3], and [sparkwingcache] subpackages.
 type ArtifactStore interface {
 	// Get returns a reader for the blob at key. The caller closes it.
 	// Returns ErrNotFound if the key has never been written.
@@ -60,6 +52,9 @@ type ReadOpts struct {
 
 // LogStore persists per-node log streams keyed by (runID, nodeID).
 // Implementations store opaque bytes; callers control marshaling.
+// Open via [storeurl.OpenLogStore]; implementations live in the
+// [fs], [s3], [sparkwinglogs], and [stdoutlogs] subpackages. [ReadOpts]
+// narrows the slice returned by Read.
 type LogStore interface {
 	// Append writes data verbatim to the (runID, nodeID) log.
 	Append(ctx context.Context, runID, nodeID string, data []byte) error

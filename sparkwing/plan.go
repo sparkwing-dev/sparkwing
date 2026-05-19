@@ -10,9 +10,10 @@ import (
 )
 
 // Plan is the typed DAG a pipeline returns from its Plan method.
-// The orchestrator consumes this, snapshots it, and dispatches nodes
-// in dependency order. Build plans via NewPlan and the Sequence /
-// Parallel combinators.
+// The orchestrator consumes it, snapshots the graph, and dispatches
+// [JobNode]s in dependency order. Build a Plan via [NewPlan] and
+// attach jobs with [Job], [JobApproval], or [JobSpawn]; chain
+// dependencies with [JobNode.Needs].
 type Plan struct {
 	mu         sync.Mutex
 	nodes      []*JobNode
@@ -346,8 +347,11 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 	return w, resultStep
 }
 
-// Job is a single entry in the Plan. It wraps a user-authored job
-// plus dispatch modifiers.
+// JobNode is a single entry in a [Plan]. It wraps a user-authored
+// [Workable] plus the Plan-layer modifiers (Needs, Retry, Timeout,
+// OnFailure, Cache, RunsOn, Inline, BeforeRun / AfterRun, Approval).
+// Returned by [Job], [JobApproval], and [JobSpawn]; modifier methods
+// chain off it. Inner-DAG modifiers live on [WorkStep] instead.
 type JobNode struct {
 	id         string
 	job        Workable
