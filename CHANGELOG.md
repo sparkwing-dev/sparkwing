@@ -54,6 +54,10 @@
 - Moved `WithLogger` and `WithNode` from `sparkwing` to
   `internal/sparkwingruntime`. Authors do not call these; `LoggerFromContext`
   and `NodeFromContext` remain in sparkwing for extensibility.
+- Extracted 6 `sw:"..."` struct-tag reflection helpers (`parseSWTags`,
+  `coerceAssign`, `toString`/`toBool`/`toInt64`/`toFloat64`) to a new
+  `internal/swtags` package, used by both sparkwing and
+  `internal/sparkwingruntime`. No behavior change, no public API change.
 
 ### Removed
 

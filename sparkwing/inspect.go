@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/swtags"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
@@ -62,7 +63,7 @@ func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
 		return nil, fmt.Errorf("pipeline %q config: Config() must return a non-nil pointer to a struct, got %T", reg.Name, cfg)
 	}
-	specs, err := parseSWTags(rv.Type())
+	specs, err := swtags.Parse(rv.Type())
 	if err != nil {
 		return nil, fmt.Errorf("pipeline %q config: %w", reg.Name, err)
 	}
@@ -71,20 +72,20 @@ func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 
 	// Layer 1: struct defaults.
 	for _, s := range specs {
-		if !s.hasDefault {
+		if !s.HasDefault {
 			continue
 		}
-		if err := applyDefault(elem.FieldByIndex(s.field.Index), s.defaultRaw, s.field.Name); err != nil {
+		if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), s.DefaultRaw, s.Field.Name); err != nil {
 			return nil, fmt.Errorf("pipeline %q config: %w", reg.Name, err)
 		}
-		sources[s.name] = "struct default"
+		sources[s.Name] = "struct default"
 	}
 
 	// Layer 2: pipelines.yaml values.base.
 	if yamlEntry != nil && len(yamlEntry.Values.Base) > 0 {
 		for _, s := range specs {
-			if _, ok := yamlEntry.Values.Base[s.name]; ok {
-				sources[s.name] = "pipelines.yaml values.base"
+			if _, ok := yamlEntry.Values.Base[s.Name]; ok {
+				sources[s.Name] = "pipelines.yaml values.base"
 			}
 		}
 		if err := applyValueOverlay(elem, specs, yamlEntry.Values.Base, reg.Name); err != nil {
@@ -96,8 +97,8 @@ func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 	if yamlEntry != nil && target != "" {
 		if t, ok := yamlEntry.Targets[target]; ok && len(t.Values) > 0 {
 			for _, s := range specs {
-				if _, ok := t.Values[s.name]; ok {
-					sources[s.name] = fmt.Sprintf("pipelines.yaml targets.%s.values", target)
+				if _, ok := t.Values[s.Name]; ok {
+					sources[s.Name] = fmt.Sprintf("pipelines.yaml targets.%s.values", target)
 				}
 			}
 			if err := applyValueOverlay(elem, specs, t.Values, reg.Name); err != nil {
@@ -110,8 +111,8 @@ func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 	if yamlEntry != nil && triggerSource != "" {
 		if tv := yamlEntry.TriggerValues(triggerSource); len(tv) > 0 {
 			for _, s := range specs {
-				if _, ok := tv[s.name]; ok {
-					sources[s.name] = fmt.Sprintf("pipelines.yaml on.%s.values", triggerSource)
+				if _, ok := tv[s.Name]; ok {
+					sources[s.Name] = fmt.Sprintf("pipelines.yaml on.%s.values", triggerSource)
 				}
 			}
 			if err := applyValueOverlay(elem, specs, tv, reg.Name); err != nil {
@@ -122,18 +123,18 @@ func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 
 	out := make([]ConfigField, 0, len(specs))
 	for _, s := range specs {
-		fv := elem.FieldByIndex(s.field.Index).Interface()
-		src := sources[s.name]
+		fv := elem.FieldByIndex(s.Field.Index).Interface()
+		src := sources[s.Name]
 		if src == "" {
 			src = "not set"
 		}
 		out = append(out, ConfigField{
-			Name:     s.name,
-			GoField:  s.field.Name,
-			TypeName: s.field.Type.String(),
+			Name:     s.Name,
+			GoField:  s.Field.Name,
+			TypeName: s.Field.Type.String(),
 			Value:    fv,
 			Source:   src,
-			Required: s.required,
+			Required: s.Required,
 		})
 	}
 	return out, nil
@@ -218,26 +219,26 @@ func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *p
 		if raw != nil {
 			rv := reflect.ValueOf(raw)
 			if rv.Kind() == reflect.Pointer && !rv.IsNil() && rv.Elem().Kind() == reflect.Struct {
-				specs, err := parseSWTags(rv.Type())
+				specs, err := swtags.Parse(rv.Type())
 				if err == nil {
 					for _, s := range specs {
-						if idx, ok := seen[s.name]; ok {
+						if idx, ok := seen[s.Name]; ok {
 							// Struct-declared required tightens the yaml entry.
-							if s.required {
+							if s.Required {
 								entries[idx].required = true
 							}
 							if entries[idx].goField == "" {
-								entries[idx].goField = s.field.Name
+								entries[idx].goField = s.Field.Name
 							}
 							continue
 						}
 						entries = append(entries, entry{
-							name:       s.name,
-							goField:    s.field.Name,
-							required:   s.required,
+							name:       s.Name,
+							goField:    s.Field.Name,
+							required:   s.Required,
 							declaredIn: "Secrets() struct",
 						})
-						seen[s.name] = len(entries) - 1
+						seen[s.Name] = len(entries) - 1
 					}
 				}
 			}
