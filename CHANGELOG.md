@@ -17,6 +17,11 @@ are required.
   "avg wait" chart now shows real intake-to-start latency instead
   of flat zero; OpenAPI's `avg_wait_ms` description was tightened
   to match.
+- Stale doc comment on `handleWaiterNotify` referenced a
+  `coalesced` SSE event that the handler never emits. Rewrote it
+  to match the three terminal events the handler actually sends
+  (`ready`, `superseded`, `stream_end`) so the code, the doc
+  comment, and `api/openapi.yaml` all agree on the wire shape.
 
 ### Docs
 

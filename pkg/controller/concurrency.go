@@ -242,12 +242,17 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleWaiterNotify is an SSE stream that surfaces resolution events
-// for a given run's waiting nodes. Events emitted:
+// for a given (run_id, node_id) waiter. Polls the concurrency state at
+// 250ms cadence and emits exactly one terminal event per stream, then
+// closes. Every event payload carries key + run_id, plus node_id when
+// one was supplied on the query string.
 //
-//	event: ready         data: {"key":"...","node_id":"..."}
-//	event: coalesced     data: {"key":"...","node_id":"...","output_ref":"..."}
-//	event: superseded    data: {"key":"...","node_id":"..."}
-//	event: stream_end    data: {}
+//	event: ready         data: {"key":"...","run_id":"...","node_id":"..."}
+//	event: superseded    data: {"key":"...","run_id":"...","node_id":"..."}
+//	event: stream_end    data: {"reason":"max_wait"|"key_not_found", ...}
+//
+// 30 minutes is the fail-safe per-stream cap; the stream also closes
+// when the client disconnects.
 func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	runID := r.URL.Query().Get("run_id")
