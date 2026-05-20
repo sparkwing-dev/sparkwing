@@ -288,7 +288,7 @@ func parseRunFlags(args []string) (runFlags, []string) {
 
 // setupRefWorktree creates a git worktree at ref. Caller must defer cleanup.
 // Best-effort fetch first so unseen refs resolve; fetch failure is non-fatal.
-func setupRefWorktree(sparkwingDir, ref string) (worktreeDir string, sparkwingSub string, cleanup func(), err error) {
+func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub string, cleanup func(), err error) {
 	repoRoot := filepath.Dir(sparkwingDir)
 
 	tmpDir, err := os.MkdirTemp("", "sparkwing-from-*")

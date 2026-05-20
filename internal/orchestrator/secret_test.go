@@ -119,11 +119,13 @@ type captureLogger struct {
 func (c *captureLogger) Log(level, msg string) {
 	c.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
+
 func (c *captureLogger) Emit(rec sparkwing.LogRecord) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.records = append(c.records, rec)
 }
+
 func (c *captureLogger) Snapshot() []sparkwing.LogRecord {
 	c.mu.Lock()
 	defer c.mu.Unlock()

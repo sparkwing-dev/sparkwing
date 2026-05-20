@@ -176,7 +176,8 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		return
 	}
 
-	s.logger.Info("github webhook accepted",
+	s.logger.Info(
+		"github webhook accepted",
 		"pipeline", pipeline,
 		"run_id", runID,
 		"repo", payload.Repository.FullName,

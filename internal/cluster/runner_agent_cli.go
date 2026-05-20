@@ -141,7 +141,8 @@ func RunAgentCLI(args []string) error {
 	defer stop()
 
 	logger := slog.Default()
-	logger.Info("sparkwing agent starting",
+	logger.Info(
+		"sparkwing agent starting",
 		"config", *configPath,
 		"profile", cfg.Profile,
 		"controller", cfg.Controller,

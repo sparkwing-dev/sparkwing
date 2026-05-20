@@ -565,7 +565,8 @@ func TestBuildAndPushLocalRegistry(t *testing.T) {
 	}
 
 	// Cleanup local refs.
-	_ = exec.Command("docker", "rmi", "-f",
+	_ = exec.Command(
+		"docker", "rmi", "-f",
 		fmt.Sprintf("%s:%s", image, tag),
 		fmt.Sprintf("%s/%s:%s", reg, image, tag),
 	).Run()

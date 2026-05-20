@@ -100,8 +100,10 @@ func (expandEmpty) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 // should cancel.
 type expandSourceFails struct{ sparkwing.Base }
 
-var failedFaninRan atomic.Bool
-var failedGenRan atomic.Bool
+var (
+	failedFaninRan atomic.Bool
+	failedGenRan   atomic.Bool
+)
 
 type failingDiscover struct {
 	sparkwing.Base

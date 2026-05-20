@@ -103,7 +103,8 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 	// binaries that import the orchestrator but not the pipeline
 	// registry.
 	knownPipelines := sparkwing.Registered()
-	opts.Logger.Info("worker started",
+	opts.Logger.Info(
+		"worker started",
 		"controller", opts.ControllerURL,
 		"logs", opts.LogsURL,
 		"poll", opts.PollInterval,
@@ -134,7 +135,8 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 			continue
 		}
 
-		opts.Logger.Info("claimed trigger",
+		opts.Logger.Info(
+			"claimed trigger",
 			"run_id", trigger.ID,
 			"pipeline", trigger.Pipeline,
 			"source", trigger.TriggerSource,

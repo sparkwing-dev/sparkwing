@@ -150,14 +150,16 @@ func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 			if fs.Lookup(req) == nil || !fs.Changed(req) {
 				return fmt.Errorf(
 					"%s: --%s was set but --%s is required with it",
-					cmd.Path, spec.Name, req)
+					cmd.Path, spec.Name, req,
+				)
 			}
 		}
 		for _, c := range spec.ConflictsWith {
 			if fs.Lookup(c) != nil && fs.Changed(c) {
 				return fmt.Errorf(
 					"%s: --%s and --%s cannot be used together",
-					cmd.Path, spec.Name, c)
+					cmd.Path, spec.Name, c,
+				)
 			}
 		}
 	}

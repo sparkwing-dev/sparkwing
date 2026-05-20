@@ -57,7 +57,8 @@ func (p *poolBinding) run(ctx context.Context, logger *slog.Logger) {
 	p.pcfg = pool.LoadConfig(ctx, p.cfg.Client, p.cfg.Namespace)
 	p.pool = pool.NewPool(p.cfg.Client, p.cfg.Namespace, p.pcfg.PoolSize, p.pcfg.PVCSize)
 	pool.InitMetrics()
-	logger.Info("controller pool: starting",
+	logger.Info(
+		"controller pool: starting",
 		"namespace", p.cfg.Namespace,
 		"pool_size", p.pcfg.PoolSize,
 		"pvc_size", p.pcfg.PVCSize,

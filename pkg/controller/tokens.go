@@ -86,7 +86,8 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Info("token created",
+	s.logger.Info(
+		"token created",
 		"principal", tok.Principal,
 		"kind", tok.Kind,
 		"prefix", tok.Prefix,

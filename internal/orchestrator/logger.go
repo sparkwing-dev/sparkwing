@@ -905,7 +905,8 @@ func (p *PrettyRenderer) writeRunBlockNodeRow(w io.Writer, m map[string]any) {
 	oc, _ := m["outcome"].(string)
 	nodeIcon, nodeCode := outcomeIcon(oc)
 	const nameWidth = 24
-	line := fmt.Sprintf("  %s %s",
+	line := fmt.Sprintf(
+		"  %s %s",
 		p.color(nodeIcon, nodeCode),
 		p.color(fmt.Sprintf("%-*s", nameWidth, id), p.hueFor(id)),
 	)
@@ -1263,7 +1264,7 @@ func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.
 	fmt.Fprintln(w, p.sectionRule("Logs"))
 }
 
-func outcomeIcon(outcome string) (icon string, code string) {
+func outcomeIcon(outcome string) (icon, code string) {
 	switch outcome {
 	case "success", "Success":
 		return "✓", ansiGreen
@@ -1286,7 +1287,7 @@ func outcomeIcon(outcome string) (icon string, code string) {
 	}
 }
 
-func summaryStatusIcon(status string) (icon string, code string) {
+func summaryStatusIcon(status string) (icon, code string) {
 	switch status {
 	case "success":
 		return "✓", ansiGreen

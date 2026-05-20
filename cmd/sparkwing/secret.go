@@ -277,7 +277,8 @@ func runSecretList(args []string) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tMASKED\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, sec := range secs {
-		fmt.Fprintf(tw, "%s\t%v\t%s\t%s\t%s\n",
+		fmt.Fprintf(
+			tw, "%s\t%v\t%s\t%s\t%s\n",
 			sec.Name, sec.Masked, sec.Principal,
 			time.Unix(sec.CreatedAt, 0).UTC().Format("2006-01-02 15:04"),
 			time.Unix(sec.UpdatedAt, 0).UTC().Format("2006-01-02 15:04"),

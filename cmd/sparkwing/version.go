@@ -261,7 +261,8 @@ func printVersionTable(r VersionReport) {
 	case r.LatestRelease == "":
 		fmt.Printf("  latest:   %s\n", color.Dim("not checked (--offline)"))
 	case r.Behind:
-		fmt.Printf("  latest:   %s %s\n",
+		fmt.Printf(
+			"  latest:   %s %s\n",
 			r.LatestRelease,
 			color.Yellow("behind"),
 		)

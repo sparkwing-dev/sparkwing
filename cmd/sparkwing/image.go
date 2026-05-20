@@ -285,7 +285,8 @@ func setScalarField(m *yaml.Node, key, value string) error {
 			return nil
 		}
 	}
-	m.Content = append(m.Content,
+	m.Content = append(
+		m.Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Value: key},
 		&yaml.Node{Kind: yaml.ScalarNode, Value: value, Tag: "!!str"},
 	)

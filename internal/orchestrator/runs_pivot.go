@@ -162,7 +162,8 @@ func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "PIPELINE\tRECENT (%d)\tRUNS\tFAIL\tLAST\tSTATUS\n", opts.SparklineLen)
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n",
+		fmt.Fprintf(
+			tw, "%s\t%s\t%d\t%d\t%s\t%s\n",
 			r.Pipeline,
 			renderSparkline(r.RecentStatuses, opts.Style),
 			r.Total, r.Failures,

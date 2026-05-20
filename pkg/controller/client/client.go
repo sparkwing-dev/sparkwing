@@ -647,7 +647,7 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error) {
 // ClaimTriggerFor is ClaimTrigger with optional pipeline and
 // trigger_source filters. The controller returns only triggers that
 // match both lists. Empty/nil on either axis means "accept any".
-func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines []string, sources []string) (*store.Trigger, error) {
+func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error) {
 	var body io.Reader
 	if len(pipelines) > 0 || len(sources) > 0 {
 		req := map[string]any{}

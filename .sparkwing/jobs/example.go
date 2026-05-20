@@ -282,7 +282,7 @@ func (j *ErrorCanaryJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 // real warn/error-level entries to scroll back through, not just a
 // silent return at the end. Then annotates and returns the supplied
 // failure so the run records the structured outcome too.
-func canaryShard(label string, items int, durMS int, fail string) func(ctx context.Context) error {
+func canaryShard(label string, items, durMS int, fail string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		// Tick budget: spread `durMS` evenly across items so the
 		// pacing matches the previous chatter() behavior.
@@ -419,7 +419,8 @@ func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 	// GroupSteps: parallel CI gates folded into one collapsible
 	// StepGroup. Downstream .Needs(ci) waits for every member.
-	ci := sparkwing.GroupSteps(w, "ci",
+	ci := sparkwing.GroupSteps(
+		w, "ci",
 		chattyStep(w, "lint", 1500, "gofmt: 0 files reformatted", []string{
 			"scanning 87 .go files",
 			"running gofmt -l",

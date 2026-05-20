@@ -156,12 +156,14 @@ func RefTo[T any](n *JobNode) Ref[T] {
 		panic(fmt.Sprintf(
 			"sparkwing: RefTo[%T]: node %q does not embed sparkwing.Produces[%T] "+
 				"(add the marker to the job struct so the contract is visible at the type level)",
-			zero, n.id, zero))
+			zero, n.id, zero,
+		))
 	}
 	if got != want {
 		panic(fmt.Sprintf(
 			"sparkwing: RefTo[%T]: node %q produces %v, not %v",
-			zero, n.id, got, want))
+			zero, n.id, got, want,
+		))
 	}
 	return Ref[T]{NodeID: n.id}
 }

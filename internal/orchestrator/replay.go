@@ -122,7 +122,8 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 	if env.TypeName != currentType {
 		return runner.Result{}, fmt.Errorf(
 			"code drift: snapshot type %q != current %q (rebuild and replay, or restore the prior pipeline binary)",
-			env.TypeName, currentType)
+			env.TypeName, currentType,
+		)
 	}
 	if len(env.ScalarFields) > 0 && string(env.ScalarFields) != "null" {
 		if err := json.Unmarshal(env.ScalarFields, target.Job()); err != nil {

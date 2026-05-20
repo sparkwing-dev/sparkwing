@@ -75,8 +75,10 @@ func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
 // snapshotCycleA spawns snapshotCycleB; snapshotCycleB spawns
 // snapshotCycleA. The snapshot walker must catch this without
 // recursing forever.
-type snapshotCycleA struct{}
-type snapshotCycleB struct{}
+type (
+	snapshotCycleA struct{}
+	snapshotCycleB struct{}
+)
 
 func (snapshotCycleA) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.JobSpawn(w, "to-b", snapshotCycleB{})

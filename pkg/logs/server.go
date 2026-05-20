@@ -326,7 +326,7 @@ func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error {
 // ServeWithTokens starts the HTTP listener with whoami-based auth
 // wired against the given controller URL. Empty controllerURL = auth
 // fully disabled (laptop-local).
-func ServeWithTokens(ctx context.Context, root, addr string, controllerURL string, logger *slog.Logger) error {
+func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
 	s, err := New(root, logger)
 	if err != nil {
 		return err
@@ -344,7 +344,8 @@ func ServeWithTokens(ctx context.Context, root, addr string, controllerURL strin
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		s.logger.Info("logs service listening",
+		s.logger.Info(
+			"logs service listening",
 			"addr", addr, "root", root,
 			"auth_controller", controllerURL != "",
 		)
@@ -400,10 +401,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		switch {
 		case free < minGiB:
 			problems = append(problems, fmt.Sprintf(
-				"root: disk free %s (<1GiB) on %s", formatBytes(free), s.root))
+				"root: disk free %s (<1GiB) on %s", formatBytes(free), s.root,
+			))
 		case pctFree < 10.0:
 			problems = append(problems, fmt.Sprintf(
-				"root: %.1f%% free on %s (<10%%)", pctFree, s.root))
+				"root: %.1f%% free on %s (<10%%)", pctFree, s.root,
+			))
 		}
 	}
 
@@ -875,7 +878,8 @@ func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rw, r)
-		logger.Info("http",
+		logger.Info(
+			"http",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rw.status,

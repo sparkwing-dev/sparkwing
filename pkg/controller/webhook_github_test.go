@@ -60,7 +60,7 @@ func newWebhookServer(t *testing.T, secret string) (*httptest.Server, *store.Sto
 	return ts, st
 }
 
-func postWebhook(t *testing.T, url string, event string, body []byte, sig string) *http.Response {
+func postWebhook(t *testing.T, url, event string, body []byte, sig string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

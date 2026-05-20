@@ -54,7 +54,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.logger.Info("login",
+	s.logger.Info(
+		"login",
 		"principal", u.Name,
 		"expires_at", sess.ExpiresAt.Unix(),
 	)
@@ -296,7 +297,8 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Info("token rotated",
+	s.logger.Info(
+		"token rotated",
 		"from_prefix", oldTok.Prefix,
 		"to_prefix", newTok.Prefix,
 		"principal", newTok.Principal,

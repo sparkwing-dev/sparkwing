@@ -783,7 +783,8 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if gitcacheCacheMisses != nil {
 				gitcacheCacheMisses.Add(r.Context(), 1, metric.WithAttributes(
-					attribute.String("type", "dependency")))
+					attribute.String("type", "dependency"),
+				))
 			}
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -792,7 +793,8 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		info, _ := f.Stat()
 		if gitcacheCacheHits != nil {
 			gitcacheCacheHits.Add(r.Context(), 1, metric.WithAttributes(
-				attribute.String("type", "dependency")))
+				attribute.String("type", "dependency"),
+			))
 		}
 		log.Printf("cache hit: %s (%d bytes)", key, info.Size())
 		w.Header().Set("Content-Type", "application/gzip")

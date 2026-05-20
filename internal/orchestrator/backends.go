@@ -152,63 +152,83 @@ type localState struct {
 func (l localState) CreateRun(ctx context.Context, r store.Run) error {
 	return l.st.CreateRun(ctx, r)
 }
+
 func (l localState) FinishRun(ctx context.Context, runID, status, errMsg string) error {
 	return l.st.FinishRun(ctx, runID, status, errMsg)
 }
+
 func (l localState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	return l.st.UpdatePlanSnapshot(ctx, runID, snapshot)
 }
+
 func (l localState) CreateNode(ctx context.Context, n store.Node) error {
 	return l.st.CreateNode(ctx, n)
 }
+
 func (l localState) StartNode(ctx context.Context, runID, nodeID string) error {
 	return l.st.StartNode(ctx, runID, nodeID)
 }
+
 func (l localState) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
 	return l.st.FinishNode(ctx, runID, nodeID, outcome, errMsg, output)
 }
+
 func (l localState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
 	return l.st.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
+
 func (l localState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	return l.st.UpdateNodeDeps(ctx, runID, nodeID, deps)
 }
+
 func (l localState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
 	return l.st.UpdateNodeActivity(ctx, runID, nodeID, detail)
 }
+
 func (l localState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return l.st.AppendNodeAnnotation(ctx, runID, nodeID, msg)
 }
+
 func (l localState) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
 	return l.st.SetNodeSummary(ctx, runID, nodeID, md)
 }
+
 func (l localState) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
 	return l.st.SetStepSummary(ctx, runID, nodeID, stepID, md)
 }
+
 func (l localState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return l.st.StartNodeStep(ctx, runID, nodeID, stepID)
 }
+
 func (l localState) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	return l.st.FinishNodeStep(ctx, runID, nodeID, stepID, status)
 }
+
 func (l localState) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return l.st.SkipNodeStep(ctx, runID, nodeID, stepID)
 }
+
 func (l localState) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	return l.st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
 }
+
 func (l localState) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
 	return l.st.ListNodeSteps(ctx, runID)
 }
+
 func (l localState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return l.st.TouchNodeHeartbeat(ctx, runID, nodeID)
 }
+
 func (l localState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return l.st.AddNodeMetricSample(ctx, runID, nodeID, sample)
 }
+
 func (l localState) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	return l.st.GetLatestRun(ctx, pipeline, statuses, maxAge)
 }
+
 func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	n, err := l.st.GetNode(ctx, runID, nodeID)
 	if err != nil {
@@ -216,45 +236,59 @@ func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]
 	}
 	return n.Output, nil
 }
+
 func (l localState) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
 	return l.st.GetNode(ctx, runID, nodeID)
 }
+
 func (l localState) GetRun(ctx context.Context, runID string) (*store.Run, error) {
 	return l.st.GetRun(ctx, runID)
 }
+
 func (l localState) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	return l.st.WriteNodeDispatch(ctx, d)
 }
+
 func (l localState) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error) {
 	return l.st.GetNodeDispatch(ctx, runID, nodeID, seq)
 }
+
 func (l localState) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error) {
 	return l.st.ListNodeDispatches(ctx, runID, nodeID)
 }
+
 func (l localState) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	return l.st.CreateDebugPause(ctx, p)
 }
+
 func (l localState) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error) {
 	return l.st.GetActiveDebugPause(ctx, runID, nodeID)
 }
+
 func (l localState) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
 	return l.st.ReleaseDebugPause(ctx, runID, nodeID, releasedBy, kind)
 }
+
 func (l localState) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error) {
 	return l.st.ListDebugPauses(ctx, runID)
 }
+
 func (l localState) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
 	return l.st.SetNodeStatus(ctx, runID, nodeID, status)
 }
+
 func (l localState) CreateApproval(ctx context.Context, a store.Approval) error {
 	return l.st.CreateApproval(ctx, a)
 }
+
 func (l localState) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error) {
 	return l.st.GetApproval(ctx, runID, nodeID)
 }
+
 func (l localState) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
 	return l.st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
 }
+
 func (l localState) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
 	return l.st.ListPendingApprovals(ctx)
 }

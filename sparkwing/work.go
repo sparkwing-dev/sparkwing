@@ -160,13 +160,15 @@ func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error
 	if fnT.NumIn() != 1 {
 		panic(fmt.Sprintf(
 			"sparkwing: Step: fn must take exactly 1 argument (context.Context), got %d (signature: %v)",
-			fnT.NumIn(), fnT))
+			fnT.NumIn(), fnT,
+		))
 	}
 	ctxT := reflect.TypeOf((*context.Context)(nil)).Elem()
 	if fnT.In(0) != ctxT {
 		panic(fmt.Sprintf(
 			"sparkwing: Step: fn argument must be context.Context, got %v",
-			fnT.In(0)))
+			fnT.In(0),
+		))
 	}
 	errT := reflect.TypeOf((*error)(nil)).Elem()
 	switch fnT.NumOut() {
@@ -175,7 +177,8 @@ func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error
 			panic(fmt.Sprintf(
 				"sparkwing: Step: fn with one return value must return error, got %v "+
 					"(want func(context.Context) error or func(context.Context) (T, error))",
-				fnT.Out(0)))
+				fnT.Out(0),
+			))
 		}
 		fnv := reflect.ValueOf(fn)
 		return nil, func(ctx context.Context) (any, error) {
@@ -190,7 +193,8 @@ func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error
 			panic(fmt.Sprintf(
 				"sparkwing: Step: fn second return value must be error, got %v "+
 					"(want func(context.Context) (T, error))",
-				fnT.Out(1)))
+				fnT.Out(1),
+			))
 		}
 		outT := fnT.Out(0)
 		fnv := reflect.ValueOf(fn)
@@ -208,7 +212,8 @@ func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error
 	default:
 		panic(fmt.Sprintf(
 			"sparkwing: Step: fn must return error or (T, error), got %d return values (signature: %v)",
-			fnT.NumOut(), fnT))
+			fnT.NumOut(), fnT,
+		))
 	}
 }
 
@@ -231,17 +236,20 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 		panic(fmt.Sprintf(
 			"sparkwing: StepGet[%v]: step %q has no typed output "+
 				"(register it with func(ctx) (T, error) to enable StepGet)",
-			wantT, step.id))
+			wantT, step.id,
+		))
 	}
 	if step.outType != wantT {
 		panic(fmt.Sprintf(
 			"sparkwing: StepGet[%v]: step %q produces %v, not %v",
-			wantT, step.id, step.outType, wantT))
+			wantT, step.id, step.outType, wantT,
+		))
 	}
 	if err := step.awaitDone(ctx); err != nil {
 		panic(fmt.Sprintf(
 			"sparkwing: StepGet[%v]: ctx done before step %q completed: %v",
-			wantT, step.id, err))
+			wantT, step.id, err,
+		))
 	}
 	v := step.Output()
 	if v == nil {
@@ -251,7 +259,8 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 	if !ok {
 		panic(fmt.Sprintf(
 			"sparkwing: StepGet[%v]: step %q produced %T, not assignable",
-			wantT, step.id, v))
+			wantT, step.id, v,
+		))
 	}
 	return typed
 }
@@ -298,7 +307,7 @@ func JobSpawn(w *Work, id string, x any) *SpawnHandle {
 // validated at Plan time via reflection so a wrong-shaped fn panics
 // alongside other structural errors (Produces/Work-return mismatch,
 // duplicate IDs) rather than blowing up later during dispatch.
-func JobSpawnEach(w *Work, items any, fn any) *SpawnGroup {
+func JobSpawnEach(w *Work, items, fn any) *SpawnGroup {
 	if w == nil {
 		panic("sparkwing: JobSpawnEach: w must be non-nil")
 	}
@@ -321,7 +330,7 @@ func JobSpawnEach(w *Work, items any, fn any) *SpawnGroup {
 // rather than at dispatch -- matches how every other structural
 // SDK error (Produces/Work-return mismatch, duplicate IDs, invalid
 // Approval.OnExpiry) surfaces.
-func validateSpawnEach(items any, fn any) {
+func validateSpawnEach(items, fn any) {
 	if items == nil {
 		panic("sparkwing: JobSpawnEach: items must be non-nil")
 	}
@@ -339,27 +348,31 @@ func validateSpawnEach(items any, fn any) {
 	if fnT.NumIn() != 1 {
 		panic(fmt.Sprintf(
 			"sparkwing: JobSpawnEach: fn must take exactly 1 argument (the item), got %d (signature: %v)",
-			fnT.NumIn(), fnT))
+			fnT.NumIn(), fnT,
+		))
 	}
 	if fnT.NumOut() != 2 {
 		panic(fmt.Sprintf(
 			"sparkwing: JobSpawnEach: fn must return (string, sparkwing.Workable) "+
 				"or (string, func(ctx context.Context) error), "+
 				"got %d return values (signature: %v)",
-			fnT.NumOut(), fnT))
+			fnT.NumOut(), fnT,
+		))
 	}
 	elemT := itemsT.Elem()
 	argT := fnT.In(0)
 	if !elemT.AssignableTo(argT) {
 		panic(fmt.Sprintf(
 			"sparkwing: JobSpawnEach: fn argument type %v is not assignable from items element type %v",
-			argT, elemT))
+			argT, elemT,
+		))
 	}
 	stringT := reflect.TypeOf("")
 	if fnT.Out(0) != stringT {
 		panic(fmt.Sprintf(
 			"sparkwing: JobSpawnEach: fn first return value must be string, got %v",
-			fnT.Out(0)))
+			fnT.Out(0),
+		))
 	}
 	workableT := reflect.TypeOf((*Workable)(nil)).Elem()
 	closureT := reflect.TypeOf((func(context.Context) error)(nil))
@@ -372,7 +385,8 @@ func validateSpawnEach(items any, fn any) {
 		panic(fmt.Sprintf(
 			"sparkwing: JobSpawnEach: fn second return value must be sparkwing.Workable "+
 				"or func(ctx context.Context) error, got %v",
-			out1))
+			out1,
+		))
 	}
 }
 

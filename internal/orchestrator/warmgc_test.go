@@ -26,7 +26,7 @@ func (s *stubRunLister) ListRuns(ctx context.Context, f store.RunFilter) ([]*sto
 	return s.runs, nil
 }
 
-func mustTouch(t *testing.T, path string, content string, mtime time.Time) {
+func mustTouch(t *testing.T, path, content string, mtime time.Time) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

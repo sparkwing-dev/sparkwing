@@ -40,7 +40,8 @@ func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunReq
 	if lg == nil {
 		lg = slog.Default()
 	}
-	lg.Info("in-process dispatch",
+	lg.Info(
+		"in-process dispatch",
 		"run_id", req.RunID,
 		"pipeline", req.Pipeline,
 		"trigger", req.Trigger.Source,
@@ -59,14 +60,16 @@ func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunReq
 			MaxParallel: d.MaxParallel,
 		})
 		if err != nil {
-			lg.Error("dispatched run failed",
+			lg.Error(
+				"dispatched run failed",
 				"run_id", req.RunID,
 				"pipeline", req.Pipeline,
 				"err", err,
 			)
 			return
 		}
-		lg.Info("dispatched run finished",
+		lg.Info(
+			"dispatched run finished",
 			"run_id", res.RunID,
 			"pipeline", req.Pipeline,
 			"status", res.Status,

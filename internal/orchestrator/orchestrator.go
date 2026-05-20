@@ -1028,7 +1028,7 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 	nodes := plan.Nodes()
 	rows := make([]any, 0, len(nodes))
 	seen := make(map[string]bool, len(nodes))
-	appendRow := func(id string, outcome string) {
+	appendRow := func(id, outcome string) {
 		state.mu.Lock()
 		dur := state.durations[id]
 		errMsg := state.errors[id]

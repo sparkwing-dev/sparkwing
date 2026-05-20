@@ -68,7 +68,8 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	}
 
 	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token)
-	logger.Info("trigger loop started",
+	logger.Info(
+		"trigger loop started",
 		"controller", opts.ControllerURL,
 		"gitcache", opts.GitcacheURL,
 		"poll", opts.Poll,
@@ -234,7 +235,8 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"SPARKWING_CONTROLLER_URL="+opts.ControllerURL,
 		"SPARKWING_LOGS_URL="+opts.LogsURL,
 		"SPARKWING_AGENT_TOKEN="+opts.Token,

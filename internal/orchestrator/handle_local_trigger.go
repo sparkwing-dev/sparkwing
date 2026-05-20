@@ -36,7 +36,8 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
-	logger.Info("handling claimed trigger (local)",
+	logger.Info(
+		"handling claimed trigger (local)",
 		"run_id", trigger.ID,
 		"pipeline", trigger.Pipeline,
 		"parent_run_id", trigger.ParentRunID,
@@ -74,13 +75,15 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		Runner: r,
 	})
 	if err != nil {
-		logger.Error("run failed setup",
+		logger.Error(
+			"run failed setup",
 			"run_id", trigger.ID,
 			"err", err,
 		)
 		return err
 	}
-	logger.Info("run finished (local)",
+	logger.Info(
+		"run finished (local)",
 		"run_id", res.RunID,
 		"pipeline", trigger.Pipeline,
 		"status", res.Status,

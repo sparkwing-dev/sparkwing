@@ -75,7 +75,7 @@ func SplitExcludes(values []string) (include, exclude []string) {
 		}
 		include = append(include, v)
 	}
-	return
+	return include, exclude
 }
 
 // ParseLooseDate accepts the same shapes the dashboard filter bar

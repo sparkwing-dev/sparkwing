@@ -26,7 +26,7 @@ import (
 // The lookup is called exactly once per NewSecretResolverFromSource
 // for type=remote-controller sources; the returned resolver caches
 // the result internally and reuses it for every Resolve call.
-type ProfileLookup func(name string) (controller string, token string, err error)
+type ProfileLookup func(name string) (controller, token string, err error)
 
 // NewSecretResolverFromSource builds a SecretResolver tailored to
 // the given source spec. The returned resolver is uncached and

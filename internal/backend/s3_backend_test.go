@@ -57,7 +57,8 @@ func TestS3Backend_ListRuns(t *testing.T) {
 	b := backend.NewS3Backend(st, nil)
 
 	now := time.Now().UTC().Truncate(time.Second)
-	putState(t, st, mkRun("alpha", "build", "succeeded", now.Add(-2*time.Hour)),
+	putState(
+		t, st, mkRun("alpha", "build", "succeeded", now.Add(-2*time.Hour)),
 		mkNode("alpha", "compile", "completed"),
 	)
 	putState(t, st, mkRun("beta", "deploy", "failed", now.Add(-1*time.Hour)))
@@ -93,7 +94,8 @@ func TestS3Backend_GetRunAndListNodes(t *testing.T) {
 	b := backend.NewS3Backend(st, nil)
 	ctx := context.Background()
 
-	putState(t, st,
+	putState(
+		t, st,
 		mkRun("r1", "p", "succeeded", time.Now().UTC()),
 		mkNode("r1", "n1", "completed"),
 		mkNode("r1", "n2", "completed"),

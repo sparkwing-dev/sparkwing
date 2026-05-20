@@ -99,7 +99,8 @@ func runNodeRemote(
 
 	// cmd.Dir below must be the repo root so the SDK's walk-up to
 	// .sparkwing/ resolves.
-	childEnv := append(os.Environ(),
+	childEnv := append(
+		os.Environ(),
 		"SPARKWING_CONTROLLER_URL="+controllerURL,
 		"SPARKWING_LOGS_URL="+logsURL,
 		"SPARKWING_AGENT_TOKEN="+token,

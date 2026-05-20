@@ -209,6 +209,7 @@ type fakeClusterRunner struct{}
 func (fakeClusterRunner) RunNode(context.Context, runner.Request) runner.Result {
 	return runner.Result{}
 }
+
 func (fakeClusterRunner) AdvertisedLabels() []string {
 	return []string{"cloud-linux", "os=linux"}
 }

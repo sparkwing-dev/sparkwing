@@ -20,7 +20,7 @@ import (
 // `replace` target, then execs the cached binary with the given
 // args. Subsequent invocations with no source changes skip the
 // compile entirely.
-func compileAndExec(sparkwingDir string, args []string, env []string, opts compileOptions) error {
+func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
 	// Resolve sparks libraries before we compute the cache key so any
 	// overlay modfile change busts the hash (PipelineCacheKey already
 	// hashes.resolved.mod/.sum; see). Fast path: absent
@@ -192,7 +192,8 @@ func runGo(dir string, args, env []string) error {
 	if !goOnPath() {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via the `go` command.\n" +
-				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.")
+				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.",
+		)
 	}
 	return runExec("go", args, dir, env)
 }

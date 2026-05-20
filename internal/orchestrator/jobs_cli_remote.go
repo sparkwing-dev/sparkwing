@@ -113,7 +113,8 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 	fmt.Fprintf(out, "pipeline:  %s\n", run.Pipeline)
 	fmt.Fprintf(out, "status:    %s\n", run.Status)
 	fmt.Fprintf(out, "trigger:   %s\n", orDash(run.TriggerSource))
-	fmt.Fprintf(out, "started:   %s  (%s)\n",
+	fmt.Fprintf(
+		out, "started:   %s  (%s)\n",
 		run.StartedAt.Local().Format("2006-01-02 15:04:05"),
 		relativeAge(run.StartedAt),
 	)

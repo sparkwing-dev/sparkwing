@@ -145,7 +145,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	if req.CacheKeyHash != "" {
 		var outputRef, originRun, originNode string
 		var expiresNS int64
-		err := tx.QueryRowContext(ctx,
+		err := tx.QueryRowContext(
+			ctx,
 			`SELECT output_ref, origin_run_id, origin_node_id, expires_at
 			   FROM concurrency_cache
 			  WHERE key = ? AND cache_key_hash = ?`,
@@ -158,7 +159,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			return AcquireSlotResponse{}, err
 		default:
 			if expiresNS > nowNS {
-				if _, err := tx.ExecContext(ctx,
+				if _, err := tx.ExecContext(
+					ctx,
 					`UPDATE concurrency_cache SET last_hit_at = ? WHERE key = ? AND cache_key_hash = ?`,
 					nowNS, req.Key, req.CacheKeyHash,
 				); err != nil {
@@ -175,7 +177,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 				}, nil
 			}
 			// expired entry; delete so we don't keep re-reading it
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`DELETE FROM concurrency_cache WHERE key = ? AND cache_key_hash = ? AND expires_at <= ?`,
 				req.Key, req.CacheKeyHash, nowNS,
 			); err != nil {
@@ -188,12 +191,14 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	driftNote := ""
 	prevCap := 0
 	var existingCap int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, req.Key,
 	).Scan(&existingCap)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT INTO concurrency_entries
 			   (key, capacity, previous_capacity, last_write_run_id, last_write_node_id, updated_at)
 			 VALUES (?, ?, NULL, ?, ?, ?)`,
@@ -208,8 +213,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			prevCap = existingCap
 			driftNote = fmt.Sprintf(
 				"concurrency key %q capacity changed %d -> %d (latest-wins; previous writer was preserved in previous_capacity)",
-				req.Key, existingCap, req.Capacity)
-			if _, err := tx.ExecContext(ctx,
+				req.Key, existingCap, req.Capacity,
+			)
+			if _, err := tx.ExecContext(
+				ctx,
 				`UPDATE concurrency_entries
 				    SET capacity = ?, previous_capacity = ?, last_write_run_id = ?, last_write_node_id = ?, updated_at = ?
 				  WHERE key = ?`,
@@ -218,7 +225,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 				return AcquireSlotResponse{}, err
 			}
 		} else {
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`UPDATE concurrency_entries
 				    SET last_write_run_id = ?, last_write_node_id = ?, updated_at = ?
 				  WHERE key = ?`,
@@ -232,14 +240,16 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	// 3a. Idempotent re-acquire by same holder_id; refreshes lease.
 	var existingLeaseNS int64
 	var existingSuperInt int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT lease_expires_at, superseded FROM concurrency_holders
 		  WHERE key = ? AND holder_id = ?`,
 		req.Key, req.HolderID,
 	).Scan(&existingLeaseNS, &existingSuperInt)
 	if err == nil && existingSuperInt == 0 {
 		newExpires := now.Add(req.Lease).UnixNano()
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
 			newExpires, req.Key, req.HolderID,
 		); err != nil {
@@ -262,7 +272,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 
 	// 3. Count active, non-superseded holders.
 	var activeCount int
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COUNT(*) FROM concurrency_holders
 		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
 		req.Key, nowNS,
@@ -273,7 +284,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	// 4. Slot available -> grant immediately.
 	if activeCount < req.Capacity {
 		expiresNS := now.Add(req.Lease).UnixNano()
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT INTO concurrency_holders
 			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded)
 			 VALUES (?, ?, ?, ?, ?, ?, 0)`,
@@ -309,7 +321,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 
 	case OnLimitCoalesce:
 		var leaderRun, leaderNode string
-		err := tx.QueryRowContext(ctx,
+		err := tx.QueryRowContext(
+			ctx,
 			`SELECT run_id, node_id FROM concurrency_holders
 			  WHERE key = ? AND superseded = 0
 			  ORDER BY claimed_at ASC LIMIT 1`,
@@ -318,7 +331,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		if err != nil {
 			return AcquireSlotResponse{}, fmt.Errorf("coalesce: select leader: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT OR REPLACE INTO concurrency_waiters
 			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
@@ -339,7 +353,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 
 	case OnLimitCancelOthers:
 		toSupersede := max(activeCount+1-req.Capacity, 1)
-		rows, err := tx.QueryContext(ctx,
+		rows, err := tx.QueryContext(
+			ctx,
 			`SELECT holder_id FROM concurrency_holders
 			  WHERE key = ? AND superseded = 0
 			  ORDER BY claimed_at ASC LIMIT ?`,
@@ -362,14 +377,16 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			return AcquireSlotResponse{}, err
 		}
 		for _, hid := range supersededIDs {
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`UPDATE concurrency_holders SET superseded = 1 WHERE key = ? AND holder_id = ?`,
 				req.Key, hid,
 			); err != nil {
 				return AcquireSlotResponse{}, err
 			}
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT OR REPLACE INTO concurrency_waiters
 			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?)`,
@@ -390,7 +407,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	case OnLimitQueue:
 		fallthrough
 	default:
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT OR REPLACE INTO concurrency_waiters
 			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0)`,
@@ -421,7 +439,8 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	defer tx.Rollback()
 
 	var superInt int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT superseded FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
 	).Scan(&superInt)
@@ -431,7 +450,8 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(
+		ctx,
 		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
 		expires.UnixNano(), key, holderID,
 	); err != nil {
@@ -453,7 +473,8 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 	defer tx.Rollback()
 
 	var runID, nodeID string
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT run_id, node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
 	).Scan(&runID, &nodeID)
@@ -464,7 +485,8 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 		return false, err
 	}
 
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(
+		ctx,
 		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
 	); err != nil {
@@ -473,7 +495,8 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 
 	if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
 		now := time.Now()
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT OR REPLACE INTO concurrency_cache
 			   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -492,7 +515,7 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 
 // ReleaseAndNotify atomically performs release + coalesce-resolve +
 // promote-next in one txn so a crash can't strand waiters.
-func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers []ConcurrencyWaiter, promoted []ConcurrencyWaiter, err error) {
+func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error) {
 	if promoteLease <= 0 {
 		promoteLease = DefaultConcurrencyLease
 	}
@@ -504,7 +527,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 
 	// 1. Look up the holder to get (runID, nodeID) before deleting.
 	var runID, nodeID string
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT run_id, node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
 	).Scan(&runID, &nodeID)
@@ -517,7 +541,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		return false, nil, nil, err
 	default:
 		released = true
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 			key, holderID,
 		); err != nil {
@@ -525,7 +550,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		}
 		if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
 			now := time.Now()
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`INSERT OR REPLACE INTO concurrency_cache
 				   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -537,7 +563,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		}
 
 		// 2. Resolve coalesce followers in the same tx.
-		frows, err := tx.QueryContext(ctx,
+		frows, err := tx.QueryContext(
+			ctx,
 			`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 			   FROM concurrency_waiters
 			  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
@@ -560,7 +587,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 			return false, nil, nil, err
 		}
 		for _, w := range followers {
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 				w.Key, w.RunID, w.NodeID,
 			); err != nil {
@@ -571,7 +599,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 
 	// 3. Promote queue / cancel_others waiters up to capacity.
 	var capacity int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&capacity)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -583,7 +612,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	now := time.Now()
 	nowNS := now.UnixNano()
 	var activeCount int
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COUNT(*) FROM concurrency_holders
 		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
 		key, nowNS,
@@ -592,7 +622,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	}
 	openSlots := capacity - activeCount
 	if openSlots > 0 {
-		prows, err := tx.QueryContext(ctx,
+		prows, err := tx.QueryContext(
+			ctx,
 			`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 			   FROM concurrency_waiters
 			  WHERE key = ? AND policy IN (?, ?)
@@ -620,13 +651,15 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 			if newHolder == "" {
 				newHolder = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
 			}
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 				w.Key, w.RunID, w.NodeID,
 			); err != nil {
 				return false, nil, nil, err
 			}
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`INSERT INTO concurrency_holders
 				   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded)
 				 VALUES (?, ?, ?, ?, ?, ?, 0)`,
@@ -653,7 +686,8 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.QueryContext(ctx,
+	rows, err := tx.QueryContext(
+		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 		   FROM concurrency_waiters
 		  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
@@ -677,7 +711,8 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 		return nil, err
 	}
 	for _, w := range out {
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 			w.Key, w.RunID, w.NodeID,
 		); err != nil {
@@ -703,7 +738,8 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	defer tx.Rollback()
 
 	var capacity int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&capacity)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -717,7 +753,8 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	nowNS := now.UnixNano()
 
 	var activeCount int
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COUNT(*) FROM concurrency_holders
 		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
 		key, nowNS,
@@ -730,7 +767,8 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 		return nil, tx.Commit()
 	}
 
-	rows, err := tx.QueryContext(ctx,
+	rows, err := tx.QueryContext(
+		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 		   FROM concurrency_waiters
 		  WHERE key = ? AND policy IN (?, ?)
@@ -761,13 +799,15 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 			// Pre-fix waiter row; fall back to "runID/nodeID".
 			holderID = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 			w.Key, w.RunID, w.NodeID,
 		); err != nil {
 			return nil, err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT INTO concurrency_holders
 			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded)
 			 VALUES (?, ?, ?, ?, ?, ?, 0)`,
@@ -829,7 +869,8 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	var holderID string
 	var leaseNS int64
 	var superInt int
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT holder_id, lease_expires_at, superseded
 		   FROM concurrency_holders
 		  WHERE key = ? AND run_id = ? AND node_id = ?`,
@@ -853,14 +894,16 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	if cacheKeyHash != "" {
 		var outputRef, originRun, originNode string
 		var expiresNS int64
-		err := tx.QueryRowContext(ctx,
+		err := tx.QueryRowContext(
+			ctx,
 			`SELECT output_ref, origin_run_id, origin_node_id, expires_at
 			   FROM concurrency_cache
 			  WHERE key = ? AND cache_key_hash = ?`,
 			key, cacheKeyHash,
 		).Scan(&outputRef, &originRun, &originNode, &expiresNS)
 		if err == nil && expiresNS > nowNS {
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`UPDATE concurrency_cache SET last_hit_at = ? WHERE key = ? AND cache_key_hash = ?`,
 				nowNS, key, cacheKeyHash,
 			); err != nil {
@@ -883,7 +926,8 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 
 	// 3. Waiter row still present -> keep waiting.
 	var waiterArrivedNS int64
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT arrived_at FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 		key, runID, nodeID,
 	).Scan(&waiterArrivedNS)
@@ -918,7 +962,8 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 
 // CancelWaiter removes one waiter row; returns whether one matched.
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(
+		ctx,
 		`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 		key, runID, nodeID,
 	)
@@ -932,7 +977,8 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 // GetConcurrencyState returns capacity + holders + waiters; ErrNotFound when undeclared.
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error) {
 	var capacity int
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(
+		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&capacity)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -944,7 +990,8 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 
 	state := &ConcurrencyState{Key: key, Capacity: capacity}
 
-	hrows, err := s.db.QueryContext(ctx,
+	hrows, err := s.db.QueryContext(
+		ctx,
 		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
 		   FROM concurrency_holders WHERE key = ? ORDER BY claimed_at ASC`, key,
 	)
@@ -969,7 +1016,8 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		return nil, err
 	}
 
-	wrows, err := s.db.QueryContext(ctx,
+	wrows, err := s.db.QueryContext(
+		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 		   FROM concurrency_waiters WHERE key = ? ORDER BY arrived_at ASC`, key,
 	)
@@ -995,7 +1043,8 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 // runs PromoteNextWaiters and emits audit events.
 func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
 	now := time.Now().UnixNano()
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.db.QueryContext(
+		ctx,
 		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
 		   FROM concurrency_holders WHERE lease_expires_at <= ?`, now,
 	)
@@ -1021,7 +1070,8 @@ func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 		return nil, err
 	}
 	for _, h := range stale {
-		if _, err := s.db.ExecContext(ctx,
+		if _, err := s.db.ExecContext(
+			ctx,
 			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`, h.Key, h.HolderID,
 		); err != nil {
 			return nil, err
@@ -1039,7 +1089,8 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.QueryContext(ctx,
+	rows, err := tx.QueryContext(
+		ctx,
 		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
 		   FROM concurrency_holders WHERE key = ? AND superseded = 1`, key,
 	)
@@ -1065,7 +1116,8 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 		return nil, err
 	}
 	for _, h := range out {
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 			h.Key, h.HolderID,
 		); err != nil {
@@ -1094,7 +1146,8 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	cutoff := time.Now().Add(-maxAge).UnixNano()
 
 	// Pass 1: orphan coalesce followers (no live leader holder).
-	orphanRows, err := tx.QueryContext(ctx,
+	orphanRows, err := tx.QueryContext(
+		ctx,
 		`SELECT w.key, w.run_id, w.node_id, w.holder_id, w.arrived_at, w.policy,
 		        w.cache_key_hash, w.leader_run_id, w.leader_node_id, w.cancel_timeout_ns
 		   FROM concurrency_waiters w
@@ -1128,7 +1181,8 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	}
 
 	// Pass 2: anything older than maxAge.
-	ageRows, err := tx.QueryContext(ctx,
+	ageRows, err := tx.QueryContext(
+		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy,
 		        cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 		   FROM concurrency_waiters WHERE arrived_at < ?`,
@@ -1158,7 +1212,8 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	}
 
 	for _, w := range dropped {
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 			w.Key, w.RunID, w.NodeID,
 		); err != nil {
@@ -1177,7 +1232,8 @@ func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duratio
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.db.QueryContext(
+		ctx,
 		`SELECT DISTINCT key FROM concurrency_waiters
 		  WHERE policy IN (?, ?)`,
 		OnLimitQueue, OnLimitCancelOthers,
@@ -1226,7 +1282,8 @@ func (s *Store) SweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.db.QueryRowContext(
+		ctx,
 		`SELECT COUNT(*) FROM concurrency_cache`,
 	).Scan(&count); err != nil {
 		return 0, err
@@ -1235,7 +1292,8 @@ func (s *Store) SweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	evict := count - keepCount
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(
+		ctx,
 		`DELETE FROM concurrency_cache
 		  WHERE ROWID IN (
 		    SELECT ROWID FROM concurrency_cache

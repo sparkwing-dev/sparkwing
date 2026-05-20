@@ -270,6 +270,7 @@ type recordingEmitter struct {
 func (r *recordingEmitter) Log(level, msg string) {
 	r.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
+
 func (r *recordingEmitter) Emit(rec sparkwing.LogRecord) {
 	r.records = append(r.records, rec)
 }

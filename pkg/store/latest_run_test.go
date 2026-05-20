@@ -23,7 +23,7 @@ func openStore(t *testing.T) *store.Store {
 // seedRun inserts a run with the given pipeline + status + started_at,
 // optionally finished at a relative offset. Centralizes the boilerplate
 // so each test case reads as data, not setup.
-func seedRun(t *testing.T, s *store.Store, id, pipeline, status string, startedAgo time.Duration, finishedAgo time.Duration) {
+func seedRun(t *testing.T, s *store.Store, id, pipeline, status string, startedAgo, finishedAgo time.Duration) {
 	t.Helper()
 	ctx := context.Background()
 	started := time.Now().Add(-startedAgo)

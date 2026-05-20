@@ -20,7 +20,7 @@ import "strings"
 // Labels are equality strings; the matcher does no parsing of the
 // key=value form -- "os=linux" is a single opaque string that must
 // appear verbatim in have.
-func MatchLabels(needed []string, have []string) bool {
+func MatchLabels(needed, have []string) bool {
 	if len(needed) == 0 {
 		return true
 	}

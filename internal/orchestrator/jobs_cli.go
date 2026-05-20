@@ -129,7 +129,8 @@ func renderRunList(runs []*store.Run, opts ListOpts, out io.Writer) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tPIPELINE\tSTATUS\tSTARTED\tDURATION")
 	for _, r := range runs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(
+			tw, "%s\t%s\t%s\t%s\t%s\n",
 			r.ID, r.Pipeline, r.Status,
 			formatStartedAt(r.StartedAt),
 			formatRunDuration(r),
@@ -248,7 +249,8 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 	fmt.Fprintf(out, "%s %s\n", label("pipeline: "), run.Pipeline)
 	fmt.Fprintf(out, "%s %s\n", label("status:   "), colorStatus(run.Status))
 	fmt.Fprintf(out, "%s %s\n", label("trigger:  "), orDash(run.TriggerSource))
-	fmt.Fprintf(out, "%s %s  %s\n", label("started:  "),
+	fmt.Fprintf(
+		out, "%s %s  %s\n", label("started:  "),
 		run.StartedAt.Local().Format("2006-01-02 15:04:05"),
 		color.Dim("("+relativeAge(run.StartedAt)+")"),
 	)

@@ -892,7 +892,8 @@ end
 			// (Argument != "") take -r so fish suggests an arg.
 			line := fmt.Sprintf(
 				"complete -c sparkwing -n '__sparkwing_has_path %s' -l %s",
-				k, f.Name)
+				k, f.Name,
+			)
 			if f.Short != "" {
 				line += " -s " + f.Short
 			}

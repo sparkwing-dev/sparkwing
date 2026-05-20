@@ -39,7 +39,8 @@ func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error {
 	if lg == nil {
 		lg = slog.Default()
 	}
-	lg.Info("noop dispatch",
+	lg.Info(
+		"noop dispatch",
 		"run_id", req.RunID,
 		"pipeline", req.Pipeline,
 		"trigger", req.Trigger.Source,

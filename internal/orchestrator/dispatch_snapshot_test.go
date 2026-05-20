@@ -32,22 +32,33 @@ func (b *captureBackend) StartNode(ctx context.Context, _, _ string) error   { r
 func (b *captureBackend) FinishNode(ctx context.Context, _, _, _, _ string, _ []byte) error {
 	return nil
 }
+
 func (b *captureBackend) FinishNodeWithReason(ctx context.Context, _, _, _, _ string, _ []byte, _ string, _ *int) error {
 	return nil
 }
+
 func (b *captureBackend) UpdateNodeDeps(ctx context.Context, _, _ string, _ []string) error {
 	return nil
 }
-func (b *captureBackend) UpdateNodeActivity(ctx context.Context, _, _, _ string) error   { return nil }
+
+func (b *captureBackend) UpdateNodeActivity(ctx context.Context, _, _, _ string) error { return nil }
+
 func (b *captureBackend) AppendNodeAnnotation(ctx context.Context, _, _, _ string) error { return nil }
-func (b *captureBackend) SetNodeSummary(ctx context.Context, _, _, _ string) error       { return nil }
-func (b *captureBackend) SetStepSummary(ctx context.Context, _, _, _, _ string) error    { return nil }
-func (b *captureBackend) StartNodeStep(ctx context.Context, _, _, _ string) error        { return nil }
-func (b *captureBackend) FinishNodeStep(ctx context.Context, _, _, _, _ string) error    { return nil }
-func (b *captureBackend) SkipNodeStep(ctx context.Context, _, _, _ string) error         { return nil }
+
+func (b *captureBackend) SetNodeSummary(ctx context.Context, _, _, _ string) error { return nil }
+
+func (b *captureBackend) SetStepSummary(ctx context.Context, _, _, _, _ string) error { return nil }
+
+func (b *captureBackend) StartNodeStep(ctx context.Context, _, _, _ string) error { return nil }
+
+func (b *captureBackend) FinishNodeStep(ctx context.Context, _, _, _, _ string) error { return nil }
+
+func (b *captureBackend) SkipNodeStep(ctx context.Context, _, _, _ string) error { return nil }
+
 func (b *captureBackend) AppendStepAnnotation(ctx context.Context, _, _, _, _ string) error {
 	return nil
 }
+
 func (b *captureBackend) ListNodeSteps(ctx context.Context, _ string) ([]*store.NodeStep, error) {
 	return nil, nil
 }
@@ -55,32 +66,43 @@ func (b *captureBackend) TouchNodeHeartbeat(ctx context.Context, _, _ string) er
 func (b *captureBackend) AppendEvent(ctx context.Context, _, _, _ string, _ []byte) error {
 	return nil
 }
+
 func (b *captureBackend) AddNodeMetricSample(ctx context.Context, _, _ string, _ store.MetricSample) error {
 	return nil
 }
+
 func (b *captureBackend) GetLatestRun(ctx context.Context, _ string, _ []string, _ time.Duration) (*store.Run, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) GetNodeOutput(ctx context.Context, _, _ string) ([]byte, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) GetNode(ctx context.Context, _, _ string) (*store.Node, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) GetRun(ctx context.Context, _ string) (*store.Run, error) {
 	return &store.Run{GitSHA: b.gitSHA}, nil
 }
+
 func (b *captureBackend) EnqueueTrigger(ctx context.Context, _ string, _ map[string]string, _, _, _, _, _, _, _ string) (string, error) {
 	return "", nil
 }
+
 func (b *captureBackend) FindSpawnedChildTriggerID(ctx context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
+
 func (b *captureBackend) CreateDebugPause(ctx context.Context, _ store.DebugPause) error { return nil }
+
 func (b *captureBackend) GetActiveDebugPause(ctx context.Context, _, _ string) (*store.DebugPause, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) ReleaseDebugPause(ctx context.Context, _, _, _, _ string) error { return nil }
+
 func (b *captureBackend) ListDebugPauses(ctx context.Context, _ string) ([]*store.DebugPause, error) {
 	return nil, nil
 }
@@ -88,15 +110,19 @@ func (b *captureBackend) SetNodeStatus(ctx context.Context, _, _, _ string) erro
 func (b *captureBackend) CreateApproval(ctx context.Context, _ store.Approval) error {
 	return nil
 }
+
 func (b *captureBackend) GetApproval(ctx context.Context, _, _ string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) ResolveApproval(ctx context.Context, _, _, _, _, _ string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
 	return nil, nil
 }
+
 func (b *captureBackend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	if b.writeErr != nil {
 		return b.writeErr
@@ -104,9 +130,11 @@ func (b *captureBackend) WriteNodeDispatch(ctx context.Context, d store.NodeDisp
 	b.captured = append(b.captured, d)
 	return nil
 }
+
 func (b *captureBackend) GetNodeDispatch(ctx context.Context, _, _ string, _ int) (*store.NodeDispatch, error) {
 	return nil, store.ErrNotFound
 }
+
 func (b *captureBackend) ListNodeDispatches(ctx context.Context, _, _ string) ([]*store.NodeDispatch, error) {
 	return nil, nil
 }

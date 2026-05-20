@@ -155,8 +155,8 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 // dispatchLocalTrigger compiles and execs a claimed trigger. The
 // child handles FinishTrigger/FinishRun.
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
-	cache *localCompileCache, logger *slog.Logger) error {
-
+	cache *localCompileCache, logger *slog.Logger,
+) error {
 	// Repo resolution: registry by pipeline name first, then slug
 	// fallback via LocalRepoDir.
 	var repoDir string
@@ -184,7 +184,8 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		return fmt.Errorf("compile %s: %w", sparkwingDir, err)
 	}
 
-	logger.Info("local trigger: dispatching child",
+	logger.Info(
+		"local trigger: dispatching child",
 		"trigger_id", trig.ID,
 		"pipeline", trig.Pipeline,
 		"repo", trig.Repo,

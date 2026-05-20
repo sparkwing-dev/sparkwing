@@ -207,7 +207,8 @@ func fetchExactSHA(cloneURL, sha, dest string) error {
 // shallowCloneBranch runs `git clone --depth 1 --single-branch
 // --branch B URL DEST` for the no-SHA fallback path.
 func shallowCloneBranch(cloneURL, branch, dest string) error {
-	cmd := exec.Command("git", "clone",
+	cmd := exec.Command(
+		"git", "clone",
 		"--depth", "1",
 		"--single-branch",
 		"--branch", branch,
@@ -373,7 +374,8 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
-				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.")
+				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.",
+		)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err

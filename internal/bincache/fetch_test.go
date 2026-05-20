@@ -88,7 +88,8 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 	mustGit := func(dir string, args ...string) string {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(
+			os.Environ(),
 			"GIT_AUTHOR_NAME=test",
 			"GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=test",
@@ -208,7 +209,8 @@ func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 	mustGit := func(dir string, args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(
+			os.Environ(),
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@e.x",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@e.x",
 		)

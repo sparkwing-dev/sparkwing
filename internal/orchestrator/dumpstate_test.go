@@ -74,7 +74,8 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 	// these via AppendNodeAnnotation, but the dump-format bijection
 	// cares about the fields surviving the round-trip, not the mutation
 	// path that set them.
-	if _, err := st.DB().ExecContext(ctx, `
+	if _, err := st.DB().ExecContext(
+		ctx, `
 UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
  WHERE id = ?`,
 		2, "linked in 1.2s",
@@ -96,7 +97,8 @@ UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
 	// Populate the rest of the node columns directly: the dump-format
 	// bijection cares about the fields, not the mutation sequence the
 	// orchestrator happens to use to set them.
-	if _, err := st.DB().ExecContext(ctx, `
+	if _, err := st.DB().ExecContext(
+		ctx, `
 UPDATE nodes SET
    status='done', outcome='success', error='warn',
    output_json=?, started_at=?, finished_at=?, ready_at=?,

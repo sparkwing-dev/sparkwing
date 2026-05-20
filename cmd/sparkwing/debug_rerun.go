@@ -170,7 +170,8 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	envMap["SPARKWING_RERUN"] = "1"
 
 	pod := podName(t.run, t.node)
-	args := []string{"kubectl", "run", pod, "--rm", "-it", "--restart=Never",
+	args := []string{
+		"kubectl", "run", pod, "--rm", "-it", "--restart=Never",
 		"--image=" + image,
 		"--labels=sparkwing.dev/rerun-of-run=" + t.run + ",sparkwing.dev/managed-by=sparkwing-debug",
 	}

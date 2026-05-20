@@ -137,132 +137,169 @@ func (f *fakeState) CreateRun(ctx context.Context, r store.Run) error {
 	f.createRuns++
 	return nil
 }
+
 func (f *fakeState) FinishRun(ctx context.Context, runID, status, errMsg string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishRuns++
 	return nil
 }
+
 func (f *fakeState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	return nil
 }
+
 func (f *fakeState) CreateNode(ctx context.Context, n store.Node) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createNodes++
 	return nil
 }
+
 func (f *fakeState) StartNode(ctx context.Context, runID, nodeID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startNodes++
 	return nil
 }
+
 func (f *fakeState) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishNodes++
 	return nil
 }
+
 func (f *fakeState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishNodes++
 	return nil
 }
+
 func (f *fakeState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	return nil
 }
+
 func (f *fakeState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
 	return nil
 }
+
 func (f *fakeState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return nil
 }
+
 func (f *fakeState) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
 	return nil
 }
+
 func (f *fakeState) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
 	return nil
 }
+
 func (f *fakeState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return nil
 }
+
 func (f *fakeState) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	return nil
 }
+
 func (f *fakeState) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return nil
 }
+
 func (f *fakeState) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	return nil
 }
+
 func (f *fakeState) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
 	return nil, nil
 }
+
 func (f *fakeState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return nil
 }
+
 func (f *fakeState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.eventKinds[kind]++
 	return nil
 }
+
 func (f *fakeState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return nil
 }
+
 func (f *fakeState) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) GetRun(ctx context.Context, runID string) (*store.Run, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
 	return "", nil
 }
+
 func (f *fakeState) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
 	return "", nil
 }
+
 func (f *fakeState) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	return nil
 }
+
 func (f *fakeState) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
 	return nil
 }
+
 func (f *fakeState) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error) {
 	return nil, nil
 }
+
 func (f *fakeState) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
 	return nil
 }
+
 func (f *fakeState) CreateApproval(ctx context.Context, a store.Approval) error {
 	return nil
 }
+
 func (f *fakeState) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
 	return nil, nil
 }
+
 func (f *fakeState) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	return nil
 }
+
 func (f *fakeState) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error) {
 	return nil, nil
 }

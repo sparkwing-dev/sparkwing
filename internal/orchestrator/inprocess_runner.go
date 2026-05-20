@@ -59,8 +59,10 @@ func (r *InProcessRunner) SetLabels(labels []string) {
 	}
 }
 
-var _ runner.Runner = (*InProcessRunner)(nil)
-var _ runner.LabelAdvertiser = (*InProcessRunner)(nil)
+var (
+	_ runner.Runner          = (*InProcessRunner)(nil)
+	_ runner.LabelAdvertiser = (*InProcessRunner)(nil)
+)
 
 // runJobBody executes the node's materialized Work as a step DAG.
 // Returns the typed output of the *WorkStep the Job's Work returned

@@ -607,7 +607,8 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						}
 					}
 				}
-				s.logger.Warn("reaped stale claim",
+				s.logger.Warn(
+					"reaped stale claim",
 					"trigger_id", id,
 					"had_run", err == nil,
 				)
@@ -642,7 +643,8 @@ func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
 		elapsed := time.Since(start)
 		route := normalizeRoute(r.URL.Path)
 		observeHTTPRequest(route, r.Method, rw.status, elapsed)
-		logger.Info("http",
+		logger.Info(
+			"http",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"route", route,

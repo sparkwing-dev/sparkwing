@@ -88,7 +88,8 @@ func RunNodeOnce(
 	if !ok {
 		return runner.Result{}, fmt.Errorf(
 			"pipeline %q not registered in this runner image and trigger has no GITHUB_REPOSITORY to clone from",
-			run.Pipeline)
+			run.Pipeline,
+		)
 	}
 
 	rc := sparkwing.RunContext{
@@ -213,7 +214,8 @@ func RunNodeOnce(
 				}
 			}
 			return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: data}, nil
-		}))
+		},
+	))
 
 	// Cluster-mode equivalent of dispatchState.pipelineAwaiter.
 	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
@@ -285,7 +287,8 @@ func RunNodeOnce(
 				case <-ticker.C:
 				}
 			}
-		}))
+		},
+	))
 
 	node := plan.Job(nodeID)
 	if node == nil {

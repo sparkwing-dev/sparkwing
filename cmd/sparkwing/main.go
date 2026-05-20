@@ -744,7 +744,7 @@ func runJobs(args []string) error {
 // --output=json and "default + --json" should resolve to JSON, not
 // error. Only when BOTH flags are user-set AND disagree do we surface
 // a conflict. Mirrors the kubectl / gh / aws CLI convention.
-func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
+func resolveOutputFormat(outFmt string, outputChanged, jsonAlias bool, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:

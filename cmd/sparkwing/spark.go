@@ -266,7 +266,8 @@ func runSparksLint(args []string) error {
 			abs := filepath.Join(libDir, p.Path)
 			if info, err := os.Stat(abs); err != nil || !info.IsDir() {
 				problems = append(problems, fmt.Sprintf(
-					"packages[%d] (%s): directory %s does not exist", i, p.Path, abs))
+					"packages[%d] (%s): directory %s does not exist", i, p.Path, abs,
+				))
 			}
 		}
 		if strings.TrimSpace(p.Description) == "" {
@@ -275,12 +276,14 @@ func runSparksLint(args []string) error {
 		if p.Stability != "" && !validStability(p.Stability) {
 			problems = append(problems, fmt.Sprintf(
 				"packages[%d] (%s): stability must be experimental|beta|stable, got %q",
-				i, p.Path, p.Stability))
+				i, p.Path, p.Stability,
+			))
 		}
 	}
 	if m.Stability != "" && !validStability(m.Stability) {
 		problems = append(problems, fmt.Sprintf(
-			"stability must be experimental|beta|stable, got %q", m.Stability))
+			"stability must be experimental|beta|stable, got %q", m.Stability,
+		))
 	}
 	// Check duplicate package paths -- surfaces authorship mistakes
 	// before a confused consumer does.
@@ -292,7 +295,8 @@ func runSparksLint(args []string) error {
 		if prev, ok := seen[p.Path]; ok {
 			problems = append(problems, fmt.Sprintf(
 				"packages[%d] (%s): duplicate path; first seen at packages[%d]",
-				i, p.Path, prev))
+				i, p.Path, prev,
+			))
 		}
 		seen[p.Path] = i
 	}
@@ -303,7 +307,8 @@ func runSparksLint(args []string) error {
 		}
 		if d.Version == "" {
 			problems = append(problems, fmt.Sprintf(
-				"dependencies[%d] (%s): 'version' is required", i, d.Source))
+				"dependencies[%d] (%s): 'version' is required", i, d.Source,
+			))
 		}
 	}
 	if len(problems) > 0 {

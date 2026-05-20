@@ -114,7 +114,8 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 	}
 
 	scopeStr := strings.Join(dedupeScopes(scopes), ",")
-	_, err = s.db.Exec(`
+	_, err = s.db.Exec(
+		`
         INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     `,

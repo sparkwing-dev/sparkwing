@@ -109,7 +109,8 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	})
 	cancelRun()
 	if err != nil {
-		logger.Error("run failed setup",
+		logger.Error(
+			"run failed setup",
 			"run_id", trigger.ID,
 			"err", err,
 		)
@@ -134,7 +135,8 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		}
 	}
 
-	logger.Info("run finished",
+	logger.Info(
+		"run finished",
 		"run_id", res.RunID,
 		"pipeline", trigger.Pipeline,
 		"status", finalStatus,
@@ -192,7 +194,8 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
-	opts.Logger.Info("handling claimed trigger",
+	opts.Logger.Info(
+		"handling claimed trigger",
 		"run_id", trigger.ID,
 		"pipeline", trigger.Pipeline,
 		"source", trigger.TriggerSource,

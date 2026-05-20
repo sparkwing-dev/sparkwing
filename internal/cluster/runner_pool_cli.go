@@ -112,7 +112,8 @@ func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
 // runPoolLoop is the testable core. cfg must already be normalized.
 // claimer + exec are injected so tests don't need an HTTP stack.
 func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, logger *slog.Logger) error {
-	logger.Info(cfg.SourceName+" started",
+	logger.Info(
+		cfg.SourceName+" started",
 		"controller", cfg.ControllerURL,
 		"logs", cfg.LogsURL,
 		"max_concurrent", cfg.MaxConcurrent,
@@ -249,7 +250,8 @@ func runRunnerCLI(args []string) error {
 		if err != nil {
 			logger.Warn("gc: warm sweep returned error (continuing)", "err", err)
 		} else {
-			logger.Info("gc: warm sweep complete",
+			logger.Info(
+				"gc: warm sweep complete",
 				"git_dirs", stats.GitDirsRemoved,
 				"tmp_entries", stats.TmpEntriesRemoved,
 				"run_dirs", stats.RunDirsRemoved,

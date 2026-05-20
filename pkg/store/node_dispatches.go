@@ -54,7 +54,8 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 			return fmt.Errorf("assign next seq: %w", err)
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO node_dispatches (
 			run_id, node_id, seq, dispatched_at,
 			code_version, binary_hash, runner_labels, env_json,

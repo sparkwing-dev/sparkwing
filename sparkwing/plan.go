@@ -147,7 +147,8 @@ func newNode(caller, id string, job Workable) *JobNode {
 			panic(fmt.Sprintf(
 				"sparkwing: %s(%q): ApprovalConfig.OnExpiry = %q is not one of "+
 					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
-				caller, id, app.cfg.OnExpiry))
+				caller, id, app.cfg.OnExpiry,
+			))
 		}
 		cfg := app.cfg
 		return &JobNode{
@@ -172,18 +173,21 @@ func newNode(caller, id string, job Workable) *JobNode {
 		panic(fmt.Sprintf(
 			"sparkwing: node %q: declares Produces[%v] but Work() returned no typed step "+
 				"(return a typed *WorkStep matching Produces[%v], or drop the marker)",
-			id, pr.producedType(), pr.producedType()))
+			id, pr.producedType(), pr.producedType(),
+		))
 	case !hasMarker && workType != nil:
 		panic(fmt.Sprintf(
 			"sparkwing: node %q: Work returned a typed step of type %v but the job struct does not embed "+
 				"sparkwing.Produces[%v] (add the marker so the contract is visible at the type level)",
-			id, workType, workType))
+			id, workType, workType,
+		))
 	case hasMarker && workType != nil:
 		declared := pr.producedType()
 		if declared != workType {
 			panic(fmt.Sprintf(
 				"sparkwing: node %q: Produces[%v] but Work returned a step of type %v (align them)",
-				id, declared, workType))
+				id, declared, workType,
+			))
 		}
 		outType = declared
 	}
@@ -312,7 +316,8 @@ func coerceJobArg(caller, id string, x any) Workable {
 		panic(fmt.Sprintf(
 			"sparkwing: %s(%q): third argument must be sparkwing.Workable or "+
 				"func(ctx context.Context) error, got %T",
-			caller, id, x))
+			caller, id, x,
+		))
 	}
 }
 

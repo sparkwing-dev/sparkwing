@@ -170,7 +170,8 @@ func runDashboardStart(args []string) error {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
 
-	superviseArgs := []string{"__dashboard-supervise",
+	superviseArgs := []string{
+		"__dashboard-supervise",
 		"--addr", addr,
 		"--home", dp.home,
 		"--pid", dp.pid,

@@ -140,7 +140,8 @@ func (o CacheOptions) rejectTypoShape(ctx string) {
 	panic(fmt.Sprintf(
 		"sparkwing: Cache on %s: CacheOptions has %v set but Key is empty -- "+
 			"either set Key to enable coordination, or pass a bare CacheOptions{} to disable",
-		ctx, set))
+		ctx, set,
+	))
 }
 
 func (o *CacheOptions) validate(ctx string, isPlan bool) {

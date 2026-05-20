@@ -90,7 +90,7 @@ var (
 // SetTestHTTPNodeLogRetry overrides the per-line retry budget +
 // backoff for the duration of a test, restoring the originals on
 // cleanup. Production callers should not touch these knobs.
-func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts int, backoffMS int) {
+func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS int) {
 	oldA, oldB := httpNodeLogRetryAttempts, httpNodeLogRetryBackoff
 	httpNodeLogRetryAttempts = attempts
 	httpNodeLogRetryBackoff = time.Duration(backoffMS) * time.Millisecond
@@ -164,7 +164,8 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 				l.fatal = authErr
 			}
 			l.mu.Unlock()
-			l.logger.Error("logs append blocked by auth; failing run",
+			l.logger.Error(
+				"logs append blocked by auth; failing run",
 				"run_id", l.runID,
 				"node_id", l.nodeID,
 				"status", authErr.Status,
@@ -183,7 +184,8 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 	}
 	count := l.dropCount
 	l.mu.Unlock()
-	l.logger.Warn("logs append dropped after retries",
+	l.logger.Warn(
+		"logs append dropped after retries",
 		"run_id", l.runID,
 		"node_id", l.nodeID,
 		"err", lastErr,

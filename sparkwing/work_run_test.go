@@ -23,11 +23,13 @@ type recordingWorkLogger struct {
 func (l *recordingWorkLogger) Log(level, msg string) {
 	l.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
+
 func (l *recordingWorkLogger) Emit(rec sparkwing.LogRecord) {
 	l.mu.Lock()
 	l.records = append(l.records, rec)
 	l.mu.Unlock()
 }
+
 func (l *recordingWorkLogger) snapshot() []sparkwing.LogRecord {
 	l.mu.Lock()
 	defer l.mu.Unlock()

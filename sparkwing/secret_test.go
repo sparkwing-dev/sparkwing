@@ -19,7 +19,8 @@ func TestSecret_NoResolverInstalled(t *testing.T) {
 
 func TestSecret_BlankName(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) { return "x", true, nil }))
+		func(ctx context.Context, name string) (string, bool, error) { return "x", true, nil },
+	))
 	if _, err := Secret(ctx, ""); err == nil {
 		t.Fatal("Secret(ctx, \"\") must error")
 	}
@@ -34,7 +35,8 @@ func TestSecret_DelegatesToResolver(t *testing.T) {
 				t.Errorf("resolver got %q, want TOKEN", name)
 			}
 			return "abc123", true, nil
-		}))
+		},
+	))
 	got, err := Secret(ctx, "TOKEN")
 	if err != nil {
 		t.Fatalf("Secret: %v", err)
@@ -50,7 +52,8 @@ func TestSecret_DelegatesToResolver(t *testing.T) {
 func TestSecret_PropagatesResolverError(t *testing.T) {
 	want := errors.New("source unreachable")
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) { return "", false, want }))
+		func(ctx context.Context, name string) (string, bool, error) { return "", false, want },
+	))
 	_, err := Secret(ctx, "FOO")
 	if err == nil {
 		t.Fatal("expected error")
@@ -71,7 +74,8 @@ func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
 			return "us-east-1", false, nil
-		}))
+		},
+	))
 	_, err := Secret(ctx, "REGION")
 	if err == nil {
 		t.Fatal("expected error for masked=false entry")
@@ -88,7 +92,8 @@ func TestConfig_RejectsMaskedEntry(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
 			return "abc123", true, nil
-		}))
+		},
+	))
 	_, err := Config(ctx, "TOKEN")
 	if err == nil {
 		t.Fatal("expected error for masked=true entry")
@@ -102,7 +107,8 @@ func TestConfig_ReadsUnmaskedEntry(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
 			return "us-east-1", false, nil
-		}))
+		},
+	))
 	got, err := Config(ctx, "REGION")
 	if err != nil {
 		t.Fatalf("Config: %v", err)

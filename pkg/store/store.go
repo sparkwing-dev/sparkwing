@@ -704,7 +704,8 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	// orchestrator promoting a controller-allocated pending run to
 	// running. We deliberately do NOT clobber created_at on the
 	// upsert so the trigger-intake timestamp survives.
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
@@ -1519,7 +1520,8 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 
 // MarkNodeReady stamps ready_at if unset. Idempotent.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(
+		ctx,
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?)
 		  WHERE run_id = ? AND node_id = ?`,
 		time.Now().UnixNano(), runID, nodeID,
@@ -1540,7 +1542,8 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 // RevokeNodeReady clears ready_at when unclaimed. Returns false when
 // a pod already claimed the node.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(
+		ctx,
 		`UPDATE nodes SET ready_at = NULL
 		  WHERE run_id = ? AND node_id = ?
 		    AND claimed_by IS NULL AND status != 'done'`,
@@ -1598,7 +1601,8 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 				cand := n.ReadyAt.UnixNano() + int64(time.Microsecond)
 				bump = max(bump, cand)
 			}
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`UPDATE nodes SET ready_at = ?
 				  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
 				bump, n.RunID, n.NodeID,
@@ -1614,7 +1618,8 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 		now := time.Now()
 		expires := now.Add(lease)
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`UPDATE nodes SET claimed_by = ?, lease_expires_at = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
 			holderID, expires.UnixNano(), n.RunID, n.NodeID,
@@ -1691,7 +1696,8 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 		lease = DefaultLeaseDuration
 	}
 	expires := time.Now().Add(lease).UnixNano()
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(
+		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?`,
 		expires, runID, nodeID, holderID,
@@ -2174,7 +2180,8 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if t.Full {
 		fullInt = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
                       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full)
@@ -2237,7 +2244,8 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 	for range maxDepth {
 		var parent sql.NullString
 		var pipeline string
-		err := s.db.QueryRowContext(ctx,
+		err := s.db.QueryRowContext(
+			ctx,
 			`SELECT pipeline, parent_run_id FROM runs WHERE id = ?`, cur,
 		).Scan(&pipeline, &parent)
 		if err != nil {
@@ -2266,7 +2274,7 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 }
 
 // ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics).
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines []string, sources []string) (*Trigger, error) {
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -2311,7 +2319,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	err = tx.QueryRowContext(ctx, sel, args...).Scan(
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt)
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+	)
 	if parent.Valid {
 		t.ParentRunID = parent.String
 	}
@@ -2325,7 +2334,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 
 	now := time.Now()
 	expires := now.Add(lease)
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(
+		ctx,
 		`UPDATE triggers SET status = 'claimed', claimed_at = ?, lease_expires_at = ? WHERE id = ?`,
 		now.UnixNano(), expires.UnixNano(), t.ID,
 	); err != nil {
@@ -2379,7 +2389,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	}
 
 	var cancelNS sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT cancel_requested_at FROM triggers WHERE id = ?`, id,
 	).Scan(&cancelNS); err != nil {
 		return false, err
@@ -2529,7 +2540,8 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	var createdNS int64
 	var parent sql.NullString
 	var fullInt int
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(
+		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
@@ -2566,7 +2578,8 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
 	var fullInt int
-	err := s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(
+		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, full
@@ -2609,7 +2622,8 @@ func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, pare
 		return "", nil
 	}
 	var id string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(
+		ctx, `
 SELECT id FROM triggers
  WHERE parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
  ORDER BY created_at DESC
@@ -2730,7 +2744,8 @@ var ErrLockHeld = errors.New("held by another holder")
 // CountPendingNodes returns the count of unclaimed ready nodes.
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(
+		ctx,
 		`SELECT COUNT(*) FROM nodes
 		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')`,
 	).Scan(&n)
@@ -2741,7 +2756,8 @@ func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error) {
 	threshold := time.Now().Add(-window).UnixNano()
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(
+		ctx,
 		`SELECT COUNT(DISTINCT claimed_by) FROM nodes
 		  WHERE claimed_by IS NOT NULL AND claimed_by != ''
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?`,
@@ -2840,7 +2856,8 @@ func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, 
 
 	var pkRun, pkNode string
 	var resolvedNS sql.NullInt64
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT run_id, node_id, resolved_at FROM approvals
 		  WHERE run_id = ? AND node_id = ?`, runID, nodeID,
 	).Scan(&pkRun, &pkNode, &resolvedNS)

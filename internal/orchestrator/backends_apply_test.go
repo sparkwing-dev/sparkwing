@@ -31,14 +31,18 @@ func (stubLogStore) Append(context.Context, string, string, []byte) error { retu
 func (stubLogStore) Read(context.Context, string, string, storage.ReadOpts) ([]byte, error) {
 	return nil, nil
 }
-func (stubLogStore) ReadRun(context.Context, string) ([]byte, error)               { return nil, nil }
+
+func (stubLogStore) ReadRun(context.Context, string) ([]byte, error) { return nil, nil }
+
 func (stubLogStore) Stream(context.Context, string, string) (io.ReadCloser, error) { return nil, nil }
 func (stubLogStore) DeleteRun(context.Context, string) error                       { return nil }
 
 func strReader(s string) io.Reader { return strings.NewReader(s) }
 
-var _ sparkwing.Cache = stubArtifactStore{}
-var _ sparkwing.Logs = stubLogStore{}
+var (
+	_ sparkwing.Cache = stubArtifactStore{}
+	_ sparkwing.Logs  = stubLogStore{}
+)
 
 func writeBackendsYAML(t *testing.T, dir, body string) string {
 	t.Helper()

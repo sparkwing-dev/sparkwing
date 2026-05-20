@@ -41,6 +41,7 @@ func (s shardJob) Requires() []string {
 	}
 	return []string{"cloud-linux"}
 }
+
 func (s shardJob) Work(_ *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }

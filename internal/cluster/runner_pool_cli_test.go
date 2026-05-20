@@ -50,8 +50,11 @@ func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
 	// 5 successive claimed results, MaxClaims=3 -> loop exits after
 	// the third claim is dispatched. 4th ClaimNode should never run.
 	stub := &stubClaimer{responses: []claimResp{
-		{node: fakeNode("a")}, {node: fakeNode("b")}, {node: fakeNode("c")},
-		{node: fakeNode("d")}, {node: fakeNode("e")},
+		{node: fakeNode("a")},
+		{node: fakeNode("b")},
+		{node: fakeNode("c")},
+		{node: fakeNode("d")},
+		{node: fakeNode("e")},
 	}}
 
 	var executed atomic.Int64

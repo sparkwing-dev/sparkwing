@@ -108,7 +108,8 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 	// Rotation-grace telemetry: token replaced but still in grace
 	// window. Helps operators identify callers that need to swap.
 	if tok.RevokedAt != nil && tok.ReplacedBy != "" {
-		slog.Warn("token.rotating",
+		slog.Warn(
+			"token.rotating",
 			"prefix", tok.Prefix,
 			"principal", tok.Principal,
 			"replaced_by", tok.ReplacedBy,

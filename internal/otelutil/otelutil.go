@@ -118,7 +118,8 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		serviceName = env
 	}
 
-	res, err := resource.New(ctx,
+	res, err := resource.New(
+		ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
 			semconv.ServiceVersion(cfg.Version),

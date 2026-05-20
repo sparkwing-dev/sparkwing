@@ -29,36 +29,42 @@ var _ backend.Backend = (*fakeBackend)(nil)
 func (f *fakeBackend) Capabilities(context.Context) (backend.Capabilities, error) {
 	return f.caps, nil
 }
+
 func (f *fakeBackend) ListRuns(_ context.Context, fl store.RunFilter) ([]*store.Run, error) {
 	if f.listRuns == nil {
 		return nil, backend.ErrNotSupported
 	}
 	return f.listRuns(fl)
 }
+
 func (f *fakeBackend) GetRun(_ context.Context, id string) (*store.Run, error) {
 	if f.getRun == nil {
 		return nil, backend.ErrNotSupported
 	}
 	return f.getRun(id)
 }
+
 func (f *fakeBackend) ListNodes(_ context.Context, id string) ([]*store.Node, error) {
 	if f.listNodes == nil {
 		return nil, backend.ErrNotSupported
 	}
 	return f.listNodes(id)
 }
+
 func (f *fakeBackend) ListEventsAfter(_ context.Context, id string, seq int64, limit int) ([]store.Event, error) {
 	if f.listEvents == nil {
 		return nil, nil
 	}
 	return f.listEvents(id, seq, limit)
 }
+
 func (f *fakeBackend) ReadNodeLog(_ context.Context, runID, nodeID string, opts backend.ReadOpts) ([]byte, error) {
 	if f.readNodeLog == nil {
 		return nil, nil
 	}
 	return f.readNodeLog(runID, nodeID, opts)
 }
+
 func (f *fakeBackend) StreamNodeLog(context.Context, string, string) (io.ReadCloser, error) {
 	return nil, nil
 }
