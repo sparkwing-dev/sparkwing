@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -50,6 +51,18 @@ func run(args []string) error {
 	fs.DurationVar(&cfg.ProxyMaxAge, "proxy-max-age",
 		envDuration("PROXY_MAX_AGE", cfg.ProxyMaxAge),
 		"cleanup threshold for immutable proxy entries (content-addressed files). Falls back to $PROXY_MAX_AGE.")
+	fs.StringVar(&cfg.APIToken, "api-token",
+		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
+		"bearer token required on external write endpoints. Empty disables auth. Falls back to $SPARKWING_API_TOKEN.")
+	fs.StringVar(&cfg.AutoRegisterRepos, "auto-register-repos",
+		envOr("GITCACHE_REPOS", cfg.AutoRegisterRepos),
+		"comma-separated name=url pairs cloned into the gitcache on startup. Falls back to $GITCACHE_REPOS.")
+	fs.StringVar(&cfg.SSHKeyDir, "ssh-key-dir",
+		envOr("SSH_KEY_DIR", cfg.SSHKeyDir),
+		"directory containing the SSH key + known_hosts (typically a k8s secret mount). Falls back to $SSH_KEY_DIR.")
+	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
+		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
+		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
 	_ = fs.Parse(args)
 
 	srv, err := cache.New(cfg)
@@ -73,6 +86,15 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	if v := os.Getenv(name); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
+		}
+	}
+	return fallback
+}
+
+func envInt(name string, fallback int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
 		}
 	}
 	return fallback

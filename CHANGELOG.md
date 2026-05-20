@@ -10,6 +10,14 @@ are required.
 
 ### Changed
 
+- `sparkwing-cache` now resolves `APIToken`, `AutoRegisterRepos`,
+  `SSHKeyDir`, and `GitForkLimit` from `cache.Config` instead of
+  reading `SPARKWING_API_TOKEN`, `GITCACHE_REPOS`,
+  `SPARKWING_GITCACHE_CONCURRENCY`, and a hardcoded `/etc/ssh-key`
+  ad-hoc inside the package. Env-var fallback now lives in
+  `cmd/sparkwing-cache/main.go` alongside the other flags. Behavior
+  unchanged; existing deployments setting these env vars keep
+  working.
 - `sparkwing-cache` binary refactored: business logic moved from
   `cmd/sparkwing-cache/main.go` (~1681 LOC, plus `proxy.go`) into a
   new `internal/cache` package. The `cmd/sparkwing-cache/main.go`
@@ -37,12 +45,14 @@ are required.
 
 - `sparkwing-cache` now accepts pflag-based command-line flags for
   every setting: `--addr`, `--data-dir`, `--proxy-cache-dir`,
-  `--fetch-interval`, `--proxy-cache-ttl`, `--proxy-max-age`. Each
-  flag falls back to the corresponding env var (`DATA_DIR`,
-  `PROXY_CACHE_DIR`, `FETCH_INTERVAL`, `PROXY_CACHE_TTL`,
-  `PROXY_MAX_AGE`, plus `PORT` / `PORT_ADDR` for the bind address)
-  so existing k8s ConfigMap-style env configurations continue to
-  work unchanged.
+  `--fetch-interval`, `--proxy-cache-ttl`, `--proxy-max-age`,
+  `--api-token`, `--auto-register-repos`, `--ssh-key-dir`,
+  `--git-fork-limit`. Each flag falls back to the corresponding env
+  var (`DATA_DIR`, `PROXY_CACHE_DIR`, `FETCH_INTERVAL`,
+  `PROXY_CACHE_TTL`, `PROXY_MAX_AGE`, `SPARKWING_API_TOKEN`,
+  `GITCACHE_REPOS`, `SSH_KEY_DIR`, `SPARKWING_GITCACHE_CONCURRENCY`,
+  plus `PORT` / `PORT_ADDR` for the bind address) so existing k8s
+  ConfigMap-style env configurations continue to work unchanged.
 - Conformance test suites for the three plug-in interfaces:
   `pkg/storage.ArtifactStore`, `pkg/storage.LogStore`, and
   `pkg/controller.Cipher`. Each suite lives in a sibling

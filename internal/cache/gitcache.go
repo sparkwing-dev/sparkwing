@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -101,6 +100,12 @@ var (
 	artifactsDir = "/data/artifacts"
 	binsDir      = "/data/bins"
 	cacheDir     = "/data/cache"
+	// Knobs resolved from Config by New(). Package-level so the
+	// existing handlers + background loops can keep reading them
+	// directly without threading *Server through every call site.
+	apiToken              string
+	sshKeyDir             = "/etc/ssh-key"
+	autoRegisterReposSpec string
 	// Per-repo locks to allow concurrent fetches of different repos
 	repoLocks   = map[string]*sync.Mutex{}
 	repoLocksMu sync.Mutex
@@ -120,7 +125,6 @@ func repoHash(repoURL string) string {
 }
 
 func setupSSH() {
-	sshKeyDir := "/etc/ssh-key"
 	if _, err := os.Stat(sshKeyDir); err != nil {
 		log.Printf("warning: no SSH key at %s — only public repos will work", sshKeyDir)
 		return
@@ -146,9 +150,9 @@ func setupSSH() {
 }
 
 // requireToken bears auth on external requests; in-cluster callers
-// (no X-Forwarded-For) skip. Empty SPARKWING_API_TOKEN disables auth.
+// (no X-Forwarded-For) skip. Empty Config.APIToken disables auth.
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
-	token := os.Getenv("SPARKWING_API_TOKEN")
+	token := apiToken
 	return func(w http.ResponseWriter, r *http.Request) {
 		if token == "" {
 			next(w, r)
@@ -496,18 +500,11 @@ func enableSHAFetch(bareRepo string) {
 }
 
 // gitForkSem caps concurrent git subprocesses; webhook bursts at
-// 512-1024Mi limits otherwise hit fork() EAGAIN. Override with
-// SPARKWING_GITCACHE_CONCURRENCY.
-var gitForkSem = make(chan struct{}, gitForkLimit())
-
-func gitForkLimit() int {
-	if v := os.Getenv("SPARKWING_GITCACHE_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return 4
-}
+// tight memory limits otherwise hit fork() EAGAIN. Capacity is set
+// by cache.New from Config.GitForkLimit. The default capacity here
+// keeps unit tests that exercise gitCmd directly (without going
+// through cache.New) workable.
+var gitForkSem = make(chan struct{}, 4)
 
 func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1398,15 +1395,15 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "hash": hash})
 }
 
-// autoRegisterRepos registers repos listed in GITCACHE_REPOS env var on
-// startup. Format: comma-separated "name=url" pairs, e.g.
+// autoRegisterRepos registers repos listed in
+// Config.AutoRegisterRepos on startup. Format: comma-separated
+// "name=url" pairs, e.g.
 // "gitops=git@github.com:your-org/gitops.git,my-app=git@github.com:..."
 func autoRegisterRepos() {
-	repos := os.Getenv("GITCACHE_REPOS")
-	if repos == "" {
+	if autoRegisterReposSpec == "" {
 		return
 	}
-	for _, entry := range strings.Split(repos, ",") {
+	for _, entry := range strings.Split(autoRegisterReposSpec, ",") {
 		entry = strings.TrimSpace(entry)
 		parts := strings.SplitN(entry, "=", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
