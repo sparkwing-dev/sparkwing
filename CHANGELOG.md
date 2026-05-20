@@ -8,6 +8,26 @@ are required.
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed dead route registration for `GET /api/v1/auth/session`.
+  The route was registered twice in `pkg/controller/server.go`:
+  once on the outer router (no auth middleware) and once inside the
+  inner mux (wrapped by the bearer-token middleware). Go's
+  `http.ServeMux` specificity rules made the outer registration win
+  every time, leaving the inner copy as unreachable dead code.
+  Resolved to **outcome A**: the route is intentionally
+  unauthenticated — its handler resolves an
+  `Authorization: Session <id>` header rather than a bearer token,
+  so gating it behind bearer auth would 401 every legitimate caller.
+  The inner registration was deleted; the outer one stays as the
+  single source of truth. Behavior is unchanged (matches the
+  OpenAPI spec, which already showed `sessionAuth` only on this
+  route). Two regression tests added: a static check that fails if
+  any route is registered more than once in `server.go`, and a live
+  behavioral check that asserts `handleSession` runs outside the
+  bearer middleware even when an Authenticator is wired.
+
 ### Added
 
 - `api/openapi.yaml` — OpenAPI 3.0 spec for `pkg/controller`'s

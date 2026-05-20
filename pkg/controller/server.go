@@ -400,10 +400,9 @@ func (s *Server) Handler() http.Handler {
 	// whichever token authenticated the request.
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 
-	// Session lookup: web pod resolves the sw_session cookie by passing
-	// it as `Authorization: Session <raw>`. The caller presenting the
-	// session id is the same trust the cookie grants.
-	mux.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
+	// Session lookup is registered on the OUTER router (see below) so
+	// the `Authorization: Session <raw>` header can resolve before the
+	// bearer-token middleware runs and rejects it.
 
 	// Token rotation.
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
