@@ -91,7 +91,7 @@ func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, 
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
 }
 
@@ -155,7 +155,7 @@ func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID str
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if runID != "" {
 		return st.ListApprovalsForRun(ctx, runID)
 	}

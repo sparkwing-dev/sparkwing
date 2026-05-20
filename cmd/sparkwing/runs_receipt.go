@@ -82,7 +82,7 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, *runID)
 	if err != nil {
 		return err

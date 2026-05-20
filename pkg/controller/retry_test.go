@@ -20,7 +20,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	src := store.Run{
@@ -93,7 +93,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	src := store.Run{
@@ -159,7 +159,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
@@ -203,7 +203,7 @@ func TestRetry_ListAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	t0 := time.Now().Add(-3 * time.Hour)
@@ -247,7 +247,7 @@ func TestRetry_ListAttempts(t *testing.T) {
 func TestRetry_UnknownRunReturns404(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := store.Open(filepath.Join(dir, "s.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	resp, err := http.Post(srv.URL+"/api/v1/runs/missing/retry", "application/json", nil)

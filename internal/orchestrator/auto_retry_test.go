@@ -80,7 +80,7 @@ func TestAutoRetry_RecoversAfterTransientFailures(t *testing.T) {
 	// re-dispatch beyond the first) so the dashboard can surface the
 	// retry count.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	events, err := st.ListEventsAfter(context.Background(), res.RunID, 0, 1000)
 	if err != nil {
 		t.Fatalf("ListEventsAfter: %v", err)
@@ -116,7 +116,7 @@ func TestAutoRetry_FailsAfterExhaustingAttempts(t *testing.T) {
 	// Final node row should be Failed with the final attempt's error
 	// preserved (not buried under the auto-retry plumbing).
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 1 || nodes[0].NodeID != "always-fails" {
 		t.Fatalf("expected one always-fails node, got %+v", nodes)

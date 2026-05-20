@@ -31,7 +31,7 @@ func TestApproval_DecorationCarriesResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	run, err := st.GetRun(context.Background(), res.RunID)
 	if err != nil {

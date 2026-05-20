@@ -129,7 +129,7 @@ func TestRun_OnTargetSkipsNonMatchingJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)

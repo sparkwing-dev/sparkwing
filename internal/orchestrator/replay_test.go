@@ -41,7 +41,7 @@ func TestMintReplayRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
 	if err := st.CreateRun(ctx, store.Run{
@@ -120,7 +120,7 @@ func TestMintReplayRun_NoSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
 	if err := st.CreateRun(ctx, store.Run{
@@ -148,7 +148,7 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	paths := PathsAt(dir)
 
@@ -191,7 +191,7 @@ func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	paths := PathsAt(dir)
 

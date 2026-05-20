@@ -41,7 +41,7 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -101,7 +101,7 @@ func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -139,7 +139,7 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()

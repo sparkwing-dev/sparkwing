@@ -70,7 +70,7 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type runRow struct {
 		id, pipeline, status string

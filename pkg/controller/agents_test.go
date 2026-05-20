@@ -18,7 +18,7 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -90,7 +90,7 @@ func TestAgents_EmptyWhenNoClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	data, err := httpGet(srv.URL + "/api/v1/agents")

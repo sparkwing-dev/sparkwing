@@ -270,7 +270,7 @@ func TestCache_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	// Follower's node row must carry outcome=skipped-concurrent and
 	// the step body must NOT have incremented the counter.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	fnodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
 	if len(fnodes) != 1 {
 		t.Fatalf("follower: expected 1 node, got %d", len(fnodes))
@@ -312,7 +312,7 @@ func TestCache_FailResolvesFollowerAsFailed(t *testing.T) {
 	// Harden: follower's node row should carry a clear error message
 	// that an operator can read back.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("follower run: expected 1 node, got %d", len(nodes))
@@ -359,7 +359,7 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res2.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("run 2: expected 1 node, got %d", len(nodes))
@@ -390,7 +390,7 @@ func TestCache_CoalesceFollowersInheritLeader(t *testing.T) {
 	// All three node rows should show a terminal success. Followers
 	// carry a "coalesced" event; verify via ListNodes.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 3 {
 		t.Fatalf("expected 3 nodes, got %d", len(nodes))
@@ -423,7 +423,7 @@ func TestCache_DriftWarnEventEmitted(t *testing.T) {
 
 	// Scan the second run's events for concurrency_drift.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	events, _ := st.ListEventsAfter(context.Background(), r2.RunID, 0, 500)
 	found := false
 	for _, e := range events {

@@ -123,7 +123,7 @@ func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	firstChildID, err := st.FindSpawnedChildTriggerID(ctx, "p1", "spawner", "spawn-retry-child")
 	if err != nil {
@@ -197,7 +197,7 @@ func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Sanity: no child trigger was created in the first run because
 	// the spawner never executed.

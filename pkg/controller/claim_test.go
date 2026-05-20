@@ -26,7 +26,7 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -108,7 +108,7 @@ func TestClaim_FIFOOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Three triggers with monotonically-increasing timestamps.
 	for i, name := range []string{"first", "second", "third"} {

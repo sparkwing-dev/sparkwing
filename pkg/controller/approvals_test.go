@@ -35,7 +35,7 @@ func TestApprovals_RequestThenApprove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -87,7 +87,7 @@ func TestApprovals_ResolveTwiceIsConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -115,7 +115,7 @@ func TestApprovals_ResolveMissingIs404(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -134,7 +134,7 @@ func TestApprovals_ListPendingAndForRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

@@ -178,7 +178,7 @@ func TestRetry_LogCapturesAttempts(t *testing.T) {
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-retry-exhausted"})
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) == 0 || nodes[0].NodeID != "always-fails" {
 		t.Fatalf("expected always-fails node, got %+v", nodes)
@@ -217,7 +217,7 @@ func TestTimeout_CancelsSlowJob(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 1 || !strings.Contains(nodes[0].Error, "timeout exceeded") {
 		t.Fatalf("expected timeout error, got %+v", nodes)
@@ -237,7 +237,7 @@ func TestOnFailure_RunsWhenParentFails(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {
@@ -264,7 +264,7 @@ func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {
@@ -297,7 +297,7 @@ func TestOnFailure_DetachedRecoveryRuns(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {

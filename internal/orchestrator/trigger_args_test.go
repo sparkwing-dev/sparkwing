@@ -18,7 +18,7 @@ func TestResolveTriggerArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	backend := localState{st: st}

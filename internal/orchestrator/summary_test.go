@@ -64,7 +64,7 @@ func TestRun_SummaryPersistsToNodeRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestRun_SummaryPersistsToStepRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	steps, err := st.ListNodeSteps(context.Background(), res.RunID)
 	if err != nil {

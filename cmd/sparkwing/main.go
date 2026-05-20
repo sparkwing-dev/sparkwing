@@ -838,7 +838,7 @@ func localStatusExitCheck(ctx context.Context, paths orchestrator.Paths, runID s
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err

@@ -81,7 +81,7 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	runs, err := st.ListRuns(ctx, store.RunFilter{
 		Limit:     grepFetchLimit(opts),
 		Pipelines: opts.Pipelines,

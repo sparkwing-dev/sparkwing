@@ -158,7 +158,7 @@ func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	want := map[string]bool{"parent": false, "parent/scan": false}
 	for _, n := range nodes {
@@ -186,7 +186,7 @@ func TestSpawnDispatch_ChildFailureFailsParent(t *testing.T) {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 
 	parent, child := find(nodes, "parent"), find(nodes, "parent/doomed-child")
@@ -216,7 +216,7 @@ func TestSpawnDispatch_ForEachFansOut(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	wantIDs := map[string]bool{
 		"parent":         false,

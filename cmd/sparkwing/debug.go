@@ -203,7 +203,7 @@ func runDebugRelease(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if err := st.ReleaseDebugPause(ctx, t.run, t.node, releasedBy, store.PauseReleaseManual); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("no active pause for %s/%s (already released or never paused)", t.run, t.node)
@@ -308,7 +308,7 @@ func runDebugEnv(args []string) error {
 		if oerr != nil {
 			return oerr
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		node, err = st.GetNode(ctx, t.run, t.node)
 		if err != nil {
 			return err

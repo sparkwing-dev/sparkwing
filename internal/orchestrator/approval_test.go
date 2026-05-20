@@ -67,7 +67,7 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		deadline := time.Now().Add(4 * time.Second)
 		for time.Now().Before(deadline) {
 			pend, _ := st.ListPendingApprovals(context.Background())
@@ -95,7 +95,7 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 
 	// Confirm durable state reflects the approval.
 	st, _ := store.Open(dbPath)
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	runs, _ := st.ListRuns(context.Background(), store.RunFilter{Pipelines: []string{"appr-basic"}, Limit: 1})
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(runs))
@@ -136,7 +136,7 @@ func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		deadline := time.Now().Add(4 * time.Second)
 		for time.Now().Before(deadline) {
 			pend, _ := st.ListPendingApprovals(context.Background())
@@ -177,7 +177,7 @@ func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
 
 	dbPath := filepath.Join(p.Root, "state.db")
 	st, _ := store.Open(dbPath)
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	appr, err := st.GetApproval(context.Background(), res.RunID, "gate")
 	if err != nil {
 		t.Fatalf("GetApproval: %v", err)

@@ -113,7 +113,7 @@ func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*NodeDispatch
 	for rows.Next() {
 		d, err := scanNodeDispatch(rows.Scan)

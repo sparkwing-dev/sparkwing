@@ -142,7 +142,7 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Fire both pipelines concurrently against one shared Store.
 	type result struct {
@@ -238,7 +238,7 @@ func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	const iterations = 3
 	var wg sync.WaitGroup

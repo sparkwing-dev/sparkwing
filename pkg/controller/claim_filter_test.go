@@ -41,7 +41,7 @@ func TestClaim_PipelineFilter_BasicInclude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// "other" is older (would win FIFO without filter); "sample-build"
 	// is newer but matches the worker's advertised set.
@@ -80,7 +80,7 @@ func TestClaim_PipelineFilter_Empty204(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	seedTrigger(t, st, "t1", "other", time.Now())
 
@@ -114,7 +114,7 @@ func TestClaim_PipelineFilter_NilMeansAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	seedTrigger(t, st, "t1", "whatever", time.Now())
 
@@ -144,7 +144,7 @@ func TestClaim_SourceFilter_GithubWorkerSkipsManual(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	now := time.Now()
 	// A manual trigger is the only one in the queue.
@@ -182,7 +182,7 @@ func TestClaim_SourceFilter_WorkerClaimsMatchingSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	now := time.Now()
 	// Seed two triggers: github (older, would win FIFO) and manual.
@@ -222,7 +222,7 @@ func TestClaim_SourceFilter_AndWithPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	now := time.Now()
 	// right-pipeline, wrong-source

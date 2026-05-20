@@ -99,7 +99,7 @@ func TestMaterializeLocalRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{

@@ -38,7 +38,7 @@ SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(le
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type holderInfo struct {
 		holder, name, kind string

@@ -47,7 +47,7 @@ func RunTimeline(ctx context.Context, paths Paths, runID string, opts TimelineOp
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err

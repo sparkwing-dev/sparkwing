@@ -97,7 +97,7 @@ func TestSecret_MissingNameFailsTheJob(t *testing.T) {
 	// Per-node error carries the verbatim message; the run-level
 	// error just lists which nodes failed.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	node, gerr := st.GetNode(context.Background(), res.RunID, "read")
 	if gerr != nil {
 		t.Fatalf("GetNode: %v", gerr)

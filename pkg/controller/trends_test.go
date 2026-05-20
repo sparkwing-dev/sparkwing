@@ -29,7 +29,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -102,7 +102,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -156,7 +156,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -220,7 +220,7 @@ func TestTrends_PipelineFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()

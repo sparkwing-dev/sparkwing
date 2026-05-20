@@ -65,7 +65,7 @@ func TestRun_WhenRunnerSkipsJobWhenRunnerCannotSatisfy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestRun_WhenRunnerLocalRunsOnLocalRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 1 {
@@ -132,7 +132,7 @@ func TestRun_WhenRunnerCommaOrMatchesLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 1 {

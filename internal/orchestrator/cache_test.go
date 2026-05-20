@@ -174,7 +174,7 @@ func TestCacheKey_FirstRunRunsJob(t *testing.T) {
 
 	// Verify an entry landed in the cache table.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// We don't know the exact key string, but we know there must be
 	// exactly one cache row with a matching output payload.
@@ -210,7 +210,7 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 
 	// Second run's "build" node must be Cached.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res2.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("expected 1 node, got %d", len(nodes))

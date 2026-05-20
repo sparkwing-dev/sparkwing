@@ -140,7 +140,7 @@ func TestRun_SkipPassedOnRetry(t *testing.T) {
 	// marked done with the rehydrated output, and a node_skipped_from_retry
 	// event should be recorded.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	buildNode, err := st.GetNode(context.Background(), second.RunID, "build")
 	if err != nil {
 		t.Fatalf("GetNode(second, build): %v", err)

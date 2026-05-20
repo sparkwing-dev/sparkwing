@@ -188,7 +188,7 @@ func TestJobFanOutDynamic_FansOutAndJoins(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	nodeIDs := map[string]string{}
 	for _, n := range nodes {
@@ -237,7 +237,7 @@ func TestJobFanOutDynamic_SourceFailsCancelsFanin(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {

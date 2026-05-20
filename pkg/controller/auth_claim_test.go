@@ -22,7 +22,7 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Seed a runner token BEFORE the server starts so
 	// EnableAuthFromStore picks it up.

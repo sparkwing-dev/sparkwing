@@ -84,7 +84,7 @@ func runDebugRerunLocal(ctx context.Context, t rerunFlags) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	snap, err := st.GetNodeDispatch(ctx, t.run, t.node, t.seq)
 	if err != nil {

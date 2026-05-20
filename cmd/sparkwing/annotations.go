@@ -114,7 +114,7 @@ func listLocalAnnotations(ctx context.Context, paths orchestrator.Paths, runID, 
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
@@ -258,7 +258,7 @@ func addLocalAnnotation(ctx context.Context, paths orchestrator.Paths, runID, no
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if stepID != "" {
 		if err := st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
 			return err

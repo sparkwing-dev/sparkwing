@@ -196,7 +196,7 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tokens: query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Token
 	for rows.Next() {
@@ -275,7 +275,7 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Token
 	for rows.Next() {

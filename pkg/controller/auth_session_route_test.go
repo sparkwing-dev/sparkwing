@@ -69,7 +69,7 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := controller.New(st, nil).WithAuthenticator(
 		controller.NewAuthenticator(st, time.Minute),

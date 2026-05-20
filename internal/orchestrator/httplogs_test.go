@@ -51,7 +51,7 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	paths := orchestrator.PathsAt(dir)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)

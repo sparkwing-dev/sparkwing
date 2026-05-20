@@ -30,7 +30,7 @@ func TestTrigger_Validation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -59,7 +59,7 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -83,7 +83,7 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -126,7 +126,7 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
@@ -209,7 +209,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -277,7 +277,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	created := time.Now().Add(-time.Hour)
@@ -323,7 +323,7 @@ func TestTrigger_DispatcherError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())

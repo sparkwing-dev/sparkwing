@@ -131,7 +131,7 @@ func TestWorkDispatch_TypedResultPersistedAsNodeOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
@@ -165,7 +165,7 @@ func TestWorkDispatch_FailingStepFailsTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)

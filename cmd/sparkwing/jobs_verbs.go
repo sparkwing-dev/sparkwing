@@ -102,7 +102,7 @@ func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipelin
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	filter := store.RunFilter{Statuses: []string{"failed"}, Limit: limit * 4}
 	if pipeline != "" {
@@ -318,7 +318,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		if oerr != nil {
 			return oerr
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		filter := store.RunFilter{Limit: 500}
 		if *pipeline != "" {
 			filter.Pipelines = []string{*pipeline}
@@ -453,7 +453,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err != nil {
 			return nil, err
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		runs, err := st.ListRuns(ctx, filter)
 		if err != nil {
 			return nil, err
@@ -563,7 +563,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err != nil {
 			return err
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		r, err := st.GetRun(ctx, *runID)
 		if err != nil {
 			return err
@@ -701,7 +701,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if oerr != nil {
 			return exitError(4, oerr)
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		fetch = func() (*store.Run, error) { return st.GetRun(ctx, *runID) }
 	}
 
@@ -812,7 +812,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if oerr != nil {
 			return oerr
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		searchOnce = func() ([]*store.Run, error) {
 			return findRunsLocal(ctx, st, *gitSHA, *pipeline, *repo, *since, *limit)
 		}

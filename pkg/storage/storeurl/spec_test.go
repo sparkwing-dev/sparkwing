@@ -129,7 +129,7 @@ func TestOpenStateStoreFromSpec_SQLite(t *testing.T) {
 	if st == nil {
 		t.Fatal("nil store")
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("expected db file at %s: %v", path, err)
 	}

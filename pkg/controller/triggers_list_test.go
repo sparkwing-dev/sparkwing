@@ -22,7 +22,7 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -100,7 +100,7 @@ func TestListTriggers_RepoFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()

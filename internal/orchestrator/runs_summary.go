@@ -82,7 +82,7 @@ func RunSummaryLocal(ctx context.Context, paths Paths, runID string, opts Summar
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err

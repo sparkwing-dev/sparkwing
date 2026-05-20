@@ -512,12 +512,12 @@ func (s *Store) backfillRunAnnotationRollup() error {
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, id := range ids {
 		gathered, err := s.gatherRunAnnotations(id)
 		if err != nil {
@@ -549,7 +549,7 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
@@ -603,12 +603,12 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		var notnull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		have[name] = true
 	}
-	rows.Close()
+	_ = rows.Close()
 	for name, typ := range cols {
 		if have[name] {
 			continue
@@ -819,7 +819,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 			for rows.Next() {
 				r, scanErr := scanRun(rows)
 				if scanErr != nil {
-					rows.Close()
+					_ = rows.Close()
 					return nil, scanErr
 				}
 				if _, dup := collected[r.ID]; dup {
@@ -828,7 +828,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 				collected[r.ID] = r
 				next = append(next, r.ID)
 			}
-			rows.Close()
+			_ = rows.Close()
 		}
 		frontier = next
 	}
@@ -914,7 +914,7 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*Run
 	for rows.Next() {
@@ -997,12 +997,12 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, id := range ids {
 		if err := s.DeleteRun(ctx, id); err != nil {
 			return ids, err
@@ -1176,7 +1176,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Node
 	for rows.Next() {
 		n := &Node{}
@@ -1408,7 +1408,7 @@ ORDER BY node_id, started_at`, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*NodeStep
 	for rows.Next() {
 		ns := &NodeStep{RunID: runID}
@@ -1501,7 +1501,7 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
 VALUES (?,?,?,?)
@@ -1723,7 +1723,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
@@ -1737,12 +1737,12 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	for rows.Next() {
 		var rid, nid string
 		if err := rows.Scan(&rid, &nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1769,7 +1769,7 @@ func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
@@ -1783,12 +1783,12 @@ func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	for rows.Next() {
 		var rid, nid string
 		if err := rows.Scan(&rid, &nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1820,7 +1820,7 @@ func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT node_id FROM nodes WHERE run_id = ? AND status != 'done'`, runID)
@@ -1831,12 +1831,12 @@ func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason
 	for rows.Next() {
 		var nid string
 		if err := rows.Scan(&nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		nodeIDs = append(nodeIDs, nid)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1872,7 +1872,7 @@ func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
@@ -1886,12 +1886,12 @@ func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	for rows.Next() {
 		var rid, nid string
 		if err := rows.Scan(&rid, &nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1944,7 +1944,7 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Event
 	for rows.Next() {
 		var e Event
@@ -1981,7 +1981,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var seq int64
 	err = tx.QueryRowContext(ctx,
@@ -2069,7 +2069,7 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*DebugPause
 	for rows.Next() {
 		p, err := scanDebugPause(rows)
@@ -2218,7 +2218,7 @@ ORDER BY parent_node_id, created_at`, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SpawnedChild
 	for rows.Next() {
 		var c SpawnedChild
@@ -2282,7 +2282,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
@@ -2370,7 +2370,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers
@@ -2431,7 +2431,7 @@ func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM triggers
@@ -2445,12 +2445,12 @@ func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -2494,7 +2494,7 @@ SELECT id FROM triggers
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -2516,7 +2516,7 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now()
 	expires := now.Add(lease)
@@ -2687,7 +2687,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Repo filter is client-side; trigger_env is an unindexed JSON blob.
 	var out []*Trigger
@@ -2811,7 +2811,7 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO approvals (run_id, node_id, requested_at, message, timeout_ms, on_timeout)
 VALUES (?,?,?,?,?,?)
@@ -2852,7 +2852,7 @@ func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var pkRun, pkNode string
 	var resolvedNS sql.NullInt64
@@ -2895,7 +2895,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Approval
 	for rows.Next() {
 		a, err := scanApproval(rows)
@@ -2917,7 +2917,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Approval
 	for rows.Next() {
 		a, err := scanApproval(rows)

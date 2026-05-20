@@ -181,7 +181,7 @@ func TestRun_FanOutFanIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
@@ -207,7 +207,7 @@ func TestRun_MidFailureCancelsDownstream(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {
@@ -238,7 +238,7 @@ func TestRun_TypedRefsThreadOutput(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	for _, n := range nodes {
 		if n.NodeID != "build" {
@@ -262,7 +262,7 @@ func TestRun_PersistsPlanSnapshotAndRunRow(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	r, err := st.GetRun(context.Background(), res.RunID)
 	if err != nil {

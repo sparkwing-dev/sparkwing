@@ -75,7 +75,7 @@ func (s *Store) ListSecrets() ([]Secret, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Secret
 	for rows.Next() {
 		var sec Secret

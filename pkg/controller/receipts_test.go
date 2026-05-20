@@ -24,7 +24,7 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
 	start := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
@@ -113,7 +113,7 @@ func TestReceiptEndpoint_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	c := client.New(srv.URL, nil)
