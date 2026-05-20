@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -283,7 +284,7 @@ func Parse(r io.Reader) (*Config, error) {
 	dec := yaml.NewDecoder(r)
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return &cfg, nil
 		}
 		return nil, fmt.Errorf("parse pipelines.yaml: %w", err)

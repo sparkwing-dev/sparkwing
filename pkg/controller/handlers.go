@@ -883,7 +883,7 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("seq"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid seq: %v", err))
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid seq: %w", err))
 			return
 		}
 		seq = n

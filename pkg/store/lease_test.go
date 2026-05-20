@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 func TestLease_HeartbeatMissingReturnsNotFound(t *testing.T) {
 	s := newStoreT(t)
 	_, err := s.HeartbeatTrigger(context.Background(), "nope", 5*time.Second)
-	if err != store.ErrNotFound {
+	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("err=%v want ErrNotFound", err)
 	}
 }

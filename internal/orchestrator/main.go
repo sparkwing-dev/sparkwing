@@ -11,10 +11,11 @@ import (
 	"runtime"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"golang.org/x/term"
 )
 
 // Main is the entry point for .sparkwing/main.go. Subcommands:

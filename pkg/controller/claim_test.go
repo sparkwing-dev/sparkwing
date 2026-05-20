@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -132,7 +133,7 @@ func TestClaim_FIFOOrdering(t *testing.T) {
 
 	// Fourth claim: empty.
 	_, err = st.ClaimNextTrigger(context.Background(), 0)
-	if err != store.ErrNotFound {
+	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("4th claim err=%v want ErrNotFound", err)
 	}
 }

@@ -175,7 +175,7 @@ func findStoreType(v reflect.Value, depth int) string {
 		return t.String()
 	}
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface:
+	case reflect.Pointer, reflect.Interface:
 		if v.IsNil() {
 			return ""
 		}

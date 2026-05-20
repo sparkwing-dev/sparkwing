@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -264,7 +265,7 @@ func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *p
 			switch {
 			case err == nil && val != "":
 				sf.Resolved = true
-			case err == ErrSecretMissing:
+			case errors.Is(err, ErrSecretMissing):
 				sf.Note = "missing"
 			case err != nil:
 				sf.Note = err.Error()

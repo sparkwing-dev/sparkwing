@@ -108,10 +108,10 @@ func toCommandJSON(c *Command) CommandJSON {
 		Hidden:      c.Hidden,
 	}
 	for _, s := range c.Subcommands {
-		out.Subcommands = append(out.Subcommands, SubcommandJSON{Name: s.Name, Synopsis: s.Synopsis})
+		out.Subcommands = append(out.Subcommands, SubcommandJSON(s))
 	}
 	for _, p := range c.PosArgs {
-		out.PosArgs = append(out.PosArgs, PosArgJSON{Name: p.Name, Desc: p.Desc, Required: p.Required})
+		out.PosArgs = append(out.PosArgs, PosArgJSON(p))
 	}
 	for _, f := range c.Flags {
 		if f.Hidden {

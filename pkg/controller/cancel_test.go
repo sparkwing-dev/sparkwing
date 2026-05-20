@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -104,7 +105,7 @@ func TestCancel_MissingRun(t *testing.T) {
 	c := client.New(ts.URL, nil)
 
 	err = c.CancelRun(context.Background(), "nope")
-	if err != store.ErrNotFound {
+	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("err=%v want ErrNotFound", err)
 	}
 }

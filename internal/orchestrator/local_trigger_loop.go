@@ -165,7 +165,7 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 	} else if trig.Repo != "" {
 		path, lerr := LocalRepoDir(trig.Repo)
 		if lerr != nil {
-			return fmt.Errorf("locate %q: registry miss + slug fallback failed: registry=%v slug=%w",
+			return fmt.Errorf("locate %q: registry miss + slug fallback failed: registry=%w slug=%w",
 				trig.Pipeline, err, lerr)
 		}
 		repoDir = path

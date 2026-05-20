@@ -47,9 +47,7 @@ func stepRangeFromContext(ctx context.Context) (stepRange, bool) {
 func computeStepRangeSkips(items map[string]*workItem, children map[string][]string, r stepRange) map[string]string {
 	parents := make(map[string][]string, len(items))
 	for id, it := range items {
-		for _, d := range it.deps {
-			parents[id] = append(parents[id], d)
-		}
+		parents[id] = append(parents[id], it.deps...)
 		// Ensure every node has an entry so reachable() is uniform.
 		if _, ok := parents[id]; !ok {
 			parents[id] = nil

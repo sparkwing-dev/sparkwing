@@ -14,6 +14,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 

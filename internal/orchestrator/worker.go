@@ -174,7 +174,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 
 	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
 
-	var logsBackend LogBackend = local.Logs
+	logsBackend := local.Logs
 	switch {
 	case opts.LogStore != nil:
 		logsBackend = NewLogStoreBackend(opts.LogStore, opts.Logger)
