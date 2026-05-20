@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"

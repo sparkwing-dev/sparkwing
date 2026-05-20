@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
