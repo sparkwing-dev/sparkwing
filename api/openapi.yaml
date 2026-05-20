@@ -1,0 +1,2305 @@
+openapi: 3.0.3
+
+info:
+  title: Sparkwing Controller HTTP API
+  version: "0.1"
+  description: |
+    HTTP API served by `sparkwing-controller` (cluster mode) and embedded
+    in `sparkwing-local-ws` (laptop mode). Same route table, same wire
+    shapes; the mode is determined by which functional options the
+    process wires into the [pkg/controller.Server][1] instance.
+
+    Mode-conditional routes are marked in each operation's `description`:
+
+    - **cluster-only** — wired when the process calls `AttachPool`
+      (warm-PVC pool routes under `/api/v1/pool/*`).
+    - **laptop-only** — wired when the process calls `WithArtifactStore`
+      (`GET /api/v1/artifacts/{key}`).
+
+    See [VERSIONING.md][2] for stability promises around this surface:
+    JSON field renames and behavioural changes are tracked under module
+    semver. The Go client lives at `pkg/controller/client/`.
+
+    [1]: https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/pkg/controller
+    [2]: ../VERSIONING.md
+
+  contact:
+    name: sparkwing
+    url: https://github.com/sparkwing-dev/sparkwing
+  license:
+    name: Elastic License 2.0
+    url: https://github.com/sparkwing-dev/sparkwing/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:4344
+    description: Default cluster-mode `sparkwing-controller` bind address.
+  - url: http://127.0.0.1:4343
+    description: Default laptop-mode `sparkwing-local-ws` bind address.
+
+tags:
+  - name: runs
+    description: Run lifecycle and read paths.
+  - name: nodes
+    description: Per-DAG-node lifecycle (workers and dashboards).
+  - name: node-steps
+    description: Per-step state inside a node's inner DAG.
+  - name: events
+    description: Append-only audit + telemetry stream per run.
+  - name: triggers
+    description: Pipeline invocation intake and worker dispatch.
+  - name: approvals
+    description: Human gates between nodes.
+  - name: concurrency
+    description: Distributed mutual exclusion + coalescing.
+  - name: debug-pauses
+    description: Operator-induced pauses for live debugging.
+  - name: pool
+    description: Warm-PVC pool (cluster-only).
+  - name: artifacts
+    description: Content-addressed blob reads (laptop-only).
+  - name: tokens
+    description: Bearer-token CRUD (admin).
+  - name: users
+    description: Local-account CRUD + bootstrap.
+  - name: auth
+    description: Login / logout / session + introspection.
+  - name: secrets
+    description: Named secret material.
+  - name: agents
+    description: Active runner heartbeats.
+  - name: pipelines
+    description: Cross-pipeline / cross-repo reads.
+  - name: trends
+    description: Aggregate dashboard charts.
+  - name: receipts
+    description: Per-run audit + cost receipts (cluster).
+  - name: webhooks
+    description: External-trigger ingress (GitHub).
+  - name: health
+    description: Process probes and Prometheus scrape.
+
+security:
+  - bearerToken: []
+
+paths:
+  # ───────────────────────── Runs ─────────────────────────
+
+  /api/v1/runs:
+    post:
+      tags: [runs]
+      summary: Create a run row directly.
+      description: |
+        Insert a [Run][1] in the caller-supplied state. Idempotent
+        upgrade of `pending` rows pre-allocated by trigger intake.
+        Admin scope.
+        [1]: #/components/schemas/Run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Run"
+      responses:
+        "201": { description: Created. Empty body. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [runs]
+      summary: List runs filtered by query parameters.
+      description: |
+        Filter via `pipeline`, `status`, `since`, `limit` query
+        params. Empty result is `{"runs": []}`. Requires `runs.read`
+        scope.
+      parameters:
+        - in: query
+          name: pipeline
+          schema: { type: string }
+          description: csv of pipeline names.
+        - in: query
+          name: status
+          schema: { type: string }
+          description: csv of run statuses (e.g. `running,pending`).
+        - in: query
+          name: since
+          schema: { type: string, format: duration }
+          description: Go duration (`1h`, `30m`). Returns runs younger than this.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: List wrapped under `runs`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [runs]
+      summary: Fetch a single run, optionally with its nodes.
+      description: |
+        With `?include=nodes` returns `{run, nodes}` and decorates each
+        node with plan-snapshot context (step rows, approvals,
+        spawned children). Without include, returns the raw `Run`.
+      parameters:
+        - in: query
+          name: include
+          schema: { type: string, enum: [nodes] }
+      responses:
+        "200":
+          description: Run, or `{run, nodes}` when `include=nodes`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Run"
+                  - type: object
+                    required: [run, nodes]
+                    properties:
+                      run: { $ref: "#/components/schemas/Run" }
+                      nodes:
+                        type: array
+                        items: { $ref: "#/components/schemas/Node" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      tags: [runs]
+      summary: Delete a run and its nodes / events. Admin scope.
+      responses:
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/finish:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    post:
+      tags: [runs]
+      summary: Mark a run terminal. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinishRunRequest" }
+      responses:
+        "204": { description: Run finished. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/plan:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    post:
+      tags: [runs]
+      summary: Upload the run's plan-snapshot blob.
+      description: |
+        Body is opaque bytes (typically JSON serialised plan).
+        Content-Type is ignored. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "204": { description: Plan stored. }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/cancel:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    post:
+      tags: [runs]
+      summary: Request cancellation. The orchestrator surfaces this via heartbeat.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "204": { description: Cancellation requested. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/retry:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    post:
+      tags: [runs]
+      summary: Re-run a failed run. `?full=1` re-runs every node; default skips passed.
+      parameters:
+        - in: query
+          name: full
+          schema: { type: string, enum: ["1", "true"] }
+          description: When set, re-runs every node regardless of prior outcome.
+      responses:
+        "200":
+          description: New run created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id]
+                properties:
+                  run_id: { type: string }
+                  status: { type: string }
+                  trigger_source: { type: string }
+                  started_at: { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/attempts:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [runs]
+      summary: List the retry tree for a run.
+      description: |
+        Walks `retry_of` / `retried_as` lineage and returns every
+        related run in chronological order.
+      responses:
+        "200":
+          description: Retry tree.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempts]
+                properties:
+                  attempts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Run" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/receipt:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [receipts]
+      summary: Per-run audit + cost receipt.
+      description: |
+        Recomputed on demand. Field set is documented under the
+        `Receipt` schema below.
+      responses:
+        "200":
+          description: Receipt JSON.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Receipt" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/nodes:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [nodes]
+      summary: List nodes for a run, insertion order.
+      responses:
+        "200":
+          description: Nodes wrapped under `nodes`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes]
+                properties:
+                  nodes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Node" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      tags: [nodes]
+      summary: Insert a node row in `pending` state. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Node" }
+      responses:
+        "201": { description: Node created. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    get:
+      tags: [nodes]
+      summary: Fetch one node.
+      responses:
+        "200":
+          description: Node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/start:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Mark a node `running`. Admin scope.
+      responses:
+        "204": { description: Started. }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/finish:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Mark a node terminal with outcome + optional output / error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinishNodeRequest" }
+      responses:
+        "204": { description: Finished. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/deps:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Rewrite a node's dependency list. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deps]
+              properties:
+                deps:
+                  type: array
+                  items: { type: string }
+      responses:
+        "204": { description: Updated. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/output:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    get:
+      tags: [nodes]
+      summary: Read the raw output JSON for one node.
+      description: |
+        Returns the exact bytes the orchestrator wrote — opaque to
+        the controller. Empty body when the node hasn't completed
+        with output.
+      responses:
+        "200":
+          description: Raw JSON output.
+          content:
+            application/json:
+              schema:
+                type: string
+                format: byte
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/dispatch:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Record a node-dispatch attempt. Nodes-claim scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeDispatch" }
+      responses:
+        "204": { description: Recorded. }
+    get:
+      tags: [nodes]
+      summary: Fetch the latest dispatch (or a specific `?seq=N`) for a node.
+      parameters:
+        - in: query
+          name: seq
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Dispatch row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeDispatch" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/dispatches:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    get:
+      tags: [nodes]
+      summary: List every dispatch attempt for a node.
+      responses:
+        "200":
+          description: Dispatch list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dispatches]
+                properties:
+                  dispatches:
+                    type: array
+                    items: { $ref: "#/components/schemas/NodeDispatch" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/activity:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Update the node's phase string for the dashboard. Nodes-claim scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                detail: { type: string }
+      responses:
+        "204": { description: Updated. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/touch:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Update the node's last-heartbeat timestamp.
+      responses:
+        "204": { description: Touched. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/annotations:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Append one annotation string to the node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [annotation]
+              properties:
+                annotation: { type: string }
+      responses:
+        "204": { description: Appended. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/summary:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Overwrite the node-scoped run summary markdown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [summary]
+              properties:
+                summary: { type: string }
+      responses:
+        "204": { description: Stored. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/metrics:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Append one metric sample to a node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MetricSample" }
+      responses:
+        "204": { description: Recorded. }
+    get:
+      tags: [nodes]
+      summary: List metric samples for a node.
+      responses:
+        "200":
+          description: Sample list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [metrics]
+                properties:
+                  metrics:
+                    type: array
+                    items: { $ref: "#/components/schemas/MetricSample" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/mark-ready:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Stamp `ready_at` so pool runners can claim the node.
+      responses:
+        "204": { description: Stamped. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Atomically null `ready_at` iff the node is not claimed.
+      responses:
+        "200":
+          description: Whether the revoke won the race.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/heartbeat:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Extend the holding runner's claim lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder_id]
+              properties:
+                holder_id: { type: string }
+                lease_secs: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: Lease extended. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Caller is not the current claim holder. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/status:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Admin override of a node's status (debug / repair).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string }
+      responses:
+        "204": { description: Updated. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/release:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [debug-pauses]
+      summary: Release any active debug pause on the node.
+      responses:
+        "204": { description: Released or no-op. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/debug-pause:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    get:
+      tags: [debug-pauses]
+      summary: Get the open debug pause for a node.
+      responses:
+        "200":
+          description: Active pause, or 404 when none.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DebugPause" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/debug-pauses:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [debug-pauses]
+      summary: List every debug pause for a run.
+      responses:
+        "200":
+          description: Pauses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pauses]
+                properties:
+                  pauses:
+                    type: array
+                    items: { $ref: "#/components/schemas/DebugPause" }
+    post:
+      tags: [debug-pauses]
+      summary: Create a debug pause on a node. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DebugPause" }
+      responses:
+        "201": { description: Created. }
+
+  /api/v1/runs/{id}/paused:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [debug-pauses]
+      summary: Alias of `/runs/{id}/debug-pauses`. Same response shape.
+      responses:
+        "200":
+          description: Pauses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pauses]
+                properties:
+                  pauses:
+                    type: array
+                    items: { $ref: "#/components/schemas/DebugPause" }
+
+  # ───────────────────────── Node Steps ─────────────────────────
+
+  /api/v1/runs/{id}/nodes/{nodeID}/steps/start:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [node-steps]
+      summary: Mark a step within a node as running.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step_id]
+              properties:
+                step_id: { type: string }
+      responses:
+        "204": { description: Started. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/steps/finish:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [node-steps]
+      summary: Transition a step to passed / failed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step_id, status]
+              properties:
+                step_id: { type: string }
+                status:
+                  type: string
+                  enum: [passed, failed]
+      responses:
+        "204": { description: Finished. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/steps/skip:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [node-steps]
+      summary: Record a step as skipped (SkipIf hit).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step_id]
+              properties:
+                step_id: { type: string }
+                reason: { type: string }
+      responses:
+        "204": { description: Recorded. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [node-steps]
+      summary: Append one annotation to a step.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step_id, annotation]
+              properties:
+                step_id: { type: string }
+                annotation: { type: string }
+      responses:
+        "204": { description: Appended. }
+
+  /api/v1/runs/{id}/nodes/{nodeID}/steps/summary:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [node-steps]
+      summary: Overwrite the step-scoped run-summary markdown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step_id, summary]
+              properties:
+                step_id: { type: string }
+                summary: { type: string }
+      responses:
+        "204": { description: Stored. }
+
+  /api/v1/runs/{id}/steps:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [node-steps]
+      summary: List every step in a run with terminal state.
+      responses:
+        "200":
+          description: Step list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [steps]
+                properties:
+                  steps:
+                    type: array
+                    items: { $ref: "#/components/schemas/NodeStep" }
+
+  # ───────────────────────── Events ─────────────────────────
+
+  /api/v1/runs/{id}/events:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [events]
+      summary: List events for a run, ascending by seq.
+      parameters:
+        - in: query
+          name: after
+          schema: { type: integer }
+          description: Return only events with seq > `after`.
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500, minimum: 1 }
+      responses:
+        "200":
+          description: Events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+    post:
+      tags: [events]
+      summary: Append one event to a run. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                node_id: { type: string }
+                kind: { type: string }
+                payload:
+                  type: string
+                  format: byte
+                  description: Opaque bytes (caller chooses encoding).
+      responses:
+        "200":
+          description: Assigned sequence number.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [seq]
+                properties:
+                  seq: { type: integer, format: int64 }
+
+  # ───────────────────────── Triggers ─────────────────────────
+
+  /api/v1/triggers:
+    post:
+      tags: [triggers]
+      summary: Submit a new trigger. Persists then notifies the dispatcher.
+      description: |
+        Returns 202 with a generated `run_id` even before the
+        orchestrator picks the trigger up, so webhook callers can
+        respond quickly. `trigger.source` is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TriggerRequest" }
+      responses:
+        "202":
+          description: Trigger accepted; orchestrator will run it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, status]
+                properties:
+                  run_id: { type: string }
+                  status: { type: string, enum: [dispatched] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    get:
+      tags: [triggers]
+      summary: List triggers (operator view). Filter by `status`, `pipeline`.
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: pipeline
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Triggers wrapped under `triggers`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [triggers]
+                properties:
+                  triggers:
+                    type: array
+                    items: { $ref: "#/components/schemas/Trigger" }
+
+  /api/v1/triggers/claim:
+    post:
+      tags: [triggers]
+      summary: Atomically claim the oldest pending trigger. Admin scope.
+      description: |
+        Empty body claims any pending trigger. 204 when the queue is
+        empty.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pipelines:
+                  type: array
+                  items: { type: string }
+                trigger_sources:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Claimed trigger.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Trigger" }
+        "204": { description: Queue empty. }
+
+  /api/v1/triggers/{id}:
+    parameters: [{ $ref: "#/components/parameters/TriggerID" }]
+    get:
+      tags: [triggers]
+      summary: Fetch a single trigger by ID.
+      responses:
+        "200":
+          description: Trigger.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Trigger" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/triggers/{id}/heartbeat:
+    parameters: [{ $ref: "#/components/parameters/TriggerID" }]
+    post:
+      tags: [triggers]
+      summary: Extend the worker lease on a claimed trigger.
+      responses:
+        "200":
+          description: Heartbeat. Body signals whether cancel was requested.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cancel_requested]
+                properties:
+                  cancel_requested: { type: boolean }
+        "404": { description: Trigger missing — worker should stop. }
+
+  /api/v1/triggers/{id}/done:
+    parameters: [{ $ref: "#/components/parameters/TriggerID" }]
+    post:
+      tags: [triggers]
+      summary: Mark a trigger `done`. Idempotent. Admin scope.
+      responses:
+        "204": { description: Done. }
+
+  /api/v1/triggers/spawned-child:
+    get:
+      tags: [triggers]
+      summary: Find the child trigger spawned by a parent (run, node, pipeline).
+      parameters:
+        - in: query
+          name: parent_run_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: parent_node_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: pipeline
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Trigger.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Trigger" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────── Approvals ─────────────────────────
+
+  /api/v1/runs/{id}/approvals/{nodeID}/request:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [approvals]
+      summary: Create a pending approval gate (called by the orchestrator). Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string }
+                timeout_ms: { type: integer, format: int64 }
+                on_timeout:
+                  type: string
+                  enum: [fail, deny, approve]
+      responses:
+        "201": { description: Approval created. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/runs/{id}/approvals/{nodeID}:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [approvals]
+      summary: Resolve an approval (human or timeout). Requires `approvals.write` scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution:
+                  type: string
+                  enum: [approved, denied, timed_out]
+                comment: { type: string }
+                approver:
+                  type: string
+                  description: |
+                    Honored only when auth is disabled or for
+                    timed_out resolutions from the orchestrator. With
+                    auth enabled the approver is taken from the
+                    bearer principal.
+      responses:
+        "204": { description: Resolved. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    get:
+      tags: [approvals]
+      summary: Fetch an approval by (run, node).
+      responses:
+        "200":
+          description: Approval.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Approval" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{id}/approvals:
+    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    get:
+      tags: [approvals]
+      summary: List approvals for a run.
+      responses:
+        "200":
+          description: Approvals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approvals]
+                properties:
+                  approvals:
+                    type: array
+                    items: { $ref: "#/components/schemas/Approval" }
+
+  /api/v1/approvals/pending:
+    get:
+      tags: [approvals]
+      summary: List every pending approval across runs.
+      responses:
+        "200":
+          description: Pending approvals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approvals]
+                properties:
+                  approvals:
+                    type: array
+                    items: { $ref: "#/components/schemas/Approval" }
+
+  # ───────────────────────── Concurrency ─────────────────────────
+
+  /api/v1/concurrency/{key}/acquire:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: { type: string }
+    post:
+      tags: [concurrency]
+      summary: Try to acquire a slot under a concurrency key.
+      description: |
+        Status code carries the outcome class:
+        - **200** — granted or cached.
+        - **202** — queued, coalesced, or `cancel_others` in progress.
+        - **429** — skipped or failed (terminal).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcquireSlotRequest" }
+      responses:
+        "200":
+          description: Granted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcquireSlotResponse" }
+        "202":
+          description: Queued / coalesced / cancel_others.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcquireSlotResponse" }
+        "429":
+          description: Skipped / failed (terminal).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcquireSlotResponse" }
+
+  /api/v1/concurrency/{key}/heartbeat:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: { type: string }
+    post:
+      tags: [concurrency]
+      summary: Extend a holder's lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder_id]
+              properties:
+                holder_id: { type: string }
+                lease_secs: { type: integer }
+      responses:
+        "200":
+          description: New lease + supersede flag.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lease_expires_at, cancelled_by_newer]
+                properties:
+                  lease_expires_at: { type: string, format: date-time }
+                  cancelled_by_newer: { type: boolean }
+        "409": { description: Lock held by another runner. }
+
+  /api/v1/concurrency/{key}/release:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: { type: string }
+    post:
+      tags: [concurrency]
+      summary: Release a slot. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder_id, outcome]
+              properties:
+                holder_id: { type: string }
+                outcome: { type: string }
+                output_ref: { type: string }
+                cache_key_hash: { type: string }
+                cache_ttl_ns: { type: integer, format: int64 }
+      responses:
+        "204": { description: Released. }
+
+  /api/v1/concurrency/{key}/state:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: { type: string }
+    get:
+      tags: [concurrency]
+      summary: Inspect capacity + holders + waiters under a key.
+      responses:
+        "200":
+          description: State snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConcurrencyState" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/concurrency/{key}/notify:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: { type: string }
+    get:
+      tags: [concurrency]
+      summary: Long-poll waiter notify endpoint.
+      description: |
+        TODO: schema needs verification. Used by waiting clients to
+        observe slot promotion events; the exact response shape is
+        not exercised by the current Go client and would need a
+        manual capture before standardizing.
+      responses:
+        "200":
+          description: Implementation detail; see TODO above.
+
+  /api/v1/nodes/claim:
+    post:
+      tags: [nodes]
+      summary: Claim the oldest ready, unclaimed node matching labels.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder_id]
+              properties:
+                holder_id: { type: string }
+                lease_secs: { type: integer }
+                labels:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Claimed node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        "204": { description: Nothing to claim. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  # ───────────────────────── Pool (cluster-only) ─────────────────────────
+
+  /api/v1/pool:
+    get:
+      tags: [pool]
+      summary: List warm-PVC pool. **cluster-only** (requires `AttachPool`).
+      responses:
+        "200":
+          description: Pool snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PoolListResponse" }
+        "503": { description: Pool not ready. }
+
+  /api/v1/pool/checkout:
+    post:
+      tags: [pool]
+      summary: Check out a clean PVC. **cluster-only**.
+      parameters:
+        - in: query
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Checked-out PVC name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pvc]
+                properties:
+                  pvc: { type: string }
+        "409":
+          {
+            description: No clean PVC available — fall back to cache-less build.,
+          }
+
+  /api/v1/pool/return:
+    post:
+      tags: [pool]
+      summary: Return a PVC to the pool (marks it dirty). **cluster-only**.
+      parameters:
+        - in: query
+          name: pvc
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Returned. }
+
+  /api/v1/pool/heartbeat:
+    post:
+      tags: [pool]
+      summary: Keep ownership of an in-use PVC alive. **cluster-only**.
+      parameters:
+        - in: query
+          name: pvc
+          required: true
+          schema: { type: string }
+        - in: query
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Renewed. }
+        "409": { description: Heartbeat lost (job_id mismatch or PVC expired). }
+
+  # ───────────────────────── Artifacts (laptop-only) ─────────────────────────
+
+  /api/v1/artifacts/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: { type: string }
+        description: Content-addressed artifact key.
+    get:
+      tags: [artifacts]
+      summary: Stream an artifact's bytes. **laptop-only** (requires `WithArtifactStore`).
+      responses:
+        "200":
+          description: Artifact bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────── Tokens ─────────────────────────
+
+  /api/v1/tokens:
+    post:
+      tags: [tokens]
+      summary: Mint a new bearer token. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTokenRequest" }
+      responses:
+        "201":
+          description: New token (raw value is included **once** in this response).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateTokenResponse" }
+    get:
+      tags: [tokens]
+      summary: List all tokens (no raw values).
+      responses:
+        "200":
+          description: Tokens.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/Token" }
+
+  /api/v1/tokens/{prefix}:
+    parameters:
+      - in: path
+        name: prefix
+        required: true
+        schema:
+          { type: string, description: The 12-char prefix returned at mint. }
+    get:
+      tags: [tokens]
+      summary: Lookup a token by prefix.
+      responses:
+        "200":
+          description: Token (no raw value).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Token" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [tokens]
+      summary: Revoke a token by prefix.
+      responses:
+        "204": { description: Revoked. }
+
+  /api/v1/tokens/{prefix}/rotate:
+    parameters:
+      - in: path
+        name: prefix
+        required: true
+        schema: { type: string }
+    post:
+      tags: [tokens]
+      summary: Mint a replacement; mark the prior token revoked + replaced_by.
+      responses:
+        "200":
+          description: New token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateTokenResponse" }
+
+  # ───────────────────────── Users ─────────────────────────
+
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: List local-account users.
+      responses:
+        "200":
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+    post:
+      tags: [users]
+      summary: Create a user. **Unauthenticated** when no users exist (bootstrap); otherwise admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password]
+              properties:
+                name: { type: string }
+                password: { type: string }
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "409": { description: Bootstrap race lost. }
+
+  /api/v1/users/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [users]
+      summary: Delete a user. Admin scope.
+      responses:
+        "204": { description: Deleted. }
+
+  # ───────────────────────── Auth ─────────────────────────
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange username + password for a session id + CSRF token.
+      description: Unauthenticated.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [session_id, csrf_token, principal, scopes, expires_at]
+                properties:
+                  session_id: { type: string }
+                  csrf_token: { type: string }
+                  principal: { type: string }
+                  scopes:
+                    type: array
+                    items: { type: string }
+                  expires_at:
+                    { type: integer, format: int64, description: Unix seconds. }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Delete a session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+      responses:
+        "204": { description: Logged out. }
+
+  /api/v1/auth/session:
+    get:
+      tags: [auth]
+      summary: "Resolve a session id (sent via `Authorization: Session <id>`) to the principal."
+      security:
+        - sessionAuth: []
+      responses:
+        "200":
+          description: Session info.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  principal: { type: string }
+                  scopes:
+                    type: array
+                    items: { type: string }
+                  expires_at: { type: integer, format: int64 }
+
+  /api/v1/auth/whoami:
+    get:
+      tags: [auth]
+      summary: Resolve the bearer token to the principal.
+      responses:
+        "200":
+          description: Principal info.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  principal: { type: string }
+                  scopes:
+                    type: array
+                    items: { type: string }
+                  kind: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/bootstrap-needed:
+    get:
+      tags: [auth]
+      summary: Whether the users table is empty (first-run probe).
+      security: []
+      responses:
+        "200":
+          description: "Cached check (one-way: once false, stays false)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  needed: { type: boolean }
+
+  # ───────────────────────── Secrets ─────────────────────────
+
+  /api/v1/secrets:
+    post:
+      tags: [secrets]
+      summary: Create or replace a secret. Admin scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name: { type: string }
+                value: { type: string }
+                masked: { type: boolean }
+      responses:
+        "201": { description: Created. }
+    get:
+      tags: [secrets]
+      summary: List secrets (metadata only; values are never returned in list).
+      responses:
+        "200":
+          description: Secrets list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secrets]
+                properties:
+                  secrets:
+                    type: array
+                    items: { $ref: "#/components/schemas/Secret" }
+
+  /api/v1/secrets/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    get:
+      tags: [secrets]
+      summary: Read one secret (value included).
+      responses:
+        "200":
+          description: Secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Secret" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [secrets]
+      summary: Delete a secret. Admin scope.
+      responses:
+        "204": { description: Deleted. }
+
+  # ───────────────────────── Misc ─────────────────────────
+
+  /api/v1/agents:
+    get:
+      tags: [agents]
+      summary: List recently-heartbeating runners.
+      responses:
+        "200":
+          description: Agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items: { $ref: "#/components/schemas/Agent" }
+
+  /api/v1/trends:
+    get:
+      tags: [trends]
+      summary: Aggregate counts for the dashboard's overview chart.
+      description: |
+        TODO: schema needs verification. The handler aggregates per
+        pipeline + status; exact shape is `{points: [{...TrendPoint}]}`
+        but the TrendPoint field set is not formalised here.
+      responses:
+        "200":
+          description: Trend data.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  points:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrendPoint" }
+
+  /api/v1/pipelines/{name}/latest:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    get:
+      tags: [pipelines]
+      summary: The latest matching run for a pipeline (cross-pipeline-ref read).
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+          description: csv of statuses (default `success`).
+        - in: query
+          name: max_age
+          schema: { type: string, format: duration }
+      responses:
+        "200":
+          description: Latest run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ───────────────────────── Webhooks ─────────────────────────
+
+  /webhooks/github/{pipeline}:
+    parameters:
+      - in: path
+        name: pipeline
+        required: true
+        schema: { type: string }
+    post:
+      tags: [webhooks]
+      summary: GitHub webhook intake. HMAC-verified; no bearer auth.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: GitHub webhook payload (push, pull_request, ...).
+      responses:
+        "202": { description: Accepted; trigger queued. }
+        "401": { description: Invalid HMAC signature. }
+        "503": { description: GitHub webhook secret not configured. }
+
+  # ───────────────────────── Health / Metrics ─────────────────────────
+
+  /api/v1/health:
+    get:
+      tags: [health]
+      summary: Process liveness probe.
+      security: []
+      responses:
+        "200":
+          description: Healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /metrics:
+    get:
+      tags: [health]
+      summary: Prometheus scrape endpoint.
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema: { type: string }
+
+components:
+  securitySchemes:
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <token>` with a `sw*_`-prefixed token
+        issued by `POST /api/v1/tokens`. The token's scopes (e.g.
+        `runs.read`, `nodes.claim`, `admin`) gate per-route access.
+    sessionAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        `Authorization: Session <session-id>`. Used only by the
+        dashboard's browser flow after `POST /api/v1/auth/login`.
+
+  parameters:
+    RunID:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+      description: Run id (e.g. `run-20260519-150405-a1b2`).
+    NodeID:
+      in: path
+      name: nodeID
+      required: true
+      schema: { type: string }
+    TriggerID:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Invalid request (missing field, malformed JSON).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AuthError" }
+    Forbidden:
+      description: Token does not carry the scope this route requires.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AuthError" }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InternalError:
+      description: Unhandled server error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      description: Canonical error shape for non-2xx responses.
+      required: [error]
+      properties:
+        error: { type: string }
+
+    AuthError:
+      type: object
+      description: Error returned by the auth middleware. Carries a missing-scope hint when applicable.
+      required: [error]
+      properties:
+        error: { type: string }
+        missing_scope: { type: string }
+
+    Run:
+      type: object
+      description: One pipeline invocation row. Mirrors `pkg/store.Run`.
+      required: [id, pipeline, status, started_at]
+      properties:
+        id: { type: string }
+        pipeline: { type: string }
+        status:
+          type: string
+          description: e.g. `pending`, `running`, `success`, `failed`, `cancelled`, `timed_out`.
+        trigger_source: { type: string }
+        git_branch: { type: string }
+        git_sha: { type: string }
+        args:
+          type: object
+          additionalProperties: { type: string }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        parent_run_id: { type: string }
+        repo: { type: string }
+        repo_url: { type: string }
+        github_owner: { type: string }
+        github_repo: { type: string }
+        retry_of: { type: string }
+        retried_as: { type: string }
+        retry_source:
+          type: string
+          enum: ["", manual, auto]
+        replay_of_run_id: { type: string }
+        replay_of_node_id: { type: string }
+        invocation:
+          type: object
+          description: Free-form snapshot of run-start context (flags, args, binary_source, cwd, ...).
+          additionalProperties: true
+        annotation_count: { type: integer }
+        top_annotation: { type: string }
+        annotations:
+          type: array
+          items: { type: string }
+
+    Node:
+      type: object
+      description: One DAG node row. Mirrors `pkg/store.Node`.
+      required: [id, status, deps]
+      properties:
+        run_id: { type: string }
+        id: { type: string, description: Node id within the run. }
+        status:
+          type: string
+          description: e.g. `pending`, `running`, `done`, `approval_pending`.
+        outcome: { type: string }
+        deps:
+          type: array
+          items: { type: string }
+        error: { type: string }
+        output:
+          type: string
+          format: byte
+          description: Raw JSON of the job's run output. Opaque to the controller.
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        ready_at: { type: string, format: date-time, nullable: true }
+        claimed_by: { type: string }
+        lease_expires_at: { type: string, format: date-time, nullable: true }
+        needs_labels:
+          type: array
+          items: { type: string }
+        status_detail: { type: string }
+        last_heartbeat: { type: string, format: date-time, nullable: true }
+        failure_reason: { type: string }
+        exit_code: { type: integer, nullable: true }
+        annotations:
+          type: array
+          items: { type: string }
+        summary: { type: string }
+
+    NodeStep:
+      type: object
+      description: One step inside a node's inner DAG. Mirrors `pkg/store.NodeStep`.
+      required: [node_id, step_id, status]
+      properties:
+        run_id: { type: string }
+        node_id: { type: string }
+        step_id: { type: string }
+        status:
+          type: string
+          enum: [running, passed, failed, skipped]
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        annotations:
+          type: array
+          items: { type: string }
+        summary: { type: string }
+
+    Event:
+      type: object
+      description: One ordered event in a run's audit stream. Mirrors `pkg/store.Event`.
+      required: [run_id, seq, kind, ts]
+      properties:
+        run_id: { type: string }
+        seq: { type: integer, format: int64 }
+        node_id: { type: string }
+        kind: { type: string }
+        ts: { type: string, format: date-time }
+        payload:
+          description: Either a structured JSON object or a raw string (escaped).
+
+    NodeDispatch:
+      type: object
+      description: One attempt to dispatch a node to a runner.
+      properties:
+        run_id: { type: string }
+        node_id: { type: string }
+        seq: { type: integer }
+        kind: { type: string }
+        runner: { type: string }
+        target: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        outcome: { type: string }
+        error: { type: string }
+        attrs:
+          type: object
+          additionalProperties: true
+
+    MetricSample:
+      type: object
+      description: One metric data point attached to a node.
+      properties:
+        ts: { type: string, format: date-time }
+        name: { type: string }
+        value: { type: number }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+
+    Trigger:
+      type: object
+      description: One queued or in-flight trigger. Mirrors `pkg/store.Trigger`.
+      required: [id, pipeline, status, created_at]
+      properties:
+        id: { type: string }
+        pipeline: { type: string }
+        args:
+          type: object
+          additionalProperties: { type: string }
+        trigger_source: { type: string }
+        trigger_user: { type: string }
+        trigger_env:
+          type: object
+          additionalProperties: { type: string }
+        git_branch: { type: string }
+        git_sha: { type: string }
+        status:
+          type: string
+          enum: [pending, claimed, done]
+        created_at: { type: string, format: date-time }
+        claimed_at: { type: string, format: date-time, nullable: true }
+        lease_expires_at: { type: string, format: date-time, nullable: true }
+        parent_run_id: { type: string }
+        repo: { type: string }
+        repo_url: { type: string }
+        github_owner: { type: string }
+        github_repo: { type: string }
+        retry_of: { type: string }
+        retry_source:
+          type: string
+          enum: ["", manual, auto]
+        parent_node_id: { type: string }
+        full: { type: boolean }
+
+    TriggerRequest:
+      type: object
+      description: Body of `POST /api/v1/triggers`. `trigger.source` is required.
+      required: [pipeline, trigger]
+      properties:
+        pipeline: { type: string }
+        args:
+          type: object
+          additionalProperties: { type: string }
+        trigger:
+          type: object
+          required: [source]
+          properties:
+            source: { type: string }
+            user: { type: string }
+            env:
+              type: object
+              additionalProperties: { type: string }
+        git:
+          type: object
+          properties:
+            branch: { type: string }
+            sha: { type: string }
+            repo: { type: string }
+            repo_url: { type: string }
+            github_owner: { type: string }
+            github_repo: { type: string }
+        parent_run_id: { type: string }
+        parent_node_id: { type: string }
+        retry_of: { type: string }
+
+    Approval:
+      type: object
+      description: One human-gate row. Mirrors `pkg/store.Approval`.
+      required: [run_id, node_id, requested_at]
+      properties:
+        run_id: { type: string }
+        node_id: { type: string }
+        requested_at: { type: string, format: date-time }
+        message: { type: string }
+        timeout_ms: { type: integer, format: int64 }
+        on_timeout:
+          type: string
+          enum: [fail, deny, approve]
+        approver: { type: string }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        resolution:
+          type: string
+          enum: ["", approved, denied, timed_out]
+        comment: { type: string }
+
+    DebugPause:
+      type: object
+      description: Operator-induced node pause.
+      required: [run_id, node_id, reason, paused_at, expires_at]
+      properties:
+        run_id: { type: string }
+        node_id: { type: string }
+        reason: { type: string }
+        paused_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        released_at: { type: string, format: date-time, nullable: true }
+        released_by: { type: string }
+        release_kind: { type: string }
+
+    Token:
+      type: object
+      description: One bearer-token row (raw value redacted; only `prefix` is shown after mint).
+      properties:
+        prefix: { type: string }
+        principal: { type: string }
+        kind: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        replaced_by: { type: string }
+
+    CreateTokenRequest:
+      type: object
+      required: [principal, scopes]
+      properties:
+        principal: { type: string }
+        kind: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        expires_at: { type: string, format: date-time }
+
+    CreateTokenResponse:
+      type: object
+      description: Returned only at mint time. The raw `token` is never re-served.
+      required: [token, prefix]
+      properties:
+        token:
+          type: string
+          description: Full bearer token. Copy now; the controller never re-shows it.
+        prefix: { type: string }
+        token_metadata: { $ref: "#/components/schemas/Token" }
+
+    Secret:
+      type: object
+      description: One stored secret. List endpoints redact `value`.
+      required: [name]
+      properties:
+        name: { type: string }
+        value: { type: string }
+        principal: { type: string }
+        masked: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      required: [name, created_at]
+      properties:
+        name: { type: string }
+        created_at:
+          type: integer
+          format: int64
+          description: Unix seconds.
+        last_login_at:
+          type: integer
+          format: int64
+          nullable: true
+
+    Agent:
+      type: object
+      description: Heartbeating runner.
+      properties:
+        id: { type: string }
+        labels:
+          type: array
+          items: { type: string }
+        last_heartbeat: { type: string, format: date-time }
+        in_flight_node:
+          type: object
+          properties:
+            run_id: { type: string }
+            node_id: { type: string }
+
+    TrendPoint:
+      type: object
+      description: |
+        TODO: schema needs verification. Field set is the
+        controller's internal `TrendPoint`; not currently formalised
+        in this spec.
+      additionalProperties: true
+
+    Receipt:
+      type: object
+      description: |
+        Per-run audit + cost receipt. Recomputed from nodes,
+        dispatches, and the controller's cost rate (when configured).
+      properties:
+        run_id: { type: string }
+        pipeline: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        compute_cents: { type: integer }
+        cost_rate_source: { type: string }
+        nodes:
+          type: array
+          description: Per-node line items.
+          items:
+            type: object
+            additionalProperties: true
+
+    AcquireSlotRequest:
+      type: object
+      required: [holder_id, run_id]
+      properties:
+        holder_id: { type: string }
+        run_id: { type: string }
+        node_id: { type: string }
+        max:
+          type: integer
+          description: Capacity for this key. Set on every acquire; latest write wins per the store's drift-handling rule.
+        policy:
+          type: string
+          description: e.g. `queue`, `cancel_others`, `skip`, `coalesce`.
+        cache_key_hash: { type: string }
+        cache_ttl_ns: { type: integer, format: int64 }
+        cancel_timeout_ns: { type: integer, format: int64 }
+        lease_secs: { type: integer }
+
+    AcquireSlotResponse:
+      type: object
+      required: [kind, granted]
+      properties:
+        granted: { type: boolean }
+        kind:
+          type: string
+          enum:
+            [
+              granted,
+              cached,
+              queued,
+              coalesced,
+              cancelling_others,
+              skipped,
+              failed,
+            ]
+        holder_id: { type: string }
+        lease_expires_at: { type: string, format: date-time }
+        leader_run_id: { type: string }
+        leader_node_id: { type: string }
+        output_ref: { type: string }
+        origin_run_id: { type: string }
+        origin_node_id: { type: string }
+        superseded_ids:
+          type: array
+          items: { type: string }
+        previous_capacity: { type: integer }
+        drift_note: { type: string }
+
+    ConcurrencyState:
+      type: object
+      required: [key, capacity, holders, waiters]
+      properties:
+        key: { type: string }
+        capacity: { type: integer }
+        holders:
+          type: array
+          items:
+            type: object
+            properties:
+              holder_id: { type: string }
+              run_id: { type: string }
+              node_id: { type: string }
+              claimed_at: { type: string, format: date-time }
+              lease_expires_at: { type: string, format: date-time }
+              superseded: { type: boolean }
+        waiters:
+          type: array
+          items:
+            type: object
+            properties:
+              run_id: { type: string }
+              node_id: { type: string }
+              arrived_at: { type: string, format: date-time }
+              policy: { type: string }
+              cache_key_hash: { type: string }
+              leader_run_id: { type: string }
+              leader_node_id: { type: string }
+              cancel_timeout: { type: string }
+
+    FinishRunRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        error: { type: string }
+
+    FinishNodeRequest:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: { type: string }
+        error: { type: string }
+        output:
+          type: string
+          format: byte
+          description: JSON-encoded raw output bytes.
+        failure_reason: { type: string }
+        exit_code: { type: integer, nullable: true }
+
+    PoolListResponse:
+      type: object
+      description: Snapshot of the warm-PVC pool (cluster-only).
+      properties:
+        pool_size: { type: integer }
+        pvc_size: { type: string }
+        pvcs:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              state:
+                type: string
+                enum: [clean, in-use, dirty, warming, unknown]
+              warmed_at: { type: string }
+              checked_out_by: { type: string }
+              checked_out_at: { type: string }

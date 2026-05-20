@@ -82,6 +82,21 @@ func init() {
 for the full reference; [`docs/sdk.md`](./docs/sdk.md) is the SDK
 flat reference.
 
+## HTTP API
+
+The controller's HTTP API (served by `sparkwing-controller` in
+cluster mode and embedded in `sparkwing-local-ws` for laptop mode)
+is documented as an OpenAPI 3.0 spec at
+[`api/openapi.yaml`](./api/openapi.yaml). Every route, request
+shape, response shape, and security requirement is described there.
+
+To view it: paste the file into [editor.swagger.io](https://editor.swagger.io)
+for an interactive renderer, or open with any OpenAPI-aware tool
+(Redoc, Stoplight, Postman, etc.). The Go client at
+[`pkg/controller/client/`](./pkg/controller/client) implements the
+same routes; new clients in other languages should be able to be
+generated from the spec.
+
 ## Stability
 
 Sparkwing follows semantic versioning, but with explicit scope: only

@@ -57,6 +57,27 @@ While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go 
 - CI fails if a commit touches `pkg/`, `sparkwing/`, CLI flag definitions, or wire-format structs without including a `CHANGELOG.md` entry. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
 - Releases move entries from `[Unreleased]` to a new `[vX.Y.Z]` section in the same commit that cuts the tag.
 
+## Wire protocol
+
+The controller's HTTP API has a formal contract at
+[`api/openapi.yaml`](./api/openapi.yaml) (OpenAPI 3.0). Wire-protocol
+changes follow the same semver discipline as Go API changes:
+
+- Renaming a JSON field, removing a field, or changing a field's
+  type is a **breaking change**. The deprecation procedure above
+  applies — announce in a `Changed` / `Deprecated` CHANGELOG entry
+  one release ahead of removal.
+- Adding a new optional field, adding a new route, or adding a new
+  status code is **non-breaking** when existing callers ignore it.
+- Changing a route's path, HTTP method, or required-vs-optional
+  status on a field is breaking.
+
+The OpenAPI spec is the source of truth for what the controller
+serves; if reality and the spec diverge, the spec is wrong (fix
+it). Keeping it in sync is human discipline today — there is no
+automated drift gate for the HTTP surface yet (the snapshot gate
+below covers the Go surface only).
+
 ## API surface snapshot
 
 A deterministic text snapshot of the entire covered public API

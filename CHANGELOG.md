@@ -10,6 +10,17 @@ are required.
 
 ### Added
 
+- `api/openapi.yaml` — OpenAPI 3.0 spec for `pkg/controller`'s
+  HTTP API. Covers every public route on the unified controller
+  (run lifecycle, nodes, steps, events, triggers, approvals,
+  concurrency, debug pauses, tokens, users, secrets, auth,
+  agents, trends, pipelines) plus the mode-conditional pool
+  (cluster) and artifacts (laptop) routes. Two security schemes
+  (`Authorization: Bearer <token>` for service callers,
+  `Authorization: Session <id>` for the dashboard's browser
+  flow) wired to the operations that require auth. 26 component
+  schemas mirror the `pkg/store` types. Wire protocol now has a
+  formal contract; see VERSIONING.md.
 - Checked-in API surface snapshots under `.apidiff/` for every
   covered public package (21 files: `sparkwing.txt`,
   `pkg_storage.txt`, `pkg_controller.txt`, ...). The new
