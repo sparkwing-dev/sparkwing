@@ -8,8 +8,41 @@ are required.
 
 ## [Unreleased]
 
+### Changed
+
+- `sparkwing-cache` binary refactored: business logic moved from
+  `cmd/sparkwing-cache/main.go` (~1681 LOC, plus `proxy.go`) into a
+  new `internal/cache` package. The `cmd/sparkwing-cache/main.go`
+  shell is now 88 lines (flag parsing → `cache.Config` →
+  `cache.New(cfg)` → `srv.Run(ctx)`), matching the texture of the
+  other binary entry points. HTTP wire protocol unchanged; the same
+  routes accept the same requests and return the same shapes; the
+  same clients (`pkg/storage/sparkwingcache` adapter, etc.) work
+  with no change.
+
+### Fixed
+
+- Fragile `init()` ordering in `sparkwing-cache` where directory
+  creation ran at package-load time against hardcoded `/data/*`
+  paths, before `initDataDirs()` (or in the previous shape, before
+  env-var parsing) could rebind those paths. Directory creation now
+  happens inside `cache.New(cfg)` AFTER the resolved Config is in
+  hand, so the boot order is deterministic and reviewable.
+  `backgroundFetchLoop` / `proxyCleanupLoop` now accept the
+  cancellable ctx and exit cleanly when the process is asked to
+  drain (the prior shape blocked SIGTERM for the full sleep
+  interval).
+
 ### Added
 
+- `sparkwing-cache` now accepts pflag-based command-line flags for
+  every setting: `--addr`, `--data-dir`, `--proxy-cache-dir`,
+  `--fetch-interval`, `--proxy-cache-ttl`, `--proxy-max-age`. Each
+  flag falls back to the corresponding env var (`DATA_DIR`,
+  `PROXY_CACHE_DIR`, `FETCH_INTERVAL`, `PROXY_CACHE_TTL`,
+  `PROXY_MAX_AGE`, plus `PORT` / `PORT_ADDR` for the bind address)
+  so existing k8s ConfigMap-style env configurations continue to
+  work unchanged.
 - Conformance test suites for the three plug-in interfaces:
   `pkg/storage.ArtifactStore`, `pkg/storage.LogStore`, and
   `pkg/controller.Cipher`. Each suite lives in a sibling
