@@ -38,6 +38,7 @@ func TestController_Health(t *testing.T) {
 	defer cleanup()
 
 	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health status=%d want 200", resp.StatusCode)
 	}
@@ -148,6 +149,7 @@ func TestController_GetRun_IncludeNodes(t *testing.T) {
 
 	// Default shape: raw store.Run, no wrapper.
 	resp := mustGet(t, base+"/api/v1/runs/run-incl")
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("default get status=%d", resp.StatusCode)
 	}

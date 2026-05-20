@@ -299,7 +299,7 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		res.Err = errors.New(n.Error)
 	}
 	if len(n.Output) > 0 {
-		res.Output = []byte(n.Output)
+		res.Output = n.Output
 	}
 	// Defensive: if the node is still "running" according to the
 	// controller but the Job has finished, the pod crashed before

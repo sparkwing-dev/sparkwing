@@ -173,7 +173,6 @@ func TestRegisterAndInvoke_OneNodePlan(t *testing.T) {
 }
 
 func TestRegisterAndInvoke_Planner(t *testing.T) {
-	plan := sparkwing.NewPlan()
 	name := "sanity-planner"
 	sparkwing.Register[sparkwing.NoInputs](name, func() sparkwing.Pipeline[sparkwing.NoInputs] { return plannerPipe{} })
 	reg, _ := sparkwing.Lookup(name)

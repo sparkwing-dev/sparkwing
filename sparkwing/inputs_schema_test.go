@@ -192,7 +192,7 @@ func TestParseInputsSchema_MapWithoutExtraRejected(t *testing.T) {
 // state-keeping fields someone might add to their Inputs struct.
 type withUntaggedField struct {
 	Tagged   string `flag:"x"`
-	internal int    //nolint:unused
+	internal int    //nolint:unused // exists to exercise the untagged-field skip path
 }
 
 func TestParseInputsSchema_SkipsUntagged(t *testing.T) {

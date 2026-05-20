@@ -423,7 +423,7 @@ func renderApprovalsSection(out io.Writer, approvals []*store.Approval) {
 		if a.ResolvedAt != nil {
 			status = a.Resolution
 		}
-		waited := "—"
+		var waited string
 		if a.ResolvedAt != nil {
 			waited = a.ResolvedAt.Sub(a.RequestedAt).Round(time.Second).String()
 		} else {

@@ -56,7 +56,7 @@ func runInternalCompleteProfiles(_ []string) error {
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	for _, n := range cfg.Names() {
 		fmt.Println(n)
@@ -67,7 +67,7 @@ func runInternalCompleteProfiles(_ []string) error {
 func runInternalCompletePipelines(_ []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	shortByName := map[string]string{}
 	helpByName := map[string]string{}
@@ -168,7 +168,7 @@ func runInternalCompletePipelineFlags(args []string) error {
 	pipelineName := args[0]
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	sparkwingDir, ok := walkUpForSparkwing(cwd)
 	if !ok {

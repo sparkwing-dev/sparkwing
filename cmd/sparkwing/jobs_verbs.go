@@ -612,12 +612,13 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 				prefix, connector, n.Run.ID, n.Run.Pipeline, n.Run.Status, relTime(n.Run.StartedAt))
 		}
 		for i, c := range n.Children {
-			next := prefix
-			if prefix == "" {
+			var next string
+			switch {
+			case prefix == "":
 				next = "    "
-			} else if last {
+			case last:
 				next = prefix + "    "
-			} else {
+			default:
 				next = prefix + "│   "
 			}
 			render(c, next, i == len(n.Children)-1)

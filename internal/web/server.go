@@ -178,9 +178,9 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	// probing both endpoints can't spend its budget twice.
 	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		rateLimitMiddleware(loginLimiter, http.HandlerFunc(loginSubmitHandler(opts))))
+		rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts)))
 	router.Handle("POST /login/bootstrap",
-		rateLimitMiddleware(loginLimiter, http.HandlerFunc(bootstrapSubmitHandler(opts))))
+		rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts)))
 	router.HandleFunc("POST /logout", logoutHandler(opts))
 	router.Handle("/", sessionAuthMiddleware(opts, authedMux))
 	return router

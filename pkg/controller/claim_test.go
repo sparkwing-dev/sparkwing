@@ -40,6 +40,7 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 		"git":      map[string]string{"branch": "main", "sha": "abc"},
 		"args":     map[string]string{"foo": "bar"},
 	})
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)

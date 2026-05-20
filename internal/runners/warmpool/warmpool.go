@@ -212,7 +212,7 @@ func resultFromNode(n *store.Node) runner.Result {
 		res.Err = errors.New(n.Error)
 	}
 	if len(n.Output) > 0 {
-		res.Output = []byte(n.Output)
+		res.Output = n.Output
 	}
 	// Defensive: if the pod wrote terminal state without an outcome,
 	// treat as Failed so the orchestrator sees something deterministic
