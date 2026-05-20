@@ -75,7 +75,7 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	body_out := acquireSlotResp{
+	bodyOut := acquireSlotResp{
 		Kind:             string(resp.Kind),
 		HolderID:         resp.HolderID,
 		LeaseExpiresAt:   resp.LeaseExpiresAt,
@@ -90,12 +90,12 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 	}
 	switch resp.Kind {
 	case store.AcquireGranted, store.AcquireCached:
-		body_out.Granted = true
-		writeJSON(w, http.StatusOK, body_out)
+		bodyOut.Granted = true
+		writeJSON(w, http.StatusOK, bodyOut)
 	case store.AcquireQueued, store.AcquireCoalesced, store.AcquireCancellingOthers:
-		writeJSON(w, http.StatusAccepted, body_out)
+		writeJSON(w, http.StatusAccepted, bodyOut)
 	case store.AcquireSkipped, store.AcquireFailed:
-		writeJSON(w, http.StatusTooManyRequests, body_out)
+		writeJSON(w, http.StatusTooManyRequests, bodyOut)
 	default:
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("unknown kind %q", resp.Kind))
 	}

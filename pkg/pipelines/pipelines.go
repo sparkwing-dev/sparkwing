@@ -393,10 +393,7 @@ func (s SecretsField) Validate(pipeline string) error {
 // start. Defaults to true when neither field is set, matching the
 // fail-fast posture of the bare-string legacy form.
 func (e SecretEntry) IsRequired() bool {
-	if e.Optional {
-		return false
-	}
-	return true
+	return !e.Optional
 }
 
 // TargetNames returns the pipeline's declared target names in sorted

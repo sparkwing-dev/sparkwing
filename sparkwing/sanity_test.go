@@ -151,7 +151,6 @@ func (plannerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 }
 
 func TestRegisterAndInvoke_OneNodePlan(t *testing.T) {
-	plan := sparkwing.NewPlan()
 	name := "sanity-simple"
 	sparkwing.Register[sparkwing.NoInputs](name, func() sparkwing.Pipeline[sparkwing.NoInputs] { return simplePipe{} })
 

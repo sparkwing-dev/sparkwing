@@ -38,7 +38,7 @@ const (
 	argonSaltLen = 16
 )
 
-// PrefixLen: chars 0-2 = kind marker, char 3 = underscore, chars
+// PrefixLen is 12: chars 0-2 = kind marker, char 3 = underscore, chars
 // 4-11 = 48 bits of entropy.
 const PrefixLen = 12
 

@@ -26,7 +26,7 @@ const DefaultConcurrencyLease = 3 * time.Minute
 // run heartbeats so CancelOthers supersedes land within ~3s.
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 
-// DefaultConcurrencyHeartbeatTimeout: strictly less than the interval
+// DefaultConcurrencyHeartbeatTimeout is strictly less than the interval
 // so a wedged controller can't stack ticks.
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 

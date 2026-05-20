@@ -23,7 +23,7 @@ import (
 type SparklineStyle string
 
 const (
-	SparkAscii SparklineStyle = "ascii"
+	SparkASCII SparklineStyle = "ascii"
 	SparkBlock SparklineStyle = "block"
 	SparkDot   SparklineStyle = "dot"
 )

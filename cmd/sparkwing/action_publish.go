@@ -76,13 +76,13 @@ func runPipelinePublish(args []string) error {
 
 	// Parse --platform list. Empty = current platform only, matches
 	// what `sparkwing run` would compile for.
-	platforms_list, err := parsePlatforms(*platforms)
+	platformsList, err := parsePlatforms(*platforms)
 	if err != nil {
 		return err
 	}
 
-	results := make([]publishedBinary, 0, len(platforms_list))
-	for _, p := range platforms_list {
+	results := make([]publishedBinary, 0, len(platformsList))
+	for _, p := range platformsList {
 		row, err := compileAndPublishOne(context.Background(), dir, p, store, storeURL)
 		if err != nil {
 			return fmt.Errorf("publish %s: %w", p.label(), err)

@@ -9,11 +9,11 @@ import (
 )
 
 func TestRenderJSONL_FormatsRecord(t *testing.T) {
-	in := []byte(`{"ts":"2026-05-04T06:03:16.748Z","level":"info","node":"docker-version","event":"exec_line","msg":"Docker version 24.0.7"}` + "\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16.748Z\",\"level\":\"info\",\"node\":\"docker-version\",\"event\":\"exec_line\",\"msg\":\"Docker version 24.0.7\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	got := out.String()
-	if strings.Contains(got, `"msg":`) || strings.Contains(got, `"event":`) {
+	if strings.Contains(got, "\"msg\":") || strings.Contains(got, "\"event\":") {
 		t.Fatalf("rendered output still looks like JSONL envelope:\n%s", got)
 	}
 	if !strings.Contains(got, "docker-version") || !strings.Contains(got, "Docker version 24.0.7") {
@@ -22,7 +22,7 @@ func TestRenderJSONL_FormatsRecord(t *testing.T) {
 }
 
 func TestRenderJSONL_NodeStartEvent(t *testing.T) {
-	in := []byte(`{"ts":"2026-05-04T06:03:16.330Z","level":"info","node":"docker-version","event":"node_start","msg":"docker --version"}` + "\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16.330Z\",\"level\":\"info\",\"node\":\"docker-version\",\"event\":\"node_start\",\"msg\":\"docker --version\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	if !strings.Contains(out.String(), "▶ docker-version") {
@@ -44,9 +44,9 @@ func TestRenderJSONL_NonJSONLinesPassThrough(t *testing.T) {
 }
 
 // TestRenderJSONL_PlainStripsMsgANSI: a child-process color sequence
-// embedded in `Msg` must not survive the plain render path.
+// embedded in "Msg" must not survive the plain render path.
 func TestRenderJSONL_PlainStripsMsgANSI(t *testing.T) {
-	in := []byte(`{"ts":"2026-05-04T06:03:16Z","node":"n","msg":"[31mred text[0m"}` + "\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"node\":\"n\",\"msg\":\"\x1b[31mred text\x1b[0m\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatPlain)
 	if strings.ContainsRune(out.String(), 0x1b) {
@@ -71,7 +71,7 @@ func TestRenderJSONL_PlainStripsNonJSONANSI(t *testing.T) {
 // TestRenderJSONL_ANSIKeepsRendererSGRAndMsg: renderer SGR is on AND
 // child-process ANSI in Msg survives.
 func TestRenderJSONL_ANSIKeepsRendererSGRAndMsg(t *testing.T) {
-	in := []byte(`{"ts":"2026-05-04T06:03:16Z","level":"error","node":"n","msg":"[31mred[0m"}` + "\n")
+	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"error\",\"node\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}\n")
 	var out bytes.Buffer
 	renderJSONL(in, &out, formatANSI)
 	if !strings.ContainsRune(out.String(), 0x1b) {
@@ -119,7 +119,7 @@ func TestNegotiateLogFormat(t *testing.T) {
 }
 
 func TestRenderSSELogLine_StructuredRecord(t *testing.T) {
-	payload := []byte(`{"ts":"2026-05-04T06:03:16Z","level":"info","node":"n","msg":"hello"}`)
+	payload := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"info\",\"node\":\"n\",\"msg\":\"hello\"}")
 	got := renderSSELogLine(payload, formatPlain)
 	if len(got) == 0 {
 		t.Fatal("expected at least one line")
@@ -135,7 +135,7 @@ func TestRenderSSELogLine_StructuredRecord(t *testing.T) {
 }
 
 func TestRenderSSELogLine_PlainStripsMsgANSI(t *testing.T) {
-	payload := []byte(`{"ts":"2026-05-04T06:03:16Z","node":"n","msg":"[31mred[0m"}`)
+	payload := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"node\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}")
 	got := renderSSELogLine(payload, formatPlain)
 	for _, line := range got {
 		if strings.ContainsRune(line, 0x1b) {

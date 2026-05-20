@@ -179,7 +179,8 @@ func (s *Store) CreateUser(name, password string, now time.Time) (*User, error) 
 	}, nil
 }
 
-// ErrBootstrapClosed: users table already has rows.
+// ErrBootstrapClosed signals the users table is non-empty so first-admin
+// bootstrap is no longer permitted.
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 
 // CreateFirstUser race-safely inserts the first admin in one txn.

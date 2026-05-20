@@ -502,7 +502,7 @@ func runJobs(args []string) error {
 		var sparkStyle orchestrator.SparklineStyle
 		switch *style {
 		case "ascii", "":
-			sparkStyle = orchestrator.SparkAscii
+			sparkStyle = orchestrator.SparkASCII
 		case "block":
 			sparkStyle = orchestrator.SparkBlock
 		case "dot":

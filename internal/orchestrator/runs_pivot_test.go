@@ -50,7 +50,7 @@ func TestPivotByPipeline_HonorsSparklineCap(t *testing.T) {
 }
 
 func TestRenderSparkline_AsciiGlyphs(t *testing.T) {
-	got := renderSparkline([]string{"success", "failed", "running", "cancelled"}, SparkAscii)
+	got := renderSparkline([]string{"success", "failed", "running", "cancelled"}, SparkASCII)
 	for _, want := range []string{"✓", "✗", "⋯", "⊘"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in %q", want, got)
@@ -65,7 +65,7 @@ func TestRenderPipelinePivot_JSONShape(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	if err := RenderPipelinePivot(runs,
-		PivotOpts{SparklineLen: 5, Style: SparkAscii, JSON: true}, &buf); err != nil {
+		PivotOpts{SparklineLen: 5, Style: SparkASCII, JSON: true}, &buf); err != nil {
 		t.Fatal(err)
 	}
 	var rows []PipelinePivotRow
@@ -85,7 +85,7 @@ func TestRenderPipelinePivot_QuietPrintsPipelinesOnly(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	if err := RenderPipelinePivot(runs,
-		PivotOpts{SparklineLen: 5, Style: SparkAscii, Quiet: true}, &buf); err != nil {
+		PivotOpts{SparklineLen: 5, Style: SparkASCII, Quiet: true}, &buf); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -103,7 +103,7 @@ func TestRenderPipelinePivot_TableHasCounts(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	if err := RenderPipelinePivot(runs,
-		PivotOpts{SparklineLen: 30, Style: SparkAscii}, &buf); err != nil {
+		PivotOpts{SparklineLen: 30, Style: SparkASCII}, &buf); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()

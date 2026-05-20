@@ -2738,7 +2738,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 
 // --- Locks ---
 
-// ErrLockHeld: caller is not the current slot holder. HTTP -> 409.
+// ErrLockHeld signals the caller is not the current slot holder. HTTP -> 409.
 var ErrLockHeld = errors.New("held by another holder")
 
 // CountPendingNodes returns the count of unclaimed ready nodes.
