@@ -1233,17 +1233,55 @@ paths:
         name: key
         required: true
         schema: { type: string }
+      - in: query
+        name: run_id
+        required: true
+        schema: { type: string }
+      - in: query
+        name: node_id
+        required: false
+        schema: { type: string }
     get:
       tags: [concurrency]
-      summary: Long-poll waiter notify endpoint.
+      summary: Server-sent event stream of waiter resolution events.
       description: |
-        TODO: schema needs verification. Used by waiting clients to
-        observe slot promotion events; the exact response shape is
-        not exercised by the current Go client and would need a
-        manual capture before standardizing.
+        Streams Server-Sent Events for a single (run_id, node_id)
+        waiter on this concurrency key. The server polls the
+        concurrency state at 250ms cadence and emits exactly one
+        terminal event per stream, then closes:
+
+        - `event: ready` — the caller is now a holder of the slot.
+        - `event: superseded` — the caller is no longer a waiter
+          (slot acquired elsewhere, run cancelled, etc.).
+        - `event: stream_end` — fail-safe timeout (max 30 minutes
+          per stream) or the concurrency key no longer exists; the
+          event payload carries a `reason` field
+          (`"max_wait"` or `"key_not_found"`).
+
+        Every event payload also carries the `key` and `run_id`
+        fields, plus `node_id` when one was supplied. The stream
+        opens with a `: open` comment line so proxies don't buffer.
       responses:
         "200":
-          description: Implementation detail; see TODO above.
+          description: |
+            SSE stream of resolution events. The response is
+            `text/event-stream`; clients consume it line-by-line
+            until the terminal event arrives.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE frames. Each event has the form
+
+                  ```
+                  event: ready|superseded|stream_end
+                  data: {"key":"...","run_id":"...","node_id":"...","reason":"..."}
+                  ```
+
+                  `node_id` is present when the request supplied one;
+                  `reason` is present only on `stream_end`.
+        "400": { $ref: "#/components/responses/BadRequest" }
 
   /api/v1/nodes/claim:
     post:
@@ -1670,9 +1708,18 @@ paths:
       tags: [trends]
       summary: Aggregate counts for the dashboard's overview chart.
       description: |
-        TODO: schema needs verification. The handler aggregates per
-        pipeline + status; exact shape is `{points: [{...TrendPoint}]}`
-        but the TrendPoint field set is not formalised here.
+        Returns one `TrendPoint` per time bucket over the requested
+        window. `hours` defaults to 24 and is capped at 14 days
+        (336 hours). When `pipeline` is supplied, only runs of that
+        pipeline are included and the response echoes the filter
+        back in the top-level `pipeline` field.
+      parameters:
+        - in: query
+          name: hours
+          schema: { type: integer, minimum: 1, maximum: 336, default: 24 }
+        - in: query
+          name: pipeline
+          schema: { type: string }
       responses:
         "200":
           description: Trend data.
@@ -1680,10 +1727,14 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [points]
                 properties:
                   points:
                     type: array
                     items: { $ref: "#/components/schemas/TrendPoint" }
+                  pipeline:
+                    type: string
+                    description: Echoed back only when the request filtered by pipeline.
 
   /api/v1/pipelines/{name}/latest:
     parameters:
@@ -2161,10 +2212,56 @@ components:
     TrendPoint:
       type: object
       description: |
-        TODO: schema needs verification. Field set is the
-        controller's internal `TrendPoint`; not currently formalised
-        in this spec.
-      additionalProperties: true
+        One time bucket of the dashboard's overview chart. Bucket
+        width is one hour for windows <=48h, three hours for
+        windows <=7 days, otherwise one day. Cached counts a run
+        when every node finished with outcome `cached` or
+        `satisfied`.
+      required:
+        [
+          bucket,
+          total,
+          passed,
+          failed,
+          cached,
+          avg_dur_ms,
+          p95_dur_ms,
+          avg_wait_ms,
+        ]
+      properties:
+        bucket:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp at the bucket boundary (UTC).
+        total: { type: integer, description: Runs started in this bucket. }
+        passed:
+          {
+            type: integer,
+            description: Runs with status `success` and at least one non-cached node.,
+          }
+        failed: { type: integer, description: Runs with status `failed`. }
+        cached:
+          {
+            type: integer,
+            description: Runs where every node was `cached` / `satisfied`.,
+          }
+        avg_dur_ms:
+          type: integer
+          format: int64
+          description: Mean duration of finished runs in this bucket (ms).
+        p95_dur_ms:
+          type: integer
+          format: int64
+          description: 95th-percentile duration of finished runs in this bucket (ms).
+        avg_wait_ms:
+          type: integer
+          format: int64
+          description: |
+            Mean wait time (queue-to-start) of runs in this bucket
+            (ms). Always present in the field set, currently always
+            zero — the handler does not yet aggregate per-node
+            wait time, so consumers should treat the field as
+            best-effort.
 
     Receipt:
       type: object

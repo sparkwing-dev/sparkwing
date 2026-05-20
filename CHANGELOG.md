@@ -8,6 +8,20 @@ are required.
 
 ## [Unreleased]
 
+### Docs
+
+- `api/openapi.yaml` — resolved the two `TODO: schema needs
+  verification` markers. `GET /api/v1/concurrency/{key}/notify` is
+  now documented as a server-sent event stream with the three
+  terminal events (`ready`, `superseded`, `stream_end`) the
+  controller actually emits, plus the `run_id` / `node_id` query
+  parameters it requires. `GET /api/v1/trends` and the `TrendPoint`
+  schema now spell out every field (`bucket`, `total`, `passed`,
+  `failed`, `cached`, `avg_dur_ms`, `p95_dur_ms`, `avg_wait_ms`),
+  the bucket-width rules, and the optional `pipeline` query
+  parameter. `avg_wait_ms` is documented as currently always zero
+  since the handler does not yet aggregate per-node wait time.
+
 ### Changed
 
 - `sparkwing-cache` now resolves `APIToken`, `AutoRegisterRepos`,
