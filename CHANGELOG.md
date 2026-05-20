@@ -8,6 +8,17 @@ are required.
 
 ## [Unreleased]
 
+### Added
+
+- `.golangci.yml` at the repo root. Balanced linter set:
+  bidichk, bodyclose, copyloopvar, errcheck, errorlint, govet
+  (enable-all minus fieldalignment/shadow), ineffassign, misspell,
+  nolintlint, staticcheck (minus QF*/ST1000/ST1020/ST1021),
+  unconvert, usestdlibvars. Formatters: gofumpt + goimports with
+  `github.com/sparkwing-dev` local prefix. Rule selection mirrors
+  what elite Go repos converge on per
+  `sparkwing-platform/RESEARCH-elite-comparison.md`.
+
 ### Fixed
 
 - `TrendPoint.avg_wait_ms` is now actually computed:

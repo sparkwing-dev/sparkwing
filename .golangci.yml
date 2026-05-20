@@ -1,0 +1,106 @@
+# golangci-lint v2 configuration.
+# Run: golangci-lint run ./...
+#
+# The rule set is a balance between catching real bugs (staticcheck,
+# errcheck, errorlint, bodyclose) and avoiding noise on legitimate
+# patterns (no gosec, no godot, no fieldalignment). Trimmed to what
+# the elite Go repos converge on per RESEARCH-elite-comparison.md.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - bidichk # CVE-2021-42574 Trojan Source defense
+    - bodyclose # missing http response body Close()
+    - copyloopvar # loop-variable capture bugs (Go 1.22+ semantics)
+    - errcheck # unchecked error returns
+    - errorlint # %w wrapping + errors.Is/As discipline
+    - govet # default vet + extras enabled below
+    - ineffassign # assignments whose value is never read
+    - misspell # common english spelling errors
+    - nolintlint # stale / malformed nolint directives
+    - staticcheck # SA + S + ST + QF rule families
+    - unconvert # redundant type conversions
+    - usestdlibvars # use stdlib constants (http.StatusOK over 200)
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment is mechanical but rarely affects performance
+        # meaningfully and produces large noisy reorderings.
+        - fieldalignment
+        # shadow is legitimate often enough that the noise outweighs
+        # the catches; readers can disambiguate.
+        - shadow
+    staticcheck:
+      checks:
+        - all
+        # Stylistic suggestions about formatting that we have own opinions on.
+        - -QF1001
+        - -QF1002
+        - -QF1003
+        - -QF1004
+        - -QF1005
+        - -QF1006
+        - -QF1007
+        - -QF1008
+        - -QF1009
+        - -QF1010
+        - -QF1011
+        - -QF1012
+        # ST1000 / ST1020 / ST1021 require godoc on every package /
+        # exported func / exported type; useful in libraries but a lot
+        # of legitimate internal code doesn't justify it. Enable in
+        # public-SDK config separately if desired.
+        - -ST1000
+        - -ST1020
+        - -ST1021
+    errcheck:
+      exclude-functions:
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net/http.ResponseWriter).Write
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+  exclusions:
+    rules:
+      # Tests often ignore errors deliberately.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Generated code should be left alone.
+      - path: \.pb\.go$
+        linters:
+          - all
+      - source: "^// Code generated"
+        linters:
+          - all
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/sparkwing-dev
