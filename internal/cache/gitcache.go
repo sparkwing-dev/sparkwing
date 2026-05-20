@@ -18,9 +18,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 var (

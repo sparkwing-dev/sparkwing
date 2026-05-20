@@ -21,9 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Config holds every tunable knob the cache service accepts. All
