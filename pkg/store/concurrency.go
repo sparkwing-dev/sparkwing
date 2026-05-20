@@ -139,7 +139,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	if err != nil {
 		return AcquireSlotResponse{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// 1. Cache lookup; atomic with the rest so we never double-run.
 	if req.CacheKeyHash != "" {
@@ -367,12 +367,12 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		for rows.Next() {
 			var hid string
 			if err := rows.Scan(&hid); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return AcquireSlotResponse{}, err
 			}
 			supersededIDs = append(supersededIDs, hid)
 		}
-		rows.Close()
+		_ = rows.Close()
 		if err := rows.Err(); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -436,7 +436,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var superInt int
 	err = tx.QueryRowContext(
@@ -577,12 +577,12 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		for frows.Next() {
 			w, serr := scanWaiter(frows)
 			if serr != nil {
-				frows.Close()
+				_ = frows.Close()
 				return false, nil, nil, serr
 			}
 			followers = append(followers, w)
 		}
-		frows.Close()
+		_ = frows.Close()
 		if err := frows.Err(); err != nil {
 			return false, nil, nil, err
 		}
@@ -636,12 +636,12 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		for prows.Next() {
 			w, serr := scanWaiter(prows)
 			if serr != nil {
-				prows.Close()
+				_ = prows.Close()
 				return false, nil, nil, serr
 			}
 			promoted = append(promoted, w)
 		}
-		prows.Close()
+		_ = prows.Close()
 		if err := prows.Err(); err != nil {
 			return false, nil, nil, err
 		}
@@ -1003,7 +1003,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		var claimedNS, expiresNS int64
 		var superInt int
 		if err := hrows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
-			hrows.Close()
+			_ = hrows.Close()
 			return nil, err
 		}
 		h.ClaimedAt = time.Unix(0, claimedNS)
@@ -1011,7 +1011,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		h.Superseded = superInt == 1
 		state.Holders = append(state.Holders, h)
 	}
-	hrows.Close()
+	_ = hrows.Close()
 	if err := hrows.Err(); err != nil {
 		return nil, err
 	}
@@ -1027,12 +1027,12 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	for wrows.Next() {
 		w, err := scanWaiter(wrows)
 		if err != nil {
-			wrows.Close()
+			_ = wrows.Close()
 			return nil, err
 		}
 		state.Waiters = append(state.Waiters, w)
 	}
-	wrows.Close()
+	_ = wrows.Close()
 	if err := wrows.Err(); err != nil {
 		return nil, err
 	}
@@ -1170,12 +1170,12 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	for orphanRows.Next() {
 		w, err := scanWaiter(orphanRows)
 		if err != nil {
-			orphanRows.Close()
+			_ = orphanRows.Close()
 			return nil, err
 		}
 		dropped = append(dropped, w)
 	}
-	orphanRows.Close()
+	_ = orphanRows.Close()
 	if err := orphanRows.Err(); err != nil {
 		return nil, err
 	}
@@ -1199,14 +1199,14 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	for ageRows.Next() {
 		w, err := scanWaiter(ageRows)
 		if err != nil {
-			ageRows.Close()
+			_ = ageRows.Close()
 			return nil, err
 		}
 		if !already[w.Key+"|"+w.RunID+"|"+w.NodeID] {
 			dropped = append(dropped, w)
 		}
 	}
-	ageRows.Close()
+	_ = ageRows.Close()
 	if err := ageRows.Err(); err != nil {
 		return nil, err
 	}
