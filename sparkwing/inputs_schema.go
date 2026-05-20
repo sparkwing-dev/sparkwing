@@ -405,7 +405,7 @@ func readFieldByIndex(v reflect.Value, idx []int) (reflect.Value, bool) {
 // fieldByIndexAlloc walks idx into v, allocating any nil pointer
 // fields encountered along anonymous-embed chains so the leaf is
 // settable. reflect.Value.FieldByIndex panics on a nil pointer
-// embed; this helper materialises the embed instead.
+// embed; this helper materializes the embed instead.
 func fieldByIndexAlloc(v reflect.Value, idx []int) (reflect.Value, error) {
 	for i, n := range idx {
 		if i > 0 && v.Kind() == reflect.Pointer {

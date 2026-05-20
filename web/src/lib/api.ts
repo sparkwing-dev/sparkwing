@@ -241,7 +241,7 @@ export interface Node {
   groups?: string[];
   // True when the node is `.Dynamic()` (explicit) or the source of an
   // ExpandFrom (auto-inferred). Drives the rainbow "DYNAMIC" pill in
-  // the DAG view, signalling that the plan preview isn't authoritative
+  // the DAG view, signaling that the plan preview isn't authoritative
   // — the node may spawn children at runtime.
   dynamic?: boolean;
   // True when the node was declared as an approval gate

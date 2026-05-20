@@ -111,7 +111,7 @@ symbols moved, in what direction, with no other noise.
 
 The plug-in interfaces under `pkg/storage` and `pkg/controller`
 ship portable test suites so adopters writing custom implementations
-can verify they honour the contract:
+can verify they honor the contract:
 
 | Interface | Suite |
 |---|---|

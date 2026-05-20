@@ -64,7 +64,7 @@ func proxyKeyLock(key string) *sync.RWMutex {
 	return proxyKeyLocks[key]
 }
 
-// initProxy materialises the per-registry subdirectories under
+// initProxy materializes the per-registry subdirectories under
 // proxyDir. New() calls this after Config has seeded proxyDir /
 // proxyCacheTTL / proxyMaxAge so all directory creation is
 // deterministically post-config.

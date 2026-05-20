@@ -187,7 +187,7 @@ const EventNodeAnnotation = "node_annotation"
 // Summary records a persistent markdown run summary on the
 // currently-executing Job or Step. Unlike Annotate, which appends a
 // short scannable line, Summary stores a larger overwrite-on-write
-// markdown blob -- the GitHub-Actions step-summary analogue.
+// markdown blob -- the GitHub-Actions step-summary analog.
 //
 // Multiple calls within the same scope keep only the last value: the
 // later call replaces the earlier one. Summaries fired inside a step

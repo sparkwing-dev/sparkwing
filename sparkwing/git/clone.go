@@ -19,7 +19,7 @@ var gitcacheProbeURL = "http://localhost:18090"
 // cache is the common case outside cluster mode.
 var gitcacheProbeTimeout = 200 * time.Millisecond
 
-// CloneOption configures optional git-clone behaviour.
+// CloneOption configures optional git-clone behavior.
 type CloneOption func(*cloneConfig)
 
 type cloneConfig struct {

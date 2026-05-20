@@ -530,7 +530,7 @@ rather than a runtime panic / silent no-op.
 - `Timeout` - maximum wait before the waiter writes a `timed_out`
   resolution itself. Zero (the default) means never time out.
 - `OnExpiry` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
-  or `sw.ApprovalApprove`. Unrecognised values panic at plan time.
+  or `sw.ApprovalApprove`. Unrecognized values panic at plan time.
   Named `OnExpiry` (not `OnTimeout`) so it doesn't read like
   `Job.Timeout()`, which is unrelated.
 

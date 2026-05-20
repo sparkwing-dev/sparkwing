@@ -76,6 +76,12 @@ linters:
       comparison: true
     misspell:
       locale: US
+      ignore-rules:
+        # `Cancelled` is the public Outcome constant in sparkwing/outcome.go
+        # and `"cancelled"` is its persisted string value. Renaming would
+        # be a breaking API + schema change.
+        - cancelled
+        - cancelling
     nolintlint:
       require-explanation: true
       require-specific: true

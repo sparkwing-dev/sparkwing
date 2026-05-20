@@ -4452,7 +4452,7 @@ function DAG({
   }
 
   // Group frames: compute the bounding box around every node sharing
-  // the same `.Group("name")` tag so we can draw a labelled dashed
+  // the same `.Group("name")` tag so we can draw a labeled dashed
   // container behind them. Rendered before edges/nodes so it sits
   // visually beneath the DAG's active elements. Single-member groups
   // still get a frame so the visual grouping matches the nodes list
@@ -4769,7 +4769,7 @@ function DAG({
                   // Top-pill stack. Each pill type self-reports its
                   // width so the layout pass can lay them out side-by-
                   // side, centered as a group, instead of having every
-                  // pill self-center and clobber its neighbours. The
+                  // pill self-center and clobber its neighbors. The
                   // priority order below is also the left-to-right
                   // visual order on the node (most important read
                   // first): state markers (dynamic / approval) on the

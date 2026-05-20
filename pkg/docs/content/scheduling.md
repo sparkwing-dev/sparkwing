@@ -74,7 +74,7 @@ my-build:
 | `require` | `nodeSelector` / required nodeAffinity | Every key/value must match the agent's labels (or `name`/`type` pseudo-labels). If any miss, the job is **not eligible** for that agent. |
 | `prefer` | preferred nodeAffinity | Soft scoring — each matching key adds +10 to that (job, agent) pair. Doesn't filter, just sorts. |
 | `tolerate` | `tolerations` | List of tolerations. Every `NoSchedule` taint on the agent must be tolerated, or the job is rejected. `PreferNoSchedule` taints lower the score by 1 instead of blocking. |
-| `queue_timeout` | (no k8s analogue) | How long the job may sit pending before the controller fails it. Empty → 10m default. `forever` or `never` disables. |
+| `queue_timeout` | (no k8s analog) | How long the job may sit pending before the controller fails it. Empty → 10m default. `forever` or `never` disables. |
 
 ### Toleration shorthand
 

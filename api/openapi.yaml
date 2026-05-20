@@ -17,7 +17,7 @@ info:
       (`GET /api/v1/artifacts/{key}`).
 
     See [VERSIONING.md][2] for stability promises around this surface:
-    JSON field renames and behavioural changes are tracked under module
+    JSON field renames and behavioral changes are tracked under module
     semver. The Go client lives at `pkg/controller/client/`.
 
     [1]: https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/pkg/controller
@@ -201,7 +201,7 @@ paths:
       tags: [runs]
       summary: Upload the run's plan-snapshot blob.
       description: |
-        Body is opaque bytes (typically JSON serialised plan).
+        Body is opaque bytes (typically JSON serialized plan).
         Content-Type is ignored. Admin scope.
       requestBody:
         required: true

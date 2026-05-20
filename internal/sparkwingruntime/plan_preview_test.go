@@ -188,7 +188,7 @@ func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwingruntime.PreviewPlan(plan, "preview-near-miss", nil, sparkwingruntime.PreviewOptions{StartAt: "instal-argocd"})
+	preview, err := sparkwingruntime.PreviewPlan(plan, "preview-near-miss", nil, sparkwingruntime.PreviewOptions{StartAt: "install-argocd"})
 	if err == nil {
 		t.Fatalf("expected error for typo'd --start-at, got nil (preview = %+v)", preview)
 	}
@@ -198,7 +198,7 @@ func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
 	if previewExecCounter.Load() != 0 {
 		t.Fatalf("step body executed during failed preview (counter = %d)", previewExecCounter.Load())
 	}
-	for _, want := range []string{"--sw-start-at", `"instal-argocd"`, `did you mean "install-argocd"`} {
+	for _, want := range []string{"--sw-start-at", `"install-argocd"`, `did you mean "install-argocd"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q\nfull: %s", want, err.Error())
 		}

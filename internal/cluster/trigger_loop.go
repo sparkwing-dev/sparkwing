@@ -275,7 +275,7 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	}
 	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token)
 	// Use a fresh context: the trigger ctx may already be cancelling
-	// (heartbeat goroutine signalled the parent), but we still want
+	// (heartbeat goroutine signaled the parent), but we still want
 	// to ship the diagnostic so operators can see why compile failed.
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()

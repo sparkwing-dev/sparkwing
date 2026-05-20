@@ -161,7 +161,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 		Timeout(10*time.Second).
 		OnFailure("deploy-rollback", rollbackFn)
 
-	// GroupJobs: the Plan-layer analogue of GroupSteps. Takes
+	// GroupJobs: the Plan-layer analog of GroupSteps. Takes
 	// already-constructed sibling Nodes and folds them into a single
 	// NodeGroup for collapsible dashboard rendering + one .Needs()
 	// target downstream. Distinct from JobFanOut, which synthesizes

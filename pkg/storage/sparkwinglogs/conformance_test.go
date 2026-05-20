@@ -15,7 +15,7 @@ import (
 
 // TestConformance_LogStore wires the shared conformance suite
 // against an in-process stub of the sparkwing-logs HTTP service.
-// The stub honours tail/head/grep query params so the suite's
+// The stub honors tail/head/grep query params so the suite's
 // filter subtests exercise the real client query encoding without
 // reaching the production service.
 func TestConformance_LogStore(t *testing.T) {

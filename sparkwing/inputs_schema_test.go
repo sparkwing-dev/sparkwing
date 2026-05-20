@@ -579,7 +579,7 @@ func TestFlattenInputs_AnonymousEmbedRoundTrip(t *testing.T) {
 // Pointer-to-struct embeds should also work: the populator must
 // allocate the embedded struct on demand so the leaf is settable.
 // The embedded type must be exported because Go disallows
-// reflect.Set on unexported fields, including the synthesised
+// reflect.Set on unexported fields, including the synthesized
 // field that anonymous embeds produce.
 type EmbeddedSkipFilter struct {
 	Skip string `flag:"skip" desc:"comma-separated job names to skip"`

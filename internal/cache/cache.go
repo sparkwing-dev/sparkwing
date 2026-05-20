@@ -104,7 +104,7 @@ type Server struct {
 
 // New resolves a Config onto the package's filesystem layout,
 // creates every required directory, loads persisted repo-name
-// mappings, initialises metrics, sets up SSH, and auto-registers
+// mappings, initializes metrics, sets up SSH, and auto-registers
 // repos from Config.AutoRegisterRepos. Returns a ready-to-Run
 // *Server.
 //

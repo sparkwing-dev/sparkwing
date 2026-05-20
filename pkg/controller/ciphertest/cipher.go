@@ -12,7 +12,7 @@ import (
 // return a fresh cipher per call.
 //
 // The suite is implementation-agnostic: it never inspects envelope
-// format, only behaviour observable through Seal / Open. Tampering
+// format, only behavior observable through Seal / Open. Tampering
 // detection is exercised by mutating a known-good sealed value (flip
 // a byte, truncate) and verifying Open errors -- the suite does not
 // craft synthetic ciphertext.
