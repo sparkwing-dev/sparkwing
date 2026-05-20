@@ -107,6 +107,28 @@ Snapshot diffs are the single most useful artifact in API-affecting
 review: a reviewer scanning the PR sees exactly which exported
 symbols moved, in what direction, with no other noise.
 
+## Conformance suites for plug-in interfaces
+
+The plug-in interfaces under `pkg/storage` and `pkg/controller`
+ship portable test suites so adopters writing custom implementations
+can verify they honour the contract:
+
+| Interface | Suite |
+|---|---|
+| [`storage.ArtifactStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestArtifactStore`](./pkg/storage/conformance) |
+| [`storage.LogStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestLogStore`](./pkg/storage/conformance) |
+| [`controller.Cipher`](./pkg/controller/cipher.go) | [`pkg/controller/ciphertest.TestCipher`](./pkg/controller/ciphertest) |
+
+Each suite is a single exported `TestX(t, factory)` function. A
+downstream implementation calls it from its own `*_test.go` with a
+factory that returns a fresh implementation per subtest. Operations
+the implementation opts out of (`storage.ErrNotSupported`,
+`storage.ErrListNotSupported`) are skipped, not failed.
+
+The conformance contract counts as part of the public API: changes
+to what an implementation must support to pass are breaking, and
+follow the same deprecation procedure as Go-level API changes.
+
 ## Migration help
 
 When a breaking change ships, the CHANGELOG entry should include:

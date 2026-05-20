@@ -8,6 +8,29 @@ are required.
 
 ## [Unreleased]
 
+### Added
+
+- Conformance test suites for the three plug-in interfaces:
+  `pkg/storage.ArtifactStore`, `pkg/storage.LogStore`, and
+  `pkg/controller.Cipher`. Each suite lives in a sibling
+  conformance subpackage (`pkg/storage/conformance` for the storage
+  surfaces; `pkg/controller/ciphertest` for cipher) and exposes a
+  `TestX(t, factory)` function any implementation can call from its
+  own `*_test.go` to verify it satisfies the contract. All in-tree
+  implementations (`fs`, `s3`, `sparkwingcache`, `sparkwinglogs`,
+  `stdoutlogs`, `internal/secrets`) now run these suites as part
+  of `go test ./...`. Operations a partial implementation opts out
+  of (e.g., `Read` on the write-only `stdoutlogs.LogStore`, `List`
+  on `sparkwingcache`) skip rather than fail. See VERSIONING.md.
+- `pkg/storage.ErrNotSupported` sentinel for operations a partial
+  implementation deliberately doesn't perform. Conformance suites
+  use `errors.Is` against this to know which subtests to skip.
+  `stdoutlogs.ErrReadUnsupported` now wraps this sentinel via
+  `fmt.Errorf(...: %w, storage.ErrNotSupported)` so callers using
+  either the local or shared sentinel detect the case correctly;
+  the existing `ErrReadUnsupported` var name and identity are
+  preserved.
+
 ### Fixed
 
 - Removed dead route registration for `GET /api/v1/auth/session`.
