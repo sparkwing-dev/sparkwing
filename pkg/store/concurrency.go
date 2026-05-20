@@ -735,7 +735,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var capacity int
 	err = tx.QueryRowContext(
@@ -863,7 +863,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	if err != nil {
 		return WaiterResolution{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// 1. Holder row present + not superseded -> Promoted.
 	var holderID string
@@ -1057,7 +1057,7 @@ func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 		var claimedNS, expiresNS int64
 		var superInt int
 		if err := rows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		h.ClaimedAt = time.Unix(0, claimedNS)
@@ -1065,7 +1065,7 @@ func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 		h.Superseded = superInt == 1
 		stale = append(stale, h)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1087,7 +1087,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(
 		ctx,
@@ -1103,7 +1103,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 		var claimedNS, expiresNS int64
 		var superInt int
 		if err := rows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		h.ClaimedAt = time.Unix(0, claimedNS)
@@ -1111,7 +1111,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 		h.Superseded = true
 		out = append(out, h)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1140,7 +1140,7 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	nowNS := time.Now().UnixNano()
 	cutoff := time.Now().Add(-maxAge).UnixNano()
@@ -1245,12 +1245,12 @@ func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duratio
 	for rows.Next() {
 		var k string
 		if err := rows.Scan(&k); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		keys = append(keys, k)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}

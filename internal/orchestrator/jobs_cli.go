@@ -579,7 +579,7 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
@@ -1062,7 +1062,7 @@ func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	ids, err := descendantRunIDs(ctx, st, rootID)
@@ -1166,7 +1166,7 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {

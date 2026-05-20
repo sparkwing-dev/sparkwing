@@ -1266,7 +1266,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var current []byte
 	row := tx.QueryRowContext(ctx,
 		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`,
@@ -1443,7 +1443,7 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
 VALUES (?,?,?,?)

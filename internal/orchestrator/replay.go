@@ -40,7 +40,7 @@ func runReplayNodeCLI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state db: %w", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	res, err := RunReplayNode(context.Background(), paths, st, runID, nodeID, selectLocalRenderer())
 	if err != nil {

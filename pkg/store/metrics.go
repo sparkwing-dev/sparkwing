@@ -32,7 +32,7 @@ SELECT ts, cpu_millicores, memory_bytes
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []MetricSample{}
 	for rows.Next() {
 		var tsNs, cpu, mem int64

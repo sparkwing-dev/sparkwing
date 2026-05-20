@@ -205,7 +205,7 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return writeRunDetailJSON(ctx, st, runID, out)
 }
 

@@ -44,12 +44,12 @@ func writeProfileBackendsConfig(logStoreURL, artifactStoreURL string) (path stri
 		return "", func() {}, err
 	}
 	if _, err := tmp.WriteString(body); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 		return "", func() {}, err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return "", func() {}, err
 	}
 	cleanup = func() {

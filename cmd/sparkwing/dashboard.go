@@ -311,7 +311,7 @@ func runDashboardSupervise(args []string) error {
 	if err := os.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write pid: %w", err)
 	}
-	defer os.Remove(*pidPath)
+	defer func() { _ = os.Remove(*pidPath) }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

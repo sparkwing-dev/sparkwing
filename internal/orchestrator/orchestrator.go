@@ -527,7 +527,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	}
 	st := opts.State
 	if ownsState {
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 	}
 	backends := LocalBackends(paths, st)
 	if opts.LogStore != nil {
