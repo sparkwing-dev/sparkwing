@@ -336,11 +336,13 @@ func TestController_ListPausesAlias(t *testing.T) {
 		t.Fatalf("paused alias status=%d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
 	resp = mustGet(t, base+"/api/v1/runs/run-pause/debug-pauses")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("debug-pauses status=%d", resp.StatusCode)
 	}
 	canonicalBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
 	if !bytes.Equal(body, canonicalBody) {
 		t.Errorf("alias body diverges from canonical:\n  alias:    %s\n  canonical: %s",
 			body, canonicalBody)

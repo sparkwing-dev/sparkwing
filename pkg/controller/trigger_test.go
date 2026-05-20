@@ -40,6 +40,7 @@ func TestTrigger_Validation(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d want 400", resp.StatusCode)
 	}
+	_ = resp.Body.Close()
 
 	// Unknown field.
 	resp2 := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -49,6 +50,7 @@ func TestTrigger_Validation(t *testing.T) {
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("unknown field status=%d want 400", resp2.StatusCode)
 	}
+	_ = resp2.Body.Close()
 }
 
 // A POST without trigger.source gets 400, not a 202 with a
@@ -68,6 +70,7 @@ func TestTrigger_MissingSource400(t *testing.T) {
 		"pipeline": "demo",
 		// trigger.source intentionally omitted
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d want 400 (missing trigger.source)", resp.StatusCode)
 	}
@@ -92,6 +95,7 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 		"pipeline": "demo",
 		"trigger":  map[string]string{"source": "github"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -153,6 +157,7 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 		"trigger":  map[string]string{"source": "github"},
 		"git":      map[string]string{"branch": "main", "sha": "abc123"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("trigger status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -219,6 +224,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 		"trigger":  map[string]string{"source": "github"},
 		"git":      map[string]string{"branch": "main", "sha": "deadbeef"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -335,6 +341,7 @@ func TestTrigger_DispatcherError(t *testing.T) {
 		"pipeline": "x",
 		"trigger":  map[string]string{"source": "manual"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status=%d want 500", resp.StatusCode)
 	}

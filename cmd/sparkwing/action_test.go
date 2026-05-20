@@ -71,14 +71,31 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 			{NodeID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}
-	a := Pipeline{Name: dp.Name}
-	a.Short = dp.Short
-	a.Help = dp.Help
-	a.Args = dp.Args
-	a.Examples = dp.Examples
-	a.Risks = dp.Risks
-	a.RisksBySteps = dp.RisksBySteps
+	a := Pipeline{
+		Name:         dp.Name,
+		Short:        dp.Short,
+		Help:         dp.Help,
+		Args:         dp.Args,
+		Examples:     dp.Examples,
+		Risks:        dp.Risks,
+		RisksBySteps: dp.RisksBySteps,
+	}
 
+	if a.Name != dp.Name {
+		t.Errorf("Name = %q, want %q", a.Name, dp.Name)
+	}
+	if a.Short != dp.Short {
+		t.Errorf("Short = %q, want %q", a.Short, dp.Short)
+	}
+	if a.Help != dp.Help {
+		t.Errorf("Help = %q, want %q", a.Help, dp.Help)
+	}
+	if len(a.Args) != len(dp.Args) {
+		t.Errorf("Args len = %d, want %d", len(a.Args), len(dp.Args))
+	}
+	if len(a.Examples) != len(dp.Examples) {
+		t.Errorf("Examples len = %d, want %d", len(a.Examples), len(dp.Examples))
+	}
 	if got, want := len(a.Risks), 2; got != want {
 		t.Errorf("Risks len = %d, want %d", got, want)
 	}

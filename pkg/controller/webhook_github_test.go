@@ -85,6 +85,7 @@ func postWebhook(t *testing.T, url, event string, body []byte, sig string) *http
 func TestWebhookGitHub_SecretUnset(t *testing.T) {
 	ts, _ := newWebhookServer(t, "")
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", []byte("{}"), "sha256=deadbeef")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status=%d want 503", resp.StatusCode)
 	}
@@ -96,6 +97,7 @@ func TestWebhookGitHub_Ping(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"zen":"Keep it simple."}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "ping", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 200 (body %s)", resp.StatusCode, raw)
@@ -117,6 +119,7 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 		"head_commit": {"id": "abc123", "message": "feat: ship it"}
 	}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/sample-app-build", "push", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body %s)", resp.StatusCode, raw)
@@ -172,6 +175,7 @@ func TestWebhookGitHub_BadSignature(t *testing.T) {
 	// Sign with a different secret.
 	bad := signWebhook("wrong-secret", body)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, bad)
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status=%d want 401", resp.StatusCode)
 	}
@@ -185,6 +189,7 @@ func TestWebhookGitHub_MissingSignature(t *testing.T) {
 	ts, _ := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"ref":"refs/heads/main"}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, "")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status=%d want 401", resp.StatusCode)
 	}
@@ -200,6 +205,7 @@ func TestWebhookGitHub_TagPushIgnored(t *testing.T) {
 		"repository": {"full_name": "x/y"}
 	}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("status=%d want 202", resp.StatusCode)
 	}
@@ -223,6 +229,7 @@ func TestWebhookGitHub_BranchDeleteIgnored(t *testing.T) {
 		"repository": {"full_name": "x/y"}
 	}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("status=%d want 202", resp.StatusCode)
 	}
@@ -235,6 +242,7 @@ func TestWebhookGitHub_UnknownEventIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"action":"opened"}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "pull_request", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("status=%d want 202", resp.StatusCode)
 	}
@@ -248,6 +256,7 @@ func TestWebhookGitHub_BodyTooLarge(t *testing.T) {
 	// 2 MiB; limit is 1 MiB.
 	body := []byte(`{"filler":"` + strings.Repeat("x", 2<<20) + `"}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("status=%d want 413", resp.StatusCode)
 	}

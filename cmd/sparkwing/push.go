@@ -112,6 +112,7 @@ func runPush(args []string) error {
 		short = short[:pushShortCommitLen]
 	}
 	inCluster := "http://sparkwing-cache.sparkwing.svc.cluster.local/git/" + repoName
+	//nolint:govet // pushOutput is the wire shape for a planned --json output; fields are deliberately populated even though only Ref/RepoName/Commit are emitted today.
 	out := pushOutput{
 		Ref:          ref,
 		RepoName:     repoName,

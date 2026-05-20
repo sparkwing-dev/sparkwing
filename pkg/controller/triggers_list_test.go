@@ -39,6 +39,7 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 			t.Fatalf("POST /triggers pipeline=%s status=%d want 202",
 				pipeline, resp.StatusCode)
 		}
+		_ = resp.Body.Close()
 	}
 
 	// No filter: both triggers, status=pending.
@@ -116,6 +117,7 @@ func TestListTriggers_RepoFilter(t *testing.T) {
 				},
 			},
 		})
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusAccepted {
 			t.Fatalf("POST /triggers pipeline=%s status=%d want 202",
 				pipeline, resp.StatusCode)
