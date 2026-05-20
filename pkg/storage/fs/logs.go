@@ -194,10 +194,10 @@ func applyReadOpts(data []byte, opts storage.ReadOpts) ([]byte, error) {
 	var out bytes.Buffer
 	w := bufio.NewWriter(&out)
 	for _, l := range lines {
-		w.WriteString(l)
-		w.WriteByte('\n')
+		_, _ = w.WriteString(l)
+		_ = w.WriteByte('\n')
 	}
-	w.Flush()
+	_ = w.Flush()
 	return out.Bytes(), nil
 }
 
