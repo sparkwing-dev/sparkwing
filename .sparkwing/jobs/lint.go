@@ -7,16 +7,20 @@ import (
 )
 
 // Lint runs fast, repo-wide checks: gofmt compliance, go vet across
-// every package in the sparkwing module, and the CHANGELOG gate that
-// enforces the stability policy in VERSIONING.md. Cross-repo callers
-// (a downstream release-all orchestration pipeline) can invoke
-// `sparkwing run lint` here as a gate.
+// every package in the sparkwing module, the CHANGELOG gate that
+// enforces the stability policy in VERSIONING.md, and the API
+// surface gate that diffs HEAD's public API against the checked-in
+// snapshots under .apidiff/. Cross-repo callers (a downstream
+// release-all orchestration pipeline) can invoke `sparkwing run
+// lint` here as a gate.
 type Lint struct{ sparkwing.Base }
 
-func (Lint) ShortHelp() string { return "Fast static check: gofmt + go vet + changelog gate" }
+func (Lint) ShortHelp() string {
+	return "Fast static check: gofmt + go vet + changelog + API snapshot gates"
+}
 
 func (Lint) Help() string {
-	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, and the CHANGELOG-required gate (bin/check-changelog.sh, per VERSIONING.md)."
+	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), and the API-surface drift gate (bin/check-api-snapshot.sh). See VERSIONING.md."
 }
 
 func (Lint) Examples() []sparkwing.Example {
@@ -49,6 +53,11 @@ func (p *Lint) run(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Info(ctx, "changelog gate: ok")
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "api snapshot gate: ok")
 	return nil
 }
 

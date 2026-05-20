@@ -57,6 +57,35 @@ While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go 
 - CI fails if a commit touches `pkg/`, `sparkwing/`, CLI flag definitions, or wire-format structs without including a `CHANGELOG.md` entry. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
 - Releases move entries from `[Unreleased]` to a new `[vX.Y.Z]` section in the same commit that cuts the tag.
 
+## API surface snapshot
+
+A deterministic text snapshot of the entire covered public API
+lives under `.apidiff/`, one file per package
+(`pkg_storage.txt`, `sparkwing.txt`, …). The snapshot is the
+machine-readable source of truth for what the API looks like at HEAD;
+godoc comments are deliberately excluded so the file diff captures
+only contract-affecting changes.
+
+The lint pipeline (`sparkwing run lint`) regenerates the snapshots
+into a tempdir and diffs against the checked-in tree.
+**PRs that change the public surface without updating `.apidiff/`
+fail CI** — the snapshot must be regenerated and committed in the
+same PR.
+
+Workflow when you change a covered API:
+
+1. Make the source change.
+2. Run `bash bin/regen-api-snapshot.sh`.
+3. Review the resulting `.apidiff/` diff — that's the surface change
+   reviewers will see.
+4. Add a `CHANGELOG.md` entry under `[Unreleased]` (Added / Changed /
+   Removed / Deprecated).
+5. Commit both the source and the snapshot in the same PR.
+
+Snapshot diffs are the single most useful artifact in API-affecting
+review: a reviewer scanning the PR sees exactly which exported
+symbols moved, in what direction, with no other noise.
+
 ## Migration help
 
 When a breaking change ships, the CHANGELOG entry should include:

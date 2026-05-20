@@ -8,6 +8,22 @@ are required.
 
 ## [Unreleased]
 
+### Added
+
+- Checked-in API surface snapshots under `.apidiff/` for every
+  covered public package (21 files: `sparkwing.txt`,
+  `pkg_storage.txt`, `pkg_controller.txt`, ...). The new
+  `cmd/apidiff` tool walks each package's AST and emits a
+  deterministic text representation of the exported declarations
+  (functions, types with exported fields, methods grouped under
+  receivers, consts, vars) with godoc stripped. The `lint` pipeline
+  now regenerates snapshots into a tempdir and diffs against the
+  checked-in tree via `bin/check-api-snapshot.sh`; drift fails CI
+  with an educational message explaining how to fix it. Developers
+  refresh the baseline with `bash bin/regen-api-snapshot.sh` whenever
+  they intentionally change a public API; the snapshot diff in the PR
+  is the surface-change review artifact. See `VERSIONING.md`.
+
 ### Docs
 
 - Curated godoc for the remaining `pkg/` packages: `pipelines`,
