@@ -232,7 +232,7 @@ func runRunnerCLI(args []string) error {
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	logger := slog.Default()
 	go func() {

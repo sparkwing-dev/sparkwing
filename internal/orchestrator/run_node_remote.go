@@ -83,7 +83,7 @@ func runNodeRemote(
 	// Scoped per run+node so concurrent remote fallbacks on the same
 	// pod don't collide.
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	sparkwingDir, err := bincache.FetchPipelineSource(gcURL, repoURL, branch, trig.GitSHA, workDir)
 	if err != nil {

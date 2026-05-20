@@ -470,7 +470,7 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var runID, nodeID string
 	err = tx.QueryRowContext(
@@ -523,7 +523,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	if err != nil {
 		return false, nil, nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// 1. Look up the holder to get (runID, nodeID) before deleting.
 	var runID, nodeID string
@@ -684,7 +684,7 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(
 		ctx,
@@ -701,12 +701,12 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 	for rows.Next() {
 		w, err := scanWaiter(rows)
 		if err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		out = append(out, w)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -782,12 +782,12 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	for rows.Next() {
 		w, err := scanWaiter(rows)
 		if err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		promote = append(promote, w)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}

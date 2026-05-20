@@ -30,7 +30,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 	if err != nil {
 		return fmt.Errorf("open local store: %w", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	trigger, err := st.GetTrigger(ctx, triggerID)
 	if err != nil {

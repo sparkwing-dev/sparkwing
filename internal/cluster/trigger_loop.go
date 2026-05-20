@@ -187,7 +187,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	}
 
 	workDir := filepath.Join(opts.WorkRoot, trigger.ID)
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	sha := trigger.GitSHA
 	logger.Info("trigger loop: fetching source",

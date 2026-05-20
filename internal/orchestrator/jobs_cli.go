@@ -52,7 +52,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Lazy orphan reconciliation: any "running" rows whose orchestrator
 	// process is dead get transitioned to "failed" before we read.
@@ -189,7 +189,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Lazy orphan reconciliation -- see ListJobs.
 	_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
@@ -937,8 +937,8 @@ func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error
 		}
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			out.Write(line)
-			out.Write([]byte{'\n'})
+			_, _ = out.Write(line)
+			_, _ = out.Write([]byte{'\n'})
 			continue
 		}
 		if wantPlain {

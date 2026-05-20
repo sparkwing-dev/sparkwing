@@ -34,12 +34,12 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 		return err
 	}
 	if _, err := io.Copy(f, rc); err != nil {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, dest)

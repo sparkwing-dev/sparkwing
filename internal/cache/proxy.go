@@ -435,8 +435,8 @@ func proxyCleanupLoop(ctx context.Context) {
 
 				if expired {
 					key := strings.TrimSuffix(e.Name(), ".meta")
-					os.Remove(metaPath)
-					os.Remove(filepath.Join(regDir, key+".body"))
+					_ = os.Remove(metaPath)
+					_ = os.Remove(filepath.Join(regDir, key+".body"))
 					removed++
 				}
 			}

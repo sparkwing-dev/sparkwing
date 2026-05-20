@@ -69,7 +69,7 @@ func runWorkerCLI(args []string) error {
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-worker"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	logger := slog.Default()
 	go func() {

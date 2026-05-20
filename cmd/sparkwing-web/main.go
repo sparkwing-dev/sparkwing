@@ -46,7 +46,7 @@ func run(args []string) error {
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-web"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	if *token == "" {
 		*token = os.Getenv("SPARKWING_AGENT_TOKEN")

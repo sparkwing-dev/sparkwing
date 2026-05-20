@@ -107,7 +107,7 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 					byRun[runID] = append(byRun[runID], outcome)
 				}
 			}
-			nrows.Close()
+			_ = nrows.Close()
 			for id, outcomes := range byRun {
 				allCached := len(outcomes) > 0
 				for _, o := range outcomes {

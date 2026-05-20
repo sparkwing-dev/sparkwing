@@ -169,7 +169,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if err != nil {
 		return fmt.Errorf("open local store: %w", err)
 	}
-	defer dummyStore.Close()
+	defer func() { _ = dummyStore.Close() }()
 	local := LocalBackends(paths, dummyStore)
 
 	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
