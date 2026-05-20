@@ -1601,7 +1601,7 @@ func cleanOldArchives(repoHash string) {
 				oldest = j
 			}
 		}
-		os.Remove(filepath.Join(archDir, matching[oldest].name))
+		_ = os.Remove(filepath.Join(archDir, matching[oldest].name))
 		matching = append(matching[:oldest], matching[oldest+1:]...)
 	}
 }

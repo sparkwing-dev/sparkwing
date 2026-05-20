@@ -106,7 +106,7 @@ func Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("open %s: %w", paths.StateDB(), err)
 		}
 		st = s
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 	}
 
 	// Skipped when an external LogStore is configured: reads come from

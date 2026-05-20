@@ -53,13 +53,13 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state db: %w", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	cipher, cerr := loadSecretsCipher(*secretsKeyFile)
 	if cerr != nil {

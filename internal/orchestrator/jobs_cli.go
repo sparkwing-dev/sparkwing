@@ -895,14 +895,14 @@ func renderJSONLStream(r io.Reader, opts LogsOpts, out io.Writer) error {
 	for sc.Scan() {
 		line := sc.Bytes()
 		if wantJSON {
-			out.Write(line)
-			out.Write([]byte{'\n'})
+			_, _ = out.Write(line)
+			_, _ = out.Write([]byte{'\n'})
 			continue
 		}
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			out.Write(line)
-			out.Write([]byte{'\n'})
+			_, _ = out.Write(line)
+			_, _ = out.Write([]byte{'\n'})
 			continue
 		}
 		if wantPlain {

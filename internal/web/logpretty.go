@@ -82,9 +82,9 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			if f == formatPlain {
-				w.Write([]byte(orchestrator.StripANSI(string(line))))
+				_, _ = w.Write([]byte(orchestrator.StripANSI(string(line))))
 			} else {
-				w.Write(line)
+				_, _ = w.Write(line)
 			}
 			fmt.Fprintln(w)
 			continue

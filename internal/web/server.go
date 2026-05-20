@@ -100,7 +100,7 @@ func Serve(ctx context.Context, paths orchestrator.Paths, addr string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return ServeWithOptions(ctx,
 		HandlerOptions{Backend: backend.NewStoreBackend(st, paths, nil), Paths: paths},
 		addr)

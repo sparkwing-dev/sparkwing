@@ -43,6 +43,6 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 	return logs.ServeWithTokens(ctx, *root, *addr, *controllerURL, nil)
 }

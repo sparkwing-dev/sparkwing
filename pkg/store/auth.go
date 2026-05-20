@@ -198,7 +198,7 @@ func (s *Store) CreateFirstUser(name, password string, now time.Time) (*User, er
 	if err != nil {
 		return nil, fmt.Errorf("users: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
@@ -266,7 +266,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []User
 	for rows.Next() {

@@ -180,7 +180,7 @@ func downloadAndInstall(version, currentBin string) error {
 	if err != nil {
 		return fmt.Errorf("mkdir tmp: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, asset)
 	if err := downloadFile(base+"/"+asset, binPath); err != nil {

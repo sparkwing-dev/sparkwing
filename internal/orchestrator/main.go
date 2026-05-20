@@ -383,7 +383,7 @@ func printPipelinePlan(pipeline string, rest []string) error {
 	if err != nil {
 		return fmt.Errorf("marshal plan: %w", err)
 	}
-	os.Stdout.Write(snap)
+	_, _ = os.Stdout.Write(snap)
 	fmt.Println()
 	return nil
 }

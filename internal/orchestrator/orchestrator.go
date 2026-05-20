@@ -554,7 +554,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	envLog, envErr := newEnvelopeLogger(paths.EnvelopeLog(opts.RunID), opts.Delegate)
 	if envErr == nil {
 		opts.Delegate = envLog
-		defer envLog.Close()
+		defer func() { _ = envLog.Close() }()
 	}
 	res, runErr := Run(ctx, backends, opts)
 	// Dump on error too, for post-mortem of partial runs.
@@ -1859,7 +1859,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	if err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	defer nlog.Close()
+	defer func() { _ = nlog.Close() }()
 
 	if err := s.backends.State.StartNode(s.ctx, s.runID, node.ID()); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}

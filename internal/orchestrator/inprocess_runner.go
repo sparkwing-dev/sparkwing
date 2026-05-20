@@ -139,7 +139,7 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
 	// Persist step_start / step_end / step_skipped to node_steps rows.
 	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
-	defer nlog.Close()
+	defer func() { _ = nlog.Close() }()
 
 	if err := r.backends.State.StartNode(ctx, runID, node.ID()); err != nil {
 		return nil, err

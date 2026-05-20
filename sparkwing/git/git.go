@@ -186,7 +186,7 @@ func listFilesystemFiles(repoDir string) []string {
 		"dist": true, "build": true, ".sparkwing": true,
 	}
 	var files []string
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}

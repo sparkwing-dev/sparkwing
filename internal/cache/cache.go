@@ -248,7 +248,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
-	s.tel.Shutdown(shutdownCtx)
+	_ = s.tel.Shutdown(shutdownCtx)
 	s.wg.Wait()
 	log.Printf("sparkwing-cache stopped")
 	return <-serveErr

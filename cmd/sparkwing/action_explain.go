@@ -223,7 +223,7 @@ func runPipelineExplain(args []string) error {
 		return fmt.Errorf("explain: %w", err)
 	}
 	if jsonOut {
-		os.Stdout.Write(stdout.Bytes())
+		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
 	var snap planSnapshotDoc
@@ -231,7 +231,7 @@ func runPipelineExplain(args []string) error {
 		// Fallback: if the output isn't parseable JSON, dump it raw so
 		// the operator sees what actually came back rather than a
 		// cryptic decode error.
-		os.Stdout.Write(stdout.Bytes())
+		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
 	printPlanSnapshot(&snap)

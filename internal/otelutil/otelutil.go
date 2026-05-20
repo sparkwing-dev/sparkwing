@@ -334,7 +334,7 @@ func (h *multiSlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (h *multiSlogHandler) Handle(ctx context.Context, r slog.Record) error {
 	for _, handler := range h.handlers {
 		if handler.Enabled(ctx, r.Level) {
-			handler.Handle(ctx, r)
+			_ = handler.Handle(ctx, r)
 		}
 	}
 	return nil
