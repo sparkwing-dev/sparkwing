@@ -19,6 +19,21 @@ are required.
   what elite Go repos converge on per
   `sparkwing-platform/RESEARCH-elite-comparison.md`.
 
+### Changed
+
+- **Initial lint sweep.** Cleared 135 golangci-lint findings introduced
+  by the new `.golangci.yml` adoption. Mechanical mix: gofumpt
+  formatting across 77 files, US-locale spelling normalization (with
+  `cancelled` / `Cancelled` exempted because it's the persisted
+  `Outcome` constant), `usestdlibvars` (HTTP verbs/statuses pinned to
+  stdlib constants), unchecked error-return cleanup across cache /
+  controller / orchestrator / storage subsystems, `bodyclose` for
+  HTTP test bodies, `errorlint` `%w` wrapping, `nolintlint` directive
+  explanations, and idiomatic naming (`SparkAscii` -> `SparkASCII`,
+  `body_out` -> `bodyOut`). No behavior changes; the rename
+  `SparkAscii` -> `SparkASCII` is in `internal/orchestrator` (not
+  importable externally).
+
 ### Fixed
 
 - `TrendPoint.avg_wait_ms` is now actually computed:
