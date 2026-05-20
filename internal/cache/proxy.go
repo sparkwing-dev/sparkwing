@@ -1,6 +1,7 @@
-package main
+package cache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -63,20 +64,11 @@ func proxyKeyLock(key string) *sync.RWMutex {
 	return proxyKeyLocks[key]
 }
 
+// initProxy materialises the per-registry subdirectories under
+// proxyDir. New() calls this after Config has seeded proxyDir /
+// proxyCacheTTL / proxyMaxAge so all directory creation is
+// deterministically post-config.
 func initProxy() {
-	if d := os.Getenv("PROXY_CACHE_DIR"); d != "" {
-		proxyDir = d
-	}
-	if s := os.Getenv("PROXY_CACHE_TTL"); s != "" {
-		if d, err := time.ParseDuration(s); err == nil {
-			proxyCacheTTL = d
-		}
-	}
-	if s := os.Getenv("PROXY_MAX_AGE"); s != "" {
-		if d, err := time.ParseDuration(s); err == nil {
-			proxyMaxAge = d
-		}
-	}
 	for name := range defaultRegistries {
 		os.MkdirAll(filepath.Join(proxyDir, name), 0o755)
 	}
@@ -391,12 +383,14 @@ func isImmutable(path string) bool {
 }
 
 // proxyCleanupLoop runs periodically and removes expired cache entries.
-func proxyCleanupLoop() {
+func proxyCleanupLoop(ctx context.Context) {
 	interval := 1 * time.Hour
 	log.Printf("proxy cleanup: every %s, max age %s", interval, proxyMaxAge)
 
 	for {
-		time.Sleep(interval)
+		if !sleepCtx(ctx, interval) {
+			return
+		}
 		removed := 0
 
 		for name := range defaultRegistries {
