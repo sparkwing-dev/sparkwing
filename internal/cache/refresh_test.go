@@ -64,7 +64,7 @@ func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 	}
 
 	// 4. Hit the endpoint.
-	req := httptest.NewRequest("POST", "/git/refresh?repo="+repoURL, nil)
+	req := httptest.NewRequest(http.MethodPost, "/git/refresh?repo="+repoURL, nil)
 	w := httptest.NewRecorder()
 	handleGitRefresh(w, req)
 
@@ -89,7 +89,7 @@ func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 // TestHandleGitRefresh_MissingArgs guards the input contract: at least
 // one of name/repo must be set.
 func TestHandleGitRefresh_MissingArgs(t *testing.T) {
-	req := httptest.NewRequest("POST", "/git/refresh", nil)
+	req := httptest.NewRequest(http.MethodPost, "/git/refresh", nil)
 	w := httptest.NewRecorder()
 	handleGitRefresh(w, req)
 	if w.Code != 400 {
@@ -112,7 +112,7 @@ func TestHandleGitRefresh_UncachedRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest("POST", "/git/refresh?repo=git@github.com:never/cloned.git", nil)
+	req := httptest.NewRequest(http.MethodPost, "/git/refresh?repo=git@github.com:never/cloned.git", nil)
 	w := httptest.NewRecorder()
 	handleGitRefresh(w, req)
 	if w.Code != 404 {
@@ -122,7 +122,7 @@ func TestHandleGitRefresh_UncachedRepo(t *testing.T) {
 
 // TestHandleGitRefresh_GETRejected pins the POST-only contract.
 func TestHandleGitRefresh_GETRejected(t *testing.T) {
-	req := httptest.NewRequest("GET", "/git/refresh?repo=foo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/git/refresh?repo=foo", nil)
 	w := httptest.NewRecorder()
 	handleGitRefresh(w, req)
 	if w.Code != 405 {

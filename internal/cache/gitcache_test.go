@@ -11,7 +11,7 @@ import (
 )
 
 func TestHandleHealth(t *testing.T) {
-	req := httptest.NewRequest("GET", "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 	handleHealthCombined(w, req)
 
@@ -26,7 +26,7 @@ func TestArtifactUpload(t *testing.T) {
 	defer func() { artifactsDir = oldDir }()
 
 	body := strings.NewReader("test content")
-	req := httptest.NewRequest("POST", "/artifacts/job123?path=coverage/report.html", body)
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=coverage/report.html", body)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -45,7 +45,7 @@ func TestArtifactUpload(t *testing.T) {
 }
 
 func TestArtifactUpload_MissingPath(t *testing.T) {
-	req := httptest.NewRequest("POST", "/artifacts/job123", nil)
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -59,7 +59,7 @@ func TestArtifactUpload_DirectoryTraversal(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest("POST", "/artifacts/job123?path=../../etc/passwd", strings.NewReader("evil"))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=../../etc/passwd", strings.NewReader("evil"))
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -78,7 +78,7 @@ func TestArtifactList(t *testing.T) {
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "a.txt"), nil, 0o644)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "sub", "b.txt"), nil, 0o644)
 
-	req := httptest.NewRequest("GET", "/artifacts/job123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -94,7 +94,7 @@ func TestArtifactList_Empty(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest("GET", "/artifacts/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/nonexistent", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -113,7 +113,7 @@ func TestArtifactDownload_SingleFile(t *testing.T) {
 	os.MkdirAll(filepath.Join(artifactsDir, "job123"), 0o755)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "report.html"), []byte("html content"), 0o644)
 
-	req := httptest.NewRequest("GET", "/artifacts/job123?glob=*.html", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*.html", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -134,7 +134,7 @@ func TestArtifactDownload_NotFound(t *testing.T) {
 
 	os.MkdirAll(filepath.Join(artifactsDir, "job123"), 0o755)
 
-	req := httptest.NewRequest("GET", "/artifacts/job123?glob=*.xyz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*.xyz", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -164,7 +164,7 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest("POST", "/artifacts/job123?path=/etc/passwd", strings.NewReader("evil"))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=/etc/passwd", strings.NewReader("evil"))
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 

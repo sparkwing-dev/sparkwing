@@ -575,7 +575,7 @@ func TestBuildAndPushLocalRegistry(t *testing.T) {
 // registryReachable does a GET /v2/ against the registry.
 func registryReachable(registry string) bool {
 	u := &url.URL{Scheme: "http", Host: registry, Path: "/v2/"}
-	req, _ := http.NewRequest("GET", u.String(), nil)
+	req, _ := http.NewRequest(http.MethodGet, u.String(), nil)
 	resp, err := httpDefaultClient().Do(req)
 	if err != nil {
 		return false

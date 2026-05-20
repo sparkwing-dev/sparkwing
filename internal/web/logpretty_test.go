@@ -106,7 +106,7 @@ func TestNegotiateLogFormat(t *testing.T) {
 			if c.query != "" {
 				url += "?format=" + c.query
 			}
-			r := httptest.NewRequest("GET", url, nil)
+			r := httptest.NewRequest(http.MethodGet, url, nil)
 			if c.accept != "" {
 				r.Header.Set("Accept", c.accept)
 			}

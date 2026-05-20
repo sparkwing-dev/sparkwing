@@ -85,7 +85,7 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	for time.Now().Before(deadline) {
 		if resp, err := http.Get(base + "/api/health"); err == nil {
 			resp.Body.Close()
-			if resp.StatusCode == 200 {
+			if resp.StatusCode == http.StatusOK {
 				return base, func() {
 					cancel()
 					<-done
@@ -139,7 +139,7 @@ func TestAPI_StaticIndexServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
@@ -199,14 +199,14 @@ func TestAPI_LogsAcceptNegotiation(t *testing.T) {
 
 func mustGetTextWithAccept(t *testing.T, url, accept string) string {
 	t.Helper()
-	req, _ := http.NewRequest("GET", url, nil)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Accept", accept)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s (Accept=%s): %v", url, accept, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s (Accept=%s): status %d", url, accept, resp.StatusCode)
 	}
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, accept) {
@@ -223,7 +223,7 @@ func mustGetText(t *testing.T, url string) string {
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s: status %d", url, resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)

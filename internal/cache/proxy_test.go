@@ -70,7 +70,7 @@ func TestIsImmutable(t *testing.T) {
 }
 
 func TestHandleProxy_UnknownRegistry(t *testing.T) {
-	req := httptest.NewRequest("GET", "/proxy/foobar/something", nil)
+	req := httptest.NewRequest(http.MethodGet, "/proxy/foobar/something", nil)
 	w := httptest.NewRecorder()
 	handleProxy(w, req)
 
@@ -83,7 +83,7 @@ func TestHandleProxy_UnknownRegistry(t *testing.T) {
 }
 
 func TestHandleProxy_PathTraversal(t *testing.T) {
-	req := httptest.NewRequest("GET", "/proxy/npm/../../etc/passwd", nil)
+	req := httptest.NewRequest(http.MethodGet, "/proxy/npm/../../etc/passwd", nil)
 	w := httptest.NewRecorder()
 	handleProxy(w, req)
 
@@ -93,7 +93,7 @@ func TestHandleProxy_PathTraversal(t *testing.T) {
 }
 
 func TestHandleProxy_MethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest("POST", "/proxy/npm/lodash", nil)
+	req := httptest.NewRequest(http.MethodPost, "/proxy/npm/lodash", nil)
 	w := httptest.NewRecorder()
 	handleProxy(w, req)
 
@@ -103,7 +103,7 @@ func TestHandleProxy_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleProxy_MissingRegistry(t *testing.T) {
-	req := httptest.NewRequest("GET", "/proxy/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/proxy/", nil)
 	w := httptest.NewRecorder()
 	handleProxy(w, req)
 
@@ -139,7 +139,7 @@ func TestHandleProxy_CacheMissAndHit(t *testing.T) {
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
 		// First request: cache miss
-		req1 := httptest.NewRequest("GET", "/proxy/test/testpkg", nil)
+		req1 := httptest.NewRequest(http.MethodGet, "/proxy/test/testpkg", nil)
 		w1 := httptest.NewRecorder()
 		handleProxy(w1, req1)
 
@@ -154,7 +154,7 @@ func TestHandleProxy_CacheMissAndHit(t *testing.T) {
 		}
 
 		// Second request: cache hit
-		req2 := httptest.NewRequest("GET", "/proxy/test/testpkg", nil)
+		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/testpkg", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
 
@@ -179,7 +179,7 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 	withTestProxy(t, map[string]Registry{
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
-		req := httptest.NewRequest("GET", "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
+		req := httptest.NewRequest(http.MethodGet, "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
 		w := httptest.NewRecorder()
 		handleProxy(w, req)
 
@@ -203,7 +203,7 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 		}
 
 		// Second fetch should come from cache
-		req2 := httptest.NewRequest("GET", "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
+		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
 		_ = w2
@@ -230,7 +230,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 	withTestProxy(t, map[string]Registry{
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
-		req := httptest.NewRequest("GET", "/proxy/test/metadata", nil)
+		req := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w := httptest.NewRecorder()
 		handleProxy(w, req)
 		if hitCount.Load() != 1 {
@@ -238,7 +238,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 		}
 
 		// Immediately: should be cached
-		req2 := httptest.NewRequest("GET", "/proxy/test/metadata", nil)
+		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
 		_ = w2
@@ -250,7 +250,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 		time.Sleep(1100 * time.Millisecond)
 
 		// Should re-fetch
-		req3 := httptest.NewRequest("GET", "/proxy/test/metadata", nil)
+		req3 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w3 := httptest.NewRecorder()
 		handleProxy(w3, req3)
 		_ = w3
@@ -273,7 +273,7 @@ func TestHandleProxy_ConcurrentReads(t *testing.T) {
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
 		// Prime the cache
-		req := httptest.NewRequest("GET", "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
+		req := httptest.NewRequest(http.MethodGet, "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
 		w := httptest.NewRecorder()
 		handleProxy(w, req)
 		if hitCount.Load() != 1 {
@@ -286,7 +286,7 @@ func TestHandleProxy_ConcurrentReads(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := httptest.NewRequest("GET", "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
+				r := httptest.NewRequest(http.MethodGet, "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
 				rec := httptest.NewRecorder()
 				handleProxy(rec, r)
 				if rec.Header().Get("X-Proxy-Cache") != "HIT" {
@@ -311,7 +311,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 			w.Write([]byte(`{"data":"cached"}`))
 			return
 		}
-		w.WriteHeader(502)
+		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer upstream.Close()
 
@@ -323,7 +323,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
 		// First request — populates cache
-		req1 := httptest.NewRequest("GET", "/proxy/test/data", nil)
+		req1 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w1 := httptest.NewRecorder()
 		handleProxy(w1, req1)
 		if w1.Code != 200 {
@@ -333,7 +333,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Upstream returns 502 — forwarded to client
-		req2 := httptest.NewRequest("GET", "/proxy/test/data", nil)
+		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
 		if w2.Code != 502 {
@@ -346,7 +346,7 @@ func TestProxyRewriteBody_Npm(t *testing.T) {
 	body := []byte(`{"name":"lodash","dist":{"tarball":"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"}}`)
 	reg := Registry{Name: "npm", Upstream: "https://registry.npmjs.org", RewriteBody: true}
 
-	req := httptest.NewRequest("GET", "/proxy/npm/lodash", nil)
+	req := httptest.NewRequest(http.MethodGet, "/proxy/npm/lodash", nil)
 	req.Host = "gitcache.local:8091"
 
 	result := proxyRewriteBody(body, reg, req)
@@ -364,7 +364,7 @@ func TestProxyRewriteBody_Pypi(t *testing.T) {
 	body := []byte(`<a href="https://files.pythonhosted.org/packages/ab/cd/requests-2.31.0.tar.gz">requests-2.31.0.tar.gz</a>`)
 	reg := Registry{Name: "pypi", Upstream: "https://pypi.org", RewriteBody: true}
 
-	req := httptest.NewRequest("GET", "/proxy/pypi/simple/requests/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/proxy/pypi/simple/requests/", nil)
 	req.Host = "gitcache.local:8091"
 
 	result := proxyRewriteBody(body, reg, req)
@@ -382,7 +382,7 @@ func TestProxyRewriteBody_NoRewrite(t *testing.T) {
 	body := []byte(`{"some":"data"}`)
 	reg := Registry{Name: "rubygems", Upstream: "https://rubygems.org", RewriteBody: false}
 
-	req := httptest.NewRequest("GET", "/proxy/rubygems/api/v1/gems/rails.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/proxy/rubygems/api/v1/gems/rails.json", nil)
 	req.Host = "gitcache.local:8091"
 
 	result := proxyRewriteBody(body, reg, req)
@@ -400,7 +400,7 @@ func TestHandleProxyStats(t *testing.T) {
 	os.WriteFile(filepath.Join(proxyDir, "npm", "abc123.body"), []byte("cached content"), 0o644)
 	os.WriteFile(filepath.Join(proxyDir, "npm", "abc123.meta"), []byte("{}"), 0o644)
 
-	req := httptest.NewRequest("GET", "/stats", nil)
+	req := httptest.NewRequest(http.MethodGet, "/stats", nil)
 	w := httptest.NewRecorder()
 	handleProxyStats(w, req)
 
