@@ -27,11 +27,11 @@ func runInternalCompleteTargets(args []string) error {
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	_, cfg, err := pipelines.Discover(cwd)
 	if err != nil || cfg == nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	p := cfg.Find(args[0])
 	if p == nil {
@@ -49,7 +49,7 @@ func runInternalCompleteTargets(args []string) error {
 func runInternalCompleteRunners(_ []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	sparkwingDir, ok := walkUpForSparkwing(cwd)
 	if !ok {
@@ -57,7 +57,7 @@ func runInternalCompleteRunners(_ []string) error {
 	}
 	names, err := runners.Names(sparkwingDir)
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	sort.Strings(names)
 	for _, n := range names {
@@ -82,11 +82,11 @@ func runInternalCompleteProfilesForPipeline(args []string) error {
 	}
 	path, err := profile.DefaultPath()
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	_, pcfg, _ := pipelines.Discover(cwd)
 	var allowed map[string]bool

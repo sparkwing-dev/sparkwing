@@ -149,14 +149,16 @@ func TestController_GetRun_IncludeNodes(t *testing.T) {
 
 	// Default shape: raw store.Run, no wrapper.
 	resp := mustGet(t, base+"/api/v1/runs/run-incl")
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		t.Fatalf("default get status=%d", resp.StatusCode)
 	}
 	var raw map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		resp.Body.Close()
 		t.Fatalf("decode default: %v", err)
 	}
+	resp.Body.Close()
 	if raw["id"] != "run-incl" {
 		t.Errorf("default shape: id=%v want run-incl (run not at top level)", raw["id"])
 	}
@@ -166,6 +168,7 @@ func TestController_GetRun_IncludeNodes(t *testing.T) {
 
 	// include=nodes shape: {run, nodes}.
 	resp = mustGet(t, base+"/api/v1/runs/run-incl?include=nodes")
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("include get status=%d", resp.StatusCode)
 	}
@@ -223,6 +226,7 @@ func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
 	}
 
 	resp := mustGet(t, base+"/api/v1/runs/run-deco?include=nodes")
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("include get status=%d", resp.StatusCode)
 	}
@@ -294,6 +298,7 @@ func TestController_GetRun_IncludeNodes_NoSnapshot(t *testing.T) {
 		store.Node{NodeID: "a", Status: "pending"}, http.StatusCreated)
 
 	resp := mustGet(t, base+"/api/v1/runs/run-bare?include=nodes")
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("include get status=%d", resp.StatusCode)
 	}
