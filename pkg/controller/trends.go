@@ -24,7 +24,10 @@ type TrendPoint struct {
 
 // handleTrends aggregates the runs table into hourly buckets over the
 // last N hours (default 24, capped at 14d). Cached runs = every node
-// finished with outcome=cached.
+// finished with outcome=cached. avg_wait_ms is the mean intake-to-start
+// latency (started_at - created_at) across the bucket's runs; rows with
+// a zero created_at (legacy sentinel) or with created_at > started_at
+// (clock skew) are excluded so the average reflects real waits.
 func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	hours := 24
 	if v := r.URL.Query().Get("hours"); v != "" {
@@ -51,7 +54,7 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	bucketNs := int64(bucketDur)
 
 	query := `
-SELECT id, pipeline, status, started_at, finished_at
+SELECT id, pipeline, status, created_at, started_at, finished_at
   FROM runs
  WHERE started_at >= ?
 `
@@ -71,14 +74,14 @@ SELECT id, pipeline, status, started_at, finished_at
 
 	type runRow struct {
 		id, pipeline, status string
-		startedNs            int64
+		createdNs, startedNs int64
 		finishedNs           *int64
 	}
 	var runs []runRow
 	for rows.Next() {
 		var rr runRow
 		var fin *int64
-		if err := rows.Scan(&rr.id, &rr.pipeline, &rr.status, &rr.startedNs, &fin); err != nil {
+		if err := rows.Scan(&rr.id, &rr.pipeline, &rr.status, &rr.createdNs, &rr.startedNs, &fin); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -123,6 +126,8 @@ SELECT id, pipeline, status, started_at, finished_at
 	type bucket struct {
 		total, passed, failed, cached int
 		durationsMs                   []int64
+		waitSumNs                     int64
+		waitCount                     int
 	}
 	buckets := map[int64]*bucket{}
 	for _, rr := range runs {
@@ -144,6 +149,13 @@ SELECT id, pipeline, status, started_at, finished_at
 		if rr.finishedNs != nil {
 			durMs := (*rr.finishedNs - rr.startedNs) / 1_000_000
 			bkt.durationsMs = append(bkt.durationsMs, durMs)
+		}
+		// Wait = started_at - created_at. Skip legacy rows (created_at
+		// == 0 sentinel) and clock-skew cases (created_at > started_at)
+		// so the average reflects real intake-to-start latency.
+		if rr.createdNs > 0 && rr.createdNs <= rr.startedNs {
+			bkt.waitSumNs += rr.startedNs - rr.createdNs
+			bkt.waitCount++
 		}
 	}
 
@@ -170,14 +182,19 @@ SELECT id, pipeline, status, started_at, finished_at
 			}
 			p95 = b.durationsMs[p95Idx]
 		}
+		var avgWait int64
+		if b.waitCount > 0 {
+			avgWait = b.waitSumNs / int64(b.waitCount) / int64(time.Millisecond)
+		}
 		out = append(out, TrendPoint{
-			Bucket:   time.Unix(0, k).UTC().Format(time.RFC3339),
-			Total:    b.total,
-			Passed:   b.passed,
-			Failed:   b.failed,
-			Cached:   b.cached,
-			AvgDurMs: avg,
-			P95DurMs: p95,
+			Bucket:    time.Unix(0, k).UTC().Format(time.RFC3339),
+			Total:     b.total,
+			Passed:    b.passed,
+			Failed:    b.failed,
+			Cached:    b.cached,
+			AvgDurMs:  avg,
+			P95DurMs:  p95,
+			AvgWaitMs: avgWait,
 		})
 	}
 

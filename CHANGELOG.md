@@ -8,6 +8,16 @@ are required.
 
 ## [Unreleased]
 
+### Fixed
+
+- `TrendPoint.avg_wait_ms` is now actually computed:
+  `started_at - created_at` averaged across each bucket's runs,
+  excluding rows with a zero `created_at` (legacy sentinel) or
+  with `created_at > started_at` (clock skew). The dashboard's
+  "avg wait" chart now shows real intake-to-start latency instead
+  of flat zero; OpenAPI's `avg_wait_ms` description was tightened
+  to match.
+
 ### Docs
 
 - `api/openapi.yaml` — resolved the two `TODO: schema needs

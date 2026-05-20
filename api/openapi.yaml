@@ -2257,11 +2257,13 @@ components:
           type: integer
           format: int64
           description: |
-            Mean wait time (queue-to-start) of runs in this bucket
-            (ms). Always present in the field set, currently always
-            zero — the handler does not yet aggregate per-node
-            wait time, so consumers should treat the field as
-            best-effort.
+            Mean intake-to-start latency (`started_at -
+            created_at`) in milliseconds across the bucket's runs.
+            Runs with a zero `created_at` (legacy sentinel from
+            before the column was added) or with `created_at >
+            started_at` (clock skew) are excluded from the
+            average; a bucket containing only such runs reports
+            zero.
 
     Receipt:
       type: object
