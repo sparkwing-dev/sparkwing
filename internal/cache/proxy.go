@@ -70,7 +70,9 @@ func proxyKeyLock(key string) *sync.RWMutex {
 // deterministically post-config.
 func initProxy() {
 	for name := range defaultRegistries {
-		os.MkdirAll(filepath.Join(proxyDir, name), 0o755)
+		if err := os.MkdirAll(filepath.Join(proxyDir, name), 0o755); err != nil {
+			log.Printf("warning: proxy init mkdir %s: %v", name, err)
+		}
 	}
 }
 
@@ -152,7 +154,7 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 		regDir := filepath.Join(proxyDir, name)
 		var size int64
 		var count int
-		filepath.Walk(regDir, func(_ string, info os.FileInfo, err error) error {
+		if err := filepath.Walk(regDir, func(_ string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
 				return err
 			}
@@ -161,7 +163,9 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 				count++
 			}
 			return nil
-		})
+		}); err != nil {
+			log.Printf("warning: proxy stats walk %s: %v", name, err)
+		}
 		stats[name] = map[string]any{"files": count, "size_bytes": size}
 		totalSize += size
 		totalFiles += count
@@ -169,7 +173,9 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 
 	stats["total"] = map[string]any{"files": totalFiles, "size_bytes": totalSize}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("warning: proxy stats encode: %v", err)
+	}
 }
 
 func proxyCacheKey(registry, path string) string {
@@ -253,7 +259,7 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	if resp.StatusCode >= 400 {
 		w.Header().Set("X-Proxy-Cache", "MISS")
 		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		_, _ = io.Copy(w, resp.Body)
 		return
 	}
 
@@ -293,8 +299,12 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	if err := os.WriteFile(tmpBody, body, 0o644); err != nil {
 		log.Printf("warning: proxy cache write error: %v", err)
 	} else {
-		os.Rename(tmpBody, bodyPath)
-		os.WriteFile(metaPath, metaJSON, 0o644)
+		if err := os.Rename(tmpBody, bodyPath); err != nil {
+			log.Printf("warning: proxy cache rename: %v", err)
+		}
+		if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
+			log.Printf("warning: proxy cache meta write: %v", err)
+		}
 	}
 
 	log.Printf("proxy: MISS %s/%s (%d bytes, immutable=%v)", reg.Name, truncatePath(remotePath), len(body), immutable)
