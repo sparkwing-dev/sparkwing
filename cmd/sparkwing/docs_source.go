@@ -168,7 +168,7 @@ func fetchDocWeb(ctx context.Context, r webResolution, slug string) (string, err
 	}
 	if errors.Is(err, docs.ErrNotFound) {
 		return "", fmt.Errorf(
-			"topic %q not found at %s (%s/docs/%s/%s.md returned 404). Try `sparkwing docs versions --web` to confirm the version exists.",
+			"topic %q not found at %s (%s/docs/%s/%s.md returned 404); try `sparkwing docs versions --web` to confirm the version exists",
 			slug, displayVersion(r.version), r.client.BaseURL, r.version, slug)
 	}
 	return "", err
@@ -187,7 +187,7 @@ func fetchMigrationWeb(ctx context.Context, r webResolution) (string, error) {
 	}
 	if errors.Is(err, docs.ErrNotFound) {
 		return "", fmt.Errorf(
-			"migration guide for %s not found (%s/migrations/%s.md returned 404). Try `sparkwing docs versions --web` to confirm the version exists.",
+			"migration guide for %s not found (%s/migrations/%s.md returned 404); try `sparkwing docs versions --web` to confirm the version exists",
 			r.version, r.client.BaseURL, r.version)
 	}
 	return "", err
