@@ -147,6 +147,8 @@ func Main() {
 		Debug:          readDebugDirectivesFromEnv(),
 		StartAt:        os.Getenv("SPARKWING_START_AT"),
 		StopAt:         os.Getenv("SPARKWING_STOP_AT"),
+		Only:           os.Getenv("SPARKWING_ONLY"),
+		NoCacheRuns:    os.Getenv("SPARKWING_NO_CACHE_RUNS") == "1",
 		DryRun:         os.Getenv("SPARKWING_DRY_RUN") == "1",
 		MaxParallel:    runtime.NumCPU(),
 		Target:         os.Getenv("SPARKWING_TARGET"),

@@ -52,6 +52,7 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 		CacheKeyHash:  cacheHash,
 		CacheTTL:      opts.CacheTTL,
 		CancelTimeout: opts.CancelTimeout,
+		BypassRead:    noCacheRunsFromContext(ctx),
 	}
 
 	resp, err := r.backends.Concurrency.AcquireSlot(ctx, acquireReq)

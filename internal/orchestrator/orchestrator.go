@@ -79,6 +79,25 @@ type Options struct {
 	StartAt string
 	StopAt  string
 
+	// Only filters the plan's JobNodes to those whose IDs match the
+	// path.Match glob, transitively pulling Needs() ancestors so the
+	// resulting dispatch is self-consistent. Unmatched (and
+	// non-ancestor) jobs are skipped with `node_skipped` and reason
+	// `outside --only=<pattern>`. Empty disables the filter. Rejected
+	// in combination with StartAt/StopAt: they are a different filter
+	// mode (step-level reachability) and intersecting them produces
+	// surprising selections. Operates on the statically-known plan;
+	// dynamically expanded group members run when their parent is in
+	// the keep-set.
+	Only string
+
+	// NoCacheRuns disables cache READS on this run's per-node Cache()
+	// lookups. Cache WRITES still occur on success, so subsequent runs
+	// over the same content hit cache normally. Distinct from the
+	// SPARKWING_NO_CACHE / bincache flag that gates the compiled-
+	// pipeline-binary cache.
+	NoCacheRuns bool
+
 	// DryRun selects the no-mutation dispatch path: every step's
 	// DryRunFn (or its apply Fn when the step is explicitly marked
 	// SafeWithoutDryRun) runs in place of the apply Fn. Steps that
@@ -377,11 +396,30 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// loop is "save -> sparkwing run X -> see typo error" not "save -> dispatch
 	// -> watch run finish silently doing nothing useful."
 	if opts.StartAt != "" || opts.StopAt != "" {
+		if opts.Only != "" {
+			err := fmt.Errorf("--only is mutually exclusive with --start-at / --stop-at")
+			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
 		if err := sparkwingruntime.ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 		ctx = sparkwingruntime.WithStepRange(ctx, opts.StartAt, opts.StopAt)
+	}
+	// --only fails fast on a malformed glob or a pattern that matches
+	// nothing. Computed skip set is plumbed into dispatch below.
+	var onlySkip map[string]string
+	if opts.Only != "" {
+		skip, err := computeOnlySkip(plan, opts.Only)
+		if err != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
+		onlySkip = skip
+	}
+	if opts.NoCacheRuns {
+		ctx = withNoCacheRuns(ctx)
 	}
 	// Install the dry-run mode flag on the run-wide ctx so every
 	// Work executed under it routes through DryRunFn instead
@@ -447,7 +485,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		go runLocalTriggerLoop(consumerCtx, ls.st, runID, nil)
 	}
 
-	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta)
+	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip)
 
 	finalStatus := "success"
 	errMsg := ""
@@ -594,7 +632,7 @@ func DumpRunState(ctx context.Context, st *store.Store, runID string, art storag
 // dispatch runs nodes in parallel where deps allow. Failed upstreams
 // produce Cancelled downstreams (reason "upstream-failed"). OnFailure
 // recoveries dispatch only when their parent fails.
-func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta) error {
+func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta, onlySkip map[string]string) error {
 	runStart := time.Now()
 
 	// Plan-level .Cache() gates the whole run before any dispatch.
@@ -616,6 +654,7 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	state := newDispatchState(ctx, backends, r, runID, plan, delegate, debug, retryOf, masker, maxParallel)
 	state.snapMeta = snapMeta
 	state.onTargetSkip = computeOnTargetSkip(plan, snapMeta.Target)
+	state.onlySkip = onlySkip
 
 	// Skip-passed: pre-seed succeeded nodes from the prior run so
 	// runOneNode short-circuits them.
@@ -1141,6 +1180,11 @@ type dispatchState struct {
 	// dispatch loop short-circuits these nodes via markSkipped.
 	onTargetSkip map[string]string
 
+	// onlySkip captures the --only job-level filter. Nodes outside the
+	// matched set (plus their transitive Needs() ancestors) are skipped
+	// at dispatch entry. Empty map = no filter.
+	onlySkip map[string]string
+
 	wg sync.WaitGroup
 }
 
@@ -1558,6 +1602,10 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	// filtered here -- they participate via the parent's outcome.
 	if _, claimed := s.claimedBy[node.ID()]; !claimed {
 		if reason, ok := s.onTargetSkip[node.ID()]; ok {
+			s.markSkipped(node.ID(), reason)
+			return
+		}
+		if reason, ok := s.onlySkip[node.ID()]; ok {
 			s.markSkipped(node.ID(), reason)
 			return
 		}

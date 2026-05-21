@@ -48,6 +48,12 @@ const (
 
 // AcquireSlotRequest: empty CacheKeyHash = no memo; empty NodeID =
 // plan-level. HolderID convention: "runID/nodeID" or "runID/-".
+//
+// BypassRead suppresses the cache-lookup branch: the request flows
+// straight into the capacity/coalesce/queue path as if no prior entry
+// existed for this key. Cache WRITES at release time are unaffected.
+// Used by --no-cache so a run forces fresh execution but still
+// populates the runs store for subsequent runs over the same content.
 type AcquireSlotRequest struct {
 	Key           string
 	HolderID      string
@@ -59,6 +65,7 @@ type AcquireSlotRequest struct {
 	CacheTTL      time.Duration
 	CancelTimeout time.Duration
 	Lease         time.Duration
+	BypassRead    bool
 }
 
 // AcquireSlotResponse: fields are populated per Kind.
@@ -142,7 +149,11 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	defer func() { _ = tx.Rollback() }()
 
 	// 1. Cache lookup; atomic with the rest so we never double-run.
-	if req.CacheKeyHash != "" {
+	// BypassRead skips this branch entirely: the request flows into
+	// capacity / coalesce / queue as if no prior entry existed. The
+	// release-time write still records the run's result so a
+	// follow-up request (BypassRead=false) hits cache normally.
+	if req.CacheKeyHash != "" && !req.BypassRead {
 		var outputRef, originRun, originNode string
 		var expiresNS int64
 		err := tx.QueryRowContext(

@@ -51,6 +51,19 @@ type runFlags struct {
 	// mean X?" suggestion at registration time.
 	startAt string
 	stopAt  string
+	// --only is a job-level filter (path.Match glob over JobNode IDs).
+	// Matched jobs run; jobs reachable as transitive Needs() ancestors
+	// of matched jobs also run (so a glob hitting only the leaves still
+	// produces a self-consistent dispatch). Everything else is skipped
+	// with `node_skipped`. Mutually exclusive with --start-at / --stop-at:
+	// they're a different filter mode (step-level reachability) and
+	// intersecting the two would produce surprising selections.
+	only string
+	// --no-cache disables cache READS for this run; per-node cache
+	// WRITES still happen on success so subsequent runs over the same
+	// content hit cache normally. Distinct from SPARKWING_NO_CACHE
+	// (which gates the bincache compiled-pipeline-binary cache).
+	noCache bool
 	// --dry-run runs each step's DryRunFn instead of its apply Fn.
 	// No mutation; safe to run from agents and CI gates before
 	// destructive operations. Steps without a DryRunFn (and without
@@ -219,6 +232,20 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-stop-at="):
 			wf.stopAt = strings.TrimPrefix(a, "--sw-stop-at=")
 			i++
+		case a == "--sw-only":
+			if i+1 < len(args) {
+				wf.only = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-only="):
+			wf.only = strings.TrimPrefix(a, "--sw-only=")
+			i++
+		case a == "--sw-no-cache":
+			wf.noCache = true
+			i++
 		case a == "--sw-dry-run", a == "--dry-run=true":
 			wf.dryRun = true
 			i++
@@ -359,6 +386,12 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 	// same way it does locally.
 	if wf.dryRun {
 		envMap["SPARKWING_DRY_RUN"] = "1"
+	}
+	if wf.only != "" {
+		envMap["SPARKWING_ONLY"] = wf.only
+	}
+	if wf.noCache {
+		envMap["SPARKWING_NO_CACHE_RUNS"] = "1"
 	}
 
 	triggerBranch := wf.ref

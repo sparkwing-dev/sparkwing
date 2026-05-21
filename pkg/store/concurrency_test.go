@@ -195,6 +195,53 @@ func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
 	}
 }
 
+func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	r1 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
+	})
+	if r1.Kind != store.AcquireGranted {
+		t.Fatalf("r1: want Granted got %s", r1.Kind)
+	}
+	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
+	if err != nil || !released {
+		t.Fatalf("release: released=%v err=%v", released, err)
+	}
+
+	// BypassRead must not short-circuit on the seeded cache entry.
+	r2 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
+		BypassRead: true,
+	})
+	if r2.Kind != store.AcquireGranted {
+		t.Fatalf("r2 with BypassRead: want Granted got %s", r2.Kind)
+	}
+
+	// Release r2 with the same cache-key hash; this is the write that
+	// must still happen under BypassRead.
+	released2, err := s.ReleaseConcurrencySlot(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour)
+	if err != nil || !released2 {
+		t.Fatalf("release r2: released=%v err=%v", released2, err)
+	}
+
+	// A subsequent acquire without BypassRead must hit the cache entry
+	// r2 just wrote (origin = r2/n1, not r1/n1 — write replaced the row).
+	r3 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
+	})
+	if r3.Kind != store.AcquireCached {
+		t.Fatalf("r3: want Cached got %s", r3.Kind)
+	}
+	if r3.OriginRunID != "r2" || r3.OriginNodeID != "n1" {
+		t.Fatalf("r3: origin = %s/%s, want r2/n1 (write under BypassRead must replace prior entry)",
+			r3.OriginRunID, r3.OriginNodeID)
+	}
+}
+
 func TestConcurrency_DriftWarnOnCapacityChange(t *testing.T) {
 	s := newStoreT(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
