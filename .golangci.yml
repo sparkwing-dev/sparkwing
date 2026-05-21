@@ -17,8 +17,10 @@ linters:
     - bidichk # CVE-2021-42574 Trojan Source defense
     - bodyclose # missing http response body Close()
     - copyloopvar # loop-variable capture bugs (Go 1.22+ semantics)
+    - depguard # banned imports (deprecated / wrong-version modules)
     - errcheck # unchecked error returns
     - errorlint # %w wrapping + errors.Is/As discipline
+    - forbidigo # banned function calls (panic / os.Exit outside main)
     - govet # default vet + extras enabled below
     - ineffassign # assignments whose value is never read
     - misspell # common english spelling errors
@@ -86,12 +88,52 @@ linters:
       require-explanation: true
       require-specific: true
       allow-unused: false
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: "io/ioutil is deprecated since Go 1.16; use io and os."
+            - pkg: github.com/pkg/errors
+              desc: "use stdlib errors with %w wrapping; errors.Is/As replaces pkg/errors.Cause/As."
+            - pkg: gopkg.in/yaml.v2
+              desc: "use gopkg.in/yaml.v3; v2 is unmaintained and has known issues with anchor handling."
+            - pkg: github.com/stretchr/testify/assert
+              desc: "use testify/require instead so a failed assertion stops the test (assert keeps going and produces follow-on noise)."
+    forbidigo:
+      # Each `forbid` pattern fires on call sites by default; analyze-types=false
+      # keeps the rule focused on textual matches (no need to load full type info).
+      exclude-godoc-examples: true
+      analyze-types: false
+      forbid:
+        - pattern: ^panic$
+          msg: "panic() in library code is a hard crash; return an error and let the caller decide. Allowed in cmd/**/main.go and _test.go (see exclusions)."
+        - pattern: ^os\.Exit$
+          msg: "os.Exit short-circuits deferred cleanup; return an error from main or use orchestrator-managed shutdown. Allowed in cmd/**/main.go (see exclusions)."
+        - pattern: ^fmt\.Println$
+          msg: "fmt.Println bypasses the structured logger; use sparkwing.Info/Error or slog directly. Allowed in cmd/**/main.go and _test.go (see exclusions)."
   exclusions:
     rules:
       # Tests often ignore errors deliberately.
       - path: _test\.go
         linters:
           - errcheck
+      # Tests can panic / Println / os.Exit as part of their style.
+      - path: _test\.go
+        linters:
+          - forbidigo
+      # CLI binary subtrees legitimately do panic / os.Exit /
+      # fmt.Println at the process boundary. The forbidigo bans
+      # target library code, not the binary entry points.
+      - path: cmd/
+        linters:
+          - forbidigo
+      # planguard.go's API is to panic when a sparkwing invariant
+      # is violated (side effects in Pipeline.Plan()). Panic is
+      # the contract of this package, not a leak.
+      - path: sparkwing/planguard/
+        linters:
+          - forbidigo
       # Generated code should be left alone.
       - path: \.pb\.go$
         linters:

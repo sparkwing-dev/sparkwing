@@ -1,0 +1,54 @@
+# Markdownlint config for sparkwing docs. Defaults are reasonable;
+# the overrides below disable a few rules that produce noise without
+# catching real issues for our prose style.
+
+config:
+  # Line length: docs already wrap at ~80 by convention but code
+  # blocks, tables, and link-heavy lines blow past that. Disable
+  # rather than fight per-line.
+  MD013: false
+
+  # Inline HTML: we use occasional <kbd>, <details>, etc. Allow.
+  MD033: false
+
+  # Bare URLs: README/CHANGELOG cite URLs directly fairly often.
+  # Wrapping every URL in <> or [] is more ceremony than payoff.
+  MD034: false
+
+  # First-line-must-be-h1: not every doc starts with a top-level
+  # heading (e.g., migration guides start with a # then immediately
+  # have ## sections).
+  MD041: false
+
+  # Heading-style: allow both ATX and setext where authors prefer.
+  # ATX (#) is the default; setext (===/---) is fine in a few docs.
+  MD003: false
+
+  # Multiple consecutive blank lines: occasionally intentional for
+  # vertical breathing room.
+  MD012:
+    maximum: 2
+
+  # Table column style (compact vs spaced pipes): existing docs mix
+  # both forms freely. Different renderers handle both identically;
+  # zero reader-facing impact.
+  MD060: false
+
+  # Code-block language tag: useful for syntax highlighting but
+  # ASCII art / plain output / shell prompts are legitimately
+  # untagged. Enable per-doc with author judgment rather than
+  # globally.
+  MD040: false
+
+globs:
+  - "docs/**/*.md"
+  - "*.md"
+ignores:
+  - "node_modules/**"
+  - "web/**"
+  - "**/CHANGELOG.md"
+  # CHANGELOG is governed by the dedicated checker in
+  # .sparkwing/jobs/changelog_lint.go, which enforces conventions
+  # markdownlint can't see (per-section dedupe + breaking-link
+  # rules). Letting both lint CHANGELOG.md would create overlapping
+  # signal.

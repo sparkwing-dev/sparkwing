@@ -64,6 +64,17 @@ func (p *Lint) run(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Info(ctx, "api snapshot gate: ok")
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "shellcheck: clean")
+
+	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "markdownlint: clean")
+
 	return nil
 }
 

@@ -56,6 +56,19 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "no-replace check: clean")
 	}
 
+	// 1b. `go mod tidy` drift: running tidy should produce no diff. A
+	// non-tidy go.mod is a near-certain sign that a recent `go get`
+	// wasn't followed by tidy. We swallow tidy's own error (it can fail
+	// in workspaces with unreleased local sibling modules); the actual
+	// signal is `git diff --quiet` against go.mod/go.sum after tidy ran.
+	if _, err := sparkwing.Bash(ctx,
+		`go -C .sparkwing mod tidy 2>/dev/null || true; git diff --quiet -- .sparkwing/go.mod .sparkwing/go.sum`,
+	).Run(); err != nil {
+		failures = append(failures, "go mod tidy drift: run `go -C .sparkwing mod tidy` and commit the result")
+	} else {
+		sparkwing.Info(ctx, "go mod tidy: no drift")
+	}
+
 	// 2. Version freshness: every sparkwing-ecosystem dep must be at
 	// the latest released tag (or a not-behind local replace).
 	if err := CheckVersionsFreshness(ctx, sparkwing.WorkDir()); err != nil {
