@@ -441,34 +441,97 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-// migrate creates the canonical schema and applies any column
-// additions needed by older databases. On Postgres, the entire
-// migration runs inside one transaction guarded by a transactional
-// advisory lock so concurrent OpenPostgres calls against a fresh
-// database don't race the DDL. SQLite serializes writers at the
-// database level and therefore needs no equivalent.
-func (s *Store) migrate() error {
-	if s.dialect == DialectPostgres {
-		return s.migratePostgres()
-	}
-	return s.migrateSQLite()
+// expectedSchemaVersion is the schema version this binary understands.
+// Bumped each time a new migrateToVN step is appended below. On Open,
+// a database recording a higher version refuses; a database recording
+// a lower (or no) version is brought forward by running the missing
+// steps in order inside a single transaction (on Postgres, guarded by
+// pg_advisory_xact_lock so N runners coordinate cleanly).
+const expectedSchemaVersion = 1
+
+// schemaVersionTable is created unconditionally on every Open before
+// the version check runs; the check needs the table to exist in order
+// to read from it. The same DDL is valid in both dialects (INTEGER +
+// BIGINT translate identically here).
+const schemaVersionTable = `CREATE TABLE IF NOT EXISTS sparkwing_schema_version (
+    version    INTEGER NOT NULL,
+    applied_at BIGINT NOT NULL,
+    PRIMARY KEY (version)
+);`
+
+// SkewError is returned by Open when the database is at a schema
+// version newer than the binary understands. Callers can use
+// errors.As to detect the condition (e.g. for surfacing a custom
+// upgrade prompt in the CLI); the wrapped message is plain English
+// and suitable for direct display.
+type SkewError struct {
+	DBVersion     int
+	BinaryVersion int
 }
 
-func (s *Store) migrateSQLite() error {
-	if _, err := s.execNoCtx(schemaSQLite); err != nil {
-		return err
+func (e *SkewError) Error() string {
+	return fmt.Sprintf(
+		"sparkwing: database is at schema version %d; this binary expects %d. Upgrade sparkwing or restore the database to a matching version.",
+		e.DBVersion, e.BinaryVersion,
+	)
+}
+
+// migrate brings the database up to expectedSchemaVersion. The flow
+// is identical across dialects:
+//
+//  1. Ensure sparkwing_schema_version exists (idempotent CREATE TABLE
+//     IF NOT EXISTS).
+//  2. Read MAX(version). NULL → 0; treat a brand-new database the
+//     same as one stuck at the pre-history version 0.
+//  3. If current > expectedSchemaVersion: return SkewError. Do not
+//     touch the database.
+//  4. If current < expectedSchemaVersion: run migrateToVN(...) for
+//     each missing step in order. Each step ends by INSERTing its
+//     version row.
+//  5. If current == expectedSchemaVersion: no-op.
+//
+// On Postgres the version check and migration steps run inside one
+// transaction guarded by pg_advisory_xact_lock so concurrent opens
+// against a fresh database produce exactly one execution. SQLite
+// serializes writers at the database level; concurrent opens
+// converge via INSERT ... ON CONFLICT DO NOTHING on the version
+// row.
+func (s *Store) migrate() error {
+	ctx := context.Background()
+	if _, err := s.exec(ctx, schemaVersionTable); err != nil {
+		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
 	}
-	if err := s.ensureColumnsAll(); err != nil {
-		return err
+	if s.dialect == DialectPostgres {
+		return s.migratePostgres(ctx)
 	}
-	if err := s.backfillRunAnnotationRollup(); err != nil {
-		return err
+	return s.migrateSQLite(ctx)
+}
+
+func (s *Store) migrateSQLite(ctx context.Context) error {
+	var current int
+	if err := s.queryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`,
+	).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if current > expectedSchemaVersion {
+		return &SkewError{DBVersion: current, BinaryVersion: expectedSchemaVersion}
+	}
+	for v := current + 1; v <= expectedSchemaVersion; v++ {
+		if err := s.applyMigrationSQLite(ctx, v); err != nil {
+			return fmt.Errorf("apply migration v%d: %w", v, err)
+		}
+		if _, err := s.exec(ctx,
+			`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)
+			 ON CONFLICT (version) DO NOTHING`,
+			v, time.Now().UnixNano()); err != nil {
+			return fmt.Errorf("record schema version v%d: %w", v, err)
+		}
 	}
 	return nil
 }
 
-func (s *Store) migratePostgres() error {
-	ctx := context.Background()
+func (s *Store) migratePostgres(ctx context.Context) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -481,16 +544,70 @@ func (s *Store) migratePostgres() error {
 		`SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`); err != nil {
 		return fmt.Errorf("acquire migrate advisory lock: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, schemaPostgres); err != nil {
-		return err
+	var current int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`,
+	).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
 	}
-	if err := s.ensureColumnsAllTx(ctx, tx); err != nil {
-		return err
+	if current > expectedSchemaVersion {
+		return &SkewError{DBVersion: current, BinaryVersion: expectedSchemaVersion}
+	}
+	if current == expectedSchemaVersion {
+		return tx.Commit()
+	}
+	for v := current + 1; v <= expectedSchemaVersion; v++ {
+		if err := s.applyMigrationPostgresTx(ctx, tx, v); err != nil {
+			return fmt.Errorf("apply migration v%d: %w", v, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)
+			 ON CONFLICT (version) DO NOTHING`,
+			v, time.Now().UnixNano()); err != nil {
+			return fmt.Errorf("record schema version v%d: %w", v, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	// backfillRunAnnotationRollup runs after the lock is released so
+	// it doesn't hold writers; it's idempotent and re-running across
+	// retries is harmless.
 	return s.backfillRunAnnotationRollup()
+}
+
+// applyMigrationSQLite dispatches on version. Each case body is the
+// canonical SQLite-side migration step for that version; new
+// versions append a case here and bump expectedSchemaVersion.
+func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
+	switch version {
+	case 1:
+		if _, err := s.exec(ctx, schemaSQLite); err != nil {
+			return err
+		}
+		if err := s.ensureColumnsAll(); err != nil {
+			return err
+		}
+		return s.backfillRunAnnotationRollup()
+	default:
+		return fmt.Errorf("no migration registered for v%d", version)
+	}
+}
+
+// applyMigrationPostgresTx dispatches on version inside the open
+// migration transaction. Pairs with applyMigrationSQLite — the same
+// version number maps to a semantically equivalent step on each
+// dialect.
+func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, version int) error {
+	switch version {
+	case 1:
+		if _, err := tx.ExecContext(ctx, schemaPostgres); err != nil {
+			return err
+		}
+		return s.ensureColumnsAllTx(ctx, tx)
+	default:
+		return fmt.Errorf("no migration registered for v%d", version)
+	}
 }
 
 // columnMigrations enumerates the additive column changes that have
