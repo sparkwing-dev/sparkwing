@@ -115,6 +115,24 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "govulncheck: clean")
 	}
 
+	// 6. Shell-script gate. bin/check-shell.sh discovers every tracked
+	// .sh + bash-shebanged file and runs shellcheck on it. No-op when
+	// the repo has no shell scripts.
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
+	} else {
+		sparkwing.Info(ctx, "shellcheck: clean")
+	}
+
+	// 7. Markdown lint. .markdownlint-cli2.yaml selects which files
+	// to check; CHANGELOG.md is exempt (the changelog-style gate
+	// owns that surface).
+	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
+	} else {
+		sparkwing.Info(ctx, "markdownlint: clean")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
