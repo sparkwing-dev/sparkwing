@@ -13,14 +13,23 @@ import (
 )
 
 // MigrationEntry describes one per-version migration guide shipped
-// under docs/migrations/. Date and Summary are best-effort enrichment
-// pulled from docs/migrations/README.md; both may be empty if the
-// index file is missing, malformed, or omits a row for this version.
+// under docs/migrations/. Field shape (and order) mirrors the web's
+// /migrations/index.json (minus url / raw_url, which are
+// web-deployment artifacts) so an agent that learned the schema from
+// either source can consume the other. Slug == Version to match the
+// web; agents that want to feed a value to `sparkwing docs read
+// --topic` should prefix with `migrations/`.
+//
+// Title is parsed from the file's first H1. Date and Summary are
+// best-effort enrichment pulled from docs/migrations/README.md; both
+// may be the empty string if the index is missing, malformed, or
+// omits a row for this version.
 type MigrationEntry struct {
 	Version string `json:"version"`
-	Date    string `json:"date,omitempty"`
-	Summary string `json:"summary,omitempty"`
 	Slug    string `json:"slug"`
+	Title   string `json:"title"`
+	Date    string `json:"date"`
+	Summary string `json:"summary"`
 	Bytes   int    `json:"bytes"`
 }
 
@@ -51,9 +60,11 @@ func MigrationsList() []MigrationEntry {
 		if rerr != nil {
 			return nil
 		}
+		title, _ := extractTitleSummary(body)
 		entry := MigrationEntry{
 			Version: version,
-			Slug:    "migrations/" + version,
+			Slug:    version,
+			Title:   title,
 			Bytes:   len(body),
 		}
 		if row, ok := index[version]; ok {

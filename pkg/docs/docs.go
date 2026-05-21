@@ -16,10 +16,12 @@ var allDocs embed.FS
 
 // Entry describes one doc topic. Slug is what the CLI takes via
 // --topic. Title and Summary are extracted from the markdown's first
-// H1 / first paragraph.
+// H1 / first paragraph. Field shape mirrors the web's
+// /docs/index.json (minus url / raw_url, which are web-deployment
+// artifacts) so an agent that learned the schema from either source
+// can consume the other.
 type Entry struct {
 	Slug    string `json:"slug"`
-	Path    string `json:"path"`
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
 	Bytes   int    `json:"bytes"`
@@ -44,7 +46,6 @@ func List() []Entry {
 		title, summary := extractTitleSummary(body)
 		entries = append(entries, Entry{
 			Slug:    slug,
-			Path:    rel,
 			Title:   title,
 			Summary: summary,
 			Bytes:   len(body),

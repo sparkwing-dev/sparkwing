@@ -3,13 +3,24 @@
 func All() string
 type Entry struct {
 	Slug    string
-	Path    string
 	Title   string
 	Summary string
 	Bytes   int
 }
 const ErrNotFound = docsError("doc not found")
 func List() []Entry
+type MigrationEntry struct {
+	Version string
+	Slug    string
+	Title   string
+	Date    string
+	Summary string
+	Bytes   int
+}
+func MigrationsBetween(from, to string) ([]MigrationEntry, error)
+func MigrationsBetweenMarkdown(from, to string, entries []MigrationEntry) (string, error)
+func MigrationsList() []MigrationEntry
+func MigrationsRead(version string) (string, error)
 func Read(slug string) (string, error)
 func Search(query string) []Entry
 

@@ -49,10 +49,14 @@ type InfoVersion struct {
 }
 
 type InfoDocs struct {
-	CLI      string `json:"cli"`
-	Web      string `json:"web"`
-	LLMsFull string `json:"llms_full"`
-	LLMsTXT  string `json:"llms_txt"`
+	CLI                  string `json:"cli"`
+	Web                  string `json:"web"`
+	LLMsFull             string `json:"llms_full"`
+	LLMsTXT              string `json:"llms_txt"`
+	Index                string `json:"index"`
+	MigrationGuides      string `json:"migration_guides"`
+	MigrationGuidesAgent string `json:"migration_guides_agent"`
+	MigrationGuidesIndex string `json:"migration_guides_index"`
 }
 
 type InfoProject struct {
@@ -324,10 +328,14 @@ func gatherInfo(agentMode bool) Info {
 		Version: parseInfoVersion(installedVersion()),
 		Binary:  binary,
 		Docs: InfoDocs{
-			CLI:      "sparkwing docs list / read --topic <slug> / all",
-			Web:      "https://sparkwing.dev/docs/",
-			LLMsFull: "https://sparkwing.dev/llms-full.txt",
-			LLMsTXT:  "https://sparkwing.dev/llms.txt",
+			CLI:                  "sparkwing docs list / read --topic <slug> / all",
+			Web:                  "https://sparkwing.dev/docs/",
+			LLMsFull:             "https://sparkwing.dev/llms-full.txt",
+			LLMsTXT:              "https://sparkwing.dev/llms.txt",
+			Index:                "https://sparkwing.dev/docs/index.json",
+			MigrationGuides:      "https://sparkwing.dev/docs/migration-guide/",
+			MigrationGuidesAgent: "https://sparkwing.dev/migrations-full.txt",
+			MigrationGuidesIndex: "https://sparkwing.dev/migrations/index.json",
 		},
 		ForAgents:    infoForAgents,
 		FirstRunNote: infoFirstRunNote,
@@ -663,6 +671,14 @@ func printInfoTable(info Info) {
 	fmt.Printf("  web:        %s\n", color.Cyan(info.Docs.Web))
 	fmt.Printf("  llms-full:  %s %s\n", color.Cyan(info.Docs.LLMsFull), color.Dim("(full corpus, one fetch)"))
 	fmt.Printf("  llms.txt:   %s %s\n", color.Cyan(info.Docs.LLMsTXT), color.Dim("(short index)"))
+	fmt.Printf("  index:      %s %s\n", color.Cyan(info.Docs.Index), color.Dim("(structured doc discovery)"))
+	fmt.Println()
+
+	fmt.Println(color.Bold("MIGRATION GUIDES"))
+	fmt.Printf("  cli:        %s %s\n", color.Cyan("sparkwing docs migrations list / read / between"), color.Dim("(offline, version-locked)"))
+	fmt.Printf("  web:        %s\n", color.Cyan(info.Docs.MigrationGuides))
+	fmt.Printf("  agent:      %s %s\n", color.Cyan(info.Docs.MigrationGuidesAgent), color.Dim("(concatenated corpus, one fetch)"))
+	fmt.Printf("  index:      %s %s\n", color.Cyan(info.Docs.MigrationGuidesIndex), color.Dim("(structured migration discovery)"))
 }
 
 func batsay(msg string, width int) string {

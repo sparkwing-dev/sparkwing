@@ -38,13 +38,124 @@ func TestRunDocsMigrationsList_JSONIsParseable(t *testing.T) {
 		t.Fatal("expected at least one row in json output")
 	}
 	for _, r := range rows {
-		if r.Slug != "migrations/"+r.Version {
-			t.Errorf("row %+v slug doesn't match version", r)
+		if r.Slug != r.Version {
+			t.Errorf("row %+v: slug should equal version (matches web /migrations/index.json)", r)
 		}
 		if r.Bytes <= 0 {
 			t.Errorf("row %+v has non-positive bytes", r)
 		}
 	}
+}
+
+// TestRunDocsMigrationsList_JSONSchemaMatchesWeb asserts the CLI's
+// list -o json output uses the same field names (and order) as the
+// web's /migrations/index.json schema. The web is authoritative; the
+// CLI conforms to a subset (minus url / raw_url, which are
+// web-deployment artifacts).
+func TestRunDocsMigrationsList_JSONSchemaMatchesWeb(t *testing.T) {
+	out := captureStdout(t, func() {
+		if err := runDocsMigrationsList([]string{"-o", "json"}); err != nil {
+			t.Fatalf("list -o json: %v", err)
+		}
+	})
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("expected at least one row")
+	}
+	wantKeys := []string{"version", "slug", "title", "date", "summary", "bytes"}
+	row := rows[0]
+	if len(row) != len(wantKeys) {
+		t.Errorf("row has %d keys, want %d (%v); got %v", len(row), len(wantKeys), wantKeys, keysOf(row))
+	}
+	for _, k := range wantKeys {
+		if _, ok := row[k]; !ok {
+			t.Errorf("row missing key %q (web schema requires it)", k)
+		}
+	}
+	// Field-order check: re-encode the first row and parse the raw
+	// JSON to make sure keys appear in the same order as the web.
+	gotOrder := keysInOrder(out)
+	if len(gotOrder) != len(wantKeys) {
+		t.Errorf("ordered keys = %v; want %v", gotOrder, wantKeys)
+		return
+	}
+	for i := range wantKeys {
+		if gotOrder[i] != wantKeys[i] {
+			t.Errorf("ordered key[%d] = %q; want %q (web schema order: %v)", i, gotOrder[i], wantKeys[i], wantKeys)
+		}
+	}
+}
+
+// TestRunDocsList_JSONSchemaMatchesWeb verifies the existing
+// `sparkwing docs list -o json` output mirrors the web's
+// /docs/index.json shape (minus url / raw_url).
+func TestRunDocsList_JSONSchemaMatchesWeb(t *testing.T) {
+	out := captureStdout(t, func() {
+		if err := runDocsList([]string{"-o", "json"}); err != nil {
+			t.Fatalf("list -o json: %v", err)
+		}
+	})
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("expected at least one row")
+	}
+	wantKeys := []string{"slug", "title", "summary", "bytes"}
+	row := rows[0]
+	if len(row) != len(wantKeys) {
+		t.Errorf("row has %d keys, want %d (%v); got %v", len(row), len(wantKeys), wantKeys, keysOf(row))
+	}
+	for _, k := range wantKeys {
+		if _, ok := row[k]; !ok {
+			t.Errorf("row missing key %q (web schema requires it)", k)
+		}
+	}
+}
+
+func keysOf(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// keysInOrder returns the JSON object keys of the first element of a
+// top-level JSON array, in source order. Uses a streaming decoder so
+// map iteration randomness doesn't interfere.
+func keysInOrder(jsonArray string) []string {
+	dec := json.NewDecoder(strings.NewReader(jsonArray))
+	// Read `[`.
+	if _, err := dec.Token(); err != nil {
+		return nil
+	}
+	// Read `{`.
+	if _, err := dec.Token(); err != nil {
+		return nil
+	}
+	var keys []string
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return nil
+		}
+		keys = append(keys, key)
+		// Skip the value.
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil
+		}
+	}
+	return keys
 }
 
 func TestRunDocsMigrationsList_PlainOnePerLine(t *testing.T) {

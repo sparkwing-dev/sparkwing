@@ -16,8 +16,8 @@ func TestMigrationsList_IncludesEmbeddedVersionsInDescendingOrder(t *testing.T) 
 		if !semver.IsValid(e.Version) {
 			t.Fatalf("entry %d has invalid semver version %q", i, e.Version)
 		}
-		if e.Slug != "migrations/"+e.Version {
-			t.Fatalf("entry %d slug = %q, want %q", i, e.Slug, "migrations/"+e.Version)
+		if e.Slug != e.Version {
+			t.Fatalf("entry %d slug = %q, want %q (slug mirrors the web's /migrations/index.json where slug == version)", i, e.Slug, e.Version)
 		}
 		if e.Bytes == 0 {
 			t.Fatalf("entry %d (%s) has zero bytes; embedded file should be non-empty", i, e.Version)
@@ -31,8 +31,16 @@ func TestMigrationsList_IncludesEmbeddedVersionsInDescendingOrder(t *testing.T) 
 
 func TestMigrationsList_ExcludesReadmeIndex(t *testing.T) {
 	for _, e := range MigrationsList() {
-		if strings.HasSuffix(e.Slug, "/README") || e.Version == "README" {
+		if e.Slug == "README" || e.Version == "README" {
 			t.Fatalf("README.md leaked into MigrationsList(): %+v", e)
+		}
+	}
+}
+
+func TestMigrationsList_PopulatesTitle(t *testing.T) {
+	for _, e := range MigrationsList() {
+		if e.Title == "" {
+			t.Errorf("entry %s has empty Title; expected H1 to be parsed", e.Version)
 		}
 	}
 }
