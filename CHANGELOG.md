@@ -10,6 +10,21 @@ are required.
 
 ### Added
 
+- `.sparkwing/jobs/changelog_lint.go` — `CheckChangelogLint` /
+  `LintChangelog(body, migrations fs.FS)` enforces the
+  `docs/changelog-style.md` rubric mechanically. Two checks: (1)
+  no duplicate `### <Category>` sub-headings within a single
+  `## [Unreleased]` / `## [vX.Y.Z]` section, (2) every
+  `- **<scope> (Breaking):**` entry in a versioned section must
+  link to a real `docs/migrations/v<X.Y.Z>.md#<anchor>` whose file
+  exists, anchor resolves to an H2 in that file, and whose version
+  matches the section. Inside `[Unreleased]` the link can be missing
+  (release-time agent fills it in) or point at
+  `docs/migrations/_unreleased.md`. Output: one
+  `CHANGELOG.md:<line>: <category>: <message>` per violation, with a
+  final `<N> issue(s)` summary. Wired into `sparkwing run lint`.
+  Pure Go, fully unit-tested (no filesystem reads in the pure
+  function — caller wires `os.DirFS`).
 - `.sparkwing/jobs/pre_v1_policy.go` — `CheckPreV1Policy` enforces the
   README's "stays below v1.0.0" rule across the indirect signals the
   existing `release.go` version-gate can't see: CHANGELOG.md must not

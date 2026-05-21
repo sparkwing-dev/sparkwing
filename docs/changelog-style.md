@@ -114,6 +114,25 @@ migration. Stable anchor slugs matter; rename with care.
 `docs/migrations/README.md` is an append-only chronological index.
 The release pipeline appends an entry on every release.
 
+## What the linter enforces vs what the agent does
+
+Two layers, with deliberately separate concerns:
+
+- **`sparkwing run lint`** (the CHANGELOG-style gate in
+  `.sparkwing/jobs/changelog_lint.go`) catches the mechanical
+  violations: duplicate `### Category` sub-headings inside a single
+  version section, missing or wrong migration-guide links on
+  `(Breaking)` entries (file must exist, anchor must resolve to an
+  H2 in the file, version in the link path must match the section's
+  version). Output shape: `CHANGELOG.md:<line>: <category>: <message>`,
+  one issue per violation, exit non-zero with a final `<N> issue(s)`
+  summary. Always-on; no env-var gate.
+- **The pre-release manicuring agent** does the judgment work: tightening
+  prose, choosing scope prefixes, deciding which entries to merge,
+  generating the migration-guide bodies, pulling internal-cleanup
+  entries that don't belong in adopter-facing notes. The linter
+  surfaces *what's wrong*; the agent decides *how to fix it*.
+
 ## Pre-release manicuring (what the agent does)
 
 Before cutting `vX.Y.Z`, the agent applies this rubric to `[Unreleased]`:
