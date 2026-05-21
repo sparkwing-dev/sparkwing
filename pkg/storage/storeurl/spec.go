@@ -148,7 +148,13 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 		return client.NewWithToken(url, nil, token), nil
 	case backends.TypeGCS, backends.TypeAzureBlob:
 		return nil, unimplemented("state", spec.Type)
-	case backends.TypePostgres, backends.TypeMySQL:
+	case backends.TypePostgres:
+		dsn, err := resolveStateDSN("postgres", spec.URL, spec.URLSource)
+		if err != nil {
+			return nil, err
+		}
+		return store.OpenPostgres(ctx, dsn)
+	case backends.TypeMySQL:
 		return nil, unimplemented("state", spec.Type)
 	default:
 		return nil, fmt.Errorf("state backend type %q is not recognized", spec.Type)
@@ -157,6 +163,33 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 
 func unimplemented(surface, t string) error {
 	return fmt.Errorf("%s backend type %q is recognized but not implemented in this build", surface, t)
+}
+
+// resolveStateDSN reads either an inline url or an env-var indirection
+// (`env:VAR_NAME`) and returns the resolved DSN. Mirrors the
+// convention used elsewhere in the backends config: keep the literal
+// connection string out of YAML by pointing at an environment variable
+// the runner provides.
+func resolveStateDSN(surface, url, urlSource string) (string, error) {
+	if url != "" {
+		return url, nil
+	}
+	if urlSource == "" {
+		return "", fmt.Errorf("state backend type=%s requires url or url_source: env:VAR", surface)
+	}
+	const prefix = "env:"
+	if !strings.HasPrefix(urlSource, prefix) {
+		return "", fmt.Errorf("state backend url_source must use the form %sVAR_NAME (got %q)", prefix, urlSource)
+	}
+	name := urlSource[len(prefix):]
+	if name == "" {
+		return "", fmt.Errorf("state backend url_source: %s name is empty", prefix)
+	}
+	val := os.Getenv(name)
+	if val == "" {
+		return "", fmt.Errorf("state backend url_source: env %s is empty or unset", name)
+	}
+	return val, nil
 }
 
 func expandPath(p string) (string, error) {

@@ -147,7 +147,7 @@ func TestOpenStateStoreFromSpec_SQLiteMissingPath(t *testing.T) {
 }
 
 func TestOpenStateStoreFromSpec_Unimplemented(t *testing.T) {
-	for _, ty := range []string{backends.TypePostgres, backends.TypeMySQL} {
+	for _, ty := range []string{backends.TypeMySQL} {
 		t.Run(ty, func(t *testing.T) {
 			_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
 				backends.Spec{Type: ty, URL: "x"}, nil)
@@ -158,6 +158,42 @@ func TestOpenStateStoreFromSpec_Unimplemented(t *testing.T) {
 				t.Errorf("want 'not implemented in this build', got: %v", err)
 			}
 		})
+	}
+}
+
+func TestOpenStateStoreFromSpec_PostgresInvalidDSN(t *testing.T) {
+	// Postgres now opens for real; an obviously bad DSN should surface
+	// the driver error rather than the "not implemented" sentinel.
+	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypePostgres, URL: "x"}, nil)
+	if err == nil {
+		t.Fatal("expected error for malformed dsn")
+	}
+	if strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("postgres should be implemented; got: %v", err)
+	}
+}
+
+func TestOpenStateStoreFromSpec_PostgresURLSourceEmpty(t *testing.T) {
+	t.Setenv("SPARKWING_PG_URL_TEST_EMPTY", "")
+	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypePostgres, URLSource: "env:SPARKWING_PG_URL_TEST_EMPTY"}, nil)
+	if err == nil {
+		t.Fatal("expected error when env var is empty")
+	}
+	if !strings.Contains(err.Error(), "empty or unset") {
+		t.Errorf("want 'empty or unset', got: %v", err)
+	}
+}
+
+func TestOpenStateStoreFromSpec_PostgresURLSourceMalformed(t *testing.T) {
+	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypePostgres, URLSource: "literal-url-no-env-prefix"}, nil)
+	if err == nil {
+		t.Fatal("expected error for missing env: prefix")
+	}
+	if !strings.Contains(err.Error(), "env:VAR") {
+		t.Errorf("want hint about env:VAR form, got: %v", err)
 	}
 }
 
