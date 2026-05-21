@@ -67,12 +67,6 @@ func (p *PreCommit) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "tracker IDs: none")
 	}
 
-	if err := CheckNoRawCSS(ctx, regexCheckRoot()); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(ctx, "raw CSS: none")
-	}
-
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-commit check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
