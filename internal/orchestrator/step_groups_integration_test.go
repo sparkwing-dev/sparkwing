@@ -11,14 +11,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ciBuildJob mirrors the shape the public example pipeline uses: a
+// ciBuild mirrors the shape the public example pipeline uses: a
 // fetch step, a GroupSteps "ci" cluster of three siblings, and a
 // downstream compile step. It's intentionally tiny -- we're
 // exercising the snapshot persistence + decoration path, not the
 // example pipeline itself.
-type ciBuildJob struct{ sparkwing.Base }
+type ciBuild struct{ sparkwing.Base }
 
-func (ciBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (ciBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	fetch := sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
 	lint := sparkwing.Step(w, "lint", func(ctx context.Context) error { return nil }).Needs(fetch)
 	vet := sparkwing.Step(w, "vet", func(ctx context.Context) error { return nil }).Needs(fetch)
@@ -30,7 +30,7 @@ func (ciBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type ciPipe struct{ sparkwing.Base }
 
 func (ciPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "build", &ciBuildJob{})
+	sparkwing.Job(plan, "build", &ciBuild{})
 	return nil
 }
 

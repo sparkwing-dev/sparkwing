@@ -125,12 +125,12 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	// success while the per-step failures stay visible. No downstream
 	// needs the node; the point is to test stepping through multiple
 	// errored, chatty steps.
-	sparkwing.Job(plan, "error-canary", &ErrorCanaryJob{}).Needs(configure).Optional()
+	sparkwing.Job(plan, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
 
 	// Multi-step Job with typed output (Produces[BuildOut]). The
 	// returned Node is the source for buildRef below; Retry is set
 	// so a flake retries once.
-	build := sparkwing.Job(plan, "build", &BuildJob{}).
+	build := sparkwing.Job(plan, "build", &ExampleBuild{}).
 		Needs(checks).
 		Retry(1, sparkwing.RetryBackoff(200*time.Millisecond))
 	buildRef := sparkwing.RefTo[BuildOut](build)
@@ -156,7 +156,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	// deploy times out after 10s and registers a sibling rollback
 	// node that only runs if deploy fails (OnFailure). The rollback
 	// is wired but won't fire in the success path.
-	deploy := sparkwing.Job(plan, "deploy", &DeployJob{Build: buildRef}).
+	deploy := sparkwing.Job(plan, "deploy", &ExampleDeploy{Build: buildRef}).
 		Needs(approveDeploy).
 		Timeout(10*time.Second).
 		OnFailure("deploy-rollback", rollbackFn)
@@ -251,16 +251,16 @@ func rollbackFn(ctx context.Context) error {
 	return nap(ctx, 200)
 }
 
-// ErrorCanaryJob is the multi-step error fixture. Four parallel
+// ExampleErrorCanary is the multi-step error fixture. Four parallel
 // shard steps each emit ~60 chatty progress lines (with graduated
 // WARN / ERROR-level entries near the end) and then return a
 // distinct failure mode. Every shard is marked .ContinueOnError()
 // so one shard's failure doesn't cancel its in-flight siblings, and
 // the surrounding Plan-layer Node is .Optional() so the run still
 // reports success while every per-step failure stays visible.
-type ErrorCanaryJob struct{ sparkwing.Base }
+type ExampleErrorCanary struct{ sparkwing.Base }
 
-func (j *ErrorCanaryJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *ExampleErrorCanary) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "shard-alpha", canaryShard("shard-alpha", 60, 2500,
 		"connection reset by peer at item 042 (after 3 retries)")).
 		ContinueOnError()
@@ -396,14 +396,14 @@ Within SLO.`)
 	return nil
 }
 
-// --- BuildJob: multi-step Work + typed output ---
+// --- ExampleBuild: multi-step Work + typed output ---
 
-type BuildJob struct {
+type ExampleBuild struct {
 	sparkwing.Base
 	sparkwing.Produces[BuildOut]
 }
 
-func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	fetchRefs := chattyStep(w, "fetch-refs", 1200, "fetched 142 objects · 1.3 MiB", []string{
 		"connecting to origin (git@github.com:example/app.git)",
 		"negotiating protocol v2",
@@ -525,14 +525,14 @@ func (j *BuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}).Needs(strip), nil
 }
 
-// --- DeployJob: multi-step Work with Work-layer SkipIf ---
+// --- ExampleDeploy: multi-step Work with Work-layer SkipIf ---
 
-type DeployJob struct {
+type ExampleDeploy struct {
 	sparkwing.Base
 	Build sparkwing.Ref[BuildOut]
 }
 
-func (j *DeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	render := sparkwing.Step(w, "render", func(ctx context.Context) error {
 		out := j.Build.Get(ctx)
 		return chatter(ctx, 700, []string{

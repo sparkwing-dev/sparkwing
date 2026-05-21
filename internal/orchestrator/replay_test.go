@@ -62,7 +62,7 @@ func TestMintReplayRun(t *testing.T) {
 	}
 	if err := st.WriteNodeDispatch(ctx, store.NodeDispatch{
 		RunID: "orig-1", NodeID: "build", Seq: 0,
-		InputEnvelope: []byte(`{"version":1,"type_name":"BuildJob","scalar_fields":{"target":"prod"}}`),
+		InputEnvelope: []byte(`{"version":1,"type_name":"Build","scalar_fields":{"target":"prod"}}`),
 	}); err != nil {
 		t.Fatalf("WriteNodeDispatch: %v", err)
 	}

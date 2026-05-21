@@ -21,7 +21,7 @@ type cachedPipe struct{ sparkwing.Base }
 var cachedInvocations atomic.Int32
 
 func (cachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "build", &cachedBuildJob{})
+	sparkwing.Job(plan, "build", &cachedBuild{})
 	return nil
 }
 
@@ -29,16 +29,16 @@ type cachedBuildOut struct {
 	Tag string `json:"tag"`
 }
 
-type cachedBuildJob struct {
+type cachedBuild struct {
 	sparkwing.Base
 	sparkwing.Produces[cachedBuildOut]
 }
 
-func (j *cachedBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *cachedBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", j.run), nil
 }
 
-func (cachedBuildJob) run(ctx context.Context) (cachedBuildOut, error) {
+func (cachedBuild) run(ctx context.Context) (cachedBuildOut, error) {
 	cachedInvocations.Add(1)
 	return cachedBuildOut{Tag: "v-cached"}, nil
 }

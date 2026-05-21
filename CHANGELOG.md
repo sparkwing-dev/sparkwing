@@ -48,7 +48,15 @@ code change to unlock.
 
 ## [Unreleased]
 
-_No entries yet._
+### Changed
+
+- **docs:** Example struct names in sparkwing's own examples,
+  documentation, and template scaffolders normalized to drop the
+  redundant `Job` suffix (`&BuildJob{}` → `&Build{}`, `*BuildJob` →
+  `*Build`, etc.). The constructor verb (`sparkwing.Job(...)`)
+  provides "this is a job" context; the struct doesn't need to repeat
+  it. No SDK behavior change; adopter code that names its own structs
+  differently is unaffected.
 
 ## [v0.4.0] - 2026-05-20
 

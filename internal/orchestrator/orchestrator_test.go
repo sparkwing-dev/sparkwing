@@ -71,30 +71,30 @@ func (middleFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 type refBuildOut struct {
 	Tag string `json:"tag"`
 }
-type refBuildJob struct {
+type refBuild struct {
 	sparkwing.Base
 	sparkwing.Produces[refBuildOut]
 }
 
-func (j *refBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *refBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", j.run), nil
 }
 
-func (refBuildJob) run(ctx context.Context) (refBuildOut, error) {
+func (refBuild) run(ctx context.Context) (refBuildOut, error) {
 	return refBuildOut{Tag: "v9"}, nil
 }
 
-type refDeployJob struct {
+type refDeploy struct {
 	sparkwing.Base
 	Build sparkwing.Ref[refBuildOut]
 }
 
-func (d *refDeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (d *refDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "run", d.run)
 	return nil, nil
 }
 
-func (d *refDeployJob) run(ctx context.Context) error {
+func (d *refDeploy) run(ctx context.Context) error {
 	got := d.Build.Get(ctx)
 	if got.Tag != "v9" {
 		return fmt.Errorf("ref got %q, want v9", got.Tag)
@@ -105,8 +105,8 @@ func (d *refDeployJob) run(ctx context.Context) error {
 type refPipe struct{ sparkwing.Base }
 
 func (refPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	build := sparkwing.Job(plan, "build", &refBuildJob{})
-	sparkwing.Job(plan, "deploy", &refDeployJob{Build: sparkwing.RefTo[refBuildOut](build)}).Needs(build)
+	build := sparkwing.Job(plan, "build", &refBuild{})
+	sparkwing.Job(plan, "deploy", &refDeploy{Build: sparkwing.RefTo[refBuildOut](build)}).Needs(build)
 	return nil
 }
 

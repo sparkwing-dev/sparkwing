@@ -328,46 +328,46 @@ func ({{STRUCT}}) Examples() []sw.Example {
 // state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
 // (registered name).
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	build := sw.Job(plan, "build", &{{STRUCT}}BuildJob{})
-	test := sw.Job(plan, "test", &{{STRUCT}}TestJob{}).Needs(build)
-	sw.Job(plan, "deploy", &{{STRUCT}}DeployJob{}).Needs(test)
+	build := sw.Job(plan, "build", &{{STRUCT}}Build{})
+	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Needs(build)
+	sw.Job(plan, "deploy", &{{STRUCT}}Deploy{}).Needs(test)
 	return nil
 }
 
-type {{STRUCT}}BuildJob struct{ sw.Base }
+type {{STRUCT}}Build struct{ sw.Base }
 
-func (j *{{STRUCT}}BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+func (j *{{STRUCT}}Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
 // Paths in .Dir() / ReadFile are relative to the repo root, not
 // .sparkwing/. See WorkDir().
-func ({{STRUCT}}BuildJob) run(ctx context.Context) error {
+func ({{STRUCT}}Build) run(ctx context.Context) error {
 	_, err := sw.Bash(ctx, ` + "`echo \"TODO: build\"`" + `).Run()
 	return err
 }
 
-type {{STRUCT}}TestJob struct{ sw.Base }
+type {{STRUCT}}Test struct{ sw.Base }
 
-func (j *{{STRUCT}}TestJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+func (j *{{STRUCT}}Test) Work(w *sw.Work) (*sw.WorkStep, error) {
 	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
-func ({{STRUCT}}TestJob) run(ctx context.Context) error {
+func ({{STRUCT}}Test) run(ctx context.Context) error {
 	_, err := sw.Bash(ctx, ` + "`echo \"TODO: test\"`" + `).Run()
 	return err
 }
 
-type {{STRUCT}}DeployJob struct{ sw.Base }
+type {{STRUCT}}Deploy struct{ sw.Base }
 
-func (j *{{STRUCT}}DeployJob) Work(w *sw.Work) (*sw.WorkStep, error) {
+func (j *{{STRUCT}}Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
 	sparkwing.Step(w, "run", j.run)
 	return nil, nil
 }
 
-func ({{STRUCT}}DeployJob) run(ctx context.Context) error {
+func ({{STRUCT}}Deploy) run(ctx context.Context) error {
 	_, err := sw.Bash(ctx, ` + "`echo \"TODO: deploy\"`" + `).Run()
 	return err
 }
