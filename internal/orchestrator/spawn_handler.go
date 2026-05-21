@@ -38,7 +38,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 
 	child := sparkwing.NewDetachedNode(childID, job)
 
-	if err := h.state.plan.InsertChild(child); err != nil {
+	if err := sparkwing.RuntimePlumbing.Fns.PlanInsertChild(h.state.plan, child); err != nil {
 		return nil, fmt.Errorf("orchestrator: insert spawn child %q: %w", childID, err)
 	}
 	if err := h.state.backends.State.CreateNode(h.state.ctx, store.Node{

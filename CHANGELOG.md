@@ -15,7 +15,7 @@ are required.
   `workDepID()`) restrict implementors to sparkwing-defined live
   handles -- Plan-layer `Dep` is `*JobNode` / `*ApprovalGate` /
   `*JobGroup`; Work-layer `WorkDep` is `*WorkStep` / `*StepGroup` /
-  `*SpawnHandle` / `*SpawnGroup`. The two interfaces are disjoint, so
+  `*SpawnSpec` / `*SpawnGenSpec`. The two interfaces are disjoint, so
   layer-crossing (a `*WorkStep` in `*JobNode.Needs`, or vice versa)
   is a compile-time error.
 - `sparkwing.NoCache` typed sentinel for explicit cache opt-out from a
@@ -47,9 +47,31 @@ are required.
 
 ### Changed
 
+- **Breaking:** Runtime-mutator methods removed from the author-facing
+  type surface and relocated behind `sparkwing.RuntimePlumbing.Fns`.
+  Affected methods: `Plan.InsertChild`, `Plan.InsertExpanded`,
+  `JobGroup.Finalize`, `WorkStep.Fn`, `WorkStep.MarkDone`,
+  `SpawnSpec.SetResolvedID`, `SpawnSpec.MarkDone`. These were always
+  orchestrator-only with no production pipeline-author callers. Tab
+  completion and reference docs no longer surface them on `*Plan`,
+  `*JobGroup`, `*WorkStep`, or `*SpawnSpec`. Test or tool code that
+  poked at these directly must call the bridge entry instead:
+  `sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(step, out)`.
+  `RuntimePlumbing` itself gains a `{Keys, Fns}` shape; existing
+  `RuntimePlumbing.<Key>` accessors move to `RuntimePlumbing.Keys.<Key>`.
+- **Breaking:** `JobSpawn(...)` returns `*SpawnSpec` instead of
+  `*SpawnHandle`; `JobSpawnEach(...)` returns `*SpawnGenSpec` instead
+  of `*SpawnGroup`. The chainable methods (`Needs`, `SkipIf`) now live
+  on the spec types directly, and the `Spec()` accessors are gone --
+  the handles were thin wrappers around the specs and disappear
+  entirely. Code that chains `sw.JobSpawn(w, ...).Needs(...).SkipIf(...)`
+  is unchanged. Code that stored the result as `*SpawnHandle` /
+  `*SpawnGroup` must update its type to `*SpawnSpec` /
+  `*SpawnGenSpec`, and any `spec := handle.Spec()` indirection
+  collapses (the handle IS the spec now).
 - **Breaking:** `Needs(...any)` and `NeedsOptional(...any)` on every
   dep-accepting type (`*JobNode`, `*ApprovalGate`, `*JobGroup`,
-  `*WorkStep`, `*StepGroup`, `*SpawnHandle`, `*SpawnGroup`) replaced
+  `*WorkStep`, `*StepGroup`, `*SpawnSpec`, `*SpawnGenSpec`) replaced
   with typed-dep signatures: `Needs(...Dep)` for Plan-layer methods,
   `Needs(...WorkDep)` for Work-layer methods. The previous
   `...any` signature accepted anything that compiled and validated at

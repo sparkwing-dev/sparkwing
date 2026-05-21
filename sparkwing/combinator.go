@@ -64,9 +64,10 @@ func (g *JobGroup) Err() error {
 	return g.err
 }
 
-// Finalize populates a dynamic group with the generator's output and
-// signals readiness. Called by the orchestrator.
-func (g *JobGroup) Finalize(members []*JobNode, err error) {
+// finalize populates a dynamic group with the generator's output and
+// signals readiness. Exposed to the orchestrator via
+// RuntimePlumbing.Fns.JobGroupFinalize.
+func (g *JobGroup) finalize(members []*JobNode, err error) {
 	g.mu.Lock()
 	g.members = append(g.members, members...)
 	g.err = err

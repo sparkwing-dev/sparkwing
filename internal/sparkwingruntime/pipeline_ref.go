@@ -9,5 +9,5 @@ import (
 // WithPipelineResolver installs a PipelineResolver into ctx. Intended
 // for orchestrator implementations.
 func WithPipelineResolver(ctx context.Context, r sparkwing.PipelineResolver) context.Context {
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.PipelineResolver, r)
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.PipelineResolver, r)
 }

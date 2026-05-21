@@ -207,34 +207,36 @@ func newNode(caller, id string, job Workable) *JobNode {
 // but does not register it on a Plan. Pipeline authors should not
 // reach for this -- it exists for the orchestrator's SpawnNode
 // dispatch path, where the child node is created at runtime and
-// spliced in via Plan.InsertChild after the parent suspends. Use
+// spliced in via the orchestrator's plan-insert plumbing after the
+// parent suspends. Use
 // sparkwing.Job from pipeline code.
 func NewDetachedNode(id string, job Workable) *JobNode {
 	return newNode("NewDetachedNode", id, job)
 }
 
-// InsertChild splices a fresh node into the running plan WITHOUT
+// insertChild splices a fresh node into the running plan WITHOUT
 // wiring any dependency. Used by the SpawnNode dispatch path: the
 // spawning runner is suspended waiting on the child's outcome, so
-// adding child.Needs(parent) would deadlock.
-func (p *Plan) InsertChild(child *JobNode) error {
+// adding child.Needs(parent) would deadlock. Exposed to the orchestrator
+// via RuntimePlumbing.Fns.PlanInsertChild.
+func (p *Plan) insertChild(child *JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if child == nil {
-		return fmt.Errorf("InsertChild: nil child node")
+		return fmt.Errorf("insertChild: nil child node")
 	}
 	if _, exists := p.byID[child.id]; exists {
-		return fmt.Errorf("InsertChild: duplicate id %q", child.id)
+		return fmt.Errorf("insertChild: duplicate id %q", child.id)
 	}
 	p.byID[child.id] = child
 	p.nodes = append(p.nodes, child)
 	return nil
 }
 
-// InsertExpanded splices dynamically generated children into the plan.
-// Each child automatically gets Needs(source). Called by the
-// orchestrator.
-func (p *Plan) InsertExpanded(source *JobNode, children []*JobNode) error {
+// insertExpanded splices dynamically generated children into the plan.
+// Each child automatically gets Needs(source). Exposed to the
+// orchestrator via RuntimePlumbing.Fns.PlanInsertExpanded.
+func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, child := range children {

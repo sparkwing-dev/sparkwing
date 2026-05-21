@@ -424,8 +424,8 @@ plus one typed reader:
 ```
 sw.Step(w, id, fn any) *WorkStep                          // register a step (untyped or typed; see below)
 sw.GroupSteps(w, name, steps...) *StepGroup               // named cluster + Needs target
-sw.JobSpawn(w, id, job) *SpawnHandle                      // spawn one Plan node from inside Work
-sw.JobSpawnEach(w, items, fn) *SpawnGroup                 // spawn many Plan nodes (per-item template)
+sw.JobSpawn(w, id, job) *SpawnSpec                        // spawn one Plan node from inside Work
+sw.JobSpawnEach(w, items, fn) *SpawnGenSpec               // spawn many Plan nodes (per-item template)
 sw.StepGet[T](ctx, step) T                                // typed-read accessor for use inside step bodies
 ```
 
@@ -440,7 +440,7 @@ only declaration site for typing.
 Step modifiers (chainable on `*WorkStep`):
 
 ```
-step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnHandle, *SpawnGroup, []*WorkStep, string
+step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnSpec, *SpawnGenSpec, []*WorkStep, string
 step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
 step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under sparkwing X --dry-run
 step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --dry-run

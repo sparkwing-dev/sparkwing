@@ -368,7 +368,7 @@ func dispatchItem(ctx context.Context, it *workItem, parentNodeID string, handle
 		if IsDryRun(ctx) && it.step.dryRunFn != nil {
 			return nil, it.step.dryRunFn(ctx)
 		}
-		return it.step.Fn()(ctx)
+		return it.step.fn(ctx)
 	case itemSpawn:
 		return runOneSpawn(ctx, it.spawn, parentNodeID, handler)
 	case itemSpawnEach:
@@ -381,9 +381,9 @@ func dispatchItem(ctx context.Context, it *workItem, parentNodeID string, handle
 func (it *workItem) markDone(out any) {
 	switch it.kind {
 	case itemStep:
-		it.step.MarkDone(out)
+		it.step.markDone(out)
 	case itemSpawn:
-		it.spawn.MarkDone(out)
+		it.spawn.markDone(out)
 	}
 }
 

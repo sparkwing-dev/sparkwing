@@ -232,7 +232,6 @@ func (g *JobGroup) ContinueOnError() *JobGroup
 func (g *JobGroup) Dynamic() bool
 func (g *JobGroup) Env(key, value string) *JobGroup
 func (g *JobGroup) Err() error
-func (g *JobGroup) Finalize(members []*JobNode, err error)
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
 func (g *JobGroup) Name() string
@@ -292,8 +291,8 @@ func (n *JobNode) TimeoutDuration() time.Duration
 func (n *JobNode) WhenRunner(labels ...string) *JobNode
 func (n *JobNode) WhenRunnerLabels() []string
 func (n *JobNode) Work() *Work
-func JobSpawn(w *Work, id string, x any) *SpawnHandle
-func JobSpawnEach(w *Work, items, fn any) *SpawnGroup
+func JobSpawn(w *Work, id string, x any) *SpawnSpec
+func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec
 func Key(parts ...any) CacheKey
 type LintWarning struct {
 	NodeID string
@@ -356,8 +355,6 @@ func (p *Plan) CacheOpts() CacheOptions
 func (p *Plan) Expansions() []Expansion
 func (p *Plan) GroupSourceIDs(id string) []string
 func (p *Plan) Inputs() any
-func (p *Plan) InsertChild(child *JobNode) error
-func (p *Plan) InsertExpanded(source *JobNode, children []*JobNode) error
 func (p *Plan) IsDynamicNode(id string) bool
 func (p *Plan) Job(id string) *JobNode
 func (p *Plan) JobGroupNames(id string) []string
@@ -448,21 +445,35 @@ type RuntimeConfig struct {
 
 	Git *Git
 }
-var RuntimePlumbing = runtimePlumbingKeys{
-	DryRun:           dryRunKey{},
-	Runner:           runnerCtxKey{},
-	SpawnHandler:     keySpawnHandler,
-	StepRange:        stepRangeKey{},
-	Target:           targetKey{},
-	RefResolver:      keyRefResolver,
-	JSONRefResolver:  keyJSONRefResolver,
-	PipelineResolver: keyPipelineResolver,
-	PipelineAwaiter:  keyPipelineAwaiter,
-	Inputs:           keyInputs,
-	PipelineSecrets:  keyPipelineSecrets,
-	SecretResolver:   keySecretResolver,
-	Logger:           keyLogger,
-	Node:             keyNode,
+var RuntimePlumbing = struct {
+	Keys runtimePlumbingKeys
+	Fns  runtimePlumbingFns
+}{
+	Keys: runtimePlumbingKeys{
+		DryRun:           dryRunKey{},
+		Runner:           runnerCtxKey{},
+		SpawnHandler:     keySpawnHandler,
+		StepRange:        stepRangeKey{},
+		Target:           targetKey{},
+		RefResolver:      keyRefResolver,
+		JSONRefResolver:  keyJSONRefResolver,
+		PipelineResolver: keyPipelineResolver,
+		PipelineAwaiter:  keyPipelineAwaiter,
+		Inputs:           keyInputs,
+		PipelineSecrets:  keyPipelineSecrets,
+		SecretResolver:   keySecretResolver,
+		Logger:           keyLogger,
+		Node:             keyNode,
+	},
+	Fns: runtimePlumbingFns{
+		PlanInsertChild:        (*Plan).insertChild,
+		PlanInsertExpanded:     (*Plan).insertExpanded,
+		JobGroupFinalize:       (*JobGroup).finalize,
+		WorkStepFn:             func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
+		WorkStepMarkDone:       (*WorkStep).markDone,
+		SpawnSpecSetResolvedID: (*SpawnSpec).setResolvedID,
+		SpawnSpecMarkDone:      (*SpawnSpec).markDone,
+	},
 }
 const Satisfied Outcome = "satisfied"
 func Secret(ctx context.Context, name string) (string, error)
@@ -520,15 +531,7 @@ func (g *SpawnGenSpec) DepIDs() []string
 func (g *SpawnGenSpec) Fn() any
 func (g *SpawnGenSpec) ID() string
 func (g *SpawnGenSpec) Items() any
-type SpawnGroup struct {
-}
-func (g *SpawnGroup) Needs(deps ...WorkDep) *SpawnGroup
-func (g *SpawnGroup) Spec() *SpawnGenSpec
-type SpawnHandle struct {
-}
-func (h *SpawnHandle) Needs(deps ...WorkDep) *SpawnHandle
-func (h *SpawnHandle) SkipIf(fn SkipPredicate) *SpawnHandle
-func (h *SpawnHandle) Spec() *SpawnSpec
+func (g *SpawnGenSpec) Needs(deps ...WorkDep) *SpawnGenSpec
 type SpawnHandler interface {
 	Spawn(ctx context.Context, parentNodeID, spawnID string, job Workable) (output any, err error)
 }
@@ -539,9 +542,9 @@ type SpawnSpec struct {
 func (s *SpawnSpec) DepIDs() []string
 func (s *SpawnSpec) ID() string
 func (s *SpawnSpec) Job() Workable
-func (s *SpawnSpec) MarkDone(out any)
+func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec
 func (s *SpawnSpec) ResolvedID() string
-func (s *SpawnSpec) SetResolvedID(id string)
+func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec
 func (s *SpawnSpec) SkipPredicates() []SkipPredicate
 type State = storage.StateStore
 func Step(w *Work, id string, fn any) *WorkStep
@@ -599,13 +602,11 @@ type WorkStep struct {
 func (s *WorkStep) ContinueOnError() *WorkStep
 func (s *WorkStep) DepIDs() []string
 func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep
-func (s *WorkStep) Fn() func(ctx context.Context) (any, error)
 func (s *WorkStep) HasDryRun() bool
 func (s *WorkStep) ID() string
 func (s *WorkStep) IsContinueOnError() bool
 func (s *WorkStep) IsOptional() bool
 func (s *WorkStep) IsSafeWithoutDryRun() bool
-func (s *WorkStep) MarkDone(out any)
 func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep
 func (s *WorkStep) OnTarget(targets ...string) *WorkStep
 func (s *WorkStep) OnTargets() []string

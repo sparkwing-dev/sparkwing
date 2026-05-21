@@ -11,5 +11,5 @@ import (
 // --for selection; tests use it to exercise target-conditional code
 // paths from a bare ctx.
 func WithTarget(ctx context.Context, target string) context.Context {
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Target, target)
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.Target, target)
 }

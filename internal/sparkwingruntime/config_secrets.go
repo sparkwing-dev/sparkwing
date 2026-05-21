@@ -14,7 +14,7 @@ import (
 
 // WithPipelineSecrets installs the resolved Secrets struct on ctx.
 func WithPipelineSecrets(ctx context.Context, v any) context.Context {
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.PipelineSecrets, v)
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.PipelineSecrets, v)
 }
 
 // DecodePipelineConfig rehydrates a previously-resolved Config
@@ -78,7 +78,7 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, ya
 	if p == nil {
 		return nil, nil
 	}
-	resolver, _ := ctx.Value(sparkwing.RuntimePlumbing.SecretResolver).(sparkwing.SecretResolver)
+	resolver, _ := ctx.Value(sparkwing.RuntimePlumbing.Keys.SecretResolver).(sparkwing.SecretResolver)
 
 	// SecretsField from yaml: union with the struct-declared required set.
 	var yamlRequired []string

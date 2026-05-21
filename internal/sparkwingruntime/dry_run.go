@@ -16,5 +16,5 @@ import (
 // `step_skipped` event with reason `no_dry_run_defined` so the
 // operator's run logs make the contract gap visible.
 func WithDryRun(ctx context.Context) context.Context {
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.DryRun, true)
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.DryRun, true)
 }

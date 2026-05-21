@@ -40,7 +40,7 @@ func (j *spawnedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 // spawnSingleParent declares one SpawnNode after a setup step. The
 // parent's third step waits on the spawn and reads through
-// SpawnHandle to confirm the suspended-runner round-trip.
+// the SpawnSpec to confirm the suspended-runner round-trip.
 type spawnSingleParent struct {
 	sparkwing.Base
 	childRan *atomic.Bool

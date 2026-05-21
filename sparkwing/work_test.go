@@ -31,7 +31,7 @@ func TestJob_ClosureFormSingleStepWork(t *testing.T) {
 	if steps[0].ID() != "run" {
 		t.Fatalf("step id = %q, want %q", steps[0].ID(), "run")
 	}
-	if _, err := steps[0].Fn()(context.Background()); err != nil {
+	if _, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(steps[0])(context.Background()); err != nil {
 		t.Fatalf("step fn returned %v", err)
 	}
 	if !called {
@@ -179,11 +179,11 @@ func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 		t.Fatal("typed sw.Step should set OutputType from fn return")
 	}
 	// Drive the producing step's fn directly so we control timing.
-	out, err := produced.Fn()(context.Background())
+	out, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(produced)(context.Background())
 	if err != nil {
 		t.Fatalf("produce fn returned %v", err)
 	}
-	produced.MarkDone(out)
+	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(produced, out)
 
 	got := sparkwing.StepGet[fooOut](context.Background(), produced)
 	if got != want {
@@ -196,7 +196,7 @@ func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 func TestStepGet_PanicsOnUntypedStep(t *testing.T) {
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "plain", func(ctx context.Context) error { return nil })
-	s.MarkDone(nil)
+	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(s, nil)
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -217,8 +217,8 @@ func TestStepGet_PanicsOnTypeMismatch(t *testing.T) {
 	s := sparkwing.Step(w, "produce", func(ctx context.Context) (fooOut, error) {
 		return fooOut{Tag: "ok"}, nil
 	})
-	out, _ := s.Fn()(context.Background())
-	s.MarkDone(out)
+	out, _ := sparkwing.RuntimePlumbing.Fns.WorkStepFn(s)(context.Background())
+	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(s, out)
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -387,7 +387,7 @@ func TestWork_StepFnReturnsError(t *testing.T) {
 	myErr := errors.New("boom")
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "x", func(ctx context.Context) error { return myErr })
-	if _, err := s.Fn()(context.Background()); !errors.Is(err, myErr) {
+	if _, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(s)(context.Background()); !errors.Is(err, myErr) {
 		t.Fatalf("step fn should propagate error, got %v", err)
 	}
 }

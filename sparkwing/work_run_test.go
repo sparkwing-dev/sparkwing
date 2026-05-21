@@ -176,7 +176,7 @@ func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
 // TestRunWork_TypedResultRecordsOnStep runs a multi-step Work whose
 // terminal step is typed; RunWork itself returns nil for the value
 // (the orchestrator reads typed output via node.ResultStep().Output()),
-// but the typed step's MarkDone must persist the typed value so
+// but completing the typed step must persist the typed value so
 // readers see it.
 func TestRunWork_TypedResultRecordsOnStep(t *testing.T) {
 	ctx, _ := newWorkCtx()
@@ -201,7 +201,8 @@ func TestRunWork_TypedResultRecordsOnStep(t *testing.T) {
 
 // TestRunWork_StepGetResolvesInDownstream confirms the in-process
 // resolution path: a downstream step calling sw.StepGet[T](ctx, step)
-// on its upstream gets the typed value back once MarkDone has fired.
+// on its upstream gets the typed value back once the upstream step
+// completes.
 // This is the canonical fixture for typed inter-step composition under
 // the single-Step grammar.
 func TestRunWork_StepGetResolvesInDownstream(t *testing.T) {
@@ -305,7 +306,7 @@ func TestRunWork_SpawnRejectedWithoutHandler(t *testing.T) {
 // TestRunWork_SpawnDispatchedThroughHandler installs a stub handler
 // and verifies that runtime fan-out flows: SpawnNode triggers the
 // handler with the right (parent, id, job) arguments, and the
-// returned output is observable via SpawnHandle.
+// returned output is observable via the SpawnSpec.
 func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -313,8 +314,7 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	scan := sparkwing.JobSpawn(w, "scan", func(ctx context.Context) error { return nil }).Needs(a)
 	var afterSawSpawn bool
 	sparkwing.Step(w, "after", func(ctx context.Context) error {
-		// SpawnHandle.Spec().ResolvedID is set by the handler stub.
-		if scan.Spec().ResolvedID() == "test-node/scan" {
+		if scan.ResolvedID() == "test-node/scan" {
 			afterSawSpawn = true
 		}
 		return nil
@@ -329,7 +329,7 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 		if id != "scan" {
 			t.Errorf("handler id = %q, want scan", id)
 		}
-		scan.Spec().SetResolvedID(parent + "/" + id)
+		sparkwing.RuntimePlumbing.Fns.SpawnSpecSetResolvedID(scan, parent+"/"+id)
 		return nil, nil
 	})
 

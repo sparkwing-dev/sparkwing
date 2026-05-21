@@ -1464,7 +1464,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 	select {
 	case <-sourceCh:
 	case <-s.resolverCtx.Done():
-		exp.Group.Finalize(nil, fmt.Errorf("ctx cancelled before expansion"))
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, fmt.Errorf("ctx cancelled before expansion"))
 		return
 	}
 
@@ -1473,7 +1473,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 	// group with an error and let downstream cancel cleanly.
 	oc, _ := s.getOutcome(exp.Source.ID())
 	if !oc.OK() {
-		exp.Group.Finalize(nil, fmt.Errorf("expansion source %q did not succeed (outcome=%s)", exp.Source.ID(), oc))
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, fmt.Errorf("expansion source %q did not succeed (outcome=%s)", exp.Source.ID(), oc))
 		return
 	}
 
@@ -1481,12 +1481,12 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 	if err != nil {
 		sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 			fmt.Sprintf("ExpandFrom(%s) failed: %v", exp.Source.ID(), err))
-		exp.Group.Finalize(nil, err)
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
 		return
 	}
 
-	if err := s.plan.InsertExpanded(exp.Source, children); err != nil {
-		exp.Group.Finalize(nil, err)
+	if err := sparkwing.RuntimePlumbing.Fns.PlanInsertExpanded(s.plan, exp.Source, children); err != nil {
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
 		return
 	}
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, exp.Source.ID(), "expansion_generated",
@@ -1529,7 +1529,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		}
 	}
 
-	exp.Group.Finalize(children, nil)
+	sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, children, nil)
 }
 
 // invokeGenerator runs the user closure under panic recovery.

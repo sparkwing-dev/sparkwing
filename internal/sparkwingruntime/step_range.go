@@ -20,7 +20,7 @@ func WithStepRange(ctx context.Context, startAt, stopAt string) context.Context 
 	if startAt == "" && stopAt == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.StepRange, [2]string{startAt, stopAt})
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.StepRange, [2]string{startAt, stopAt})
 }
 
 // StepRangeFromContext returns the (startAt, stopAt) bounds plumbed
@@ -28,6 +28,6 @@ func WithStepRange(ctx context.Context, startAt, stopAt string) context.Context 
 // Exported so renderers (e.g. `sparkwing pipeline explain`) can
 // preview "what would be skipped" without re-running RunWork.
 func StepRangeFromContext(ctx context.Context) (startAt, stopAt string) {
-	v, _ := ctx.Value(sparkwing.RuntimePlumbing.StepRange).([2]string)
+	v, _ := ctx.Value(sparkwing.RuntimePlumbing.Keys.StepRange).([2]string)
 	return v[0], v[1]
 }

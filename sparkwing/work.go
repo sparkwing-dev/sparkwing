@@ -225,7 +225,7 @@ func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error
 //   - nil step
 //   - step with no typed output (registered with func(ctx) error)
 //   - step's typed output type doesn't match T
-//   - ctx cancelled before step's MarkDone fires
+//   - ctx cancelled before step completes
 func StepGet[T any](ctx context.Context, step *WorkStep) T {
 	var zero T
 	if step == nil {
@@ -270,7 +270,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 // completes. Use sparingly: a suspended runner holds a slot of
 // compute.
 //
-// The returned *SpawnHandle accepts .Needs to declare which Steps must
+// The returned *SpawnSpec accepts .Needs to declare which Steps must
 // complete before the spawn fires, and .Get(ctx) for typed output.
 //
 // "Spawn" is a lifecycle suffix here -- the verb adds a Plan Job
@@ -278,7 +278,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 //
 // Accepts the same argument shapes as sparkwing.Job's third arg
 // (Workable struct or func(ctx) error closure).
-func JobSpawn(w *Work, id string, x any) *SpawnHandle {
+func JobSpawn(w *Work, id string, x any) *SpawnSpec {
 	if w == nil {
 		panic("sparkwing: JobSpawn: w must be non-nil")
 	}
@@ -291,7 +291,7 @@ func JobSpawn(w *Work, id string, x any) *SpawnHandle {
 		job: job,
 	}
 	w.spawns = append(w.spawns, spec)
-	return &SpawnHandle{spec: spec}
+	return spec
 }
 
 // JobSpawnEach is the cardinality-many variant of JobSpawn. The
@@ -307,7 +307,7 @@ func JobSpawn(w *Work, id string, x any) *SpawnHandle {
 // validated at Plan time via reflection so a wrong-shaped fn panics
 // alongside other structural errors (Produces/Work-return mismatch,
 // duplicate IDs) rather than blowing up later during dispatch.
-func JobSpawnEach(w *Work, items, fn any) *SpawnGroup {
+func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec {
 	if w == nil {
 		panic("sparkwing: JobSpawnEach: w must be non-nil")
 	}
@@ -315,14 +315,14 @@ func JobSpawnEach(w *Work, items, fn any) *SpawnGroup {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	spec := &SpawnGenSpec{
-		// Synthetic id keyed by ordinal so downstream .Needs(group)
+		// Synthetic id keyed by ordinal so downstream .Needs(spec)
 		// has a stable scheduling target.
 		id:    fmt.Sprintf("__spawn_each_%d", len(w.spawnGens)),
 		items: items,
 		fn:    fn,
 	}
 	w.spawnGens = append(w.spawnGens, spec)
-	return &SpawnGroup{spec: spec}
+	return spec
 }
 
 // validateSpawnEach checks JobSpawnEach's reflective contract at
@@ -470,18 +470,14 @@ func (s *WorkStep) ID() string { return s.id }
 // that return only error.
 func (s *WorkStep) OutputType() reflect.Type { return s.outType }
 
-// Fn returns the underlying executable closure. Intended for the
-// orchestrator.
-func (s *WorkStep) Fn() func(ctx context.Context) (any, error) { return s.fn }
-
 // WorkDep is the closed type set accepted by Work-layer [WorkStep.Needs]
-// and the Needs methods on [StepGroup], [SpawnHandle], and [SpawnGroup].
+// and the Needs methods on [StepGroup], [SpawnSpec], and [SpawnGenSpec].
 // The unexported marker method `workDepID()` prevents callers from
 // passing arbitrary values; the Plan-layer [Dep] types are NOT WorkDep
 // and vice versa, so the two layers cannot cross by accident.
 //
-// Implementations: [*WorkStep], [*StepGroup], [*SpawnHandle],
-// [*SpawnGroup]. By-name references via a typed-string sentinel are
+// Implementations: [*WorkStep], [*StepGroup], [*SpawnSpec],
+// [*SpawnGenSpec]. By-name references via a typed-string sentinel are
 // intentionally not supported -- store and pass the upstream's handle.
 type WorkDep interface {
 	workDepID() string
@@ -495,18 +491,18 @@ func (g *StepGroup) workDepID() string {
 	return g.name
 }
 
-func (h *SpawnHandle) workDepID() string {
-	if h == nil || h.spec == nil {
+func (s *SpawnSpec) workDepID() string {
+	if s == nil {
 		return ""
 	}
-	return h.spec.id
+	return s.id
 }
 
-func (g *SpawnGroup) workDepID() string {
-	if g == nil || g.spec == nil {
+func (g *SpawnGenSpec) workDepID() string {
+	if g == nil {
 		return ""
 	}
-	return g.spec.syntheticID()
+	return g.syntheticID()
 }
 
 // Compile-time conformance assertions: every Work-layer dep type
@@ -514,13 +510,13 @@ func (g *SpawnGroup) workDepID() string {
 var (
 	_ WorkDep = (*WorkStep)(nil)
 	_ WorkDep = (*StepGroup)(nil)
-	_ WorkDep = (*SpawnHandle)(nil)
-	_ WorkDep = (*SpawnGroup)(nil)
+	_ WorkDep = (*SpawnSpec)(nil)
+	_ WorkDep = (*SpawnGenSpec)(nil)
 )
 
 // Needs declares hard upstream Step / Spawn dependencies inside the
 // same Work. Accepts any [WorkDep]: [*WorkStep], [*StepGroup],
-// [*SpawnHandle], or [*SpawnGroup]. For multiple steps from a slice,
+// [*SpawnSpec], or [*SpawnGenSpec]. For multiple steps from a slice,
 // splat: `s.Needs(steps...)`.
 func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep {
 	for _, d := range deps {
@@ -530,7 +526,7 @@ func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep {
 }
 
 // addWorkDep appends the IDs implied by d to out, deduping. *StepGroup
-// expands to its member IDs; *SpawnGroup uses the generator's
+// expands to its member IDs; *SpawnGenSpec uses the generator's
 // synthetic id (members aren't known until the generator runs).
 func addWorkDep(d WorkDep, out *[]string) {
 	if d == nil {
@@ -639,10 +635,11 @@ func (s *WorkStep) OnTargets() []string {
 	return copyLabels(s.onTarget)
 }
 
-// MarkDone is called by the runner once the step terminates. Stores
+// markDone is called by the runner once the step terminates. Stores
 // the typed output so downstream sparkwing.StepGet[T](ctx, step) calls
-// resolve.
-func (s *WorkStep) MarkDone(out any) {
+// resolve. Exposed to the orchestrator via
+// RuntimePlumbing.Fns.WorkStepMarkDone.
+func (s *WorkStep) markDone(out any) {
 	s.mu.Lock()
 	if s.done == nil {
 		s.done = make(chan struct{})
@@ -657,7 +654,8 @@ func (s *WorkStep) MarkDone(out any) {
 	s.mu.Unlock()
 }
 
-// Output returns the resolved typed output (after MarkDone) or nil.
+// Output returns the resolved typed output (after the step completes)
+// or nil.
 func (s *WorkStep) Output() any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -799,17 +797,19 @@ func (s *SpawnSpec) DepIDs() []string {
 // SkipPredicates returns the spawn's registered predicates.
 func (s *SpawnSpec) SkipPredicates() []SkipPredicate { return s.skipIf }
 
-// SetResolvedID records the namespaced Plan node id assigned when the
-// spawn fires. Set by the orchestrator.
-func (s *SpawnSpec) SetResolvedID(id string) { s.resolvedID = id }
+// setResolvedID records the namespaced Plan node id assigned when the
+// spawn fires. Exposed to the orchestrator via
+// RuntimePlumbing.Fns.SpawnSpecSetResolvedID.
+func (s *SpawnSpec) setResolvedID(id string) { s.resolvedID = id }
 
 // ResolvedID returns the assigned Plan node id, populated after the
 // spawn fires. Empty before then.
 func (s *SpawnSpec) ResolvedID() string { return s.resolvedID }
 
-// MarkDone is called by the orchestrator once the spawned node
-// terminates so SpawnHandle.Get can resolve.
-func (s *SpawnSpec) MarkDone(out any) {
+// markDone is called by the orchestrator once the spawned node
+// terminates so downstream SpawnSpec.Get calls resolve. Exposed to the
+// orchestrator via RuntimePlumbing.Fns.SpawnSpecMarkDone.
+func (s *SpawnSpec) markDone(out any) {
 	s.mu.Lock()
 	if s.done == nil {
 		s.done = make(chan struct{})
@@ -843,31 +843,23 @@ func (s *SpawnSpec) awaitDone(ctx context.Context) error {
 	}
 }
 
-// SpawnHandle is the author-facing handle to a JobSpawn declaration.
-type SpawnHandle struct {
-	spec *SpawnSpec
-}
-
-// Spec returns the underlying SpawnSpec. Intended for the orchestrator.
-func (h *SpawnHandle) Spec() *SpawnSpec { return h.spec }
-
 // Needs declares which Steps / Spawns inside the same Work must
 // complete before the spawn fires. Mirrors [WorkStep.Needs] at the
 // spawn layer.
-func (h *SpawnHandle) Needs(deps ...WorkDep) *SpawnHandle {
+func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec {
 	for _, d := range deps {
-		addWorkDep(d, &h.spec.needs)
+		addWorkDep(d, &s.needs)
 	}
-	return h
+	return s
 }
 
 // SkipIf registers a predicate the orchestrator evaluates before
 // firing the spawn.
-func (h *SpawnHandle) SkipIf(fn SkipPredicate) *SpawnHandle {
+func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec {
 	if fn != nil {
-		h.spec.skipIf = append(h.spec.skipIf, fn)
+		s.skipIf = append(s.skipIf, fn)
 	}
-	return h
+	return s
 }
 
 // SpawnGenSpec is the static record of a JobSpawnEach declaration.
@@ -901,19 +893,11 @@ func (g *SpawnGenSpec) DepIDs() []string {
 	return out
 }
 
-// SpawnGroup is the author-facing handle returned by JobSpawnEach.
-type SpawnGroup struct {
-	spec *SpawnGenSpec
-}
-
-// Spec returns the underlying SpawnGenSpec.
-func (g *SpawnGroup) Spec() *SpawnGenSpec { return g.spec }
-
 // Needs declares which Steps / Spawns must complete before the
 // generator runs.
-func (g *SpawnGroup) Needs(deps ...WorkDep) *SpawnGroup {
+func (g *SpawnGenSpec) Needs(deps ...WorkDep) *SpawnGenSpec {
 	for _, d := range deps {
-		addWorkDep(d, &g.spec.needs)
+		addWorkDep(d, &g.needs)
 	}
 	return g
 }
