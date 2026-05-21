@@ -69,7 +69,6 @@ type Server struct {
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
-func (s *Server) PoolListForTesting(ctx context.Context) ([]corev1.PersistentVolumeClaim, error)
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server

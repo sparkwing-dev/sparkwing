@@ -62,7 +62,7 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 			case <-reaperCtx.Done():
 				return
 			case <-ticker.C:
-				ids, err := st.ReapExpiredTriggers(reaperCtx)
+				ids, err := store.Maintenance.ReapExpiredTriggers(st, reaperCtx)
 				if err != nil {
 					continue
 				}
@@ -152,7 +152,7 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 	// Reap concurrently -- should not re-queue while heartbeats land.
 	go func() {
 		for range 10 {
-			_, _ = st.ReapExpiredTriggers(ctx)
+			_, _ = store.Maintenance.ReapExpiredTriggers(st, ctx)
 			time.Sleep(30 * time.Millisecond)
 		}
 	}()

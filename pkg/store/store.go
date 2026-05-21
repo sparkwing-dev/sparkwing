@@ -1762,8 +1762,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	return pairs, nil
 }
 
-// FailExpiredNodeClaims terminates expired claims with FailureAgentLost.
-func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
+// failExpiredNodeClaims terminates expired claims with FailureAgentLost.
+func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
 	now := time.Now().UnixNano()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1813,9 +1813,9 @@ UPDATE nodes
 	return pairs, nil
 }
 
-// FailNodesInRun marks every non-terminal node in runID as failed.
+// failNodesInRun marks every non-terminal node in runID as failed.
 // Used by the reaper to avoid zombie nodes when a worker lease expires.
-func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
+func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -1861,9 +1861,9 @@ UPDATE nodes
 	return nodeIDs, nil
 }
 
-// FailStaleQueuedNodes terminates unclaimed nodes whose ready_at is
+// failStaleQueuedNodes terminates unclaimed nodes whose ready_at is
 // older than olderThan with FailureQueueTimeout.
-func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error) {
+func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error) {
 	if olderThan <= 0 {
 		return nil, nil
 	}
@@ -2422,9 +2422,9 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 	return nil
 }
 
-// ReapExpiredTriggers flips lease-expired claimed triggers back to
+// reapExpiredTriggers flips lease-expired claimed triggers back to
 // pending. Returns reaped IDs; matching runs are caller-reconciled.
-func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
+func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	now := time.Now().UnixNano()
 
 	tx, err := s.db.BeginTx(ctx, nil)

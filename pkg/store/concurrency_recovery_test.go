@@ -87,7 +87,7 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		t.Fatalf("setup: expected 0 holders + 1 waiter, got %+v", state)
 	}
 
-	promoted, err := s.ReconcileConcurrencyKeys(ctx, store.DefaultConcurrencyLease)
+	promoted, err := store.Maintenance.ReconcileConcurrencyKeys(s, ctx, store.DefaultConcurrencyLease)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	}
 
 	// Waiter reaper should detect the orphan follower and drop it.
-	dropped, err := s.ReapStaleConcurrencyWaiters(ctx, time.Hour)
+	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, time.Hour)
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		t.Fatalf("rewrite arrived_at: %v", err)
 	}
 
-	dropped, err := s.ReapStaleConcurrencyWaiters(ctx, 10*time.Minute)
+	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	dropped, _ = s.ReapStaleConcurrencyWaiters(ctx, 10*time.Minute)
+	dropped, _ = store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, 10*time.Minute)
 	if len(dropped) != 0 {
 		t.Fatalf("fresh waiter should not be reaped: %+v", dropped)
 	}
@@ -200,7 +200,7 @@ func TestConcurrency_WaiterReaperZeroAgeIsNoop(t *testing.T) {
 		Key: "k", HolderID: "w", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	dropped, err := s.ReapStaleConcurrencyWaiters(ctx, 0)
+	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, 0)
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}

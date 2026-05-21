@@ -473,7 +473,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	// the matching PromoteNextWaiters tx, keys can have queued waiters
 	// and open capacity sitting idle. Sweep once on startup so those
 	// waiters don't wait for a new arrival to unstick them.
-	if n, err := s.store.ReconcileConcurrencyKeys(ctx, store.DefaultConcurrencyLease); err != nil {
+	if n, err := store.Maintenance.ReconcileConcurrencyKeys(s.store, ctx, store.DefaultConcurrencyLease); err != nil {
 		s.logger.Warn("concurrency reconcile on startup failed", "err", err)
 	} else if n > 0 {
 		s.logger.Info("concurrency reconcile promoted stranded waiters", "count", n)
@@ -521,7 +521,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			// Stale holder sweep promotes the next FIFO waiter so a
 			// crashed pod mid-node doesn't wedge the whole key. Cache
 			// TTL and LRU sweeps keep the cache table bounded.
-			if stale, err := s.store.ReapStaleConcurrencyHolders(ctx); err != nil {
+			if stale, err := store.Maintenance.ReapStaleConcurrencyHolders(s.store, ctx); err != nil {
 				s.logger.Error("concurrency stale-holder reap failed", "err", err)
 			} else {
 				for _, h := range stale {
@@ -534,7 +534,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 					}
 				}
 			}
-			if n, err := s.store.SweepExpiredConcurrencyCache(ctx); err != nil {
+			if n, err := store.Maintenance.SweepExpiredConcurrencyCache(s.store, ctx); err != nil {
 				s.logger.Error("concurrency cache TTL sweep failed", "err", err)
 			} else if n > 0 {
 				s.logger.Info("swept expired concurrency cache entries", "count", n)
@@ -542,7 +542,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			// Orphan coalesce followers (leader gone) and any waiter
 			// older than 2x the node lease, lining up with the
 			// node-level queue timeout.
-			if dropped, err := s.store.ReapStaleConcurrencyWaiters(ctx, 2*store.DefaultConcurrencyLease); err != nil {
+			if dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s.store, ctx, 2*store.DefaultConcurrencyLease); err != nil {
 				s.logger.Error("concurrency waiter reap failed", "err", err)
 			} else {
 				for _, w := range dropped {
@@ -552,7 +552,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"arrived_at", w.ArrivedAt.Format(time.RFC3339))
 				}
 			}
-			if n, err := s.store.SweepLRUConcurrencyCache(ctx, s.concurrencyCacheCap); err != nil {
+			if n, err := store.Maintenance.SweepLRUConcurrencyCache(s.store, ctx, s.concurrencyCacheCap); err != nil {
 				s.logger.Error("concurrency cache LRU sweep failed", "err", err)
 			} else if n > 0 {
 				s.logger.Info("evicted LRU concurrency cache entries", "count", n)
@@ -561,7 +561,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			// failed with failure_reason=agent_lost. A clean failure
 			// surfaces the problem; the orchestrator's Retry modifier
 			// can redeliver intentionally.
-			if pairs, err := s.store.FailExpiredNodeClaims(ctx); err != nil {
+			if pairs, err := store.Maintenance.FailExpiredNodeClaims(s.store, ctx); err != nil {
 				s.logger.Error("node agent-lost sweep failed", "err", err)
 			} else {
 				for _, p := range pairs {
@@ -573,7 +573,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			// deadline: terminate with failure_reason=queue_timeout.
 			// Protects against pools that drained or label sets that
 			// nothing matches.
-			if pairs, err := s.store.FailStaleQueuedNodes(ctx, s.queueTimeout); err != nil {
+			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, s.queueTimeout); err != nil {
 				s.logger.Error("queue-timeout sweep failed", "err", err)
 			} else {
 				for _, p := range pairs {
@@ -581,7 +581,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"run_id", p[0], "node_id", p[1])
 				}
 			}
-			ids, err := s.store.ReapExpiredTriggers(ctx)
+			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, ctx)
 			if err != nil {
 				s.logger.Error("reap failed", "err", err)
 				continue
@@ -595,7 +595,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 					// Cascade-fail nodes still marked running or
 					// pending: the trigger lease expired, so any
 					// orphaned node row is by definition stale.
-					if nids, nerr := s.store.FailNodesInRun(ctx, id,
+					if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 						"runner lease expired before node reported completion",
 						store.FailureRunnerLeaseExpired); nerr != nil {
 						s.logger.Error("cascade-fail nodes failed",

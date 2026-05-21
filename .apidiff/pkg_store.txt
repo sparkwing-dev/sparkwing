@@ -111,6 +111,17 @@ const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
+var Maintenance = storeMaintenanceFns{
+	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
+	FailNodesInRun:               (*Store).failNodesInRun,
+	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
+	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
+	ReapStaleConcurrencyHolders:  (*Store).reapStaleConcurrencyHolders,
+	ReapStaleConcurrencyWaiters:  (*Store).reapStaleConcurrencyWaiters,
+	SweepExpiredConcurrencyCache: (*Store).sweepExpiredConcurrencyCache,
+	SweepLRUConcurrencyCache:     (*Store).sweepLRUConcurrencyCache,
+	ReconcileConcurrencyKeys:     (*Store).reconcileConcurrencyKeys,
+}
 const MaxNodeDispatchEnvelope = 4 << 20
 type MetricSample struct {
 	TS            time.Time
@@ -293,9 +304,6 @@ func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name string) error
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
-func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error)
-func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error)
-func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
@@ -339,10 +347,6 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
-func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error)
-func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error)
-func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error)
-func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error)
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
@@ -360,8 +364,6 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (s *Store) SweepExpiredConcurrencyCache(ctx context.Context) (int64, error)
-func (s *Store) SweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error

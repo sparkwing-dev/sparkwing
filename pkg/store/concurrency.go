@@ -1039,9 +1039,9 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	return state, nil
 }
 
-// ReapStaleConcurrencyHolders deletes lease-expired holders; caller
+// reapStaleConcurrencyHolders deletes lease-expired holders; caller
 // runs PromoteNextWaiters and emits audit events.
-func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
+func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
 	now := time.Now().UnixNano()
 	rows, err := s.db.QueryContext(
 		ctx,
@@ -1130,9 +1130,9 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 	return out, nil
 }
 
-// ReapStaleConcurrencyWaiters drops orphan coalesce followers (leader
+// reapStaleConcurrencyWaiters drops orphan coalesce followers (leader
 // gone) and any waiter older than maxAge.
-func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
+func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	if maxAge <= 0 {
 		return nil, nil
 	}
@@ -1226,9 +1226,9 @@ func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	return dropped, nil
 }
 
-// ReconcileConcurrencyKeys is the startup recovery sweep; PromoteNext
+// reconcileConcurrencyKeys is the startup recovery sweep; PromoteNext
 // for every key with queued waiters and room.
-func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error) {
+func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error) {
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
@@ -1266,8 +1266,8 @@ func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duratio
 	return total, nil
 }
 
-// SweepExpiredConcurrencyCache removes cache entries past their TTL.
-func (s *Store) SweepExpiredConcurrencyCache(ctx context.Context) (int64, error) {
+// sweepExpiredConcurrencyCache removes cache entries past their TTL.
+func (s *Store) sweepExpiredConcurrencyCache(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM concurrency_cache WHERE expires_at <= ?`, time.Now().UnixNano())
 	if err != nil {
@@ -1276,8 +1276,8 @@ func (s *Store) SweepExpiredConcurrencyCache(ctx context.Context) (int64, error)
 	return res.RowsAffected()
 }
 
-// SweepLRUConcurrencyCache evicts oldest until row count == keepCount.
-func (s *Store) SweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error) {
+// sweepLRUConcurrencyCache evicts oldest until row count == keepCount.
+func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error) {
 	if keepCount <= 0 {
 		return 0, nil
 	}

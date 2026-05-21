@@ -74,7 +74,7 @@ func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 
-	pairs, err := s.FailExpiredNodeClaims(ctx)
+	pairs, err := store.Maintenance.FailExpiredNodeClaims(s, ctx)
 	if err != nil {
 		t.Fatalf("FailExpiredNodeClaims: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pairs, err := s.FailStaleQueuedNodes(ctx, 15*time.Minute)
+	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("FailStaleQueuedNodes: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestFailStaleQueuedNodes_SkipsClaimedAndFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pairs, err := s.FailStaleQueuedNodes(ctx, 15*time.Minute)
+	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("FailStaleQueuedNodes: %v", err)
 	}

@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -185,15 +184,6 @@ func (s *Server) handlePoolHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// PoolListForTesting returns the raw PVC list. For tests asserting
-// pool state without going through HTTP.
-func (s *Server) PoolListForTesting(ctx context.Context) ([]corev1.PersistentVolumeClaim, error) {
-	if !s.pool.ready() {
-		return nil, errors.New("pool not attached")
-	}
-	return s.pool.pool.List(ctx)
 }
 
 // Compile-time confirmation that json.Marshal stays in scope for any

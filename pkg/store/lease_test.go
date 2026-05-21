@@ -97,7 +97,7 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 		t.Fatalf("initial claim: %v", err)
 	}
 	// Reaper too early: nothing reaped.
-	ids, err := s.ReapExpiredTriggers(context.Background())
+	ids, err := store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 
 	// Wait for the lease to expire, then reap.
 	time.Sleep(80 * time.Millisecond)
-	ids, err = s.ReapExpiredTriggers(context.Background())
+	ids, err = store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestLease_ReaperSkipsNonExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ids, err := s.ReapExpiredTriggers(context.Background())
+	ids, err := store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
