@@ -577,7 +577,7 @@ func (s *Store) ensureColumnsAllTx(ctx context.Context, tx *storeTx) error {
 	for _, spec := range columnMigrations {
 		for name, typ := range spec.cols {
 			stmt := fmt.Sprintf(
-				`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`,
+				`ALTER TABLE %q ADD COLUMN IF NOT EXISTS %q %s`,
 				spec.table, name, translateColumnType(typ),
 			)
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
@@ -716,7 +716,7 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		if have[name] {
 			continue
 		}
-		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %s %s`, table, name, typ)
+		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, name, typ)
 		if _, err := s.execNoCtx(stmt); err != nil {
 			return fmt.Errorf("add column %s.%s: %w", table, name, err)
 		}
@@ -2287,7 +2287,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full)
+                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full")
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
@@ -2390,7 +2390,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers
  WHERE status = 'pending'`
 	args := []any{}
@@ -2647,7 +2647,7 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
@@ -2685,7 +2685,7 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, "full"
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
@@ -2782,7 +2782,7 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
