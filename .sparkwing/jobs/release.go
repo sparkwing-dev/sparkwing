@@ -94,11 +94,33 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	changelog.Needs(discover, clean)
 
+	// Bump .sparkwing/go.mod's sparkwing pin to the release version
+	// and strip the dogfood self-replace before push-tag. The replace
+	// is mandatory during development (so .sparkwing/ pipelines build
+	// against local SDK edits) but pre-push refuses to ship it, and a
+	// shipped go.mod with a relative-path replace breaks anyone who
+	// clones the tag.
+	bumpSelf := sparkwing.Job(plan, "bump-self-replace", &prepareSelfReplaceJob{
+		RepoDir: repoDir,
+		Version: versionRef,
+	})
+	bumpSelf.Needs(discover, clean)
+
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog)
+	pushTag.Needs(validate, clean, changelog, bumpSelf)
+
+	// After the tag is out, restore the self-replace + commit + push
+	// so local development against the next SDK iteration works again.
+	// Leaving the post-release tree in shipped-state would force every
+	// platform-dev edit to go through `go mod download` against the
+	// proxy instead of the source tree next door.
+	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{
+		RepoDir: repoDir,
+	})
+	restoreSelf.Needs(pushTag)
 	return nil
 }
 
@@ -314,6 +336,227 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and commit", version, action.unreleasedEntries)
 	}
 	return nil
+}
+
+// selfReplaceComment is the comment block that precedes the dogfood
+// self-replace in `.sparkwing/go.mod`. Kept verbatim so restore-side
+// rewrites round-trip cleanly.
+const selfReplaceComment = `// The pipelines tree is consumed as the same module path the SDK
+// itself ships, so the require above is a placeholder; this replace
+// pins it to the parent checkout (the sparkwing repo root). The
+// pattern follows the standard "consumer .sparkwing/ uses a local
+// replace during development" convention; here the parent IS the
+// SDK rather than a sibling.
+`
+
+const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
+
+const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
+
+// prepareSelfReplaceJob bumps the sparkwing pin in `.sparkwing/go.mod`
+// to the release version and strips the dogfood self-replace. Runs
+// pre-tag so the shipped commit's `.sparkwing/go.mod` is in
+// ready-to-ship shape (no relative-path replace, real version pin).
+// Pairs with restoreSelfReplaceJob which puts the replace back after
+// the tag is out.
+type prepareSelfReplaceJob struct {
+	sparkwing.Base
+	RepoDir string
+	Version sparkwing.Ref[string]
+}
+
+func (j *prepareSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
+	return nil, nil
+}
+
+func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	newBody, changed, err := stripSelfReplace(string(body), version)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if !changed {
+		sparkwing.Info(ctx, ".sparkwing/go.mod already in shipped shape; skipping")
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
+		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
+		"release: pin .sparkwing/ to "+version+", drop dogfood self-replace"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+	}
+	sparkwing.Info(ctx, "bumped .sparkwing/go.mod sparkwing pin -> %s, removed self-replace", version)
+	return nil
+}
+
+func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	_, changed, err := stripSelfReplace(string(body), version)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if !changed {
+		sparkwing.Info(ctx, "dry-run: .sparkwing/go.mod already in shipped shape; no rewrite")
+	} else {
+		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod pin to %s and strip self-replace", version)
+	}
+	return nil
+}
+
+// restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
+// the tag has been pushed. Adds the self-replace block back and
+// pushes the restore commit so subsequent local development picks up
+// SDK edits via the parent checkout instead of the freshly-tagged
+// module proxy version. Idempotent: noop if the replace is already
+// present.
+type restoreSelfReplaceJob struct {
+	sparkwing.Base
+	RepoDir string
+}
+
+func (j *restoreSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun).Risk("destructive")
+	return nil, nil
+}
+
+func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	newBody, changed := restoreSelfReplace(string(body))
+	if !changed {
+		sparkwing.Info(ctx, ".sparkwing/go.mod self-replace already present; skipping")
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
+		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
+		"chore: restore .sparkwing/ dogfood self-replace for next dev cycle"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+	}
+	branch, err := currentBranch(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: detect branch for restore push: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("release: push restore commit: %w", err)
+	}
+	sparkwing.Info(ctx, "restored .sparkwing/ self-replace + pushed to %s", branch)
+	return nil
+}
+
+func (j *restoreSelfReplaceJob) dryRun(ctx context.Context) error {
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	_, changed := restoreSelfReplace(string(body))
+	if !changed {
+		sparkwing.Info(ctx, "dry-run: .sparkwing/go.mod self-replace already present; no rewrite")
+	} else {
+		sparkwing.Info(ctx, "dry-run: would restore .sparkwing/ self-replace, commit, and push")
+	}
+	return nil
+}
+
+// stripSelfReplace rewrites .sparkwing/go.mod for release: bumps the
+// `require github.com/sparkwing-dev/sparkwing vX.Y.Z` line to version
+// and removes the comment-block-plus-replace-line trailer. Pure
+// function so the rewrite is unit-testable without git or the file
+// system. Returns (newBody, changed, err).
+//
+//   - If neither the require nor the replace is present: error
+//     (unexpected go.mod shape; refuse to guess).
+//   - If the replace is absent but the require is on `version` already:
+//     (body, false, nil) -- already in shipped shape.
+//   - Otherwise: bump require, strip the comment + replace trailer.
+func stripSelfReplace(body, version string) (string, bool, error) {
+	// Match both the block-internal form (`\tmodule-path vX.Y.Z`
+	// inside a `require ( ... )` block) and the standalone form
+	// (`require module-path vX.Y.Z` on its own line). The optional
+	// `require\s+` prefix lets one regex cover both.
+	requireRe := regexp.MustCompile(`(?m)^([\t ]*(?:require[\t ]+)?)` + regexp.QuoteMeta(sparkwingModulePath) + `[\t ]+v[0-9][0-9A-Za-z.+-]*[\t ]*$`)
+	if !requireRe.MatchString(body) {
+		return "", false, fmt.Errorf(".sparkwing/go.mod: no `%s vX.Y.Z` require line found", sparkwingModulePath)
+	}
+	newBody := requireRe.ReplaceAllString(body, "${1}"+sparkwingModulePath+" "+version)
+
+	// Detect and strip the trailing comment + replace block. The
+	// canonical form is two consecutive blank lines off the end of the
+	// require closure, the multi-line comment, the replace line, and
+	// an optional trailing newline. We anchor on the replace line and
+	// walk backwards through any contiguous `^//` comment lines.
+	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
+	loc := replaceRe.FindStringIndex(newBody)
+	if loc == nil {
+		// No replace to strip. Already-shipped shape if the require
+		// pin matched the requested version; otherwise we still made
+		// a require-line change.
+		return newBody, newBody != body, nil
+	}
+	// Walk backwards from loc[0] to swallow the contiguous `^//`
+	// comment block and a single blank line above it.
+	start := loc[0]
+	for start > 0 {
+		// Find the start of the previous line.
+		prevEnd := start - 1
+		if prevEnd >= 0 && newBody[prevEnd] != '\n' {
+			break
+		}
+		prevStart := prevEnd - 1
+		for prevStart >= 0 && newBody[prevStart] != '\n' {
+			prevStart--
+		}
+		line := newBody[prevStart+1 : prevEnd]
+		if !strings.HasPrefix(line, "//") {
+			break
+		}
+		start = prevStart + 1
+	}
+	// Swallow one blank line above the comment block, if present.
+	if start >= 2 && newBody[start-1] == '\n' && newBody[start-2] == '\n' {
+		start--
+	}
+	end := loc[1]
+	if end < len(newBody) && newBody[end] == '\n' {
+		end++
+	}
+	newBody = newBody[:start] + newBody[end:]
+	return newBody, true, nil
+}
+
+// restoreSelfReplace puts the dogfood self-replace block back after a
+// release cut. Idempotent: returns (body, false) if the replace is
+// already present.
+func restoreSelfReplace(body string) (string, bool) {
+	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
+	if replaceRe.MatchString(body) {
+		return body, false
+	}
+	trimmed := strings.TrimRight(body, "\n")
+	return trimmed + "\n\n" + selfReplaceComment + selfReplaceLine + "\n", true
 }
 
 // changelogRewriteKind distinguishes "operator already prepared the
