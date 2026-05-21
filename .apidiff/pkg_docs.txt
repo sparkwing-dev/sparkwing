@@ -1,6 +1,19 @@
 # pkg/docs
 
 func All() string
+const BaseURLEnvVar = "SPARKWING_DOCS_BASE_URL"
+type CacheStats struct {
+	Dir            string
+	Exists         bool
+	TotalFiles     int
+	TotalBytes     int64
+	DocFiles       int
+	MigrationFiles int
+	IndexFiles     int
+	VersionsState  string
+}
+const DefaultBaseURL = "https://sparkwing.dev"
+func DefaultCacheDir() string
 type Entry struct {
 	Slug    string
 	Title   string
@@ -8,6 +21,9 @@ type Entry struct {
 	Bytes   int
 }
 const ErrNotFound = docsError("doc not found")
+var ErrUnavailable = errors.New("docs: web fetch unavailable")
+const IndexTTL = 24 * time.Hour
+const LatestAlias = "latest"
 func List() []Entry
 type MigrationEntry struct {
 	Version string
@@ -21,8 +37,29 @@ func MigrationsBetween(from, to string) ([]MigrationEntry, error)
 func MigrationsBetweenMarkdown(from, to string, entries []MigrationEntry) (string, error)
 func MigrationsList() []MigrationEntry
 func MigrationsRead(version string) (string, error)
+func NewWebClient() *WebClient
 func Read(slug string) (string, error)
 func Search(query string) []Entry
+var Version string
+type Versions struct {
+	Latest   string
+	Versions []string
+}
+type WebClient struct {
+	BaseURL   string
+	HTTP      *http.Client
+	CacheDir  string
+	NoCache   bool
+	UserAgent string
+}
+func (c *WebClient) CacheInfo() (CacheStats, error)
+func (c *WebClient) ClearCache() (int, error)
+func (c *WebClient) Doc(ctx context.Context, version, slug string) (string, error)
+func (c *WebClient) DocIndex(ctx context.Context, version string) ([]Entry, error)
+func (c *WebClient) Migration(ctx context.Context, version string) (string, error)
+func (c *WebClient) MigrationIndex(ctx context.Context) ([]MigrationEntry, error)
+func (c *WebClient) Versions(ctx context.Context) (Versions, error)
 
 # methods on un-declared receiver types (likely a bug)
 func (e docsError) Error() string
+func (e *statusErr) Error() string
