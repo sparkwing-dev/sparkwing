@@ -24,6 +24,7 @@ var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsAll, &cmdDocsSearch,
+	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe, &cmdPipelineDiscover,

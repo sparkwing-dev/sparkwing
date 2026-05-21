@@ -56,9 +56,9 @@ for agent-facing discovery.`,
 	},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run build-test-deploy"},
-		{"First command an agent should run", "sparkwing info --json"},
-		{"List every invocable (agents)", "sparkwing pipeline list --json"},
-		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release --json"},
+		{"First command an agent should run", "sparkwing info -o json"},
+		{"List every invocable (agents)", "sparkwing pipeline list -o json"},
+		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release -o json"},
 		{"Bootstrap + scaffold your first pipeline in a fresh repo", "sparkwing pipeline new --name release"},
 		{"Start the local dashboard", "sparkwing dashboard start"},
 	},
@@ -77,19 +77,18 @@ toolchain is on PATH, a curated list of next-step commands, and
 the docs URL.
 
 This is the canonical first command an agent runs after install.
-Use --json for structured output that an agent can parse, or
+Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "for-agent", Desc: "Emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)", Group: "Output"},
 		{Name: "first-time", Desc: "Print the post-install onboarding card (used by install.sh; re-runnable any time)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Human-readable card", "sparkwing info"},
-		{"Agent-readable record", "sparkwing info --json"},
+		{"Agent-readable record", "sparkwing info -o json"},
 		{"Paste into CLAUDE.md / AGENTS.md", "sparkwing info --for-agent >> CLAUDE.md"},
 		{"Reprint the post-install onboarding card", "sparkwing info --first-time"},
 	},
@@ -157,7 +156,7 @@ controller, not the local config. Secrets are top-level
 	},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
-		{"Status of laptop config", "sparkwing configure init --json"},
+		{"Status of laptop config", "sparkwing configure init -o json"},
 		{"List profiles", "sparkwing configure profiles list"},
 		{"Add a new profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
 		{"Register the current repo with the cross-repo registry", "sparkwing configure xrepo add"},
@@ -184,13 +183,12 @@ Re-running on an already-set-up laptop is a no-op status report.
 --dry-run skips the mkdir so the command pure-probes.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "dry-run", Desc: "Probe + report without creating ~/.config/sparkwing/", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
-		{"Status of laptop config (agent-readable)", "sparkwing configure init --json"},
+		{"Status of laptop config (agent-readable)", "sparkwing configure init -o json"},
 		{"Probe without writing anything", "sparkwing configure init --dry-run"},
 	},
 }
@@ -207,10 +205,10 @@ fetch -- bounded by ~3s, fail-soft when offline), and the
 alongside it.
 
 Behind-by-version is computed via semver compare for both the
-CLI itself and the SDK pin so an agent reading --json can
+CLI itself and the SDK pin so an agent reading -o json can
 trigger an upgrade without parsing prose.
 
---offline skips the network fetch entirely; --json emits the
+--offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
 	Subcommands: []SubcommandRef{
@@ -218,13 +216,12 @@ latest) for shell pipelines.`,
 	},
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
 	Examples: []Example{
 		{"Human-readable card", "sparkwing version"},
-		{"Agent-readable record", "sparkwing version --json"},
+		{"Agent-readable record", "sparkwing version -o json"},
 		{"CLI semver only (scripts)", "sparkwing version -o plain | head -n1"},
 		{"Local-only (no network)", "sparkwing version --offline"},
 		{"Update the CLI binary", "sparkwing version update --cli"},
@@ -352,7 +349,7 @@ doc in one shot for an agent that wants the full corpus in
 context. The docs match the binary version exactly -- no risk of
 the website explaining a flag your CLI doesn't have.
 
-Discovery: ` + "`sparkwing docs list --json`" + ` returns slug + title +
+Discovery: ` + "`sparkwing docs list -o json`" + ` returns slug + title +
 summary for every topic. ` + "`sparkwing docs search --query \"warm pool\"`" + `
 substring-matches across slug + title + body.`,
 	Subcommands: []SubcommandRef{
@@ -360,13 +357,16 @@ substring-matches across slug + title + body.`,
 		{"read", "Print one doc's markdown to stdout (--topic NAME)"},
 		{"all", "Concatenate every doc to stdout (full corpus dump)"},
 		{"search", "Substring search across docs (--query TEXT)"},
+		{"migrations", "Per-version migration guides (list / read / between)"},
 	},
 	Examples: []Example{
 		{"List all topics (table)", "sparkwing docs list"},
-		{"List all topics (agent-readable)", "sparkwing docs list --json"},
+		{"List all topics (agent-readable)", "sparkwing docs list -o json"},
 		{"Read one topic", "sparkwing docs read --topic pipelines"},
 		{"Slurp the whole corpus into context", "sparkwing docs all"},
 		{"Find docs that mention warm pool", "sparkwing docs search --query \"warm pool\""},
+		{"List migration guides this CLI knows", "sparkwing docs migrations list"},
+		{"Pipe every guide up to v0.4.0 into context", "sparkwing docs migrations between --to v0.4.0"},
 	},
 }
 
@@ -374,17 +374,16 @@ var cmdDocsList = Command{
 	Path:     "sparkwing docs list",
 	Synopsis: "Enumerate every doc topic",
 	Description: `Walks the embedded docs and prints one row per topic with its
-slug, first-H1 title, and first-paragraph summary. Use --json for
+slug, first-H1 title, and first-paragraph summary. Use -o json for
 agent-readable structured output, --output plain for one slug per
 line (pipe-friendly).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing docs list"},
-		{"Agent-readable", "sparkwing docs list --json"},
+		{"Agent-readable", "sparkwing docs list -o json"},
 		{"Slug-per-line for shell loops", "sparkwing docs list -o plain"},
 	},
 }
@@ -423,16 +422,110 @@ var cmdDocsSearch = Command{
 	Description: `Returns every doc whose slug + title + body contains every
 space-separated token in --query (case-insensitive). Hits in
 title/slug rank above body-only matches. Output shape matches
-` + "`sparkwing docs list`" + ` so --json composes the same way.`,
+` + "`sparkwing docs list`" + ` so -o json composes the same way.`,
 	Flags: []FlagSpec{
 		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Search terms (every token must match)", Required: true, Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Selection", "Output", "Other"},
 	Examples: []Example{
 		{"Find docs about the warm pool", "sparkwing docs search --query \"warm pool\""},
-		{"JSON for agents", "sparkwing docs search -q approval --json"},
+		{"JSON for agents", "sparkwing docs search -q approval -o json"},
+	},
+}
+
+var cmdDocsMigrations = Command{
+	Path:     "sparkwing docs migrations",
+	Synopsis: "Per-version migration guides (agent-friendly)",
+	Description: `Surface the migration guides shipped under docs/migrations/.
+Each released sparkwing version that introduces breaking changes
+gets a guide; ` + "`sparkwing docs migrations between`" + ` concatenates
+every guide in a version range into one blob you can pipe straight
+into an agent context.
+
+The same files are also reachable as regular docs (e.g.
+` + "`sparkwing docs read --topic migrations/v0.4.0`" + `); this
+subcommand is the ergonomics layer with semver-aware filtering and
+range output.`,
+	Subcommands: []SubcommandRef{
+		{"list", "Table of every migration guide this CLI knows about"},
+		{"read", "Print one migration guide to stdout (--version vX.Y.Z)"},
+		{"between", "Concatenate every guide in (--from, --to] into one blob"},
+	},
+	Examples: []Example{
+		{"List embedded migration guides", "sparkwing docs migrations list"},
+		{"Read one guide", "sparkwing docs migrations read --version v0.4.0"},
+		{"Every guide upgrading from v0.3.0 to v0.4.0", "sparkwing docs migrations between --from v0.3.0 --to v0.4.0"},
+		{"Every guide this CLI knows (one-shot agent context)", "sparkwing docs migrations between"},
+	},
+}
+
+var cmdDocsMigrationsList = Command{
+	Path:     "sparkwing docs migrations list",
+	Synopsis: "Table of every embedded migration guide",
+	Description: `Lists each migration guide bundled with this binary in
+descending semver order, with date and one-line summary parsed
+from docs/migrations/README.md. Use --output json for an
+agent-readable array of {version, date, summary, slug, bytes}.
+
+When the CLI's own version is older than the newest embedded
+guide a one-line stderr note suggests rebuilding.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable table", "sparkwing docs migrations list"},
+		{"Agent-readable", "sparkwing docs migrations list -o json"},
+		{"Version-per-line for shell loops", "sparkwing docs migrations list -o plain"},
+	},
+}
+
+var cmdDocsMigrationsRead = Command{
+	Path:     "sparkwing docs migrations read",
+	Synopsis: "Print one migration guide's markdown to stdout",
+	Description: `Outputs the markdown body for a single migration guide. Default
+output is the raw markdown so an agent can pipe straight into
+its context. Cross-doc markdown links to other topics are
+rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
+(same transform as ` + "`sparkwing docs read`" + `).`,
+	PosArgs: []PosArg{
+		{Name: "[vX.Y.Z]", Desc: "Migration guide version, when --version is not supplied"},
+	},
+	Flags: []FlagSpec{
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Migration guide version (e.g. v0.4.0). Positional fallback accepted.", Group: "Selection"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+	},
+	GroupOrder: []string{"Selection", "Output", "Other"},
+	Examples: []Example{
+		{"Read the v0.4.0 guide", "sparkwing docs migrations read --version v0.4.0"},
+		{"Positional shortcut", "sparkwing docs migrations read v0.4.0"},
+	},
+}
+
+var cmdDocsMigrationsBetween = Command{
+	Path:     "sparkwing docs migrations between",
+	Synopsis: "Concatenate every guide in a version range into one blob",
+	Description: `Returns every migration guide whose version is in (--from, --to],
+in ascending version order, separated by markdown horizontal rules.
+The output starts with a "Migration: vA -> vB" header so an agent
+knows the range up-front.
+
+This is the agent-killer command: one invocation produces the full
+migration context for an N-version jump in a form ready to pipe.
+
+--from defaults to v0.0.0 (every guide up through --to).
+--to defaults to the highest version this CLI knows about.`,
+	Flags: []FlagSpec{
+		{Name: "from", Argument: "vX.Y.Z", Desc: "Exclusive lower bound (default v0.0.0)", Group: "Selection"},
+		{Name: "to", Argument: "vA.B.C", Desc: "Inclusive upper bound (default = latest embedded version)", Group: "Selection"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+	},
+	GroupOrder: []string{"Selection", "Output", "Other"},
+	Examples: []Example{
+		{"Every guide for a v0.3.0 -> v0.4.0 jump", "sparkwing docs migrations between --from v0.3.0 --to v0.4.0"},
+		{"Every guide up to a target version", "sparkwing docs migrations between --to v0.4.0"},
+		{"Every guide this CLI knows (one-shot agent context)", "sparkwing docs migrations between"},
 	},
 }
 
@@ -658,7 +751,7 @@ pipelines to git pre-commit / pre-push.
 'sparks' manages reusable spark libraries declared in
 .sparkwing/sparks.yaml.
 
-Every verb supports --json so an agent can parse output
+Every verb supports -o json so an agent can parse output
 directly rather than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
@@ -676,8 +769,8 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 		{"sparks", "Manage sparks libraries: list / add / remove / lint / resolve / update / warmup"},
 	},
 	Examples: []Example{
-		{"Machine-readable catalog", "sparkwing pipeline list --json"},
-		{"One pipeline's details", "sparkwing pipeline describe --name release --json"},
+		{"Machine-readable catalog", "sparkwing pipeline list -o json"},
+		{"One pipeline's details", "sparkwing pipeline describe --name release -o json"},
 		{"Search by intent", `sparkwing pipeline discover --query "tag a release"`},
 		{"First pipeline in a fresh repo (auto-bootstraps)", "sparkwing pipeline new --name release"},
 		{"Inspect the DAG before running", "sparkwing pipeline explain --name release-all"},
@@ -726,20 +819,19 @@ var cmdPipelineList = Command{
 merges pipelines.yaml entries with the describe cache's typed
 metadata, and prints a grouped aligned table.
 
---json emits structured records instead; agents should prefer
---json since tab-complete / table output is for human reading.
+-o json emits structured records instead; agents should prefer
+-o json since tab-complete / table output is for human reading.
 
 --all includes entries marked 'hidden: true'. By default they're
 omitted.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "all", Desc: "Include entries marked hidden", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing pipeline list"},
-		{"Agent-readable catalog", "sparkwing pipeline list --json"},
+		{"Agent-readable catalog", "sparkwing pipeline list -o json"},
 		{"Include hidden entries", "sparkwing pipeline list --all"},
 	},
 }
@@ -755,12 +847,11 @@ hidden flag shouldn't surprise you.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable", "sparkwing pipeline describe --name release"},
-		{"Agent-readable", "sparkwing pipeline describe --name release --json"},
+		{"Agent-readable", "sparkwing pipeline describe --name release -o json"},
 	},
 }
 
@@ -772,18 +863,17 @@ must match some haystack field (name / short / help / group /
 tags / triggers); matches in the name score higher than matches
 in prose so direct hits surface first.
 
---json emits {name, kind, group, ..., score} records sorted by
-score descending; agents should prefer --json for consumption.`,
+-o json emits {name, kind, group, ..., score} records sorted by
+score descending; agents should prefer -o json for consumption.`,
 	Flags: []FlagSpec{
 		{Name: "query", Argument: "TEXT", Desc: "Search query (one or more tokens, all must hit some field)", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json (ranked, with score field)", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
 		{"Find release-related pipelines", `sparkwing pipeline discover --query release`},
 		{"Multi-token, all must hit", `sparkwing pipeline discover --query "tag release"`},
-		{"Agent-readable ranked hits", `sparkwing pipeline discover --query deploy --json`},
+		{"Agent-readable ranked hits", `sparkwing pipeline discover --query deploy -o json`},
 	},
 }
 
@@ -839,7 +929,7 @@ pipeline's Plan method, and prints the resulting DAG (nodes,
 dependencies, approval gates) without running a single job.
 
 Any --flag value tokens that are NOT recognized by explain itself
-(i.e. anything other than --name / --all / --json / --help) are
+(i.e. anything other than --name / --all / -o/--output / --help) are
 forwarded to the pipeline so Plans that branch on --env / --version
 / etc. can be previewed under realistic inputs. Missing required
 args are non-fatal here -- explain renders a best-effort plan so
@@ -855,14 +945,13 @@ pipeline ever runs.`,
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to explain (one of --name or --all required)", Group: "Target"},
 		{Name: "all", Desc: "Validate every pipeline in this repo's pipelines.yaml; non-zero exit on any failure", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json (emits raw plan-snapshot JSON, or per-pipeline result rows under --all)", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Inspect release-all's DAG", "sparkwing pipeline explain --name release-all"},
 		{"Preview with args (forwarded to the pipeline)", "sparkwing pipeline explain --name example-release --env prod"},
-		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all --json"},
+		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all -o json"},
 		{"Validate every pipeline (CI gate)", "sparkwing pipeline explain --all"},
 	},
 }
@@ -904,14 +993,13 @@ with 'sparkwing run <name>' to actually dispatch.`,
 		{Name: "start-at", Argument: "STEP", Desc: "Skip every WorkStep upstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "stop-at", Argument: "STEP", Desc: "Skip every WorkStep downstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json (emits raw plan-preview JSON for agents)", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Range", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Resolve cluster-up's DAG with current args", "sparkwing pipeline plan --name cluster-up"},
 		{"Preview a resume-from-step", "sparkwing pipeline plan --name cluster-up --start-at install-argocd"},
-		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name release-all --json"},
+		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name release-all -o json"},
 	},
 }
 
@@ -937,12 +1025,11 @@ Invocation: ` + "`sparkwing run <pipeline> config --for <target>`" + ` --
 the pipeline binary handles the subverb directly.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Inspect the staging config", "sparkwing run release config --for staging"},
-		{"Agent-readable form", "sparkwing run release config --for prod --json"},
+		{"Agent-readable form", "sparkwing run release config --for prod -o json"},
 	},
 	HideFromComplete: true,
 }
@@ -1332,12 +1419,11 @@ to each token. Tokens carrying the controller's "admin"
 superset render as "*" since admin short-circuits every other
 scope check. An empty scope set renders as "-".
 
-Use --json (or -o json) to get a structured array with explicit
+Use -o json to get a structured array with explicit
 scope arrays, suitable for piping into jq.`,
 	Flags: []FlagSpec{
 		{Name: "type", Argument: "KIND", Desc: "Filter by token type", Group: "Filter"},
 		{Name: "include-revoked", Desc: "Include revoked tokens in the output", Group: "Filter"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
@@ -1605,7 +1691,7 @@ timestamped on disk).`,
 		{"Merge a parent run with every descendant", "sparkwing runs logs --run run-... --tree"},
 		{"JSON stream for an agent", "sparkwing runs logs --run run-... -o json"},
 		{"Plain text with node/step prefix", "sparkwing runs logs --run run-... -o plain"},
-		{"Force the colored renderer when piping", "sparkwing runs logs --run run-... --pretty | less -R"},
+		{"Force the colored renderer when piping", "sparkwing runs logs --run run-... -o pretty | less -R"},
 	},
 }
 
@@ -1621,7 +1707,7 @@ var cmdJobsErrors = Command{
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Inspect a local failure", "sparkwing runs errors --run run-20260422-142501-abcd"},
-		{"Inspect a prod failure", "sparkwing runs errors --run run-... --on prod --json"},
+		{"Inspect a prod failure", "sparkwing runs errors --run run-... --on prod -o json"},
 	},
 }
 
@@ -1830,8 +1916,6 @@ Exit code 0 even when there are no matches.`,
 		{Name: "limit", Argument: "N", Desc: "Max candidate runs to scan", Default: "50", Group: "Output"},
 		{Name: "max-matches", Argument: "M", Desc: "Per-node match cap (0 = no cap)", Default: "5", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
-		{Name: "pretty", Desc: "Force pretty rendering even when piped (alias for -o pretty)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
@@ -1839,7 +1923,7 @@ Exit code 0 even when there are no matches.`,
 	Examples: []Example{
 		{"Find every run that hit a permission-denied line in the past week", "sparkwing runs grep --pattern 'permission denied' --since 7d"},
 		{"Pipe matching run ids into runs logs", "sparkwing runs grep --pattern OOMKilled --since 24h -q | xargs -I{} sparkwing runs logs --run {}"},
-		{"Search prod runs as JSON for an agent", "sparkwing runs grep --pattern 'connection refused' --on prod --since 24h --json"},
+		{"Search prod runs as JSON for an agent", "sparkwing runs grep --pattern 'connection refused' --on prod --since 24h -o json"},
 	},
 }
 
@@ -1854,14 +1938,12 @@ in effect + any approval-gate state. Useful for the
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
-		{Name: "pretty", Desc: "Force pretty rendering even when piped (alias for -o pretty)", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Quick run rollup", "sparkwing runs summary --run run-..."},
-		{"JSON for an agent", "sparkwing runs summary --run run-... --json"},
+		{"JSON for an agent", "sparkwing runs summary --run run-... -o json"},
 	},
 }
 
@@ -1878,15 +1960,13 @@ emits start/end offsets in milliseconds per row.`,
 		{Name: "steps", Desc: "Include per-step rows under each node", Group: "Output"},
 		{Name: "width", Argument: "N", Desc: "Bar width in characters", Default: "60", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
-		{Name: "pretty", Desc: "Force the waterfall view even when piped (alias for -o pretty)", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Default node waterfall", "sparkwing runs timeline --run run-..."},
 		{"Expand into per-step bars", "sparkwing runs timeline --run run-... --steps"},
-		{"JSON for an agent", "sparkwing runs timeline --run run-... --steps --json"},
+		{"JSON for an agent", "sparkwing runs timeline --run run-... --steps -o json"},
 	},
 }
 
@@ -2189,7 +2269,6 @@ entries narrow cleanly.`,
 		{Name: "limit", Argument: "N", Desc: "Max triggers to show", Default: "20", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only trigger ids, newline-separated", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw triggers array", Group: "Output"},
-		{Name: "json", Desc: "Alias for -o json (hidden)", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
@@ -2207,7 +2286,6 @@ var cmdTriggersGet = Command{
 	Flags: []FlagSpec{
 		{Name: "id", Argument: "TRIGGER_ID", Desc: "Trigger / run identifier (same value 'fire' prints)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw response", Group: "Output"},
-		{Name: "json", Desc: "Alias for -o json (hidden)", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
@@ -2297,7 +2375,6 @@ minimally-configured laptop profile can still exit 0.`,
 	Flags: []FlagSpec{
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
@@ -2331,7 +2408,6 @@ and don't change the exit code so scripts can still condition
 on "is the cluster reachable at all?".`,
 	Flags: []FlagSpec{
 		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
-		{Name: "json", Desc: "Emit JSON (alias of -o json)", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
@@ -2379,7 +2455,6 @@ hooks render as "(non-sparkwing)".`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (reserved for symmetry; unused by list)", Group: "System"},
 	},
@@ -2404,7 +2479,6 @@ take a time filter). Default: 24h.`,
 		{Name: "hook", Argument: "N", Desc: "GitHub hook id from 'webhooks list'", Required: true, Group: "Input"},
 		{Name: "since", Argument: "DURATION", Desc: "Only deliveries newer than this", Default: "24h", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "on", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
 	},
@@ -2462,7 +2536,6 @@ Use -q to print just names, one per line, for shell piping
 	Flags: []FlagSpec{
 		{Name: "on", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print just agent names, one per line", Group: "Output"},
 	},
@@ -2516,7 +2589,6 @@ proxy calls when offline.`,
 	Flags: []FlagSpec{
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (hidden alias for -o json)", Group: "Output"},
 		{Name: "no-resolve", Desc: "Skip module-proxy lookups; print declared versions only", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},

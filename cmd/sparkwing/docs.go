@@ -32,12 +32,14 @@ func runDocs(args []string) error {
 		return runDocsAll(args[1:])
 	case "search":
 		return runDocsSearch(args[1:])
+	case "migrations":
+		return runDocsMigrations(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdDocs, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdDocs, os.Stderr)
-		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search)", args[0])
+		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search, migrations)", args[0])
 	}
 }
 
@@ -45,15 +47,11 @@ func runDocsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
-	}
-	if *asJSON {
-		output = "json"
 	}
 	entries := docs.List()
 	return renderDocsList(entries, output)
@@ -115,7 +113,6 @@ func runDocsSearch(args []string) error {
 	var output string
 	fs.StringVarP(&query, "query", "q", "", "search terms (every token must match somewhere)")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := parseAndCheck(cmdDocsSearch, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -130,9 +127,6 @@ func runDocsSearch(args []string) error {
 	if query == "" {
 		PrintHelp(cmdDocsSearch, os.Stderr)
 		return errors.New("docs search: --query is required (e.g. --query \"warm pool\")")
-	}
-	if *asJSON {
-		output = "json"
 	}
 	hits := docs.Search(query)
 	return renderDocsList(hits, output)
