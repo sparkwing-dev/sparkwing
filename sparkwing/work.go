@@ -817,6 +817,12 @@ func (s *SpawnSpec) markDone(out any) {
 	s.mu.Unlock()
 }
 
+// awaitDone is the reader half of the done/resolved/out channel
+// pattern; the writer half (markDone) is wired through
+// RuntimePlumbing.Fns.SpawnSpecMarkDone. No call site exists yet --
+// this is scaffolding for a future SpawnSpec.Get API.
+//
+//lint:ignore U1000 reader half of unwired SpawnSpec.Get scaffolding; keep paired with markDone
 func (s *SpawnSpec) awaitDone(ctx context.Context) error {
 	s.mu.Lock()
 	if s.resolved {
