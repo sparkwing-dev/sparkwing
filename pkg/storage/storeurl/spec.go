@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/stdoutlogs"
@@ -121,7 +122,7 @@ func resolveControllerProfile(surface, controller string, lookup ProfileLookup) 
 // file. Callers that want the historical default (~/.sparkwing/state.db)
 // should pass that path explicitly so the factory has a single,
 // caller-provided source of truth.
-func OpenStateStoreFromSpec(_ context.Context, spec backends.Spec) (storage.StateStore, error) {
+func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec) (storage.StateStore, error) {
 	switch spec.Type {
 	case backends.TypeSQLite:
 		path, err := expandPath(spec.Path)
@@ -129,6 +130,15 @@ func OpenStateStoreFromSpec(_ context.Context, spec backends.Spec) (storage.Stat
 			return nil, fmt.Errorf("state sqlite: %w", err)
 		}
 		return store.Open(path)
+	case backends.TypeS3:
+		client, err := newS3Client(ctx)
+		if err != nil {
+			return nil, err
+		}
+		art := s3store.NewArtifactStore(spec.Bucket, spec.Prefix, client)
+		return s3state.New(art), nil
+	case backends.TypeGCS, backends.TypeAzureBlob:
+		return nil, unimplemented("state", spec.Type)
 	case backends.TypePostgres, backends.TypeMySQL, backends.TypeController:
 		return nil, unimplemented("state", spec.Type)
 	default:

@@ -122,6 +122,9 @@ var allowedTypes = map[Surface]map[string]bool{
 		TypePostgres:   true,
 		TypeMySQL:      true,
 		TypeController: true,
+		TypeS3:         true,
+		TypeGCS:        true,
+		TypeAzureBlob:  true,
 	},
 }
 
