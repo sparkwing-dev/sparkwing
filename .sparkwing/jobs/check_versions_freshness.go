@@ -96,6 +96,17 @@ var watchedModulePrefixes = []string{
 	"github.com/sparkwing-dev/sparks-core",
 }
 
+// maxAllowedMajor is the highest semver major allowed for a watched
+// module. The SDK is intentionally pinned below v1.0.0 (the README
+// states this explicitly). The proxy carries v1.0.0+ tags that were
+// pushed by mistake and the cache can't be undone; the linter rejects
+// any consumer pinned at those versions and refuses to treat them as
+// "latest" when picking a target to bump to. Modules absent from this
+// map have no major-version cap.
+var maxAllowedMajor = map[string]int{
+	"github.com/sparkwing-dev/sparkwing": 0,
+}
+
 func isWatchedModule(path string) bool {
 	for _, p := range watchedModulePrefixes {
 		if path == p || strings.HasPrefix(path, p+"/") {
@@ -103,6 +114,15 @@ func isWatchedModule(path string) bool {
 		}
 	}
 	return false
+}
+
+// majorCapFor returns the highest allowed semver major for modulePath,
+// or -1 when there is no cap.
+func majorCapFor(modulePath string) int {
+	if cap, ok := maxAllowedMajor[modulePath]; ok {
+		return cap
+	}
+	return -1
 }
 
 // findGoModFiles returns every go.mod under root, skipping vendored
@@ -190,11 +210,26 @@ func localBehindRemote(ctx context.Context, localPath string) (bool, int, error)
 }
 
 // checkAgainstLatest compares pinned against the module's latest
-// released tag. Returns an empty string when pinned is current or
-// ahead, or a problem description otherwise.
+// released tag (respecting the per-module major-version cap). Returns
+// an empty string when pinned is current or ahead, or a problem
+// description otherwise.
 func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile string) string {
 	if pinned == "" {
 		return ""
+	}
+	cap := majorCapFor(modulePath)
+	// Reject pins that exceed the configured major-version cap. The
+	// sparkwing SDK is intentionally pre-v1; v1.0.0+ tags were
+	// accidentally pushed and the proxy cache cannot be undone, so any
+	// consumer pinning a capped module past its cap is wrong by policy
+	// regardless of what the proxy reports as "latest".
+	if cap >= 0 {
+		if pinnedMajor, ok := semverMajor(pinned); ok && pinnedMajor > cap {
+			return fmt.Sprintf(
+				"%s pinned at %s but is capped at major v%d (the README states this module stays below v%d; v%d+ tags on the proxy were pushed by mistake)",
+				modulePath, pinned, cap, cap+1, cap+1,
+			)
+		}
 	}
 	latest, err := latestReleasedVersion(ctx, modulePath, fromModFile)
 	if err != nil {
@@ -213,10 +248,32 @@ func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile str
 		modulePath, pinned, latest, modulePath, latest)
 }
 
+// semverMajor returns the major-version integer of a v-prefixed
+// semver string ("v1.2.3" -> 1). Returns (0, false) when the input
+// isn't a valid semver.
+func semverMajor(v string) (int, bool) {
+	if !semver.IsValid(v) {
+		return 0, false
+	}
+	maj := semver.Major(v)
+	if !strings.HasPrefix(maj, "v") {
+		return 0, false
+	}
+	n := 0
+	if _, err := fmt.Sscanf(maj[1:], "%d", &n); err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // latestReleasedVersion uses `go list -m -versions` to discover the
 // highest released semver tag for modulePath. The command runs from
 // the directory of the consuming go.mod so module-resolution config
-// (GOPROXY, GOPRIVATE, replace directives) is respected.
+// (GOPROXY, GOPRIVATE, replace directives) is respected. When the
+// module has a configured major-version cap (see maxAllowedMajor),
+// versions above the cap are filtered out so the returned "latest"
+// is the highest tag the consumer should actually pin to, not the
+// highest tag the proxy happens to know about.
 func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) (string, error) {
 	dir := filepath.Dir(fromModFile)
 	out, err := captureCmd(ctx, dir, "go", "list", "-m", "-versions", modulePath)
@@ -228,17 +285,25 @@ func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) 
 	if len(parts) < 2 {
 		return "", fmt.Errorf("no versions reported for %s", modulePath)
 	}
+	cap := majorCapFor(modulePath)
 	// Filter to released semver tags (skip pre-release for the
 	// "latest" comparison so that a -rc tag doesn't shadow a stable
-	// release of the same series).
+	// release of the same series). Also drop anything above the
+	// configured major cap.
 	var stable []string
 	for _, v := range parts[1:] {
-		if semver.IsValid(v) && semver.Prerelease(v) == "" {
-			stable = append(stable, v)
+		if !semver.IsValid(v) || semver.Prerelease(v) != "" {
+			continue
 		}
+		if cap >= 0 {
+			if maj, ok := semverMajor(v); !ok || maj > cap {
+				continue
+			}
+		}
+		stable = append(stable, v)
 	}
 	if len(stable) == 0 {
-		return "", fmt.Errorf("no stable releases for %s", modulePath)
+		return "", fmt.Errorf("no stable releases for %s within cap", modulePath)
 	}
 	semver.Sort(stable)
 	return stable[len(stable)-1], nil

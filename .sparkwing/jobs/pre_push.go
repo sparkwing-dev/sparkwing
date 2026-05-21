@@ -80,7 +80,13 @@ func (p *PrePush) run(ctx context.Context) error {
 	}
 
 	// 5. Known-vulnerabilities scan.
-	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && govulncheck ./...").Run(); err != nil {
+	//
+	// `go run` compiles govulncheck against the current toolchain so
+	// the scan reports against the actual stdlib version the project
+	// builds with. The standalone `govulncheck` binary on PATH is
+	// frozen to whatever Go version installed it, which produces stale
+	// false-positives after a system Go upgrade.
+	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && go run golang.org/x/vuln/cmd/govulncheck@latest ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("govulncheck: %v", err))
 	} else {
 		sparkwing.Info(ctx, "govulncheck: clean")
