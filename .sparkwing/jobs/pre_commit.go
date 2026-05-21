@@ -36,41 +36,30 @@ func (PreCommit) Examples() []sparkwing.Example {
 }
 
 func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run)
+	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
 }
 
-func (p *PreCommit) run(ctx context.Context) error {
-	var failures []string
+// Work declares one step per check so they dispatch in parallel. A
+// failed step doesn't block its siblings; the node's terminal outcome
+// rolls up from the steps, and the dashboard surfaces each check's
+// status independently. No Needs() edges between steps -- they're
+// fully independent.
+func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "gofmt", runGofmt)
+	sparkwing.Step(w, "vet", runVet)
+	sparkwing.Step(w, "em-dashes", checkEmDashes)
+	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
+	return nil, nil
+}
 
-	if err := sparkwing.Bash(ctx, `gofmt -l .sparkwing/`).MustBeEmpty("files need formatting"); err != nil {
-		failures = append(failures, fmt.Sprintf("gofmt: %v", err))
-	} else {
-		sparkwing.Info(ctx, "gofmt: clean")
-	}
+func runGofmt(ctx context.Context) error {
+	return sparkwing.Bash(ctx, `gofmt -l .sparkwing/`).MustBeEmpty("files need formatting")
+}
 
-	if _, err := sparkwing.Bash(ctx, "go -C .sparkwing vet ./...").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("go vet: %v", err))
-	} else {
-		sparkwing.Info(ctx, "go vet: clean")
-	}
-
-	if err := checkEmDashes(ctx); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(ctx, "em dashes: none")
-	}
-
-	if err := checkTrackerIDs(ctx); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(ctx, "tracker IDs: none")
-	}
-
-	if len(failures) > 0 {
-		return fmt.Errorf("%d pre-commit check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
-	}
-	return nil
+func runVet(ctx context.Context) error {
+	_, err := sparkwing.Bash(ctx, "go -C .sparkwing vet ./...").Run()
+	return err
 }
 
 var trackerIDPattern = regexp.MustCompile(`\b(IMP|SDK|LOCAL|RUN|ORG|REG|TOD)-[0-9]+\b`)
