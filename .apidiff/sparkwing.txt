@@ -524,11 +524,11 @@ func (g *SpawnGenSpec) ID() string
 func (g *SpawnGenSpec) Items() any
 type SpawnGroup struct {
 }
-func (g *SpawnGroup) Needs(deps ...any) *SpawnGroup
+func (g *SpawnGroup) Needs(deps ...WorkDep) *SpawnGroup
 func (g *SpawnGroup) Spec() *SpawnGenSpec
 type SpawnHandle struct {
 }
-func (h *SpawnHandle) Needs(deps ...any) *SpawnHandle
+func (h *SpawnHandle) Needs(deps ...WorkDep) *SpawnHandle
 func (h *SpawnHandle) SkipIf(fn SkipPredicate) *SpawnHandle
 func (h *SpawnHandle) Spec() *SpawnSpec
 type SpawnHandler interface {
@@ -559,9 +559,11 @@ type StepGroup struct {
 }
 func (g *StepGroup) Members() []*WorkStep
 func (g *StepGroup) Name() string
-func (g *StepGroup) Needs(deps ...any) *StepGroup
+func (g *StepGroup) Needs(deps ...WorkDep) *StepGroup
 func (g *StepGroup) OnTarget(targets ...string) *StepGroup
 func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
+type StepID string
+func StepIDOf(id string) StepID
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
@@ -592,6 +594,9 @@ func (w *Work) Spawns() []*SpawnSpec
 func (w *Work) StepByID(id string) *WorkStep
 func (w *Work) Steps() []*WorkStep
 func (w *Work) TopologicalStepOrder() []string
+type WorkDep interface {
+	workDepID() string
+}
 func WorkDir() string
 type WorkStep struct {
 }
@@ -605,7 +610,7 @@ func (s *WorkStep) IsContinueOnError() bool
 func (s *WorkStep) IsOptional() bool
 func (s *WorkStep) IsSafeWithoutDryRun() bool
 func (s *WorkStep) MarkDone(out any)
-func (s *WorkStep) Needs(deps ...any) *WorkStep
+func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep
 func (s *WorkStep) OnTarget(targets ...string) *WorkStep
 func (s *WorkStep) OnTargets() []string
 func (s *WorkStep) Optional() *WorkStep

@@ -16,6 +16,13 @@ are required.
   variable bug. The `Dep` interface is closed (unexported marker
   method) so only sparkwing-defined types satisfy it: `*JobNode`,
   `*ApprovalGate`, `*JobGroup`, and `NodeID`.
+- `sparkwing.WorkDep` interface and `sparkwing.StepID` /
+  `sparkwing.StepIDOf` for typed Work-layer dependency wiring,
+  parallel to the Plan-layer `Dep`. `WorkDep` is implemented by
+  `*WorkStep`, `*StepGroup`, `*SpawnHandle`, `*SpawnGroup`, and
+  `StepID`. The two interfaces are disjoint (a `*WorkStep` does NOT
+  satisfy `Dep`, a `*JobNode` does NOT satisfy `WorkDep`), so the
+  layers cannot cross by accident.
 - `sparkwing.NoCache` typed sentinel for explicit cache opt-out from a
   `CacheOptions.ContentHash` function. Returning `NoCache` is distinct
   from returning the zero `CacheKey`: operators see an "explicit
@@ -63,6 +70,14 @@ are required.
 
   The `*JobGroup` dynamic-membership special case in `*JobNode.Needs`
   is preserved -- only the entry-point type changed.
+- **Breaking:** Work-layer `Needs(...)` on `*WorkStep`, `*StepGroup`,
+  `*SpawnHandle`, and `*SpawnGroup` now takes `...WorkDep` instead of
+  `...any`. Same rationale and migration shape as the Plan-layer
+  change: rewrite `.Needs("step-id")` to `.Needs(sparkwing.StepIDOf("step-id"))`;
+  typed `*WorkStep` / handle args are unchanged. The previously
+  documented "embedded `*WorkStep` via reflection" unwrap path is
+  removed -- no code in the repo used it, and the typed interface
+  makes the embed-and-unwrap pattern moot.
 - **Breaking:** `CacheOptions.Key` renamed to `CacheOptions.Namespace`,
   and `CacheOptions.CacheKey` renamed to `CacheOptions.ContentHash`.
   `HasKey()` renamed to `HasNamespace()`. Hard cut: the old field

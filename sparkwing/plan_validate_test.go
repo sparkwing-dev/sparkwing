@@ -36,7 +36,7 @@ type typoCloseJob struct{ sparkwing.Base }
 
 func (typoCloseJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
-	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs("fetchh")
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs(sparkwing.StepIDOf("fetchh"))
 	return nil, nil
 }
 
@@ -67,7 +67,7 @@ type typoFarJob struct{ sparkwing.Base }
 
 func (typoFarJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
-	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs("totallyunrelated")
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs(sparkwing.StepIDOf("totallyunrelated"))
 	return nil, nil
 }
 
@@ -130,7 +130,7 @@ type stringExactJob struct{ sparkwing.Base }
 
 func (stringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "fetch", func(ctx context.Context) error { return nil })
-	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs("fetch")
+	sparkwing.Step(w, "compile", func(ctx context.Context) error { return nil }).Needs(sparkwing.StepIDOf("fetch"))
 	return nil, nil
 }
 
@@ -182,7 +182,7 @@ type spawnTypoJob struct{ sparkwing.Base }
 
 func (spawnTypoJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.JobSpawn(w, "seed", func(ctx context.Context) error { return nil })
-	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs("seedd")
+	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs(sparkwing.StepIDOf("seedd"))
 	return nil, nil
 }
 
@@ -213,7 +213,7 @@ type spawnStringExactJob struct{ sparkwing.Base }
 
 func (spawnStringExactJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.JobSpawn(w, "seed", func(ctx context.Context) error { return nil })
-	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs("seed")
+	sparkwing.Step(w, "after", func(ctx context.Context) error { return nil }).Needs(sparkwing.StepIDOf("seed"))
 	return nil, nil
 }
 

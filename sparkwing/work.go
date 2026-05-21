@@ -474,17 +474,83 @@ func (s *WorkStep) OutputType() reflect.Type { return s.outType }
 // orchestrator.
 func (s *WorkStep) Fn() func(ctx context.Context) (any, error) { return s.fn }
 
+// WorkDep is the closed type set accepted by Work-layer [WorkStep.Needs]
+// and the Needs methods on [StepGroup], [SpawnHandle], and [SpawnGroup].
+// The unexported marker method `workDepID()` prevents callers from
+// passing arbitrary values; the Plan-layer [Dep] types are NOT WorkDep
+// and vice versa, so the two layers cannot cross by accident.
+//
+// Implementations: [*WorkStep], [*StepGroup], [*SpawnHandle],
+// [*SpawnGroup], and [StepID].
+type WorkDep interface {
+	workDepID() string
+}
+
+// StepID is an explicit by-name reference to a WorkStep / SpawnHandle
+// inside the same Work. Construct via [StepIDOf] to get the empty-id
+// guard.
+type StepID string
+
+// StepIDOf builds a [StepID] from a string, panicking when id is
+// empty. An empty by-name dep is almost always an unset variable bug.
+func StepIDOf(id string) StepID {
+	if id == "" {
+		panic("sparkwing: StepIDOf called with empty id")
+	}
+	return StepID(id)
+}
+
+func (id StepID) workDepID() string   { return string(id) }
+func (s *WorkStep) workDepID() string { return s.id }
+func (g *StepGroup) workDepID() string {
+	// StepGroup is expanded inline by the Needs caller; this id is
+	// the group's name and is not added directly to needs lists.
+	// Kept here so *StepGroup satisfies WorkDep at the type level.
+	return g.name
+}
+
+func (h *SpawnHandle) workDepID() string {
+	if h == nil || h.spec == nil {
+		return ""
+	}
+	return h.spec.id
+}
+
+func (g *SpawnGroup) workDepID() string {
+	if g == nil || g.spec == nil {
+		return ""
+	}
+	return g.spec.syntheticID()
+}
+
+// Compile-time conformance assertions: every Work-layer dep type
+// satisfies [WorkDep]. A regression here surfaces as a build break.
+var (
+	_ WorkDep = (*WorkStep)(nil)
+	_ WorkDep = (*StepGroup)(nil)
+	_ WorkDep = (*SpawnHandle)(nil)
+	_ WorkDep = (*SpawnGroup)(nil)
+	_ WorkDep = StepID("")
+)
+
 // Needs declares hard upstream Step / Spawn dependencies inside the
-// same Work. Accepts *WorkStep, *StepGroup, *SpawnHandle, *SpawnGroup,
-// or string IDs.
-func (s *WorkStep) Needs(deps ...any) *WorkStep {
+// same Work. Accepts any [WorkDep]: [*WorkStep], [*StepGroup],
+// [*SpawnHandle], [*SpawnGroup], or [StepID]. For multiple steps
+// from a slice, splat: `s.Needs(steps...)`.
+func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep {
 	for _, d := range deps {
-		coerceDep(d, "WorkStep.Needs", &s.needs)
+		addWorkDep(d, &s.needs)
 	}
 	return s
 }
 
-func coerceDep(d any, caller string, out *[]string) {
+// addWorkDep appends the IDs implied by d to out, deduping. *StepGroup
+// expands to its member IDs; *SpawnGroup uses the generator's
+// synthetic id (members aren't known until the generator runs).
+func addWorkDep(d WorkDep, out *[]string) {
+	if d == nil {
+		return
+	}
 	add := func(id string) {
 		if id == "" {
 			return
@@ -493,42 +559,13 @@ func coerceDep(d any, caller string, out *[]string) {
 			*out = append(*out, id)
 		}
 	}
-	switch v := d.(type) {
-	case *WorkStep:
-		if v != nil {
-			add(v.id)
+	if g, ok := d.(*StepGroup); ok && g != nil {
+		for _, m := range g.members {
+			add(m.id)
 		}
-	case *StepGroup:
-		if v != nil {
-			for _, m := range v.members {
-				add(m.id)
-			}
-		}
-	case *SpawnHandle:
-		if v != nil && v.spec != nil {
-			add(v.spec.id)
-		}
-	case *SpawnGroup:
-		// Fan-in waits on the generator's synthetic id; member ids
-		// aren't known until the generator runs.
-		if v != nil && v.spec != nil {
-			add(v.spec.syntheticID())
-		}
-	case string:
-		add(v)
-	case []*WorkStep:
-		for _, vv := range v {
-			if vv != nil {
-				add(vv.id)
-			}
-		}
-	default:
-		if step := unwrapStep(d); step != nil {
-			add(step.id)
-			return
-		}
-		panic(fmt.Sprintf("sparkwing: %s: unsupported dep type %T", caller, d))
+		return
 	}
+	add(d.workDepID())
 }
 
 // DepIDs returns the step IDs this step depends on.
@@ -715,8 +752,8 @@ func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup {
 }
 
 // Needs declares an upstream dependency on every member of the group.
-// Accepts the same shapes as WorkStep.Needs.
-func (g *StepGroup) Needs(deps ...any) *StepGroup {
+// Accepts any [WorkDep], same as [WorkStep.Needs].
+func (g *StepGroup) Needs(deps ...WorkDep) *StepGroup {
 	for _, m := range g.members {
 		m.Needs(deps...)
 	}
@@ -830,11 +867,11 @@ type SpawnHandle struct {
 func (h *SpawnHandle) Spec() *SpawnSpec { return h.spec }
 
 // Needs declares which Steps / Spawns inside the same Work must
-// complete before the spawn fires. Mirrors WorkStep.Needs at the
+// complete before the spawn fires. Mirrors [WorkStep.Needs] at the
 // spawn layer.
-func (h *SpawnHandle) Needs(deps ...any) *SpawnHandle {
+func (h *SpawnHandle) Needs(deps ...WorkDep) *SpawnHandle {
 	for _, d := range deps {
-		coerceDep(d, "SpawnHandle.Needs", &h.spec.needs)
+		addWorkDep(d, &h.spec.needs)
 	}
 	return h
 }
@@ -889,42 +926,11 @@ func (g *SpawnGroup) Spec() *SpawnGenSpec { return g.spec }
 
 // Needs declares which Steps / Spawns must complete before the
 // generator runs.
-func (g *SpawnGroup) Needs(deps ...any) *SpawnGroup {
+func (g *SpawnGroup) Needs(deps ...WorkDep) *SpawnGroup {
 	for _, d := range deps {
-		coerceDep(d, "SpawnGroup.Needs", &g.spec.needs)
+		addWorkDep(d, &g.spec.needs)
 	}
 	return g
-}
-
-// unwrapStep extracts an embedded *WorkStep from typed wrappers via
-// reflection. Returns nil if none found.
-func unwrapStep(v any) *WorkStep {
-	rv := reflect.ValueOf(v)
-	if !rv.IsValid() {
-		return nil
-	}
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			return nil
-		}
-		rv = rv.Elem()
-	}
-	if rv.Kind() != reflect.Struct {
-		return nil
-	}
-	for i := range rv.NumField() {
-		fv := rv.Field(i)
-		if !fv.IsValid() {
-			continue
-		}
-		if fv.Kind() == reflect.Pointer && fv.Type() == reflect.TypeFor[*WorkStep]() {
-			if fv.IsNil() {
-				return nil
-			}
-			return fv.Interface().(*WorkStep)
-		}
-	}
-	return nil
 }
 
 // jobFn is the unexported Workable wrapper used internally when
