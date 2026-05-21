@@ -122,7 +122,7 @@ func TestOpenStateStoreFromSpec_SQLite(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/state.db"
 	st, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-		backends.Spec{Type: backends.TypeSQLite, Path: path})
+		backends.Spec{Type: backends.TypeSQLite, Path: path}, nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestOpenStateStoreFromSpec_SQLite(t *testing.T) {
 
 func TestOpenStateStoreFromSpec_SQLiteMissingPath(t *testing.T) {
 	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-		backends.Spec{Type: backends.TypeSQLite})
+		backends.Spec{Type: backends.TypeSQLite}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -147,10 +147,10 @@ func TestOpenStateStoreFromSpec_SQLiteMissingPath(t *testing.T) {
 }
 
 func TestOpenStateStoreFromSpec_Unimplemented(t *testing.T) {
-	for _, ty := range []string{backends.TypePostgres, backends.TypeMySQL, backends.TypeController} {
+	for _, ty := range []string{backends.TypePostgres, backends.TypeMySQL} {
 		t.Run(ty, func(t *testing.T) {
 			_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-				backends.Spec{Type: ty, URL: "x"})
+				backends.Spec{Type: ty, URL: "x"}, nil)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -161,9 +161,38 @@ func TestOpenStateStoreFromSpec_Unimplemented(t *testing.T) {
 	}
 }
 
+func TestOpenStateStoreFromSpec_Controller(t *testing.T) {
+	lookup := func(name string) (string, string, error) {
+		if name != "prod" {
+			t.Fatalf("lookup called with %q, want prod", name)
+		}
+		return "https://controller.example", "tok-123", nil
+	}
+	st, err := storeurl.OpenStateStoreFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeController, Controller: "prod"}, lookup)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if st == nil {
+		t.Fatal("nil store")
+	}
+	defer func() { _ = st.Close() }()
+}
+
+func TestOpenStateStoreFromSpec_ControllerRequiresLookup(t *testing.T) {
+	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeController, Controller: "prod"}, nil)
+	if err == nil {
+		t.Fatal("expected error when lookup is nil")
+	}
+	if !strings.Contains(err.Error(), "profile lookup") {
+		t.Errorf("want 'profile lookup', got: %v", err)
+	}
+}
+
 func TestOpenStateStoreFromSpec_UnrecognizedType(t *testing.T) {
 	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-		backends.Spec{Type: backends.TypeFilesystem, Path: "/tmp/x"})
+		backends.Spec{Type: backends.TypeFilesystem, Path: "/tmp/x"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "not recognized") {
 		t.Errorf("want 'not recognized', got: %v", err)
 	}

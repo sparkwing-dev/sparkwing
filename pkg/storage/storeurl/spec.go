@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -116,13 +117,15 @@ func resolveControllerProfile(surface, controller string, lookup ProfileLookup) 
 }
 
 // OpenStateStoreFromSpec constructs a StateStore from a backends.Spec.
-// See OpenArtifactStoreFromSpec for error semantics.
+// See OpenArtifactStoreFromSpec for error semantics. The lookup
+// callback is consulted for type=controller specs; pass nil when no
+// controller-typed spec can appear.
 //
 // For type=sqlite, spec.Path is required and names the SQLite database
 // file. Callers that want the historical default (~/.sparkwing/state.db)
 // should pass that path explicitly so the factory has a single,
 // caller-provided source of truth.
-func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec) (storage.StateStore, error) {
+func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.StateStore, error) {
 	switch spec.Type {
 	case backends.TypeSQLite:
 		path, err := expandPath(spec.Path)
@@ -131,15 +134,21 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec) (storage.St
 		}
 		return store.Open(path)
 	case backends.TypeS3:
-		client, err := newS3Client(ctx)
+		s3client, err := newS3Client(ctx)
 		if err != nil {
 			return nil, err
 		}
-		art := s3store.NewArtifactStore(spec.Bucket, spec.Prefix, client)
+		art := s3store.NewArtifactStore(spec.Bucket, spec.Prefix, s3client)
 		return s3state.New(art), nil
+	case backends.TypeController:
+		url, token, err := resolveControllerProfile("state", spec.Controller, lookup)
+		if err != nil {
+			return nil, err
+		}
+		return client.NewWithToken(url, nil, token), nil
 	case backends.TypeGCS, backends.TypeAzureBlob:
 		return nil, unimplemented("state", spec.Type)
-	case backends.TypePostgres, backends.TypeMySQL, backends.TypeController:
+	case backends.TypePostgres, backends.TypeMySQL:
 		return nil, unimplemented("state", spec.Type)
 	default:
 		return nil, fmt.Errorf("state backend type %q is not recognized", spec.Type)

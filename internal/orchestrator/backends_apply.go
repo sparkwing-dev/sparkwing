@@ -39,7 +39,7 @@ func ApplyBackendsConfig(ctx context.Context, opts *Options) error {
 			return fmt.Errorf("--sw-local-only: no default state database path resolved")
 		}
 		spec := backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
-		st, err := storeurl.OpenStateStoreFromSpec(ctx, spec)
+		st, err := storeurl.OpenStateStoreFromSpec(ctx, spec, nil)
 		if err != nil {
 			return fmt.Errorf("--sw-local-only: open sqlite state: %w", err)
 		}
@@ -85,7 +85,7 @@ func ApplyBackendsConfig(ctx context.Context, opts *Options) error {
 			spec = &filled
 		}
 		if spec != nil {
-			st, err := storeurl.OpenStateStoreFromSpec(ctx, *spec)
+			st, err := storeurl.OpenStateStoreFromSpec(ctx, *spec, lookup)
 			if err != nil {
 				return fmt.Errorf("state backend: %w", err)
 			}
