@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -76,6 +77,31 @@ func LocalBackends(paths Paths, st *store.Store) Backends {
 		Logs:        localLogs{paths: paths},
 		Concurrency: localConcurrency{st: st},
 	}
+}
+
+// S3Backends builds a Backends bundle for Mode 2 (S3-only shared).
+// State is the NDJSON-over-object-store backend; Logs is the
+// supplied storage.LogStore wrapped as a LogBackend; Concurrency is
+// the no-op backend (no cross-runner cache reservation). Caller
+// owns the s3state.Backend lifecycle.
+func S3Backends(log storage.LogStore, state *s3state.Backend) Backends {
+	return Backends{
+		State:       s3StateAdapter{Backend: state},
+		Logs:        NewLogStoreBackend(log, nil),
+		Concurrency: noopConcurrency{},
+	}
+}
+
+// s3StateAdapter wraps *s3state.Backend so it satisfies StateBackend.
+// AppendEvent + GetNodeOutput are real implementations on the
+// embedded backend; EnqueueTrigger surfaces ErrNotSupported because
+// triggers require a central rendezvous Mode 2 deliberately omits.
+type s3StateAdapter struct {
+	*s3state.Backend
+}
+
+func (s s3StateAdapter) EnqueueTrigger(_ context.Context, _ string, _ map[string]string, _, _, _, _, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("%w: pipeline triggers require Mode 3 (Postgres) or Mode 4 (hosted controller)", s3state.ErrNotSupported)
 }
 
 // --- local implementations ---

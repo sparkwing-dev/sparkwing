@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -563,17 +564,29 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if opts.State == nil {
 		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")
 	}
-	// RunLocal is the SQLite path; LocalBackends and DumpRunState both
-	// need the concrete *store.Store. Other state-backend impls plug in
-	// via their own backend bundles when the matching specs land.
-	st, ok := opts.State.(*store.Store)
-	if !ok {
-		return nil, fmt.Errorf("state backend: RunLocal requires a sqlite-backed store, got %T", opts.State)
+	// Pick the matching Backends bundle for the concrete state impl.
+	// SQLite -> LocalBackends, S3-only NDJSON -> S3Backends. Future
+	// state backends (Postgres, hosted-controller) plug in here.
+	var backends Backends
+	var st *store.Store
+	switch s := opts.State.(type) {
+	case *store.Store:
+		st = s
+		if ownsState {
+			defer func() { _ = st.Close() }()
+		}
+		backends = LocalBackends(paths, st)
+	case *s3state.Backend:
+		if opts.LogStore == nil {
+			return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
+		}
+		if ownsState {
+			defer func() { _ = s.Close() }()
+		}
+		backends = S3Backends(opts.LogStore, s)
+	default:
+		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 	}
-	if ownsState {
-		defer func() { _ = st.Close() }()
-	}
-	backends := LocalBackends(paths, st)
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)
 	}
@@ -601,8 +614,10 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		defer func() { _ = envLog.Close() }()
 	}
 	res, runErr := Run(ctx, backends, opts)
-	// Dump on error too, for post-mortem of partial runs.
-	if opts.ArtifactStore != nil && res != nil && res.RunID != "" {
+	// Dump on error too, for post-mortem of partial runs. Only the
+	// SQLite-backed RunLocal path needs the dump step: the S3-only
+	// backend already writes runs/<runID>/state.ndjson live.
+	if st != nil && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
 		if err := DumpRunState(ctx, st, res.RunID, opts.ArtifactStore); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: state dump failed: %v\n", err)
 		}
