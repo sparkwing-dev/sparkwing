@@ -20,6 +20,7 @@ injected as an env var. Comparison uses constant-time comparison
 (`subtle.ConstantTimeCompare`) to prevent timing attacks.
 
 **Exempt paths** (have their own auth or are intentionally public):
+
 - `/health` — health check for probes
 - `/badge` — CI status badge (public by design)
 - `/webhooks/*` — GitHub HMAC-verified (see below)
@@ -43,6 +44,7 @@ curl -X POST -H "Authorization: Bearer $ROOT_TOKEN" \
 ```
 
 Response includes the raw token (shown only once):
+
 ```json
 {"id":"abc12345","token":"sw_a1b2c3d4e5f6g7h8i9j0k1l2m3n4","name":"staging-cd","environments":["staging"]}
 ```
@@ -52,6 +54,7 @@ first (constant-time), then looks up scoped tokens via SHA-256 hash
 in SQLite. Scoped tokens are stored as hashes, never in plaintext.
 
 **Scope enforcement** happens at three endpoints:
+
 - `POST /authorize` — the pre-deploy authorization check. A staging
   token cannot authorize a prod deploy.
 - `POST /trigger` — if the `environment` query param is set, the
@@ -64,6 +67,7 @@ work with any valid token. Runner operations (claim, heartbeat,
 complete) use the root token from the k8s Secret.
 
 **Token management** (`/tokens` endpoint):
+
 - `POST /tokens` — create a new scoped token
 - `GET /tokens` — list tokens (prefix only, never full value)
 - `DELETE /tokens` — revoke a token by ID
@@ -113,6 +117,7 @@ HTTP connections are redirected to HTTPS before any data is exchanged.
 Security headers are delivered via application-level middleware
 (`securityHeaders` in the controller). This bypasses the nginx
 ingress controller's disabled `configuration-snippet` annotations:
+
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains`
   (only when behind TLS / X-Forwarded-Proto: https)
 - `X-Content-Type-Options: nosniff`
@@ -218,6 +223,7 @@ Two layers of rate limiting protect against brute force and DoS:
 | Cache | 10 req/s | 30 |
 
 **Application-level** (auth middleware):
+
 - 10 failed auth attempts per IP per minute → blocked for 5 minutes
 - Returns HTTP 429 Too Many Requests
 

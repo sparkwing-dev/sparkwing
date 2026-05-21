@@ -81,6 +81,7 @@ even when the layer cache is busted. The mount directory survives `--no-cache`
 and Dockerfile changes — only `docker builder prune -af` clears it.
 
 **Benchmark proof:**
+
 - Images cached, cold mounts: 92s
 - Images cached, warm mounts: 61s
 - **Savings: 31s (34%)**
@@ -116,6 +117,7 @@ network egress for cached packages, but since package downloads are only
 ~15% of total build time, the absolute savings are small on fast networks.
 
 **Where the proxy matters:**
+
 - **Reliability:** builds succeed when npmjs.org or rubygems.org have outages
   (stale-on-error fallback serves cached responses)
 - **Bandwidth:** 290MB of cached packages not re-downloaded from the internet
@@ -222,16 +224,19 @@ registries:
 | alpine | dl-cdn.alpinelinux.org | No |
 
 **Cache policy:**
+
 - Immutable content (.tgz, .whl, .gem, .zip, .jar, .apk): cached indefinitely
 - Metadata (JSON, HTML): 10-minute TTL, stale-on-error fallback
 - Background cleanup: removes expired entries hourly
 
 **Endpoints:**
+
 - `GET /proxy/{registry}/{path}` — cached reverse proxy
 - `GET /stats` — cache size per registry
 - `GET /health` — liveness/readiness
 
 **Configuration (env vars):**
+
 - `PROXY_CACHE_DIR` — cache directory (default: `/data/proxy`)
 - `PROXY_CACHE_TTL` — metadata TTL (default: `10m`)
 - `PROXY_MAX_AGE` — cleanup threshold for immutable entries (default: `168h`)

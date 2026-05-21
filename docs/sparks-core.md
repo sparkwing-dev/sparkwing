@@ -77,6 +77,7 @@ import "github.com/sparkwing-dev/sparks-core/docker"
 ### `docker.ComputeTags() ImageTag`
 
 Derives deterministic image tags from the current repo state:
+
 - **Commit** — 12-char git SHA (or `SPARKWING_COMMIT` env var)
 - **Content** — 12-char SHA256 of all files affecting the Docker build (respects `.dockerignore`)
 - **Dirty** — true if working tree has uncommitted changes
@@ -176,6 +177,7 @@ gitops.Deploy(gitops.DeployConfig{
 ```
 
 **Transport priority:**
+
 1. Gitcache HTTP (fast clone, no SSH needed)
 2. GitHub HTTPS + PAT (`GITHUB_TOKEN` env var)
 3. Direct SSH (k8s-mounted keys)
@@ -277,6 +279,7 @@ import "github.com/sparkwing-dev/sparks-core/deploy"
 ### `deploy.Run(cfg Config)`
 
 Executes a deployment:
+
 - **In-cluster (EKS):** pushes image tags to the gitops repo via `gitops.Deploy()`, then syncs ArgoCD
 - **Local (Kind):** restarts deployments directly via `kubectl rollout restart`
 
@@ -308,6 +311,7 @@ import "github.com/sparkwing-dev/sparks-core/s3"
 ### `s3.DeployStaticSite(cfg StaticSiteConfig) (SyncResult, error)`
 
 Syncs a static site build directory to S3 with appropriate cache headers:
+
 - **Non-HTML assets** (JS, CSS, images): 1-year immutable cache (fingerprinted by bundler)
 - **HTML files**: no-cache (always serve fresh content)
 
@@ -334,6 +338,7 @@ SPARKWING_DEBUG=1 sparkwing run build-deploy
 ```
 
 Debug logging covers:
+
 - **git**: commit SHA source, dirty detection method, fileset hash computation
 - **docker**: registry detection results, environment overrides
 - **deploy**: strategy selection (gitops+ArgoCD vs kubectl)

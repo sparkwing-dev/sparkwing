@@ -97,6 +97,7 @@ is a layer choice. Internalize this before reading the recipes below.
 Each pipeline implements `Plan(ctx, plan *sw.Plan, in T, rc sw.RunContext) error`
 which registers nodes on the passed-in `*Plan` (the outer DAG). Each Job carries a `Job` whose `Work()`
 method returns the inner DAG. Both DAGs are materialized at Plan-time
+
 - the orchestrator walks the entire reachable tree (including spawn
 targets) before any dispatch begins, so `pipeline explain` and the
 dashboard render the full structure before the run starts.
@@ -481,6 +482,7 @@ build := sw.Job[BuildOut](plan, "build", &Build{}).
 ```
 
 `sparkwing.Key(parts...)` hashes arbitrary parts into a stable string
+
 - use it rather than hand-concatenating. Return the empty string from
 `CacheKey` to opt out for a particular invocation - useful when inputs
 are non-deterministic.
