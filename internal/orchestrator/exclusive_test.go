@@ -71,7 +71,7 @@ func (optionalDepsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 		}
 		optB.Store(true)
 		return nil
-	}).NeedsOptional(a, "missing-node")
+	}).NeedsOptional(a, sparkwing.NodeIDOf("missing-node"))
 	return nil
 }
 

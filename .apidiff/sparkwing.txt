@@ -19,8 +19,8 @@ func (g *ApprovalGate) BeforeRun(fn BeforeRunFn) *ApprovalGate
 func (g *ApprovalGate) ContinueOnError() *ApprovalGate
 func (g *ApprovalGate) ID() string
 func (g *ApprovalGate) Job() *JobNode
-func (g *ApprovalGate) Needs(deps ...any) *ApprovalGate
-func (g *ApprovalGate) NeedsOptional(deps ...any) *ApprovalGate
+func (g *ApprovalGate) Needs(deps ...Dep) *ApprovalGate
+func (g *ApprovalGate) NeedsOptional(deps ...Dep) *ApprovalGate
 func (g *ApprovalGate) OnFailure(id string, x any) *ApprovalGate
 func (g *ApprovalGate) Optional() *ApprovalGate
 func (g *ApprovalGate) SkipIf(fn SkipPredicate, opts ...SkipOption) *ApprovalGate
@@ -94,6 +94,9 @@ func CurrentRuntime() RuntimeConfig
 func Debug(ctx context.Context, format string, args ...any)
 func DebugEnabled() bool
 const DefaultCacheTTL = 7 * 24 * time.Hour
+type Dep interface {
+	depID() string
+}
 type DescribeArg struct {
 	Name     string
 	GoName   string
@@ -233,8 +236,8 @@ func (g *JobGroup) Finalize(members []*JobNode, err error)
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
 func (g *JobGroup) Name() string
-func (g *JobGroup) Needs(deps ...any) *JobGroup
-func (g *JobGroup) NeedsOptional(deps ...any) *JobGroup
+func (g *JobGroup) Needs(deps ...Dep) *JobGroup
+func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
 func (g *JobGroup) OnTarget(targets ...string) *JobGroup
 func (g *JobGroup) Optional() *JobGroup
 func (g *JobGroup) Prefers(labels ...string) *JobGroup
@@ -264,9 +267,9 @@ func (n *JobNode) IsContinueOnError() bool
 func (n *JobNode) IsInline() bool
 func (n *JobNode) IsOptional() bool
 func (n *JobNode) Job() Workable
-func (n *JobNode) Needs(deps ...any) *JobNode
+func (n *JobNode) Needs(deps ...Dep) *JobNode
 func (n *JobNode) NeedsGroups() []*JobGroup
-func (n *JobNode) NeedsOptional(deps ...any) *JobNode
+func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode
 func (n *JobNode) OnFailure(id string, x any) *JobNode
 func (n *JobNode) OnFailureNode() *JobNode
 func (n *JobNode) OnTarget(targets ...string) *JobNode
@@ -326,6 +329,8 @@ func NewWork() *Work
 const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
+type NodeID string
+func NodeIDOf(id string) NodeID
 type OnLimitPolicy string
 type Outcome string
 func (o Outcome) OK() bool

@@ -206,8 +206,8 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (
 // handlers are per-node by intent.
 
 // Needs declares an upstream dependency on every member of the group.
-// Accepts the same shapes as Job.Needs (*JobNode, *JobGroup, []*JobNode, string).
-func (g *JobGroup) Needs(deps ...any) *JobGroup {
+// Accepts any [Dep], same as [JobNode.Needs].
+func (g *JobGroup) Needs(deps ...Dep) *JobGroup {
 	for _, m := range g.Members() {
 		m.Needs(deps...)
 	}
@@ -333,8 +333,8 @@ func (g *JobGroup) Cache(opts CacheOptions) *JobGroup {
 
 // NeedsOptional declares optional upstream dependencies on every
 // member; unknown IDs are silently dropped at finalize. See
-// Job.NeedsOptional.
-func (g *JobGroup) NeedsOptional(deps ...any) *JobGroup {
+// [JobNode.NeedsOptional].
+func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup {
 	for _, m := range g.Members() {
 		m.NeedsOptional(deps...)
 	}

@@ -10,6 +10,12 @@ are required.
 
 ### Added
 
+- `sparkwing.Dep` interface and `sparkwing.NodeID` / `sparkwing.NodeIDOf`
+  for typed Plan-layer dependency wiring. `NodeIDOf("foo")` panics on
+  empty input -- an empty by-name dep was almost always an unset
+  variable bug. The `Dep` interface is closed (unexported marker
+  method) so only sparkwing-defined types satisfy it: `*JobNode`,
+  `*ApprovalGate`, `*JobGroup`, and `NodeID`.
 - `sparkwing.NoCache` typed sentinel for explicit cache opt-out from a
   `CacheOptions.ContentHash` function. Returning `NoCache` is distinct
   from returning the zero `CacheKey`: operators see an "explicit
@@ -39,6 +45,24 @@ are required.
 
 ### Changed
 
+- **Breaking:** Plan-layer dependency methods `Needs(...)` and
+  `NeedsOptional(...)` on `*JobNode`, `*ApprovalGate`, and `*JobGroup`
+  now take `...Dep` instead of `...any`. The previous `any`-typed
+  signature accepted anything that compiled and validated at runtime
+  via a type switch -- wiring `42` or a typo'd field reference would
+  compile and fail with a runtime panic. The typed interface forces
+  the compiler to catch this. Hard cut: no `...any` overload retained.
+  **Migration:**
+
+  | Old | New |
+  |---|---|
+  | `n.Needs(other)` (typed node/gate/group) | unchanged |
+  | `n.Needs("upstream-name")` | `n.Needs(sparkwing.NodeIDOf("upstream-name"))` |
+  | `n.Needs([]*JobNode{...})` (single-arg slice) | `n.Needs(slice...)` (splat) |
+  | `n.Needs([]any{...}...)` | rewrite element-by-element |
+
+  The `*JobGroup` dynamic-membership special case in `*JobNode.Needs`
+  is preserved -- only the entry-point type changed.
 - **Breaking:** `CacheOptions.Key` renamed to `CacheOptions.Namespace`,
   and `CacheOptions.CacheKey` renamed to `CacheOptions.ContentHash`.
   `HasKey()` renamed to `HasNamespace()`. Hard cut: the old field

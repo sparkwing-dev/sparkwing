@@ -146,7 +146,7 @@ type plannerPipe struct{ sparkwing.Base }
 
 func (plannerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, run sparkwing.RunContext) error {
 	sparkwing.Job(plan, "one", jobFnNoop())
-	sparkwing.Job(plan, "two", jobFnNoop()).Needs("one")
+	sparkwing.Job(plan, "two", jobFnNoop()).Needs(sparkwing.NodeIDOf("one"))
 	return nil
 }
 
@@ -222,7 +222,7 @@ func TestNeeds_AcceptsVariedForms(t *testing.T) {
 	b := sparkwing.Job(plan, "b", jobFnNoop())
 	c := sparkwing.Job(plan, "c", jobFnNoop())
 	group := sparkwing.GroupJobs(plan, "", a, b)
-	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(c, group, "a")
+	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(c, group, sparkwing.NodeIDOf("a"))
 	deps := d.DepIDs()
 	// "a" is also in the group but should dedupe.
 	if len(deps) != 3 {

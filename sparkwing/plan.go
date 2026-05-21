@@ -543,17 +543,16 @@ func (g *ApprovalGate) Job() *JobNode { return g.n }
 // ID returns the gate's node id.
 func (g *ApprovalGate) ID() string { return g.n.id }
 
-// Needs declares hard upstream dependencies on the gate. Accepts the
-// same shapes as Job.Needs (*JobNode, *JobGroup, *ApprovalGate, string
-// IDs, []*JobNode).
-func (g *ApprovalGate) Needs(deps ...any) *ApprovalGate {
+// Needs declares hard upstream dependencies on the gate. Accepts any
+// [Dep].
+func (g *ApprovalGate) Needs(deps ...Dep) *ApprovalGate {
 	g.n.Needs(deps...)
 	return g
 }
 
 // NeedsOptional declares soft upstream dependencies; missing IDs are
 // silently dropped instead of failing the run.
-func (g *ApprovalGate) NeedsOptional(deps ...any) *ApprovalGate {
+func (g *ApprovalGate) NeedsOptional(deps ...Dep) *ApprovalGate {
 	g.n.NeedsOptional(deps...)
 	return g
 }
@@ -639,6 +638,53 @@ type BeforeRunFn func(ctx context.Context) error
 // value is logged but does not change the node's outcome.
 type AfterRunFn func(ctx context.Context, err error)
 
+// Dep is the closed type set accepted by Plan-layer Needs and
+// NeedsOptional. The unexported marker method depID() means only
+// sparkwing-defined types can satisfy the interface, so passing an
+// arbitrary value (an int, a typo'd string, a Work-layer *WorkStep)
+// is a compile-time error.
+//
+// Implementations: [*JobNode], [*ApprovalGate], [*JobGroup], and
+// [NodeID] (a typed string for by-name references).
+type Dep interface {
+	depID() string
+}
+
+// NodeID is an explicit by-name node reference. Use when the upstream
+// node isn't constructed yet at the time you wire deps, or when you
+// want to reference a node defined elsewhere in the Plan by its ID.
+//
+// Construct via [NodeIDOf] to get the empty-string guard. The bare
+// type-literal form (`NodeID("foo")`) is legal Go but skips the
+// guard; prefer the constructor.
+type NodeID string
+
+// NodeIDOf builds a [NodeID] from a string, panicking when id is
+// empty. An empty by-name dep is almost always an unset variable
+// rather than an intentional opt-out, so failing loud at construction
+// catches the bug at the call site instead of at dispatch.
+func NodeIDOf(id string) NodeID {
+	if id == "" {
+		panic("sparkwing: NodeIDOf called with empty id")
+	}
+	return NodeID(id)
+}
+
+func (id NodeID) depID() string       { return string(id) }
+func (n *JobNode) depID() string      { return n.id }
+func (g *ApprovalGate) depID() string { return g.n.id }
+func (g *JobGroup) depID() string     { return g.name }
+
+// Compile-time conformance assertions: every Plan-layer dep type
+// satisfies [Dep]. A regression here surfaces as a build break,
+// not a runtime panic.
+var (
+	_ Dep = (*JobNode)(nil)
+	_ Dep = (*ApprovalGate)(nil)
+	_ Dep = (*JobGroup)(nil)
+	_ Dep = NodeID("")
+)
+
 // ID returns the node's identifier.
 func (n *JobNode) ID() string { return n.id }
 
@@ -656,42 +702,29 @@ func (n *JobNode) ResultStep() *WorkStep { return n.resultStep }
 // Needs declares hard upstream dependencies. The orchestrator will not
 // dispatch this node until every named dependency is satisfied.
 //
-// Accepts *JobNode, *JobGroup, []*JobNode, or string IDs.
-func (n *JobNode) Needs(deps ...any) *JobNode {
+// Accepts any [Dep]: [*JobNode], [*ApprovalGate], [*JobGroup], or
+// [NodeID]. For multiple typed nodes from a slice, splat the slice:
+//
+//	n.Needs(upstreams...)
+func (n *JobNode) Needs(deps ...Dep) *JobNode {
 	for _, d := range deps {
-		switch v := d.(type) {
-		case *JobNode:
-			if v != nil {
-				n.addNeed(v.id)
+		if d == nil {
+			continue
+		}
+		// Dynamic *JobGroup membership materializes at dispatch
+		// once the expansion generator runs.
+		if g, ok := d.(*JobGroup); ok && g != nil {
+			if g.dynamic {
+				n.needsGroups = append(n.needsGroups, g)
+				continue
 			}
-		case *ApprovalGate:
-			if v != nil && v.n != nil {
-				n.addNeed(v.n.id)
+			for _, m := range g.members {
+				n.addNeed(m.id)
 			}
-		case *JobGroup:
-			if v != nil {
-				if v.dynamic {
-					// Resolve membership at dispatch, after the
-					// expansion generator runs.
-					n.needsGroups = append(n.needsGroups, v)
-				} else {
-					for _, m := range v.members {
-						n.addNeed(m.id)
-					}
-				}
-			}
-		case string:
-			if v != "" {
-				n.addNeed(v)
-			}
-		case []*JobNode:
-			for _, vv := range v {
-				if vv != nil {
-					n.addNeed(vv.id)
-				}
-			}
-		default:
-			panic(fmt.Sprintf("sparkwing: Job.Needs: unsupported dep type %T", d))
+			continue
+		}
+		if id := d.depID(); id != "" {
+			n.addNeed(id)
 		}
 	}
 	return n
@@ -1180,34 +1213,22 @@ func (n *JobNode) IsOptional() bool { return n.optional }
 
 // NeedsOptional declares upstream dependencies that may or may not be
 // present in the plan. Unknown IDs are silently dropped; known IDs
-// behave like Needs. Accepts the same shapes as Needs.
-func (n *JobNode) NeedsOptional(deps ...any) *JobNode {
+// behave like Needs. Accepts the same [Dep] types as [JobNode.Needs];
+// unlike Needs, dynamic *JobGroup membership is NOT special-cased --
+// optional deps are resolved at finalize time only.
+func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode {
 	for _, d := range deps {
-		switch v := d.(type) {
-		case *JobNode:
-			if v != nil {
-				n.needsOptional = append(n.needsOptional, v.id)
+		if d == nil {
+			continue
+		}
+		if g, ok := d.(*JobGroup); ok && g != nil {
+			for _, m := range g.members {
+				n.needsOptional = append(n.needsOptional, m.id)
 			}
-		case *ApprovalGate:
-			if v != nil && v.n != nil {
-				n.needsOptional = append(n.needsOptional, v.n.id)
-			}
-		case *JobGroup:
-			if v != nil {
-				for _, m := range v.members {
-					n.needsOptional = append(n.needsOptional, m.id)
-				}
-			}
-		case string:
-			if v != "" {
-				n.needsOptional = append(n.needsOptional, v)
-			}
-		case []*JobNode:
-			for _, vv := range v {
-				if vv != nil {
-					n.needsOptional = append(n.needsOptional, vv.id)
-				}
-			}
+			continue
+		}
+		if id := d.depID(); id != "" {
+			n.needsOptional = append(n.needsOptional, id)
 		}
 	}
 	return n

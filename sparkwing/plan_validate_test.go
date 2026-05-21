@@ -156,7 +156,7 @@ type planTypoPipe struct{ sparkwing.Base }
 
 func (planTypoPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "fetch", func(ctx context.Context) error { return nil })
-	sparkwing.Job(plan, "compile", func(ctx context.Context) error { return nil }).Needs("fetchh")
+	sparkwing.Job(plan, "compile", func(ctx context.Context) error { return nil }).Needs(sparkwing.NodeIDOf("fetchh"))
 	return nil
 }
 
