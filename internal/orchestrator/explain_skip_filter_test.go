@@ -117,8 +117,6 @@ func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 		{"skip only", []string{"--skip", "artifact"}},
 		{"skip with -o json (space)", []string{"--skip", "artifact", "-o", "json"}},
 		{"skip with --output=json", []string{"--skip", "artifact", "--output=json"}},
-		{"skip with --json", []string{"--skip", "artifact", "--json"}},
-		{"skip with --json=true", []string{"--skip", "artifact", "--json=true"}},
 		{"skip with -o=json", []string{"--skip", "artifact", "-o=json"}},
 	}
 	var baseline []string
@@ -145,9 +143,9 @@ func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 }
 
 // TestStripExplainOutputFlags_RemovesWrapperFlagsKeepsRest pins the
-// helper's contract: every shape of -o / --output / --json (with or
-// without =, with or without a separate value) is consumed; every
-// other token survives in original order.
+// helper's contract: every shape of -o / --output (with or without =,
+// with or without a separate value) is consumed; every other token
+// survives in original order.
 func TestStripExplainOutputFlags_RemovesWrapperFlagsKeepsRest(t *testing.T) {
 	cases := []struct {
 		in, want []string
@@ -156,8 +154,6 @@ func TestStripExplainOutputFlags_RemovesWrapperFlagsKeepsRest(t *testing.T) {
 		{[]string{"--skip", "artifact", "-o", "json"}, []string{"--skip", "artifact"}},
 		{[]string{"-o", "json", "--skip", "artifact"}, []string{"--skip", "artifact"}},
 		{[]string{"--skip", "artifact", "--output=json"}, []string{"--skip", "artifact"}},
-		{[]string{"--skip", "artifact", "--json"}, []string{"--skip", "artifact"}},
-		{[]string{"--skip", "artifact", "--json=true"}, []string{"--skip", "artifact"}},
 		{[]string{"--skip", "artifact", "-o=json"}, []string{"--skip", "artifact"}},
 		{[]string{"--only", "build", "-o", "table"}, []string{"--only", "build"}},
 		// Defensive: -o followed by a flag (malformed) must not eat

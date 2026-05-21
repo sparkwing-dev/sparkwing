@@ -60,15 +60,13 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 	since := fs.Duration("since", 0, "only failures newer than this (e.g. 24h, 7d)")
 	groupBy := fs.String("group-by", "", "cluster failures by: step | node (default: flat list)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsFailures, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs failures")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs failures")
 	if rerr != nil {
 		return rerr
 	}
@@ -278,15 +276,13 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only runs newer than this (e.g. 7d)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsStats, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs stats")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs stats")
 	if rerr != nil {
 		return rerr
 	}
@@ -408,8 +404,6 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 	on := fs.String("on", "", "profile name (default: current default)")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	watch := fs.BoolP("watch", "w", false, "tail for new runs (reprints whenever a newer run appears)")
 	if err := parseAndCheck(cmdJobsLast, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -417,7 +411,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs last")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs last")
 	if rerr != nil {
 		return rerr
 	}
@@ -516,15 +510,13 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 	runID := fs.String("run", "", "root run identifier")
 	on := fs.String("on", "", "profile name (default: current default)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsTree, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs tree")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs tree")
 	if rerr != nil {
 		return rerr
 	}
@@ -663,8 +655,6 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 	timeout := fs.Duration("timeout", 10*time.Minute, "give up (exit 2) after this long")
 	poll := fs.Duration("poll", 3*time.Second, "poll interval")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	on := fs.String("on", "", "profile name (cluster mode). Omit to poll the local store.")
 	if err := parseAndCheck(cmdJobsWait, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -672,7 +662,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs wait")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs wait")
 	if err != nil {
 		return err
 	}
@@ -772,8 +762,6 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	wait := fs.Bool("wait", false, "block until at least one match appears")
 	findTimeout := fs.Duration("find-timeout", 2*time.Minute, "give up after this long when --wait is set")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
 	on := fs.String("on", "", "profile name (cluster mode). Omit to search local.")
 	if err := parseAndCheck(cmdJobsFind, fs, args); err != nil {
@@ -785,7 +773,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	if *gitSHA == "" && *pipeline == "" && *repo == "" {
 		return fmt.Errorf("jobs find: at least one of --git-sha, --pipeline, or --repo is required")
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs find")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs find")
 	if err != nil {
 		return err
 	}

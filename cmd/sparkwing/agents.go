@@ -57,7 +57,6 @@ type agentsResp struct {
 
 func runAgentsList(args []string) error {
 	fs := flag.NewFlagSet(cmdAgentsList.Path, flag.ContinueOnError)
-	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	quiet := fs.BoolP("quiet", "q", false, "print just agent names, one per line")
 	on := addProfileFlag(fs)
@@ -100,7 +99,7 @@ func runAgentsList(args []string) error {
 		return nil
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(agents)

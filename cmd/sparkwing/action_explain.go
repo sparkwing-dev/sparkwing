@@ -109,16 +109,15 @@ type planSnapshotSpawnEach struct {
 // binary.
 type pipelineExplainArgs struct {
 	output      string
-	asJSON      bool
 	pipeline    string
 	all         bool
 	passthrough []string
 }
 
 // parsePipelineExplainArgs hand-parses the wrapper's own flags
-// (--output / --json / --name / --all / --help) and treats every
-// other token -- including everything after a literal "--"
-// separator -- as passthrough for the inner pipeline binary.
+// (--output / --name / --all / --help) and treats every other token
+// -- including everything after a literal "--" separator -- as
+// passthrough for the inner pipeline binary.
 //
 // The "--" separator is consumed (not forwarded). Forwarding it to
 // the pipeline binary would cause Go's flag package to stop flag
@@ -140,10 +139,6 @@ func parsePipelineExplainArgs(args []string) (pipelineExplainArgs, bool, error) 
 			// processing the trailing tokens as flags.
 			parsed.passthrough = append(parsed.passthrough, args[i+1:]...)
 			return parsed, false, nil
-		case tok == "--json", tok == "--json=true":
-			parsed.asJSON = true
-		case tok == "--json=false":
-			parsed.asJSON = false
 		case tok == "--all", tok == "--all=true":
 			parsed.all = true
 		case tok == "--all=false":
@@ -183,7 +178,6 @@ func runPipelineExplain(args []string) error {
 		return nil
 	}
 	output := parsed.output
-	asJSON := parsed.asJSON
 	pipeline := parsed.pipeline
 	all := parsed.all
 	passthrough := parsed.passthrough
@@ -194,7 +188,7 @@ func runPipelineExplain(args []string) error {
 		if len(passthrough) > 0 {
 			return fmt.Errorf("explain: --all does not accept pipeline-specific flags (got %v)", passthrough)
 		}
-		format, err := resolveOutputFormat(output, output != "", asJSON, cmdPipelineExplain.Path)
+		format, err := resolveOutputFormat(output, cmdPipelineExplain.Path)
 		if err != nil {
 			return err
 		}
@@ -204,7 +198,7 @@ func runPipelineExplain(args []string) error {
 		PrintHelp(cmdPipelineExplain, os.Stderr)
 		return errors.New("explain: --name or --all is required")
 	}
-	format, err := resolveOutputFormat(output, output != "", asJSON, cmdPipelineExplain.Path)
+	format, err := resolveOutputFormat(output, cmdPipelineExplain.Path)
 	if err != nil {
 		return err
 	}

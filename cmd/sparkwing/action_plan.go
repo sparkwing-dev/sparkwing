@@ -64,7 +64,6 @@ type planPreviewItemDoc struct {
 // pipelinePlanArgs holds wrapper-owned flags + passthrough.
 type pipelinePlanArgs struct {
 	output      string
-	asJSON      bool
 	pipeline    string
 	startAt     string
 	stopAt      string
@@ -85,10 +84,6 @@ func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 		case tok == "--":
 			parsed.passthrough = append(parsed.passthrough, args[i+1:]...)
 			return parsed, false, nil
-		case tok == "--json", tok == "--json=true":
-			parsed.asJSON = true
-		case tok == "--json=false":
-			parsed.asJSON = false
 		case tok == "-o", tok == "--output":
 			if i+1 >= len(args) {
 				return parsed, false, errors.New("plan: --output expects a value")
@@ -143,10 +138,7 @@ func runPipelinePlan(args []string) error {
 		PrintHelp(cmdPipelinePlan, os.Stderr)
 		return errors.New("plan: --name is required")
 	}
-	// Hand-parsed: parsed.output is the empty string when -o/--output
-	// was not provided, otherwise the user-supplied value. Use that to
-	// drive the explicit-set bit the resolver wants.
-	format, err := resolveOutputFormat(parsed.output, parsed.output != "", parsed.asJSON, cmdPipelinePlan.Path)
+	format, err := resolveOutputFormat(parsed.output, cmdPipelinePlan.Path)
 	if err != nil {
 		return err
 	}

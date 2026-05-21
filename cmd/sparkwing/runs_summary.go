@@ -16,8 +16,6 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 	fs := flag.NewFlagSet(cmdJobsSummary.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
-	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-	pretty := fs.Bool("pretty", false, "force the human-readable view even when piped (alias for -o pretty)")
 	on := fs.String("on", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsSummary, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -26,7 +24,7 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 		return err
 	}
 	*runID = normalizeRunID(*runID)
-	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, fs.Changed("output"), *asJSON, *pretty, cmdJobsSummary.Path)
+	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, cmdJobsSummary.Path)
 	if err != nil {
 		return err
 	}

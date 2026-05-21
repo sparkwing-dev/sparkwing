@@ -54,7 +54,6 @@ func runTriggersList(args []string) error {
 	limit := fs.Int("limit", 20, "max rows")
 	quiet := fs.BoolP("quiet", "q", false, "print only trigger ids")
 	output := fs.StringP("output", "o", "", "output format (json)")
-	asJSON := fs.Bool("json", false, "alias for -o json")
 	on := addProfileFlag(fs)
 
 	if err := parseAndCheck(cmdTriggersList, fs, args); err != nil {
@@ -91,8 +90,7 @@ func runTriggersList(args []string) error {
 		return fmt.Errorf("triggers list: %w", err)
 	}
 
-	wantJSON := *asJSON || strings.EqualFold(*output, "json")
-	if wantJSON {
+	if strings.EqualFold(*output, "json") {
 		buf, _ := json.MarshalIndent(trigs, "", "  ")
 		fmt.Fprintln(os.Stdout, string(buf))
 		return nil
@@ -143,7 +141,6 @@ func runTriggersGet(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersGet.Path, flag.ContinueOnError)
 	id := fs.String("id", "", "trigger identifier")
 	output := fs.StringP("output", "o", "", "output format (json)")
-	asJSON := fs.Bool("json", false, "alias for -o json")
 	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmdTriggersGet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -169,8 +166,7 @@ func runTriggersGet(args []string) error {
 		return fmt.Errorf("triggers get: %w", err)
 	}
 
-	wantJSON := *asJSON || strings.EqualFold(*output, "json")
-	if wantJSON {
+	if strings.EqualFold(*output, "json") {
 		buf, _ := json.MarshalIndent(trig, "", "  ")
 		fmt.Fprintln(os.Stdout, string(buf))
 		return nil

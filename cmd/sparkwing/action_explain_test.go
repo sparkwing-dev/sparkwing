@@ -20,7 +20,6 @@ func TestParsePipelineExplainArgs_Passthrough(t *testing.T) {
 		in         []string
 		wantName   string
 		wantOutput string
-		wantJSON   bool
 		wantAll    bool
 		wantPass   []string
 		wantHelp   bool
@@ -51,22 +50,14 @@ func TestParsePipelineExplainArgs_Passthrough(t *testing.T) {
 			wantPass: []string{"--only", "build", "--region=us-west"},
 		},
 		{
-			name:     "wrapper flags after -- are NOT re-interpreted (raw passthrough)",
-			in:       []string{"--name", "X", "--", "--json", "--all"},
-			wantName: "X",
-			wantPass: []string{"--json", "--all"},
-			wantJSON: false,
-			wantAll:  false,
-		},
-		{
-			name:     "--json before -- still toggles JSON output",
-			in:       []string{"--json", "--name", "X"},
-			wantName: "X",
-			wantJSON: true,
-		},
-		{
-			name:       "--output=json equivalent",
+			name:       "--output=json selects JSON",
 			in:         []string{"--output=json", "--name", "X"},
+			wantName:   "X",
+			wantOutput: "json",
+		},
+		{
+			name:       "-o json (separate value) selects JSON",
+			in:         []string{"-o", "json", "--name", "X"},
 			wantName:   "X",
 			wantOutput: "json",
 		},
@@ -109,9 +100,6 @@ func TestParsePipelineExplainArgs_Passthrough(t *testing.T) {
 			}
 			if got.output != tc.wantOutput {
 				t.Errorf("output = %q, want %q", got.output, tc.wantOutput)
-			}
-			if got.asJSON != tc.wantJSON {
-				t.Errorf("asJSON = %v, want %v", got.asJSON, tc.wantJSON)
 			}
 			if got.all != tc.wantAll {
 				t.Errorf("all = %v, want %v", got.all, tc.wantAll)

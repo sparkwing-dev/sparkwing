@@ -26,8 +26,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	runID := fs.String("run", "", "run identifier")
 	on := fs.String("on", "", "profile name (default: current default)")
 	outFmt := fs.StringP("output", "o", "", "output format: json (default)")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsReceipt, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -42,7 +40,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	default:
 		return fmt.Errorf("runs receipt: -o/--output only supports json, got %q", *outFmt)
 	}
-	_ = *asJSON // alias accepted for shape parity with sibling verbs.
 
 	if *runID == "" {
 		return errors.New("runs receipt: --run is required")

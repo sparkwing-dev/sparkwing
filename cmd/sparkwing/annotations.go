@@ -70,7 +70,7 @@ func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []st
 	if *runID == "" {
 		return fmt.Errorf("%s: --run is required", cmdAnnotationsList.Path)
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), false, cmdAnnotationsList.Path)
+	resolvedFmt, err := resolveOutputFormat(*outFmt, cmdAnnotationsList.Path)
 	if err != nil {
 		return err
 	}

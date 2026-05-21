@@ -4,7 +4,7 @@
 > shape of the MCP integration; `sparkwing mcp serve` and the
 > `sparkwing run tools` surface are not implemented in the current binary.
 > Until then, agents should drive sparkwing via `sparkwing commands
-> --json` + `sparkwing pipeline {list,describe,explain} --json` +
+> -o json` + `sparkwing pipeline {list,describe,explain} -o json` +
 > `sparkwing pipeline run`.
 
 Sparkwing will include an MCP (Model Context Protocol) server that exposes pipeline commands to AI agents through a single, context-efficient tool.
@@ -129,7 +129,7 @@ Sparkwing can aggregate external MCP servers into namespaces:
 sparkwing run tools                          # → pipeline, git, linear, github
 sparkwing run tools github                   # → create-issue, search-repos, ...
 sparkwing run tools github create-issue --schema
-sparkwing run tools github create-issue --json --arg title="Fix bug"
+sparkwing run tools github create-issue -o json --arg title="Fix bug"
 ```
 
 External tools configured in `.sparkwing/tools.yaml` are proxied through sparkwing's governance layer (validation, audit, rate limiting).

@@ -400,8 +400,8 @@ func filterTok(args []string, drop string) []string {
 }
 
 // stripExplainOutputFlags removes explain-output formatting flags
-// (`-o` / `--output` / `--json`) from args. The pipeline binary
-// always emits a JSON plan snapshot for `--explain`; the surrounding
+// (`-o` / `--output`) from args. The pipeline binary always emits a
+// JSON plan snapshot for `--explain`; the surrounding
 // `sparkwing pipeline explain` / `sparkwing run` wrapper is responsible for
 // any pretty-printing, so these flags are noise to the inner Plan-
 // builder. Stripping them keeps parseTypedFlags from rejecting them
@@ -413,8 +413,6 @@ func stripExplainOutputFlags(args []string) []string {
 	for i := 0; i < len(args); i++ {
 		tok := args[i]
 		switch {
-		case tok == "--json", tok == "--json=true", tok == "--json=false":
-			// Boolean toggle; consumed.
 		case tok == "-o", tok == "--output":
 			// Two-token flag; consume the value too if present and
 			// not itself a flag (defensive against malformed input).
@@ -422,8 +420,7 @@ func stripExplainOutputFlags(args []string) []string {
 				i++
 			}
 		case strings.HasPrefix(tok, "-o="),
-			strings.HasPrefix(tok, "--output="),
-			strings.HasPrefix(tok, "--json="):
+			strings.HasPrefix(tok, "--output="):
 			// Single-token =value form; consumed.
 		default:
 			out = append(out, tok)

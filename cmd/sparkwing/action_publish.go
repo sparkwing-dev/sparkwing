@@ -46,7 +46,6 @@ func runPipelinePublish(args []string) error {
 	sparkwingDirFlag := fs.String("dir", "",
 		"path to .sparkwing/ (default: walk up from cwd)")
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -90,15 +89,9 @@ func runPipelinePublish(args []string) error {
 		results = append(results, row)
 	}
 
-	format := "pretty"
-	switch {
-	case *asJSON:
-		format = "json"
-	case *output != "":
-		format = *output
-		if format == "table" {
-			format = "pretty"
-		}
+	format := *output
+	if format == "" || format == "table" {
+		format = "pretty"
 	}
 	return renderPublishResults(results, format)
 }

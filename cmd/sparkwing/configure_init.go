@@ -51,7 +51,6 @@ type ConfigureInitToolchain struct {
 func runConfigureInit(args []string) error {
 	fs := flag.NewFlagSet(cmdConfigureInit.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	dryRun := fs.Bool("dry-run", false, "probe + report without creating ~/.config/sparkwing/")
 	if err := parseAndCheck(cmdConfigureInit, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -63,7 +62,7 @@ func runConfigureInit(args []string) error {
 		PrintHelp(cmdConfigureInit, os.Stderr)
 		return fmt.Errorf("configure init: unexpected positional %q", fs.Arg(0))
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdConfigureInit.Path)
+	format, err := resolveOutputFormat(*output, cmdConfigureInit.Path)
 	if err != nil {
 		return err
 	}

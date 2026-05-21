@@ -218,11 +218,10 @@ the GitHub Release body.
   and `Node.RunsOn` / `NodeGroup.RunsOn` / `Node.RunsOnLabels` →
   `Requires` / `Requires` / `RequiresLabels`. The package-level
   `sparkwing.Job` and `sparkwing.JobGroup` constructors keep their
-  names; only the Go type names change. Workable struct types in
-  examples drop the `Job` suffix (`&BuildJob{}` → `&Build{}`) per the
-  new convention. JSON wire tags (`node`, `node_id`, `runs_on`,
-  `node_start`, ...) are preserved for log / snapshot compatibility.
-  See [migration guide](docs/migrations/v0.4.0.md#node-job-rename).
+  names; only the Go type names change. JSON wire tags (`node`,
+  `node_id`, `runs_on`, `node_start`, ...) are preserved for log /
+  snapshot compatibility. See
+  [migration guide](docs/migrations/v0.4.0.md#node-job-rename).
 - **sdk (Breaking):** `Needs(...any)` and `NeedsOptional(...any)` on
   every dep-accepting type replaced with typed-dep signatures:
   `Needs(...Dep)` for Plan-layer methods, `Needs(...WorkDep)` for
@@ -331,7 +330,13 @@ the GitHub Release body.
   [migration guide](docs/migrations/v0.4.0.md#cli-retired-flags).
 - **cli (Breaking):** `wing` CLI binary retired. `sparkwing run` is the
   only entry point. Scripts that invoked `wing ...` must update to
-  `sparkwing run ...`.
+  `sparkwing run ...`. See
+  [migration guide](docs/migrations/v0.4.0.md#cli-retired-flags).
+- **cli (Breaking):** `--json` and `--pretty` flag aliases removed
+  across every command. They were soft duplicates of `--output json` /
+  `--output pretty`. Update scripts and shell aliases to use the
+  canonical `-o`/`--output` form (e.g. `sparkwing runs list -o json`).
+  See [migration guide](docs/migrations/v0.4.0.md#cli-output-aliases).
 - **config (Breaking):** `pipelines.yaml` `group:` field and the matching
   `--group` flag on `sparkwing pipeline new` removed. The field had no
   backing on the `pipelines.Pipeline` struct, so strict YAML parsing

@@ -142,9 +142,7 @@ const infoBat = `      /\                        /\
 
 func runInfo(args []string) error {
 	fs := flag.NewFlagSet(cmdInfo.Path, flag.ContinueOnError)
-	// Empty default lets resolveOutputFormat distinguish unset from explicit.
 	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	forAgent := fs.Bool("for-agent", false, "emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)")
 	firstTime := fs.Bool("first-time", false, "print the post-install onboarding card (used by install.sh; re-runnable any time)")
 	if err := parseAndCheck(cmdInfo, fs, args); err != nil {
@@ -168,7 +166,7 @@ func runInfo(args []string) error {
 		return nil
 	}
 
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdInfo.Path)
+	format, err := resolveOutputFormat(*output, cmdInfo.Path)
 	if err != nil {
 		return err
 	}
@@ -197,9 +195,9 @@ func runInfo(args []string) error {
 const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go\n" +
 	"programs in `.sparkwing/`. Ask the binary, don't scrape the repo:\n" +
 	"\n" +
-	"- `sparkwing info --json` -- context: binary, project, next steps (start here)\n" +
+	"- `sparkwing info -o json` -- context: binary, project, next steps (start here)\n" +
 	"- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
-	"- `sparkwing pipeline list --json` -- this repo's pipelines\n" +
+	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
 

@@ -738,7 +738,7 @@ screen.
 
 Each pipeline declares exactly one Inputs type. Field tags drive CLI
 parsing, `--help`, schema introspection (`sparkwing pipeline describe
---pipeline X --json`), shell completion, dashboard run-form, and MCP
+--pipeline X -o json`), shell completion, dashboard run-form, and MCP
 tool definitions.
 
 ```
@@ -831,6 +831,6 @@ Empty `Key` is a no-op.
 - `sparkwing docs read --topic pipelines` - conceptual tour
 - `sparkwing docs read --topic sdk` - this page
 - `sparkwing docs all` - every doc concatenated (one stdout dump for agents)
-- `sparkwing pipeline explain --name X [--json]` - render the full
+- `sparkwing pipeline explain --name X [-o json]` - render the full
   Plan -> Job -> Work -> Step tree before running
 - [`pipelines.md`](pipelines.md) - the conceptual Plan/Work tour

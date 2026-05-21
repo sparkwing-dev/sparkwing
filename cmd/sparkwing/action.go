@@ -94,7 +94,6 @@ func runPipeline(args []string) error {
 func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -102,7 +101,7 @@ func runPipelineList(args []string) error {
 		}
 		return err
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineList.Path)
+	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
 	if err != nil {
 		return err
 	}
@@ -129,7 +128,6 @@ func runPipelineList(args []string) error {
 func runPipelineDiscover(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDiscover.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	queryFlag := fs.String("query", "", "search query (one or more tokens; all must match some field)")
 	if err := parseAndCheck(cmdPipelineDiscover, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -145,7 +143,7 @@ func runPipelineDiscover(args []string) error {
 		PrintHelp(cmdPipelineDiscover, os.Stderr)
 		return errors.New("discover: --query is required")
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineDiscover.Path)
+	format, err := resolveOutputFormat(*output, cmdPipelineDiscover.Path)
 	if err != nil {
 		return err
 	}
@@ -251,7 +249,6 @@ func plural(n int) string {
 func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -267,7 +264,7 @@ func runPipelineDescribe(args []string) error {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
 		return errors.New("describe: --name is required")
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineDescribe.Path)
+	format, err := resolveOutputFormat(*output, cmdPipelineDescribe.Path)
 	if err != nil {
 		return err
 	}

@@ -27,8 +27,6 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 	limit := fs.Int("limit", 50, "max candidate runs to scan")
 	maxMatches := fs.Int("max-matches", 5, "per-node match cap (0 = no cap)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-	pretty := fs.Bool("pretty", false, "force the human-readable table even when piped (alias for -o pretty)")
 	quiet := fs.BoolP("quiet", "q", false, "print only the unique matching run ids")
 	on := fs.String("on", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsGrep, fs, args); err != nil {
@@ -40,7 +38,7 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("%s: unexpected positional %q (use --pattern)", cmdJobsGrep.Path, rest[0])
 	}
-	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, fs.Changed("output"), *asJSON, *pretty, cmdJobsGrep.Path)
+	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, cmdJobsGrep.Path)
 	if err != nil {
 		return err
 	}

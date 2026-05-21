@@ -77,7 +77,6 @@ func runVersion(args []string) error {
 	fs := flag.NewFlagSet(cmdVersion.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	offline := fs.Bool("offline", false, "skip the network fetch for latest release")
 	if err := parseAndCheck(cmdVersion, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -87,9 +86,6 @@ func runVersion(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("version: unexpected positional %q", fs.Arg(0))
-	}
-	if *asJSON {
-		output = "json"
 	}
 
 	report := gatherVersionReport(*offline)

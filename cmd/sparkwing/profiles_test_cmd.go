@@ -42,7 +42,6 @@ type profileTestReport struct {
 func runProfilesTest(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesTest.Path, flag.ContinueOnError)
 	on := fs.String("on", "", "profile name (default: current default)")
-	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdProfilesTest, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -77,7 +76,7 @@ func runProfilesTest(args []string) error {
 		}
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {

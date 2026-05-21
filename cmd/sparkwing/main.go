@@ -416,8 +416,6 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
 		limit := fs.Int("limit", 20, "max runs to show")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-		_ = fs.MarkHidden("json")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
 		since := fs.Duration("since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
 		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
@@ -441,7 +439,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs list")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs list")
 		if err != nil {
 			return err
 		}
@@ -541,8 +539,6 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsStatus.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outFmt := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
-		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-		_ = fs.MarkHidden("json")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
@@ -555,7 +551,7 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs status")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs status")
 		if err != nil {
 			return err
 		}
@@ -590,8 +586,6 @@ func runJobs(args []string) error {
 		runID := fs.String("run", "", "run identifier")
 		node := fs.String("node", "", "limit output to one node id")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-		asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-		pretty := fs.Bool("pretty", false, "force the human-readable colored renderer even when stdout isn't a terminal (alias for -o pretty)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
 		on := fs.String("on", "",
 			"profile name (cluster mode). Omit to read logs from the local SQLite store.")
@@ -614,24 +608,7 @@ func runJobs(args []string) error {
 		if *tree && *on != "" {
 			return errors.New("jobs logs: --tree is local-mode only (cannot combine with --on)")
 		}
-		effectiveOut := *outFmt
-		if *pretty {
-			if effectiveOut != "" && effectiveOut != "pretty" {
-				return fmt.Errorf("jobs logs: --pretty and -o %s disagree", effectiveOut)
-			}
-			effectiveOut = "pretty"
-		}
-		// Default to JSONL when piped so agents/CI get structured output without --json.
-		if effectiveOut == "" && !*asJSON && !color.IsInteractiveStdout() {
-			effectiveOut = "json"
-		}
-		// jobs logs has its own pre-resolution (--pretty + auto-JSONL when
-		// piped), so the explicit-set bit reflects whether anyone (user or
-		// pre-resolution) settled on a non-empty effectiveOut. Empty means
-		// "let resolveOutputFormat default to pretty"; non-empty means a
-		// concrete choice was made and should compete with --json on equal
-		// footing, matching the kubectl-style explicit-bit contract.
-		resolvedFmt, err := resolveOutputFormat(effectiveOut, effectiveOut != "", *asJSON, "jobs logs")
+		resolvedFmt, err := resolveTTYAwareOutput(*outFmt, "jobs logs")
 		if err != nil {
 			return err
 		}
@@ -669,8 +646,6 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-		_ = fs.MarkHidden("json")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
 		if err := parseAndCheck(cmdJobsErrors, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
@@ -679,7 +654,7 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs errors")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs errors")
 		if err != nil {
 			return err
 		}
@@ -731,30 +706,14 @@ func runJobs(args []string) error {
 	}
 }
 
-// resolveOutputFormat canonicalizes -o/--output + --json into one of
-// {"pretty","json","plain"}. Disagreeing values error rather than
-// silently winning.
-//
-// outputChanged distinguishes "user explicitly typed -o/--output" from
-// "the flag took its default value." Callers using pflag pass
-// fs.Changed("output"); hand-parsers pass `parsed.output != ""`. The
-// distinction matters because a default-shaped --output (e.g. the
-// "pretty" pflag default a leaf may register) must not collide with
-// a user-set --json: --json is documented as an alias for
-// --output=json and "default + --json" should resolve to JSON, not
-// error. Only when BOTH flags are user-set AND disagree do we surface
-// a conflict. Mirrors the kubectl / gh / aws CLI convention.
-func resolveOutputFormat(outFmt string, outputChanged, jsonAlias bool, cmdPath string) (string, error) {
+// resolveOutputFormat canonicalizes -o/--output into one of
+// {"pretty","json","plain"}. Empty string means "no value set" and
+// resolves to the default "pretty".
+func resolveOutputFormat(outFmt string, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
-	}
-	if jsonAlias {
-		if outputChanged && outFmt != "" && outFmt != "json" {
-			return "", fmt.Errorf("%s: --json and -o %s disagree", cmdPath, outFmt)
-		}
-		return "json", nil
 	}
 	if outFmt == "" {
 		return "pretty", nil
@@ -763,41 +722,19 @@ func resolveOutputFormat(outFmt string, outputChanged, jsonAlias bool, cmdPath s
 }
 
 // resolveTTYAwareOutput canonicalizes -o/--output for verbs that
-// want runs-logs-style behavior: TTY default + --json/--pretty
-// aliases that fold into the same canonical FORMAT.
+// want runs-logs-style behavior: TTY-derived default fallback when
+// no -o value is provided.
 //
 // Rules:
-//   - --pretty wins as a forced "pretty" (errors if -o disagrees).
-//   - --json wins as a forced "json" (errors if -o disagrees).
 //   - With an explicit -o value, that value passes through.
 //   - With nothing set: "pretty" when stdout is a TTY, "json" otherwise.
 //     The auto-default lets agents pipe `... | jq` without typing
-//     --json, while humans get the readable form by default.
-//
-// outputChanged should reflect whether the user actually typed
-// -o/--output (e.g. fs.Changed("output")). It distinguishes a
-// default-shaped --output from a user-set one, mirroring the
-// kubectl explicit-bit convention.
-func resolveTTYAwareOutput(outFmt string, outputChanged, jsonAlias, prettyAlias bool, cmdPath string) (string, error) {
-	if jsonAlias && prettyAlias {
-		return "", fmt.Errorf("%s: --json and --pretty cannot be combined", cmdPath)
-	}
+//     -o json, while humans get the readable form by default.
+func resolveTTYAwareOutput(outFmt string, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
-	}
-	if prettyAlias {
-		if outputChanged && outFmt != "" && outFmt != "pretty" {
-			return "", fmt.Errorf("%s: --pretty and -o %s disagree", cmdPath, outFmt)
-		}
-		return "pretty", nil
-	}
-	if jsonAlias {
-		if outputChanged && outFmt != "" && outFmt != "json" {
-			return "", fmt.Errorf("%s: --json and -o %s disagree", cmdPath, outFmt)
-		}
-		return "json", nil
 	}
 	if outFmt != "" {
 		return outFmt, nil

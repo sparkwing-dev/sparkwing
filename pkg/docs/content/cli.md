@@ -1,3 +1,7 @@
+<!-- markdownlint-disable MD024 -->
+<!-- Two `## sparkwing` H2s are intentional: one documents the
+     runner-shortcut invocation, the other the top-level admin nouns.
+     Both legitimately share the binary name. -->
 # CLI Reference
 
 Sparkwing ships two on-path binaries: `sparkwing` (admin / inspection) and `sparkwing` (the pipeline-runner shortcut — a symlink to `sparkwing` that dispatches by invocation name).
@@ -187,7 +191,7 @@ Interactive debugging for pipeline runs. Ephemeral — pause directives live onl
 ### info
 
 ```
-sparkwing info [--json]
+sparkwing info [-o json|pretty|plain]
 ```
 
 Agent entrypoint card: a short tour of what sparkwing is, what's in
@@ -233,7 +237,7 @@ zsh + fish get per-entry descriptions; bash is name-only (compgen limitation).
 ## Conventions
 
 - **No positional args on `sparkwing`.** Every input is `--flag value`. `sparkwing` is the exception.
-- **Structured output.** Every list / describe / get verb accepts `-o pretty|json|plain` (default `pretty`). `--json` is a hidden alias for `-o json`.
+- **Structured output.** Every list / describe / get verb accepts `-o pretty|json|plain` (default `pretty`). `-o`/`--output` is the single output-format selector across the CLI.
 - **Remote dispatch.** `--on NAME` picks a profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
 - **Required flags.** Marked `[required]` in `--help`. Missing required flags fail before any side effect.
 - **Hidden entries.** Pipelines marked `hidden: true` (yaml) or `# hidden: true` (scripts) don't appear in `pipelines list` / tab-complete. Still invocable by exact name. Pass `--all` to `pipelines list` to see them.
@@ -243,10 +247,10 @@ zsh + fish get per-entry descriptions; bash is name-only (compgen limitation).
 Agents should read the catalog via JSON:
 
 ```bash
-sparkwing pipeline list --json           # every invocable with metadata
-sparkwing pipeline describe --name X --json
-sparkwing pipeline discover --query TEXT --json
-sparkwing pipeline explain --name X --json    # Plan DAG before running
+sparkwing pipeline list -o json           # every invocable with metadata
+sparkwing pipeline describe --name X -o json
+sparkwing pipeline discover --query TEXT -o json
+sparkwing pipeline explain --name X -o json    # Plan DAG before running
 sparkwing run X --flag value  # invoke
 ```
 

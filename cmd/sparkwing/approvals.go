@@ -101,15 +101,13 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 	on := fs.String("on", "", "profile name (default: local)")
 	runID := fs.String("run", "", "restrict to one run's approvals (pending + history)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdApprovalsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, cmdApprovalsList.Path)
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, cmdApprovalsList.Path)
 	if rerr != nil {
 		return rerr
 	}

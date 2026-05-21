@@ -138,7 +138,6 @@ type webhookListRow struct {
 func runWebhooksList(args []string) error {
 	fs := flag.NewFlagSet(cmdWebhooksList.Path, flag.ContinueOnError)
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
-	asJSON := fs.BoolP("json", "", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table). Matches kubectl/gh")
 	on := addProfileFlag(fs)
 	_ = on // --on is accepted for symmetry with other verbs; list doesn't need controller state.
@@ -174,7 +173,7 @@ func runWebhooksList(args []string) error {
 		})
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rows)
@@ -245,7 +244,6 @@ func runWebhooksDeliveries(args []string) error {
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
 	hook := fs.Int64("hook", 0, "GitHub hook id (from 'webhooks list')")
 	since := fs.Duration("since", 24*time.Hour, "only deliveries newer than this")
-	asJSON := fs.BoolP("json", "", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmdWebhooksDeliveries, fs, args); err != nil {
@@ -323,7 +321,7 @@ func runWebhooksDeliveries(args []string) error {
 		rows = append(rows, row)
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rows)

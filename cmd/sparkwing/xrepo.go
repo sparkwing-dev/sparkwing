@@ -71,11 +71,11 @@ func printXrepoUsage(w io.Writer) {
 
 // runXrepoList prints every registered repo and the pipelines it
 // declares. Adds a stale/worktree marker so the operator can spot
-// drift without reading the YAML by hand. --json emits a stable
+// drift without reading the YAML by hand. `-o json` emits a stable
 // shape for agents.
 func runXrepoList(args []string) error {
 	fs := flag.NewFlagSet("repo list", flag.ExitOnError)
-	jsonOut := fs.Bool("json", false, "emit JSON instead of the human table")
+	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	pipelines := fs.Bool("pipelines", true,
 		"include pipeline names (set --pipelines=false to skip the per-repo describe call)")
 	_ = fs.Parse(args)
@@ -109,7 +109,7 @@ func runXrepoList(args []string) error {
 		rows = append(rows, row)
 	}
 
-	if *jsonOut {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rows)

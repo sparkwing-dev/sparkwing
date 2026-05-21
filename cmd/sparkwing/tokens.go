@@ -108,7 +108,6 @@ func runTokensList(args []string) error {
 	on := addProfileFlag(fs)
 	kind := fs.String("type", "", "filter by type (user|runner|service)")
 	includeRevoked := fs.Bool("include-revoked", false, "include revoked tokens")
-	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdTokensList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -142,7 +141,7 @@ func runTokensList(args []string) error {
 		return fmt.Errorf("decode: %w", err)
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		return renderTokensJSON(os.Stdout, out.Tokens)
 	}
 	return renderTokensTable(os.Stdout, out.Tokens)
