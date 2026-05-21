@@ -329,8 +329,6 @@ func NewWork() *Work
 const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
-type NodeID string
-func NodeIDOf(id string) NodeID
 type OnLimitPolicy string
 type Outcome string
 func (o Outcome) OK() bool
@@ -562,8 +560,6 @@ func (g *StepGroup) Name() string
 func (g *StepGroup) Needs(deps ...WorkDep) *StepGroup
 func (g *StepGroup) OnTarget(targets ...string) *StepGroup
 func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
-type StepID string
-func StepIDOf(id string) StepID
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"

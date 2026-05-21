@@ -10,19 +10,14 @@ are required.
 
 ### Added
 
-- `sparkwing.Dep` interface and `sparkwing.NodeID` / `sparkwing.NodeIDOf`
-  for typed Plan-layer dependency wiring. `NodeIDOf("foo")` panics on
-  empty input -- an empty by-name dep was almost always an unset
-  variable bug. The `Dep` interface is closed (unexported marker
-  method) so only sparkwing-defined types satisfy it: `*JobNode`,
-  `*ApprovalGate`, `*JobGroup`, and `NodeID`.
-- `sparkwing.WorkDep` interface and `sparkwing.StepID` /
-  `sparkwing.StepIDOf` for typed Work-layer dependency wiring,
-  parallel to the Plan-layer `Dep`. `WorkDep` is implemented by
-  `*WorkStep`, `*StepGroup`, `*SpawnHandle`, `*SpawnGroup`, and
-  `StepID`. The two interfaces are disjoint (a `*WorkStep` does NOT
-  satisfy `Dep`, a `*JobNode` does NOT satisfy `WorkDep`), so the
-  layers cannot cross by accident.
+- `sparkwing.Dep` and `sparkwing.WorkDep` closed interfaces for typed
+  dependency wiring. The unexported marker methods (`depID()` /
+  `workDepID()`) restrict implementors to sparkwing-defined live
+  handles -- Plan-layer `Dep` is `*JobNode` / `*ApprovalGate` /
+  `*JobGroup`; Work-layer `WorkDep` is `*WorkStep` / `*StepGroup` /
+  `*SpawnHandle` / `*SpawnGroup`. The two interfaces are disjoint, so
+  layer-crossing (a `*WorkStep` in `*JobNode.Needs`, or vice versa)
+  is a compile-time error.
 - `sparkwing.NoCache` typed sentinel for explicit cache opt-out from a
   `CacheOptions.ContentHash` function. Returning `NoCache` is distinct
   from returning the zero `CacheKey`: operators see an "explicit
@@ -52,32 +47,48 @@ are required.
 
 ### Changed
 
-- **Breaking:** Plan-layer dependency methods `Needs(...)` and
-  `NeedsOptional(...)` on `*JobNode`, `*ApprovalGate`, and `*JobGroup`
-  now take `...Dep` instead of `...any`. The previous `any`-typed
-  signature accepted anything that compiled and validated at runtime
-  via a type switch -- wiring `42` or a typo'd field reference would
-  compile and fail with a runtime panic. The typed interface forces
-  the compiler to catch this. Hard cut: no `...any` overload retained.
+- **Breaking:** `Needs(...any)` and `NeedsOptional(...any)` on every
+  dep-accepting type (`*JobNode`, `*ApprovalGate`, `*JobGroup`,
+  `*WorkStep`, `*StepGroup`, `*SpawnHandle`, `*SpawnGroup`) replaced
+  with typed-dep signatures: `Needs(...Dep)` for Plan-layer methods,
+  `Needs(...WorkDep)` for Work-layer methods. The previous
+  `...any` signature accepted anything that compiled and validated at
+  runtime via a type switch -- wiring `42` or a typo'd field
+  reference would compile and fail with a runtime panic. The typed
+  interface forces the compiler to catch the bug. Hard cut: no
+  `...any` overload retained.
+
+  By-name string references to upstream nodes/steps are no longer
+  supported -- the interfaces are intentionally closed to live
+  handles. Patterns that built deps from yaml or other runtime
+  sources via string IDs must now do a two-pass construction: first
+  create all steps and store their handles, then wire deps using
+  those handles.
+
   **Migration:**
 
   | Old | New |
   |---|---|
   | `n.Needs(other)` (typed node/gate/group) | unchanged |
-  | `n.Needs("upstream-name")` | `n.Needs(sparkwing.NodeIDOf("upstream-name"))` |
+  | `n.Needs(node1, node2)` | unchanged |
+  | `n.Needs("upstream-name")` (by-name) | store the upstream's `*JobNode`/`*WorkStep` and pass it: `n.Needs(upstream)` |
   | `n.Needs([]*JobNode{...})` (single-arg slice) | `n.Needs(slice...)` (splat) |
   | `n.Needs([]any{...}...)` | rewrite element-by-element |
+  | `n.Needs(42)` (compiled, runtime panic) | compile error |
 
   The `*JobGroup` dynamic-membership special case in `*JobNode.Needs`
-  is preserved -- only the entry-point type changed.
-- **Breaking:** Work-layer `Needs(...)` on `*WorkStep`, `*StepGroup`,
-  `*SpawnHandle`, and `*SpawnGroup` now takes `...WorkDep` instead of
-  `...any`. Same rationale and migration shape as the Plan-layer
-  change: rewrite `.Needs("step-id")` to `.Needs(sparkwing.StepIDOf("step-id"))`;
-  typed `*WorkStep` / handle args are unchanged. The previously
-  documented "embedded `*WorkStep` via reflection" unwrap path is
-  removed -- no code in the repo used it, and the typed interface
-  makes the embed-and-unwrap pattern moot.
+  is preserved -- only the entry-point type changed. The previously
+  documented "embedded `*WorkStep` via reflection" unwrap path on the
+  Work layer is removed -- no code in the repo used it, and the
+  typed interface makes the embed-and-unwrap pattern moot.
+
+  The companion `sparkwing/plan_validate.go` typo-detection
+  validator is removed: with by-name strings no longer accepted at
+  the API, every `n.DepIDs()` entry comes from a typed handle's
+  stored id and is guaranteed valid by construction. The CLI-flag
+  `--sw-start-at` / `--sw-stop-at` validator in
+  `internal/sparkwingruntime/plan_validate.go` is unaffected (operator
+  input is still a string at that boundary).
 - **Breaking:** `CacheOptions.Key` renamed to `CacheOptions.Namespace`,
   and `CacheOptions.CacheKey` renamed to `CacheOptions.ContentHash`.
   `HasKey()` renamed to `HasNamespace()`. Hard cut: the old field

@@ -481,26 +481,12 @@ func (s *WorkStep) Fn() func(ctx context.Context) (any, error) { return s.fn }
 // and vice versa, so the two layers cannot cross by accident.
 //
 // Implementations: [*WorkStep], [*StepGroup], [*SpawnHandle],
-// [*SpawnGroup], and [StepID].
+// [*SpawnGroup]. By-name references via a typed-string sentinel are
+// intentionally not supported -- store and pass the upstream's handle.
 type WorkDep interface {
 	workDepID() string
 }
 
-// StepID is an explicit by-name reference to a WorkStep / SpawnHandle
-// inside the same Work. Construct via [StepIDOf] to get the empty-id
-// guard.
-type StepID string
-
-// StepIDOf builds a [StepID] from a string, panicking when id is
-// empty. An empty by-name dep is almost always an unset variable bug.
-func StepIDOf(id string) StepID {
-	if id == "" {
-		panic("sparkwing: StepIDOf called with empty id")
-	}
-	return StepID(id)
-}
-
-func (id StepID) workDepID() string   { return string(id) }
 func (s *WorkStep) workDepID() string { return s.id }
 func (g *StepGroup) workDepID() string {
 	// StepGroup is expanded inline by the Needs caller; this id is
@@ -530,13 +516,12 @@ var (
 	_ WorkDep = (*StepGroup)(nil)
 	_ WorkDep = (*SpawnHandle)(nil)
 	_ WorkDep = (*SpawnGroup)(nil)
-	_ WorkDep = StepID("")
 )
 
 // Needs declares hard upstream Step / Spawn dependencies inside the
 // same Work. Accepts any [WorkDep]: [*WorkStep], [*StepGroup],
-// [*SpawnHandle], [*SpawnGroup], or [StepID]. For multiple steps
-// from a slice, splat: `s.Needs(steps...)`.
+// [*SpawnHandle], or [*SpawnGroup]. For multiple steps from a slice,
+// splat: `s.Needs(steps...)`.
 func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep {
 	for _, d := range deps {
 		addWorkDep(d, &s.needs)

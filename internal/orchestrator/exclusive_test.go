@@ -63,15 +63,14 @@ func (optionalDepsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 		optA.Store(true)
 		return nil
 	})
-	// b declares NeedsOptional("a", "missing-node"). Should wait on
-	// a (present) and silently skip the missing ID.
+	// b declares NeedsOptional(a). Should wait on a and then run.
 	sparkwing.Job(plan, "b", func(ctx context.Context) error {
 		if !optA.Load() {
 			return errors.New("b ran before a")
 		}
 		optB.Store(true)
 		return nil
-	}).NeedsOptional(a, sparkwing.NodeIDOf("missing-node"))
+	}).NeedsOptional(a)
 	return nil
 }
 

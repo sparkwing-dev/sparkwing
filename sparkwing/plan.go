@@ -641,36 +641,16 @@ type AfterRunFn func(ctx context.Context, err error)
 // Dep is the closed type set accepted by Plan-layer Needs and
 // NeedsOptional. The unexported marker method depID() means only
 // sparkwing-defined types can satisfy the interface, so passing an
-// arbitrary value (an int, a typo'd string, a Work-layer *WorkStep)
-// is a compile-time error.
+// arbitrary value (an int, a string, a Work-layer *WorkStep) is a
+// compile-time error.
 //
-// Implementations: [*JobNode], [*ApprovalGate], [*JobGroup], and
-// [NodeID] (a typed string for by-name references).
+// Implementations: [*JobNode], [*ApprovalGate], [*JobGroup]. By-name
+// references via a typed-string sentinel are intentionally not
+// supported -- store and pass the upstream's handle.
 type Dep interface {
 	depID() string
 }
 
-// NodeID is an explicit by-name node reference. Use when the upstream
-// node isn't constructed yet at the time you wire deps, or when you
-// want to reference a node defined elsewhere in the Plan by its ID.
-//
-// Construct via [NodeIDOf] to get the empty-string guard. The bare
-// type-literal form (`NodeID("foo")`) is legal Go but skips the
-// guard; prefer the constructor.
-type NodeID string
-
-// NodeIDOf builds a [NodeID] from a string, panicking when id is
-// empty. An empty by-name dep is almost always an unset variable
-// rather than an intentional opt-out, so failing loud at construction
-// catches the bug at the call site instead of at dispatch.
-func NodeIDOf(id string) NodeID {
-	if id == "" {
-		panic("sparkwing: NodeIDOf called with empty id")
-	}
-	return NodeID(id)
-}
-
-func (id NodeID) depID() string       { return string(id) }
 func (n *JobNode) depID() string      { return n.id }
 func (g *ApprovalGate) depID() string { return g.n.id }
 func (g *JobGroup) depID() string     { return g.name }
@@ -682,7 +662,6 @@ var (
 	_ Dep = (*JobNode)(nil)
 	_ Dep = (*ApprovalGate)(nil)
 	_ Dep = (*JobGroup)(nil)
-	_ Dep = NodeID("")
 )
 
 // ID returns the node's identifier.
@@ -702,8 +681,8 @@ func (n *JobNode) ResultStep() *WorkStep { return n.resultStep }
 // Needs declares hard upstream dependencies. The orchestrator will not
 // dispatch this node until every named dependency is satisfied.
 //
-// Accepts any [Dep]: [*JobNode], [*ApprovalGate], [*JobGroup], or
-// [NodeID]. For multiple typed nodes from a slice, splat the slice:
+// Accepts any [Dep]: [*JobNode], [*ApprovalGate], or [*JobGroup]. For
+// multiple typed nodes from a slice, splat the slice:
 //
 //	n.Needs(upstreams...)
 func (n *JobNode) Needs(deps ...Dep) *JobNode {
