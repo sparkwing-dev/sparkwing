@@ -449,6 +449,12 @@ var schemaPostgres = func() string {
 // pg_advisory_xact_lock so N runners coordinate cleanly).
 const expectedSchemaVersion = 1
 
+// ExpectedSchemaVersion returns the schema version this binary
+// understands. Useful for diagnostics, version-mismatch reporting,
+// and tests that need to assert what Open will write into the
+// sparkwing_schema_version table on a fresh database.
+func ExpectedSchemaVersion() int { return expectedSchemaVersion }
+
 // schemaVersionTable is created unconditionally on every Open before
 // the version check runs; the check needs the table to exist in order
 // to read from it. The same DDL is valid in both dialects (INTEGER +
@@ -498,11 +504,19 @@ func (e *SkewError) Error() string {
 // row.
 func (s *Store) migrate() error {
 	ctx := context.Background()
+	if s.dialect == DialectPostgres {
+		// CREATE TABLE IF NOT EXISTS on Postgres races at the system
+		// catalog under contention (pg_type_typname_nsp_index unique
+		// violation when N concurrent CREATE statements collide). The
+		// pg migrate path therefore creates the version table inside
+		// the advisory-lock-guarded transaction so it serializes too.
+		return s.migratePostgres(ctx)
+	}
+	// SQLite serializes writers at the database level, so an unlocked
+	// CREATE TABLE IF NOT EXISTS is safe even across processes that
+	// open the same file simultaneously.
 	if _, err := s.exec(ctx, schemaVersionTable); err != nil {
 		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
-	}
-	if s.dialect == DialectPostgres {
-		return s.migratePostgres(ctx)
 	}
 	return s.migrateSQLite(ctx)
 }
@@ -543,6 +557,12 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`); err != nil {
 		return fmt.Errorf("acquire migrate advisory lock: %w", err)
+	}
+	// Create the version table under the lock; outside it, CREATE TABLE
+	// IF NOT EXISTS races at the catalog level when N processes
+	// arrive simultaneously against a fresh database.
+	if _, err := tx.ExecContext(ctx, schemaVersionTable); err != nil {
+		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
 	}
 	var current int
 	if err := tx.QueryRowContext(ctx,
