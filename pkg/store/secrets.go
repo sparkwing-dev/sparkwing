@@ -27,7 +27,7 @@ func (s *Store) CreateOrReplaceSecret(name, value, principal string, masked bool
 	if masked {
 		maskedInt = 1
 	}
-	_, err := s.db.Exec(`
+	_, err := s.execNoCtx(`
         INSERT INTO secrets (name, value, principal, masked, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
@@ -44,7 +44,7 @@ func (s *Store) GetSecret(name string) (*Secret, error) {
 	if name == "" {
 		return nil, errors.New("secrets: name required")
 	}
-	row := s.db.QueryRow(`
+	row := s.queryRowNoCtx(`
         SELECT name, value, principal, masked, created_at, updated_at
           FROM secrets
          WHERE name = ?
@@ -67,7 +67,7 @@ func (s *Store) GetSecret(name string) (*Secret, error) {
 // ListSecrets returns rows ordered by name. HTTP handlers must blank
 // Value before serializing.
 func (s *Store) ListSecrets() ([]Secret, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.queryNoCtx(`
         SELECT name, value, principal, masked, created_at, updated_at
           FROM secrets
          ORDER BY name
@@ -94,7 +94,7 @@ func (s *Store) ListSecrets() ([]Secret, error) {
 
 // DeleteSecret removes the row; ErrNotFound when missing.
 func (s *Store) DeleteSecret(name string) error {
-	res, err := s.db.Exec(`DELETE FROM secrets WHERE name = ?`, name)
+	res, err := s.execNoCtx(`DELETE FROM secrets WHERE name = ?`, name)
 	if err != nil {
 		return err
 	}

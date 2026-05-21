@@ -115,7 +115,7 @@ func TestLookupToken_IgnoresCollidedRowsWithDifferentHash(t *testing.T) {
 	}
 	// Collide: move rowB's prefix to rowA's. Now two rows share a
 	// prefix column but have different hashes.
-	if _, err := s.db.Exec(`UPDATE tokens SET prefix = ? WHERE prefix = ?`, tokA.Prefix, tokB.Prefix); err != nil {
+	if _, err := s.execNoCtx(`UPDATE tokens SET prefix = ? WHERE prefix = ?`, tokA.Prefix, tokB.Prefix); err != nil {
 		t.Fatalf("collide: %v", err)
 	}
 

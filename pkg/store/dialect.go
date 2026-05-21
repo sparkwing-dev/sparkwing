@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 )
 
@@ -48,14 +50,12 @@ func DetectDialect(dsn string) Dialect {
 	return DialectSQLite
 }
 
-// ph rewrites `?` placeholders to `$1`, `$2`, ... when the Store is
-// backed by Postgres. SQLite path returns q unchanged. Question marks
-// inside single-quoted SQL string literals are skipped so embedded JSON
-// or regex literals survive.
-//
-// Use ph at the call site for every query string the dialects share.
-func (s *Store) ph(q string) string {
-	if s.dialect != DialectPostgres {
+// rewritePh rewrites `?` placeholders to `$1`, `$2`, ... when dialect
+// is Postgres. SQLite (and any unrecognized dialect) returns q
+// unchanged. Question marks inside single-quoted SQL string literals
+// are skipped so embedded JSON or regex literals survive.
+func rewritePh(dialect Dialect, q string) string {
+	if dialect != DialectPostgres {
 		return q
 	}
 	var b strings.Builder
@@ -65,9 +65,9 @@ func (s *Store) ph(q string) string {
 	for i := 0; i < len(q); i++ {
 		c := q[i]
 		if c == '\'' {
-			// SQL single-quote escape is doubled (''); just flip the
-			// flag — a doubled '' will flip back into-string on the
-			// next char which is fine for placeholder rewriting.
+			// SQL single-quote escape is doubled ('').  Flipping the
+			// flag on each ' still bookkeeps correctly: '' inside a
+			// literal toggles out then back in on the same char pair.
 			inStr = !inStr
 			b.WriteByte(c)
 			continue
@@ -81,6 +81,79 @@ func (s *Store) ph(q string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+// Querier methods on *Store transparently rewrite `?` to `$N` for
+// Postgres before delegating to the underlying *sql.DB. Use these in
+// place of s.db.* everywhere in pkg/store so each call site stays
+// dialect-agnostic.
+
+func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return s.db.ExecContext(ctx, rewritePh(s.dialect, q), args...)
+}
+
+func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
+	return s.db.Exec(rewritePh(s.dialect, q), args...)
+}
+
+func (s *Store) query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return s.db.QueryContext(ctx, rewritePh(s.dialect, q), args...)
+}
+
+func (s *Store) queryNoCtx(q string, args ...any) (*sql.Rows, error) {
+	return s.db.Query(rewritePh(s.dialect, q), args...)
+}
+
+func (s *Store) queryRow(ctx context.Context, q string, args ...any) *sql.Row {
+	return s.db.QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
+}
+
+func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
+	return s.db.QueryRow(rewritePh(s.dialect, q), args...)
+}
+
+// storeTx wraps the underlying *sql.Tx so transactional queries get
+// the same placeholder rewriting that *Store does on the bare
+// connection. Its method names match the *sql.Tx surface so call
+// sites only change the variable type, not the call shape.
+type storeTx struct {
+	tx      *sql.Tx
+	dialect Dialect
+}
+
+func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &storeTx{tx: tx, dialect: s.dialect}, nil
+}
+
+func (t *storeTx) Commit() error   { return t.tx.Commit() }
+func (t *storeTx) Rollback() error { return t.tx.Rollback() }
+
+func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {
+	return t.tx.Exec(rewritePh(t.dialect, q), args...)
+}
+
+func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
+}
+
+func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error) {
+	return t.tx.Query(rewritePh(t.dialect, q), args...)
+}
+
+func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
+}
+
+func (t *storeTx) QueryRow(q string, args ...any) *sql.Row {
+	return t.tx.QueryRow(rewritePh(t.dialect, q), args...)
+}
+
+func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
 // itoa formats small positive integers without going through strconv;

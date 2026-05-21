@@ -455,7 +455,7 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) migrateSQLite() error {
-	if _, err := s.db.Exec(schemaSQLite); err != nil {
+	if _, err := s.execNoCtx(schemaSQLite); err != nil {
 		return err
 	}
 	if err := s.ensureColumnsAll(); err != nil {
@@ -469,7 +469,7 @@ func (s *Store) migrateSQLite() error {
 
 func (s *Store) migratePostgres() error {
 	ctx := context.Background()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -573,7 +573,7 @@ func (s *Store) ensureColumnsAll() error {
 	return nil
 }
 
-func (s *Store) ensureColumnsAllTx(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) ensureColumnsAllTx(ctx context.Context, tx *storeTx) error {
 	for _, spec := range columnMigrations {
 		for name, typ := range spec.cols {
 			stmt := fmt.Sprintf(
@@ -607,7 +607,7 @@ func translateColumnType(t string) string {
 // the computation yields 0 for runs that genuinely have no
 // annotations, so this is a no-op the second time around.
 func (s *Store) backfillRunAnnotationRollup() error {
-	rows, err := s.db.Query(`SELECT id FROM runs WHERE annotation_count = 0`)
+	rows, err := s.queryNoCtx(`SELECT id FROM runs WHERE annotation_count = 0`)
 	if err != nil {
 		return err
 	}
@@ -630,7 +630,7 @@ func (s *Store) backfillRunAnnotationRollup() error {
 			continue
 		}
 		blob, _ := json.Marshal(gathered)
-		if _, err := s.db.Exec(`
+		if _, err := s.execNoCtx(`
 UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
 WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 			return err
@@ -644,7 +644,7 @@ WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 // order -- close to event order in practice.
 func (s *Store) gatherRunAnnotations(runID string) ([]string, error) {
 	var out []string
-	rows, err := s.db.Query(`
+	rows, err := s.queryNoCtx(`
 SELECT annotations_json FROM nodes WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''
 UNION ALL
 SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''`,
@@ -671,7 +671,7 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 // inside the supplied transaction. Caller is responsible for the
 // surrounding txn lifecycle so the per-node/per-step write and the
 // run-row rollup stay in sync.
-func appendRunAnnotation(tx *sql.Tx, runID, msg string) error {
+func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	var blob []byte
 	err := tx.QueryRow(`SELECT annotations_json FROM runs WHERE id = ?`, runID).Scan(&blob)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -695,7 +695,7 @@ func appendRunAnnotation(tx *sql.Tx, runID, msg string) error {
 // Returning on the first error is safe because subsequent opens will
 // finish the job.
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
-	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
 		return err
 	}
@@ -717,7 +717,7 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 			continue
 		}
 		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %s %s`, table, name, typ)
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.execNoCtx(stmt); err != nil {
 			return fmt.Errorf("add column %s.%s: %w", table, name, err)
 		}
 	}
@@ -807,7 +807,7 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	// orchestrator promoting a controller-allocated pending run to
 	// running. We deliberately do NOT clobber created_at on the
 	// upsert so the trigger-intake timestamp survives.
-	_, err := s.db.ExecContext(
+	_, err := s.exec(
 		ctx, `
 INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -843,7 +843,7 @@ WHERE runs.status = 'pending'`,
 
 // FinishRun marks a run terminal with the given status and optional error.
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
  WHERE id = ?`,
@@ -853,13 +853,13 @@ UPDATE runs
 
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
+	_, err := s.exec(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
 	return err
 }
 
 // SetRetriedAs stores the reverse retry pointer on runID. Idempotent.
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE runs SET retried_as = ? WHERE id = ?`, newID, runID)
 	return err
 }
@@ -885,7 +885,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 	const maxDepth = 256
 	rootID := runID
 	for range maxDepth {
-		row := s.db.QueryRowContext(ctx,
+		row := s.queryRow(ctx,
 			`SELECT retry_of FROM runs WHERE id = ?`, rootID)
 		var parent string
 		if err := row.Scan(&parent); err != nil {
@@ -913,7 +913,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 	for len(frontier) > 0 {
 		next := frontier[:0:0]
 		for _, id := range frontier {
-			rows, err := s.db.QueryContext(ctx,
+			rows, err := s.query(ctx,
 				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
 				   FROM runs WHERE retry_of = ?`, id)
 			if err != nil {
@@ -947,7 +947,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
@@ -1013,7 +1013,7 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
  ORDER BY started_at DESC
  LIMIT ?`
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1056,7 +1056,7 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
-	return scanRun(s.db.QueryRowContext(ctx, q, args...))
+	return scanRun(s.queryRow(ctx, q, args...))
 }
 
 // DeleteRun removes the run + its trigger; CASCADE handles children.
@@ -1070,7 +1070,7 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 // the trigger row in that case (orphaned: child run is gone, edge
 // remains visible) so parent DAGs stay stable.
 func (s *Store) DeleteRun(ctx context.Context, runID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -1088,7 +1088,7 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 // PruneRunsOlderThan deletes terminal runs older than cutoff and
 // returns their ids so callers can purge log files / cache blobs.
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.query(ctx,
 		`SELECT id FROM runs
 		   WHERE started_at < ?
 		     AND status IN ('success','failed','cancelled')`,
@@ -1214,7 +1214,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if len(n.NeedsLabels) > 0 {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels)
 VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
 	return err
@@ -1222,7 +1222,7 @@ VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
 
 // StartNode marks a node as running.
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 UPDATE nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id = ?`,
 		time.Now().UnixNano(), runID, nodeID)
 	return err
@@ -1230,7 +1230,7 @@ UPDATE nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id
 
 // SetNodeStatus updates only the status column.
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`,
 		status, runID, nodeID)
 	return err
@@ -1239,7 +1239,7 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 // UpdateNodeDeps rewrites a node's stored dependency list.
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	depsJSON, _ := json.Marshal(deps)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET deps_json = ? WHERE run_id = ? AND node_id = ?`,
 		depsJSON, runID, nodeID)
 	return err
@@ -1256,7 +1256,7 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	if exitCode != nil {
 		code = *exitCode
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 UPDATE nodes
    SET status = 'done', outcome = ?, error = ?, output_json = ?, finished_at = ?,
        failure_reason = ?, exit_code = ?
@@ -1269,7 +1269,7 @@ UPDATE nodes
 
 // ListNodes returns the nodes for a run in insertion order.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
        failure_reason, exit_code, annotations_json, summary
@@ -1293,7 +1293,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 // GetNode fetches a single node row; ErrNotFound when missing.
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
        failure_reason, exit_code, annotations_json, summary
@@ -1365,7 +1365,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 // annotations list. Implemented as read-modify-write inside a single
 // transaction so concurrent appenders don't lose entries.
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -1412,7 +1412,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 // ErrNotFound if the node row doesn't exist. Driven by
 // sparkwing.Summary() emitted outside any step body.
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`UPDATE nodes SET summary = ? WHERE run_id = ? AND node_id = ?`,
 		md, runID, nodeID)
 	if err != nil {
@@ -1460,7 +1460,7 @@ type NodeStep struct {
 // step) is a no-op, leaving the original started_at intact so a
 // retry doesn't reset the clock.
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status, started_at)
 VALUES (?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
@@ -1474,7 +1474,7 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 // lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	now := time.Now().UnixNano()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
 VALUES (?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
@@ -1489,7 +1489,7 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // without special-casing nulls in the wire-shape serializer.
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	now := time.Now().UnixNano()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
 VALUES (?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
@@ -1503,7 +1503,7 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // nodes. Returned in (node_id, started_at) order so callers can
 // stream-bucket by node without a second sort.
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
 FROM node_steps
 WHERE run_id = ?
@@ -1542,7 +1542,7 @@ ORDER BY node_id, started_at`, runID)
 // rare reorder case). Read-modify-write inside one txn to keep
 // concurrent appenders from losing entries.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -1600,7 +1600,7 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 // pattern AppendStepAnnotation uses. Driven by sparkwing.Summary()
 // emitted inside a step body.
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -1623,7 +1623,7 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 
 // MarkNodeReady stamps ready_at if unset. Idempotent.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	res, err := s.db.ExecContext(
+	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?)
 		  WHERE run_id = ? AND node_id = ?`,
@@ -1645,7 +1645,7 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 // RevokeNodeReady clears ready_at when unclaimed. Returns false when
 // a pod already claimed the node.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	res, err := s.db.ExecContext(
+	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET ready_at = NULL
 		  WHERE run_id = ? AND node_id = ?
@@ -1680,7 +1680,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 
 	const maxCandidates = 64
 	for range maxCandidates {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := s.beginTx(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1777,7 +1777,7 @@ func labelTermSatisfied(term string, have map[string]struct{}) bool {
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
 		  WHERE run_id = ? AND node_id = ?`,
 		detail, time.Now().UnixNano(), runID, nodeID)
@@ -1786,7 +1786,7 @@ func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail st
 
 // TouchNodeHeartbeat stamps last_heartbeat=now.
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET last_heartbeat = ? WHERE run_id = ? AND node_id = ?`,
 		time.Now().UnixNano(), runID, nodeID)
 	return err
@@ -1799,7 +1799,7 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 		lease = DefaultLeaseDuration
 	}
 	expires := time.Now().Add(lease).UnixNano()
-	res, err := s.db.ExecContext(
+	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?`,
@@ -1822,7 +1822,7 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 // claims; ready_at is left intact. Returns reaped pairs.
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
 	now := time.Now().UnixNano()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1868,7 +1868,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 // failExpiredNodeClaims terminates expired claims with FailureAgentLost.
 func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
 	now := time.Now().UnixNano()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1919,7 +1919,7 @@ UPDATE nodes
 // failNodesInRun marks every non-terminal node in runID as failed.
 // Used by the reaper to avoid zombie nodes when a worker lease expires.
 func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1971,7 +1971,7 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 		return nil, nil
 	}
 	threshold := time.Now().Add(-olderThan).UnixNano()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2038,7 +2038,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int6
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, seq, node_id, kind, ts, payload
   FROM events
  WHERE run_id = ? AND seq > ?
@@ -2080,7 +2080,7 @@ SELECT run_id, seq, node_id, kind, ts, payload
 
 // AppendEvent writes an ordered event; returns the assigned seq.
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -2137,7 +2137,7 @@ type DebugPause struct {
 
 // CreateDebugPause inserts (or upserts) an open pause row.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at)
 VALUES (?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
@@ -2153,7 +2153,7 @@ ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
 
 // GetActiveDebugPause returns the open pause for a node, if any.
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
  WHERE run_id = ? AND node_id = ? AND released_at IS NULL
@@ -2164,7 +2164,7 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 
 // ListDebugPauses returns all pause rows for a run, newest first.
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
  WHERE run_id = ?
@@ -2186,7 +2186,7 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 
 // ReleaseDebugPause closes the open pause; ErrNotFound when none.
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, `
 UPDATE debug_pauses
    SET released_at = ?, released_by = ?, release_kind = ?
  WHERE run_id = ? AND node_id = ? AND released_at IS NULL`,
@@ -2283,7 +2283,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if t.Full {
 		fullInt = 1
 	}
-	_, err := s.db.ExecContext(
+	_, err := s.exec(
 		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
@@ -2313,7 +2313,7 @@ type SpawnedChild struct {
 // + pipeline so the caller can attribute the spawn back to its node.
 // Ordered by parent_node_id, created_at so callers can stream-bucket.
 func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT parent_node_id, pipeline, id
 FROM triggers
 WHERE parent_run_id = ? AND parent_node_id != ''
@@ -2347,7 +2347,7 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 	for range maxDepth {
 		var parent sql.NullString
 		var pipeline string
-		err := s.db.QueryRowContext(
+		err := s.queryRow(
 			ctx,
 			`SELECT pipeline, parent_run_id FROM runs WHERE id = ?`, cur,
 		).Scan(&pipeline, &parent)
@@ -2381,7 +2381,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2469,7 +2469,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	}
 	expires := time.Now().Add(lease).UnixNano()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -2507,7 +2507,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 // RequestCancel flags a trigger for cancellation; idempotent.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
 	now := time.Now().UnixNano()
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`UPDATE triggers
 		    SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
 		  WHERE id = ?`,
@@ -2530,7 +2530,7 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	now := time.Now().UnixNano()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2579,7 +2579,7 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 // FinishTrigger marks a trigger 'done'; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE triggers SET status = 'done', lease_expires_at = NULL WHERE id = ?`, id)
 	return err
 }
@@ -2590,7 +2590,7 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 // that started it -- without the filter, two parallel local runs
 // would steal each other's children. Empty list when no candidates.
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT id FROM triggers
  WHERE status = 'pending' AND parent_run_id = ?
  ORDER BY created_at ASC`, parentRunID)
@@ -2615,7 +2615,7 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2681,7 +2681,7 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
 	var fullInt int
-	err := s.db.QueryRowContext(
+	err := s.queryRow(
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
@@ -2725,7 +2725,7 @@ func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, pare
 		return "", nil
 	}
 	var id string
-	err := s.db.QueryRowContext(
+	err := s.queryRow(
 		ctx, `
 SELECT id FROM triggers
  WHERE parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
@@ -2786,7 +2786,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2847,7 +2847,7 @@ var ErrLockHeld = errors.New("held by another holder")
 // CountPendingNodes returns the count of unclaimed ready nodes.
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(
+	err := s.queryRow(
 		ctx,
 		`SELECT COUNT(*) FROM nodes
 		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')`,
@@ -2859,7 +2859,7 @@ func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error) {
 	threshold := time.Now().Add(-window).UnixNano()
 	var n int
-	err := s.db.QueryRowContext(
+	err := s.queryRow(
 		ctx,
 		`SELECT COUNT(DISTINCT claimed_by) FROM nodes
 		  WHERE claimed_by IS NOT NULL AND claimed_by != ''
@@ -2910,7 +2910,7 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 	if a.OnTimeout == "" {
 		a.OnTimeout = ApprovalOnTimeoutFail
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -2941,7 +2941,7 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
 
 // GetApproval returns the row, or ErrNotFound.
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE run_id = ? AND node_id = ?`, runID, nodeID)
@@ -2951,7 +2951,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 // ResolveApproval stamps resolution on a pending row.
 // ErrNotFound when missing; ErrLockHeld when already resolved.
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2990,7 +2990,7 @@ UPDATE approvals
 
 // ListApprovalsForRun returns all rows in request order.
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE run_id = ?
@@ -3012,7 +3012,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 
 // ListPendingApprovals returns unresolved approvals oldest-first.
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE resolved_at IS NULL

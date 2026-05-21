@@ -142,7 +142,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	now := time.Now()
 	nowNS := now.UnixNano()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return AcquireSlotResponse{}, err
 	}
@@ -344,9 +344,17 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT OR REPLACE INTO concurrency_waiters
+			`INSERT INTO concurrency_waiters
 			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
+			   holder_id         = excluded.holder_id,
+			   arrived_at        = excluded.arrived_at,
+			   policy            = excluded.policy,
+			   cache_key_hash    = excluded.cache_key_hash,
+			   leader_run_id     = excluded.leader_run_id,
+			   leader_node_id    = excluded.leader_node_id,
+			   cancel_timeout_ns = excluded.cancel_timeout_ns`,
 			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCoalesce, req.CacheKeyHash, leaderRun, leaderNode,
 		); err != nil {
 			return AcquireSlotResponse{}, err
@@ -398,9 +406,17 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT OR REPLACE INTO concurrency_waiters
+			`INSERT INTO concurrency_waiters
 			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?)
+			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
+			   holder_id         = excluded.holder_id,
+			   arrived_at        = excluded.arrived_at,
+			   policy            = excluded.policy,
+			   cache_key_hash    = excluded.cache_key_hash,
+			   leader_run_id     = excluded.leader_run_id,
+			   leader_node_id    = excluded.leader_node_id,
+			   cancel_timeout_ns = excluded.cancel_timeout_ns`,
 			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCancelOthers, req.CacheKeyHash, int64(req.CancelTimeout),
 		); err != nil {
 			return AcquireSlotResponse{}, err
@@ -420,9 +436,17 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	default:
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT OR REPLACE INTO concurrency_waiters
+			`INSERT INTO concurrency_waiters
 			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0)
+			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
+			   holder_id         = excluded.holder_id,
+			   arrived_at        = excluded.arrived_at,
+			   policy            = excluded.policy,
+			   cache_key_hash    = excluded.cache_key_hash,
+			   leader_run_id     = excluded.leader_run_id,
+			   leader_node_id    = excluded.leader_node_id,
+			   cancel_timeout_ns = excluded.cancel_timeout_ns`,
 			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitQueue, req.CacheKeyHash,
 		); err != nil {
 			return AcquireSlotResponse{}, err
@@ -443,7 +467,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	now := time.Now()
 	expires = now.Add(lease)
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return time.Time{}, false, err
 	}
@@ -477,7 +501,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 // ReleaseConcurrencySlot removes the holder and writes a cache entry
 // when applicable. Waiter promotion runs in the caller (ReleaseAndNotify).
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -508,9 +532,16 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 		now := time.Now()
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT OR REPLACE INTO concurrency_cache
+			`INSERT INTO concurrency_cache
 			   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (key, cache_key_hash) DO UPDATE SET
+			   output_ref     = excluded.output_ref,
+			   origin_run_id  = excluded.origin_run_id,
+			   origin_node_id = excluded.origin_node_id,
+			   created_at     = excluded.created_at,
+			   expires_at     = excluded.expires_at,
+			   last_hit_at    = excluded.last_hit_at`,
 			key, cacheKeyHash, outputRef, runID, nodeID,
 			now.UnixNano(), now.Add(ttl).UnixNano(), now.UnixNano(),
 		); err != nil {
@@ -530,7 +561,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	if promoteLease <= 0 {
 		promoteLease = DefaultConcurrencyLease
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, nil, nil, err
 	}
@@ -563,9 +594,16 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 			now := time.Now()
 			if _, err := tx.ExecContext(
 				ctx,
-				`INSERT OR REPLACE INTO concurrency_cache
+				`INSERT INTO concurrency_cache
 				   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT (key, cache_key_hash) DO UPDATE SET
+				   output_ref     = excluded.output_ref,
+				   origin_run_id  = excluded.origin_run_id,
+				   origin_node_id = excluded.origin_node_id,
+				   created_at     = excluded.created_at,
+				   expires_at     = excluded.expires_at,
+				   last_hit_at    = excluded.last_hit_at`,
 				key, cacheKeyHash, outputRef, runID, nodeID,
 				now.UnixNano(), now.Add(ttl).UnixNano(), now.UnixNano(),
 			); err != nil {
@@ -691,7 +729,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 // ResolveCoalesceFollowers drains coalesce waiters whose leader
 // matches.
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -742,7 +780,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -870,7 +908,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	now := time.Now()
 	nowNS := now.UnixNano()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return WaiterResolution{}, err
 	}
@@ -973,7 +1011,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 
 // CancelWaiter removes one waiter row; returns whether one matched.
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	res, err := s.db.ExecContext(
+	res, err := s.exec(
 		ctx,
 		`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 		key, runID, nodeID,
@@ -988,7 +1026,7 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 // GetConcurrencyState returns capacity + holders + waiters; ErrNotFound when undeclared.
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error) {
 	var capacity int
-	err := s.db.QueryRowContext(
+	err := s.queryRow(
 		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&capacity)
@@ -1001,7 +1039,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 
 	state := &ConcurrencyState{Key: key, Capacity: capacity}
 
-	hrows, err := s.db.QueryContext(
+	hrows, err := s.query(
 		ctx,
 		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
 		   FROM concurrency_holders WHERE key = ? ORDER BY claimed_at ASC`, key,
@@ -1027,7 +1065,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		return nil, err
 	}
 
-	wrows, err := s.db.QueryContext(
+	wrows, err := s.query(
 		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
 		   FROM concurrency_waiters WHERE key = ? ORDER BY arrived_at ASC`, key,
@@ -1054,7 +1092,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 // runs PromoteNextWaiters and emits audit events.
 func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
 	now := time.Now().UnixNano()
-	rows, err := s.db.QueryContext(
+	rows, err := s.query(
 		ctx,
 		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
 		   FROM concurrency_holders WHERE lease_expires_at <= ?`, now,
@@ -1081,7 +1119,7 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 		return nil, err
 	}
 	for _, h := range stale {
-		if _, err := s.db.ExecContext(
+		if _, err := s.exec(
 			ctx,
 			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`, h.Key, h.HolderID,
 		); err != nil {
@@ -1094,7 +1132,7 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 // ForceReleaseSupersededHolders drops superseded=1 rows so a stuck
 // CancelOthers eviction can't block forward progress.
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1147,7 +1185,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	if maxAge <= 0 {
 		return nil, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1243,7 +1281,7 @@ func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duratio
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
-	rows, err := s.db.QueryContext(
+	rows, err := s.query(
 		ctx,
 		`SELECT DISTINCT key FROM concurrency_waiters
 		  WHERE policy IN (?, ?)`,
@@ -1279,7 +1317,7 @@ func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duratio
 
 // sweepExpiredConcurrencyCache removes cache entries past their TTL.
 func (s *Store) sweepExpiredConcurrencyCache(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`DELETE FROM concurrency_cache WHERE expires_at <= ?`, time.Now().UnixNano())
 	if err != nil {
 		return 0, err
@@ -1293,7 +1331,7 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	var count int
-	if err := s.db.QueryRowContext(
+	if err := s.queryRow(
 		ctx,
 		`SELECT COUNT(*) FROM concurrency_cache`,
 	).Scan(&count); err != nil {
@@ -1303,7 +1341,7 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	evict := count - keepCount
-	res, err := s.db.ExecContext(
+	res, err := s.exec(
 		ctx,
 		`DELETE FROM concurrency_cache
 		  WHERE ROWID IN (
@@ -1320,7 +1358,7 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 // CountConcurrencyCache is exposed for ops dashboards.
 func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM concurrency_cache`).Scan(&n)
+	err := s.queryRow(ctx, `SELECT COUNT(*) FROM concurrency_cache`).Scan(&n)
 	return n, err
 }
 

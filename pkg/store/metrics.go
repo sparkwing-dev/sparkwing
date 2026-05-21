@@ -15,16 +15,17 @@ type MetricSample struct {
 // AddNodeMetricSample appends; duplicates by (run, node, ts) are
 // silently ignored so retries don't trip UNIQUE.
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
-	_, err := s.db.ExecContext(ctx, `
-INSERT OR IGNORE INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes)
-VALUES (?, ?, ?, ?, ?)`,
+	_, err := s.exec(ctx, `
+INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (run_id, node_id, ts) DO NOTHING`,
 		runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes)
 	return err
 }
 
 // ListNodeMetrics returns samples oldest-first.
 func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT ts, cpu_millicores, memory_bytes
   FROM node_metrics
  WHERE run_id = ? AND node_id = ?

@@ -46,7 +46,7 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 	}
 	seq := d.Seq
 	if seq < 0 {
-		if err := s.db.QueryRowContext(ctx, `
+		if err := s.queryRow(ctx, `
 			SELECT COALESCE(MAX(seq), -1) + 1
 			  FROM node_dispatches
 			 WHERE run_id = ? AND node_id = ?
@@ -54,7 +54,7 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 			return fmt.Errorf("assign next seq: %w", err)
 		}
 	}
-	_, err := s.db.ExecContext(
+	_, err := s.exec(
 		ctx, `
 		INSERT INTO node_dispatches (
 			run_id, node_id, seq, dispatched_at,
@@ -76,7 +76,7 @@ func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq i
 	              workdir, input_envelope_json, input_size_bytes, secret_redactions`
 	var row *sql.Row
 	if seq < 0 {
-		row = s.db.QueryRowContext(ctx, `
+		row = s.queryRow(ctx, `
 			SELECT `+cols+`
 			  FROM node_dispatches
 			 WHERE run_id = ? AND node_id = ?
@@ -84,7 +84,7 @@ func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq i
 			 LIMIT 1
 		`, runID, nodeID)
 	} else {
-		row = s.db.QueryRowContext(ctx, `
+		row = s.queryRow(ctx, `
 			SELECT `+cols+`
 			  FROM node_dispatches
 			 WHERE run_id = ? AND node_id = ? AND seq = ?
@@ -102,7 +102,7 @@ func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq i
 
 // ListNodeDispatches returns all snapshots oldest-first.
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 		SELECT run_id, node_id, seq, dispatched_at,
 		       code_version, binary_hash, runner_labels, env_json,
 		       workdir, input_envelope_json, input_size_bytes, secret_redactions
