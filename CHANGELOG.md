@@ -191,6 +191,36 @@ the GitHub Release body.
   single section; every `(Breaking)` entry in a versioned section links
   to a real `docs/migrations/v<X.Y.Z>.md#<anchor>` whose file exists,
   anchor resolves to an H2, and version matches.
+- **cli:** `sparkwing docs migrations` subcommand for in-CLI access to
+  per-version migration guides. `list` shows every guide the binary
+  embeds (with date + one-line summary); `read --version vX.Y.Z`
+  prints one guide; `between --from --to` concatenates every guide in
+  a version range with `---` separators. Default `-o markdown` so
+  agents pipe straight into context. Stale-CLI hint surfaces in `list`
+  when newer guides exist on the web.
+- **cli:** `sparkwing docs versions` subcommand. Lists known versions
+  (embedded by default; embedded + remote when `--web` is set), flags
+  the latest, and surfaces source (`embedded` vs `remote`). Exits
+  non-zero when `--web` discovery fails so scripts detect.
+- **cli:** `--web` flag on `sparkwing docs read|list` and
+  `sparkwing docs migrations read|list|between` fetches cross-version
+  content from `sparkwing.dev` when the requested version isn't in
+  the binary's embed. The CLI stays hermetic by default; `--web` is
+  opt-in. Pairs with `--version vX.Y.Z|latest` to pick the target
+  version. Companion `--no-cache` flag bypasses the on-disk cache for
+  one invocation.
+- **cli:** `sparkwing docs cache info` / `cache clear` for inspecting
+  and resetting the on-disk web cache at `$XDG_CACHE_HOME/sparkwing/web/`
+  (default `~/.cache/sparkwing/web/`). 24h TTL on `versions.json` and
+  `*/index.json`; indefinite TTL on per-version `.md` content (tags
+  are immutable).
+- **cli:** `SPARKWING_DOCS_BASE_URL` environment variable overrides the
+  default `https://sparkwing.dev` base for the web fetcher. Useful for
+  testing against a local mirror; falls through to the default when
+  unset.
+- **cli:** `sparkwing info` advertises four new URLs for agent
+  discovery: `docs_index_url`, `migration_guides_url`,
+  `migration_guides_agent_url`, `migration_guides_index_url`.
 - **release:** `sparkwing run release` refuses to ship a version when
   `CHANGELOG.md` `[Unreleased]` has no entries. Pairs with the existing
   PR-time CI gate (`bin/check-changelog.sh`) that catches missing
@@ -359,6 +389,27 @@ the GitHub Release body.
   Consumers of JSON log streams that explicitly read these fields will
   see them as missing rather than empty. See
   [migration guide](docs/migrations/v0.4.0.md#logrecord-fields).
+- **cli (Breaking):** `sparkwing info -o json` field names normalized
+  on the `docs` sub-object. The previously-flat `web` key splits into
+  named URL fields with `_url` suffixes: `web` → `web_url`,
+  `llms_full` → `llms_full_url`, `llms_txt` → `llms_txt_url`. Three
+  new fields (`docs_index_url`, `migration_guides_url`,
+  `migration_guides_agent_url`, `migration_guides_index_url`) join
+  the object. Consumers parsing `sparkwing info -o json` against the
+  `docs` sub-object must update field reads. See
+  [migration guide](docs/migrations/v0.4.0.md#info-docs-json).
+- **sdk (Breaking):** `pkg/docs.Entry` and `pkg/docs.MigrationEntry`
+  reshaped to align with the web's `/docs/index.json` and
+  `/migrations/index.json` JSON schemas. `Entry` drops its `Path`
+  field (the cache-internal relative path) and now matches
+  `{Slug, Title, Summary, Bytes}`. `MigrationEntry` is
+  `{Version, Slug, Title, Date, Summary, Bytes}` (with `Slug` ==
+  `Version` for parity with the web schema). External consumers
+  reading `pkg/docs.List()` or `pkg/docs.MigrationsList()` results
+  must update field names; the underlying JSON shape now matches
+  what the web emits so agents can consume either source with one
+  schema. See
+  [migration guide](docs/migrations/v0.4.0.md#pkg-docs-entry-reshape).
 - **cache:** `sparkwing-cache` business logic moved from
   `cmd/sparkwing-cache/main.go` (~1700 LOC) into a new `internal/cache`
   package. HTTP wire protocol unchanged; same routes, same shapes;
