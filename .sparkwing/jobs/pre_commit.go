@@ -87,6 +87,17 @@ func checkEmDashes(ctx context.Context) error {
 		if err != nil || len(data) == 0 {
 			continue
 		}
+		// Skip binary files: a null byte in the first 8KB
+		// is a strong signal the content isn't prose. Lambda
+		// bootstrap binaries, archives, etc. can contain bytes
+		// that match the em-dash sequence coincidentally.
+		head := data
+		if len(head) > 8192 {
+			head = head[:8192]
+		}
+		if bytes.IndexByte(head, 0) >= 0 {
+			continue
+		}
 		if bytes.Contains(data, []byte("\u2014")) {
 			bad = append(bad, f)
 		}
@@ -113,6 +124,17 @@ func checkTrackerIDs(ctx context.Context) error {
 		}
 		data, err := os.ReadFile(filepath.Join(root, f))
 		if err != nil || len(data) == 0 {
+			continue
+		}
+		// Skip binary files: a null byte in the first 8KB
+		// is a strong signal the content isn't prose. Lambda
+		// bootstrap binaries, archives, etc. can contain bytes
+		// that match the em-dash sequence coincidentally.
+		head := data
+		if len(head) > 8192 {
+			head = head[:8192]
+		}
+		if bytes.IndexByte(head, 0) >= 0 {
 			continue
 		}
 		if trackerIDPattern.Match(data) {
