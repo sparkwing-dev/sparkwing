@@ -136,3 +136,39 @@ func mkRun(id, pipeline, status string, started time.Time) store.Run {
 func mkNode(runID, nodeID, status string) store.Node {
 	return store.Node{RunID: runID, NodeID: nodeID, Status: status}
 }
+
+// TestS3Backend_ListEventsAfter_ReadsEventEnvelopes verifies the
+// dashboard parses Mode 2 event envelopes from state.ndjson and
+// returns them filtered by sequence.
+func TestS3Backend_ListEventsAfter_ReadsEventEnvelopes(t *testing.T) {
+	t.Parallel()
+	st := mustFS(t)
+	b := backend.NewS3Backend(st, nil)
+	b.SetLiveTTL(0) // disable cache so each read is fresh
+	ctx := context.Background()
+
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	_ = enc.Encode(map[string]any{"kind": "run", "data": mkRun("r", "p", "running", time.Now().UTC())})
+	_ = enc.Encode(map[string]any{"kind": "event", "data": store.Event{RunID: "r", Seq: 1, Kind: "run_start", TS: time.Now().UTC()}})
+	_ = enc.Encode(map[string]any{"kind": "event", "data": store.Event{RunID: "r", Seq: 2, Kind: "node_start", TS: time.Now().UTC()}})
+	_ = enc.Encode(map[string]any{"kind": "event", "data": store.Event{RunID: "r", Seq: 3, Kind: "node_end", TS: time.Now().UTC()}})
+	if err := st.Put(ctx, "runs/r/state.ndjson", strings.NewReader(buf.String())); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	all, err := b.ListEventsAfter(ctx, "r", 0, 100)
+	if err != nil {
+		t.Fatalf("ListEventsAfter: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("len=%d, want 3", len(all))
+	}
+	after2, err := b.ListEventsAfter(ctx, "r", 2, 100)
+	if err != nil {
+		t.Fatalf("ListEventsAfter(2): %v", err)
+	}
+	if len(after2) != 1 || after2[0].Kind != "node_end" {
+		t.Fatalf("after seq=2 = %+v", after2)
+	}
+}

@@ -11,27 +11,42 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// DefaultLiveTTL bounds how long the dashboard's parsed run snapshot
+// is reused before it re-reads the object store. Live S3 runs append
+// to state.ndjson over time; a non-zero TTL turns the cache into a
+// poll-with-jitter freshness window. Set to zero to disable caching.
+const DefaultLiveTTL = 2 * time.Second
+
 // S3Backend serves the dashboard from runs/<id>/state.ndjson dumps in
-// an ArtifactStore. State files are written once at run-finish time so
-// the in-memory cache is invalidation-free.
+// an ArtifactStore. State entries are cached with a short TTL so live
+// runs (Mode 2 NDJSON appends) appear with sub-second latency without
+// hammering the bucket on every request.
 type S3Backend struct {
 	store    storage.ArtifactStore
 	logStore storage.LogStore // nil means logs render as empty
+	liveTTL  time.Duration
 
 	mu    sync.Mutex
-	cache map[string]*runState
+	cache map[string]*cachedState
 
 	caps Capabilities
 }
 
+type cachedState struct {
+	state     *runState
+	fetchedAt time.Time
+}
+
 type runState struct {
-	run   *store.Run
-	nodes []*store.Node
+	run    *store.Run
+	nodes  []*store.Node
+	events []store.Event
 }
 
 // NewS3Backend binds an S3Backend to the given artifact store. logStore
@@ -40,9 +55,14 @@ func NewS3Backend(art storage.ArtifactStore, logStore storage.LogStore) *S3Backe
 	return &S3Backend{
 		store:    art,
 		logStore: logStore,
-		cache:    map[string]*runState{},
+		liveTTL:  DefaultLiveTTL,
+		cache:    map[string]*cachedState{},
 	}
 }
+
+// SetLiveTTL overrides DefaultLiveTTL. A zero or negative value
+// disables caching (every read parses the object store fresh).
+func (b *S3Backend) SetLiveTTL(d time.Duration) { b.liveTTL = d }
 
 var _ Backend = (*S3Backend)(nil)
 
@@ -112,10 +132,31 @@ func (b *S3Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node,
 	return st.nodes, nil
 }
 
-// ListEventsAfter returns no events: state.ndjson captures the terminal
-// record set, not the runtime event log.
-func (b *S3Backend) ListEventsAfter(context.Context, string, int64, int) ([]store.Event, error) {
-	return nil, nil
+// ListEventsAfter returns events with seq > afterSeq. Mode 2 state
+// dumps interleave event envelopes alongside run/node rows; older
+// final-only dumps carry no events and yield an empty slice.
+func (b *S3Backend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	st, err := b.loadState(ctx, runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	out := make([]store.Event, 0, len(st.events))
+	for _, e := range st.events {
+		if e.Seq <= afterSeq {
+			continue
+		}
+		out = append(out, e)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (b *S3Backend) ReadNodeLog(ctx context.Context, runID, nodeID string, opts ReadOpts) ([]byte, error) {
@@ -132,12 +173,16 @@ func (b *S3Backend) StreamNodeLog(ctx context.Context, runID, nodeID string) (io
 	return b.logStore.Stream(ctx, runID, nodeID)
 }
 
-// loadState fetches + parses runs/<id>/state.ndjson, cached by runID.
+// loadState fetches + parses runs/<id>/state.ndjson with a short TTL
+// cache so live Mode 2 runs (NDJSON appended over time) appear in the
+// dashboard within liveTTL of an update.
 func (b *S3Backend) loadState(ctx context.Context, runID string) (*runState, error) {
 	b.mu.Lock()
-	if s, ok := b.cache[runID]; ok {
-		b.mu.Unlock()
-		return s, nil
+	if entry, ok := b.cache[runID]; ok {
+		if b.liveTTL <= 0 || time.Since(entry.fetchedAt) < b.liveTTL {
+			b.mu.Unlock()
+			return entry.state, nil
+		}
 	}
 	b.mu.Unlock()
 
@@ -155,7 +200,7 @@ func (b *S3Backend) loadState(ctx context.Context, runID string) (*runState, err
 	}
 
 	b.mu.Lock()
-	b.cache[runID] = st
+	b.cache[runID] = &cachedState{state: st, fetchedAt: time.Now()}
 	// Drop-on-overflow safety valve; not a true LRU.
 	if len(b.cache) > 1024 {
 		for k := range b.cache {
@@ -169,18 +214,19 @@ func (b *S3Backend) loadState(ctx context.Context, runID string) (*runState, err
 	return st, nil
 }
 
-// parseStateNDJSON decodes the dump format the orchestrator writes:
-//
-//	{"kind":"run","data":{...}}
-//	{"kind":"node","data":{...}}
-//
-// Record order is not enforced; kind alone determines placement.
+// parseStateNDJSON decodes the dump format the orchestrator writes
+// and the s3state backend appends to over the lifetime of a run.
+// Replay semantics: last-write-wins for run/node records (Mode 2
+// re-PUTs the whole envelope log on each flush), accumulating for
+// events.
 func parseStateNDJSON(rc io.Reader) (*runState, error) {
 	type envelope struct {
 		Kind string          `json:"kind"`
 		Data json.RawMessage `json:"data"`
 	}
 	st := &runState{}
+	nodesByID := map[string]*store.Node{}
+	var nodeOrder []string
 	scanner := bufio.NewScanner(rc)
 	// state.ndjson can carry long PlanSnapshot blobs inlined into the
 	// run record; default 64K bufio limit is not enough.
@@ -207,11 +253,23 @@ func parseStateNDJSON(rc io.Reader) (*runState, error) {
 			if err := json.Unmarshal(env.Data, node); err != nil {
 				return nil, err
 			}
-			st.nodes = append(st.nodes, node)
+			if _, seen := nodesByID[node.NodeID]; !seen {
+				nodeOrder = append(nodeOrder, node.NodeID)
+			}
+			nodesByID[node.NodeID] = node
+		case "event":
+			var e store.Event
+			if err := json.Unmarshal(env.Data, &e); err != nil {
+				return nil, err
+			}
+			st.events = append(st.events, e)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	for _, id := range nodeOrder {
+		st.nodes = append(st.nodes, nodesByID[id])
 	}
 	return st, nil
 }
