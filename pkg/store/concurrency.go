@@ -199,12 +199,18 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 
 	// 2. Upsert entry (latest-wins on capacity; drift note on change).
+	// On Postgres the SELECT also acquires a row-level lock so
+	// concurrent AcquireConcurrencySlot calls for the same key
+	// serialize through the rest of the transaction (capacity check,
+	// holder count, policy branch). The ON CONFLICT DO NOTHING on the
+	// first-write path closes the race where two transactions discover
+	// the row missing simultaneously.
 	driftNote := ""
 	prevCap := 0
 	var existingCap int
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT capacity FROM concurrency_entries WHERE key = ?`, req.Key,
+		`SELECT capacity FROM concurrency_entries WHERE key = ?`+s.forUpdate(), req.Key,
 	).Scan(&existingCap)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -212,7 +218,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			ctx,
 			`INSERT INTO concurrency_entries
 			   (key, capacity, previous_capacity, last_write_run_id, last_write_node_id, updated_at)
-			 VALUES (?, ?, NULL, ?, ?, ?)`,
+			 VALUES (?, ?, NULL, ?, ?, ?)
+			 ON CONFLICT (key) DO NOTHING`,
 			req.Key, req.Capacity, req.RunID, req.NodeID, nowNS,
 		); err != nil {
 			return AcquireSlotResponse{}, err
@@ -1089,13 +1096,21 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 }
 
 // reapStaleConcurrencyHolders deletes lease-expired holders; caller
-// runs PromoteNextWaiters and emits audit events.
+// runs PromoteNextWaiters and emits audit events. The transaction
+// holds the read locks (FOR UPDATE SKIP LOCKED on Postgres) for the
+// duration so concurrent reapers pick disjoint rows.
 func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
 	now := time.Now().UnixNano()
-	rows, err := s.query(
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
-		   FROM concurrency_holders WHERE lease_expires_at <= ?`, now,
+		   FROM concurrency_holders WHERE lease_expires_at <= ?`+s.forUpdateSkipLocked(), now,
 	)
 	if err != nil {
 		return nil, err
@@ -1119,12 +1134,15 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 		return nil, err
 	}
 	for _, h := range stale {
-		if _, err := s.exec(
+		if _, err := tx.ExecContext(
 			ctx,
 			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`, h.Key, h.HolderID,
 		); err != nil {
 			return nil, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return stale, nil
 }
@@ -1209,7 +1227,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		         AND h.node_id = w.leader_node_id
 		         AND h.superseded = 0
 		         AND h.lease_expires_at > ?
-		    )`,
+		    )`+s.forUpdateSkipLocked(),
 		OnLimitCoalesce, nowNS,
 	)
 	if err != nil {
@@ -1234,7 +1252,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy,
 		        cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
-		   FROM concurrency_waiters WHERE arrived_at < ?`,
+		   FROM concurrency_waiters WHERE arrived_at < ?`+s.forUpdateSkipLocked(),
 		cutoff,
 	)
 	if err != nil {

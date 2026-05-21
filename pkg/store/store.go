@@ -1692,7 +1692,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done'
  ORDER BY ready_at ASC
- LIMIT 1`), n)
+ LIMIT 1`+s.forUpdateSkipLocked()), n)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -1831,7 +1831,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`,
+		    AND lease_expires_at < ? AND status != 'done'`+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -1877,7 +1877,7 @@ func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`,
+		    AND lease_expires_at < ? AND status != 'done'`+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -2412,7 +2412,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	}
 	sel += `
  ORDER BY created_at ASC
- LIMIT 1`
+ LIMIT 1` + s.forUpdateSkipLocked()
 
 	var t Trigger
 	var argsJSON, envJSON []byte

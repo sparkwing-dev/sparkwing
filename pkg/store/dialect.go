@@ -50,6 +50,33 @@ func DetectDialect(dsn string) Dialect {
 	return DialectSQLite
 }
 
+// forUpdateSkipLocked returns the row-locking suffix to append to a
+// SELECT used as the read half of a claim/reap transaction. SQLite
+// serializes writers at the database level and needs no suffix; on
+// Postgres the suffix is " FOR UPDATE SKIP LOCKED" so concurrent
+// claimants pick disjoint rows without blocking on each other.
+//
+// Append to the SELECT before any closing parenthesis; do not insert
+// between SELECT and FROM. Composes with `LIMIT` and `ORDER BY`
+// clauses by appearing after them.
+func (s *Store) forUpdateSkipLocked() string {
+	if s.dialect == DialectPostgres {
+		return " FOR UPDATE SKIP LOCKED"
+	}
+	return ""
+}
+
+// forUpdate returns the row-locking suffix for the read half of a
+// transaction that serializes on a specific known row (as opposed to
+// the first-eligible-row pattern handled by forUpdateSkipLocked).
+// SQLite returns empty for the same reason as above.
+func (s *Store) forUpdate() string {
+	if s.dialect == DialectPostgres {
+		return " FOR UPDATE"
+	}
+	return ""
+}
+
 // rewritePh rewrites `?` placeholders to `$1`, `$2`, ... when dialect
 // is Postgres. SQLite (and any unrecognized dialect) returns q
 // unchanged. Question marks inside single-quoted SQL string literals
