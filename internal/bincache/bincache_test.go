@@ -149,6 +149,58 @@ func TestCompilePipeline_WithOverlay_UsesModfile(t *testing.T) {
 	}
 }
 
+func TestCompilePipeline_WithOverlayAndGoWork_SkipsModfile(t *testing.T) {
+	log := installFakeGo(t)
+	t.Setenv("GOWORK", "")
+	dir := newPipelineDir(t)
+	overlay := filepath.Join(dir, ".resolved.mod")
+	if err := os.WriteFile(overlay, []byte("module overlay\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	work := filepath.Join(dir, "go.work")
+	if err := os.WriteFile(work, []byte("go 1.26\nuse .\n"), 0o644); err != nil {
+		t.Fatalf("write go.work: %v", err)
+	}
+	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
+	if err := CompilePipeline(dir, dest); err != nil {
+		t.Fatalf("CompilePipeline: %v", err)
+	}
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	got := strings.TrimSpace(string(raw))
+	if strings.Contains(got, "-modfile=") {
+		t.Fatalf("expected -modfile to be omitted when go.work is present, got: %q", got)
+	}
+}
+
+func TestCompilePipeline_WithGoWorkAndGoworkOff_UsesModfile(t *testing.T) {
+	log := installFakeGo(t)
+	t.Setenv("GOWORK", "off")
+	dir := newPipelineDir(t)
+	overlay := filepath.Join(dir, ".resolved.mod")
+	if err := os.WriteFile(overlay, []byte("module overlay\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	work := filepath.Join(dir, "go.work")
+	if err := os.WriteFile(work, []byte("go 1.26\nuse .\n"), 0o644); err != nil {
+		t.Fatalf("write go.work: %v", err)
+	}
+	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
+	if err := CompilePipeline(dir, dest); err != nil {
+		t.Fatalf("CompilePipeline: %v", err)
+	}
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	got := strings.TrimSpace(string(raw))
+	if !strings.Contains(got, "-modfile="+overlay) {
+		t.Fatalf("expected -modfile to be honored when GOWORK=off, got: %q", got)
+	}
+}
+
 // installFailingGo drops a fake `go` on PATH that prints `stderrLine`
 // to stderr, `stdoutLine` to stdout, and exits with status 1. Lets
 // us exercise the failure path of CompilePipeline without depending

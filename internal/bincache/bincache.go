@@ -367,7 +367,11 @@ func (e *CompileError) Unwrap() error { return e.Err }
 //
 // If `.sparkwing/.resolved.mod` exists, compile is invoked with
 // `-modfile=<path>` so the overlay's resolved versions take precedence
-// over the git-tracked go.mod.
+// over the git-tracked go.mod. When a `go.work` is in scope, the
+// overlay is skipped (the toolchain refuses `-modfile` in workspace
+// mode); the workspace's module resolution wins, and a single-line
+// warning is written to stderr so the operator knows sparks pinning
+// is dormant for this build.
 func CompilePipeline(sparkwingDir, dest string) error {
 	// Bare exec.Command("go", ...) with no Go on PATH surfaces a
 	// confusing message; preempt with a clearer one.
@@ -383,7 +387,16 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	}
 	args := []string{"build"}
 	if overlay := overlayModfilePath(sparkwingDir); overlay != "" {
-		args = append(args, "-modfile="+overlay)
+		if work, present := goWorkInScope(sparkwingDir); present {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s in effect; skipping sparks resolution. "+
+					"Modules resolve from go.mod + workspace, not .resolved.mod. "+
+					"To use local copies of sparks libs too, add them to go.work.\n",
+				work,
+			)
+		} else {
+			args = append(args, "-modfile="+overlay)
+		}
 	}
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
@@ -414,6 +427,36 @@ func overlayModfilePath(sparkwingDir string) string {
 		return ""
 	}
 	return p
+}
+
+// goWorkInScope walks up from sparkwingDir looking for a `go.work`
+// file, the same way `go build` discovers workspace mode. Returns the
+// path + true on hit, "" + false otherwise. Honors GOWORK if set
+// ("off" disables; an explicit path is used as-is when readable).
+func goWorkInScope(sparkwingDir string) (string, bool) {
+	switch env := os.Getenv("GOWORK"); env {
+	case "off":
+		return "", false
+	case "":
+		// fall through to the walk
+	default:
+		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
+			return env, true
+		}
+		return "", false
+	}
+	dir := sparkwingDir
+	for {
+		candidate := filepath.Join(dir, "go.work")
+		if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 // PipelineCacheKey returns a 16-char hex fingerprint of the pipeline

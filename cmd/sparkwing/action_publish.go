@@ -177,7 +177,14 @@ func compileForPlatform(sparkwingDir, dest string, p platform) error {
 	}
 	args := []string{"build"}
 	if overlay := overlayModfilePath(sparkwingDir); overlay != "" {
-		args = append(args, "-modfile="+overlay)
+		if work, present := goWorkInScope(sparkwingDir); present {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s in effect; skipping sparks resolution for %s/%s.\n",
+				work, p.OS, p.Arch,
+			)
+		} else {
+			args = append(args, "-modfile="+overlay)
+		}
 	}
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
@@ -200,6 +207,36 @@ func overlayModfilePath(sparkwingDir string) string {
 		return p
 	}
 	return ""
+}
+
+// goWorkInScope mirrors the bincache helper. Returns the path to a
+// go.work in sparkwingDir or an ancestor + true on hit, "" + false
+// otherwise. Honors GOWORK ("off" disables; an explicit path wins
+// when readable).
+func goWorkInScope(sparkwingDir string) (string, bool) {
+	switch env := os.Getenv("GOWORK"); env {
+	case "off":
+		return "", false
+	case "":
+		// fall through
+	default:
+		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
+			return env, true
+		}
+		return "", false
+	}
+	dir := sparkwingDir
+	for {
+		candidate := filepath.Join(dir, "go.work")
+		if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 // resolveArtifactStoreURL picks the storage URL to publish to.

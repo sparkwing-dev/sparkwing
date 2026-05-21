@@ -142,6 +142,15 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 }
 
 func materializeSum(ctx context.Context, workDir, overlayPath string) error {
+	if work, present := goWorkInScope(workDir); present {
+		return fmt.Errorf(
+			"sparks: cannot materialize sum file while %s is in effect "+
+				"(go toolchain refuses -modfile in workspace mode). "+
+				"Rename or remove the workspace file to refresh sparks pins, "+
+				"or set GOWORK=off in this shell for the resolve step",
+			work,
+		)
+	}
 	// `go mod download -modfile=X` without a pattern only resolves
 	// the modules explicitly listed in X -- not their transitive
 	// closure. Building the pipeline binary with `-modfile=X` then
@@ -158,6 +167,37 @@ func materializeSum(ctx context.Context, workDir, overlayPath string) error {
 			overlayPath, err, string(out))
 	}
 	return nil
+}
+
+// goWorkInScope walks up from workDir looking for a `go.work` file,
+// the same way `go build` discovers workspace mode. Honors GOWORK:
+// "off" disables, an explicit path is used as-is when readable.
+// Mirrored in internal/bincache and cmd/sparkwing; pulled out once
+// these three callers grow a shared internal package.
+func goWorkInScope(workDir string) (string, bool) {
+	switch env := os.Getenv("GOWORK"); env {
+	case "off":
+		return "", false
+	case "":
+		// fall through
+	default:
+		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
+			return env, true
+		}
+		return "", false
+	}
+	dir := workDir
+	for {
+		candidate := filepath.Join(dir, "go.work")
+		if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 func assertGoModUntouched(path string, before []byte) error {

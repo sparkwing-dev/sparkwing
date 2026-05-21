@@ -254,6 +254,46 @@ checked-in `go.mod` pins a tag that does not exist (a "ghost pin"), that is
 still a repo-level bug - fix it with a real pin. The overlay is
 a build-time convenience, not a substitute for a correct `go.mod`.
 
+### Interaction with `go.work`
+
+The Go toolchain refuses `-modfile` whenever a `go.work` is in scope
+("go: -modfile cannot be used in workspace mode"). The overlay
+mechanism uses `-modfile=.resolved.mod`, so the two cannot coexist.
+
+When sparkwing detects a workspace, it skips the overlay and prints a
+warning to stderr:
+
+```
+warning: /path/to/go.work in effect; skipping sparks resolution.
+         Modules resolve from go.mod + workspace, not .resolved.mod.
+         To use local copies of sparks libs too, add them to go.work.
+```
+
+Builds resolve sparks libs from `go.mod` (+ any workspace `use`
+directives) instead of `.resolved.mod`. This is the right call when
+you are deliberately iterating on multiple modules together: list
+every repo you are editing in `.sparkwing/go.work`, e.g.
+
+```go
+// .sparkwing/go.work
+go 1.26.3
+use (
+    .
+    ../../sparkwing
+    ../../sparks-core
+)
+```
+
+The workspace then resolves everything from local checkouts, and sparks
+pinning is suspended for the duration. The pre-push gate refuses to
+push a committed `go.work` or `go.work.sum`, so this stays a local-only
+convenience -- shipped builds always go through the overlay.
+
+`sparkwing sparks resolve` itself refuses to run while a workspace is
+in scope (the same toolchain limitation applies to `go mod download
+-modfile=X`). Remove the workspace file or set `GOWORK=off` in your
+shell to refresh pins.
+
 ## Cache tiers
 
 Compiled pipeline binaries are cached under a `PipelineCacheKey` that hashes

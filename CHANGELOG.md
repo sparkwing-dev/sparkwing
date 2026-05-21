@@ -48,6 +48,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** `sparkwing run` no longer fails with `-modfile cannot be
+  used in workspace mode` when a `go.work` is in scope. When sparkwing
+  detects a workspace, it skips its `.resolved.mod` overlay so the
+  workspace's module resolution wins, and prints a one-line warning to
+  stderr so it's clear sparks pinning is dormant for that build. Honor
+  `GOWORK=off` and the explicit `GOWORK=<path>` form. Sparks resolve
+  itself (`sparkwing sparks resolve`) still requires no workspace in
+  scope and now returns a friendly error instead of the raw toolchain
+  message.
+
 ### Changed
 
 - **docs:** Example struct names in sparkwing's own examples,
