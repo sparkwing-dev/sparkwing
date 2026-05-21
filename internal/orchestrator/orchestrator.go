@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
@@ -573,8 +574,9 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")
 	}
 	// Pick the matching Backends bundle for the concrete state impl.
-	// SQLite -> LocalBackends, S3-only NDJSON -> S3Backends. Future
-	// state backends (Postgres, hosted-controller) plug in here.
+	// SQLite -> LocalBackends, S3-only NDJSON -> S3Backends,
+	// HTTP controller -> RemoteBackends. Future state backends
+	// (Postgres) plug in here.
 	var backends Backends
 	var st *store.Store
 	switch s := opts.State.(type) {
@@ -592,6 +594,12 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 			defer func() { _ = s.Close() }()
 		}
 		backends = S3Backends(opts.LogStore, s)
+	case *client.Client:
+		var logsBackend LogBackend
+		if opts.LogStore != nil {
+			logsBackend = NewLogStoreBackend(opts.LogStore, nil)
+		}
+		backends = RemoteBackends(s, logsBackend, 0)
 	default:
 		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 	}

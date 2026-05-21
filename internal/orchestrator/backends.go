@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -103,6 +105,46 @@ type s3StateAdapter struct {
 func (s s3StateAdapter) EnqueueTrigger(_ context.Context, _ string, _ map[string]string, _, _, _, _, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("%w: pipeline triggers require Mode 3 (Postgres) or Mode 4 (hosted controller)", s3state.ErrNotSupported)
 }
+
+// Compile-time check: *client.Client (the HTTP-backed state surface
+// the cluster worker and Mode 4 laptop runs against) satisfies the
+// orchestrator's runtime StateBackend interface. The narrower
+// storage.StateStore assertion lives next to the client itself in
+// pkg/controller/client/state_assertion.go; this one catches drift in
+// the orchestrator-only adapter methods (AppendEvent, GetNodeOutput,
+// EnqueueTrigger).
+var _ StateBackend = (*client.Client)(nil)
+
+// RemoteBackends builds a Backends bundle for Mode 4 (hosted
+// controller). State + concurrency talk to the same controller HTTP
+// surface; logs is the caller-supplied LogBackend or, when nil, a
+// fresh HTTP logs backend pointed at the same controller. The lease
+// argument shapes how long the HTTPConcurrency holders run before
+// the controller can reap them; zero falls back to the package
+// default.
+//
+// Use this when state-store creds are an HTTP profile, not direct
+// access to a database. Cluster workers reach the same assembly by
+// inlining the same wiring with extra logs-URL plumbing; this
+// constructor centralizes the laptop path and is symmetric with
+// LocalBackends + S3Backends.
+func RemoteBackends(c *client.Client, logs LogBackend, lease time.Duration) Backends {
+	if logs == nil {
+		logs = NewHTTPLogsWithToken(c.BaseURL(), nil, c.Token(), nil)
+	}
+	return Backends{
+		State:       c,
+		Logs:        logs,
+		Concurrency: NewHTTPConcurrency(c.BaseURL(), defaultHTTPClient(), c.Token(), lease),
+	}
+}
+
+// defaultHTTPClient returns nil so NewHTTPConcurrency picks its own
+// default transport (mirrors how client.NewWithToken handles a nil
+// httpClient). Kept as a named helper so a future change to
+// "share the same *http.Client across state + concurrency" lands in
+// one place.
+func defaultHTTPClient() *http.Client { return nil }
 
 // --- local implementations ---
 
