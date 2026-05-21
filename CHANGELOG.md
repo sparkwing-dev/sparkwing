@@ -10,6 +10,14 @@ are required.
 
 ### Added
 
+- `.sparkwing/jobs/pre_v1_policy.go` — `CheckPreV1Policy` enforces the
+  README's "stays below v1.0.0" rule across the indirect signals the
+  existing `release.go` version-gate can't see: CHANGELOG.md must not
+  carry a `## [v1.x.x]` / `## v1.x.x` release section, VERSIONING.md
+  must not assert "v1.0.0 released/shipped/tagged" or equivalent, and
+  any local `v1.0.0+` git tag (proxy-cache poisoning fallout that
+  can't be undone) is surfaced as a warning so it doesn't go silent.
+  Wired into pre-push so doc drift can't sneak past the policy.
 - `sparkwing.Dep` and `sparkwing.WorkDep` closed interfaces for typed
   dependency wiring. The unexported marker methods (`depID()` /
   `workDepID()`) restrict implementors to sparkwing-defined live
@@ -45,8 +53,24 @@ are required.
   what elite Go repos converge on per
   `sparkwing-platform/RESEARCH-elite-comparison.md`.
 
+### Removed
+
+- `pkg/controller.Server.PoolListForTesting`. The method had zero
+  callers anywhere in the repo. If you need PVC introspection in
+  tests, add a same-package test helper in a `*_test.go` file.
+
 ### Changed
 
+- **Breaking:** Maintenance methods on `pkg/store.Store` hidden behind
+  the `store.Maintenance` bridge. The 9 reaper/sweep methods
+  (`ReapExpiredTriggers`, `FailNodesInRun`, `FailStaleQueuedNodes`,
+  `FailExpiredNodeClaims`, `ReapStaleConcurrencyHolders`,
+  `ReapStaleConcurrencyWaiters`, `SweepExpiredConcurrencyCache`,
+  `SweepLRUConcurrencyCache`, `ReconcileConcurrencyKeys`) are no
+  longer on the public `Store` API. Call them via
+  `store.Maintenance.<Name>(s, ctx, ...)`. External adopters had no
+  prior use case for these -- they're crash-recovery and TTL sweeps
+  the controller runs on a schedule.
 - **Breaking:** Runtime-mutator methods removed from the author-facing
   type surface and relocated behind `sparkwing.RuntimePlumbing.Fns`.
   Affected methods: `Plan.InsertChild`, `Plan.InsertExpanded`,

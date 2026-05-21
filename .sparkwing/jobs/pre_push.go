@@ -64,6 +64,16 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "version freshness: current")
 	}
 
+	// 2b. Pre-v1 policy: CHANGELOG and VERSIONING.md must not assert
+	// the project has shipped v1.0.0; the version-gate in release.go
+	// blocks v1+ tags at cut-time, this check catches the indirect
+	// signals (doc edits, manual tag pushes).
+	if err := CheckPreV1Policy(ctx, sparkwing.WorkDir()); err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		sparkwing.Info(ctx, "pre-v1 policy: clean")
+	}
+
 	// 3. Full golangci-lint sweep on .sparkwing/ (if a config is
 	// present there; falls back to a no-op message otherwise).
 	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && golangci-lint run ./...").Run(); err != nil {
