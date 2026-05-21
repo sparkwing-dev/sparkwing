@@ -107,7 +107,7 @@ func (s *Store) Close() error { return s.db.Close() }
 // DB returns the underlying handle for read-side aggregations only.
 func (s *Store) DB() *sql.DB { return s.db }
 
-const schema = `
+const schemaSQLite = `
 CREATE TABLE IF NOT EXISTS runs (
     id              TEXT PRIMARY KEY,
     pipeline        TEXT NOT NULL,
@@ -427,19 +427,92 @@ CREATE INDEX IF NOT EXISTS idx_node_dispatches_lookup
     ON node_dispatches(run_id, node_id, seq DESC);
 `
 
+// schemaPostgres is derived from schemaSQLite by substituting the two
+// type names that differ. The full SQLite schema is otherwise valid
+// Postgres: partial indexes, RETURNING, ON CONFLICT, FK CASCADE,
+// composite PRIMARY KEY, and DEFAULT '<literal>' all carry over
+// unchanged. JSON-encoded columns stay as BYTEA so read paths can
+// remain dialect-agnostic; JSONB is a future optimization.
+var schemaPostgres = func() string {
+	r := strings.NewReplacer(
+		"INTEGER", "BIGINT",
+		"BLOB", "BYTEA",
+	)
+	return r.Replace(schemaSQLite)
+}()
+
+// migrate creates the canonical schema and applies any column
+// additions needed by older databases. On Postgres, the entire
+// migration runs inside one transaction guarded by a transactional
+// advisory lock so concurrent OpenPostgres calls against a fresh
+// database don't race the DDL. SQLite serializes writers at the
+// database level and therefore needs no equivalent.
 func (s *Store) migrate() error {
-	if _, err := s.db.Exec(schema); err != nil {
+	if s.dialect == DialectPostgres {
+		return s.migratePostgres()
+	}
+	return s.migrateSQLite()
+}
+
+func (s *Store) migrateSQLite() error {
+	if _, err := s.db.Exec(schemaSQLite); err != nil {
 		return err
 	}
-	// SQLite lacks ADD COLUMN IF NOT EXISTS; probe table_info and add
-	// missing columns to keep laptop dev DBs moving.
-	if err := s.ensureColumns("node_steps", map[string]string{
+	if err := s.ensureColumnsAll(); err != nil {
+		return err
+	}
+	if err := s.backfillRunAnnotationRollup(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) migratePostgres() error {
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// pg_advisory_xact_lock auto-releases on commit/rollback so N
+	// runners opening the same fresh database serialize cleanly on
+	// the migration path. The hash key is stable across versions.
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`); err != nil {
+		return fmt.Errorf("acquire migrate advisory lock: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, schemaPostgres); err != nil {
+		return err
+	}
+	if err := s.ensureColumnsAllTx(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.backfillRunAnnotationRollup()
+}
+
+// columnMigrations enumerates the additive column changes that have
+// landed since the canonical schema first shipped. Types are written
+// in SQLite syntax; the Postgres path translates them at apply time
+// via translateColumnType.
+//
+// New columns must keep the existing row default behavior compatible:
+// either NOT NULL DEFAULT <literal> or NULL-able. This list is part of
+// the schema contract; reorderings and deletions both count as
+// schema-version bumps.
+type columnSpec struct {
+	table string
+	cols  map[string]string
+}
+
+var columnMigrations = []columnSpec{
+	{"node_steps", map[string]string{
 		"annotations_json": "BLOB",
 		"summary":          "TEXT NOT NULL DEFAULT ''",
-	}); err != nil {
-		return err
-	}
-	if err := s.ensureColumns("nodes", map[string]string{
+	}},
+	{"nodes", map[string]string{
 		"ready_at":         "INTEGER",
 		"claimed_by":       "TEXT",
 		"lease_expires_at": "INTEGER",
@@ -450,10 +523,8 @@ func (s *Store) migrate() error {
 		"exit_code":        "INTEGER",
 		"annotations_json": "BLOB",
 		"summary":          "TEXT NOT NULL DEFAULT ''",
-	}); err != nil {
-		return err
-	}
-	if err := s.ensureColumns("runs", map[string]string{
+	}},
+	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
 		"repo":              "TEXT NOT NULL DEFAULT ''",
 		"repo_url":          "TEXT NOT NULL DEFAULT ''",
@@ -464,40 +535,17 @@ func (s *Store) migrate() error {
 		"retry_source":      "TEXT NOT NULL DEFAULT ''",
 		"replay_of_run_id":  "TEXT NOT NULL DEFAULT ''",
 		"replay_of_node_id": "TEXT NOT NULL DEFAULT ''",
-		// created_at lets pending (pre-orchestrator) runs carry a real
-		// timestamp without lying about started_at.
-		"created_at": "INTEGER NOT NULL DEFAULT 0",
-		// Receipt + cost queryable summary. Full receipt JSON is
-		// recomputed on demand from runs+nodes; only these queryable
-		// fields persist. cost_settled flips to 1 when cloud-billing
-		// reconciliation lands.
-		"receipt_sha":   "TEXT NOT NULL DEFAULT ''",
-		"cost_cents":    "INTEGER NOT NULL DEFAULT 0",
-		"cost_currency": "TEXT NOT NULL DEFAULT 'USD'",
-		"cost_settled":  "INTEGER NOT NULL DEFAULT 0",
-		// Annotation summary surfaced into list views. Bumped on each
-		// AppendNodeAnnotation / AppendStepAnnotation so the runs page
-		// can render a chip without a per-row aggregate query.
-		"annotation_count": "INTEGER NOT NULL DEFAULT 0",
-		"top_annotation":   "TEXT NOT NULL DEFAULT ''",
-		// JSON array of every annotation message on the run, in
-		// append order. Lets the dashboard show all of them in a
-		// hover tooltip without an extra per-row fetch.
-		"annotations_json": "BLOB",
-		// Invocation snapshot: a single BLOB captures the same
-		// shape that flows into run_start.attrs (binary_source, cwd,
-		// flags, args, reproducer, inputs_hash, hints, etc.) so the
-		// dashboard / runs status / runs receipt can show "how was
-		// this run started" without scanning the envelope log.
-		// Stored as a map blob rather than column-per-field so adding
-		// a new flag is a code-only change -- no migration. SQLite
-		// JSON1 (json_extract) handles the rare query case where a
-		// caller wants to filter by a specific key.
-		"invocation_json": "BLOB",
-	}); err != nil {
-		return err
-	}
-	if err := s.ensureColumns("triggers", map[string]string{
+		"created_at":        "INTEGER NOT NULL DEFAULT 0",
+		"receipt_sha":       "TEXT NOT NULL DEFAULT ''",
+		"cost_cents":        "INTEGER NOT NULL DEFAULT 0",
+		"cost_currency":     "TEXT NOT NULL DEFAULT 'USD'",
+		"cost_settled":      "INTEGER NOT NULL DEFAULT 0",
+		"annotation_count":  "INTEGER NOT NULL DEFAULT 0",
+		"top_annotation":    "TEXT NOT NULL DEFAULT ''",
+		"annotations_json":  "BLOB",
+		"invocation_json":   "BLOB",
+	}},
+	{"triggers", map[string]string{
 		"parent_run_id":  "TEXT",
 		"repo":           "TEXT NOT NULL DEFAULT ''",
 		"repo_url":       "TEXT NOT NULL DEFAULT ''",
@@ -506,36 +554,50 @@ func (s *Store) migrate() error {
 		"retry_of":       "TEXT NOT NULL DEFAULT ''",
 		"retry_source":   "TEXT NOT NULL DEFAULT ''",
 		"parent_node_id": "TEXT NOT NULL DEFAULT ''",
-		// full=1 means "rerun all": ignore the skip-passed
-		// rehydration that Options.RetryOf would normally trigger
-		// and re-execute every node. Surfaced via the dashboard's
-		// "Rerun all" choice on the retry menu.
-		"full": "INTEGER NOT NULL DEFAULT 0",
-	}); err != nil {
-		return err
-	}
-	// concurrency_waiters gained a holder_id column after the
-	// initial landing so caller identity survives promotion. Old
-	// rows default to "" which the promotion path treats as
-	// "synthesize runID/nodeID" (the pre-fix behavior).
-	if err := s.ensureColumns("concurrency_waiters", map[string]string{
+		"full":           "INTEGER NOT NULL DEFAULT 0",
+	}},
+	{"concurrency_waiters", map[string]string{
 		"holder_id": "TEXT NOT NULL DEFAULT ''",
-	}); err != nil {
-		return err
-	}
-	// Per-entry mask flag for secrets. Existing rows default to
-	// masked=1 so behavior matches the prior treat-every-entry-as-
-	// sensitive default. Newer writes can opt in to masked=0 for
-	// non-secret config values.
-	if err := s.ensureColumns("secrets", map[string]string{
+	}},
+	{"secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",
-	}); err != nil {
-		return err
-	}
-	if err := s.backfillRunAnnotationRollup(); err != nil {
-		return err
+	}},
+}
+
+func (s *Store) ensureColumnsAll() error {
+	for _, spec := range columnMigrations {
+		if err := s.ensureColumns(spec.table, spec.cols); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (s *Store) ensureColumnsAllTx(ctx context.Context, tx *sql.Tx) error {
+	for _, spec := range columnMigrations {
+		for name, typ := range spec.cols {
+			stmt := fmt.Sprintf(
+				`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`,
+				spec.table, name, translateColumnType(typ),
+			)
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("add column %s.%s: %w", spec.table, name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// translateColumnType rewrites a SQLite column-type fragment into its
+// Postgres equivalent. Only the two name substitutions used in the
+// canonical schema are handled; the rest of the SQL fragment
+// (NULL/NOT NULL, DEFAULT, etc.) is byte-identical between dialects.
+func translateColumnType(t string) string {
+	r := strings.NewReplacer(
+		"INTEGER", "BIGINT",
+		"BLOB", "BYTEA",
+	)
+	return r.Replace(t)
 }
 
 // backfillRunAnnotationRollup populates the runs annotation columns
