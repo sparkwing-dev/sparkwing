@@ -19,9 +19,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func init() {
+	docs.Version = installedVersion()
+}
 
 func main() {
 	// Windows self-update defers deletion of the running binary; clean it up here.

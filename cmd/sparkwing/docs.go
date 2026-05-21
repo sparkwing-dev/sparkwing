@@ -34,32 +34,53 @@ func runDocs(args []string) error {
 		return runDocsSearch(args[1:])
 	case "migrations":
 		return runDocsMigrations(args[1:])
+	case "versions":
+		return runDocsVersions(args[1:])
+	case "cache":
+		return runDocsCache(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdDocs, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdDocs, os.Stderr)
-		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search, migrations)", args[0])
+		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search, migrations, versions, cache)", args[0])
 	}
 }
 
 func runDocsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
 	var output string
+	var wf docsWebFlags
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
+	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	entries := docs.List()
+	ctx, cancel := newWebContext()
+	defer cancel()
+	resolution, err := resolveSource(ctx, wf)
+	if err != nil {
+		return err
+	}
+	printDiscoveryWarning(resolution)
+	if !resolution.useWeb {
+		return renderDocsList(docs.List(), output)
+	}
+	entries, err := resolution.client.DocIndex(ctx, resolution.version)
+	if err != nil {
+		return fmt.Errorf("docs list --web %s: %w", resolution.version, err)
+	}
 	return renderDocsList(entries, output)
 }
 
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
 	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
+	var wf docsWebFlags
+	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -74,16 +95,32 @@ func runDocsRead(args []string) error {
 		PrintHelp(cmdDocsRead, os.Stderr)
 		return errors.New("docs read: --topic is required (e.g. --topic getting-started)")
 	}
-	body, err := docs.Read(*topic)
+	ctx, cancel := newWebContext()
+	defer cancel()
+	resolution, err := resolveSource(ctx, wf)
 	if err != nil {
-		// Suggest available slugs so the user can correct typos
-		// without a second command.
-		var b strings.Builder
-		fmt.Fprintf(&b, "%v\n\navailable topics:\n", err)
-		for _, e := range docs.List() {
-			fmt.Fprintf(&b, "  %s\n", e.Slug)
+		return err
+	}
+	printDiscoveryWarning(resolution)
+	if !resolution.useWeb {
+		body, err := docs.Read(*topic)
+		if err != nil {
+			var b strings.Builder
+			fmt.Fprintf(&b, "%v\n\navailable topics:\n", err)
+			for _, e := range docs.List() {
+				fmt.Fprintf(&b, "  %s\n", e.Slug)
+			}
+			return errors.New(strings.TrimRight(b.String(), "\n"))
 		}
-		return errors.New(strings.TrimRight(b.String(), "\n"))
+		fmt.Print(body)
+		if !strings.HasSuffix(body, "\n") {
+			fmt.Println()
+		}
+		return nil
+	}
+	body, err := fetchDocWeb(ctx, resolution, *topic)
+	if err != nil {
+		return err
 	}
 	fmt.Print(body)
 	if !strings.HasSuffix(body, "\n") {

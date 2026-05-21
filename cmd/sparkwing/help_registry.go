@@ -358,33 +358,41 @@ substring-matches across slug + title + body.`,
 		{"all", "Concatenate every doc to stdout (full corpus dump)"},
 		{"search", "Substring search across docs (--query TEXT)"},
 		{"migrations", "Per-version migration guides (list / read / between)"},
+		{"versions", "List doc versions known to this CLI (and sparkwing.dev with --web)"},
+		{"cache", "Inspect / clear the on-disk cache used by --web"},
 	},
 	Examples: []Example{
 		{"List all topics (table)", "sparkwing docs list"},
 		{"List all topics (agent-readable)", "sparkwing docs list -o json"},
 		{"Read one topic", "sparkwing docs read --topic pipelines"},
+		{"Read one topic at a specific version (online)", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
 		{"Slurp the whole corpus into context", "sparkwing docs all"},
 		{"Find docs that mention warm pool", "sparkwing docs search --query \"warm pool\""},
 		{"List migration guides this CLI knows", "sparkwing docs migrations list"},
 		{"Pipe every guide up to v0.4.0 into context", "sparkwing docs migrations between --to v0.4.0"},
+		{"List every version available online", "sparkwing docs versions --web"},
 	},
 }
 
 var cmdDocsList = Command{
 	Path:     "sparkwing docs list",
 	Synopsis: "Enumerate every doc topic",
-	Description: `Walks the embedded docs and prints one row per topic with its
-slug, first-H1 title, and first-paragraph summary. Use -o json for
-agent-readable structured output, --output plain for one slug per
-line (pipe-friendly).`,
+	Description: `Walks the docs corpus and prints one row per topic with its
+slug, first-H1 title, and first-paragraph summary. By default reads
+the binary's embedded copy (hermetic, version-locked); pass --web
+to fetch from sparkwing.dev for another version.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Output", "Other"},
+	GroupOrder: []string{"Source", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing docs list"},
 		{"Agent-readable", "sparkwing docs list -o json"},
 		{"Slug-per-line for shell loops", "sparkwing docs list -o plain"},
+		{"List the v0.3.0 corpus from sparkwing.dev", "sparkwing docs list --web --version v0.3.0"},
 	},
 }
 
@@ -394,14 +402,23 @@ var cmdDocsRead = Command{
 	Description: `Prints the raw markdown body for the named topic. The slug is
 the filename under /docs/ minus .md (run ` + "`sparkwing docs list`" + ` to
 see them all). Subdirs use slash-separated paths (e.g.
-design/remote-retry).`,
+design/remote-retry).
+
+Default source is the binary's embedded corpus. Use --web to fetch
+from sparkwing.dev, optionally pinned to --version vX.Y.Z or
+--version latest.`,
 	Flags: []FlagSpec{
 		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Required: true, Group: "Selection"},
+		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Selection", "Other"},
+	GroupOrder: []string{"Selection", "Source", "Other"},
 	Examples: []Example{
 		{"Read the getting-started page", "sparkwing docs read --topic getting-started"},
 		{"Pipe through a pager", "sparkwing docs read --topic pipelines | less"},
+		{"Read v0.3.0's pipelines page online", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
+		{"Always fetch the freshest version", "sparkwing docs read --topic pipelines --version latest --web"},
 	},
 }
 
@@ -472,12 +489,15 @@ When the CLI's own version is older than the newest embedded
 guide a one-line stderr note suggests rebuilding.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "web", Desc: "Fetch the index from sparkwing.dev/migrations/index.json instead of the embed", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Output", "Other"},
+	GroupOrder: []string{"Source", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing docs migrations list"},
 		{"Agent-readable", "sparkwing docs migrations list -o json"},
 		{"Version-per-line for shell loops", "sparkwing docs migrations list -o plain"},
+		{"Online (every release on sparkwing.dev)", "sparkwing docs migrations list --web"},
 	},
 }
 
@@ -495,11 +515,14 @@ rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
 	Flags: []FlagSpec{
 		{Name: "version", Argument: "vX.Y.Z", Desc: "Migration guide version (e.g. v0.4.0). Positional fallback accepted.", Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Selection", "Output", "Other"},
+	GroupOrder: []string{"Selection", "Source", "Output", "Other"},
 	Examples: []Example{
 		{"Read the v0.4.0 guide", "sparkwing docs migrations read --version v0.4.0"},
 		{"Positional shortcut", "sparkwing docs migrations read v0.4.0"},
+		{"Read v0.5.0 from sparkwing.dev (not yet embedded)", "sparkwing docs migrations read --version v0.5.0 --web"},
 	},
 }
 
@@ -520,12 +543,87 @@ migration context for an N-version jump in a form ready to pipe.
 		{Name: "from", Argument: "vX.Y.Z", Desc: "Exclusive lower bound (default v0.0.0)", Group: "Selection"},
 		{Name: "to", Argument: "vA.B.C", Desc: "Inclusive upper bound (default = latest embedded version)", Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+		{Name: "web", Desc: "Fetch every guide in the range from sparkwing.dev", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Selection", "Output", "Other"},
+	GroupOrder: []string{"Selection", "Source", "Output", "Other"},
 	Examples: []Example{
 		{"Every guide for a v0.3.0 -> v0.4.0 jump", "sparkwing docs migrations between --from v0.3.0 --to v0.4.0"},
 		{"Every guide up to a target version", "sparkwing docs migrations between --to v0.4.0"},
 		{"Every guide this CLI knows (one-shot agent context)", "sparkwing docs migrations between"},
+		{"Full range from sparkwing.dev (includes versions not yet embedded)", "sparkwing docs migrations between --web"},
+	},
+}
+
+var cmdDocsVersions = Command{
+	Path:     "sparkwing docs versions",
+	Synopsis: "List doc versions known to this CLI (and sparkwing.dev with --web)",
+	Description: `Reports each doc version the source knows about. Default
+output is hermetic: only the binary's embedded version (plus every
+migration-guide version shipped in the embed) appears, with no
+network calls.
+
+With --web, fetches sparkwing.dev/versions.json and merges in every
+release available online -- useful for discovering newer versions
+this CLI can render via --web on the read / list verbs.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "web", Desc: "Merge in sparkwing.dev/versions.json (network)", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
+	},
+	GroupOrder: []string{"Source", "Output", "Other"},
+	Examples: []Example{
+		{"Embedded only (default)", "sparkwing docs versions"},
+		{"Every version available online", "sparkwing docs versions --web"},
+		{"Agent-readable JSON", "sparkwing docs versions --web -o json"},
+	},
+}
+
+var cmdDocsCache = Command{
+	Path:     "sparkwing docs cache",
+	Synopsis: "Inspect or clear the on-disk cache used by --web",
+	Description: `--web fetches are cached to $XDG_CACHE_HOME/sparkwing/web/ (or
+~/.cache/sparkwing/web/). The cache mirrors the URL path, so you
+can ` + "`cat`" + ` the cached files directly when debugging.
+
+Use ` + "`cache info`" + ` to see size / counts; use ` + "`cache clear`" + ` to wipe it.`,
+	Subcommands: []SubcommandRef{
+		{"info", "Print cache dir, total size, per-resource breakdown"},
+		{"clear", "Remove every cached file (refuses to escape the cache dir)"},
+	},
+	Examples: []Example{
+		{"How big is the cache?", "sparkwing docs cache info"},
+		{"Force-refresh on next --web call", "sparkwing docs cache clear"},
+	},
+}
+
+var cmdDocsCacheInfo = Command{
+	Path:     "sparkwing docs cache info",
+	Synopsis: "Print cache dir, total size, per-resource breakdown",
+	Description: `Walks the cache and prints a summary: total size, file counts
+broken down by doc / migration / index, and the freshness state of
+the cached versions.json (24h TTL).`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing docs cache info"},
+		{"Agent-readable", "sparkwing docs cache info -o json"},
+	},
+}
+
+var cmdDocsCacheClear = Command{
+	Path:     "sparkwing docs cache clear",
+	Synopsis: "Remove every cached file",
+	Description: `Deletes every file under the cache directory. Safe: the
+implementation refuses to remove paths that don't resolve inside
+the cache dir, so a stray symlink in the cache can't escape.
+
+Useful when a cached versions.json or index.json has gone stale
+faster than the 24h TTL window, or when debugging --web behavior.`,
+	Examples: []Example{
+		{"Wipe the cache", "sparkwing docs cache clear"},
 	},
 }
 

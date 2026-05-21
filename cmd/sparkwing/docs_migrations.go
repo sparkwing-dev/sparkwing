@@ -44,7 +44,11 @@ func runDocsMigrations(args []string) error {
 func runDocsMigrationsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsMigrationsList.Path, flag.ContinueOnError)
 	var output string
+	var wf docsWebFlags
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | table | json | plain")
+	// Migrations list is version-agnostic (it enumerates every guide
+	// the source knows about), so we don't expose --version here.
+	registerWebFlags(fs, &wf, false)
 	if err := parseAndCheck(cmdDocsMigrationsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -54,44 +58,79 @@ func runDocsMigrationsList(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("docs migrations list: unexpected positional %q", fs.Arg(0))
 	}
-	entries := docs.MigrationsList()
-	if err := renderMigrationsList(entries, output); err != nil {
-		return err
+	ctx, cancel := newWebContext()
+	defer cancel()
+	if !wf.web {
+		entries := docs.MigrationsList()
+		if err := renderMigrationsList(entries, output); err != nil {
+			return err
+		}
+		renderStaleCLIHint(entries, output)
+		return nil
 	}
-	renderStaleCLIHint(entries, output)
-	return nil
+	client := docs.NewWebClient()
+	client.NoCache = wf.noCache
+	entries, err := client.MigrationIndex(ctx)
+	if err != nil {
+		return fmt.Errorf("docs migrations list --web: %w", err)
+	}
+	return renderMigrationsList(entries, output)
 }
 
 func runDocsMigrationsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsMigrationsRead.Path, flag.ContinueOnError)
-	version := fs.String("version", "", "migration guide version (e.g. v0.4.0)")
 	var output string
+	var wf docsWebFlags
 	fs.StringVarP(&output, "output", "o", "markdown", "markdown | plain")
+	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsMigrationsRead, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	if *version == "" && fs.NArg() > 0 {
-		*version = fs.Arg(0)
+	if wf.version == "" && fs.NArg() > 0 {
+		wf.version = fs.Arg(0)
 	}
-	if *version == "" {
+	if wf.version == "" {
 		PrintHelp(cmdDocsMigrationsRead, os.Stderr)
 		return errors.New("docs migrations read: --version is required (e.g. --version v0.4.0)")
 	}
-	if !semver.IsValid(*version) {
-		return fmt.Errorf("docs migrations read: %q is not a valid semver (e.g. v0.4.0); run `sparkwing docs migrations list` to see available versions", *version)
+	if !semver.IsValid(wf.version) {
+		return fmt.Errorf("docs migrations read: %q is not a valid semver (e.g. v0.4.0); run `sparkwing docs migrations list` to see available versions", wf.version)
 	}
-	body, err := docs.MigrationsRead(*version)
-	if err != nil {
-		var b strings.Builder
-		fmt.Fprintf(&b, "%v\n\navailable versions:\n", err)
-		for _, e := range docs.MigrationsList() {
-			fmt.Fprintf(&b, "  %s\n", e.Version)
+
+	ctx, cancel := newWebContext()
+	defer cancel()
+
+	var body string
+	if wf.web {
+		resolution, err := resolveSource(ctx, wf)
+		if err != nil {
+			return err
 		}
-		return errors.New(strings.TrimRight(b.String(), "\n"))
+		printDiscoveryWarning(resolution)
+		b, ferr := fetchMigrationWeb(ctx, resolution)
+		if ferr != nil {
+			return ferr
+		}
+		body = b
+	} else {
+		// Embedded path. If the requested version isn't in this
+		// binary, suggest --web.
+		b, err := docs.MigrationsRead(wf.version)
+		if err != nil {
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "%v\n\navailable versions in this binary:\n", err)
+			for _, e := range docs.MigrationsList() {
+				fmt.Fprintf(&sb, "  %s\n", e.Version)
+			}
+			sb.WriteString("\nRerun with --web to fetch from sparkwing.dev.")
+			return errors.New(sb.String())
+		}
+		body = b
 	}
+
 	switch strings.ToLower(output) {
 	case "markdown", "plain", "":
 		fmt.Print(body)
@@ -109,7 +148,9 @@ func runDocsMigrationsBetween(args []string) error {
 	from := fs.String("from", "", "exclusive lower bound (default v0.0.0 = every guide up through --to)")
 	to := fs.String("to", "", "inclusive upper bound (default = highest version this CLI knows about)")
 	var output string
+	var wf docsWebFlags
 	fs.StringVarP(&output, "output", "o", "markdown", "markdown | plain")
+	registerWebFlags(fs, &wf, false)
 	if err := parseAndCheck(cmdDocsMigrationsBetween, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -119,21 +160,40 @@ func runDocsMigrationsBetween(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("docs migrations between: unexpected positional %q (use --from/--to)", fs.Arg(0))
 	}
-	entries, err := docs.MigrationsBetween(*from, *to)
-	if err != nil {
-		return fmt.Errorf("docs migrations between: %w", err)
-	}
-	displayFrom := *from
-	if displayFrom == "" {
-		displayFrom = "v0.0.0"
-	}
 	if *from != "" && *to != "" && semver.Compare(*from, *to) > 0 {
 		fmt.Fprintf(os.Stderr, "%s: --from (%s) is newer than --to (%s); did you swap the args?\n",
 			color.Dim("warning"), *from, *to)
 	}
+
+	ctx, cancel := newWebContext()
+	defer cancel()
+
+	var entries []docs.MigrationEntry
+	var bodyFetcher func(version string) (string, error)
+
+	if wf.web {
+		client := docs.NewWebClient()
+		client.NoCache = wf.noCache
+		all, err := client.MigrationIndex(ctx)
+		if err != nil {
+			return fmt.Errorf("docs migrations between --web: %w", err)
+		}
+		entries = filterAndOrderBetween(all, *from, *to)
+		bodyFetcher = func(version string) (string, error) {
+			return client.Migration(ctx, version)
+		}
+	} else {
+		picked, err := docs.MigrationsBetween(*from, *to)
+		if err != nil {
+			return fmt.Errorf("docs migrations between: %w", err)
+		}
+		entries = picked
+		bodyFetcher = docs.MigrationsRead
+	}
+
 	switch strings.ToLower(output) {
 	case "markdown", "plain", "":
-		body, err := docs.MigrationsBetweenMarkdown(*from, *to, entries)
+		body, err := renderBetweenMarkdown(*from, *to, entries, bodyFetcher)
 		if err != nil {
 			return fmt.Errorf("docs migrations between: %w", err)
 		}
@@ -145,6 +205,87 @@ func runDocsMigrationsBetween(args []string) error {
 		return fmt.Errorf("unknown output format %q (valid: markdown, plain)", output)
 	}
 	return nil
+}
+
+// filterAndOrderBetween applies the same (from, to] filter as
+// docs.MigrationsBetween, but to an externally-supplied index (e.g.
+// the web-fetched MigrationIndex). The local-only variant lives in
+// pkg/docs/migrations.go; this duplicates the logic so the web path
+// doesn't have to round-trip through the embed.
+func filterAndOrderBetween(all []docs.MigrationEntry, from, to string) []docs.MigrationEntry {
+	if from == "" {
+		from = "v0.0.0"
+	}
+	if to == "" {
+		newest := ""
+		for _, e := range all {
+			if newest == "" || semver.Compare(e.Version, newest) > 0 {
+				newest = e.Version
+			}
+		}
+		to = newest
+	}
+	if !semver.IsValid(from) || !semver.IsValid(to) {
+		return nil
+	}
+	var picked []docs.MigrationEntry
+	for _, e := range all {
+		if !semver.IsValid(e.Version) {
+			continue
+		}
+		if semver.Compare(e.Version, from) > 0 && semver.Compare(e.Version, to) <= 0 {
+			picked = append(picked, e)
+		}
+	}
+	// Ascending.
+	for i := 1; i < len(picked); i++ {
+		for j := i; j > 0 && semver.Compare(picked[j-1].Version, picked[j].Version) > 0; j-- {
+			picked[j-1], picked[j] = picked[j], picked[j-1]
+		}
+	}
+	return picked
+}
+
+// renderBetweenMarkdown is the shared formatter for "between" output.
+// Mirrors docs.MigrationsBetweenMarkdown but parameterizes the
+// per-version body fetch so the web path can pull from sparkwing.dev
+// without going through the embed.
+func renderBetweenMarkdown(from, to string, entries []docs.MigrationEntry, fetch func(string) (string, error)) (string, error) {
+	var b strings.Builder
+	displayFrom := from
+	if displayFrom == "" {
+		displayFrom = "v0.0.0"
+	}
+	displayTo := to
+	if displayTo == "" && len(entries) > 0 {
+		displayTo = entries[len(entries)-1].Version
+	}
+	if displayTo == "" {
+		displayTo = "(latest)"
+	}
+	fmt.Fprintf(&b, "# Migration: %s -> %s\n\n", displayFrom, displayTo)
+	switch len(entries) {
+	case 0:
+		b.WriteString("(no migration guides apply in this range)\n")
+		return b.String(), nil
+	case 1:
+		b.WriteString("(1 guide applies in this range)\n\n")
+	default:
+		fmt.Fprintf(&b, "(%d guides apply in this range)\n\n", len(entries))
+	}
+	for i, e := range entries {
+		body, err := fetch(e.Version)
+		if err != nil {
+			return "", err
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("---\n\n")
+		b.WriteString(strings.TrimSpace(body))
+		b.WriteString("\n")
+	}
+	return b.String(), nil
 }
 
 func renderMigrationsList(entries []docs.MigrationEntry, output string) error {

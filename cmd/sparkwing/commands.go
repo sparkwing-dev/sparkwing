@@ -25,6 +25,7 @@ var allCommands = []*Command{
 	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
+	&cmdDocsVersions, &cmdDocsCache, &cmdDocsCacheInfo, &cmdDocsCacheClear,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe, &cmdPipelineDiscover,
