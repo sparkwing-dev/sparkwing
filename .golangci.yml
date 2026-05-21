@@ -134,9 +134,19 @@ linters:
       - path: (^|/)main\.go$
         linters:
           - forbidigo
-      # planguard.go's API is to panic when a sparkwing invariant
-      # is violated (side effects in Pipeline.Plan()). Panic is
-      # the contract of this package, not a leak.
+      # SDK root package convention: the public sparkwing/ package
+      # uses panic() at Plan / Register / Cache / GroupJobs time as
+      # programmer-error guards (caller passed an invalid argument
+      # at construction). This is the explicit SDK contract: panic
+      # loud at test time rather than carry the invalid plan into
+      # dispatch. The whole sparkwing/*.go set lives under this
+      # convention; the subpackages (sparkwing/planguard/, etc.)
+      # are covered by their own entries or follow the same rule.
+      # `forbidigo` still gates the rest of the tree (internal/,
+      # pkg/, cmd/<not-main>/).
+      - path: ^sparkwing/[^/]+\.go$
+        linters:
+          - forbidigo
       - path: sparkwing/planguard/
         linters:
           - forbidigo

@@ -32,6 +32,7 @@ for the simplest setup — see `install/docker-compose/Caddyfile.example`.
 Traefik, nginx, or Cloudflare tunnels also work.
 
 What runs:
+
 - `controller` - queue, dispatcher, webhooks, pool management, state store.
 - `sparkwing-logs` - streaming log store. Runners write, dashboard reads.
 - `cache` - git server, artifact blob store, package registry proxy.
@@ -43,6 +44,7 @@ All state persists in docker volumes. Backup `controller-data`,
 ### Where to host
 
 Works anywhere docker-compose runs:
+
 - **$5-10/mo VPS** (Hetzner, Vultr, Digital Ocean, Linode)
 - **Fly.io** (with minor tweaks — Fly has its own TLS + networking)
 - **Railway** (similar)
@@ -64,6 +66,7 @@ bash install/install.sh
 ```
 
 The script is interactive. It'll ask for:
+
 - Controller URL (public URL of your team's sparkwing server)
 - Logs URL (same)
 - API token (from your team's sparkwing admin)

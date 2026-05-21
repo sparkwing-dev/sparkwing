@@ -15,7 +15,7 @@ declare -a BINS=(
 
 # GOPRIVATE so freshly-tagged sparks/sdk modules resolve directly from
 # GitHub if proxy lags.
-export GOPRIVATE=github.com/sparkwing-dev/*
+export GOPRIVATE='github.com/sparkwing-dev/*'
 
 for b in "${BINS[@]}"; do
   echo "build $b"

@@ -64,6 +64,7 @@ keep things compatible via discipline; consumers feel the pain when
 discipline slips.
 
 For v0 we accept this and rely on:
+
 - Migration recipes shipped in CHANGELOG.md alongside breaking
   releases.
 - Mechanical-rewrite scripts for the migrations.

@@ -11,6 +11,7 @@ Authorization: Bearer <SPARKWING_API_TOKEN>
 ```
 
 **Exempt paths** (no auth required):
+
 - `GET /health`
 - `GET /metrics` (Prometheus)
 - `GET /badge/{app}`
@@ -19,6 +20,7 @@ Authorization: Bearer <SPARKWING_API_TOKEN>
 **Scoped tokens**: Created via `POST /tokens`, restricted to specific environments. Enforced on `/trigger`, `/authorize`, and `/secrets` endpoints.
 
 **Rate limiting**:
+
 - `/trigger`: 20 requests per minute per IP+pipeline
 - Auth failures: 10 per IP per minute, then blocked 5 minutes (HTTP 429)
 
@@ -108,6 +110,7 @@ Request body: `{"status": "string", "detail": "string"}`
 Mark a job as complete.
 
 Request body:
+
 ```json
 {
   "success": true,
@@ -142,6 +145,7 @@ Response: `{"original_job": "id", "new_job": "id", "status": "retried"}`
 Fetch CPU/memory resource usage data points for a job.
 
 Response:
+
 ```json
 {
   "points": [
@@ -353,6 +357,7 @@ Prometheus metrics endpoint. Always active. See [Observability](observability.md
 Dashboard-friendly aggregated metrics with 10-second cache.
 
 Response:
+
 ```json
 {
   "total_jobs": 1234,

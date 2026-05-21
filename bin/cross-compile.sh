@@ -23,7 +23,7 @@ declare -a PLATFORMS=(
 )
 
 # Module path-aware build using cli's go-modules.
-export GOPRIVATE=github.com/sparkwing-dev/*
+export GOPRIVATE='github.com/sparkwing-dev/*'
 
 for plat in "${PLATFORMS[@]}"; do
   goos="${plat%/*}"

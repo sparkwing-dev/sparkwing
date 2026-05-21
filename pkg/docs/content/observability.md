@@ -64,6 +64,7 @@ in SQLite and displayed as charts in the dashboard.
 - **Memory**: total bytes across all containers
 
 The charts show:
+
 - Data points over time (area chart)
 - Resource **limits** as dashed lines (2 CPU / 2Gi for runner, plus DinD
   if applicable)
@@ -131,6 +132,7 @@ can scrape these directly.
 ### OTLP export
 
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is set:
+
 - **Traces**: Exported via `otlptracehttp` directly to Tempo (spans for job lifecycle, HTTP requests)
 - **Logs**: Exported via `otlploghttp` directly to Loki (structured logs with trace correlation)
 - **Metrics**: Served via Prometheus `/metrics` - VictoriaMetrics scrapes them

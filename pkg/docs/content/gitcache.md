@@ -74,6 +74,7 @@ The cache periodically fetches upstream for all registered bare repos
 (default: every 30 seconds, configurable via `FETCH_INTERVAL` env var).
 
 This keeps repos fresh so that:
+
 - Runner clones see recent commits without cold-start fetches
 - Ancestor negotiation for incremental uploads succeeds more often
 
@@ -123,6 +124,7 @@ the ingress sets.
 ## API Endpoints
 
 ### Git Protocol (read-only)
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/git/register?name=X&repo=Y` | Register a repo name |
@@ -131,6 +133,7 @@ the ingress sets.
 | POST | `/git/<name>/git-receive-pack` | **Returns 403** (read-only) |
 
 ### Archives & Files
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/archive?repo=X&branch=Y` | Download repo as tar.gz |
@@ -139,6 +142,7 @@ the ingress sets.
 | GET | `/branch-contains?repo=X&branch=Y&commit=Z` | Check if commit is on branch |
 
 ### Uploads (Code Sync)
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/upload` | Upload a tarball (auth required) |
@@ -148,6 +152,7 @@ the ingress sets.
 | POST | `/sync/seed?repo=X` | Seed repo from git bundle (auth required) |
 
 ### Artifacts
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/artifacts/<jobID>?path=X` | Upload artifact |
@@ -155,6 +160,7 @@ the ingress sets.
 | GET | `/artifacts/<jobID>?glob=X` | Download matching artifacts |
 
 ### Binary & Dependency Cache
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/bin/<name>` | Download cached binary |
@@ -164,6 +170,7 @@ the ingress sets.
 | PUT | `/cache/<key>` | Upload dependency archive to cache |
 
 ### Status
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (`{"status":"ok"}`) |

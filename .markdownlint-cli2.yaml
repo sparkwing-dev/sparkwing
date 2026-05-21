@@ -40,6 +40,13 @@ config:
   # globally.
   MD040: false
 
+  # Duplicate headings: flag only if the duplicates are siblings
+  # at the same level. The same heading text under two distinct
+  # parents is legitimate (e.g., one `### API` under each transport
+  # section is clearer than ad-hoc disambiguations).
+  MD024:
+    siblings_only: true
+
 globs:
   - "docs/**/*.md"
   - "*.md"

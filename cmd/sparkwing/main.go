@@ -709,7 +709,7 @@ func runJobs(args []string) error {
 // resolveOutputFormat canonicalizes -o/--output into one of
 // {"pretty","json","plain"}. Empty string means "no value set" and
 // resolves to the default "pretty".
-func resolveOutputFormat(outFmt string, cmdPath string) (string, error) {
+func resolveOutputFormat(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:
@@ -730,7 +730,7 @@ func resolveOutputFormat(outFmt string, cmdPath string) (string, error) {
 //   - With nothing set: "pretty" when stdout is a TTY, "json" otherwise.
 //     The auto-default lets agents pipe `... | jq` without typing
 //     -o json, while humans get the readable form by default.
-func resolveTTYAwareOutput(outFmt string, cmdPath string) (string, error) {
+func resolveTTYAwareOutput(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:

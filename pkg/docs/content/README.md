@@ -14,7 +14,7 @@ these pages; the CLI ships them embedded too (`sparkwing docs read
 - **Running in CI?** [`ci-embedded.md`](ci-embedded.md) — `sparkwing
   run --mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
 - **Self-hosting the dashboard?** [`architecture.md`](architecture.md)
-  + [`deployment.md`](deployment.md).
+  - [`deployment.md`](deployment.md).
 - **Self-hosting without Kubernetes?** [`self-hosting.md`](self-hosting.md)
   — single-host docker-compose + laptop-fleet runners.
 

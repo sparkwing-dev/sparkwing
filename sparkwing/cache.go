@@ -142,7 +142,6 @@ func (o CacheOptions) rejectTypoShape(ctx string) {
 	if len(set) == 0 {
 		return
 	}
-	//nolint:forbidigo // construction-time CacheOptions invariant; programmer error, not a runtime failure path
 	panic(fmt.Sprintf(
 		"sparkwing: Cache on %s: CacheOptions has %v set but Namespace is empty -- "+
 			"either set Namespace to enable coordination, or pass a bare CacheOptions{} to disable",
@@ -152,7 +151,6 @@ func (o CacheOptions) rejectTypoShape(ctx string) {
 
 func (o *CacheOptions) validate(ctx string, isPlan bool) {
 	if o.Max < 0 {
-		//nolint:forbidigo // construction-time CacheOptions invariant; programmer error, not a runtime failure path
 		panic(fmt.Sprintf("sparkwing: Cache on %s: Max must be >= 0, got %d", ctx, o.Max))
 	}
 	if o.CacheTTL < 0 {

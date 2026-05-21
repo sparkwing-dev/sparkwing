@@ -18,7 +18,7 @@ cd "$(dirname "$0")"
 
 WORKDIR=$(mktemp -d)
 cp Dockerfile Gemfile Gemfile.lock package.json "$WORKDIR/"
-trap "rm -rf $WORKDIR" EXIT
+trap 'rm -rf "$WORKDIR"' EXIT
 cd "$WORKDIR"
 
 RESULTS=()
@@ -34,7 +34,9 @@ time_build() {
     local start end elapsed
     start=$(date +%s)
     # Capture full output for step timing analysis
-    local logfile="/tmp/bench-$(echo "$label" | tr ' ' '-').log"
+    local slug logfile
+    slug="$(echo "$label" | tr ' ' '-')"
+    logfile="/tmp/bench-$slug.log"
     docker build "$@" . 2>&1 | tee "$logfile" | tail -15
     end=$(date +%s)
     elapsed=$((end - start))
