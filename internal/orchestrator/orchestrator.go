@@ -91,12 +91,12 @@ type Options struct {
 	// the keep-set.
 	Only string
 
-	// NoCacheRuns disables cache READS on this run's per-node Cache()
+	// NoCache disables cache READS on this run's per-node Cache()
 	// lookups. Cache WRITES still occur on success, so subsequent runs
 	// over the same content hit cache normally. Distinct from the
 	// SPARKWING_NO_BINCACHE flag that gates the compiled-pipeline-binary
 	// (bincache) cache.
-	NoCacheRuns bool
+	NoCache bool
 
 	// DryRun selects the no-mutation dispatch path: every step's
 	// DryRunFn (or its apply Fn when the step is explicitly marked
@@ -418,8 +418,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		onlySkip = skip
 	}
-	if opts.NoCacheRuns {
-		ctx = withNoCacheRuns(ctx)
+	if opts.NoCache {
+		ctx = withNoCache(ctx)
 	}
 	// Install the dry-run mode flag on the run-wide ctx so every
 	// Work executed under it routes through DryRunFn instead
