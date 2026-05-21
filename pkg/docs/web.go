@@ -17,7 +17,7 @@ import (
 
 // DefaultBaseURL is the production host. Override via
 // SPARKWING_DOCS_BASE_URL (read by NewWebClient) for testing or
-// against a staging site. The override is honored as-is — callers
+// against a staging site. The override is honored as-is -- callers
 // pinning a custom BaseURL via the struct field also bypass the env
 // lookup.
 const DefaultBaseURL = "https://sparkwing.dev"
@@ -30,7 +30,7 @@ const BaseURLEnvVar = "SPARKWING_DOCS_BASE_URL"
 // IndexTTL is the freshness window for *.json index files
 // (versions.json and per-version index.json). Per-version markdown
 // content is cached indefinitely because versioned tags are
-// immutable — once v0.3.0/pipelines.md is published, it never
+// immutable -- once v0.3.0/pipelines.md is published, it never
 // changes.
 const IndexTTL = 24 * time.Hour
 

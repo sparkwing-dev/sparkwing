@@ -21,9 +21,9 @@ injected as an env var. Comparison uses constant-time comparison
 
 **Exempt paths** (have their own auth or are intentionally public):
 
-- `/health` — health check for probes
-- `/badge` — CI status badge (public by design)
-- `/webhooks/*` — GitHub HMAC-verified (see below)
+- `/health` -- health check for probes
+- `/badge` -- CI status badge (public by design)
+- `/webhooks/*` -- GitHub HMAC-verified (see below)
 
 **Rate limiting**: After 10 failed auth attempts from the same IP
 within 1 minute, the IP is blocked for 5 minutes (HTTP 429). This
@@ -55,11 +55,11 @@ in SQLite. Scoped tokens are stored as hashes, never in plaintext.
 
 **Scope enforcement** happens at three endpoints:
 
-- `POST /authorize` — the pre-deploy authorization check. A staging
+- `POST /authorize` -- the pre-deploy authorization check. A staging
   token cannot authorize a prod deploy.
-- `POST /trigger` — if the `environment` query param is set, the
+- `POST /trigger` -- if the `environment` query param is set, the
   token must be scoped for that environment.
-- `POST /secrets`, `DELETE /secrets` — a token can only manage
+- `POST /secrets`, `DELETE /secrets` -- a token can only manage
   secrets for its authorized environments.
 
 **What's not scoped**: read-only operations (list jobs, agents, etc.)
@@ -68,9 +68,9 @@ complete) use the root token from the k8s Secret.
 
 **Token management** (`/tokens` endpoint):
 
-- `POST /tokens` — create a new scoped token
-- `GET /tokens` — list tokens (prefix only, never full value)
-- `DELETE /tokens` — revoke a token by ID
+- `POST /tokens` -- create a new scoped token
+- `GET /tokens` -- list tokens (prefix only, never full value)
+- `DELETE /tokens` -- revoke a token by ID
 
 Only the root token can manage other tokens.
 
@@ -169,7 +169,7 @@ reject webhook payloads from unknown hosts. This prevents an attacker
 from configuring a webhook that clones from a malicious repository.
 
 Local triggers (`sparkwing ... --on prod`) are not affected by this
-restriction — they go through the `/trigger` endpoint which serves
+restriction -- they go through the `/trigger` endpoint which serves
 authenticated users only.
 
 ## Input Validation
@@ -233,14 +233,14 @@ Two layers of rate limiting protect against brute force and DoS:
    `SPARKWING_LOGS_TOKEN`, `GITHUB_WEBHOOK_SECRET`. Without these,
    endpoints fall back to open access with a logged warning.
 
-2. **Set `SPARKWING_ALLOWED_REPO_HOSTS`** — restrict to your git
+2. **Set `SPARKWING_ALLOWED_REPO_HOSTS`** -- restrict to your git
    hosting provider (e.g., `github.com`).
 
-3. **Pin container image digests** — use SHA256 digests instead of
+3. **Pin container image digests** -- use SHA256 digests instead of
    floating tags to prevent supply chain attacks.
 
-4. **Enable etcd encryption** — k8s secrets are base64-encoded, not
+4. **Enable etcd encryption** -- k8s secrets are base64-encoded, not
    encrypted, unless etcd encryption is enabled at the cluster level.
 
-5. **Rotate secrets regularly** — especially the GitHub PAT and SSH
+5. **Rotate secrets regularly** -- especially the GitHub PAT and SSH
    keys. ExternalSecrets can automate rotation from AWS SSM.

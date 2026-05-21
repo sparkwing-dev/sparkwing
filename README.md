@@ -46,11 +46,11 @@ version-locked).
 
 The Go module pipeline authors import:
 
-- **[`sparkwing/`](./sparkwing)** — the stable user-facing DSL: Plan,
+- **[`sparkwing/`](./sparkwing)** -- the stable user-facing DSL: Plan,
   Job, Work, Step, modifiers, runtime helpers (`sparkwing.Bash`,
   `sparkwing.Path`, etc.), wire types. This is the package with
   stability guarantees.
-- **Implementation packages** — `orchestrator/`, `controller/client/`,
+- **Implementation packages** -- `orchestrator/`, `controller/client/`,
   `bincache/`, `logs/`, `pkg/storage/`, `otelutil/`, `profile/`,
   `repos/`, `secrets/`. Exported for technical reasons (the CLI
   consumes them) but APIs may change in any release. Don't import

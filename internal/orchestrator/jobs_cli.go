@@ -123,7 +123,7 @@ func renderRunList(runs []*store.Run, opts ListOpts, out io.Writer) error {
 	}
 
 	if len(runs) == 0 {
-		fmt.Fprintln(out, "no runs yet — invoke one via `sparkwing run <pipeline>`")
+		fmt.Fprintln(out, "no runs yet -- invoke one via `sparkwing run <pipeline>`")
 		return nil
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
@@ -282,7 +282,7 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 		}
 	}
 
-	// Skip "upstream-failed" — root cause is already printed.
+	// Skip "upstream-failed" -- root cause is already printed.
 	for _, n := range nodes {
 		if n.Error != "" && n.Error != "upstream-failed" {
 			fmt.Fprintf(out, "\n%s error:\n  %s\n", n.NodeID, indent(n.Error, "  "))
@@ -403,7 +403,7 @@ func formatStepDuration(s *store.NodeStep) string {
 	if s.StartedAt != nil {
 		return "running " + time.Since(*s.StartedAt).Round(100*time.Millisecond).String()
 	}
-	return "—"
+	return "--"
 }
 
 // renderApprovalsSection prints a compact block of approval-gate
@@ -1290,7 +1290,7 @@ func formatNodeDuration(n *store.Node) string {
 		return base
 	}
 	if n.Status == "done" {
-		return "—"
+		return "--"
 	}
 	return "pending"
 }

@@ -287,7 +287,7 @@ func runPipelineDescribe(args []string) error {
 		// Surface a "did you mean X?" suggestion when the typo is
 		// close to a registered name. Source the candidate set from
 		// the catalog we just gathered
-		// (rather than sparkwing.Registered() — this CLI verb runs in
+		// (rather than sparkwing.Registered() -- this CLI verb runs in
 		// the sparkwing process, not the inner pipeline binary, so the
 		// in-process registry is empty here). Far typos fall through
 		// to the existing "list --all" hint.

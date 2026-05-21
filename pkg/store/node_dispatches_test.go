@@ -83,7 +83,7 @@ func TestDispatch_RoundTrip(t *testing.T) {
 }
 
 // TestDispatch_AutoSeq lets the store assign the seq when the caller
-// passes Seq < 0 — the warm-pool / re-claim path that doesn't know the
+// passes Seq < 0 -- the warm-pool / re-claim path that doesn't know the
 // current attempt index.
 func TestDispatch_AutoSeq(t *testing.T) {
 	s := openDispatchStore(t)
@@ -146,7 +146,7 @@ func TestDispatch_NotFound(t *testing.T) {
 	}
 }
 
-// TestDispatch_Cascade verifies the FK cascade — when a run is deleted
+// TestDispatch_Cascade verifies the FK cascade -- when a run is deleted
 // (via DELETE FROM runs WHERE id=...), its dispatch rows go too. This
 // is the GC story; aligns with how output_json + events behave.
 func TestDispatch_Cascade(t *testing.T) {
@@ -180,7 +180,7 @@ func TestDispatch_TruncationCap(t *testing.T) {
 
 	// Build an envelope just over the cap. Use a JSON-shaped payload
 	// (so it's at least syntactically valid) but the content doesn't
-	// matter — the store treats the BLOB as opaque.
+	// matter -- the store treats the BLOB as opaque.
 	big := make([]byte, store.MaxNodeDispatchEnvelope+1024)
 	for i := range big {
 		big[i] = 'A'

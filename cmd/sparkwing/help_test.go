@@ -101,7 +101,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
 		"--sw-target", "--sw-profile",
-		// Advanced tier — also surface in --help
+		// Advanced tier -- also surface in --help
 		"--sw-cd", "--sw-verbose",
 		"--sw-allow",
 	}
@@ -120,7 +120,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 }
 
 // TestCompletionFlagsListsHotOnly pins that tab-completion filters to
-// the hot tier — `--sw-allow` and friends only surface in
+// the hot tier -- `--sw-allow` and friends only surface in
 // --help, not in the completion menu.
 func TestCompletionFlagsListsHotOnly(t *testing.T) {
 	hotFlags := []string{
@@ -170,7 +170,7 @@ func flagNames(fs []FlagSpec) []string {
 }
 
 // containsFlagRow returns true when out contains a help-formatted
-// flag row for f — i.e., a single line that includes both the flag
+// flag row for f -- i.e., a single line that includes both the flag
 // name and an [optional]/[required] tag. Excludes mentions of the
 // flag in DESCRIPTION prose where tags are absent.
 func containsFlagRow(out, flagName string) bool {

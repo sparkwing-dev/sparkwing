@@ -46,7 +46,7 @@ func (i ChangelogIssue) Format() string {
 //     heading in that file, and the version in the path must match
 //     the section the entry lives in. Inside `[Unreleased]` the
 //     link can be missing entirely or point at
-//     `docs/migrations/_unreleased.md` — the release-time agent
+//     `docs/migrations/_unreleased.md` -- the release-time agent
 //     fills it in at tag time.
 //
 // Pure function: no filesystem reads, no globals. The caller wires
@@ -78,7 +78,7 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 	if info, statErr := os.Stat(migrationsDir); statErr == nil && info.IsDir() {
 		migrations = os.DirFS(migrationsDir)
 	} else {
-		// No migrations dir yet — pass an empty FS so file-existence
+		// No migrations dir yet -- pass an empty FS so file-existence
 		// checks all fail cleanly.
 		migrations = emptyFS{}
 	}
@@ -216,7 +216,7 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 // normalizeHeadingName is the equality used for dedupe: case-sensitive
 // matching of the heading text after `### `. `### Added` and `### added`
 // are treated as distinct so authors who deliberately use lowercase
-// don't get falsely deduped — the related case-correction check is
+// don't get falsely deduped -- the related case-correction check is
 // a separate concern.
 func normalizeHeadingName(s string) string { return s }
 

@@ -183,7 +183,7 @@ func resolveLocalReplacePath(target, modPath string) (string, error) {
 // localBehindRemote checks whether the git repo at localPath is
 // behind its origin/main. Returns (behind, count, error). If there
 // is no `origin` remote or no `main` branch, returns (false, 0, nil)
-// rather than failing — the local clone may be a personal fork with
+// rather than failing -- the local clone may be a personal fork with
 // a different default branch, and the freshness check should not
 // blow up on that. fetches origin/main first so the comparison is
 // against current remote state.
@@ -233,7 +233,7 @@ func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile str
 	}
 	latest, err := latestReleasedVersion(ctx, modulePath, fromModFile)
 	if err != nil {
-		// Resolution failure is non-fatal — surface the error but
+		// Resolution failure is non-fatal -- surface the error but
 		// don't block. Some modules are still pre-release / private
 		// and may not resolve via the proxy in every environment.
 		return fmt.Sprintf("%s: cannot resolve latest version (%v)", modulePath, err)
@@ -280,7 +280,7 @@ func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) 
 	if err != nil {
 		return "", err
 	}
-	// Output: "<module> v1 v2 v3 ..." — last token is the highest.
+	// Output: "<module> v1 v2 v3 ..." -- last token is the highest.
 	parts := strings.Fields(strings.TrimSpace(out))
 	if len(parts) < 2 {
 		return "", fmt.Errorf("no versions reported for %s", modulePath)

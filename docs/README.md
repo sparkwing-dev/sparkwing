@@ -7,16 +7,16 @@ these pages; the CLI ships them embedded too (`sparkwing docs read
 
 ## Where to start
 
-- **New here?** [`getting-started.md`](getting-started.md) — install,
+- **New here?** [`getting-started.md`](getting-started.md) -- install,
   scaffold, run.
 - **Writing pipelines?** [`sdk.md`](sdk.md) and
   [`pipelines.md`](pipelines.md) cover the Go DSL.
-- **Running in CI?** [`ci-embedded.md`](ci-embedded.md) — `sparkwing
+- **Running in CI?** [`ci-embedded.md`](ci-embedded.md) -- `sparkwing
   run --mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
 - **Self-hosting the dashboard?** [`architecture.md`](architecture.md)
   - [`deployment.md`](deployment.md).
 - **Self-hosting without Kubernetes?** [`self-hosting.md`](self-hosting.md)
-  — single-host docker-compose + laptop-fleet runners.
+  -- single-host docker-compose + laptop-fleet runners.
 
 ## Map
 

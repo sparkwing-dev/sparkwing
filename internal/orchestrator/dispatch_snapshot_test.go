@@ -234,7 +234,7 @@ func TestDispatchSnapshot_MaskerRedactsScalar(t *testing.T) {
 	}
 }
 
-// TestDispatchSnapshot_BestEffortFailureNonFatal — a backend whose
+// TestDispatchSnapshot_BestEffortFailureNonFatal -- a backend whose
 // WriteNodeDispatch errors must surface the error to the caller (so
 // the inprocess_runner caller can log it) but the caller decides
 // whether to fail the node. This test asserts the error returns and

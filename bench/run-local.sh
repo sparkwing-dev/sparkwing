@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Sparkwing Build Cache — Thorough Benchmark
+# Sparkwing Build Cache -- Thorough Benchmark
 #
 # Isolates every caching variable to show exactly where build time goes.
 # WARNING: uses `docker system prune -af` which removes ALL images.
 #
 # Matrix:
-#   A. True cold         — nothing cached (system prune)
-#   B. Images cached     — base images present, no build cache
-#   C. Images + mounts   — base images + warm cache mounts, no layer cache
-#   D. Full layer cache  — everything cached, unchanged rebuild
-#   E. Dep change + mounts warm  — new dep, layers busted, mounts warm
-#   F. Dep change + mounts cold  — new dep, no build cache at all
+#   A. True cold         -- nothing cached (system prune)
+#   B. Images cached     -- base images present, no build cache
+#   C. Images + mounts   -- base images + warm cache mounts, no layer cache
+#   D. Full layer cache  -- everything cached, unchanged rebuild
+#   E. Dep change + mounts warm  -- new dep, layers busted, mounts warm
+#   F. Dep change + mounts cold  -- new dep, no build cache at all
 #
 set -e
 cd "$(dirname "$0")"
@@ -50,12 +50,12 @@ time_build() {
 }
 
 echo "╔══════════════════════════════════════════════════════════════════╗"
-echo "║         Sparkwing Build Cache — Thorough Benchmark              ║"
+echo "║         Sparkwing Build Cache -- Thorough Benchmark              ║"
 echo "║         WARNING: docker system prune will remove all images     ║"
 echo "╚══════════════════════════════════════════════════════════════════╝"
 
 # ═══════════════════════════════════════════════════════════════
-# A. True cold — docker system prune removes EVERYTHING
+# A. True cold -- docker system prune removes EVERYTHING
 # ═══════════════════════════════════════════════════════════════
 echo ""
 echo "==> Nuking everything (docker system prune -af)..."
@@ -67,7 +67,7 @@ time_build \
     --no-cache -t bench-a
 
 # ═══════════════════════════════════════════════════════════════
-# B. Images cached — prune build cache, keep base images
+# B. Images cached -- prune build cache, keep base images
 # ═══════════════════════════════════════════════════════════════
 echo ""
 echo "==> Pruning build cache only (keeping base images)..."
@@ -78,9 +78,9 @@ time_build \
     --no-cache -t bench-b
 
 # ═══════════════════════════════════════════════════════════════
-# C. Images + warm cache mounts — prune layers, keep mounts
+# C. Images + warm cache mounts -- prune layers, keep mounts
 #    (rebuild from B populated the mounts; --no-cache busts layers
-#     but BuildKit cache mounts survive builder prune? NO — builder
+#     but BuildKit cache mounts survive builder prune? NO -- builder
 #     prune -af kills them too. So we need to NOT prune here.)
 #
 #    Strategy: B already populated the mounts. We use --no-cache
@@ -91,14 +91,14 @@ time_build \
     --no-cache -t bench-c
 
 # ═══════════════════════════════════════════════════════════════
-# D. Full layer cache — unchanged rebuild
+# D. Full layer cache -- unchanged rebuild
 # ═══════════════════════════════════════════════════════════════
 time_build \
     "D. Full layer cache (unchanged)" \
     -t bench-d
 
 # ═══════════════════════════════════════════════════════════════
-# E. Dep change + warm mounts — add dayjs + httparty, rebuild
+# E. Dep change + warm mounts -- add dayjs + httparty, rebuild
 #    Layers bust at COPY package.json, but mounts are warm
 # ═══════════════════════════════════════════════════════════════
 echo ""
@@ -115,7 +115,7 @@ time_build \
     --no-cache -t bench-e
 
 # ═══════════════════════════════════════════════════════════════
-# F. Dep change + cold mounts — same new deps, prune build cache
+# F. Dep change + cold mounts -- same new deps, prune build cache
 # ═══════════════════════════════════════════════════════════════
 echo ""
 echo "==> Pruning build cache (killing mounts)..."
@@ -126,7 +126,7 @@ time_build \
     --no-cache -t bench-f
 
 # ═══════════════════════════════════════════════════════════════
-# G. True cold with new deps — system prune everything
+# G. True cold with new deps -- system prune everything
 # ═══════════════════════════════════════════════════════════════
 echo ""
 echo "==> Nuking everything (docker system prune -af)..."

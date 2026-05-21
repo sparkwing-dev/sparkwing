@@ -312,7 +312,7 @@ const notOurRefSubstr = "not our ref"
 
 // fetchPipelineSourceWithRetry wraps bincache.FetchPipelineSource
 // with bounded retry on the gitcache-lag failure mode. Other errors
-// (auth, missing repo, malformed URL, etc.) fail fast — we never
+// (auth, missing repo, malformed URL, etc.) fail fast -- we never
 // want to delay surfacing an obviously-broken state by 30s.
 //
 // On exhausted retries the caller still gets the original error
@@ -333,7 +333,7 @@ func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, repoURL, branch, s
 		}
 		lastErr = err
 		if !strings.Contains(err.Error(), notOurRefSubstr) {
-			// Real failure — don't delay surfacing it.
+			// Real failure -- don't delay surfacing it.
 			return "", err
 		}
 		if i == attempts-1 {

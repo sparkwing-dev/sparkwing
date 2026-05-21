@@ -280,7 +280,7 @@ func TestHandleProxy_ConcurrentReads(t *testing.T) {
 			t.Fatalf("expected 1 upstream hit, got %d", hitCount.Load())
 		}
 
-		// Fire 10 concurrent reads — all should get cache hits, no upstream calls
+		// Fire 10 concurrent reads -- all should get cache hits, no upstream calls
 		var wg sync.WaitGroup
 		for range 10 {
 			wg.Add(1)
@@ -322,7 +322,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 	withTestProxy(t, map[string]Registry{
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
-		// First request — populates cache
+		// First request -- populates cache
 		req1 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w1 := httptest.NewRecorder()
 		handleProxy(w1, req1)
@@ -332,7 +332,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 
 		time.Sleep(10 * time.Millisecond)
 
-		// Upstream returns 502 — forwarded to client
+		// Upstream returns 502 -- forwarded to client
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)

@@ -188,7 +188,7 @@ func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
 	}
 
 	previewExecCounter.Store(0)
-	preview, err := sparkwingruntime.PreviewPlan(plan, "preview-near-miss", nil, sparkwingruntime.PreviewOptions{StartAt: "install-argocd"})
+	preview, err := sparkwingruntime.PreviewPlan(plan, "preview-near-miss", nil, sparkwingruntime.PreviewOptions{StartAt: "install-argod"})
 	if err == nil {
 		t.Fatalf("expected error for typo'd --start-at, got nil (preview = %+v)", preview)
 	}

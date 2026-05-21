@@ -131,7 +131,7 @@ func TestFormatStepDuration_TerminalShowsDuration(t *testing.T) {
 	start := time.Now().Add(-2 * time.Second)
 	end := start.Add(time.Second)
 	got := formatStepDuration(&store.NodeStep{StartedAt: &start, FinishedAt: &end})
-	if got == "running" || got == "—" {
+	if got == "running" || got == "--" {
 		t.Errorf("expected duration, got %q", got)
 	}
 }

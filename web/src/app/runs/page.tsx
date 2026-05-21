@@ -91,7 +91,7 @@ import AttemptsDropdown from "@/components/AttemptsDropdown";
 
 // Runs-list still polls: the event stream is per-run, not global, so
 // the left sidebar can't subscribe to "anything new". The detail
-// view (middle + right columns) is event-driven — see the
+// view (middle + right columns) is event-driven -- see the
 // useRunEvents wiring in Pipelines() below.
 const POLL_MS = 2000;
 // Fallback detail refresh when the event stream is unavailable
@@ -270,7 +270,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const initialRun = searchParams.get("run");
   const [selectedRun, setSelectedRun] = useState<string | null>(initialRun);
-  // checkedRuns is the selection set — what rerun / delete operate
+  // checkedRuns is the selection set -- what rerun / delete operate
   // on. The detail pane (selectedRun) is a separate "viewing" state;
   // opening a detail also adds that run to the selection so the user
   // sees what's selected, but un-viewing doesn't drop it from the set.
@@ -399,7 +399,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   // Kick an initial detail fetch when a run is selected so the UI
   // has a baseline to mutate against. Subsequent updates come from
-  // the SSE event stream (see the useRunEvents block just below) —
+  // the SSE event stream (see the useRunEvents block just below) --
   // event-driven, ~sub-100ms latency, no 2s poll. A slow fallback
   // poll still fires while a run is selected in case the stream
   // can't open (auth drop, proxy cut, etc.).
@@ -571,7 +571,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           setFocusedColumn("runs");
           return;
         }
-        // Already in runs column — no-op.
+        // Already in runs column -- no-op.
         return;
       }
       if (e.key === "l" || e.key === "ArrowRight") {
@@ -1362,7 +1362,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     router.replace(`/runs?${params.toString()}`, { scroll: false });
     runGrep(query, since);
   }, [query, since, searchParams, router, runGrep]);
-  // Auto-run on mount when the URL arrived with a gq — e.g., direct
+  // Auto-run on mount when the URL arrived with a gq -- e.g., direct
   // link, refresh, or the user pressing Back from a run detail.
   const ranInitialRef = useRef(false);
   useEffect(() => {
@@ -1432,7 +1432,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               submit();
             }
           }}
-          placeholder="substring across log bodies — uses the filters above as the candidate set"
+          placeholder="substring across log bodies -- uses the filters above as the candidate set"
           className="flex-1 text-xs font-mono px-2 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)]"
         />
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
@@ -1628,7 +1628,7 @@ function NodesList({
     <>
       {groups.map(({ group, nodes: children }) => {
         if (!group) {
-          // Ungrouped nodes render flat at the top — preserves the
+          // Ungrouped nodes render flat at the top -- preserves the
           // pre-group look for pipelines that haven't opted in.
           return children.map((n) => (
             <NodeRow
@@ -2052,7 +2052,7 @@ const FullRunRow = memo(function FullRunRow({
           </>
         ) : (
           <Tooltip content="Finished">
-            <span className="text-[var(--foreground)] shrink-0">—</span>
+            <span className="text-[var(--foreground)] shrink-0">--</span>
           </Tooltip>
         )}
         {elapsedMs > 0 && (
@@ -2402,11 +2402,11 @@ function RunDetailPane({
   // Each find target is its own hit so the walker behaves like Ctrl-F
   // on the Summary view: cycle through every matching item, scrolling
   // each into view. Kinds correspond to distinct DOM targets:
-  //   node      — id (or group) match → Jobs row + DAG/Timeline ring
-  //   node-err  — error message match → Errors list row
-  //   node-anno — node-scoped annotation match → annotation row
-  //   step      — step id match → DAG/Timeline ring (no Summary row)
-  //   step-anno — step-scoped annotation match → annotation row
+  //   node      -- id (or group) match → Jobs row + DAG/Timeline ring
+  //   node-err  -- error message match → Errors list row
+  //   node-anno -- node-scoped annotation match → annotation row
+  //   step      -- step id match → DAG/Timeline ring (no Summary row)
+  //   step-anno -- step-scoped annotation match → annotation row
   // DAG/Timeline restrict to id-based kinds (node, step); Summary
   // walks all of them.
   type FindHit =
@@ -2490,7 +2490,7 @@ function RunDetailPane({
     }
     return set;
   }, [findStructuredHits]);
-  // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
+  // Keys: "<nodeID>::<stepID>" -- disambiguates step names reused across nodes.
   const findMatchedSteps = useMemo(() => {
     const set = new Set<string>();
     for (const h of findStructuredHits) {
@@ -2544,7 +2544,7 @@ function RunDetailPane({
     }
     return set;
   }, [findTimelineHits]);
-  // Resources tab matches on node ids only — that's the visible text.
+  // Resources tab matches on node ids only -- that's the visible text.
   type ResourceHit = { nodeID: string };
   const findResourceHits = useMemo<ResourceHit[]>(() => {
     const q = findQuery.trim().toLowerCase();
@@ -2640,7 +2640,7 @@ function RunDetailPane({
     }
     return out;
   }, [findLogResults]);
-  // Setup / Resources opt out — no per-node content to match against.
+  // Setup / Resources opt out -- no per-node content to match against.
   const findCounts: Partial<Record<TabKey, number>> = {
     summary: findStructuredHits.length,
     dag: findNameHits.length,
@@ -2790,7 +2790,7 @@ function RunDetailPane({
 
   // The previous-selection ref is kept so future routing decisions
   // could compare against it, but we intentionally do NOT auto-switch
-  // the tab on selection changes — the user's tab choice persists
+  // the tab on selection changes -- the user's tab choice persists
   // when flipping nodes or deselecting.
   useEffect(() => {
     prevSelectedRef.current = selectedId;
@@ -3609,7 +3609,7 @@ function AllNodesLogs({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Brief purple flash on collapse so the user can locate the now-
-  // collapsed header — handy when it isn't pinned at the top.
+  // collapsed header -- handy when it isn't pinned at the top.
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     const wasOpen = expanded.has(id);
@@ -3694,7 +3694,7 @@ function AllNodesLogs({
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 text-[10px] text-[var(--muted)] mb-1">
         <span className="shrink-0">
-          All nodes — expand a node to load its logs
+          All nodes -- expand a node to load its logs
         </span>
         <span className="flex-1" />
         <div className="flex items-center gap-2">
@@ -3865,7 +3865,7 @@ function AllNodesResources({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
-        <span>All nodes — expand to load CPU / memory over time</span>
+        <span>All nodes -- expand to load CPU / memory over time</span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
@@ -3995,7 +3995,7 @@ function StreamingLogs({
     es.onmessage = (e) => {
       // SSE may bundle several JSONL records into one data chunk
       // (one-per-line). Split so each record becomes its own entry
-      // in state — parseLogLines wants line granularity to detect
+      // in state -- parseLogLines wants line granularity to detect
       // JSONL vs legacy text.
       const incoming = (e.data as string).split("\n").filter((s) => s !== "");
       setLines((prev) => [...prev, ...incoming]);
@@ -4597,7 +4597,7 @@ function DAG({
             // shifts to the group's frame so edges route to the card.
             // Group-frame endpoints (the to-group / from-group kinds)
             // resolve to the frame directly. Returned `key` is what
-            // we dedupe on — multiple parallel edges into one
+            // we dedupe on -- multiple parallel edges into one
             // collapsed group fold to one visual line.
             const resolveEnd = (
               kind: "node" | "group",
@@ -5098,7 +5098,7 @@ function StepDag({
   onBack?: () => void;
   selectedStep?: string | null;
   onSelectStep?: (stepId: string | null) => void;
-  // Keys: "<nodeID>::<stepID>" — same shape as the run-level set.
+  // Keys: "<nodeID>::<stepID>" -- same shape as the run-level set.
   findMatchedSteps?: Set<string>;
 }) {
   // Auto-scroll selected step into view (mirrors the run-level DAG).
@@ -6152,7 +6152,7 @@ function CachedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
 // during its body. Sky-cyan to read as "outgoing connection." Label
 // is the generic "SPAWNS" (with a count when there are several) so
 // pill width is stable across pipeline names. Clicking the pill
-// jumps to the spawned run — for multi-spawn nodes it routes to the
+// jumps to the spawned run -- for multi-spawn nodes it routes to the
 // first child; the hover tooltip lists the full set.
 function crossPipelinePillWidth(pipelines: SpawnedPipelineRef[]): number {
   const label =
@@ -6469,8 +6469,8 @@ function ReuseSummary({
       <div className="text-[10px] text-[var(--muted)] py-1">
         ↻ Rerun of #{priorRunID}
         {mode === "full"
-          ? " — full rerun (re-executing every node)."
-          : " — no passed nodes were reused (re-executing everything)."}
+          ? " -- full rerun (re-executing every node)."
+          : " -- no passed nodes were reused (re-executing everything)."}
       </div>
     );
   }

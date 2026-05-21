@@ -185,7 +185,7 @@ export default function SetupPanel({
   // Pipelines page wires this to its sidebar-click behavior so the
   // jump preserves filter state.
   onOpenRun?: (id: string) => void;
-  // When true, render body without the collapsible header chevron —
+  // When true, render body without the collapsible header chevron --
   // the panel is being embedded somewhere (e.g., a tab) where the
   // surrounding UI already names it.
   inline?: boolean;

@@ -1,6 +1,6 @@
 "use client";
 
-// Home: triage view. Answers "what should I look at right now?" —
+// Home: triage view. Answers "what should I look at right now?" --
 // distinct from Runs (chronological feed) and Analytics (long-term
 // trends). Surfaces approvals, recent failures, and degraded
 // infrastructure on one glanceable screen.

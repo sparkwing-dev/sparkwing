@@ -31,7 +31,7 @@
 // # Plug points
 //
 // [Dispatcher] decouples the HTTP surface from how runs actually
-// launch — pluggable so the same controller can drive in-process,
+// launch -- pluggable so the same controller can drive in-process,
 // pool-backed pod, or external systems. [Cipher] decouples secret
 // encryption from any specific implementation so consumers can
 // supply their own AEAD without depending on sparkwing's internal

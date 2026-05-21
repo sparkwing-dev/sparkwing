@@ -13,7 +13,7 @@ import (
 // TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures models
 // the happy path: the cache's background-fetch loop hasn't caught
 // up on attempt 1 or 2, but the SHA is present by attempt 3.
-// The retry loop must NOT surface the cryptic git error — it should
+// The retry loop must NOT surface the cryptic git error -- it should
 // return the eventually-good sparkwingDir.
 func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	prevFn := fetchSourceFn
@@ -53,7 +53,7 @@ func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 // TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError verifies
 // that after every retry hits "not our ref", the caller sees a
 // human-readable error pointing at gitcache lag rather than the
-// raw upload-pack message — and the original error is still in the
+// raw upload-pack message -- and the original error is still in the
 // chain via errors.Is/As.
 func TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError(t *testing.T) {
 	prevFn := fetchSourceFn
@@ -96,7 +96,7 @@ func TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError(t *testing.T) {
 
 // TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError ensures
 // non-"not our ref" errors (auth, network, malformed URL, ...) bypass
-// the retry — we never want to delay an obviously-broken state by 30s
+// the retry -- we never want to delay an obviously-broken state by 30s
 // of pointless backoff.
 func TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError(t *testing.T) {
 	prevFn := fetchSourceFn

@@ -87,7 +87,7 @@ func TestStepRange_LinearDAG_StartEqualsStop(t *testing.T) {
 //	   |
 //	   end
 //
-// --start-at end skips root, L, R, merge — only end runs.
+// --start-at end skips root, L, R, merge -- only end runs.
 func TestStepRange_BranchingDAG_StartAtSkipsAllUpstream(t *testing.T) {
 	var ranRoot, ranL, ranR, ranMerge, ranEnd atomic.Bool
 	w := sparkwing.NewWork()

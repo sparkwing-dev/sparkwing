@@ -87,7 +87,7 @@ func checkEmDashes(ctx context.Context) error {
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		if bytes.Contains(data, []byte("—")) {
+		if bytes.Contains(data, []byte("\u2014")) {
 			bad = append(bad, f)
 		}
 	}

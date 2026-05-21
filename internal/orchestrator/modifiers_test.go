@@ -187,7 +187,7 @@ func TestRetry_LogCapturesAttempts(t *testing.T) {
 	// Log file should contain retry banners for attempts 2 and 3.
 	logPath := p.NodeLog(res.RunID, "always-fails")
 	// Read via jobs-logs API which knows the path layout.
-	// (Direct read is simpler here — use sparkwing's utils wouldn't help.)
+	// (Direct read is simpler here -- use sparkwing's utils wouldn't help.)
 	body, err := readFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)

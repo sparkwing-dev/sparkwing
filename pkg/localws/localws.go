@@ -33,7 +33,7 @@ type Options struct {
 	// callers (chiefly parallel tests) reserve a port and hand it
 	// over without a close-then-rebind window where another process
 	// can race in. The bound address is still reported via Addr's
-	// usual channels (dev.env, baseURL) — callers should set Addr to
+	// usual channels (dev.env, baseURL) -- callers should set Addr to
 	// the listener's address for those side effects to be correct.
 	Listener net.Listener
 
@@ -163,7 +163,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	// Go 1.22 ServeMux picks the most specific pattern. The
 	// dashboard-owned /api/v1/runs/{id}/{logs,events} patterns must
-	// be registered alongside the controller's catch-all /api/v1/ —
+	// be registered alongside the controller's catch-all /api/v1/ --
 	// see TestMuxSpecificity_ApiV1Routing for the load-bearing
 	// assertion.
 	root := http.NewServeMux()

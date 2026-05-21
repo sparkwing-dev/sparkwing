@@ -11,10 +11,10 @@
 #   - Reverse proxy in front (Caddy, Traefik, or nginx) handling TLS
 #
 # Not included here (bring your own):
-#   - TLS termination — put Caddy or Traefik in front and route to the
+#   - TLS termination -- put Caddy or Traefik in front and route to the
 #     service ports below. Example Caddyfile in install/docker-compose/Caddyfile
-#   - Persistent DNS — point your domain at the host
-#   - GitHub webhook secret — set GITHUB_WEBHOOK_SECRET in .env
+#   - Persistent DNS -- point your domain at the host
+#   - GitHub webhook secret -- set GITHUB_WEBHOOK_SECRET in .env
 #
 # First-run setup:
 #   1. cp .env.example .env
@@ -80,7 +80,7 @@ services:
       # Shared auth token for the API. Remote runners send this as
       # Authorization: Bearer <token>.
       - SPARKWING_API_TOKEN=${SPARKWING_API_TOKEN:?SPARKWING_API_TOKEN must be set in .env}
-      # Internal URLs — controller talks to gitcache + logs over the
+      # Internal URLs -- controller talks to gitcache + logs over the
       # compose network. sparkwing-logs gets the public URL for handing
       # out to clients.
       - SPARKWING_GITCACHE=http://gitcache:8090

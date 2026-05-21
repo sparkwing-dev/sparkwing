@@ -100,7 +100,7 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 	}
 	// Wing-owned flags are prefixed sw-* (--sw-ref, --sw-profile,
 	// --sw-start-at, ...), so pipeline `flag:"..."` tags have the
-	// full unprefixed namespace to themselves — no reserved-name
+	// full unprefixed namespace to themselves -- no reserved-name
 	// collision check needed.
 
 	invoke := func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error) {

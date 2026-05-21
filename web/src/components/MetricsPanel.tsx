@@ -5,12 +5,12 @@ import AgentUtilization from "@/components/AgentUtilization";
 import { ResponsiveContainer, BarChart, Bar, Tooltip } from "recharts";
 
 function pct(n: number, d: number): string {
-  if (d === 0) return "—";
+  if (d === 0) return "--";
   return `${Math.round((n / d) * 100)}%`;
 }
 
 function fmtDuration(ns: number): string {
-  if (!ns) return "—";
+  if (!ns) return "--";
   const s = ns / 1e9;
   if (s < 1) return `${(s * 1000).toFixed(0)}ms`;
   if (s < 60) return `${s.toFixed(1)}s`;
@@ -31,7 +31,7 @@ function p95(values: number[]): number {
   return sorted[Math.floor(sorted.length * 0.95)];
 }
 
-// Activity sparkline — shows job volume over recent time buckets
+// Activity sparkline -- shows job volume over recent time buckets
 function Sparkline({
   jobs,
   buckets = 12,

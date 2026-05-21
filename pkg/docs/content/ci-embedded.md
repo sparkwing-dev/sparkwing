@@ -96,7 +96,7 @@ git push                          # triggers publish + run with frozen overlay
 
 CI never re-resolves; the publish step on your laptop (or in a
 publish-on-merge workflow) is the deliberate "go fresh" surface.
-Repos without `sparks.yaml` ignore this var — it's a no-op.
+Repos without `sparks.yaml` ignore this var -- it's a no-op.
 
 ## Profile-based config (laptop)
 

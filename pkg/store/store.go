@@ -538,7 +538,7 @@ WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 
 // gatherRunAnnotations reads every annotation across the run's nodes
 // and steps in append order. Order is by table then natural row
-// order — close to event order in practice.
+// order -- close to event order in practice.
 func (s *Store) gatherRunAnnotations(runID string) ([]string, error) {
 	var out []string
 	rows, err := s.db.Query(`

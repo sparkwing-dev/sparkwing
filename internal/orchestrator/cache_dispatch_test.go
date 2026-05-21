@@ -162,7 +162,7 @@ func (cacheDriftPipeB) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 }
 
 // planLevelQueuePipe: single-node plan gated by Plan.Cache({Key, Max:1}).
-// Running two concurrently MUST serialize — peak concurrency across
+// Running two concurrently MUST serialize -- peak concurrency across
 // both runs' nodes should stay at 1.
 type planLevelQueuePipe struct{ sparkwing.Base }
 
@@ -496,7 +496,7 @@ func TestCache_PlanLevelSkipShortCircuits(t *testing.T) {
 		t.Fatalf("follower status = %q, want success (Skip treats plan-level full slot as OK)", followerRes.Status)
 	}
 
-	// The follower's 'work' node MUST NOT have run — counter should
+	// The follower's 'work' node MUST NOT have run -- counter should
 	// only have incremented from the leader's node, not the follower.
 	<-leaderDone
 	finalCount := cacheCounter.inflight.Load()

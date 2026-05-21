@@ -28,7 +28,7 @@ func (allThreeJob) Work(_ *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// shardJob picks Requires per its data — the canonical heterogeneous
+// shardJob picks Requires per its data -- the canonical heterogeneous
 // fan-out use case.
 type shardJob struct {
 	sparkwing.Base

@@ -140,7 +140,7 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 }
 
 // LookupToken authenticates and bumps last_used_at. Materialize the
-// candidate list before any follow-up Exec — MaxOpenConns=1 will
+// candidate list before any follow-up Exec -- MaxOpenConns=1 will
 // deadlock if a cursor is still open.
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	if len(raw) < PrefixLen {

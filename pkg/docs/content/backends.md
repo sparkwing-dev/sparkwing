@@ -2,9 +2,9 @@
 
 `backends.yaml` declares where the three persistence surfaces live:
 
-- **cache** — content-addressed artifacts and compiled pipeline binaries
-- **logs** — per-job log streams
-- **state** — run records, plan snapshots, status
+- **cache** -- content-addressed artifacts and compiled pipeline binaries
+- **logs** -- per-job log streams
+- **state** -- run records, plan snapshots, status
 
 A pipeline run picks a backend per surface through one resolved
 configuration. The same pipeline source runs on a laptop with the
@@ -15,8 +15,8 @@ through the controller's services -- without code changes.
 
 Two locations are merged at load time (repo wins per non-zero field):
 
-- `.sparkwing/backends.yaml` — team-shared, checked in
-- `~/.config/sparkwing/backends.yaml` — per-user additions / overrides
+- `.sparkwing/backends.yaml` -- team-shared, checked in
+- `~/.config/sparkwing/backends.yaml` -- per-user additions / overrides
 
 Honors `$XDG_CONFIG_HOME` for the user-level file.
 
@@ -62,11 +62,11 @@ rule contributes only the detect predicate).
 
 Required fields per type:
 
-- `filesystem` — `path`
-- `s3`, `gcs`, `azure-blob` — `bucket` (plus optional `prefix`)
-- `postgres`, `mysql` — exactly one of `url` or `url_source` (the
+- `filesystem` -- `path`
+- `s3`, `gcs`, `azure-blob` -- `bucket` (plus optional `prefix`)
+- `postgres`, `mysql` -- exactly one of `url` or `url_source` (the
   latter names a secret in the resolved source)
-- `controller`, `stdout`, `sqlite` — no required fields
+- `controller`, `stdout`, `sqlite` -- no required fields
 
 Recognized backend types that aren't implemented in the current
 build surface a clear error at run start ("type X is recognized but

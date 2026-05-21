@@ -2,7 +2,7 @@
 
 How sparkwing decides which agent runs a job. The model is **deliberately
 Kubernetes-shaped** so anyone who's seen `nodeSelector` /
-`tolerations` / `nodeAffinity` will recognize it — but the YAML is
+`tolerations` / `nodeAffinity` will recognize it -- but the YAML is
 flatter and the controller fills in sane defaults.
 
 ## The model in one paragraph
@@ -58,10 +58,10 @@ my-build:
     push:
       branches: [main]
   runs_on:
-    require:                  # hard filter — must all match
+    require:                  # hard filter -- must all match
       os: linux
       arch: amd64
-    prefer:                   # soft preference — extra points per match
+    prefer:                   # soft preference -- extra points per match
       zone: us-east
     tolerate:                 # which agent taints this job accepts
       - agent=local
@@ -72,13 +72,13 @@ my-build:
 | Field | Maps to k8s | Meaning |
 |---|---|---|
 | `require` | `nodeSelector` / required nodeAffinity | Every key/value must match the agent's labels (or `name`/`type` pseudo-labels). If any miss, the job is **not eligible** for that agent. |
-| `prefer` | preferred nodeAffinity | Soft scoring — each matching key adds +10 to that (job, agent) pair. Doesn't filter, just sorts. |
+| `prefer` | preferred nodeAffinity | Soft scoring -- each matching key adds +10 to that (job, agent) pair. Doesn't filter, just sorts. |
 | `tolerate` | `tolerations` | List of tolerations. Every `NoSchedule` taint on the agent must be tolerated, or the job is rejected. `PreferNoSchedule` taints lower the score by 1 instead of blocking. |
 | `queue_timeout` | (no k8s analog) | How long the job may sit pending before the controller fails it. Empty → 10m default. `forever` or `never` disables. |
 
 ### Toleration shorthand
 
-Tolerations accept four forms — pick whichever reads cleanest:
+Tolerations accept four forms -- pick whichever reads cleanest:
 
 ```yaml
 tolerate:
@@ -89,7 +89,7 @@ tolerate:
 ```
 
 The first three are sugar for the long form. `Operator: Exists` matches
-any value with the named key — useful when a taint exists for *any*
+any value with the named key -- useful when a taint exists for *any*
 value of, say, `gpu`.
 
 ## Agent labels and taints
@@ -163,9 +163,9 @@ empty string to advertise no taints at all (and accept any job).
 When you run a pipeline directly with `sparkwing` (without `--on <cluster>`),
 sparkwing marks the job as **`Direct`**. Direct jobs:
 
-- Skip the taint check entirely — you've already chosen the agent (your
+- Skip the taint check entirely -- you've already chosen the agent (your
   laptop, this terminal), so untolerated `NoSchedule` taints don't repel.
-- Skip the queue-timeout sweeper — you'll cancel manually if needed.
+- Skip the queue-timeout sweeper -- you'll cancel manually if needed.
 
 This is the key distinction the user cares about: **webhook → controller
 → scheduling matters; `sparkwing run build-deploy` → just run it here**.
@@ -173,7 +173,7 @@ This is the key distinction the user cares about: **webhook → controller
 `sparkwing run build-deploy --on prod` is *not* direct: you've explicitly chosen
 to dispatch to a remote controller, which then schedules normally.
 
-`require` and `prefer` are still respected for `sparkwing` invocations —
+`require` and `prefer` are still respected for `sparkwing` invocations --
 nothing forces a `linux` pipeline to compile on a Mac.
 
 ## Scoring (how ties are broken)
@@ -199,13 +199,13 @@ and overrides:
 |---|---|
 | (unset) | 10 minutes (`DefaultQueueTimeout`) |
 | `30s`, `5m`, `1h30m` | parsed via `time.ParseDuration` |
-| `forever` / `never` | Never expires — job sits pending until claimed or cancelled |
+| `forever` / `never` | Never expires -- job sits pending until claimed or cancelled |
 
 The controller's cleanup loop runs once a minute. When a queue-timeout
 fires, the job's logs explain *why* nothing claimed it (no matching
 labels, no toleration for taint X, etc.).
 
-Direct (`sparkwing`) jobs are exempt — see above.
+Direct (`sparkwing`) jobs are exempt -- see above.
 
 ## Worked examples
 

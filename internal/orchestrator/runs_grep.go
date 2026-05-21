@@ -1,5 +1,5 @@
 // `sparkwing runs grep PATTERN` -- substring search across recent
-// runs' log bodies. Walks the IMP-048 filter-narrowed candidate set
+// runs' log bodies. Walks the filter-narrowed candidate set
 // and emits one row per matching line. Fills the gap between
 // `runs logs --grep` (one known run) and `runs list --error`
 // (structured failure reason only) by surfacing free-form log body

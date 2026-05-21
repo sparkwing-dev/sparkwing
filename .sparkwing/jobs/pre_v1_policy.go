@@ -148,7 +148,7 @@ func checkLocalGitTagsPreV1(ctx context.Context, repoRoot string) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"local repo has %d v1.0.0+ tag(s) — these are permanent in the Go proxy cache and can't be undone, but the policy lock is still in force for future tags:\n      %s",
+		"local repo has %d v1.0.0+ tag(s) -- these are permanent in the Go proxy cache and can't be undone, but the policy lock is still in force for future tags:\n      %s",
 		len(bad), strings.Join(bad, " "),
 	)
 }

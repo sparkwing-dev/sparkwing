@@ -99,7 +99,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	reg, ok := defaultRegistries[registryName]
 	if !ok {
-		http.Error(w, fmt.Sprintf("unknown registry %q — supported: %s", registryName, registryList()), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("unknown registry %q -- supported: %s", registryName, registryList()), http.StatusBadRequest)
 		return
 	}
 
@@ -124,7 +124,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	lock.RUnlock()
 
-	// Cache miss — take write lock to fetch and store
+	// Cache miss -- take write lock to fetch and store
 	lock.Lock()
 	defer lock.Unlock()
 

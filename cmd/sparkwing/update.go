@@ -191,7 +191,7 @@ func downloadAndInstall(version, currentBin string) error {
 		return fmt.Errorf("download SHA256SUMS: %w", err)
 	}
 
-	// Hard-fail on missing/stale manifest — skipping would be a supply-chain foot-gun.
+	// Hard-fail on missing/stale manifest -- skipping would be a supply-chain foot-gun.
 	expected, err := lookupSHA256(sumsPath, asset)
 	if err != nil {
 		return err

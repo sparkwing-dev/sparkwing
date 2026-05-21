@@ -11,7 +11,7 @@ export function fmtMs(ms: number): string {
   return `${m}m ${s}s`;
 }
 
-// fmtMsCompact collapses to the largest unit only — "12m" instead of
+// fmtMsCompact collapses to the largest unit only -- "12m" instead of
 // "12m 32s", "1h" instead of "1h 37m". Used in narrow contexts where
 // space is at a premium.
 export function fmtMsCompact(ms: number): string {
@@ -23,7 +23,7 @@ export function fmtMsCompact(ms: number): string {
 }
 
 export function fmtFullDate(ts: string): string {
-  if (!ts) return "—";
+  if (!ts) return "--";
   const d = new Date(ts);
   if (isNaN(d.getTime())) return ts;
   return d.toLocaleString([], {
@@ -36,7 +36,7 @@ export function fmtFullDate(ts: string): string {
 }
 
 export function fmtClock(ts: string): string {
-  if (!ts) return "—";
+  if (!ts) return "--";
   return new Date(ts).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
@@ -65,9 +65,9 @@ export function fmtDatePrefix(ts: string): string {
 // offset string ("-2d", "-5m") without the trailing "ago". Useful in
 // narrow columns where every character counts.
 export function fmtAgoShort(ts: string): string {
-  if (!ts) return "—";
+  if (!ts) return "--";
   const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (sec < 0) return "—";
+  if (sec < 0) return "--";
   if (sec < 60) return `-${sec}s`;
   if (sec < 3600) return `-${Math.floor(sec / 60)}m`;
   if (sec < 86_400) return `-${Math.floor(sec / 3600)}h`;
@@ -75,9 +75,9 @@ export function fmtAgoShort(ts: string): string {
 }
 
 export function fmtAgo(ts: string): string {
-  if (!ts) return "—";
+  if (!ts) return "--";
   const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (sec < 0) return "—";
+  if (sec < 0) return "--";
   if (sec < 60) return `${sec}s ago`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   if (sec < 86_400) return `${Math.floor(sec / 3600)}h ago`;

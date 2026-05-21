@@ -1,6 +1,6 @@
 # sparks-core (Example Spark Library)
 
-sparks-core is an example of a **spark library** — a reusable Go module that provides pipeline helpers. It is not part of the sparkwing SDK and is not required to use sparkwing. It demonstrates the pattern of extracting common pipeline logic into shared libraries.
+sparks-core is an example of a **spark library** -- a reusable Go module that provides pipeline helpers. It is not part of the sparkwing SDK and is not required to use sparkwing. It demonstrates the pattern of extracting common pipeline logic into shared libraries.
 
 This particular library provides packages for Docker builds, GitOps deployments, Kubernetes operations, AWS helpers, pre-commit checks, S3 static site deploys, and deploy orchestration. Your spark libraries can provide whatever your team needs.
 
@@ -78,9 +78,9 @@ import "github.com/sparkwing-dev/sparks-core/docker"
 
 Derives deterministic image tags from the current repo state:
 
-- **Commit** — 12-char git SHA (or `SPARKWING_COMMIT` env var)
-- **Content** — 12-char SHA256 of all files affecting the Docker build (respects `.dockerignore`)
-- **Dirty** — true if working tree has uncommitted changes
+- **Commit** -- 12-char git SHA (or `SPARKWING_COMMIT` env var)
+- **Content** -- 12-char SHA256 of all files affecting the Docker build (respects `.dockerignore`)
+- **Dirty** -- true if working tree has uncommitted changes
 
 ```go
 tags := docker.ComputeTags()
@@ -346,7 +346,7 @@ Debug logging covers:
 - **aws**: profile selection, IRSA detection
 - **s3**: bucket and output directory
 
-Normal pipeline runs show none of this — only the step banners and results.
+Normal pipeline runs show none of this -- only the step banners and results.
 
 ---
 

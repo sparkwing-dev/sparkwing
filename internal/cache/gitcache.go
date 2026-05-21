@@ -78,7 +78,7 @@ func initProxyMetrics() {
 		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10))
 }
 
-// validGitRef matches safe git branch/tag names — no shell metacharacters.
+// validGitRef matches safe git branch/tag names -- no shell metacharacters.
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
 
 func validateGitRef(ref string) error {
@@ -127,7 +127,7 @@ func repoHash(repoURL string) string {
 
 func setupSSH() {
 	if _, err := os.Stat(sshKeyDir); err != nil {
-		log.Printf("warning: no SSH key at %s — only public repos will work", sshKeyDir)
+		log.Printf("warning: no SSH key at %s -- only public repos will work", sshKeyDir)
 		return
 	}
 
@@ -138,7 +138,7 @@ func setupSSH() {
 		return
 	}
 
-	// Copy keys — k8s secret mounts strip trailing newlines, so ensure
+	// Copy keys -- k8s secret mounts strip trailing newlines, so ensure
 	// private keys end with one (OpenSSH requires it).
 	entries, _ := os.ReadDir(sshKeyDir)
 	for _, e := range entries {
@@ -179,7 +179,7 @@ func requireToken(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		http.Error(w, "unauthorized — set Authorization: Bearer <token> header", http.StatusUnauthorized)
+		http.Error(w, "unauthorized -- set Authorization: Bearer <token> header", http.StatusUnauthorized)
 	}
 }
 
@@ -205,7 +205,7 @@ func (fs *fetchState) problems() []string {
 
 	var msgs []string
 	if fs.allFailing {
-		msgs = append(msgs, "All git fetches are failing — SSH may be broken or the pod is resource-exhausted")
+		msgs = append(msgs, "All git fetches are failing -- SSH may be broken or the pod is resource-exhausted")
 	}
 	for name, rs := range fs.repos {
 		if rs.lastError == "" {
@@ -225,17 +225,17 @@ func (fs *fetchState) problems() []string {
 func friendlyFetchError(raw string) string {
 	switch {
 	case strings.Contains(raw, "cannot fork"):
-		return "cannot fork SSH process — pod is out of PIDs or memory"
+		return "cannot fork SSH process -- pod is out of PIDs or memory"
 	case strings.Contains(raw, "Permission denied"):
-		return "SSH permission denied — check that the SSH key has read access to this repo"
+		return "SSH permission denied -- check that the SSH key has read access to this repo"
 	case strings.Contains(raw, "Host key verification failed"):
-		return "SSH host key verification failed — known_hosts may be missing or stale"
+		return "SSH host key verification failed -- known_hosts may be missing or stale"
 	case strings.Contains(raw, "Could not resolve hostname"):
-		return "DNS resolution failed — check network connectivity"
+		return "DNS resolution failed -- check network connectivity"
 	case strings.Contains(raw, "Connection refused"):
-		return "SSH connection refused — GitHub may be unreachable from this cluster"
+		return "SSH connection refused -- GitHub may be unreachable from this cluster"
 	case strings.Contains(raw, "timed out"):
-		return "git fetch timed out — slow network or large repo"
+		return "git fetch timed out -- slow network or large repo"
 	default:
 		// Truncate raw error to something reasonable
 		if len(raw) > 120 {
@@ -328,7 +328,7 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			bgFetch.allFailing = true
 			bgFetch.mu.Unlock()
 			pause := min(time.Duration(consecutiveAllFail)*interval, maxBackoff)
-			log.Printf("background fetch: all %d repos failed — pausing %s", failed, pause)
+			log.Printf("background fetch: all %d repos failed -- pausing %s", failed, pause)
 			if !sleepCtx(ctx, pause) {
 				return
 			}
@@ -397,7 +397,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		enableSHAFetch(bareRepo)
 		log.Printf("background fetch: fetching %s", hash)
 		if out, err := gitCmd("-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"); err != nil {
-			// Fetch failed — repo may be corrupt from a previous partial clone/crash.
+			// Fetch failed -- repo may be corrupt from a previous partial clone/crash.
 			// Remove and reclone rather than leaving a permanently broken repo.
 			log.Printf("warning: fetch failed for %s, attempting recovery reclone: %v", hash, err)
 			_ = os.RemoveAll(bareRepo)
@@ -441,7 +441,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		gitcacheCacheMisses.Add(r.Context(), 1)
 	}
 
-	// Generate tarball — use piped commands instead of sh -c to avoid injection
+	// Generate tarball -- use piped commands instead of sh -c to avoid injection
 	log.Printf("cache hit: archiving %s@%s", hash, shortCommit)
 	tmpTar := tarball + ".tmp"
 	if err := archiveToFile(bareRepo, branch, tmpTar); err != nil {
@@ -490,7 +490,7 @@ func handleRepos(w http.ResponseWriter, r *http.Request) {
 // sshHint returns a helpful message if the git error looks like an SSH auth failure.
 func sshHint(output string) string {
 	if strings.Contains(output, "Permission denied") || strings.Contains(output, "Host key verification failed") {
-		return "hint: SSH key rejected — run: sparkwing cluster update-ssh-key --name <cluster> --github-ssh-key ~/.ssh/<your-key>"
+		return "hint: SSH key rejected -- run: sparkwing cluster update-ssh-key --name <cluster> --github-ssh-key ~/.ssh/<your-key>"
 	}
 	return ""
 }
@@ -544,7 +544,7 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 }
 
 // archiveToFile runs `git archive --format=tar <branch> | gzip > <outPath>`
-// using piped exec commands — no shell involved, safe from injection.
+// using piped exec commands -- no shell involved, safe from injection.
 func archiveToFile(bareRepo, branch, outPath string) error {
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", branch)
 	gzipCmd := exec.Command("gzip")
@@ -603,7 +603,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 
 	bareRepo := filepath.Join(repoDir, hash+".git")
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		http.Error(w, "repo not cached — trigger an archive first", http.StatusNotFound)
+		http.Error(w, "repo not cached -- trigger an archive first", http.StatusNotFound)
 		return
 	}
 
@@ -626,7 +626,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /tree-hash?repo=X&branch=Y&path=services/api
-// Returns the git tree hash for a subdirectory — content-addressable.
+// Returns the git tree hash for a subdirectory -- content-addressable.
 // Same content = same hash, regardless of commit.
 func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")
@@ -717,9 +717,9 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 
 // --- Artifacts ---
 
-// POST /artifacts/{jobID}?path=coverage/report.html — upload a file
-// GET  /artifacts/{jobID}?glob=*.html — download artifacts as tar.gz
-// GET  /artifacts/{jobID} — list artifacts for a job
+// POST /artifacts/{jobID}?path=coverage/report.html -- upload a file
+// GET  /artifacts/{jobID}?glob=*.html -- download artifacts as tar.gz
+// GET  /artifacts/{jobID} -- list artifacts for a job
 // handleBin serves compiled pipeline binaries by content hash.
 var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$`)
 
@@ -818,7 +818,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
-		// 500MB max — dependency caches can be large (node_modules, etc.)
+		// 500MB max -- dependency caches can be large (node_modules, etc.)
 		r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
 
 		tmpFile, err := os.CreateTemp(cacheDir, "upload-*.tmp")
@@ -1008,7 +1008,7 @@ func contains(s []string, v string) bool {
 
 var uploadsDir = "/data/uploads"
 
-// POST /upload — accepts a tarball, stores with content-addressed ID, returns the ID.
+// POST /upload -- accepts a tarball, stores with content-addressed ID, returns the ID.
 // Optional query params:
 //   - repo: git repo URL (for incremental sync)
 //   - base: commit hash to overlay the upload on top of (incremental sync)
@@ -1152,7 +1152,7 @@ func archiveToDir(bareRepo, ref, dir string) error {
 	return tarExtract.Wait()
 }
 
-// GET /uploads/{id} — download a previously uploaded tarball.
+// GET /uploads/{id} -- download a previously uploaded tarball.
 func handleUploadDownload(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/uploads/")
 	id = strings.TrimSuffix(id, ".tar.gz")
@@ -1172,7 +1172,7 @@ func handleUploadDownload(w http.ResponseWriter, r *http.Request) {
 
 // --- Sync negotiation ---
 
-// POST /sync/negotiate — find common ancestor between sparkwing's local commits and gitcache's repo.
+// POST /sync/negotiate -- find common ancestor between sparkwing's local commits and gitcache's repo.
 // Request: {"repo": "git@...", "commits": ["abc123", "def456", ...]}
 // Response: {"ancestor": "def456", "found": true} or {"ancestor": "", "found": false}
 func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
@@ -1199,7 +1199,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 
 	// Check if we have this repo cached
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		// No cached repo — can't negotiate, sparkwing should send full tarball
+		// No cached repo -- can't negotiate, sparkwing should send full tarball
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
 		return
@@ -1229,7 +1229,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
 }
 
-// POST /sync/seed?repo=git@github.com:user/repo.git — receive a git bundle and create/update a bare repo.
+// POST /sync/seed?repo=git@github.com:user/repo.git -- receive a git bundle and create/update a bare repo.
 // This lets the gitcache have git history without needing SSH access to clone.
 func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1359,7 +1359,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("git register: cloning %s as %q", repoURL, name)
 		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
-			// Clone failed (probably no SSH key) — that's OK, it can be seeded later
+			// Clone failed (probably no SSH key) -- that's OK, it can be seeded later
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": false})
@@ -1384,7 +1384,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 // Closes the gitcache-lag race window. Best-effort: callers pass a
 // short timeout and continue on failure.
 //
-// Either `name` (preferred — already registered) or `repo` (full URL,
+// Either `name` (preferred -- already registered) or `repo` (full URL,
 // auto-resolves via repoHash) works. Returns 404 if neither resolves
 // to a cached bare repo. Concurrent refreshes coalesce on the per-repo
 // lock so a webhook burst doesn't fan out N fetches.
@@ -1522,21 +1522,21 @@ func resolveGitRepo(name string) (string, error) {
 	repoNamesMu.RUnlock()
 
 	if !ok {
-		return "", fmt.Errorf("repo %q not registered — POST /git/register?name=%s&repo=<url>", name, name)
+		return "", fmt.Errorf("repo %q not registered -- POST /git/register?name=%s&repo=<url>", name, name)
 	}
 
 	hash := repoHash(repoURL)
 	bareRepo := filepath.Join(repoDir, hash+".git")
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		return "", fmt.Errorf("repo %q registered but not cloned — seed via POST /sync/seed?repo=%s", name, repoURL)
+		return "", fmt.Errorf("repo %q registered but not cloned -- seed via POST /sync/seed?repo=%s", name, repoURL)
 	}
 
 	return bareRepo, nil
 }
 
 func handleInfoRefs(w http.ResponseWriter, r *http.Request, bareRepo, service string) {
-	// service is "git-upload-pack" or "git-receive-pack" — strip "git-" prefix for the command
+	// service is "git-upload-pack" or "git-receive-pack" -- strip "git-" prefix for the command
 	gitCmd := strings.TrimPrefix(service, "git-")
 	cmd := exec.Command("git", gitCmd, "--stateless-rpc", "--advertise-refs", bareRepo)
 	var stdout, stderr strings.Builder
@@ -1572,8 +1572,8 @@ func handleGitUploadPack(w http.ResponseWriter, r *http.Request, bareRepo string
 }
 
 func handleGitReceivePack(w http.ResponseWriter, _ *http.Request, _, repoName string) {
-	log.Printf("git receive-pack rejected for %s — gitcache is read-only", repoName)
-	http.Error(w, "gitcache is read-only — push directly to GitHub", http.StatusForbidden)
+	log.Printf("git receive-pack rejected for %s -- gitcache is read-only", repoName)
+	http.Error(w, "gitcache is read-only -- push directly to GitHub", http.StatusForbidden)
 }
 
 func cleanOldArchives(repoHash string) {

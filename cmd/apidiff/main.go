@@ -14,7 +14,7 @@
 // Format notes:
 //   - One file per package, named with slashes replaced by underscores
 //     (`pkg/storage/fs.txt` -> `pkg_storage_fs.txt`).
-//   - Godoc is intentionally NOT included — comments rot faster than
+//   - Godoc is intentionally NOT included -- comments rot faster than
 //     APIs and Layer 4 already covers their accuracy.
 //   - Output is stable: declarations sorted by name, methods grouped
 //     under their receiver type, no iteration-order surprises.
@@ -159,7 +159,7 @@ func snapshotPackage(dir, importPath string) (string, error) {
 	}
 
 	// Build output. Methods group under their receiver type; orphan
-	// methods (receiver type not declared here — shouldn't happen for
+	// methods (receiver type not declared here -- shouldn't happen for
 	// exported symbols, but guard against it) sort to the end.
 	methodsByRecv := map[string][]member{}
 	var primary []member
@@ -348,7 +348,7 @@ func isExportedEmbedded(expr ast.Expr) bool {
 	case *ast.StarExpr:
 		return isExportedEmbedded(t.X)
 	case *ast.SelectorExpr:
-		// e.g. sparkwing.Base — always exported if Sel is exported.
+		// e.g. sparkwing.Base -- always exported if Sel is exported.
 		return t.Sel.IsExported()
 	case *ast.IndexExpr:
 		return isExportedEmbedded(t.X)

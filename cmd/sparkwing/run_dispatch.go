@@ -324,7 +324,7 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 }
 
 // dispatchRemote POSTs a TriggerRequest to the profile's controller.
-// Does NOT compile locally — assumes the remote already has the pipeline.
+// Does NOT compile locally -- assumes the remote already has the pipeline.
 func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) error {
 	prof, err := resolveProfile(wf.on)
 	if err != nil {
@@ -403,13 +403,13 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 	// hasn't yet mirrored the just-pushed SHA. The retry in the
 	// runner's trigger loop catches the residual race; this just
 	// shrinks the window to ~zero on the happy path. 5s ceiling so
-	// a wedged or unreachable cache never blocks dispatch — log a
+	// a wedged or unreachable cache never blocks dispatch -- log a
 	// warning and continue.
 	if prof.Gitcache != "" && repoURL != "" {
 		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := bincache.RefreshRepo(refreshCtx, prof.Gitcache, repoURL); err != nil {
 			fmt.Fprintf(os.Stderr,
-				"sparkwing run: gitcache eager refresh failed (%v); proceeding — runner will retry on stale-SHA\n",
+				"sparkwing run: gitcache eager refresh failed (%v); proceeding -- runner will retry on stale-SHA\n",
 				err)
 		}
 		cancel()

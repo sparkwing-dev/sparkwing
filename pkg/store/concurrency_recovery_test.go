@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Release+promote is atomic — covers the "controller crashed between
+// Release+promote is atomic -- covers the "controller crashed between
 // release tx and promote tx" window. Even if the test stops the run
 // between store calls,
 // the DB state is consistent: either the release is committed and

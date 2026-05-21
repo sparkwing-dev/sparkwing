@@ -44,11 +44,11 @@ When a covered API is on its way out:
 4. Keep the deprecated symbol working for at least one minor release.
 5. Remove the symbol in a subsequent major release (or minor while pre-1.0).
 
-The runtime warning is important — it catches uses that the godoc comment misses (e.g., dynamic callers, generated code).
+The runtime warning is important -- it catches uses that the godoc comment misses (e.g., dynamic callers, generated code).
 
 ## Pre-1.0 caveat
 
-While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. The deprecation procedure still applies — breaking changes are announced with at least one release of warning before removal. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
+While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. The deprecation procedure still applies -- breaking changes are announced with at least one release of warning before removal. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
 
 ## Release process
 
@@ -67,7 +67,7 @@ changes follow the same semver discipline as Go API changes:
 
 - Renaming a JSON field, removing a field, or changing a field's
   type is a **breaking change**. The deprecation procedure above
-  applies — announce in a `Changed` / `Deprecated` CHANGELOG entry
+  applies -- announce in a `Changed` / `Deprecated` CHANGELOG entry
   one release ahead of removal.
 - Adding a new optional field, adding a new route, or adding a new
   status code is **non-breaking** when existing callers ignore it.
@@ -76,7 +76,7 @@ changes follow the same semver discipline as Go API changes:
 
 The OpenAPI spec is the source of truth for what the controller
 serves; if reality and the spec diverge, the spec is wrong (fix
-it). Keeping it in sync is human discipline today — there is no
+it). Keeping it in sync is human discipline today -- there is no
 automated drift gate for the HTTP surface yet (the snapshot gate
 below covers the Go surface only).
 
@@ -92,14 +92,14 @@ only contract-affecting changes.
 The lint pipeline (`sparkwing run lint`) regenerates the snapshots
 into a tempdir and diffs against the checked-in tree.
 **PRs that change the public surface without updating `.apidiff/`
-fail CI** — the snapshot must be regenerated and committed in the
+fail CI** -- the snapshot must be regenerated and committed in the
 same PR.
 
 Workflow when you change a covered API:
 
 1. Make the source change.
 2. Run `bash bin/regen-api-snapshot.sh`.
-3. Review the resulting `.apidiff/` diff — that's the surface change
+3. Review the resulting `.apidiff/` diff -- that's the surface change
    reviewers will see.
 4. Add a `CHANGELOG.md` entry under `[Unreleased]` (Added / Changed /
    Removed / Deprecated).

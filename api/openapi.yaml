@@ -11,9 +11,9 @@ info:
 
     Mode-conditional routes are marked in each operation's `description`:
 
-    - **cluster-only** — wired when the process calls `AttachPool`
+    - **cluster-only** -- wired when the process calls `AttachPool`
       (warm-PVC pool routes under `/api/v1/pool/*`).
-    - **laptop-only** — wired when the process calls `WithArtifactStore`
+    - **laptop-only** -- wired when the process calls `WithArtifactStore`
       (`GET /api/v1/artifacts/{key}`).
 
     See [VERSIONING.md][2] for stability promises around this surface:
@@ -396,7 +396,7 @@ paths:
       tags: [nodes]
       summary: Read the raw output JSON for one node.
       description: |
-        Returns the exact bytes the orchestrator wrote — opaque to
+        Returns the exact bytes the orchestrator wrote -- opaque to
         the controller. Empty body when the node hasn't completed
         with output.
       responses:
@@ -980,7 +980,7 @@ paths:
                 required: [cancel_requested]
                 properties:
                   cancel_requested: { type: boolean }
-        "404": { description: Trigger missing — worker should stop. }
+        "404": { description: Trigger missing -- worker should stop. }
 
   /api/v1/triggers/{id}/done:
     parameters: [{ $ref: "#/components/parameters/TriggerID" }]
@@ -1128,9 +1128,9 @@ paths:
       summary: Try to acquire a slot under a concurrency key.
       description: |
         Status code carries the outcome class:
-        - **200** — granted or cached.
-        - **202** — queued, coalesced, or `cancel_others` in progress.
-        - **429** — skipped or failed (terminal).
+        - **200** -- granted or cached.
+        - **202** -- queued, coalesced, or `cancel_others` in progress.
+        - **429** -- skipped or failed (terminal).
       requestBody:
         required: true
         content:
@@ -1250,10 +1250,10 @@ paths:
         concurrency state at 250ms cadence and emits exactly one
         terminal event per stream, then closes:
 
-        - `event: ready` — the caller is now a holder of the slot.
-        - `event: superseded` — the caller is no longer a waiter
+        - `event: ready` -- the caller is now a holder of the slot.
+        - `event: superseded` -- the caller is no longer a waiter
           (slot acquired elsewhere, run cancelled, etc.).
-        - `event: stream_end` — fail-safe timeout (max 30 minutes
+        - `event: stream_end` -- fail-safe timeout (max 30 minutes
           per stream) or the concurrency key no longer exists; the
           event payload carries a `reason` field
           (`"max_wait"` or `"key_not_found"`).
@@ -1344,7 +1344,7 @@ paths:
                   pvc: { type: string }
         "409":
           {
-            description: No clean PVC available — fall back to cache-less build.,
+            description: No clean PVC available -- fall back to cache-less build.,
           }
 
   /api/v1/pool/return:

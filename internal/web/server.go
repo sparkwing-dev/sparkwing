@@ -35,7 +35,7 @@ var nextBundle embed.FS
 // VerifyBundleEmbedded reports an error when this binary was built
 // without the Next.js dashboard bundle. The bundle is generated and
 // gitignored, so a plain "go install" or "go build" produces a binary
-// that compiles cleanly but serves a 404 on every dashboard page —
+// that compiles cleanly but serves a 404 on every dashboard page --
 // this guard surfaces that condition at startup instead.
 func VerifyBundleEmbedded() error {
 	if _, err := fs.Stat(nextBundle, "next-out/index.html"); err != nil {
@@ -52,7 +52,7 @@ running bin/build-web.sh first produces a binary that compiles cleanly
 but serves a silent 404 on every dashboard page.
 
 To run the dashboard locally, install the sparkwing release binary and
-use the dashboard subcommand — not "go install":
+use the dashboard subcommand -- not "go install":
 
   curl -L -o sparkwing \
     https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-linux-amd64
@@ -64,7 +64,7 @@ Release binaries for every platform are listed at:
   https://github.com/sparkwing-dev/sparkwing/releases/latest
 
 To run sparkwing-web in a cluster, use the container image rather than a
-source build — it already has the dashboard bundle baked in.
+source build -- it already has the dashboard bundle baked in.
 
 If you are building from a sparkwing checkout, generate the dashboard
 bundle first, then reinstall:
@@ -730,7 +730,7 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 // slowest single read instead of summing all of them.
 //
 // Matching uses displayBodyForLogLine, so node id / step framing in
-// NDJSON metadata doesn't generate spurious hits — only what the
+// NDJSON metadata doesn't generate spurious hits -- only what the
 // dashboard's Logs tab would actually display.
 func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 	type match struct {

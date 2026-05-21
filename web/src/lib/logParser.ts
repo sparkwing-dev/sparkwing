@@ -1,11 +1,11 @@
-// logParser.ts — Parse sparkwing logs into structured sections.
+// logParser.ts -- Parse sparkwing logs into structured sections.
 //
 // Sparkwing logs come in two on-disk formats:
 //
 //   * JSONL (current): one LogRecord per line. Envelope fields
 //     (ts, level, node, event) are structure; `msg` may contain raw
 //     ANSI from child processes. node_start / node_end events bracket
-//     each node's output — we map each bracketed span onto a
+//     each node's output -- we map each bracketed span onto a
 //     StepSection so the existing LogBucketView renders them as
 //     collapsible buckets. run_summary records become the summary
 //     section.
@@ -96,7 +96,7 @@ function looksLikeJSONL(lines: string[]): boolean {
 //     where execution stopped; earlier closed buckets stay passed.
 //   - `run_summary` becomes the summary section.
 //
-// The result is a flat list of StepSections — one per phase when a
+// The result is a flat list of StepSections -- one per phase when a
 // node used Step(), one per node when it didn't. LogBucketView
 // renders them identically so no UI changes are needed for the
 // Step-aware view.
@@ -504,7 +504,7 @@ export function parseLogLines(lines: string[]): ParsedLog {
       continue;
     }
 
-    // Regular line — keep the raw bytes so SGR escapes survive into
+    // Regular line -- keep the raw bytes so SGR escapes survive into
     // the renderer (LogLines paints them via ansiToHtml). The
     // `stripped` form above is used only for banner regex matching.
     current.lines.push(raw);

@@ -37,7 +37,7 @@ func parseDebug(v string) bool {
 //	}
 //
 // Cheap format calls (string constants, small ints) can call Debug
-// unconditionally — the atomic load is negligible.
+// unconditionally -- the atomic load is negligible.
 func DebugEnabled() bool { return debugEnabled.Load() }
 
 // Debug emits a debug-level LogRecord. No-op when SPARKWING_DEBUG is

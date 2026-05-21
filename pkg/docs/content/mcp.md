@@ -32,7 +32,7 @@ sparkwing(pipeline="run", command="pipeline.release", args={version: "v1.0"}) â†
 sparkwing mcp serve
 ```
 
-This starts a JSON-RPC 2.0 server over stdio â€” the standard MCP transport.
+This starts a JSON-RPC 2.0 server over stdio -- the standard MCP transport.
 
 ## Configuration
 

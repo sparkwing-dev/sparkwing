@@ -104,7 +104,7 @@ func runInternalCompletePipelines(_ []string) error {
 			})
 		}
 	}
-	// Flat list, alphabetical. No group bucketing — the completion menu
+	// Flat list, alphabetical. No group bucketing -- the completion menu
 	// stays one section; agents and humans both scan it as one list.
 	sort.Slice(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
 	for _, r := range rows {
@@ -147,7 +147,7 @@ func runInternalCompleteFlags(args []string) error {
 }
 
 // requirementTag returns a leading "[required]/[conditional]/[optional]"
-// marker. Plain text — ANSI in compadd descriptions corrupts zsh redraws.
+// marker. Plain text -- ANSI in compadd descriptions corrupts zsh redraws.
 func requirementTag(required bool, requiredWhen string) string {
 	switch {
 	case required:

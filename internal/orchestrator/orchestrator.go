@@ -688,7 +688,7 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 				Level: "warn",
 				JobID: n.ID(),
 				Event: "plan_warn",
-				Msg:   "Inline() and Requires() are set on the same job — Requires labels are ignored for inline execution",
+				Msg:   "Inline() and Requires() are set on the same job -- Requires labels are ignored for inline execution",
 				Attrs: map[string]any{
 					"inline":      true,
 					"requires":    n.RequiresLabels(),
@@ -1563,7 +1563,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 	}
 	// Recovery nodes wait for parent failure and bypass cache/SkipIf/
-	// Exclusive — the runner gets the job-only path.
+	// Exclusive -- the runner gets the job-only path.
 	if parentID, claimed := s.claimedBy[node.ID()]; claimed {
 		parentCh, ok := s.lookupDoneCh(parentID)
 		if !ok {
@@ -2201,7 +2201,7 @@ func (s *dispatchState) markSkipped(nodeID, reason string) {
 const defaultPredicateTimeout = 30 * time.Second
 
 // evalSkipPredicates returns (reason, true) on the first true predicate.
-// Errors/panics/timeouts don't skip — run the work and let the job decide.
+// Errors/panics/timeouts don't skip -- run the work and let the job decide.
 func evalSkipPredicates(ctx context.Context, node *sparkwing.JobNode) (string, bool) {
 	preds := node.SkipPredicates()
 	if len(preds) == 0 {

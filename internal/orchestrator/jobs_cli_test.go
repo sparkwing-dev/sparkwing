@@ -288,7 +288,7 @@ func TestJobErrors(t *testing.T) {
 	if !strings.Contains(out, "mid fail") {
 		t.Fatalf("errors missing root-cause: %s", out)
 	}
-	// Cancelled downstream should NOT be listed — it did not actually
+	// Cancelled downstream should NOT be listed -- it did not actually
 	// run, so reporting its error adds noise.
 	if strings.Contains(out, "c:\n") {
 		t.Fatalf("errors should skip cancelled-downstream nodes: %s", out)

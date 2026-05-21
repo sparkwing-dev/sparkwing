@@ -13,7 +13,7 @@ interface Props {
  * RemoteLogs fetches a completed job's bytes from sparkwing-logs
  * (via the Job's `logs_url`) and renders them through the existing
  * LogBucketViewFromRaw viewer. Used as a fallback when the Job
- * response no longer carries `result.logs` inline — which is the
+ * response no longer carries `result.logs` inline -- which is the
  * case for cached jobs after the controller stopped duplicating
  * logs into the cache table.
  *

@@ -89,7 +89,7 @@ func TestRepoFiles_BustsOnSourceEdit(t *testing.T) {
 	hashIn(t, dir, func() {
 		before := RepoFiles()(context.Background())
 
-		// Edit the working tree without staging — tests that we hash
+		// Edit the working tree without staging -- tests that we hash
 		// disk content, not the git index.
 		writeAll(t, dir, map[string]string{
 			"src/foo.tsx": "export const x = 2;\n",
@@ -169,7 +169,7 @@ func TestRepoFiles_HandlesIndexTreeMismatch(t *testing.T) {
 		"b.txt": "content",
 	})
 	hashIn(t, dir, func() {
-		// Delete b.txt from the working tree without staging — index
+		// Delete b.txt from the working tree without staging -- index
 		// still lists it.
 		if err := os.Remove(filepath.Join(dir, "b.txt")); err != nil {
 			t.Fatal(err)
@@ -193,7 +193,7 @@ func TestFiles_OnlyMatchingPathsContribute(t *testing.T) {
 		fn := Files("src/**", "package.json")
 		before := fn(context.Background())
 
-		// Edit something NOT in the include list — hash should be stable.
+		// Edit something NOT in the include list -- hash should be stable.
 		writeAll(t, dir, map[string]string{"README.md": "# changed"})
 
 		after := fn(context.Background())

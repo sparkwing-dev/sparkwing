@@ -4,7 +4,7 @@
 // `node_succeeded`, `approval_resolved`, and friends as named SSE
 // events with an `id:` line carrying the store seq. The browser
 // EventSource echoes the last seen id back as Last-Event-ID on
-// reconnect, so resumption is transparent — the handler just needs a
+// reconnect, so resumption is transparent -- the handler just needs a
 // cheap callback to re-sync client state (typically a refetch of
 // getRun).
 //
@@ -67,7 +67,7 @@ export function useRunEvents(
     if (!runID) return;
     const url = getRunEventsStreamUrl(runID);
     // withCredentials forwards the session cookie so the SSE request
-    // passes the dashboard's auth middleware — same path the per-node
+    // passes the dashboard's auth middleware -- same path the per-node
     // log stream uses.
     const es = new EventSource(url, { withCredentials: true });
 

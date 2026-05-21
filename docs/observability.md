@@ -6,7 +6,7 @@ can debug failures fast and right-size containers.
 ## Failure reasons
 
 Every failed job carries a `failure_reason` in its result. The
-controller classifies failures automatically — you never have to grep
+controller classifies failures automatically -- you never have to grep
 logs to figure out *why* a build died.
 
 | Reason | What happened | What to do |
@@ -16,13 +16,13 @@ logs to figure out *why* a build died.
 | `agent_lost` | Runner stopped heartbeating (crashed, evicted, or lost network). | Check pod events with `kubectl describe pod`. May indicate node pressure or a bug in the pipeline. |
 | `queue_timeout` | No agent claimed the job within the queue timeout (default 10m). | Ensure agents are running and their labels/tolerations match the pipeline's `runs_on`. |
 | `pod_error` | Runner container exited with a non-zero code or k8s couldn't create the pod. | Check the exit code and logs. Common causes: image pull errors, missing secrets, OOM in init containers. |
-| `error` | Pipeline reported failure (normal test/build failure). | Read the logs — this is a pipeline-level error, not infrastructure. |
+| `error` | Pipeline reported failure (normal test/build failure). | Read the logs -- this is a pipeline-level error, not infrastructure. |
 
 ### How detection works
 
 The controller dispatcher polls pod container statuses every 3 seconds.
 When it sees a terminated container (e.g. `OOMKilled`, non-zero exit),
-it fails the job **immediately** with a specific reason — no waiting for
+it fails the job **immediately** with a specific reason -- no waiting for
 the 40-second heartbeat timeout.
 
 For jobs where the pod disappears entirely (node failure, eviction), the

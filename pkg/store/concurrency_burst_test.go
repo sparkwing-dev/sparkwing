@@ -153,8 +153,8 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 			runID := fmt.Sprintf("r-%d", i)
 
 			// Single Acquire call to enter the queue (or get Granted
-			// if the slot is free). Then poll ResolveWaiter — the
-			// intended read-only resolution API — until we're promoted.
+			// if the slot is free). Then poll ResolveWaiter -- the
+			// intended read-only resolution API -- until we're promoted.
 			resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 				Key: "k", HolderID: holder, RunID: runID, NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitQueue,

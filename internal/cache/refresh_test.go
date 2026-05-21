@@ -99,7 +99,7 @@ func TestHandleGitRefresh_MissingArgs(t *testing.T) {
 }
 
 // TestHandleGitRefresh_UncachedRepo: 404 when the repo URL isn't
-// already mirrored. The dispatcher tolerates this — first-time repos
+// already mirrored. The dispatcher tolerates this -- first-time repos
 // will be cloned on the regular /git/<name> path on first runner pull.
 func TestHandleGitRefresh_UncachedRepo(t *testing.T) {
 	oldRoot, oldRepoDir := dataRoot, repoDir

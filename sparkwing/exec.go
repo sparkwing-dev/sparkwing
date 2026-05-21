@@ -186,7 +186,7 @@ func (c *Cmd) Run() (ExecResult, error) {
 	return c.execute(false)
 }
 
-// Capture executes the command silently — no per-line log records,
+// Capture executes the command silently -- no per-line log records,
 // just the exec_start banner. The full stdout/stderr are returned in
 // the ExecResult; on failure, the *ExecError carries the captured
 // streams.

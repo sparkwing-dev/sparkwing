@@ -10,12 +10,12 @@ choices behind it. If you're authoring a plugin today, jump to
 Sparkwing ships as a single Go module:
 `github.com/sparkwing-dev/sparkwing`. Plugin authors import
 `github.com/sparkwing-dev/sparkwing/sparkwing` and get the entire
-contract surface — Plan, Job, Work, Register, Ref, the
+contract surface -- Plan, Job, Work, Register, Ref, the
 DAG-construction verbs, plus convenience helpers (Bash, Exec,
 Logger, etc.).
 
 We are intentionally on the `v0.x.y` line. v0 has no semver
-stability promise — minors can break things, patches can introduce
+stability promise -- minors can break things, patches can introduce
 new APIs. We are using v0's flexibility to iterate the contract.
 
 A v1.x.y line was briefly published prior to public launch and has
@@ -28,11 +28,11 @@ them.
 
 Three repos participate in plugin compatibility:
 
-- `sparkwing` — SDK + runtime + CLI as one Go module.
-- `sparks-core` — first-party plugins, one Go module per top-level
+- `sparkwing` -- SDK + runtime + CLI as one Go module.
+- `sparks-core` -- first-party plugins, one Go module per top-level
   subdirectory (aws, checks, deploy, docker, gitops, kube,
   pipelines, s3, step, templates).
-- Third-party `sparks-*` plugins — independent Go modules with
+- Third-party `sparks-*` plugins -- independent Go modules with
   their own cadence.
 
 Each follows standard semver within its own line: major = breaking
@@ -78,7 +78,7 @@ major version as the cross-repo compatibility signal:
 
 | Era | sparkwing path | sparks-core path | Compat rule |
 |---|---|---|---|
-| v0 | `.../sparkwing` | `.../sparks-core/<sub>` | none — pin specific versions |
+| v0 | `.../sparkwing` | `.../sparks-core/<sub>` | none -- pin specific versions |
 | v1 | `.../sparkwing` (v0 and v1 share path in Go) | `.../sparks-core/<sub>` | anything `v1.x.y` on any repo works with anything else `v1.x.y` |
 | v2 | `.../sparkwing/v2` | `.../sparks-core/<sub>/v2` | distinct module path; cannot collide with v1 |
 
@@ -96,7 +96,7 @@ migrate keep working.
 ## Why we are not extracting an SDK module yet
 
 A common architectural move at this point would be to split the
-plugin contract out of the runtime into a separate module — call it
+plugin contract out of the runtime into a separate module -- call it
 `github.com/sparkwing-dev/sparkwing-sdk`. The runtime would depend
 on it; plugins would depend on it. We're deliberately *not* doing
 this yet.
@@ -145,7 +145,7 @@ module:
 
 ## What the extracted state will look like
 
-When we do extract — likely as v1.0 prep — the target shape:
+When we do extract -- likely as v1.0 prep -- the target shape:
 
 ```
 github.com/sparkwing-dev/sparkwing-sdk         (small, stable)
@@ -186,7 +186,7 @@ In rough order of importance:
 
 1. Plugin authors crosses ~50 with significant external
    participation, where manual migration coordination breaks down.
-2. The plugin contract has stabilized — three to six months
+2. The plugin contract has stabilized -- three to six months
    without a breaking change.
 3. We're committing to v1.0 within a release cycle.
 

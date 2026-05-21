@@ -1,5 +1,5 @@
 # sparkwing-runner systemd user service template.
-# Installed by install/install.sh — do not edit directly.
+# Installed by install/install.sh -- do not edit directly.
 #
 # This is a USER unit, installed at ~/.config/systemd/user/sparkwing-runner.service.
 # Start with:
@@ -10,7 +10,7 @@
 #   journalctl --user -u sparkwing-runner -f
 #
 # Running as a user unit means the runner has the user's Docker
-# access (group membership, rootless docker, etc.) — same as if
+# access (group membership, rootless docker, etc.) -- same as if
 # the user ran `sparkwing-runner serve` in their terminal.
 [Unit]
 Description=sparkwing-runner (pulls jobs from a shared sparkwing controller)

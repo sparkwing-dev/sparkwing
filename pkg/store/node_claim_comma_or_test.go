@@ -85,7 +85,7 @@ func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
 }
 
 // TestNodeClaim_BareLabelCommaOR verifies the bare-label form
-// (gpu,fpga) — runner having either claims; runner with neither is
+// (gpu,fpga) -- runner having either claims; runner with neither is
 // rejected.
 func TestNodeClaim_BareLabelCommaOR(t *testing.T) {
 	ctx := context.Background()

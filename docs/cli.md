@@ -4,9 +4,9 @@
      Both legitimately share the binary name. -->
 # CLI Reference
 
-Sparkwing ships two on-path binaries: `sparkwing` (admin / inspection) and `sparkwing` (the pipeline-runner shortcut — a symlink to `sparkwing` that dispatches by invocation name).
+Sparkwing ships two on-path binaries: `sparkwing` (admin / inspection) and `sparkwing` (the pipeline-runner shortcut -- a symlink to `sparkwing` that dispatches by invocation name).
 
-The rule across the `sparkwing` tree: **every input is a named flag** — no positional args anywhere. `sparkwing` is the intentional exception: it takes the pipeline name positionally because operators type it all day.
+The rule across the `sparkwing` tree: **every input is a named flag** -- no positional args anywhere. `sparkwing` is the intentional exception: it takes the pipeline name positionally because operators type it all day.
 
 Every leaf command has a `--help` page with flags, examples, and the full description. This reference is a map, not a manual.
 
@@ -177,7 +177,7 @@ Sparks-library management. Reads `.sparkwing/sparks.yaml`.
 
 ### debug
 
-Interactive debugging for pipeline runs. Ephemeral — pause directives live only on the run they launch, never in pipeline source.
+Interactive debugging for pipeline runs. Ephemeral -- pause directives live only on the run they launch, never in pipeline source.
 
 | Command | What |
 |---|---|

@@ -21,14 +21,14 @@ target: one cheap VPS + team laptops.
 ```bash
 cd install/docker-compose
 cp .env.example .env
-# edit .env — set SPARKWING_API_TOKEN, GITHUB_WEBHOOK_SECRET, and
+# edit .env -- set SPARKWING_API_TOKEN, GITHUB_WEBHOOK_SECRET, and
 # public hostnames
 docker compose up -d
 docker compose logs -f
 ```
 
 You'll need a reverse proxy in front handling TLS. Caddy is recommended
-for the simplest setup — see `install/docker-compose/Caddyfile.example`.
+for the simplest setup -- see `install/docker-compose/Caddyfile.example`.
 Traefik, nginx, or Cloudflare tunnels also work.
 
 What runs:
@@ -46,7 +46,7 @@ All state persists in docker volumes. Backup `controller-data`,
 Works anywhere docker-compose runs:
 
 - **$5-10/mo VPS** (Hetzner, Vultr, Digital Ocean, Linode)
-- **Fly.io** (with minor tweaks — Fly has its own TLS + networking)
+- **Fly.io** (with minor tweaks -- Fly has its own TLS + networking)
 - **Railway** (similar)
 - **Home lab** (Raspberry Pi, old Mac, always-on desktop)
 - **Tailscale + a laptop at the office** (no public IP needed)
@@ -184,7 +184,7 @@ value in `~/Library/LaunchAgents/com.sparkwing.runner.plist` (or the
 systemd unit) matches what's set in the server's `.env`.
 
 **Runner connects but never claims a job.** Check that you're actually
-triggering jobs — `curl -X POST https://api.example.com/trigger?pipeline=foo`
+triggering jobs -- `curl -X POST https://api.example.com/trigger?pipeline=foo`
 with the bearer header. Also check `sparkwing.example.com` dashboard
 for the job status.
 
@@ -202,5 +202,5 @@ macOS, the LaunchAgent inherits the user's Docker socket.
 **Logs stop arriving in the dashboard.** Check `sparkwing-logs` health
 on the server and the logs hostname is reachable from the laptop. The
 runner silently drops log writes on HTTP errors to avoid wedging the
-job — use `curl https://logs.example.com/health` from the laptop to
+job -- use `curl https://logs.example.com/health` from the laptop to
 confirm connectivity.

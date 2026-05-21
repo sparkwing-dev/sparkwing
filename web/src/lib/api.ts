@@ -85,7 +85,7 @@ let _backoffUntil = 0;
 
 function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
   if (Date.now() < _backoffUntil) {
-    return Promise.reject(new Error("rate-limited — backing off"));
+    return Promise.reject(new Error("rate-limited -- backing off"));
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -242,7 +242,7 @@ export interface Node {
   // True when the node is `.Dynamic()` (explicit) or the source of an
   // ExpandFrom (auto-inferred). Drives the rainbow "DYNAMIC" pill in
   // the DAG view, signaling that the plan preview isn't authoritative
-  // — the node may spawn children at runtime.
+  // -- the node may spawn children at runtime.
   dynamic?: boolean;
   // True when the node was declared as an approval gate
   // (plan.Approval). Stays true for the whole run; the pill color
@@ -600,7 +600,7 @@ export async function listRunEvents(
 
 // RunEvent mirrors store.Event on the wire. Payload is opaque JSON;
 // consumers cast it per kind. The set of kinds is documented in
-// docs/design/structured-sse-events.md — adding a new kind on the
+// docs/design/structured-sse-events.md -- adding a new kind on the
 // server is backward-compatible as long as clients tolerate unknown
 // kinds (useRunEvents does, via a catch-all callback).
 export interface RunEvent {
@@ -693,7 +693,7 @@ export interface PipelineMeta {
   tags?: string[];
 }
 
-// Stops polling /api/v1/pipelines after the first 404 — the local
+// Stops polling /api/v1/pipelines after the first 404 -- the local
 // dev server (sparkwing-local-ws) doesn't expose the pipeline
 // registry, only the controller does, and the empty fallback is fine
 // in both cases.

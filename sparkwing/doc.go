@@ -5,7 +5,7 @@
 // # The two-layer model
 //
 // A [Pipeline] returns a [Plan]. A Plan is a DAG of [JobNode]s. Each
-// JobNode in turn returns a [Work] — its own inner DAG of [WorkStep]s.
+// JobNode in turn returns a [Work] -- its own inner DAG of [WorkStep]s.
 // The outer layer is for cross-job structure (dependencies, retries,
 // approvals, dynamic expansion); the inner layer is for ordering the
 // concrete units of work inside one job. Most pipelines only use the

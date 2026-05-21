@@ -126,7 +126,7 @@ More prose.
 	// Both "Notes" headings would dedup-flag because we treat
 	// any repeated ### within a section as a duplicate. This is
 	// stricter than the spec, which only mentions the known
-	// categories — but flagging here is the conservative behavior.
+	// categories -- but flagging here is the conservative behavior.
 	issues := LintChangelog(body, fstest.MapFS{})
 	if len(issues) != 1 {
 		t.Fatalf("expected 1 issue, got %d", len(issues))

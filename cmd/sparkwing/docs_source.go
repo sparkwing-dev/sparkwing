@@ -142,7 +142,7 @@ func displayEmbedded(v string) string {
 }
 
 // printDiscoveryWarning writes the resolution's discovery warning, if
-// any, to stderr. Idempotent — callers can invoke once they know the
+// any, to stderr. Idempotent -- callers can invoke once they know the
 // resolution went through.
 func printDiscoveryWarning(r webResolution) {
 	if r.discoveryW != "" {

@@ -12,7 +12,7 @@ package sparkwing
 // Pipelines opt into help / examples via the optional provider
 // interfaces below.
 
-// (no imports — types only)
+// (no imports -- types only)
 
 // HelpProvider is optionally implemented by pipelines to contribute
 // a short description to `sparkwing run <name> --help`. One or two sentences

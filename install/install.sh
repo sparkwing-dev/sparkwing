@@ -97,7 +97,7 @@ PLATFORM="$(detect_platform)"
 log "detected platform: $PLATFORM"
 
 if ! command -v docker >/dev/null 2>&1; then
-  warn "docker not found on PATH. Most sparkwing jobs need Docker — install Docker Desktop / colima / rancher-desktop before running real work."
+  warn "docker not found on PATH. Most sparkwing jobs need Docker -- install Docker Desktop / colima / rancher-desktop before running real work."
 fi
 
 # ---------- collect config ----------

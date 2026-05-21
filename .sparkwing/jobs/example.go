@@ -436,7 +436,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"go vet ./cmd/...",
 			"vet: 12 packages, 0 findings",
 		}).Needs(fetchCheckout),
-		// Very chatty: 15 lines over 4.5s — what a "real" test runner feels like.
+		// Very chatty: 15 lines over 4.5s -- what a "real" test runner feels like.
 		chattyStep(w, "test", 4500, "33 tests passed across 3 packages", []string{
 			"discovering test packages: 3 found",
 			"compiling test binaries",

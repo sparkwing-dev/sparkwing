@@ -233,7 +233,7 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		fmt.Fprintln(w)
 	}
 
-	// Flat flag list — no per-group section headers. With sw-prefix,
+	// Flat flag list -- no per-group section headers. With sw-prefix,
 	// pipeline-author flags (unprefixed) and sparkwing flags (--sw-*)
 	// distinguish themselves visually; section labels add noise.
 	if len(flags) > 0 {
@@ -398,7 +398,7 @@ func hasFlagNamed(flags []FlagSpec, name string) bool {
 }
 
 // FlagValues holds typed pointers returned by bindFlags. Missing keys
-// panic — programmer error, not user error.
+// panic -- programmer error, not user error.
 type FlagValues map[string]any
 
 func (v FlagValues) String(name string) string {

@@ -528,7 +528,7 @@ func semverBehind(current, latest string) bool {
 }
 
 // goToolchainVersion shells out to `go version`. The user-facing answer
-// is "what compiler runs when sparkwing compiles .sparkwing/?" — that's
+// is "what compiler runs when sparkwing compiles .sparkwing/?" -- that's
 // the version on PATH, not the one that built the CLI.
 func goToolchainVersion() string {
 	bin, err := exec.LookPath("go")
@@ -611,7 +611,7 @@ func printInfoTable(info Info) {
 
 	buildLabel := v.BuildType
 	if v.HumanLabel != "" {
-		buildLabel = v.BuildType + " — " + v.HumanLabel
+		buildLabel = v.BuildType + " -- " + v.HumanLabel
 	}
 	row("sparkwing", v.Installed, "("+buildLabel+")")
 
@@ -620,9 +620,9 @@ func printInfoTable(info Info) {
 	}
 
 	if info.Toolchain.Go.Found {
-		row("go", info.Toolchain.Go.Version, "(your local toolchain — used to compile .sparkwing/)")
+		row("go", info.Toolchain.Go.Version, "(your local toolchain -- used to compile .sparkwing/)")
 	} else {
-		row("go", color.Dim("not installed"), "(your local toolchain — needed to compile .sparkwing/)")
+		row("go", color.Dim("not installed"), "(your local toolchain -- needed to compile .sparkwing/)")
 		fmt.Printf("  %-*s  %s\n", lblW, "", color.Cyan(goInstallHintForce()))
 	}
 
