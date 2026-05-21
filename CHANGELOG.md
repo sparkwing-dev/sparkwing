@@ -1,614 +1,431 @@
 # Changelog
 
-All notable changes to sparkwing are recorded here. Format follows
-[Keep a Changelog](https://keepachangelog.com/). See
-[VERSIONING.md](./VERSIONING.md) for the stability policy that
-governs what counts as a breaking change and when CHANGELOG entries
-are required.
+All notable changes to **sparkwing** are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). The release
+pipeline refuses to ship a new version without a matching entry below.
+
+## How to read this
+
+Each entry leads with a bold scope (`**sdk:**`, `**cli:**`, `**controller:**`,
+`**cache:**`, `**config:**`, `**release:**`, `**docs:**`, ...) so you can
+scan for the surface that affects you. Breaking changes get an inline
+`(Breaking)` marker after the scope and a link to a section in that
+release's [migration guide](docs/migrations/) -- click through for
+before/after code, ordering guidance, and gotchas the inline summary can't
+fit.
+
+What belongs here:
+
+- User-facing behavior. New features, surfaces, defaults, removals, fixes
+  that an adopter would notice.
+- Breaking changes. Every break in an exported `pkg/` or `sparkwing/` API,
+  CLI flag, wire protocol, or YAML config field. Tagged `(Breaking)` inline.
+- Migration steps for breaking changes, linked to the per-release guide.
+
+What does **not** belong here:
+
+- Internal refactors invisible to adopters. Renames inside `internal/`,
+  test reshuffles, snapshot regenerations.
+- Per-commit narrative. The release page is the narrative; commits are
+  the audit trail. The pre-release manicuring agent (see
+  [docs/changelog-style.md](docs/changelog-style.md)) consolidates related
+  commits into one user-facing entry.
+- Internal-only design docs and dev-only tooling unless adopters
+  meaningfully see the result.
+
+## Pre-1.0 caveat
+
+sparkwing is on the `v0.x` track. Per [VERSIONING.md](VERSIONING.md),
+breaking changes are permitted in minor bumps until v1.0.0. We do **hard
+cuts**: removed symbols are gone, not aliased, and there is no deprecation
+runway. Each minor release that breaks something ships a migration guide
+so the cut is documented even though it isn't softened. Releases at
+`v1.0.0+` are blocked at the release pipeline and require a deliberate
+code change to unlock.
+
+---
 
 ## [Unreleased]
 
+_No entries yet._
+
+## [v0.4.0] - 2026-05-20
+
+A large release that converges on the v1-ready API surface. Two
+foundational reshapes ship here: the **author-facing SDK** (`sparkwing/`)
+is cleaned up -- `*Node`/`*NodeGroup` types renamed to `*JobNode`/`*JobGroup`,
+30+ orchestrator-only plumbing symbols moved out, `Needs()` typed via the
+new `Dep` / `WorkDep` interfaces, and the cache / spawn / risk APIs
+reshaped -- and the **package layout** finalizes the public/private
+boundary (`orchestrator/` → `internal/`, `logs/` → `pkg/logs/`,
+`secrets/` → `internal/`, and several more moves). Adopters hit a lot of
+compile errors in one release; this is deliberate so the rest of the
+v0.x line can stay quiet.
+
+Other major adds: declarative target/runner config via new `backends.yaml`
+/ `runners.yaml` / `sources.yaml`; OpenAPI 3.0 spec for the controller
+HTTP API; `.apidiff/` snapshots for every covered package; storage +
+cipher conformance test suites; release tooling that auto-rewrites
+`[Unreleased]` to a versioned section and uses the CHANGELOG entry as
+the GitHub Release body.
+
 ### Added
 
-- `.sparkwing/jobs/changelog_lint.go` — `CheckChangelogLint` /
-  `LintChangelog(body, migrations fs.FS)` enforces the
-  `docs/changelog-style.md` rubric mechanically. Two checks: (1)
-  no duplicate `### <Category>` sub-headings within a single
-  `## [Unreleased]` / `## [vX.Y.Z]` section, (2) every
-  `- **<scope> (Breaking):**` entry in a versioned section must
-  link to a real `docs/migrations/v<X.Y.Z>.md#<anchor>` whose file
-  exists, anchor resolves to an H2 in that file, and whose version
-  matches the section. Inside `[Unreleased]` the link can be missing
-  (release-time agent fills it in) or point at
-  `docs/migrations/_unreleased.md`. Output: one
-  `CHANGELOG.md:<line>: <category>: <message>` per violation, with a
-  final `<N> issue(s)` summary. Wired into `sparkwing run lint`.
-  Pure Go, fully unit-tested (no filesystem reads in the pure
-  function — caller wires `os.DirFS`).
-- `.sparkwing/jobs/pre_v1_policy.go` — `CheckPreV1Policy` enforces the
-  README's "stays below v1.0.0" rule across the indirect signals the
-  existing `release.go` version-gate can't see: CHANGELOG.md must not
-  carry a `## [v1.x.x]` / `## v1.x.x` release section, VERSIONING.md
-  must not assert "v1.0.0 released/shipped/tagged" or equivalent, and
-  any local `v1.0.0+` git tag (proxy-cache poisoning fallout that
-  can't be undone) is surfaced as a warning so it doesn't go silent.
-  Wired into pre-push so doc drift can't sneak past the policy.
-- `sparkwing.Dep` and `sparkwing.WorkDep` closed interfaces for typed
-  dependency wiring. The unexported marker methods (`depID()` /
-  `workDepID()`) restrict implementors to sparkwing-defined live
+- **sdk:** `sparkwing.Dep` and `sparkwing.WorkDep` closed interfaces for
+  typed dependency wiring. Implementations are limited to sparkwing-defined
   handles -- Plan-layer `Dep` is `*JobNode` / `*ApprovalGate` /
   `*JobGroup`; Work-layer `WorkDep` is `*WorkStep` / `*StepGroup` /
-  `*SpawnSpec` / `*SpawnGenSpec`. The two interfaces are disjoint, so
-  layer-crossing (a `*WorkStep` in `*JobNode.Needs`, or vice versa)
-  is a compile-time error.
-- `sparkwing.NoCache` typed sentinel for explicit cache opt-out from a
-  `CacheOptions.ContentHash` function. Returning `NoCache` is distinct
-  from returning the zero `CacheKey`: operators see an "explicit
-  opt-out" log line vs a "missing key" warning, so a deliberate skip
-  is no longer indistinguishable from a hashing bug.
-  `CacheKey.IsNoCache()` reports the distinction.
-- Node body errors are now automatically prefixed with the node ID
-  when the author hasn't already prefixed them. Bare `return err` /
-  `errors.New("boom")` from a step now surfaces in dispatch logs as
+  `*SpawnSpec` / `*SpawnGenSpec`. The two interfaces are disjoint, so a
+  `*WorkStep` in `*JobNode.Needs` (or vice versa) is a compile-time
+  error.
+- **sdk:** `sparkwing.NoCache` typed sentinel for explicit cache opt-out
+  from a `CacheOptions.ContentHash` function. Distinct from the zero
+  `CacheKey`: operators see an "explicit opt-out" log line vs a "missing
+  key" warning, so deliberate skips no longer look like hashing bugs.
+- **sdk:** `EnvVarDocer` optional interface. Pipelines implementing
+  `EnvVars() []EnvVarDoc` declare the environment variables they read as
+  inputs; `sparkwing pipeline describe` and `sparkwing run <pipeline>
+  --help` surface them under an "environment variables" section
+  alongside typed `Inputs`. Prefer typed `Inputs` for user-controlled
+  values; `EnvVarDocer` is for process-wide config or external-system
+  integration that already uses env.
+- **sdk:** `OnTarget(...)` verb on `*JobNode` / `*WorkStep` and a
+  `sparkwing.Target(ctx)` accessor for per-target dispatch. Pairs with
+  the new `targets:` block in `pipelines.yaml` and the `--sw-target`
+  CLI flag.
+- **sdk:** `Workable` optional interfaces for declarative runner
+  selection: `Requires() []string`, `Prefers() []string`, `WhenRunner()
+  []string`. Chainable equivalents on `*JobNode` (`Requires`, `Prefers`,
+  `WhenRunner`) for direct authoring; the Workable form lets shared job
+  types carry their own constraints.
+- **sdk:** Pipelines can implement optional `Config() any` and `Secrets()
+  any` methods. The orchestrator resolves them at run-start from
+  `pipelines.yaml` `values:` / `secrets:` blocks, the matched trigger
+  spec, and any `targets[<active>]` overlay; step bodies read them via
+  `sparkwing.PipelineConfig[T](ctx)` and
+  `sparkwing.PipelineSecrets[T](ctx)`.
+- **sdk:** Node body errors are automatically prefixed with the node ID
+  when the author hasn't already prefixed them. Bare `return err` or
+  `errors.New("boom")` from a step surfaces in dispatch logs as
   `<node-id>: boom` so failure messages identify the failing node by
   default; authors writing richer messages keep their full content.
-- `sparkwing.EnvVarDocer` optional interface. Pipelines implementing
-  `EnvVars() []EnvVarDoc` declare the environment variables they read
-  as inputs; `sparkwing pipeline describe` and `sparkwing run
-  <pipeline> --help` surface these under an "environment variables"
-  section alongside the typed `Inputs`. Prefer typed `Inputs` for
-  user-controlled values; `EnvVarDocer` is for process-wide config or
-  external-system integration that already uses env.
-- `.golangci.yml` at the repo root. Balanced linter set:
-  bidichk, bodyclose, copyloopvar, errcheck, errorlint, govet
-  (enable-all minus fieldalignment/shadow), ineffassign, misspell,
-  nolintlint, staticcheck (minus QF*/ST1000/ST1020/ST1021),
-  unconvert, usestdlibvars. Formatters: gofumpt + goimports with
-  `github.com/sparkwing-dev` local prefix. Rule selection mirrors
-  what elite Go repos converge on per
-  `sparkwing-platform/RESEARCH-elite-comparison.md`.
-
-### Removed
-
-- `pkg/controller.Server.PoolListForTesting`. The method had zero
-  callers anywhere in the repo. If you need PVC introspection in
-  tests, add a same-package test helper in a `*_test.go` file.
+- **config:** New declarative YAML surfaces for target + runner
+  configuration. `backends.yaml` selects cache / logs / state backends
+  per environment with `match:` rules. `runners.yaml` declares named
+  runner pools with label constraints. `sources.yaml` declares config +
+  secrets sources per target. `pipelines.yaml` gains `targets:`,
+  `runners:`, `values:`, and `secrets:` fields. `profiles.yaml` gains
+  `default_runner:`.
+- **controller:** Cluster controller now exposes `GET
+  /api/v1/runs/{id}/attempts` (the retry-tree listing the dashboard's
+  Attempts dropdown reads) and supports `?full=1` on `POST
+  /api/v1/runs/{id}/retry` for the "rerun all" mode. Matches the laptop
+  controller's surface.
+- **controller:** `pkg/controller.Server` functional options
+  `WithArtifactStore` (enables `GET /api/v1/artifacts/{key}` for laptop
+  mode) and `WithReconcileHook` (runs a sweep closure before list-runs /
+  get-run reads, eliminating stale "running" rows from crashed in-process
+  orchestrators). Pool routes (`GET /api/v1/pool*`) are registered only
+  when `AttachPool` is also called.
+- **controller:** Stdout logs backend (`pkg/storage/stdoutlogs`) for
+  cluster runs that route logs to container stdout.
+- **controller:** SQLite state backend wired through the backend factory.
+- **cache:** `sparkwing-cache` accepts pflag-based command-line flags
+  for every setting (`--addr`, `--data-dir`, `--proxy-cache-dir`,
+  `--fetch-interval`, `--proxy-cache-ttl`, `--proxy-max-age`,
+  `--api-token`, `--auto-register-repos`, `--ssh-key-dir`,
+  `--git-fork-limit`). Each falls back to the corresponding env var so
+  existing k8s ConfigMap-style configurations work unchanged.
+- **wire:** OpenAPI 3.0 spec at `api/openapi.yaml` covering every public
+  controller route -- runs, nodes, steps, events, triggers, approvals,
+  concurrency, debug pauses, tokens, users, secrets, auth, agents,
+  trends, pipelines -- plus the mode-conditional pool (cluster) and
+  artifacts (laptop) routes. Two security schemes (`Authorization:
+  Bearer <token>` for service callers, `Authorization: Session <id>` for
+  dashboard browser flow) wired to the operations that require auth. 26
+  component schemas mirror `pkg/store` types. The HTTP surface is now a
+  formal contract (see VERSIONING.md).
+- **wire:** Checked-in API surface snapshots under `.apidiff/` for every
+  covered public package (21 files). The new `cmd/apidiff` tool walks
+  each package's AST and emits a deterministic text representation of
+  the exported declarations with godoc stripped. `sparkwing run lint`
+  regenerates snapshots into a tempdir and diffs against the checked-in
+  tree; drift fails CI with an educational message. Authors refresh the
+  baseline via `bash bin/regen-api-snapshot.sh` and review the snapshot
+  diff in the PR as the surface-change artifact.
+- **wire:** Conformance test suites for the three plug-in interfaces:
+  `pkg/storage.ArtifactStore`, `pkg/storage.LogStore`, and
+  `pkg/controller.Cipher`. Each suite lives in a sibling conformance
+  subpackage and exposes a `TestX(t, factory)` function any
+  implementation can call from its own `*_test.go` to verify it
+  satisfies the contract. Operations a partial implementation opts out
+  of (e.g., `Read` on the write-only `stdoutlogs.LogStore`) skip rather
+  than fail.
+- **wire:** `pkg/storage.ErrNotSupported` sentinel for operations a
+  partial implementation deliberately doesn't perform. Conformance
+  suites use `errors.Is` against this to know which subtests to skip.
+- **release:** `sparkwing run release` auto-rewrites `## [Unreleased]`
+  to `## [vX.Y.Z] - YYYY-MM-DD` and commits before tagging, so the
+  tagged commit ships with the versioned section in place. The
+  GH-Actions workflow extracts that section as the GitHub Release body
+  via `bin/extract-changelog-section.sh` -- the curated CHANGELOG entry
+  is the release page, not a commit log dump.
+- **release:** Hard refusal of any `v1.0.0+` tag. Pre-1.0 lock requires
+  a deliberate code change to unlock (bumping to v1+ commits the API
+  surface; this shouldn't happen by typo or `--bump major`). Companion
+  `pre_v1_policy.go` linter catches doc drift -- CHANGELOG must not
+  carry a `## [v1.x.x]` section, VERSIONING.md must not assert v1 has
+  shipped, and any local `v1.0.0+` git tag is surfaced as a warning.
+- **release:** CHANGELOG style + structure enforced by `changelog_lint.go`
+  (`LintChangelog(body, migrations fs.FS)`), wired into `sparkwing run
+  lint`. Two checks: no duplicate `### <Category>` sub-headings within a
+  single section; every `(Breaking)` entry in a versioned section links
+  to a real `docs/migrations/v<X.Y.Z>.md#<anchor>` whose file exists,
+  anchor resolves to an H2, and version matches.
+- **release:** `sparkwing run release` refuses to ship a version when
+  `CHANGELOG.md` `[Unreleased]` has no entries. Pairs with the existing
+  PR-time CI gate (`bin/check-changelog.sh`) that catches missing
+  entries at review time.
+- **release:** Pre-commit and pre-push pipelines (`sparkwing run
+  pre-commit` / `pre-push`) with version-freshness gating, govulncheck,
+  and a refusal-on-`replace` directive in `go.mod`.
+- **release:** `.golangci.yml` at the repo root with a balanced linter
+  set (gofumpt, goimports, govet, staticcheck, errcheck, errorlint,
+  bodyclose, copyloopvar, ineffassign, misspell, nolintlint, unconvert,
+  usestdlibvars, bidichk). Wired into the existing lint pipeline.
+- **docs:** `VERSIONING.md` defines the stability promise for `pkg/`,
+  `sparkwing/`, CLI flags, wire protocols, and YAML config formats;
+  spells out what counts as a breaking change; documents the pre-1.0
+  hard-cut stance.
+- **docs:** `docs/changelog-style.md` documents the CHANGELOG conventions
+  the pre-release manicuring agent applies. `docs/migrations/` carries
+  per-version migration guides.
+- **docs:** Curated godoc with `Example*` test functions across
+  `sparkwing/` and every covered `pkg/` package (`storage`, `store`,
+  `controller` + `client` + `pool`, `logs`, `pipelines`, `backends`,
+  `runners`, `sources`, `runner`, `docs`, `color`, `localws`). Top-tier
+  types use `[Type]` cross-reference links so `go doc` and pkg.go.dev
+  render them as navigable.
+- **docs:** `sparkwing.Bash` and `sparkwing.Exec` godoc now document the
+  signal-propagation contract end-to-end (SIGKILL to direct child on
+  `ctx` cancel, terminal SIGINT reaches the foreground process group,
+  grandchildren are not torn down on programmatic cancel).
 
 ### Changed
 
-- **Breaking:** Maintenance methods on `pkg/store.Store` hidden behind
-  the `store.Maintenance` bridge. The 9 reaper/sweep methods
+- **sdk (Breaking):** `*Node` → `*JobNode`, `*NodeGroup` → `*JobGroup`,
+  and `Node.RunsOn` / `NodeGroup.RunsOn` / `Node.RunsOnLabels` →
+  `Requires` / `Requires` / `RequiresLabels`. The package-level
+  `sparkwing.Job` and `sparkwing.JobGroup` constructors keep their
+  names; only the Go type names change. Workable struct types in
+  examples drop the `Job` suffix (`&BuildJob{}` → `&Build{}`) per the
+  new convention. JSON wire tags (`node`, `node_id`, `runs_on`,
+  `node_start`, ...) are preserved for log / snapshot compatibility.
+  See [migration guide](docs/migrations/v0.4.0.md#node-job-rename).
+- **sdk (Breaking):** `Needs(...any)` and `NeedsOptional(...any)` on
+  every dep-accepting type replaced with typed-dep signatures:
+  `Needs(...Dep)` for Plan-layer methods, `Needs(...WorkDep)` for
+  Work-layer methods. By-name string references to upstream nodes /
+  steps are no longer supported -- the interfaces are intentionally
+  closed to live handles. Patterns that built deps from yaml or other
+  runtime sources via string IDs must do a two-pass construction (create
+  all nodes / steps, store handles, then wire deps using the handles).
+  See [migration guide](docs/migrations/v0.4.0.md#typed-dep-interfaces).
+- **sdk (Breaking):** `CacheOptions.Key` → `Namespace`,
+  `CacheOptions.CacheKey` → `ContentHash`, `HasKey()` → `HasNamespace()`.
+  The new names match the actual concept (`Namespace` is a coordination
+  scope; `ContentHash` is the content-addressed key driver) and remove
+  the ambiguity that let two unrelated nodes collapse into one cache
+  entry when an upstream input was missing. See
+  [migration guide](docs/migrations/v0.4.0.md#cacheoptions-rename).
+- **sdk (Breaking):** `JobSpawn(...)` returns `*SpawnSpec` (was
+  `*SpawnHandle`); `JobSpawnEach(...)` returns `*SpawnGenSpec` (was
+  `*SpawnGroup`). Chainable methods (`Needs`, `SkipIf`) now live on the
+  spec types directly; the `Spec()` accessors are gone -- the handles
+  were thin wrappers around the specs. Code that chains
+  `sw.JobSpawn(w, ...).Needs(...)` is unchanged. See
+  [migration guide](docs/migrations/v0.4.0.md#spawn-types).
+- **sdk (Breaking):** `WorkStep.Destructive()` / `.AffectsProduction()`
+  / `.CostsMoney()` replaced by `.Risk("destructive")` /
+  `.Risk("prod")` / `.Risk("money")`. Labels are now author-defined
+  (any kebab-case string works, e.g. `.Risk("rotates-key")`). Profile
+  `auto_allow` switches from per-marker booleans to a list of labels.
+  See [migration guide](docs/migrations/v0.4.0.md#risk-labels).
+- **sdk (Breaking):** Roughly 30 orchestrator-only plumbing symbols
+  relocated from the `sparkwing` package to `internal/sparkwingruntime`.
+  Pipeline authors never called these -- they were always for code
+  rebuilding the orchestrator. Runtime-mutator methods
+  (`Plan.InsertChild`, `Plan.InsertExpanded`, `JobGroup.Finalize`,
+  `WorkStep.Fn`, `WorkStep.MarkDone`, `SpawnSpec.SetResolvedID`,
+  `SpawnSpec.MarkDone`) are no longer methods on the spec types; call
+  them via `sparkwing.RuntimePlumbing.Fns.<Name>(...)`. `RuntimePlumbing`
+  itself gains a `{Keys, Fns}` shape. See
+  [migration guide](docs/migrations/v0.4.0.md#runtime-plumbing).
+- **sdk (Breaking):** Author-facing surface cleanup. Renames:
+  `JobNode.OnTargetList()` → `OnTargets()`, `WorkStep.OnTargetList()` →
+  `OnTargets()`. Removals: `JobNode.OnFailureNodeID()`,
+  `JobNode.Dynamic()`, `JobNode.IsDynamic()`, `sparkwing.ToKebabCase`,
+  `sparkwing.LookupInstance`, `sparkwing.Runtime()` alias,
+  `sparkwing.WithJob` / `JobFromContext` / `JobStackFromContext`,
+  `sparkwing.SetDebug` (unexported -- `SPARKWING_DEBUG` at process
+  start is the only supported toggle). See
+  [migration guide](docs/migrations/v0.4.0.md#sdk-surface-cleanup).
+- **sdk (Breaking):** `TriggerInfo.Env` removed. Trigger-supplied values
+  now flow through the pipeline's typed `Config` struct via the
+  trigger's `values:` block in `pipelines.yaml` (e.g. `on.push.values`)
+  with a matching `sw:"..."` tag on a Config field, read in step bodies
+  via `sparkwing.PipelineConfig[T](ctx)`. See
+  [migration guide](docs/migrations/v0.4.0.md#trigger-values).
+- **runtime (Breaking):** Package layout reorganized to finalize the
+  public / private boundary:
+  - `orchestrator/` → `internal/orchestrator/`. User repos MUST migrate
+    to `pkg/runner.Main()`.
+  - `secrets/` → `internal/secrets/`. External consumers implement
+    `pkg/controller.Cipher` (two methods, `Seal` + `Open`).
+  - `logs/` → `pkg/logs/` (promoted: now part of the public surface).
+  - `controller/client/` → `pkg/controller/client/` (promoted).
+  - `logutil`, `bincache`, `otelutil`, `profile`, `repos` → `internal/`
+    (demoted: implementation detail).
+  - `internal/local/` collapsed into `pkg/controller/`; mode is now
+    determined by functional options (`AttachPool` for cluster;
+    `WithArtifactStore` + `WithReconcileHook` for laptop).
+  - `InProcessDispatcher` moved to `internal/inprocdispatch/`.
+
+  See [migration guide](docs/migrations/v0.4.0.md#package-relocations).
+- **runtime (Breaking):** Maintenance methods on `pkg/store.Store` hidden
+  behind the `store.Maintenance` bridge. The 9 reaper / sweep methods
   (`ReapExpiredTriggers`, `FailNodesInRun`, `FailStaleQueuedNodes`,
   `FailExpiredNodeClaims`, `ReapStaleConcurrencyHolders`,
   `ReapStaleConcurrencyWaiters`, `SweepExpiredConcurrencyCache`,
-  `SweepLRUConcurrencyCache`, `ReconcileConcurrencyKeys`) are no
-  longer on the public `Store` API. Call them via
-  `store.Maintenance.<Name>(s, ctx, ...)`. External adopters had no
-  prior use case for these -- they're crash-recovery and TTL sweeps
-  the controller runs on a schedule.
-- **Breaking:** Runtime-mutator methods removed from the author-facing
-  type surface and relocated behind `sparkwing.RuntimePlumbing.Fns`.
-  Affected methods: `Plan.InsertChild`, `Plan.InsertExpanded`,
-  `JobGroup.Finalize`, `WorkStep.Fn`, `WorkStep.MarkDone`,
-  `SpawnSpec.SetResolvedID`, `SpawnSpec.MarkDone`. These were always
-  orchestrator-only with no production pipeline-author callers. Tab
-  completion and reference docs no longer surface them on `*Plan`,
-  `*JobGroup`, `*WorkStep`, or `*SpawnSpec`. Test or tool code that
-  poked at these directly must call the bridge entry instead:
-  `sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(step, out)`.
-  `RuntimePlumbing` itself gains a `{Keys, Fns}` shape; existing
-  `RuntimePlumbing.<Key>` accessors move to `RuntimePlumbing.Keys.<Key>`.
-- **Breaking:** `JobSpawn(...)` returns `*SpawnSpec` instead of
-  `*SpawnHandle`; `JobSpawnEach(...)` returns `*SpawnGenSpec` instead
-  of `*SpawnGroup`. The chainable methods (`Needs`, `SkipIf`) now live
-  on the spec types directly, and the `Spec()` accessors are gone --
-  the handles were thin wrappers around the specs and disappear
-  entirely. Code that chains `sw.JobSpawn(w, ...).Needs(...).SkipIf(...)`
-  is unchanged. Code that stored the result as `*SpawnHandle` /
-  `*SpawnGroup` must update its type to `*SpawnSpec` /
-  `*SpawnGenSpec`, and any `spec := handle.Spec()` indirection
-  collapses (the handle IS the spec now).
-- **Breaking:** `Needs(...any)` and `NeedsOptional(...any)` on every
-  dep-accepting type (`*JobNode`, `*ApprovalGate`, `*JobGroup`,
-  `*WorkStep`, `*StepGroup`, `*SpawnSpec`, `*SpawnGenSpec`) replaced
-  with typed-dep signatures: `Needs(...Dep)` for Plan-layer methods,
-  `Needs(...WorkDep)` for Work-layer methods. The previous
-  `...any` signature accepted anything that compiled and validated at
-  runtime via a type switch -- wiring `42` or a typo'd field
-  reference would compile and fail with a runtime panic. The typed
-  interface forces the compiler to catch the bug. Hard cut: no
-  `...any` overload retained.
+  `SweepLRUConcurrencyCache`, `ReconcileConcurrencyKeys`) are no longer
+  on the public `Store` API. Call them via
+  `store.Maintenance.<Name>(s, ctx, ...)`. See
+  [migration guide](docs/migrations/v0.4.0.md#store-maintenance).
+- **controller (Breaking):** `pkg/controller.Server.WithSecretsCipher`
+  now takes a `pkg/controller.Cipher` interface instead of a concrete
+  `*secrets.Cipher`. Concrete-type callers continue to work via
+  structural typing; external consumers can now supply custom cipher
+  implementations without depending on sparkwing's secrets package. See
+  [migration guide](docs/migrations/v0.4.0.md#cipher-interface).
+- **cli (Breaking):** Five CLI flag renames:
+  - `--sw-change-directory` → `--sw-cd` (the `-C` short form is unchanged)
+  - `--sw-for` → `--sw-target` (the `Job.OnTarget("...")` author API is
+    unchanged)
+  - `--sw-on` → `--sw-profile`
+  - `--sw-from` → `--sw-ref` (env-var bridge `SPARKWING_FROM` →
+    `SPARKWING_REF`)
+  - `--sw-allow-destructive` / `--sw-allow-prod` / `--sw-allow-money`
+    collapsed into one `--sw-allow LABEL[,LABEL...]` flag (repeatable;
+    comma-separated).
 
-  By-name string references to upstream nodes/steps are no longer
-  supported -- the interfaces are intentionally closed to live
-  handles. Patterns that built deps from yaml or other runtime
-  sources via string IDs must now do a two-pass construction: first
-  create all steps and store their handles, then wire deps using
-  those handles.
-
-  **Migration:**
-
-  | Old | New |
-  |---|---|
-  | `n.Needs(other)` (typed node/gate/group) | unchanged |
-  | `n.Needs(node1, node2)` | unchanged |
-  | `n.Needs("upstream-name")` (by-name) | store the upstream's `*JobNode`/`*WorkStep` and pass it: `n.Needs(upstream)` |
-  | `n.Needs([]*JobNode{...})` (single-arg slice) | `n.Needs(slice...)` (splat) |
-  | `n.Needs([]any{...}...)` | rewrite element-by-element |
-  | `n.Needs(42)` (compiled, runtime panic) | compile error |
-
-  The `*JobGroup` dynamic-membership special case in `*JobNode.Needs`
-  is preserved -- only the entry-point type changed. The previously
-  documented "embedded `*WorkStep` via reflection" unwrap path on the
-  Work layer is removed -- no code in the repo used it, and the
-  typed interface makes the embed-and-unwrap pattern moot.
-
-  The companion `sparkwing/plan_validate.go` typo-detection
-  validator is removed: with by-name strings no longer accepted at
-  the API, every `n.DepIDs()` entry comes from a typed handle's
-  stored id and is guaranteed valid by construction. The CLI-flag
-  `--sw-start-at` / `--sw-stop-at` validator in
-  `internal/sparkwingruntime/plan_validate.go` is unaffected (operator
-  input is still a string at that boundary).
-- **Breaking:** `CacheOptions.Key` renamed to `CacheOptions.Namespace`,
-  and `CacheOptions.CacheKey` renamed to `CacheOptions.ContentHash`.
-  `HasKey()` renamed to `HasNamespace()`. Hard cut: the old field
-  names are removed, not aliased. Pre-1.0 sparkwing follows
-  hard-break semantics for renames. To migrate: rename `Key:` to
-  `Namespace:` and `CacheKey:` to `ContentHash:` in every
-  `.Cache(...)` call site; replace `HasKey()` with `HasNamespace()`.
-  The new names match the actual concept -- `Namespace` is a
-  coordination scope, `ContentHash` is the content-addressed key
-  driver -- and remove the ambiguity that let two unrelated nodes
-  collapse into one cache entry when an upstream input was missing.
-- `sparkwing.Bash` and `sparkwing.Exec` godoc now document the
-  signal-propagation contract end-to-end: `ctx` cancellation sends
-  SIGKILL to the direct child only (Go's `exec.CommandContext`
-  default), terminal SIGINT reaches the whole foreground process
-  group via the OS, and grandchildren spawned by bash subshells or
-  forking binaries are not torn down on programmatic cancel. `Bash`'s
-  godoc nudges callers toward `Exec` for argv-shaped invocations.
-- **Initial lint sweep.** Cleared 135 golangci-lint findings introduced
-  by the new `.golangci.yml` adoption. Mechanical mix: gofumpt
-  formatting across 77 files, US-locale spelling normalization (with
-  `cancelled` / `Cancelled` exempted because it's the persisted
-  `Outcome` constant), `usestdlibvars` (HTTP verbs/statuses pinned to
-  stdlib constants), unchecked error-return cleanup across cache /
-  controller / orchestrator / storage subsystems, `bodyclose` for
-  HTTP test bodies, `errorlint` `%w` wrapping, `nolintlint` directive
-  explanations, and idiomatic naming (`SparkAscii` -> `SparkASCII`,
-  `body_out` -> `bodyOut`). No behavior changes; the rename
-  `SparkAscii` -> `SparkASCII` is in `internal/orchestrator` (not
-  importable externally).
+  See [migration guide](docs/migrations/v0.4.0.md#cli-flag-renames).
+- **cli (Breaking):** Retired flags. `--sw-retry-of` / `--sw-full` use
+  `sparkwing runs retry RUN_ID [--failed | --all]`. `--sw-job` /
+  `--sw-prefer` declare runner selection in the pipeline via
+  `Job.Requires` / `Job.Prefers`. `--sw-backends-env` -- fix `match:`
+  rules in `backends.yaml` or `DetectEnvironment` logic.
+  `--sw-config` preset feature removed. `--help-all` removed
+  (`--help` now shows everything). Flag-group section headers in
+  `--help` and tab-completion dropped (one flat list). See
+  [migration guide](docs/migrations/v0.4.0.md#cli-retired-flags).
+- **cli (Breaking):** `wing` CLI binary retired. `sparkwing run` is the
+  only entry point. Scripts that invoked `wing ...` must update to
+  `sparkwing run ...`.
+- **config (Breaking):** `pipelines.yaml` `group:` field and the matching
+  `--group` flag on `sparkwing pipeline new` removed. The field had no
+  backing on the `pipelines.Pipeline` struct, so strict YAML parsing
+  rejected any file that used it. Strip `group:` lines from existing
+  `.sparkwing/pipelines.yaml` files. Plan-DAG UI grouping
+  (`sw.GroupJobs`, `GroupSteps`) is a separate feature and is
+  unaffected. See
+  [migration guide](docs/migrations/v0.4.0.md#pipelines-yaml-group).
+- **wire (Breaking):** `LogRecord` JSON shape loses the (always-empty)
+  `job` and `job_stack` fields, following the removal of
+  `sparkwing.WithJob` / `JobFromContext` / `JobStackFromContext`.
+  Consumers of JSON log streams that explicitly read these fields will
+  see them as missing rather than empty. See
+  [migration guide](docs/migrations/v0.4.0.md#logrecord-fields).
+- **cache:** `sparkwing-cache` business logic moved from
+  `cmd/sparkwing-cache/main.go` (~1700 LOC) into a new `internal/cache`
+  package. HTTP wire protocol unchanged; same routes, same shapes;
+  existing clients (`pkg/storage/sparkwingcache` adapter, etc.) work
+  without modification. Knobs (`APIToken`, `AutoRegisterRepos`,
+  `SSHKeyDir`, `GitForkLimit`) resolved from `cache.Config` instead of
+  ad-hoc env / hardcoded path reads inside the package; env-var
+  fallback now lives at the binary entry point.
+- **code-health:** `.golangci.yml` adoption cleared 135 findings across
+  the tree. Mechanical mix: gofumpt + goimports formatting, US-locale
+  spelling normalization (with `cancelled` / `Cancelled` exempted
+  because it's the persisted `Outcome` constant), `usestdlibvars` (HTTP
+  verbs / statuses pinned to stdlib constants), `errcheck` wraps,
+  `bodyclose`, `errorlint` `%w`, `nolintlint` directives, idiomatic
+  naming (`SparkAscii` → `SparkASCII`, etc.). No behavior changes.
 
 ### Fixed
 
-- `TrendPoint.avg_wait_ms` is now actually computed:
-  `started_at - created_at` averaged across each bucket's runs,
-  excluding rows with a zero `created_at` (legacy sentinel) or
-  with `created_at > started_at` (clock skew). The dashboard's
-  "avg wait" chart now shows real intake-to-start latency instead
-  of flat zero; OpenAPI's `avg_wait_ms` description was tightened
-  to match.
-- Stale doc comment on `handleWaiterNotify` referenced a
-  `coalesced` SSE event that the handler never emits. Rewrote it
-  to match the three terminal events the handler actually sends
-  (`ready`, `superseded`, `stream_end`) so the code, the doc
-  comment, and `api/openapi.yaml` all agree on the wire shape.
-
-### Docs
-
-- `api/openapi.yaml` — resolved the two `TODO: schema needs
-  verification` markers. `GET /api/v1/concurrency/{key}/notify` is
-  now documented as a server-sent event stream with the three
-  terminal events (`ready`, `superseded`, `stream_end`) the
-  controller actually emits, plus the `run_id` / `node_id` query
-  parameters it requires. `GET /api/v1/trends` and the `TrendPoint`
-  schema now spell out every field (`bucket`, `total`, `passed`,
-  `failed`, `cached`, `avg_dur_ms`, `p95_dur_ms`, `avg_wait_ms`),
-  the bucket-width rules, and the optional `pipeline` query
-  parameter. `avg_wait_ms` is documented as currently always zero
-  since the handler does not yet aggregate per-node wait time.
-
-### Changed
-
-- `sparkwing-cache` now resolves `APIToken`, `AutoRegisterRepos`,
-  `SSHKeyDir`, and `GitForkLimit` from `cache.Config` instead of
-  reading `SPARKWING_API_TOKEN`, `GITCACHE_REPOS`,
-  `SPARKWING_GITCACHE_CONCURRENCY`, and a hardcoded `/etc/ssh-key`
-  ad-hoc inside the package. Env-var fallback now lives in
-  `cmd/sparkwing-cache/main.go` alongside the other flags. Behavior
-  unchanged; existing deployments setting these env vars keep
-  working.
-- `sparkwing-cache` binary refactored: business logic moved from
-  `cmd/sparkwing-cache/main.go` (~1681 LOC, plus `proxy.go`) into a
-  new `internal/cache` package. The `cmd/sparkwing-cache/main.go`
-  shell is now 88 lines (flag parsing → `cache.Config` →
-  `cache.New(cfg)` → `srv.Run(ctx)`), matching the texture of the
-  other binary entry points. HTTP wire protocol unchanged; the same
-  routes accept the same requests and return the same shapes; the
-  same clients (`pkg/storage/sparkwingcache` adapter, etc.) work
-  with no change.
-
-### Fixed
-
-- Fragile `init()` ordering in `sparkwing-cache` where directory
-  creation ran at package-load time against hardcoded `/data/*`
-  paths, before `initDataDirs()` (or in the previous shape, before
-  env-var parsing) could rebind those paths. Directory creation now
-  happens inside `cache.New(cfg)` AFTER the resolved Config is in
-  hand, so the boot order is deterministic and reviewable.
-  `backgroundFetchLoop` / `proxyCleanupLoop` now accept the
-  cancellable ctx and exit cleanly when the process is asked to
-  drain (the prior shape blocked SIGTERM for the full sleep
+- **controller:** `TrendPoint.avg_wait_ms` is now actually computed
+  (`started_at - created_at` averaged per bucket, excluding zero-created
+  / clock-skew rows). The dashboard's "avg wait" chart shows real
+  intake-to-start latency instead of flat zero.
+- **controller:** Cluster controller's retry response now returns the
+  canonical shape (`{"status":"pending", "trigger_source":"retry",
+  "started_at":<creation time>}`) matching the laptop controller. Prior
+  cluster behavior used inconsistent field names (`trigger` vs
+  `trigger_source`) and status values (`running` vs `pending`);
+  dashboards talking to a cluster controller no longer need to
+  special-case the response.
+- **controller:** Cluster controller pre-allocates the Run row in
+  `pending` state before invoking a retry trigger, eliminating the
+  window where the retry had been accepted but no row existed yet.
+- **controller:** Dead route registration for `GET /api/v1/auth/session`
+  removed. The route was registered twice in `pkg/controller/server.go`;
+  Go's `http.ServeMux` specificity made the outer (unauthenticated)
+  registration win, leaving the inner copy as unreachable dead code.
+  Resolved to the intended unauthenticated path (the handler reads
+  `Authorization: Session <id>`, not a bearer token).
+- **controller:** Stale `handleWaiterNotify` doc comment referenced a
+  `coalesced` SSE event that the handler never emits. Rewritten to
+  match the three terminal events the handler actually sends (`ready`,
+  `superseded`, `stream_end`).
+- **cache:** Fragile `init()` ordering in `sparkwing-cache` where
+  directory creation ran at package-load time against hardcoded
+  `/data/*` paths, before env-var parsing could rebind those paths.
+  Directory creation now happens inside `cache.New(cfg)` AFTER the
+  resolved Config is in hand. `backgroundFetchLoop` /
+  `proxyCleanupLoop` accept the cancellable ctx and exit cleanly on
+  shutdown (the prior shape blocked SIGTERM for the full sleep
   interval).
-
-### Added
-
-- `sparkwing-cache` now accepts pflag-based command-line flags for
-  every setting: `--addr`, `--data-dir`, `--proxy-cache-dir`,
-  `--fetch-interval`, `--proxy-cache-ttl`, `--proxy-max-age`,
-  `--api-token`, `--auto-register-repos`, `--ssh-key-dir`,
-  `--git-fork-limit`. Each flag falls back to the corresponding env
-  var (`DATA_DIR`, `PROXY_CACHE_DIR`, `FETCH_INTERVAL`,
-  `PROXY_CACHE_TTL`, `PROXY_MAX_AGE`, `SPARKWING_API_TOKEN`,
-  `GITCACHE_REPOS`, `SSH_KEY_DIR`, `SPARKWING_GITCACHE_CONCURRENCY`,
-  plus `PORT` / `PORT_ADDR` for the bind address) so existing k8s
-  ConfigMap-style env configurations continue to work unchanged.
-- Conformance test suites for the three plug-in interfaces:
-  `pkg/storage.ArtifactStore`, `pkg/storage.LogStore`, and
-  `pkg/controller.Cipher`. Each suite lives in a sibling
-  conformance subpackage (`pkg/storage/conformance` for the storage
-  surfaces; `pkg/controller/ciphertest` for cipher) and exposes a
-  `TestX(t, factory)` function any implementation can call from its
-  own `*_test.go` to verify it satisfies the contract. All in-tree
-  implementations (`fs`, `s3`, `sparkwingcache`, `sparkwinglogs`,
-  `stdoutlogs`, `internal/secrets`) now run these suites as part
-  of `go test ./...`. Operations a partial implementation opts out
-  of (e.g., `Read` on the write-only `stdoutlogs.LogStore`, `List`
-  on `sparkwingcache`) skip rather than fail. See VERSIONING.md.
-- `pkg/storage.ErrNotSupported` sentinel for operations a partial
-  implementation deliberately doesn't perform. Conformance suites
-  use `errors.Is` against this to know which subtests to skip.
-  `stdoutlogs.ErrReadUnsupported` now wraps this sentinel via
-  `fmt.Errorf(...: %w, storage.ErrNotSupported)` so callers using
-  either the local or shared sentinel detect the case correctly;
-  the existing `ErrReadUnsupported` var name and identity are
-  preserved.
-
-### Fixed
-
-- Removed dead route registration for `GET /api/v1/auth/session`.
-  The route was registered twice in `pkg/controller/server.go`:
-  once on the outer router (no auth middleware) and once inside the
-  inner mux (wrapped by the bearer-token middleware). Go's
-  `http.ServeMux` specificity rules made the outer registration win
-  every time, leaving the inner copy as unreachable dead code.
-  Resolved to **outcome A**: the route is intentionally
-  unauthenticated — its handler resolves an
-  `Authorization: Session <id>` header rather than a bearer token,
-  so gating it behind bearer auth would 401 every legitimate caller.
-  The inner registration was deleted; the outer one stays as the
-  single source of truth. Behavior is unchanged (matches the
-  OpenAPI spec, which already showed `sessionAuth` only on this
-  route). Two regression tests added: a static check that fails if
-  any route is registered more than once in `server.go`, and a live
-  behavioral check that asserts `handleSession` runs outside the
-  bearer middleware even when an Authenticator is wired.
-
-### Added
-
-- `api/openapi.yaml` — OpenAPI 3.0 spec for `pkg/controller`'s
-  HTTP API. Covers every public route on the unified controller
-  (run lifecycle, nodes, steps, events, triggers, approvals,
-  concurrency, debug pauses, tokens, users, secrets, auth,
-  agents, trends, pipelines) plus the mode-conditional pool
-  (cluster) and artifacts (laptop) routes. Two security schemes
-  (`Authorization: Bearer <token>` for service callers,
-  `Authorization: Session <id>` for the dashboard's browser
-  flow) wired to the operations that require auth. 26 component
-  schemas mirror the `pkg/store` types. Wire protocol now has a
-  formal contract; see VERSIONING.md.
-- Checked-in API surface snapshots under `.apidiff/` for every
-  covered public package (21 files: `sparkwing.txt`,
-  `pkg_storage.txt`, `pkg_controller.txt`, ...). The new
-  `cmd/apidiff` tool walks each package's AST and emits a
-  deterministic text representation of the exported declarations
-  (functions, types with exported fields, methods grouped under
-  receivers, consts, vars) with godoc stripped. The `lint` pipeline
-  now regenerates snapshots into a tempdir and diffs against the
-  checked-in tree via `bin/check-api-snapshot.sh`; drift fails CI
-  with an educational message explaining how to fix it. Developers
-  refresh the baseline with `bash bin/regen-api-snapshot.sh` whenever
-  they intentionally change a public API; the snapshot diff in the PR
-  is the surface-change review artifact. See `VERSIONING.md`.
-
-### Docs
-
-- Curated godoc for the remaining `pkg/` packages: `pipelines`,
-  `controller` (and its `client` + `pool` subpackages), `backends`,
-  `runners`, `sources`, `localws`, `logs`, `store`, `runner`,
-  `docs`, `color`. Each now has a `doc.go` overview with `[Type]`
-  cross-references and `Example*` test functions where the package
-  can be exercised in-process (storage round-trip, pipelines YAML
-  parse, store sqlite open + run write, logs Server/Client via
-  httptest, controller construction + Cipher wiring). `pkg/runner`,
-  `pkg/docs`, `pkg/color`, `pkg/localws`, and `pkg/controller/pool`
-  ship doc.go-only (no executable example) where the package surface
-  is trivial or needs scaffolding the test runner can't provide.
-  Matches the style established for `sparkwing/` and `pkg/storage/`.
-- Removed three vestigial `sdk_doc.go` files
-  (`pkg/store/`, `pkg/logs/`, `pkg/controller/client/`) whose
-  contents claimed those packages were "not part of the stable
-  public surface." Stale: the recent rewrite promoted all three to
-  the covered surface in `VERSIONING.md`. Replaced by `doc.go`
-  files describing the actual contract.
-- Curated godoc for the `sparkwing/` author SDK and `pkg/storage/`
-  public interfaces. Added `doc.go` package overviews to both
-  (two-layer Plan / Work model, registration pattern, and modifier
-  categories for `sparkwing/`; ArtifactStore / LogStore / StateStore
-  contracts and implementation map for `pkg/storage/`). Added
-  `Example*` test functions covering the primary use cases (single-
-  job pipelines, typed cross-step Ref, blast-radius Risk, human
-  approval gates, artifact store round-trip, log tail read).
-  Top-tier types now use `[Type]` cross-reference links so `go doc`
-  and pkg.go.dev render them as navigable. Establishes the
-  documentation style applied across the remaining `pkg/` packages
-  in subsequent commits.
-
-### Added
-
-- `sparkwing run release` now refuses to ship a version when
-  `CHANGELOG.md` `[Unreleased]` has no entries. The PR-time CI gate
-  (`bin/check-changelog.sh` in `sparkwing run lint`) catches missing
-  entries at review time; this release-time fence catches them at
-  ship time so a version cannot escape empty even if the CI gate
-  was bypassed. Defense in depth.
-- `VERSIONING.md` at the repo root. Defines the stability promise for
-  `pkg/`, `sparkwing/`, CLI flags, wire protocols, and YAML config
-  formats; spells out what counts as a breaking change; documents the
-  deprecation procedure (godoc `// Deprecated:` + runtime warning +
-  CHANGELOG entry + at-least-one-minor grace period); acknowledges
-  the pre-1.0 caveat that minor bumps may still break per Go semver
-  convention.
-- CHANGELOG-required CI gate. `bin/check-changelog.sh` diffs the
-  current commit / working tree against `origin/main` (or `BASE_REF`
-  if set) and fails if any covered surface (`pkg/`, `sparkwing/`,
-  `cmd/`) changed without a matching `[Unreleased]` entry in
-  `CHANGELOG.md`. Excludes `_test.go`, `internal/`, `docs/`,
-  `examples/`, and `testdata/`. Wired into `sparkwing run lint` so
-  the existing fast-checks pipeline enforces it.
-
-### Fixed
-
-- Stale comments in `.sparkwing/jobs/release.go` and
-  `.sparkwing/pipelines.yaml` that claimed the release pipeline
-  validated a "CHANGELOG entry" (it didn't, until now) and that
-  CHANGELOG.md was "no longer maintained" (it is). Docstrings,
-  flag descriptions, examples, and the pipelines.yaml header now
-  describe the current behavior: CHANGELOG.md carries adopter
-  migration prose under `[Unreleased]`, validated at release time
-  by the new `check-changelog` node; the GH-Actions workflow's
-  `gh release create --generate-notes` is a separate commit-walk
-  summary for the GitHub Release page.
+- **cli:** `RunLocal` now surfaces `res.Error` when a run-lifecycle
+  failure occurred (previously dropped).
+- **cli:** sqlite state without an explicit path falls back to
+  `DefaultStateDB` (previously empty-string).
+- **cli:** `opts.SparkwingDir` is now treated as the directory, not the
+  `pipelines.yaml` path.
+- **cli:** Tab-completion wires `--sw-target` / `--sw-prefer` /
+  `--sw-backends-env` / `--sw-job` correctly.
+- **cli:** OnTarget-skipped jobs are hidden from the CLI plan listing
+  (UI metadata still surfaces the skip), and when shown they render
+  dimmed with a `[skip: target]` marker.
 
 ### Removed
 
-- `sparkwing.SetDebug` is no longer exported. It was a test-only
-  helper with a single in-tree caller (the package's own
-  `debug_test.go`); it now lives as an unexported `setDebug` in a
-  `_test.go` file. Production code cannot flip the debug flag at
-  runtime; `SPARKWING_DEBUG` at process start is the only supported
-  toggle. Tests outside this module that called `sparkwing.SetDebug`
-  will not compile after this release.
+All breaking removals in this release are paired with replacements and
+listed above under **Changed**. Quick inventory: `sparkwing.SetDebug`
+(debug flag now `SPARKWING_DEBUG`-only), `JobNode.OnFailureNodeID()`,
+`JobNode.Dynamic()` / `IsDynamic()`, `sparkwing.ToKebabCase`,
+`sparkwing.LookupInstance`, `sparkwing.Runtime()` alias,
+`sparkwing.WithJob` / `JobFromContext` / `JobStackFromContext`,
+`LogRecord.Job` / `JobStack` fields (and the always-empty `job` /
+`job_stack` JSON tags), `TriggerInfo.Env`, `pipelines.yaml` `group:`
+field, `--group` flag on `pipeline new`, `--sw-retry-of` / `--sw-full`
+/ `--sw-job` / `--sw-prefer` / `--sw-backends-env` / `--sw-config` /
+`--help-all` CLI flags, the `wing` CLI binary, `internal/local/`
+package (collapsed into `pkg/controller/`).
 
-### Changed
-
-- `gofmt -w` sweep across the repo. No semantic change; cleans up
-  drift so future commits aren't noisy with unrelated formatting
-  changes.
-- `sparkwing.SetWorkDir` and `sparkwing.SetGit` godocs updated to
-  reflect their real consumers. `SetWorkDir` stays exported (cross-
-  package tests in `sparkwing/inputs/...` consume it); the doc now
-  names the SDK-test role honestly rather than calling it
-  "intended for tests". `SetGit`'s doc names the two
-  orchestrator boot-time call sites that wire it.
-
-### Added
-
-- Promoted `orchestrator/store/` to `pkg/store/`. The persisted
-  run/node/event data model is now explicitly part of the public
-  SDK surface (stability promise): tooling on top of sparkwing
-  (custom dashboards, analytics, audit pipelines, alternative
-  controllers) can import the canonical types without reaching
-  through `orchestrator/`.
-- `pkg/runner` package with `runner.Main()`: the user-facing entry
-  point that `.sparkwing/main.go` imports. Wraps `orchestrator.Main()`
-  so internal changes to the orchestrator package don't propagate
-  into user repos' `main.go`.
-
-### Changed
-
-- Moved `orchestrator/` to `internal/orchestrator/`. User repos
-  that already migrated to `pkg/runner.Main()` (shipped in the
-  previous release) see no change -- the shim's import updated
-  transparently. User repos still importing
-  `github.com/sparkwing-dev/sparkwing/orchestrator` directly MUST
-  migrate to `github.com/sparkwing-dev/sparkwing/pkg/runner` and
-  call `runner.Main()`. The soft-migration runway ends with this
-  release.
-- Moved `InProcessDispatcher` out of `pkg/controller` into
-  `internal/inprocdispatch/`. `pkg/controller.Dispatcher` interface
-  and `NoopDispatcher` stay public; the in-process implementation
-  (which referenced `orchestrator.Backends` in its public field)
-  is now private, since it has no production callers (only one
-  full-loop test used it). External consumers wiring a controller
-  use `NoopDispatcher` or their own `Dispatcher` implementation.
-- `.sparkwing/main.go` template now imports
-  `github.com/sparkwing-dev/sparkwing/pkg/runner` instead of
-  `.../orchestrator`. Newly-generated user repos pick up the new
-  path; existing user repos continue to work with the direct
-  `orchestrator` import and can migrate at their leisure (or on the
-  next regenerate / SDK bump).
-- `pkg/controller.Server.WithSecretsCipher` now takes a
-  `pkg/controller.Cipher` interface instead of a concrete
-  `*secrets.Cipher`. Code that passes a `*secrets.Cipher`
-  continues to work -- the concrete type satisfies the interface
-  via Go's structural typing. External consumers can now supply
-  custom cipher implementations without depending on
-  sparkwing's secrets package.
-- Moved `secrets/` to `internal/secrets/`. The AEAD cipher and
-  helpers are no longer exported from this module; external
-  consumers should implement `pkg/controller.Cipher` (two methods,
-  `Seal` + `Open`) and pass that to `WithSecretsCipher`. Consumers
-  using `secrets.Cipher` directly outside this repo will need to
-  either migrate to implementing `pkg/controller.Cipher` or vendor
-  a copy of the cipher.
-- Promoted `logs/` to `pkg/logs/`. The HTTP logs service and its
-  client are now explicitly part of the public API surface
-  (stability promise); `pkg/storage/sparkwinglogs/` already
-  depended on `logs.Client` / `logs.Server` types publicly, so this
-  just makes the existing reality match the import path. Consumers
-  outside this repo importing the old `logs/` path must update on
-  next `go.mod` bump.
-- Moved several packages to clarify the public/private boundary:
-  - `logutil`, `bincache`, `otelutil`, `profile`, `repos` →
-    `internal/` (implementation detail, no external stability
-    promise).
-  - `controller/client` → `pkg/controller/client` (intended-public
-    HTTP client lib; stability promise).
-
-  No public API change to any moved package; only the import path.
-  Sibling repos that imported the moved top-level packages directly
-  (sparks-core, moonborn-ws, okbot, moonborn-web, rangz-web) will
-  break on next `go.mod` bump and need their imports updated.
-- Collapsed `internal/local/` into `pkg/controller/`. The same
-  control-plane code now serves both laptop and cluster modes; the
-  mode is determined by which functional options the consumer sets
-  (`AttachPool` for cluster; `WithArtifactStore` + `WithReconcileHook`
-  for laptop). Eliminates ~30 duplicated files and the maintenance
-  tax of keeping them in sync.
-
-### Added
-
-- `pkg/controller.Server` functional options `WithArtifactStore` and
-  `WithReconcileHook`. Each unset option leaves the corresponding
-  route or behavior unwired:
-  - `WithArtifactStore` enables `GET /api/v1/artifacts/{key}`
-    (laptop mode); cluster mode leaves the route unregistered so
-    requests 404.
-  - `WithReconcileHook` runs a sweep closure (laptop wires
-    `orchestrator.ReconcileOrphanedLocalRuns`) before list-runs and
-    get-run reads, eliminating stale "running" rows from crashed
-    in-process orchestrators.
-- Pool routes (`GET /api/v1/pool*`) are now registered only when
-  `AttachPool` was called. Laptop mode leaves the routes
-  unregistered.
-
-### Removed
-
-- `internal/local/` package. Laptop-mode control plane is now
-  `pkg/controller/` configured via `WithArtifactStore` +
-  `WithReconcileHook`.
-
-### Fixed
-
-- Cluster controller's retry response now returns the canonical
-  shape (`{"status":"pending", "trigger_source":"retry", "started_at":<creation time>}`)
-  matching the laptop controller. Prior cluster behavior used
-  inconsistent field names (`trigger` vs `trigger_source`) and status
-  values (`running` vs `pending`), so dashboards talking to a cluster
-  controller had to special-case the response shape.
-
-### Added
-
-- Cluster controller now exposes `GET /api/v1/runs/{id}/attempts`
-  (the retry-tree listing that powers the dashboard's Attempts
-  dropdown) and supports the `?full=1` query parameter on
-  `POST /api/v1/runs/{id}/retry` for the "rerun all" mode. Behavior
-  matches the laptop controller's surface.
-
-### Changed
-
-- Cluster controller now pre-allocates the Run row in `pending`
-  state before invoking a retry trigger, eliminating the window
-  where the retry has been accepted but no row exists yet. Matches
-  the laptop controller's pre-allocate pattern from
-  `POST /api/v1/triggers`.
-
-### Removed
-
-- Dropped the `group:` field from `pipelines.yaml` entries and the
-  matching `--group` flag on `sparkwing pipeline new`. The field had
-  no backing on the `pipelines.Pipeline` struct, so strict YAML
-  parsing rejected any file that used it, breaking
-  `sparkwing pipeline list` and `sparkwing run` tab-complete. Strip
-  `group:` lines from existing `.sparkwing/pipelines.yaml` files.
-  Plan-DAG UI grouping (`Job.Group(...)`, `sw.GroupJobs`, `*Group`,
-  `GroupSteps`) is a separate feature and is unaffected.
-
-### Changed
-
-- `WorkStep.Destructive()` / `.AffectsProduction()` / `.CostsMoney()` replaced
-  by `.Risk("destructive")` / `.Risk("prod")` / `.Risk("money")`; labels are
-  now author-defined (any kebab-case string works, e.g. `.Risk("rotates-key")`).
-  Consumer repos using the old methods must update.
-- `--sw-allow-destructive` / `--sw-allow-prod` / `--sw-allow-money` collapsed
-  into one `--sw-allow LABEL[,LABEL...]` flag (repeatable; comma-separated
-  allowed). Profile `auto_allow` is now a list of labels
-  (`auto_allow: [destructive]`) instead of per-marker booleans.
-- Renamed `--sw-change-directory` to `--sw-cd`. The `-C` short form is unchanged.
-- Renamed `--sw-for` to `--sw-target`. The `Job.OnTarget("...")` author API is unchanged.
-- Renamed `--sw-on` to `--sw-profile` (and its argument `NAME` to `PROFILE`).
-- Renamed `--sw-from` to `--sw-ref` (and the env-var bridge `SPARKWING_FROM` to `SPARKWING_REF`).
-- Tightened `--sw-*` flag descriptions in `--help`. No behavior change.
-- Tightened `--sw-dry-run` description (no behavior change).
-- Moved 15 orchestrator-only plumbing functions out of the sparkwing package
-  into `internal/sparkwingruntime`. Pipeline authors never call these;
-  relocation tightens the author-facing surface visible in IDE autocomplete
-  and godoc. No behavior change.
-- Moved Plan-layer plumbing (`GuardPlanTime`, `IsPlanTime`, `ValidateStepRange`,
-  `SuggestClosest`, `PreviewPlan`) from `sparkwing` to
-  `internal/sparkwingruntime`. Pipeline authors do not call these. No behavior
-  change.
-- Renamed `JobNode.OnTargetList()` to `JobNode.OnTargets()`. The setter
-  `OnTarget(...)` is unchanged.
-- Renamed `WorkStep.OnTargetList()` to `WorkStep.OnTargets()` for parity with
-  the JobNode rename. The setter `WorkStep.OnTarget(...)` is unchanged.
-- Moved pipeline-registration plumbing (`WithPipelineResolver`,
-  `WithPipelineAwaiter`, `DescribeAll`, `DescribePipelineByName`) from the
-  `sparkwing` package to `internal/sparkwingruntime`. Pipeline authors do not
-  call these.
-- Moved deep-plumbing functions (`WithInputs`, `WithPipelineSecrets`,
-  `DecodePipelineConfig`, `ResolvePipelineSecrets`) from `sparkwing` to
-  `internal/sparkwingruntime`. These functions only matter to code rebuilding
-  the orchestrator; sparkwing retains `WithPipelineConfig`,
-  `WithSecretResolver`, `ResolvePipelineConfig` as platform-extensibility
-  primitives.
-- Moved `WithLogger` and `WithNode` from `sparkwing` to
-  `internal/sparkwingruntime`. Authors do not call these; `LoggerFromContext`
-  and `NodeFromContext` remain in sparkwing for extensibility.
-- Extracted 6 `sw:"..."` struct-tag reflection helpers (`parseSWTags`,
-  `coerceAssign`, `toString`/`toBool`/`toInt64`/`toFloat64`) to a new
-  `internal/swtags` package, used by both sparkwing and
-  `internal/sparkwingruntime`. No behavior change, no public API change.
-
-### Removed
-
-- `JobNode.OnFailureNodeID()`. Use `OnFailureNode()` with a nil check.
-- `JobNode.Dynamic()` and `JobNode.IsDynamic()`. Dynamic-node detection is via
-  `Plan.IsDynamicNode(id)`, which auto-detects ExpandFrom sources.
-- `sparkwing.ToKebabCase` (unused string utility) and `sparkwing.LookupInstance`
-  (no callers anywhere). Consumer repos using either must inline their own
-  equivalent.
-- `sparkwing.Runtime()` — use `sparkwing.CurrentRuntime()` instead. The alias
-  had no production callers.
-- `sparkwing.WithJob`, `JobFromContext`, `JobStackFromContext` — zero callers,
-  no integration anywhere. The nested-job breadcrumb design they were
-  placeholding for was superseded by `Ref` / `RunAndAwait` / `SpawnNode`,
-  which use different mechanisms. The `LogRecord.Job` and `LogRecord.JobStack`
-  fields are also dropped; the JSON wire shape loses the (always-empty)
-  `job` and `job_stack` fields.
-- Retired `--sw-retry-of` and `--sw-full`; use `sparkwing runs retry RUN_ID [--failed | --all]`.
-- Retired `--sw-job` and `--sw-prefer`; runner selection is now exclusively Plan-layer via `Job.Requires` / `Job.Prefers`. If you used these flags, declare the constraint in the pipeline instead.
-- Retired `--sw-backends-env`. `backends.yaml` environment selection is now exclusively auto-detect — if it picks wrong, fix the `match:` rules in `backends.yaml` or the `DetectEnvironment` logic.
+Non-breaking removals (no replacement needed): `PoolListForTesting` on
+`pkg/controller.Server` (had zero callers anywhere; add a same-package
+test helper in a `*_test.go` file if you need PVC introspection in
+tests). Vestigial `sdk_doc.go` files under `pkg/store/`, `pkg/logs/`,
+and `pkg/controller/client/` (replaced by `doc.go` files describing the
+actual public surface).
