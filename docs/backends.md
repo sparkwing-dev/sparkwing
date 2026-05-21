@@ -58,7 +58,21 @@ rule contributes only the detect predicate).
 | --- | --- | --- |
 | `cache` | `filesystem`, `s3`, `gcs`, `azure-blob`, `controller` | Content-addressed artifact and compiled-binary store |
 | `logs`  | `filesystem`, `s3`, `gcs`, `azure-blob`, `controller`, `stdout` | Per-job log stream persistence |
-| `state` | `sqlite`, `postgres`, `mysql`, `controller` | Run records, plan snapshots, status |
+| `state` | `sqlite`, `postgres`, `s3`, `gcs`, `azure-blob`, `controller` | Run records, plan snapshots, status |
+
+State backends correspond to deployment modes. See
+[Deployment modes](deployment-modes.md) for when to pick each:
+
+- `sqlite` -- laptop-local (Mode 1).
+- `s3`, `gcs`, `azure-blob` -- per-run NDJSON state on a shared bucket
+  (Mode 2). No coordinated cache or triggers.
+- `postgres` -- shared database for cross-runner coordination
+  (Mode 3). Triggers, approvals, debug pauses all work.
+- `controller` -- runners talk to a hosted controller over HTTP
+  (Mode 4). The controller owns the underlying database.
+
+`mysql` is reserved in the schema but not implemented; declaring it
+fails at run start with a clear error.
 
 Required fields per type:
 

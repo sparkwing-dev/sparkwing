@@ -22,6 +22,7 @@
       "label": "Infrastructure",
       "slugs": [
         "deployment",
+        "deployment-modes",
         "self-hosting",
         "backends",
         "scheduling",
