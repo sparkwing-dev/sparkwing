@@ -7,10 +7,10 @@
 //
 // [ArtifactStore] is a content-addressed blob store. [LogStore]
 // persists per-node log streams keyed by (runID, nodeID). [StateStore]
-// is the relational run-record handle (runs, nodes, steps,
-// annotations, approvals); it's a type alias for *store.Store
-// because the orchestrator's surface is broad enough that defining a
-// minimal method set wouldn't model the real contract.
+// is the run-record handle (runs, nodes, steps, annotations,
+// approvals, dispatches, debug pauses). The SQLite-backed
+// *store.Store satisfies it today; Postgres, HTTP (controller), and
+// object-store NDJSON backends slot in behind the same interface.
 //
 // # Implementations
 //

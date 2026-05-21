@@ -73,6 +73,12 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
+// Close releases resources held by the client. The HTTP transport
+// runs idle connections under its own GC; Close is a no-op kept on
+// the type so a Client satisfies the storage.StateStore lifecycle
+// contract that *store.Store already does.
+func (c *Client) Close() error { return nil }
+
 // --- Runs ---
 
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error {

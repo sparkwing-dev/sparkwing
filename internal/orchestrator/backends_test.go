@@ -128,6 +128,8 @@ type fakeState struct {
 	createRunErr error
 }
 
+func (f *fakeState) Close() error { return nil }
+
 func (f *fakeState) CreateRun(ctx context.Context, r store.Run) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

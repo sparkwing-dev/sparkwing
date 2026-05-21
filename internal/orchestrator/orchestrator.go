@@ -563,7 +563,13 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if opts.State == nil {
 		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")
 	}
-	st := opts.State
+	// RunLocal is the SQLite path; LocalBackends and DumpRunState both
+	// need the concrete *store.Store. Other state-backend impls plug in
+	// via their own backend bundles when the matching specs land.
+	st, ok := opts.State.(*store.Store)
+	if !ok {
+		return nil, fmt.Errorf("state backend: RunLocal requires a sqlite-backed store, got %T", opts.State)
+	}
 	if ownsState {
 		defer func() { _ = st.Close() }()
 	}

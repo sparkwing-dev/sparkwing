@@ -22,6 +22,7 @@ type captureBackend struct {
 	gitSHA   string
 }
 
+func (b *captureBackend) Close() error                                        { return nil }
 func (b *captureBackend) CreateRun(ctx context.Context, r store.Run) error    { return nil }
 func (b *captureBackend) FinishRun(ctx context.Context, _, _, _ string) error { return nil }
 func (b *captureBackend) UpdatePlanSnapshot(ctx context.Context, _ string, _ []byte) error {

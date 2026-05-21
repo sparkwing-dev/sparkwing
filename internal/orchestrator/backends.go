@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -19,92 +20,26 @@ type Backends struct {
 	Concurrency ConcurrencyBackend
 }
 
-// StateBackend persists run/node/event/cache state.
+// StateBackend persists run/node/event/cache state. The orchestrator
+// holds it in Backends.State. It embeds storage.StateStore (the
+// methods every state-store implementation must expose) and adds the
+// wrapper-shaped methods that fold adapter logic on top of the raw
+// store (output extraction, trigger cycle detection, simplified-error
+// AppendEvent).
 type StateBackend interface {
-	CreateRun(ctx context.Context, r store.Run) error
-	FinishRun(ctx context.Context, runID, status, errMsg string) error
-	UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+	storage.StateStore
 
-	CreateNode(ctx context.Context, n store.Node) error
-	StartNode(ctx context.Context, runID, nodeID string) error
-	FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
-	// FinishNodeWithReason adds a structured failure reason
-	// (store.Failure*) + optional exit code.
-	FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
-	UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
-
-	// UpdateNodeActivity stamps status_detail and bumps last_heartbeat.
-	UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
-
-	// AppendNodeAnnotation appends one persistent summary string to
-	// the node's annotations list. Driven by sparkwing.Annotate().
-	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
-
-	// SetNodeSummary overwrites the node's markdown summary. Driven by
-	// sparkwing.Summary() emitted outside any step body. Last write
-	// wins.
-	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
-
-	// Per-step state. Mirror the step_start / step_end / step_skipped
-	// log events so the dashboard reads structured rows instead of
-	// re-parsing the log stream. Errors are advisory; callers swallow
-	// them the same way annotations do.
-	StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-	FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
-	SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-	AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
-	// SetStepSummary overwrites a step's markdown summary. Driven by
-	// sparkwing.Summary() emitted inside a step body. Last write wins.
-	SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
-	ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
-
-	// TouchNodeHeartbeat bumps last_heartbeat without status changes.
-	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
-
+	// AppendEvent mirrors store.AppendEvent but discards the sequence
+	// number; orchestrator call sites never read it.
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
-
-	// AddNodeMetricSample is advisory; drop-on-error is acceptable.
-	AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
-
-	// GetLatestRun returns the latest pipeline run matching statuses
-	// within maxAge. ErrNotFound when nothing matches.
-	GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
 
 	// GetNodeOutput returns a finished node's raw JSON output.
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
-
-	// GetNode reads a node row in full (status + outcome + output).
-	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-
-	// GetRun reads one run row.
-	GetRun(ctx context.Context, runID string) (*store.Run, error)
-
-	// Dispatch-snapshot surface. seq < 0 fetches the latest attempt.
-	WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
-	GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
-	ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
-
-	// Debug-pause surface.
-	CreateDebugPause(ctx context.Context, p store.DebugPause) error
-	GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error)
-	ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-	ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
-	SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 
 	// EnqueueTrigger spawns a new trigger; cycles are rejected with
 	// a wrapped error mentioning "cycle". parentNodeID + retryOf
 	// thread retry lineage across nested spawns.
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
-
-	// FindSpawnedChildTriggerID returns the most-recent child trigger
-	// at (parentRunID, parentNodeID) for pipeline, or "" + nil.
-	FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
-
-	// Approval-gate surface.
-	CreateApproval(ctx context.Context, a store.Approval) error
-	GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
-	ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
-	ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
 }
 
 // LogBackend issues per-node log sinks.
@@ -148,6 +83,12 @@ func LocalBackends(paths Paths, st *store.Store) Backends {
 type localState struct {
 	st *store.Store
 }
+
+// Close satisfies storage.StateStore. The orchestrator never invokes
+// Close through Backends.State; RunLocal owns the underlying store
+// lifecycle and closes it directly. The method exists so localState
+// satisfies the storage.StateStore interface.
+func (l localState) Close() error { return l.st.Close() }
 
 func (l localState) CreateRun(ctx context.Context, r store.Run) error {
 	return l.st.CreateRun(ctx, r)
