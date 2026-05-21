@@ -167,6 +167,29 @@ func TestRun_FailurePropagatesResult(t *testing.T) {
 	}
 }
 
+// Bare errors.New("boom") from a node body must be prefixed with the
+// node ID by dispatch, so failure surfaces identify the failing node
+// without authors having to wrap manually.
+func TestRun_FailureAutoWrapsErrorWithNodeID(t *testing.T) {
+	p := newPaths(t)
+	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
+
+	st, _ := store.Open(p.StateDB())
+	defer func() { _ = st.Close() }()
+	nodes, _ := st.ListNodes(context.Background(), res.RunID)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	got := nodes[0].Error
+	want := "orch-fail:"
+	if !strings.HasPrefix(got, want) {
+		t.Fatalf("node error = %q, want it to start with %q (node ID prefix)", got, want)
+	}
+	if !strings.Contains(got, "boom") {
+		t.Fatalf("node error = %q, expected the original message to survive the wrap", got)
+	}
+}
+
 func TestRun_FanOutFanIn(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fanout-ok"})

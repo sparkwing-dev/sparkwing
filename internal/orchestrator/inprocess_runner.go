@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
@@ -73,12 +74,28 @@ func runJobBody(ctx context.Context, node *sparkwing.JobNode) (any, error) {
 		return nil, fmt.Errorf("sparkwing: node %q has no Work; non-approval nodes must be registered via plan.Job", node.ID())
 	}
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
-		return nil, err
+		return nil, wrapNodeError(node.ID(), err)
 	}
 	if rs := node.ResultStep(); rs != nil {
 		return rs.Output(), nil
 	}
 	return nil, nil
+}
+
+// wrapNodeError prefixes err with the node ID so dispatch-level
+// failure messages identify the failing node by default. Authors who
+// already include the node ID (or any "<id>:" prefix) keep their
+// richer message intact -- the check is a literal prefix match, which
+// favors false-negatives (double-wraps for unusual prefixes) over
+// false-positives.
+func wrapNodeError(nodeID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.HasPrefix(err.Error(), nodeID+":") {
+		return err
+	}
+	return fmt.Errorf("%s: %w", nodeID, err)
 }
 
 // stateMetricsSink adapts StateBackend to nodemetrics.Sink. Errors

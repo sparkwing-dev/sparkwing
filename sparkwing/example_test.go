@@ -96,6 +96,20 @@ func ExampleWorkStep_Risk() {
 	_ = plan
 }
 
+// ExampleExec shows the argv-style command builder. Prefer it over
+// [sw.Bash] for invocations that don't need shell features: no shell
+// parsing means no quoting concerns even when argv values contain
+// spaces, dollar signs, or backticks.
+func ExampleExec() {
+	plan := sw.NewPlan()
+	sw.Job(plan, "push-image", func(ctx context.Context) error {
+		tag := "app:" + "dev"
+		_, err := sw.Exec(ctx, "docker", "push", tag).Run()
+		return err
+	})
+	_ = plan
+}
+
 // ExampleJobApproval inserts a human gate between build and deploy.
 // The orchestrator pauses the run when it reaches the gate, surfaces
 // the prompt in the dashboard, and proceeds only when an approver

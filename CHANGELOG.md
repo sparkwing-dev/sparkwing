@@ -16,6 +16,11 @@ are required.
   opt-out" log line vs a "missing key" warning, so a deliberate skip
   is no longer indistinguishable from a hashing bug.
   `CacheKey.IsNoCache()` reports the distinction.
+- Node body errors are now automatically prefixed with the node ID
+  when the author hasn't already prefixed them. Bare `return err` /
+  `errors.New("boom")` from a step now surfaces in dispatch logs as
+  `<node-id>: boom` so failure messages identify the failing node by
+  default; authors writing richer messages keep their full content.
 - `.golangci.yml` at the repo root. Balanced linter set:
   bidichk, bodyclose, copyloopvar, errcheck, errorlint, govet
   (enable-all minus fieldalignment/shadow), ineffassign, misspell,
@@ -38,6 +43,13 @@ are required.
   coordination scope, `ContentHash` is the content-addressed key
   driver -- and remove the ambiguity that let two unrelated nodes
   collapse into one cache entry when an upstream input was missing.
+- `sparkwing.Bash` and `sparkwing.Exec` godoc now document the
+  signal-propagation contract end-to-end: `ctx` cancellation sends
+  SIGKILL to the direct child only (Go's `exec.CommandContext`
+  default), terminal SIGINT reaches the whole foreground process
+  group via the OS, and grandchildren spawned by bash subshells or
+  forking binaries are not torn down on programmatic cancel. `Bash`'s
+  godoc nudges callers toward `Exec` for argv-shaped invocations.
 - **Initial lint sweep.** Cleared 135 golangci-lint findings introduced
   by the new `.golangci.yml` adoption. Mechanical mix: gofumpt
   formatting across 77 files, US-locale spelling normalization (with

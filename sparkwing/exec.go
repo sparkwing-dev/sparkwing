@@ -94,7 +94,7 @@ type Cmd struct {
 }
 
 // Bash starts building a shell command (run via "bash -c"). The line
-// is the shell program verbatim — there is no printf-style formatting,
+// is the shell program verbatim -- there is no printf-style formatting,
 // so dynamic values must come through .Env() (the shell expands the
 // var safely) or argv via Exec. Splicing dynamic values into a shell
 // string is a quoting/injection footgun.
@@ -107,17 +107,41 @@ type Cmd struct {
 //	sparkwing.Bash(ctx, `git -C "$R" status --porcelain`).Env("R", repo).MustBeEmpty("dirty tree")
 //	sparkwing.Bash(ctx, `if [[ -d .git ]]; then echo repo; fi`).Run()
 //
-// For dynamic argv, prefer Exec — no shell, no quoting.
+// Prefer [Exec] for argv-shaped invocations. No shell parsing means no
+// quoting concerns and safer handling of values that might contain
+// shell metacharacters (spaces, $, backticks). Reserve Bash for cases
+// that genuinely need shell features (pipes, redirects, globs,
+// conditionals).
+//
+// Signal propagation: the child runs under exec.CommandContext, which
+// kills the direct child (SIGKILL) when ctx is cancelled. Bash spawns
+// a shell that may fork further; those grandchildren are NOT signaled
+// by ctx cancellation and can outlive the run if the bash script
+// backgrounds work or wraps a long-lived helper. Terminal SIGINT
+// (Ctrl-C) goes to the whole foreground process group and DOES reach
+// grandchildren via the OS. Authors who need clean tree teardown on
+// programmatic cancel should use Exec on a single binary, or run the
+// shell program through `setsid` / `exec` and reap explicitly.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
 
 // Exec starts building an argv command (no shell). Use this whenever
-// you have argv-shaped inputs, especially anything dynamic — there is
+// you have argv-shaped inputs, especially anything dynamic -- there is
 // no shell, so no quoting and no injection risk.
 //
 //	sparkwing.Exec(ctx, "go", "test", "./...").Dir("internal").Run()
 //	sparkwing.Exec(ctx, "kubectl", "apply", "-f", manifestPath).Run()
+//	sparkwing.Exec(ctx, "docker", "push", tag).Run()
+//
+// Signal propagation: the binary runs under exec.CommandContext, which
+// sends SIGKILL to the direct child when ctx is cancelled. Most CLIs
+// (go, kubectl, docker, git) are single-process and terminate cleanly
+// on that signal. If the binary forks long-lived children of its own,
+// those grandchildren are NOT signaled by ctx cancellation -- the
+// same caveat as [Bash]. Terminal SIGINT (Ctrl-C) reaches the whole
+// foreground process group via the OS, so interactive cancel does
+// teardown the tree.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }
