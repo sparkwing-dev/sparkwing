@@ -48,28 +48,6 @@ code change to unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **cli:** `sparkwing run` no longer fails with `-modfile cannot be
-  used in workspace mode` when a `go.work` is in scope. When sparkwing
-  detects a workspace, it skips its `.resolved.mod` overlay so the
-  workspace's module resolution wins, and prints a one-line warning to
-  stderr so it's clear sparks pinning is dormant for that build. Honor
-  `GOWORK=off` and the explicit `GOWORK=<path>` form. Sparks resolve
-  itself (`sparkwing sparks resolve`) still requires no workspace in
-  scope and now returns a friendly error instead of the raw toolchain
-  message.
-
-### Changed
-
-- **docs:** Example struct names in sparkwing's own examples,
-  documentation, and template scaffolders normalized to drop the
-  redundant `Job` suffix (`&BuildJob{}` → `&Build{}`, `*BuildJob` →
-  `*Build`, etc.). The constructor verb (`sparkwing.Job(...)`)
-  provides "this is a job" context; the struct doesn't need to repeat
-  it. No SDK behavior change; adopter code that names its own structs
-  differently is unaffected.
-
 ## [v0.4.0] - 2026-05-20
 
 A large release that converges on the v1-ready API surface. Two
@@ -264,6 +242,13 @@ the GitHub Release body.
 
 ### Changed
 
+- **docs:** Example struct names in sparkwing's own examples,
+  documentation, and template scaffolders normalized to drop the
+  redundant `Job` suffix (`&BuildJob{}` → `&Build{}`, `*BuildJob` →
+  `*Build`, etc.). The constructor verb (`sparkwing.Job(...)`)
+  provides "this is a job" context; the struct doesn't need to repeat
+  it. No SDK behavior change; adopter code that names its own structs
+  differently is unaffected.
 - **sdk (Breaking):** `*Node` → `*JobNode`, `*NodeGroup` → `*JobGroup`,
   and `Node.RunsOn` / `NodeGroup.RunsOn` / `Node.RunsOnLabels` →
   `Requires` / `Requires` / `RequiresLabels`. The package-level
@@ -440,6 +425,17 @@ the GitHub Release body.
 
 ### Fixed
 
+- **cli:** `sparkwing run` no longer fails with `-modfile cannot be
+  used in workspace mode` when a `go.work` is in scope. When sparkwing
+  detects a workspace, it skips its `.resolved.mod` overlay so the
+  workspace's module resolution wins, and prints a one-line warning to
+  stderr so it's clear sparks pinning is dormant for that build. Honor
+  `GOWORK=off` and the explicit `GOWORK=<path>` form. Sparks resolve
+  itself (`sparkwing sparks resolve`) still requires no workspace in
+  scope and now returns a friendly error instead of the raw toolchain
+  message. The canonical multi-module local-dev pattern is documented
+  in `docs/sparks.md` -- list every repo you're editing in
+  `.sparkwing/go.work`.
 - **controller:** `TrendPoint.avg_wait_ms` is now actually computed
   (`started_at - created_at` averaged per bucket, excluding zero-created
   / clock-skew rows). The dashboard's "avg wait" chart shows real
@@ -505,3 +501,21 @@ test helper in a `*_test.go` file if you need PVC introspection in
 tests). Vestigial `sdk_doc.go` files under `pkg/store/`, `pkg/logs/`,
 and `pkg/controller/client/` (replaced by `doc.go` files describing the
 actual public surface).
+
+## [v0.3.0] - 2026-05-13
+
+Pre-changelog snapshot. Detailed history wasn't tracked in this file
+for releases before v0.4.0; the git log (`git log v0.2.1..v0.3.0`) is
+the source of truth. Subsequent versions are documented here in full.
+
+## [v0.2.1] - 2026-05-07
+
+Pre-changelog snapshot. See `git log v0.2.0..v0.2.1`.
+
+## [v0.2.0] - 2026-05-06
+
+Pre-changelog snapshot. See `git log v0.1.0..v0.2.0`.
+
+## [v0.1.0] - 2026-05-06
+
+Initial public release.
