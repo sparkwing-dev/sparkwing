@@ -1,4 +1,7 @@
-// Package store persists pipeline-run state to SQLite.
+// Package store persists pipeline-run state to a SQL database. SQLite
+// (modernc.org/sqlite) and Postgres (jackc/pgx via the stdlib driver)
+// are both supported behind the same *Store type; the dialect is
+// chosen at Open time.
 package store
 
 import (
@@ -11,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
@@ -36,23 +40,60 @@ const (
 )
 
 // Store is the persistent state layer. One instance per process; safe
-// for concurrent use by multiple orchestrator goroutines.
+// for concurrent use by multiple orchestrator goroutines. The
+// underlying database is SQLite or Postgres depending on which
+// constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect Dialect
 }
+
+// Dialect reports the SQL dialect this Store was opened against.
+// Useful for callers (tests, diagnostics) that need to know which
+// backend they're talking to; query methods on Store handle the
+// dialect difference internally.
+func (s *Store) Dialect() Dialect { return s.dialect }
 
 // Open initializes a SQLite database at path with WAL + foreign keys.
 func Open(path string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)", path)
-	db, err := sql.Open("sqlite", dsn)
+	return openSQL("sqlite", dsn, DialectSQLite)
+}
+
+// OpenPostgres initializes a Store against the Postgres database
+// identified by dsn (`postgres://user:pass@host:port/db?sslmode=...`).
+// Migrations run on first connect; concurrent OpenPostgres calls
+// against the same fresh database are coordinated by a transactional
+// advisory lock so exactly one runner applies the schema.
+func OpenPostgres(_ context.Context, dsn string) (*Store, error) {
+	if dsn == "" {
+		return nil, errors.New("OpenPostgres: dsn is required")
+	}
+	return openSQL("pgx", dsn, DialectPostgres)
+}
+
+// openSQL is the shared constructor for both dialects. Pool sizing
+// differs: SQLite is single-writer by construction; Postgres uses a
+// modest connection pool to absorb orchestrator concurrency without
+// overwhelming the server. Migration runs immediately after Open so
+// callers observe a fully provisioned schema on success.
+func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
-	// SQLite serializes writes; explicit single-connection avoids
-	// "database is locked" under load.
-	db.SetMaxOpenConns(1)
+	switch dialect {
+	case DialectSQLite:
+		// SQLite serializes writes; an explicit single-connection
+		// avoids the "database is locked" failure mode under load.
+		db.SetMaxOpenConns(1)
+	case DialectPostgres:
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxIdleTime(5 * time.Minute)
+	}
 
-	s := &Store{db: db}
+	s := &Store{db: db, dialect: dialect}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
