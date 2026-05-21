@@ -26,6 +26,27 @@ import (
 // caller (e.g. cluster worker plumbing) take precedence over the
 // resolved configuration.
 func ApplyBackendsConfig(ctx context.Context, opts *Options) error {
+	// --sw-local-only short-circuits the resolver: ignore backends.yaml,
+	// ignore the env-var shim, ignore any caller-supplied LogStore /
+	// ArtifactStore. Pin state to a SQLite store at the default path
+	// and leave logs + cache as the orchestrator's built-in local
+	// fallback (per-node files under paths.RunDir, no shared cache).
+	if opts.LocalOnly {
+		opts.LogStore = nil
+		opts.ArtifactStore = nil
+		opts.State = nil
+		if opts.DefaultStateDB == "" {
+			return fmt.Errorf("--sw-local-only: no default state database path resolved")
+		}
+		spec := backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
+		st, err := storeurl.OpenStateStoreFromSpec(ctx, spec)
+		if err != nil {
+			return fmt.Errorf("--sw-local-only: open sqlite state: %w", err)
+		}
+		opts.State = st
+		return nil
+	}
+
 	file, err := backends.ResolveWithOverlay(opts.SparkwingDir, opts.BackendsConfig)
 	if err != nil {
 		return fmt.Errorf("backends.yaml: %w", err)

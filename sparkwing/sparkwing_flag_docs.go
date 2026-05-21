@@ -57,6 +57,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-stop-at", Argument: "STEP", Desc: "Stop the run after STEP", Group: "System", Hot: true},
 	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
 	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
+	{Name: "sw-local-only", Desc: "Force local state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-target", Argument: "TARGET", Desc: "Run against the named target (i.e. local, dev, prod)", Group: "System", Hot: true},

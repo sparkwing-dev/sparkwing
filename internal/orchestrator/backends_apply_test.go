@@ -402,6 +402,45 @@ defaults:
 	}
 }
 
+// TestApplyBackendsConfig_LocalOnly_IgnoresUnreachableBackends pins
+// the --sw-local-only contract: when LocalOnly is set, the resolver
+// skips backends.yaml entirely. A backends.yaml that names an
+// unresolvable controller profile would normally surface as a hard
+// error from the factory; LocalOnly short-circuits before any of
+// that runs, so the operator can recover from a broken shared-state
+// config without editing files.
+func TestApplyBackendsConfig_LocalOnly_IgnoresUnreachableBackends(t *testing.T) {
+	neutralizeEnv(t)
+	dir := writeBackendsYAML(t, t.TempDir(), `
+defaults:
+  state: { type: controller, controller: does-not-exist }
+  cache: { type: controller, controller: does-not-exist }
+  logs:  { type: controller, controller: does-not-exist }
+`)
+	defaultDB := filepath.Join(t.TempDir(), "state.db")
+	opts := Options{
+		SparkwingDir:   dir,
+		DefaultStateDB: defaultDB,
+		LocalOnly:      true,
+	}
+	if err := ApplyBackendsConfig(context.Background(), &opts); err != nil {
+		t.Fatalf("apply (LocalOnly): %v", err)
+	}
+	defer opts.State.Close()
+	if opts.State == nil {
+		t.Fatal("LocalOnly should produce a state store")
+	}
+	if _, ok := opts.State.(*store.Store); !ok {
+		t.Errorf("LocalOnly state = %T, want *store.Store", opts.State)
+	}
+	if opts.LogStore != nil {
+		t.Errorf("LocalOnly should leave LogStore nil; got %T", opts.LogStore)
+	}
+	if opts.ArtifactStore != nil {
+		t.Errorf("LocalOnly should leave ArtifactStore nil; got %T", opts.ArtifactStore)
+	}
+}
+
 func dirHasFile(t *testing.T, dir string) bool {
 	t.Helper()
 	var found bool

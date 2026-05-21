@@ -150,6 +150,7 @@ func Main() {
 		Only:           os.Getenv("SPARKWING_ONLY"),
 		NoCache:        os.Getenv("SPARKWING_NO_CACHE") == "1",
 		DryRun:         os.Getenv("SPARKWING_DRY_RUN") == "1",
+		LocalOnly:      os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		MaxParallel:    runtime.NumCPU(),
 		Target:         os.Getenv("SPARKWING_TARGET"),
 		BackendsConfig: os.Getenv("SPARKWING_BACKENDS_CONFIG"),

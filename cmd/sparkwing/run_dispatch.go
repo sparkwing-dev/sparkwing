@@ -86,6 +86,12 @@ type runFlags struct {
 	// outer CLI uses this to forward profile-derived storage
 	// settings to the child via a temp file.
 	backendsConfig string
+	// localOnly forces SQLite state + filesystem logs + filesystem
+	// cache for this run, ignoring any configured shared backends.
+	// The escape hatch when shared state is misbehaving (stale
+	// Postgres, unreachable controller, broken bucket policy) and the
+	// operator wants to run against the laptop only.
+	localOnly bool
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -245,6 +251,9 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case a == "--sw-no-cache":
 			wf.noCache = true
+			i++
+		case a == "--sw-local-only":
+			wf.localOnly = true
 			i++
 		case a == "--sw-dry-run", a == "--dry-run=true":
 			wf.dryRun = true

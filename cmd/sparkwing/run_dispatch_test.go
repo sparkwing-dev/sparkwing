@@ -38,6 +38,16 @@ func TestParseRunFlags_NoCache(t *testing.T) {
 	}
 }
 
+func TestParseRunFlags_LocalOnly(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-local-only"})
+	if !wf.localOnly {
+		t.Errorf("localOnly: want true got false")
+	}
+	if len(pass) != 0 {
+		t.Errorf("passthrough should be empty, got %v", pass)
+	}
+}
+
 func TestParseRunFlags_OnlyAndNoCacheCoexist(t *testing.T) {
 	wf, _ := parseRunFlags([]string{"--sw-only=lint-*", "--sw-no-cache"})
 	if wf.only != "lint-*" {

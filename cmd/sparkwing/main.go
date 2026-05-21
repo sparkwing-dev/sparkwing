@@ -192,6 +192,9 @@ func dispatchRun(args []string) error {
 	if wf.noCache {
 		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
+	if wf.localOnly {
+		env = append(env, "SPARKWING_LOCAL_ONLY=1")
+	}
 	// --sw-allow forwards the operator-authorized risk labels to the
 	// orchestrator. Surfaced on the run record (run_start.attrs.flags)
 	// so an agent re-invoking knows which labels were authorized.

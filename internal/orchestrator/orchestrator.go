@@ -99,6 +99,14 @@ type Options struct {
 	// (bincache) cache.
 	NoCache bool
 
+	// LocalOnly forces SQLite state, filesystem cache, and filesystem
+	// logs for this run regardless of backends.yaml, env-var shims, or
+	// any other shared-backend config. Used as the escape hatch from
+	// the shared-backends story: an operator hitting a stale or
+	// unreachable shared store can bypass the resolver entirely and
+	// run as if no shared infrastructure were configured.
+	LocalOnly bool
+
 	// DryRun selects the no-mutation dispatch path: every step's
 	// DryRunFn (or its apply Fn when the step is explicitly marked
 	// SafeWithoutDryRun) runs in place of the apply Fn. Steps that
