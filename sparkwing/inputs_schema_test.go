@@ -191,8 +191,9 @@ func TestParseInputsSchema_MapWithoutExtraRejected(t *testing.T) {
 // internal helpers, not flags). Verifies the parser doesn't trip on
 // state-keeping fields someone might add to their Inputs struct.
 type withUntaggedField struct {
-	Tagged   string `flag:"x"`
-	internal int    //nolint:unused // exists to exercise the untagged-field skip path
+	Tagged string `flag:"x"`
+	//lint:ignore U1000 exists to exercise the untagged-field skip path
+	internal int //nolint:unused
 }
 
 func TestParseInputsSchema_SkipsUntagged(t *testing.T) {

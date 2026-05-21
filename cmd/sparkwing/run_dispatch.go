@@ -18,15 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func firstNonEmptyStr(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func atoiNonNeg(s string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {

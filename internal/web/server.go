@@ -886,20 +886,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-func timeOrEmpty(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339Nano)
-}
-
-func timeOrEmptyPtr(t *time.Time) string {
-	if t == nil || t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339Nano)
-}
-
 type grepExcludes struct {
 	pipelines   []string
 	statuses    []string

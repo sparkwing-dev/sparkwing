@@ -556,13 +556,6 @@ func (s *WorkStep) DepIDs() []string {
 	return out
 }
 
-func (s *WorkStep) addNeed(id string) {
-	if slices.Contains(s.needs, id) {
-		return
-	}
-	s.needs = append(s.needs, id)
-}
-
 // SkipIf registers a predicate the runner evaluates after this step's
 // upstream deps complete. Multiple SkipIf calls accumulate with OR
 // semantics.

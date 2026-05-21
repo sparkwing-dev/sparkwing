@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var _ = context.Background // imported for fakeClusterRunner signature
@@ -21,17 +20,6 @@ func writeSourcesYAML(t *testing.T, dir, body string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(swDir, "sources.yaml"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeRunnersYAML(t *testing.T, dir, body string) {
-	t.Helper()
-	swDir := filepath.Join(dir, ".sparkwing")
-	if err := os.MkdirAll(swDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(swDir, "runners.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -197,10 +185,6 @@ sources:
 		t.Errorf("env source on cluster runner should pass (env vars are portable), got %v", err)
 	}
 }
-
-type noopWork struct{}
-
-func (noopWork) Work(*sparkwing.Work) (*sparkwing.WorkStep, error) { return nil, nil }
 
 // fakeClusterRunner stands in for a cluster pool / k8s runner: no
 // "local" label, satisfies runner.Runner with a no-op RunNode.

@@ -209,29 +209,6 @@ func profileSuffix(on string) string {
 	return " --on " + on
 }
 
-func retryOne(ctx context.Context, c *client.Client, srcRunID string) runResult {
-	run, err := c.GetRun(ctx, srcRunID)
-	if err != nil {
-		return runResult{RunID: srcRunID, Error: fmt.Sprintf("lookup: %v", err)}
-	}
-	// Trigger source stays as the plain string "retry" so it never
-	// leaks the source run id into user-visible chips. The retry_of
-	// field carries the lineage cleanly.
-	resp, err := c.CreateTrigger(ctx, client.TriggerRequest{
-		Pipeline: run.Pipeline,
-		Args:     run.Args,
-		Trigger: client.TriggerMeta{
-			Source: "retry",
-		},
-		Git:     client.GitMeta{Branch: run.GitBranch, SHA: run.GitSHA},
-		RetryOf: srcRunID,
-	})
-	if err != nil {
-		return runResult{RunID: srcRunID, Error: fmt.Sprintf("trigger: %v", err)}
-	}
-	return runResult{RunID: srcRunID, OK: true, NewRunID: resp.RunID}
-}
-
 // ---- cancel --------------------------------------------------------
 
 func runRunsCancel(ctx context.Context, args []string) error {

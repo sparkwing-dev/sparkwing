@@ -110,9 +110,6 @@ var (
 	reChecked   = regexp.MustCompile(`^(\s*)-\s+\[[xX]\]\s+(.*)$`)
 	reUnchecked = regexp.MustCompile(`^(\s*)-\s+\[\s\]\s+(.*)$`)
 	reBullet    = regexp.MustCompile(`^(\s*)-\s+(.*)$`)
-
-	reBold = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	reCode = regexp.MustCompile("`([^`]+)`")
 )
 
 func writeMarkdownLine(out io.Writer, prefix, line string) {

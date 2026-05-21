@@ -85,10 +85,9 @@ func runInternalCompletePipelines(_ []string) error {
 	}
 	// 4 tab-separated columns: name, group, kind, desc.
 	type completionRow struct {
-		name  string
-		group string
-		kind  string // "pipeline", "command", "script"
-		desc  string
+		name string
+		kind string // "pipeline", "command", "script"
+		desc string
 	}
 	var rows []completionRow
 	pipelineNames := map[string]struct{}{}
@@ -258,16 +257,6 @@ func runInternalCompleteVerbs(args []string) error {
 			strings.ReplaceAll(s.Synopsis, "\t", " "))
 	}
 	return nil
-}
-
-// hasAutoTrigger = any non-Manual trigger.
-func hasAutoTrigger(t pipelines.Triggers) bool {
-	return t.Push != nil ||
-		t.Webhook != nil ||
-		t.Schedule != "" ||
-		t.Deploy != nil ||
-		t.PreHook != nil ||
-		t.PostHook != nil
 }
 
 // shortPipelineHint: prefer ShortHelp, then truncated Help, then trigger summary.

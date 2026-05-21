@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -210,10 +209,4 @@ func renderValue(v any) string {
 		}
 		return string(b)
 	}
-}
-
-// sortConfigFieldsByName is used by tests for deterministic output;
-// the printer keeps declaration order.
-func sortConfigFieldsByName(fs []sparkwing.ConfigField) {
-	sort.Slice(fs, func(i, j int) bool { return fs[i].Name < fs[j].Name })
 }
