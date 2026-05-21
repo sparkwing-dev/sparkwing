@@ -19,6 +19,7 @@ import (
 // Client implements orchestrator.StateBackend over HTTP.
 type Client struct {
 	baseURL string
+	token   string
 	http    *http.Client
 }
 
@@ -57,8 +58,18 @@ func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 			Transport:     &bearerTransport{base: base, token: token},
 		}
 	}
-	return &Client{baseURL: baseURL, http: httpClient}
+	return &Client{baseURL: baseURL, token: token, http: httpClient}
 }
+
+// BaseURL returns the controller URL the client was constructed
+// against. Used by RemoteBackends to spin up sibling HTTP backends
+// (concurrency, logs) against the same controller.
+func (c *Client) BaseURL() string { return c.baseURL }
+
+// Token returns the bearer token the client was constructed with, or
+// "" when constructed without auth. Used by RemoteBackends to thread
+// the same auth to sibling HTTP backends.
+func (c *Client) Token() string { return c.token }
 
 // bearerTransport decorates outgoing requests with a fixed bearer
 // token.
