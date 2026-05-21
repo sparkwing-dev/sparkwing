@@ -1412,7 +1412,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
        failure_reason, exit_code, annotations_json, summary
   FROM nodes
  WHERE run_id = ?
- ORDER BY rowid`, runID)
+ ORDER BY `+s.insertionOrderColumn(), runID)
 	if err != nil {
 		return nil, err
 	}

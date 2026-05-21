@@ -1359,11 +1359,15 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	evict := count - keepCount
+	// (key, cache_key_hash) is the primary key — using it as the
+	// IN selector is portable across SQLite and Postgres, where
+	// SQLite's `rowid` and Postgres's `ctid` would otherwise need
+	// dialect branching.
 	res, err := s.exec(
 		ctx,
 		`DELETE FROM concurrency_cache
-		  WHERE ROWID IN (
-		    SELECT ROWID FROM concurrency_cache
+		  WHERE (key, cache_key_hash) IN (
+		    SELECT key, cache_key_hash FROM concurrency_cache
 		    ORDER BY last_hit_at ASC LIMIT ?
 		  )`, evict,
 	)

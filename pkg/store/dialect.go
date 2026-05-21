@@ -66,6 +66,19 @@ func (s *Store) forUpdateSkipLocked() string {
 	return ""
 }
 
+// insertionOrderColumn returns the column to ORDER BY when callers
+// want rows in insertion (storage) order. SQLite exposes the implicit
+// `rowid`; Postgres exposes `ctid`, the physical tuple identifier.
+// Both are stable for read-only ordering within a transaction. Use
+// for display ordering where deterministic semantic ordering is not
+// available.
+func (s *Store) insertionOrderColumn() string {
+	if s.dialect == DialectPostgres {
+		return "ctid"
+	}
+	return "rowid"
+}
+
 // forUpdate returns the row-locking suffix for the read half of a
 // transaction that serializes on a specific known row (as opposed to
 // the first-eligible-row pattern handled by forUpdateSkipLocked).
