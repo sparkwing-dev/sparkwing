@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // ReleaseArgs is the typed CLI surface for the public-sparkwing
