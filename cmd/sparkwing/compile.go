@@ -30,7 +30,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		return err
 	}
 
-	if os.Getenv("SPARKWING_NO_CACHE") != "" {
+	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 
@@ -185,7 +185,7 @@ func runExec(bin string, args []string, dir string, env []string) error {
 }
 
 // runGo shells out to the `go` toolchain. Mirrors the pre-flight
-// check in bincache.CompilePipeline so the SPARKWING_NO_CACHE
+// check in bincache.CompilePipeline so the SPARKWING_NO_BINCACHE
 // (`go run .`) escape hatch and the cache-miss compile path
 // produce the same actionable error message when Go is missing.
 func runGo(dir string, args, env []string) error {

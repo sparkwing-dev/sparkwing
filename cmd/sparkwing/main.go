@@ -190,7 +190,7 @@ func dispatchRun(args []string) error {
 		env = append(env, "SPARKWING_ONLY="+wf.only)
 	}
 	if wf.noCache {
-		env = append(env, "SPARKWING_NO_CACHE_RUNS=1")
+		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
 	// --sw-allow forwards the operator-authorized risk labels to the
 	// orchestrator. Surfaced on the run record (run_start.attrs.flags)

@@ -211,6 +211,18 @@ the GitHub Release body.
 - **cli:** `sparkwing info` advertises four new URLs for agent
   discovery: `docs_index_url`, `migration_guides_url`,
   `migration_guides_agent_url`, `migration_guides_index_url`.
+- **cli:** `--sw-only=<glob>` runs a partial DAG by `path.Match` over
+  JobNode IDs. Transitively pulls `Needs()` ancestors so the dispatch
+  stays self-consistent -- a glob hitting only the leaves still
+  schedules their preconditions. Fails fast on a malformed glob or a
+  pattern that matches nothing. Mutually exclusive with
+  `--sw-start-at` / `--sw-stop-at` (step-level vs job-level filter
+  modes).
+- **cli:** `--sw-no-cache` disables cache READS on this run's per-node
+  `Cache()` lookups. Cache WRITES still occur on success, so the next
+  run over the same content hits cache normally. Distinct from the
+  bincache (compiled-pipeline-binary cache) gated by
+  `SPARKWING_NO_BINCACHE`.
 - **release:** `sparkwing run release` refuses to ship a version when
   `CHANGELOG.md` `[Unreleased]` has no entries. Pairs with the existing
   PR-time CI gate (`bin/check-changelog.sh`) that catches missing
@@ -372,6 +384,13 @@ the GitHub Release body.
   `--output pretty`. Update scripts and shell aliases to use the
   canonical `-o`/`--output` form (e.g. `sparkwing runs list -o json`).
   See [migration guide](docs/migrations/v0.4.0.md#cli-output-aliases).
+- **cli (Breaking):** `SPARKWING_NO_CACHE` env var renamed to
+  `SPARKWING_NO_BINCACHE`. The new `SPARKWING_NO_CACHE` env var (and
+  its CLI flag `--sw-no-cache`) gates the per-node result cache --
+  what most operators mean when they say "no cache." Update shell
+  aliases or CI configs that set `SPARKWING_NO_CACHE` expecting
+  bincache-bypass behavior. See
+  [migration guide](docs/migrations/v0.4.0.md#no-cache-env-rename).
 - **config (Breaking):** `pipelines.yaml` `group:` field and the matching
   `--group` flag on `sparkwing pipeline new` removed. The field had no
   backing on the `pipelines.Pipeline` struct, so strict YAML parsing

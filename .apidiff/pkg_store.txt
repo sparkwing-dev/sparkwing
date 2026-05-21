@@ -19,6 +19,7 @@ type AcquireSlotRequest struct {
 	CacheTTL      time.Duration
 	CancelTimeout time.Duration
 	Lease         time.Duration
+	BypassRead    bool
 }
 type AcquireSlotResponse struct {
 	Kind             AcquireKind

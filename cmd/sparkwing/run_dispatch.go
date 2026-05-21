@@ -61,7 +61,7 @@ type runFlags struct {
 	only string
 	// --no-cache disables cache READS for this run; per-node cache
 	// WRITES still happen on success so subsequent runs over the same
-	// content hit cache normally. Distinct from SPARKWING_NO_CACHE
+	// content hit cache normally. Distinct from SPARKWING_NO_BINCACHE
 	// (which gates the bincache compiled-pipeline-binary cache).
 	noCache bool
 	// --dry-run runs each step's DryRunFn instead of its apply Fn.
@@ -391,7 +391,7 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 		envMap["SPARKWING_ONLY"] = wf.only
 	}
 	if wf.noCache {
-		envMap["SPARKWING_NO_CACHE_RUNS"] = "1"
+		envMap["SPARKWING_NO_CACHE"] = "1"
 	}
 
 	triggerBranch := wf.ref

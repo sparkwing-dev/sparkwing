@@ -94,8 +94,8 @@ type Options struct {
 	// NoCacheRuns disables cache READS on this run's per-node Cache()
 	// lookups. Cache WRITES still occur on success, so subsequent runs
 	// over the same content hit cache normally. Distinct from the
-	// SPARKWING_NO_CACHE / bincache flag that gates the compiled-
-	// pipeline-binary cache.
+	// SPARKWING_NO_BINCACHE flag that gates the compiled-pipeline-binary
+	// (bincache) cache.
 	NoCacheRuns bool
 
 	// DryRun selects the no-mutation dispatch path: every step's
