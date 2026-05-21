@@ -500,6 +500,12 @@ func ExecReplace(bin string, args []string, dir string, env []string) error {
 
 // execChildWindows runs bin as a foreground subprocess and exits with
 // the child's status code. Returns only on spawn failure.
+//
+// The two os.Exit calls below are deliberate: this function is the
+// Windows half of ExecReplace, whose POSIX path uses syscall.Exec to
+// replace the current process. ExecReplace's contract is "this
+// process disappears, replaced by the child's exit status"; returning
+// here would violate that contract.
 func execChildWindows(bin string, args, env []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
@@ -509,11 +515,11 @@ func execChildWindows(bin string, args, env []string) error {
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			os.Exit(ee.ExitCode())
+			os.Exit(ee.ExitCode()) //nolint:forbidigo // mirrors syscall.Exec exit-with-child semantics on POSIX
 		}
 		return err
 	}
-	os.Exit(0)
+	os.Exit(0) //nolint:forbidigo // mirrors syscall.Exec exit-with-child semantics on POSIX
 	return nil
 }
 

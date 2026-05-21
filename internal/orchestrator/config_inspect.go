@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -82,7 +83,7 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	if format == "json" {
 		return printConfigInspectJSON(pipeline, target, sourceName, cfgFields, secFields)
 	}
-	printConfigInspectPretty(pipeline, target, sourceName, cfgFields, secFields)
+	printConfigInspectPretty(os.Stdout, pipeline, target, sourceName, cfgFields, secFields)
 	return nil
 }
 
@@ -113,15 +114,15 @@ func defaultSourceName(sparkwingDir string) string {
 	return uf.Default
 }
 
-func printConfigInspectPretty(pipeline, target, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) {
+func printConfigInspectPretty(w io.Writer, pipeline, target, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) {
 	header := pipeline + " config"
 	if target != "" {
 		header += " (--for " + target + ")"
 	}
-	fmt.Println(header)
-	fmt.Println()
+	fmt.Fprintln(w, header)
+	fmt.Fprintln(w)
 	if len(cfgFields) == 0 {
-		fmt.Println("  (pipeline declares no Config struct)")
+		fmt.Fprintln(w, "  (pipeline declares no Config struct)")
 	} else {
 		nameWidth, valueWidth := 4, 5
 		strVals := make([]string, len(cfgFields))
@@ -139,20 +140,20 @@ func printConfigInspectPretty(pipeline, target, source string, cfgFields []spark
 			if f.Required {
 				req = " *required"
 			}
-			fmt.Printf("  %-*s = %-*s  [%s]%s\n",
+			fmt.Fprintf(w, "  %-*s = %-*s  [%s]%s\n",
 				nameWidth, f.Name, valueWidth, strVals[i], f.Source, req)
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 	if len(secFields) == 0 {
-		fmt.Println("secrets: (none declared)")
+		fmt.Fprintln(w, "secrets: (none declared)")
 		return
 	}
-	fmt.Printf("secrets (%d declared)", len(secFields))
+	fmt.Fprintf(w, "secrets (%d declared)", len(secFields))
 	if source != "" {
-		fmt.Printf("  source: %s", source)
+		fmt.Fprintf(w, "  source: %s", source)
 	}
-	fmt.Println(":")
+	fmt.Fprintln(w, ":")
 	nameWidth := 4
 	for _, s := range secFields {
 		if n := len(s.Name); n > nameWidth {
@@ -175,7 +176,7 @@ func printConfigInspectPretty(pipeline, target, source string, cfgFields []spark
 		if s.Note != "" {
 			extra += "  -- " + s.Note
 		}
-		fmt.Printf("  %-*s  %s%s\n", nameWidth, s.Name, req, extra)
+		fmt.Fprintf(w, "  %-*s  %s%s\n", nameWidth, s.Name, req, extra)
 	}
 }
 

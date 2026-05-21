@@ -167,7 +167,11 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
-		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err))
+		// VerifyBundleEmbedded ran at process start and would have
+		// reported any missing-bundle condition there; reaching here
+		// means the embed.FS itself is corrupted, which is a build
+		// invariant, not a runtime condition.
+		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
 	}
 	authedMux.Handle("/", spaHandler(subFS, opts))
 

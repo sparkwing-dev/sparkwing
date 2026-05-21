@@ -124,8 +124,14 @@ linters:
           - forbidigo
       # CLI binary subtrees legitimately do panic / os.Exit /
       # fmt.Println at the process boundary. The forbidigo bans
-      # target library code, not the binary entry points.
+      # target library code, not the binary entry points. Two
+      # patterns: cmd/ for the conventional layout and any file
+      # literally named main.go (covers `internal/orchestrator/main.go`
+      # and similar entry-point shims).
       - path: cmd/
+        linters:
+          - forbidigo
+      - path: (^|/)main\.go$
         linters:
           - forbidigo
       # planguard.go's API is to panic when a sparkwing invariant
