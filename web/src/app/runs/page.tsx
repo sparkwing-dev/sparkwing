@@ -511,11 +511,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   // every keystroke.
   const [focusedRun, setFocusedRun] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
-  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes" | "tabs">(
-    "runs",
-  );
+  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes">("runs");
   const [tab, setTab] = useState<TabKey>("summary");
-  const [focusedTab, setFocusedTab] = useState<TabKey | null>(null);
   const topLevelRef = useRef(topLevel);
   topLevelRef.current = topLevel;
   const nodesRef = useRef(nodes);
@@ -526,8 +523,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   focusedNodeRef.current = focusedNode;
   const focusedColumnRef = useRef(focusedColumn);
   focusedColumnRef.current = focusedColumn;
-  const focusedTabRef = useRef(focusedTab);
-  focusedTabRef.current = focusedTab;
   const tabRef = useRef(tab);
   tabRef.current = tab;
   const visibleTabs = useMemo(() => buildVisibleTabs(nodes), [nodes]);
@@ -552,87 +547,60 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const ns = nodesRef.current;
       const col = focusedColumnRef.current;
       const tabs = visibleTabsRef.current;
+      // Tab / Shift+Tab cycles the active tab. Wraps in both
+      // directions so repeated presses keep moving.
+      if (e.key === "Tab") {
+        if (!selectedRunRef.current || tabs.length === 0) return;
+        e.preventDefault();
+        const cur = tabRef.current;
+        const idx = tabs.findIndex((t) => t.key === cur);
+        const base = idx < 0 ? 0 : idx;
+        const nextIdx = e.shiftKey
+          ? (base - 1 + tabs.length) % tabs.length
+          : (base + 1) % tabs.length;
+        const next = tabs[nextIdx];
+        if (next) setTab(next.key);
+        return;
+      }
       // ── Column transitions ──────────────────────────────────────
       if (e.key === "h" || e.key === "ArrowLeft") {
         e.preventDefault();
-        if (col === "tabs") {
-          const ft = focusedTabRef.current;
-          const idx = ft ? tabs.findIndex((t) => t.key === ft) : -1;
-          if (idx > 0) {
-            setFocusedTab(tabs[idx - 1].key);
-            return;
-          }
-          // At first tab → step left into nodes column.
-          setFocusedColumn(ns.length > 0 ? "nodes" : "runs");
-          setFocusedTab(null);
-          return;
-        }
-        if (col === "nodes") {
-          setFocusedColumn("runs");
-          return;
-        }
-        // Already in runs column -- no-op.
+        if (col === "nodes") setFocusedColumn("runs");
         return;
       }
       if (e.key === "l" || e.key === "ArrowRight") {
         if (!selectedRunRef.current) return;
         e.preventDefault();
-        if (col === "tabs") {
-          const ft = focusedTabRef.current;
-          const idx = ft ? tabs.findIndex((t) => t.key === ft) : -1;
-          if (idx < tabs.length - 1)
-            setFocusedTab(tabs[idx + 1]?.key ?? tabs[0]?.key ?? null);
-          return;
-        }
-        if (col === "runs") {
-          if (ns.length > 0) {
-            setFocusedColumn("nodes");
-            if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
-          } else if (tabs.length > 0) {
-            setFocusedColumn("tabs");
-            setFocusedTab(tabs[0].key);
+        if (col === "runs" && ns.length > 0) {
+          setFocusedColumn("nodes");
+          if (!focusedNodeRef.current) {
+            const sel = selectedNodeRef.current;
+            const landing =
+              sel && ns.some((n) => n.id === sel) ? sel : ns[0].id;
+            setFocusedNode(landing);
           }
-          return;
         }
-        if (col === "nodes") {
-          if (tabs.length > 0) {
-            setFocusedColumn("tabs");
-            setFocusedTab(tabs[0].key);
-          }
-          return;
-        }
-      }
-      // ── Per-column j/k/Enter/Escape ─────────────────────────────
-      if (col === "tabs" && tabs.length > 0) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (focusedTabRef.current) setTab(focusedTabRef.current);
-          return;
-        }
-        if (e.key === "Escape") {
-          setFocusedColumn(ns.length > 0 ? "nodes" : "runs");
-          setFocusedTab(null);
-          return;
-        }
-        // j/k are no-ops in tabs column.
         return;
       }
+      // ── Per-column j/k/Enter/Escape ─────────────────────────────
       if (col === "nodes" && ns.length > 0) {
         const cur =
           focusedNodeRef.current ?? selectedNodeRef.current ?? ns[0].id;
         const idx = ns.findIndex((n) => n.id === cur);
         if (e.key === "j" || e.key === "ArrowDown") {
           e.preventDefault();
-          // Cycle: header → first → ... → last → header
-          if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
-          else if (idx >= ns.length - 1) setFocusedNode(null);
-          else setFocusedNode(ns[idx + 1].id);
+          let next: string;
+          if (!focusedNodeRef.current) next = ns[0].id;
+          else next = ns[Math.min(idx + 1, ns.length - 1)].id;
+          setFocusedNode(next);
+          selectNode(next);
         } else if (e.key === "k" || e.key === "ArrowUp") {
           e.preventDefault();
-          // Cycle: header → last → ... → first → header
-          if (!focusedNodeRef.current) setFocusedNode(ns[ns.length - 1].id);
-          else if (idx <= 0) setFocusedNode(null);
-          else setFocusedNode(ns[idx - 1].id);
+          let next: string;
+          if (!focusedNodeRef.current) next = ns[0].id;
+          else next = ns[Math.max(idx - 1, 0)].id;
+          setFocusedNode(next);
+          selectNode(next);
         } else if (e.key === "Enter") {
           e.preventDefault();
           // Header parked (no node focus): Enter clears selection.
@@ -659,13 +627,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const idx = runs.findIndex((r) => r.id === cur);
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
-        const i = idx < 0 ? 0 : (idx + 1) % runs.length;
+        const i = idx < 0 ? 0 : Math.min(idx + 1, runs.length - 1);
         setFocusedRun(runs[i].id);
+        selectRunRef.current(runs[i].id);
       } else if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
-        const i =
-          idx < 0 ? runs.length - 1 : (idx - 1 + runs.length) % runs.length;
+        const i = idx < 0 ? 0 : Math.max(idx - 1, 0);
         setFocusedRun(runs[i].id);
+        selectRunRef.current(runs[i].id);
       } else if (e.key === "Enter") {
         e.preventDefault();
         const target = focusedRunRef.current ?? runs[0].id;
@@ -701,14 +670,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedNode]);
 
-  // Scroll focused tab into view.
+  // Scroll the active tab into view when it changes via Tab key.
   useEffect(() => {
-    if (!focusedTab) return;
     const el = document.querySelector(
-      `[data-tab-key="${focusedTab}"]`,
+      `[data-tab-key="${tab}"]`,
     ) as HTMLElement | null;
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [focusedTab]);
+  }, [tab]);
 
   // When a node selection clears, drop the keyboard focus off any
   // specific node so the cursor parks on the Nodes header instead of
@@ -1088,7 +1056,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               onSelectStep={selectStep}
               tab={tab}
               setTab={setTab}
-              focusedTab={focusedColumn === "tabs" ? focusedTab : null}
               onRefresh={() => {
                 refresh();
                 if (selectedRun) loadDetail(selectedRun);
@@ -2330,7 +2297,6 @@ function RunDetailPane({
   onRefresh,
   tab,
   setTab,
-  focusedTab,
   pendingLogFocus,
   onConsumePendingLogFocus,
   reusedNodeIDs,
@@ -2347,7 +2313,6 @@ function RunDetailPane({
   onRefresh: () => void;
   tab: TabKey;
   setTab: (k: TabKey) => void;
-  focusedTab: TabKey | null;
   // Cross-run grep deep link. When set, switches to the Logs tab and
   // focuses the matching line; consumed once via onConsumePendingLogFocus.
   pendingLogFocus?: {
@@ -2886,10 +2851,6 @@ function RunDetailPane({
                 effectiveTab === t.key
                   ? "border-cyan-400 text-[var(--foreground)]"
                   : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
-              } ${
-                focusedTab === t.key
-                  ? "ring-2 ring-inset ring-cyan-300 bg-cyan-500/10"
-                  : ""
               }`}
             >
               <span className="font-semibold">{t.label}</span>

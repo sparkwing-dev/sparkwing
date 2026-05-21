@@ -70,6 +70,10 @@ the GitHub Release body.
 
 ### Added
 
+- **web:** `Tab` / `Shift+Tab` cycles the active tab in the runs view
+  (Summary, Logs, Resources, DAG, Timeline, Setup) with wrap-around.
+  Works from any column once a run is open, so operators can flip
+  through tabs without first moving their cursor.
 - **sdk:** `sparkwing.Dep` and `sparkwing.WorkDep` closed interfaces for
   typed dependency wiring. Implementations are limited to sparkwing-defined
   handles -- Plan-layer `Dep` is `*JobNode` / `*ApprovalGate` /
@@ -254,6 +258,12 @@ the GitHub Release body.
 
 ### Changed
 
+- **web:** Arrow keys and `j`/`k`/`h`/`l` in the runs view now
+  auto-select the focused run or node as the cursor moves -- pressing
+  `Enter` is no longer required to load detail for the row under the
+  cursor. Cursor movement clamps at the top and bottom of each list
+  instead of wrapping. Arrow navigation into the tabs column has been
+  removed; use `Tab` instead.
 - **docs:** Example struct names in sparkwing's own examples,
   documentation, and template scaffolders normalized to drop the
   redundant `Job` suffix (`&BuildJob{}` → `&Build{}`, `*BuildJob` →
