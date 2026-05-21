@@ -35,6 +35,10 @@ type Pipeline struct {
 	Entrypoint string                  `json:"entrypoint,omitempty"`
 	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
 	Examples   []sparkwing.Example     `json:"examples,omitempty"`
+	// EnvVars are env vars the pipeline reads as inputs, surfaced via
+	// the optional sparkwing.EnvVarDocer interface. Empty unless the
+	// pipeline opts in.
+	EnvVars []sparkwing.EnvVarDoc `json:"env_vars,omitempty"`
 	// Risks is the sorted, deduplicated union of per-step risk
 	// labels declared anywhere in the pipeline's plan. Mirrors
 	// sparkwing.DescribePipeline.Risks. omitempty keeps the wire
@@ -355,6 +359,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Help = dp.Help
 				a.Args = dp.Args
 				a.Examples = dp.Examples
+				a.EnvVars = dp.EnvVars
 				// Surface risk labels in
 				// `pipeline list / describe -o json`.
 				a.Risks = dp.Risks
@@ -463,6 +468,19 @@ func printPipelineDetail(a *Pipeline) {
 			}
 			fmt.Printf("  --%-20s %s %s  %s%s\n",
 				x.Name+" <"+x.Type+">", tag, x.Type, x.Desc, dflt)
+		}
+	}
+	if len(a.EnvVars) > 0 {
+		fmt.Println("\nenvironment variables:")
+		for _, e := range a.EnvVars {
+			line := "  " + e.Name
+			if e.Description != "" {
+				line += "  " + e.Description
+			}
+			if e.Default != "" {
+				line += "  (default: " + e.Default + ")"
+			}
+			fmt.Println(line)
 		}
 	}
 	if len(a.Examples) > 0 {

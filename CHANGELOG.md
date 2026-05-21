@@ -21,6 +21,13 @@ are required.
   `errors.New("boom")` from a step now surfaces in dispatch logs as
   `<node-id>: boom` so failure messages identify the failing node by
   default; authors writing richer messages keep their full content.
+- `sparkwing.EnvVarDocer` optional interface. Pipelines implementing
+  `EnvVars() []EnvVarDoc` declare the environment variables they read
+  as inputs; `sparkwing pipeline describe` and `sparkwing run
+  <pipeline> --help` surface these under an "environment variables"
+  section alongside the typed `Inputs`. Prefer typed `Inputs` for
+  user-controlled values; `EnvVarDocer` is for process-wide config or
+  external-system integration that already uses env.
 - `.golangci.yml` at the repo root. Balanced linter set:
   bidichk, bodyclose, copyloopvar, errcheck, errorlint, govet
   (enable-all minus fieldalignment/shadow), ineffassign, misspell,

@@ -3,6 +3,7 @@ package sparkwingruntime_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,5 +85,45 @@ func TestDescribePipelineShape(t *testing.T) {
 	}
 	if len(back.Args) != len(dp.Args) {
 		t.Errorf("round-trip args count mismatch")
+	}
+}
+
+type envDocPipe struct{ sparkwing.Base }
+
+func (envDocPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
+	return nil
+}
+
+func (envDocPipe) EnvVars() []sparkwing.EnvVarDoc {
+	return []sparkwing.EnvVarDoc{
+		{Name: "NO_CACHE", Description: "Bypass the build cache for this run"},
+		{Name: "SMOKE_TIMEOUT", Description: "Per-target smoke deadline", Default: "30s"},
+	}
+}
+
+func TestDescribePipeline_EnvVarDocer(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("describe-envvars-fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return envDocPipe{}
+	})
+
+	dp, ok, err := sparkwingruntime.DescribePipelineByName("describe-envvars-fixture")
+	if err != nil || !ok {
+		t.Fatalf("describe: ok=%v err=%v", ok, err)
+	}
+	if len(dp.EnvVars) != 2 {
+		t.Fatalf("EnvVars count = %d, want 2, got %+v", len(dp.EnvVars), dp.EnvVars)
+	}
+	if dp.EnvVars[0].Name != "NO_CACHE" || dp.EnvVars[0].Description == "" {
+		t.Errorf("first env var = %+v", dp.EnvVars[0])
+	}
+	if dp.EnvVars[1].Default != "30s" {
+		t.Errorf("second env var default = %q, want 30s", dp.EnvVars[1].Default)
+	}
+
+	// JSON wire shape lock-down.
+	blob, _ := json.Marshal(dp)
+	if !strings.Contains(string(blob), "env_vars") {
+		t.Errorf("JSON missing env_vars key: %s", blob)
 	}
 }

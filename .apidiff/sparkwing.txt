@@ -112,6 +112,8 @@ type DescribePipeline struct {
 	Examples []Example
 	Args     []DescribeArg
 
+	EnvVars []EnvVarDoc
+
 	Extra bool
 
 	Risks []string
@@ -122,6 +124,14 @@ type DescribeStepRisks struct {
 	NodeID string
 	StepID string
 	Labels []string
+}
+type EnvVarDoc struct {
+	Name        string
+	Description string
+	Default     string
+}
+type EnvVarDocer interface {
+	EnvVars() []EnvVarDoc
 }
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrSecretMissing = errors.New("sparkwing: secret not found")

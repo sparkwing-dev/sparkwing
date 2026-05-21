@@ -44,6 +44,29 @@ type Example struct {
 	Command string `json:"command"`
 }
 
+// EnvVarDocer is an optional interface a Pipeline can implement to
+// declare environment variables it reads as inputs. When implemented,
+// `sparkwing run <pipeline> --help` surfaces these alongside the typed
+// Inputs (declared via [Register]).
+//
+// Prefer typed Inputs for values the user controls -- they show up in
+// --help automatically and benefit from the type system.
+// EnvVarDocer is for the cases where env vars are genuinely the right
+// shape: process-wide config, integration with external systems that
+// already use env, or tunables the operator sets outside the
+// invocation.
+type EnvVarDocer interface {
+	EnvVars() []EnvVarDoc
+}
+
+// EnvVarDoc is one declared env var read by a pipeline. Default is
+// optional (empty when the pipeline has no default).
+type EnvVarDoc struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Default     string `json:"default,omitempty"`
+}
+
 // DescribePipeline is one pipeline's CLI-facing schema. Emitted as
 // JSON by `<pipeline-binary> --describe`; consumed by the sparkwing CLI
 // for flag parsing, tab completion, and per-pipeline help output.
@@ -53,6 +76,10 @@ type DescribePipeline struct {
 	Help     string        `json:"help,omitempty"`
 	Examples []Example     `json:"examples,omitempty"`
 	Args     []DescribeArg `json:"args"`
+	// EnvVars are environment variables the pipeline reads as inputs,
+	// declared via the optional [EnvVarDocer] interface. Empty unless
+	// the pipeline opts in.
+	EnvVars []EnvVarDoc `json:"env_vars,omitempty"`
 	// Extra is true when the pipeline's Inputs struct declares a
 	// `flag:",extra"` bag; in that mode unknown flags don't error.
 	Extra bool `json:"extra,omitempty"`

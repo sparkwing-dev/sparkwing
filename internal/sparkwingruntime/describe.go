@@ -47,6 +47,9 @@ func DescribePipelineByName(name string) (sparkwing.DescribePipeline, bool, erro
 		if e, ok := inst.(sparkwing.ExampleProvider); ok {
 			dp.Examples = e.Examples()
 		}
+		if ev, ok := inst.(sparkwing.EnvVarDocer); ok {
+			dp.EnvVars = ev.EnvVars()
+		}
 	}
 	for _, f := range reg.Schema.Fields {
 		if f.IsExtraBag() {
