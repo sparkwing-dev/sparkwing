@@ -44,8 +44,8 @@ var exclusiveState = &exclusiveCounter{}
 
 func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Two peer nodes, both exclusive on the same key, both try to
 	// run concurrently. The lock should serialize them.
-	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
-	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
+	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Namespace: "shared-resource"})
+	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Namespace: "shared-resource"})
 	return nil
 }
 

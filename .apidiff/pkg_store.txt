@@ -269,7 +269,7 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines []string, sources []string) (*Trigger, error)
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) Close() error
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
@@ -343,7 +343,7 @@ func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error)
 func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error)
 func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error)
-func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers []ConcurrencyWaiter, promoted []ConcurrencyWaiter, err error)
+func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error

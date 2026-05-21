@@ -35,7 +35,7 @@ func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
-func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines []string, sources []string) (*store.Trigger, error)
+func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
 func (c *Client) CreateNode(ctx context.Context, n store.Node) error

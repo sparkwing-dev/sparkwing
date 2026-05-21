@@ -41,21 +41,22 @@ func Bash(ctx context.Context, line string) *Cmd
 type BeforeRunFn func(ctx context.Context) error
 type Cache = storage.ArtifactStore
 type CacheKey string
+func (k CacheKey) IsNoCache() bool
 type CacheKeyFn func(ctx context.Context) CacheKey
 type CacheOptions struct {
-	Key string
+	Namespace string
 
 	Max int
 
 	OnLimit OnLimitPolicy
 
-	CacheKey CacheKeyFn
+	ContentHash CacheKeyFn
 
 	CacheTTL time.Duration
 
 	CancelTimeout time.Duration
 }
-func (o CacheOptions) HasKey() bool
+func (o CacheOptions) HasNamespace() bool
 const Cached Outcome = "cached"
 const CancelOthers OnLimitPolicy = "cancel_others"
 const Cancelled Outcome = "cancelled"
@@ -279,7 +280,7 @@ func (n *JobNode) WhenRunner(labels ...string) *JobNode
 func (n *JobNode) WhenRunnerLabels() []string
 func (n *JobNode) Work() *Work
 func JobSpawn(w *Work, id string, x any) *SpawnHandle
-func JobSpawnEach(w *Work, items any, fn any) *SpawnGroup
+func JobSpawnEach(w *Work, items, fn any) *SpawnGroup
 func Key(parts ...any) CacheKey
 type LintWarning struct {
 	NodeID string
@@ -312,6 +313,7 @@ func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
 func NewPlan() *Plan
 func NewSecretResolverFromSource(_ context.Context, src sources.Source, profileLookup ProfileLookup) (SecretResolver, error)
 func NewWork() *Work
+const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
 type OnLimitPolicy string
@@ -352,7 +354,7 @@ type PrefersProvider interface {
 	Prefers() []string
 }
 type Produces[T any] struct{}
-type ProfileLookup func(name string) (controller string, token string, err error)
+type ProfileLookup func(name string) (controller, token string, err error)
 const Queue OnLimitPolicy = "queue"
 func ReadFile(path string) ([]byte, error)
 type Ref[T any] struct {

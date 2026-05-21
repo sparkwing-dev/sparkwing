@@ -8,15 +8,15 @@ import (
 )
 
 // OnLimitPolicy enumerates the behaviors of a new arrival when the
-// Max concurrent limit for a Cache key is already full. Policy is
-// a property of the arrival, not the key, so different nodes using
-// the same Key may declare different OnLimit values and each gets
-// its own behavior.
+// Max concurrent limit for a Cache namespace is already full. Policy
+// is a property of the arrival, not the namespace, so different nodes
+// using the same Namespace may declare different OnLimit values and
+// each gets its own behavior.
 type OnLimitPolicy string
 
 const (
 	// Queue: new arrival waits in FIFO order for a slot to open.
-	// Existing holder(s) keep running. Default when Key is set.
+	// Existing holder(s) keep running. Default when Namespace is set.
 	Queue OnLimitPolicy = "queue"
 
 	// Coalesce: new arrival subscribes to the current holder's
@@ -25,7 +25,7 @@ const (
 	// Follower's log stream points at leader's log stream.
 	//
 	// Coalesce does NOT memoize beyond the in-flight window; late
-	// arrivals after leader completion run fresh. Add CacheKey to
+	// arrivals after leader completion run fresh. Add ContentHash to
 	// enable memoization across time.
 	//
 	// Job-level only; rejected on Plan.Cache().
@@ -52,7 +52,7 @@ const (
 	CancelOthers OnLimitPolicy = "cancel_others"
 )
 
-// DefaultCacheTTL is the TTL applied when CacheKey is set but
+// DefaultCacheTTL is the TTL applied when ContentHash is set but
 // CacheTTL is not.
 const DefaultCacheTTL = 7 * 24 * time.Hour
 
@@ -63,38 +63,43 @@ const MaxCacheTTL = 35 * 24 * time.Hour
 
 // CacheOptions configures the deduplication / coordination behavior
 // of a Job or Plan. A node/plan with no Cache() call has no
-// coordination. Setting Key enables coordination; other fields are
-// optional and fall back to sensible defaults.
+// coordination. Setting Namespace enables coordination; other fields
+// are optional and fall back to sensible defaults.
 type CacheOptions struct {
-	// Key is the global-within-controller coordination identifier.
-	// Required to enable coordination. Empty = no coordination
-	// (equivalent to not calling Cache at all).
-	Key string
+	// Namespace is the global-within-controller coordination
+	// identifier. Required to enable coordination. Empty = no
+	// coordination (equivalent to not calling Cache at all).
+	Namespace string
 
-	// Max is the maximum concurrent holders of this key. Zero or
-	// unset = 1 (mutex). Values > 1 are semaphores. Only meaningful
-	// when Key is set.
+	// Max is the maximum concurrent holders of this namespace. Zero
+	// or unset = 1 (mutex). Values > 1 are semaphores. Only
+	// meaningful when Namespace is set.
 	//
 	// Different callers declaring different Max values on the same
-	// key is tolerated: the controller applies latest-wins and emits
-	// a drift warning on the run-scoped event stream so the change
-	// is discoverable without surprise.
+	// namespace is tolerated: the controller applies latest-wins and
+	// emits a drift warning on the run-scoped event stream so the
+	// change is discoverable without surprise.
 	Max int
 
 	// OnLimit is the policy for new arrivals when the slot is full.
 	// Unset = Queue.
 	OnLimit OnLimitPolicy
 
-	// CacheKey, when set, memoizes the node's output after successful
-	// completion. Future arrivals whose CacheKey(ctx) result matches
-	// a stored entry skip execution and replay the stored output.
-	// Typically composed with OnLimit: Coalesce to prevent thundering
-	// herd on the initial miss. Only meaningful when Key is set.
-	CacheKey CacheKeyFn
+	// ContentHash, when set, memoizes the node's output after
+	// successful completion. Future arrivals whose ContentHash(ctx)
+	// result matches a stored entry skip execution and replay the
+	// stored output. Typically composed with OnLimit: Coalesce to
+	// prevent thundering herd on the initial miss. Only meaningful
+	// when Namespace is set.
+	//
+	// Return [NoCache] to explicitly opt this invocation out of
+	// memoization (distinct from returning the zero CacheKey, which
+	// is treated as a missing-key warning).
+	ContentHash CacheKeyFn
 
 	// CacheTTL bounds how long a memoized output remains reusable.
-	// Defaults to DefaultCacheTTL (7 days) when CacheKey is set but
-	// CacheTTL is zero. Values above MaxCacheTTL (35 days) are
+	// Defaults to DefaultCacheTTL (7 days) when ContentHash is set
+	// but CacheTTL is zero. Values above MaxCacheTTL (35 days) are
 	// clamped at call time with a warning log.
 	CacheTTL time.Duration
 
@@ -105,17 +110,17 @@ type CacheOptions struct {
 	CancelTimeout time.Duration
 }
 
-// HasKey reports whether these options declare coordination.
-func (o CacheOptions) HasKey() bool { return o.Key != "" }
+// HasNamespace reports whether these options declare coordination.
+func (o CacheOptions) HasNamespace() bool { return o.Namespace != "" }
 
 // rejectTypoShape catches the common typo: a CacheOptions literal
-// with non-zero Max / OnLimit / CacheKey / CacheTTL / CancelTimeout
-// but Key left empty. Without this check the whole struct silently
-// no-ops -- the author wanted coordination + memoization, the SDK
-// gave them nothing. Bare CacheOptions{} (every field zero) stays a
-// legal no-op.
+// with non-zero Max / OnLimit / ContentHash / CacheTTL / CancelTimeout
+// but Namespace left empty. Without this check the whole struct
+// silently no-ops -- the author wanted coordination + memoization,
+// the SDK gave them nothing. Bare CacheOptions{} (every field zero)
+// stays a legal no-op.
 func (o CacheOptions) rejectTypoShape(ctx string) {
-	if o.Key != "" {
+	if o.Namespace != "" {
 		return
 	}
 	var set []string
@@ -125,8 +130,8 @@ func (o CacheOptions) rejectTypoShape(ctx string) {
 	if o.OnLimit != "" {
 		set = append(set, "OnLimit")
 	}
-	if o.CacheKey != nil {
-		set = append(set, "CacheKey")
+	if o.ContentHash != nil {
+		set = append(set, "ContentHash")
 	}
 	if o.CacheTTL != 0 {
 		set = append(set, "CacheTTL")
@@ -138,8 +143,8 @@ func (o CacheOptions) rejectTypoShape(ctx string) {
 		return
 	}
 	panic(fmt.Sprintf(
-		"sparkwing: Cache on %s: CacheOptions has %v set but Key is empty -- "+
-			"either set Key to enable coordination, or pass a bare CacheOptions{} to disable",
+		"sparkwing: Cache on %s: CacheOptions has %v set but Namespace is empty -- "+
+			"either set Namespace to enable coordination, or pass a bare CacheOptions{} to disable",
 		ctx, set,
 	))
 }
@@ -154,8 +159,8 @@ func (o *CacheOptions) validate(ctx string, isPlan bool) {
 	if isPlan && o.OnLimit == Coalesce {
 		panic("sparkwing: Cache on plan: OnLimit:Coalesce is node-only (coalescing whole runs is meaningless; scope .Cache() to a gate node instead)")
 	}
-	if isPlan && o.CacheKey != nil {
-		panic("sparkwing: Cache on plan: CacheKey is node-only (plans have side effects not captured in a single output; attach CacheKey to a specific gate node instead)")
+	if isPlan && o.ContentHash != nil {
+		panic("sparkwing: Cache on plan: ContentHash is node-only (plans have side effects not captured in a single output; attach ContentHash to a specific gate node instead)")
 	}
 	if o.OnLimit == "" {
 		o.OnLimit = Queue
@@ -163,7 +168,7 @@ func (o *CacheOptions) validate(ctx string, isPlan bool) {
 	if o.Max == 0 {
 		o.Max = 1
 	}
-	if o.CacheKey != nil && o.CacheTTL == 0 {
+	if o.ContentHash != nil && o.CacheTTL == 0 {
 		o.CacheTTL = DefaultCacheTTL
 	}
 	if o.CacheTTL > MaxCacheTTL {
@@ -174,32 +179,32 @@ func (o *CacheOptions) validate(ctx string, isPlan bool) {
 }
 
 // Cache applies the given options to this node's coordination and
-// memoization. An empty CacheOptions{} is a no-op; pass Key to enable
-// coordination. Repeated calls overwrite.
+// memoization. An empty CacheOptions{} is a no-op; pass Namespace to
+// enable coordination. Repeated calls overwrite.
 //
 // Examples:
 //
 //	// Mutex: only one at a time, queue the rest.
-//	plan.Add("deploy", &Deploy{}).Cache(sparkwing.CacheOptions{Key: "deploy-prod"})
+//	plan.Add("deploy", &Deploy{}).Cache(sparkwing.CacheOptions{Namespace: "deploy-prod"})
 //
 //	// Semaphore: up to 3 concurrent, queue the rest.
 //	plan.Add("index", &Index{}).Cache(sparkwing.CacheOptions{
-//	    Key: "es-writer", Max: 3,
+//	    Namespace: "es-writer", Max: 3,
 //	})
 //
-//	// Cache-keyed single-flight: memoize the output, coalesce on
-//	// initial miss so a burst of identical triggers collapses to
+//	// Content-addressed single-flight: memoize the output, coalesce
+//	// on initial miss so a burst of identical triggers collapses to
 //	// one execution.
 //	plan.Add("image", &Build{}).Cache(sparkwing.CacheOptions{
-//	    Key:      "build",
-//	    OnLimit:  sparkwing.Coalesce,
-//	    CacheKey: func(ctx context.Context) sparkwing.CacheKey {
+//	    Namespace:   "build",
+//	    OnLimit:     sparkwing.Coalesce,
+//	    ContentHash: func(ctx context.Context) sparkwing.CacheKey {
 //	        return sparkwing.Key("image", repo.Ref().Get(ctx).SHA)
 //	    },
 //	    CacheTTL: 24 * time.Hour,
 //	})
 func (n *JobNode) Cache(opts CacheOptions) *JobNode {
-	if !opts.HasKey() {
+	if !opts.HasNamespace() {
 		opts.rejectTypoShape("node " + n.id)
 		n.cache = CacheOptions{}
 		return n
@@ -221,9 +226,10 @@ func (n *JobNode) CacheOpts() CacheOptions { return n.cache }
 // meaningless: plans have side effects not captured in a single
 // output. Scope .Cache() to a specific gate node for that behavior.
 //
-// Empty CacheOptions{} is a no-op; pass Key to enable coordination.
+// Empty CacheOptions{} is a no-op; pass Namespace to enable
+// coordination.
 func (p *Plan) Cache(opts CacheOptions) *Plan {
-	if !opts.HasKey() {
+	if !opts.HasNamespace() {
 		opts.rejectTypoShape("plan")
 		p.cache = CacheOptions{}
 		return p

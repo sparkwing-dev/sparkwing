@@ -96,7 +96,7 @@ type seamOK struct{ sparkwing.Base }
 func (seamOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
 	sparkwing.Job(plan, "b", func(ctx context.Context) error { return nil }).
-		Needs(a).Cache(sparkwing.CacheOptions{Key: "seam-lock"})
+		Needs(a).Cache(sparkwing.CacheOptions{Namespace: "seam-lock"})
 	return nil
 }
 

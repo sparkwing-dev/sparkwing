@@ -1,14 +1,14 @@
 // Package inputs provides sparkwing.CacheKeyFn helpers for declaring "what
 // changed" inputs to a node's cache. Compose them via Compose(...) and
-// assign to CacheOptions.CacheKey to skip a node when its inputs match
-// a prior successful run.
+// assign to CacheOptions.ContentHash to skip a node when its inputs
+// match a prior successful run.
 //
 //	import "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 //
 //	sd.Cache(sparkwing.CacheOptions{
-//	    Key:      "myapp/build-deploy",
-//	    OnLimit:  sparkwing.Coalesce,
-//	    CacheKey: inputs.Compose(
+//	    Namespace:   "myapp/build-deploy",
+//	    OnLimit:     sparkwing.Coalesce,
+//	    ContentHash: inputs.Compose(
 //	        inputs.RepoFiles(inputs.Ignore("*.md", "docs/**")),
 //	        inputs.Env("NEXT_PUBLIC_BACKEND_URL"),
 //	        inputs.Const("v1"),

@@ -42,8 +42,8 @@ func cacheStep(hold time.Duration) func(ctx context.Context) error {
 type cacheQueuePipe struct{ sparkwing.Base }
 
 func (cacheQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "a", cacheStep(120*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "cache-queue-key"})
-	sparkwing.Job(plan, "b", cacheStep(120*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "cache-queue-key"})
+	sparkwing.Job(plan, "a", cacheStep(120*time.Millisecond)).Cache(sparkwing.CacheOptions{Namespace: "cache-queue-key"})
+	sparkwing.Job(plan, "b", cacheStep(120*time.Millisecond)).Cache(sparkwing.CacheOptions{Namespace: "cache-queue-key"})
 	return nil
 }
 
@@ -52,7 +52,7 @@ type cacheSkipLeaderPipe struct{ sparkwing.Base }
 func (cacheSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Slow leader holds the slot while the follower pipeline arrives
 	// under OnLimit:Skip in a separate goroutine.
 	sparkwing.Job(plan, "leader", cacheStep(400*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-skip-key"})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-skip-key"})
 	return nil
 }
 
@@ -60,7 +60,7 @@ type cacheSkipFollowerPipe struct{ sparkwing.Base }
 
 func (cacheSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-skip-key", OnLimit: sparkwing.Skip})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-skip-key", OnLimit: sparkwing.Skip})
 	return nil
 }
 
@@ -69,7 +69,7 @@ type cacheFailLeaderPipe struct{ sparkwing.Base }
 func (cacheFailLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Slow leader holds the slot long enough for the follower
 	// pipeline to arrive under OnLimit:Fail while the slot is full.
 	sparkwing.Job(plan, "leader", cacheStep(400*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-fail-key"})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-fail-key"})
 	return nil
 }
 
@@ -77,7 +77,7 @@ type cacheFailFollowerPipe struct{ sparkwing.Base }
 
 func (cacheFailFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-fail-key", OnLimit: sparkwing.Fail})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-fail-key", OnLimit: sparkwing.Fail})
 	return nil
 }
 
@@ -93,7 +93,7 @@ func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Pla
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}).Cache(sparkwing.CacheOptions{Key: "cache-cancel-others-key"})
+	}).Cache(sparkwing.CacheOptions{Namespace: "cache-cancel-others-key"})
 	return nil
 }
 
@@ -102,7 +102,7 @@ type cacheCancelOthersFollowerPipe struct{ sparkwing.Base }
 func (cacheCancelOthersFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).
 		Cache(sparkwing.CacheOptions{
-			Key:           "cache-cancel-others-key",
+			Namespace:     "cache-cancel-others-key",
 			OnLimit:       sparkwing.CancelOthers,
 			CancelTimeout: 1500 * time.Millisecond,
 		})
@@ -119,9 +119,9 @@ func (cacheKeyedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 		cacheCounter.inflight.Add(1)
 		return nil
 	}).Cache(sparkwing.CacheOptions{
-		Key:      "cache-memoize-key",
-		CacheKey: func(ctx context.Context) sparkwing.CacheKey { return "v-pinned" },
-		CacheTTL: time.Hour,
+		Namespace:   "cache-memoize-key",
+		ContentHash: func(ctx context.Context) sparkwing.CacheKey { return "v-pinned" },
+		CacheTTL:    time.Hour,
 	})
 	return nil
 }
@@ -134,11 +134,11 @@ type cacheCoalescePipe struct{ sparkwing.Base }
 func (cacheCoalescePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Three peer nodes, all on the same key under Coalesce. One will
 	// win the acquire, the others become followers.
 	sparkwing.Job(plan, "a", cacheStep(300*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
 	sparkwing.Job(plan, "b", cacheStep(300*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
 	sparkwing.Job(plan, "c", cacheStep(300*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
 	return nil
 }
 
@@ -149,7 +149,7 @@ type cacheDriftPipeA struct{ sparkwing.Base }
 
 func (cacheDriftPipeA) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-drift-key", Max: 1})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-drift-key", Max: 1})
 	return nil
 }
 
@@ -157,7 +157,7 @@ type cacheDriftPipeB struct{ sparkwing.Base }
 
 func (cacheDriftPipeB) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-drift-key", Max: 3})
+		Cache(sparkwing.CacheOptions{Namespace: "cache-drift-key", Max: 3})
 	return nil
 }
 
@@ -167,7 +167,7 @@ func (cacheDriftPipeB) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 type planLevelQueuePipe struct{ sparkwing.Base }
 
 func (planLevelQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-key", Max: 1})
+	plan.Cache(sparkwing.CacheOptions{Namespace: "plan-level-key", Max: 1})
 	sparkwing.Job(plan, "work", cacheStep(200*time.Millisecond))
 	return nil
 }
@@ -177,7 +177,7 @@ func (planLevelQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 type planLevelSkipFollowerPipe struct{ sparkwing.Base }
 
 func (planLevelSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-skip-key", OnLimit: sparkwing.Skip})
+	plan.Cache(sparkwing.CacheOptions{Namespace: "plan-level-skip-key", OnLimit: sparkwing.Skip})
 	sparkwing.Job(plan, "work", cacheStep(100*time.Millisecond))
 	return nil
 }
@@ -185,7 +185,7 @@ func (planLevelSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan,
 type planLevelSkipLeaderPipe struct{ sparkwing.Base }
 
 func (planLevelSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-skip-key"})
+	plan.Cache(sparkwing.CacheOptions{Namespace: "plan-level-skip-key"})
 	sparkwing.Job(plan, "work", cacheStep(500*time.Millisecond))
 	return nil
 }

@@ -10,6 +10,12 @@ are required.
 
 ### Added
 
+- `sparkwing.NoCache` typed sentinel for explicit cache opt-out from a
+  `CacheOptions.ContentHash` function. Returning `NoCache` is distinct
+  from returning the zero `CacheKey`: operators see an "explicit
+  opt-out" log line vs a "missing key" warning, so a deliberate skip
+  is no longer indistinguishable from a hashing bug.
+  `CacheKey.IsNoCache()` reports the distinction.
 - `.golangci.yml` at the repo root. Balanced linter set:
   bidichk, bodyclose, copyloopvar, errcheck, errorlint, govet
   (enable-all minus fieldalignment/shadow), ineffassign, misspell,
@@ -21,6 +27,17 @@ are required.
 
 ### Changed
 
+- **Breaking:** `CacheOptions.Key` renamed to `CacheOptions.Namespace`,
+  and `CacheOptions.CacheKey` renamed to `CacheOptions.ContentHash`.
+  `HasKey()` renamed to `HasNamespace()`. Hard cut: the old field
+  names are removed, not aliased. Pre-1.0 sparkwing follows
+  hard-break semantics for renames. To migrate: rename `Key:` to
+  `Namespace:` and `CacheKey:` to `ContentHash:` in every
+  `.Cache(...)` call site; replace `HasKey()` with `HasNamespace()`.
+  The new names match the actual concept -- `Namespace` is a
+  coordination scope, `ContentHash` is the content-addressed key
+  driver -- and remove the ambiguity that let two unrelated nodes
+  collapse into one cache entry when an upstream input was missing.
 - **Initial lint sweep.** Cleared 135 golangci-lint findings introduced
   by the new `.golangci.yml` adoption. Mechanical mix: gofumpt
   formatting across 77 files, US-locale spelling normalization (with

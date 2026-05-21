@@ -606,9 +606,9 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	case planCacheSkipped:
 		return nil // run-level success; no nodes ran
 	case planCacheFailed:
-		return fmt.Errorf("plan concurrency key %q: slot full under OnLimit:Fail", plan.CacheOpts().Key)
+		return fmt.Errorf("plan concurrency namespace %q: slot full under OnLimit:Fail", plan.CacheOpts().Namespace)
 	case planCacheEvicted:
-		return fmt.Errorf("plan concurrency key %q: evicted before dispatch", plan.CacheOpts().Key)
+		return fmt.Errorf("plan concurrency namespace %q: evicted before dispatch", plan.CacheOpts().Namespace)
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
@@ -2514,8 +2514,8 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
 	}
-	if c := n.CacheOpts(); c.HasKey() {
-		m.CacheKey = c.Key
+	if c := n.CacheOpts(); c.HasNamespace() {
+		m.CacheKey = c.Namespace
 		m.CacheMax = c.Max
 		m.CacheOnLimit = string(c.OnLimit)
 	}

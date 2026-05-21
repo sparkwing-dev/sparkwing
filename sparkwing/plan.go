@@ -619,8 +619,14 @@ type SkipPredicate func(ctx context.Context) bool
 type CacheKey string
 
 // CacheKeyFn computes a cache key after upstream dependencies
-// complete. May read typed upstream output via Ref.Get(ctx). Return
-// "" to opt out of caching for this invocation.
+// complete. May read typed upstream output via Ref.Get(ctx).
+//
+// Return [NoCache] to explicitly opt this invocation out of
+// memoization; the run is logged as an explicit opt-out and proceeds
+// uncached. Returning the zero CacheKey ("") also bypasses caching
+// but is logged as a missing-key warning -- callers that intend to
+// skip caching should prefer NoCache so the operator-facing signal
+// is unambiguous.
 type CacheKeyFn func(ctx context.Context) CacheKey
 
 // BeforeRunFn runs once before the first Run attempt. A non-nil error

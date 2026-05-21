@@ -29,16 +29,16 @@ const (
 // it survives a cancelled run.
 func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan *sparkwing.Plan) (release func(outcome string), outcome planCacheOutcome, err error) {
 	opts := plan.CacheOpts()
-	if !opts.HasKey() {
+	if !opts.HasNamespace() {
 		return func(string) {}, planCacheProceed, nil
 	}
 	if backends.Concurrency == nil {
-		return nil, "", fmt.Errorf("plan Cache(%q) declared but Backends.Concurrency is nil", opts.Key)
+		return nil, "", fmt.Errorf("plan Cache(%q) declared but Backends.Concurrency is nil", opts.Namespace)
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
 	req := store.AcquireSlotRequest{
-		Key:           opts.Key,
+		Key:           opts.Namespace,
 		HolderID:      holderID,
 		RunID:         runID,
 		NodeID:        "",
@@ -49,13 +49,13 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 	resp, err := backends.Concurrency.AcquireSlot(ctx, req)
 	if err != nil {
-		return nil, "", fmt.Errorf("plan Cache acquire(%q): %w", opts.Key, err)
+		return nil, "", fmt.Errorf("plan Cache acquire(%q): %w", opts.Namespace, err)
 	}
 
 	if resp.DriftNote != "" {
 		payload, _ := json.Marshal(map[string]any{
 			"scope":             "plan",
-			"key":               opts.Key,
+			"key":               opts.Namespace,
 			"previous_capacity": resp.PreviousCapacity,
 			"new_capacity":      opts.Max,
 			"note":              resp.DriftNote,
@@ -65,7 +65,7 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, opts.Key, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, opts.Namespace, holderID), planCacheProceed, nil
 
 	case store.AcquireSkipped:
 		_ = backends.State.AppendEvent(ctx, runID, "", "plan_skipped_concurrent", nil)
@@ -78,7 +78,7 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 	case store.AcquireQueued, store.AcquireCancellingOthers:
 		payload, _ := json.Marshal(map[string]any{
 			"scope": "plan",
-			"key":   opts.Key,
+			"key":   opts.Namespace,
 			"kind":  string(resp.Kind),
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait", payload)
@@ -89,23 +89,23 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 			timer := time.AfterFunc(opts.CancelTimeout, func() {
 				bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_, _ = backends.Concurrency.ForceReleaseSuperseded(bg, opts.Key)
+				_, _ = backends.Concurrency.ForceReleaseSuperseded(bg, opts.Namespace)
 			})
 			defer timer.Stop()
 		}
 
-		promoted, err := waitForPlanSlot(ctx, backends, opts.Key, runID, holderID)
+		promoted, err := waitForPlanSlot(ctx, backends, opts.Namespace, runID, holderID)
 		if err != nil {
 			return nil, "", err
 		}
 		if !promoted {
 			return nil, planCacheEvicted, nil
 		}
-		return makePlanSlotRelease(backends, opts.Key, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, opts.Namespace, holderID), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
-		// Coalesce + CacheKey are rejected at plan build.
-		return nil, "", fmt.Errorf("plan Cache(%q) unexpectedly got %q from acquire; this should have been rejected at build", opts.Key, resp.Kind)
+		// Coalesce + ContentHash are rejected at plan build.
+		return nil, "", fmt.Errorf("plan Cache(%q) unexpectedly got %q from acquire; this should have been rejected at build", opts.Namespace, resp.Kind)
 	}
 
 	return nil, "", fmt.Errorf("plan Cache acquire returned unknown kind %q", resp.Kind)

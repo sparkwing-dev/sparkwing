@@ -100,7 +100,7 @@ func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 	build := sparkwing.Job(plan, "build-artifact", unsharedStep("release-build"))
 	push := sparkwing.Job(plan, "push-s3", s3Push()).
 		Needs(build).
-		Cache(sparkwing.CacheOptions{Key: "shared-s3-bucket", OnLimit: sparkwing.Queue})
+		Cache(sparkwing.CacheOptions{Namespace: "shared-s3-bucket", OnLimit: sparkwing.Queue})
 	sparkwing.Job(plan, "notify-slack", unsharedStep("release-notify")).Needs(push)
 	return nil
 }
@@ -112,7 +112,7 @@ func (syncBackupPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 	snapshot := sparkwing.Job(plan, "snapshot-db", unsharedStep("backup-snapshot"))
 	push := sparkwing.Job(plan, "push-s3", s3Push()).
 		Needs(snapshot).
-		Cache(sparkwing.CacheOptions{Key: "shared-s3-bucket", OnLimit: sparkwing.Queue})
+		Cache(sparkwing.CacheOptions{Namespace: "shared-s3-bucket", OnLimit: sparkwing.Queue})
 	sparkwing.Job(plan, "update-inventory", unsharedStep("backup-inventory")).Needs(push)
 	return nil
 }
