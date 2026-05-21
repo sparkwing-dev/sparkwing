@@ -116,9 +116,9 @@ func runInternalCompletePipelines(_ []string) error {
 	return nil
 }
 
-// runInternalCompleteFlags emits "--flag\tGroupName\tDescription" per
-// flag for the leaf at the given argv path. Walks longest prefix to
-// shortest so multi-word leaves win.
+// runInternalCompleteFlags emits "--flag\tDescription" per flag for
+// the leaf at the given argv path. Walks longest prefix to shortest
+// so multi-word leaves win.
 func runInternalCompleteFlags(args []string) error {
 	if len(args) == 0 {
 		return nil
@@ -130,15 +130,10 @@ func runInternalCompleteFlags(args []string) error {
 		if !ok {
 			continue
 		}
-		flags := visibleFlagsForHelp(cmd, true)
-		groups := groupFlagsForHelp(flags, cmd.GroupOrder)
-		for _, g := range groups {
-			for _, f := range g.flags {
-				desc := requirementTag(f.Required, f.RequiredWhen) + f.Desc
-				desc = strings.ReplaceAll(desc, "\t", " ")
-				group := strings.ReplaceAll(g.name, "\t", " ")
-				fmt.Printf("--%s\t%s\t%s\n", f.Name, group, desc)
-			}
+		for _, f := range visibleFlagsForHelp(cmd, true) {
+			desc := requirementTag(f.Required, f.RequiredWhen, false) + f.Desc
+			desc = strings.ReplaceAll(desc, "\t", " ")
+			fmt.Printf("--%s\t%s\n", f.Name, desc)
 		}
 		return nil
 	}
@@ -146,16 +141,24 @@ func runInternalCompleteFlags(args []string) error {
 }
 
 // requirementTag returns a leading "[required]/[conditional]/[optional]"
-// marker. Plain text -- ANSI in compadd descriptions corrupts zsh redraws.
-func requirementTag(required bool, requiredWhen string) string {
+// marker, with an "arg, " prefix when the flag is defined by a pipeline
+// author (so operators can tell pipeline-defined flags from sparkwing's
+// own at a glance). Plain text -- ANSI in compadd descriptions
+// corrupts zsh redraws.
+func requirementTag(required bool, requiredWhen string, pipelineArg bool) string {
+	var req string
 	switch {
 	case required:
-		return "[required] "
+		req = "required"
 	case requiredWhen != "":
-		return "[conditional] "
+		req = "conditional"
 	default:
-		return "[optional] "
+		req = "optional"
 	}
+	if pipelineArg {
+		return "[arg, " + req + "] "
+	}
+	return "[" + req + "] "
 }
 
 // runInternalCompletePipelineFlags emits typed flags for one pipeline
@@ -176,13 +179,13 @@ func runInternalCompletePipelineFlags(args []string) error {
 	schema, err := pipelineFlagsFromCache(sparkwingDir, pipelineName)
 	if err == nil && len(schema) > 0 {
 		for _, a := range schema {
-			group := "Pipeline Args"
-			desc := requirementTag(a.Required, "") + a.Desc
-			if a.Desc == "" {
-				desc = requirementTag(a.Required, "") + a.Type
+			body := a.Desc
+			if body == "" {
+				body = a.Type
 			}
+			desc := requirementTag(a.Required, "", true) + body
 			desc = strings.ReplaceAll(desc, "\t", " ")
-			fmt.Printf("--%s\t%s\t%s\n", a.Name, group, desc)
+			fmt.Printf("--%s\t%s\n", a.Name, desc)
 		}
 		return nil
 	}
@@ -613,40 +616,25 @@ _sparkwing_complete_verbs() {
 }
 
 # _sparkwing_complete_flags queries the binary for flag names +
-# descriptions (including [required]/[conditional] prefixes) for the
-# leaf at the given path. Falls through silently when no leaf matches.
+# descriptions (including [required]/[conditional]/[arg, ...] prefixes)
+# for the leaf at the given path. Falls through silently when no leaf
+# matches. Pipeline-author flags carry an "[arg, ...]" tag in the
+# description so operators can distinguish them from sparkwing-owned
+# flags in the flat menu.
 _sparkwing_complete_flags() {
-    # Helper emits three tab-separated fields per line:
-    #     --flag<TAB>GroupName<TAB>Description
-    # We bucket by GroupName in insertion order so zsh's _describe
-    # renders one labeled section per group -- operators see the same
-    # "Source", "System", "Other" headers the --help page uses.
-    local -A _sw_group_names _sw_group_descs
-    local -a _sw_group_order
-    local line name group desc label
+    local -a names descs
+    local line name desc label
 
     _sw_absorb_flag_line() {
         name="${line%%$'\t'*}"
-        line="${line#*$'\t'}"
-        group="${line%%$'\t'*}"
         desc="${line#*$'\t'}"
-        [[ -z "$group" ]] && group="Other"
-        if [[ -z "${_sw_group_names[$group]-}" ]]; then
-            _sw_group_order+=("$group")
-            _sw_group_names[$group]=""
-            _sw_group_descs[$group]=""
-        fi
-        _sw_group_names[$group]+="$name"$'\n'
+        names+=("$name")
         if [[ -z "$desc" || "$desc" == "$name" ]]; then
             label="$name"
         else
             # Truncate desc so the rendered row never exceeds terminal
-            # width. All descs are plain text now (requirementTag
-            # stopped emitting ANSI), so simple byte-length math is
-            # correct -- no ANSI-strip step needed. Keeping ANSI out
-            # of compadd display strings also prevents the duplicated-
-            # row corruption zsh's completion engine hits on small-
-            # terminal menu redraws.
+            # width. requirementTag emits plain text -- ANSI in compadd
+            # descs corrupts redraws on small terminals.
             local _sw_indent=24
             local _sw_max=$(( ${COLUMNS:-80} - _sw_indent - 1 ))
             if (( _sw_max > 10 )) && (( ${#desc} > _sw_max )); then
@@ -654,16 +642,12 @@ _sparkwing_complete_flags() {
             fi
             label="${(r:22:: :)name}  $desc"
         fi
-        _sw_group_descs[$group]+="$label"$'\n'
+        descs+=("$label")
     }
 
-    # Pipeline-specific flags go FIRST so the "Pipeline Args" group
-    # renders at the top of the menu -- operators can tab-cycle
-    # directly to the per-pipeline knobs without scrolling past the
-    # sparkwing-owned plumbing (--sw-profile/--sw-ref/...)
-    # every time. "sparkwing run <pipeline> --<TAB>" is the only path
-    # that carries a pipeline name at a known position (leaf "run",
-    # pipeline at $2).
+    # Pipeline-author flags go FIRST so per-pipeline knobs sit above
+    # sparkwing's plumbing in the menu. Only "sparkwing run <pipeline>"
+    # carries the pipeline name at a known position.
     if (( $# >= 2 )) && [[ "$1" == "run" ]]; then
         while IFS= read -r line; do
             _sw_absorb_flag_line
@@ -674,24 +658,8 @@ _sparkwing_complete_flags() {
         _sw_absorb_flag_line
     done < <(sparkwing _complete-flags "$@" 2>/dev/null)
 
-    # Flatten every collected flag into one compadd call with no
-    # section header. Pipeline-author flags (unprefixed) sort before
-    # sparkwing flags (--sw-*) naturally; the prefix is the only
-    # visual cue an operator needs to tell them apart. No magic
-    # groupings.
-    local g
-    local -a allnames alldescs
-    for g in "${_sw_group_order[@]}"; do
-        local -a gnames gdescs
-        gnames=( "${(@f)_sw_group_names[$g]}" )
-        gdescs=( "${(@f)_sw_group_descs[$g]}" )
-        (( ${#gnames[@]} > 0 )) && [[ -z "${gnames[-1]}" ]] && gnames=( "${gnames[@]:0:-1}" )
-        (( ${#gdescs[@]} > 0 )) && [[ -z "${gdescs[-1]}" ]] && gdescs=( "${gdescs[@]:0:-1}" )
-        allnames+=( "${gnames[@]}" )
-        alldescs+=( "${gdescs[@]}" )
-    done
-    (( ${#allnames[@]} == 0 )) && return
-    compadd -l -J "flags" -d alldescs -a allnames
+    (( ${#names[@]} == 0 )) && return
+    compadd -l -J "flags" -d descs -a names
 }
 
 # _sparkwing_complete_pipelines handles 'sparkwing run <TAB>'.

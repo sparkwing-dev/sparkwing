@@ -264,6 +264,14 @@ the GitHub Release body.
   cursor. Cursor movement clamps at the top and bottom of each list
   instead of wrapping. Arrow navigation into the tabs column has been
   removed; use `Tab` instead.
+- **cli:** Tab-completion descriptions for pipeline-defined flags now
+  carry an `[arg, optional]` / `[arg, required]` tag so they're
+  visually distinguishable from sparkwing-owned flags like
+  `--sw-profile` or `--help` in the flat menu. The internal
+  `_complete-flags` and `_complete-pipeline-flags` helpers now emit
+  two tab-separated columns (`--flag<TAB>description`) instead of
+  three -- the group column was unused after the shell-side flatten
+  step and the bucketing code in the zsh script has been removed.
 - **docs:** Example struct names in sparkwing's own examples,
   documentation, and template scaffolders normalized to drop the
   redundant `Job` suffix (`&BuildJob{}` → `&Build{}`, `*BuildJob` →
