@@ -144,14 +144,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # gh release create --generate-notes shells out to git to walk
-      # commits since the last tag, so the release job needs the repo
-      # history. We don't build anything here; checkout is purely to
-      # let --generate-notes work. fetch-depth: 0 because shallow
-      # clones can miss the previous tag and produce empty notes.
+      # Checkout is needed so the release body can be extracted from
+      # CHANGELOG.md at the tagged commit. The release pipeline (see
+      # .sparkwing/jobs/release.go) renames `## [Unreleased]` to
+      # `## [vX.Y.Z] - DATE` and commits before pushing the tag, so
+      # the tagged tree already has the section in place.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       # merge-multiple: true flattens every artifact into one dist/
       # without per-artifact subdirectories, so sha256sum + the upload
@@ -171,6 +169,20 @@ jobs:
           sha256sum sparkwing-* > SHA256SUMS
           ls -la
 
+      - name: Extract CHANGELOG section for this tag
+        # The CHANGELOG entry for [vX.Y.Z] is the curated migration
+        # narrative. Use it verbatim as the release body so adopters
+        # see the migration tables, not the dev-facing commit log
+        # (which includes things like "regen apidiff" / "lint sweep"
+        # that aren't user-visible). Fails the workflow if the
+        # section is missing -- catches a missed [Unreleased] -> [v*]
+        # rename before adopters ever see an empty release page.
+        run: |
+          set -euo pipefail
+          bash bin/extract-changelog-section.sh "${GITHUB_REF_NAME}" CHANGELOG.md > release-notes.md
+          echo "==> release notes:"
+          cat release-notes.md
+
       - name: Create or update release + upload assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -178,14 +190,16 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           # Idempotent: re-running this workflow against the same tag
-          # (after a fix) replaces existing assets via --clobber.
+          # (after a fix) replaces existing assets via --clobber and
+          # rewrites the notes from the (possibly updated) CHANGELOG.
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "==> existing release $tag; updating assets"
+            echo "==> existing release $tag; updating assets + notes"
+            gh release edit "$tag" --notes-file release-notes.md
           else
             echo "==> creating release $tag"
             gh release create "$tag" \
               --title "sparkwing CLI $tag" \
-              --generate-notes
+              --notes-file release-notes.md
           fi
           # Glob expands to every binary + SHA256SUMS in one upload
           # call; --clobber replaces existing assets on workflow re-run.
