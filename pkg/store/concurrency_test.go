@@ -228,7 +228,7 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 	}
 
 	// A subsequent acquire without BypassRead must hit the cache entry
-	// r2 just wrote (origin = r2/n1, not r1/n1 — write replaced the row).
+	// r2 just wrote (origin = r2/n1, not r1/n1 -- write replaced the row).
 	r3 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",

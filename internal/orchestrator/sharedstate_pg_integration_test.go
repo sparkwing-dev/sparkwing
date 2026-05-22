@@ -105,7 +105,7 @@ func registerPgIntegPipelines(t *testing.T) {
 
 // TestPgSharing_CoordinatedCacheReservation is the central Mode 3
 // claim: two runs against the same Postgres schema sharing the same
-// .Cache() key — the second sees an AcquireCached outcome (not just
+// .Cache() key -- the second sees an AcquireCached outcome (not just
 // a content-addressed blob HEAD). Verify via the concurrency_cache
 // row written by Run A and the cached outcome on Run B's node.
 func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
@@ -157,7 +157,7 @@ func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
 		t.Errorf("invocations after Run B = %d, want 1 (Run B should have hit the pg-coordinated cache)", got)
 	}
 
-	// Inspect Run B's build node — outcome must be Cached, evidence
+	// Inspect Run B's build node -- outcome must be Cached, evidence
 	// the orchestrator routed it through applyCacheHit.
 	nodes, err := stB.ListNodes(context.Background(), resB.RunID)
 	if err != nil {

@@ -63,7 +63,7 @@ func computeOnlySkip(plan *sparkwing.Plan, pattern string) (map[string]string, e
 
 // matchNodes returns the subset of nodes whose ID satisfies the
 // path.Match glob. A malformed pattern surfaces as path.ErrBadPattern
-// — the caller wraps that with the offending input.
+// -- the caller wraps that with the offending input.
 func matchNodes(nodes []*sparkwing.JobNode, pattern string) (map[string]bool, error) {
 	out := make(map[string]bool)
 	for _, n := range nodes {
@@ -80,7 +80,7 @@ func matchNodes(nodes []*sparkwing.JobNode, pattern string) (map[string]bool, er
 
 // expandAncestors adds id and every transitive Needs() ancestor
 // reachable through plan-known nodes to keep. Stops at unknown ids
-// (dynamic-group members not yet expanded) — they participate via
+// (dynamic-group members not yet expanded) -- they participate via
 // their parent's keep-status.
 func expandAncestors(byID map[string]*sparkwing.JobNode, id string, keep map[string]bool) {
 	if keep[id] {

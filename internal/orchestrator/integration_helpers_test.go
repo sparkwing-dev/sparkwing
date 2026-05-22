@@ -90,7 +90,7 @@ func openIntegrationPostgres(t *testing.T) *store.Store {
 
 // openIntegrationPostgresAt opens a second connection against the
 // same per-test schema as src. Used by tests that want two
-// independent *store.Store handles sharing one database — the cross-
+// independent *store.Store handles sharing one database -- the cross-
 // runner pattern in production.
 func openIntegrationPostgresAt(t *testing.T, src *store.Store) *store.Store {
 	t.Helper()

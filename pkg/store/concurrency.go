@@ -1359,7 +1359,7 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	evict := count - keepCount
-	// (key, cache_key_hash) is the primary key — using it as the
+	// (key, cache_key_hash) is the primary key -- using it as the
 	// IN selector is portable across SQLite and Postgres, where
 	// SQLite's `rowid` and Postgres's `ctid` would otherwise need
 	// dialect branching.

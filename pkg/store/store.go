@@ -615,7 +615,7 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 }
 
 // applyMigrationPostgresTx dispatches on version inside the open
-// migration transaction. Pairs with applyMigrationSQLite — the same
+// migration transaction. Pairs with applyMigrationSQLite -- the same
 // version number maps to a semantically equivalent step on each
 // dialect.
 func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, version int) error {
