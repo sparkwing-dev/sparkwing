@@ -43,7 +43,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       ./cmd/${BINARY}
 
 FROM alpine:3.21@sha256:c3f8e73fdb79deaebaa2037150150191b9dcbfba68b4a46d70103204c53f4709
-RUN apk add --no-cache ca-certificates
+# git ships with every image because sparkwing-cache and
+# sparkwing-runner both shell out to it (clone, fetch, advertise);
+# adding ~15MB to the other three images is cheaper than maintaining
+# per-binary apk variants.
+RUN apk add --no-cache ca-certificates git
 ARG BINARY
 ENV BINARY=${BINARY}
 COPY --from=build /out/${BINARY} /usr/local/bin/${BINARY}
