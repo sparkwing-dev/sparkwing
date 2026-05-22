@@ -44,20 +44,26 @@ type BuildImagesArgs struct {
 	SkipWeb  bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
 }
 
-// components lists the binaries that get an image. Each name matches
-// both a cmd/<name>/ directory in the source tree and a deployable
-// component in the gitops manifests.
-//
-// sparkwing-runner is deliberately omitted: the warm-runner pool's
-// image needs a runner-entrypoint.sh wrapper (seeds ~/.netrc from
-// GITHUB_TOKEN before exec'ing the binary) that isn't part of the
-// OSS build/Dockerfile.binary template. Until a runner-specific
-// Dockerfile lands, runners stay on their hand-built image.
-var buildImagesComponents = []string{
-	"sparkwing-controller",
-	"sparkwing-web",
-	"sparkwing-logs",
-	"sparkwing-cache",
+// buildImageSpec is the per-component build recipe.
+type buildImageSpec struct {
+	// name matches both a cmd/<name>/ source dir and the image name
+	// pushed to the registry.
+	name string
+	// dockerfile is the path under the repo root; empty means
+	// build/Dockerfile.binary (the standard single-binary recipe).
+	dockerfile string
+}
+
+// components lists the binaries that get an image. The standard
+// components share build/Dockerfile.binary; sparkwing-runner needs
+// extra runtime tooling (git, a netrc-seeding entrypoint wrapper)
+// so it has its own dockerfile.
+var buildImagesComponents = []buildImageSpec{
+	{name: "sparkwing-controller"},
+	{name: "sparkwing-web"},
+	{name: "sparkwing-logs"},
+	{name: "sparkwing-cache"},
+	{name: "sparkwing-runner", dockerfile: "build/Dockerfile.runner"},
 }
 
 func (BuildImages) ShortHelp() string {
@@ -93,7 +99,7 @@ func (p *BuildImages) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	prev := webBundle
 	for _, comp := range buildImagesComponents {
 		c := comp
-		prev = sparkwing.Step(w, "build-"+c, func(ctx context.Context) error {
+		prev = sparkwing.Step(w, "build-"+c.name, func(ctx context.Context) error {
 			return p.buildOne(ctx, c)
 		}).Needs(prev)
 	}
@@ -154,7 +160,7 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 	}
 	p.refs = make([]string, 0, len(buildImagesComponents))
 	for _, c := range buildImagesComponents {
-		p.refs = append(p.refs, prefix+c+":"+p.tag)
+		p.refs = append(p.refs, prefix+c.name+":"+p.tag)
 	}
 
 	sparkwing.Info(ctx, "resolved tag=%s; %d images to build", p.tag, len(p.refs))
@@ -172,13 +178,17 @@ func (p *BuildImages) buildWebBundle(ctx context.Context) error {
 	return err
 }
 
-func (p *BuildImages) buildOne(ctx context.Context, component string) error {
-	imageRef := p.refForComponent(component)
+func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
+	imageRef := p.refForComponent(spec.name)
+	dockerfile := spec.dockerfile
+	if dockerfile == "" {
+		dockerfile = "build/Dockerfile.binary"
+	}
 
 	args := []string{
 		"buildx", "build",
-		"--file", sparkwing.Path("build/Dockerfile.binary"),
-		"--build-arg", "BINARY=" + component,
+		"--file", sparkwing.Path(dockerfile),
+		"--build-arg", "BINARY=" + spec.name,
 		"--build-arg", "SPARKWING_VERSION=" + p.tag,
 		"--tag", imageRef,
 	}
@@ -189,22 +199,22 @@ func (p *BuildImages) buildOne(ctx context.Context, component string) error {
 	}
 	args = append(args, sparkwing.Path("."))
 
-	sparkwing.Info(ctx, "docker buildx build %s -> %s", component, imageRef)
+	sparkwing.Info(ctx, "docker buildx build %s -> %s (%s)", spec.name, imageRef, dockerfile)
 	_, err := sparkwing.Exec(ctx, "docker", args...).Run()
 	if err != nil {
-		return fmt.Errorf("build %s: %w", component, err)
+		return fmt.Errorf("build %s: %w", spec.name, err)
 	}
-	sparkwing.Annotate(ctx, component+" -> "+imageRef)
+	sparkwing.Annotate(ctx, spec.name+" -> "+imageRef)
 	return nil
 }
 
-func (p *BuildImages) refForComponent(component string) string {
+func (p *BuildImages) refForComponent(name string) string {
 	for i, c := range buildImagesComponents {
-		if c == component {
+		if c.name == name {
 			return p.refs[i]
 		}
 	}
-	return component + ":" + p.tag
+	return name + ":" + p.tag
 }
 
 // summary emits a single parseable line to stdout that cross-process

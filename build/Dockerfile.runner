@@ -1,0 +1,39 @@
+# Runner image: adds the git + private-module netrc bootstrap on top
+# of the standard binary build the other deployable components use.
+#
+# Why a dedicated Dockerfile rather than reusing Dockerfile.binary:
+#
+#   - The runner shells out to `git fetch` against the gitcache to
+#     pull consumer-repo source per claimed trigger. Dockerfile.binary
+#     ships only ca-certificates, no git.
+#   - The runner needs HTTPS auth to github.com for private modules.
+#     We seed ~/.netrc from $GITHUB_TOKEN at container start via the
+#     runner-entrypoint.sh wrapper; that wrapper is bundled here.
+#
+# The build stage is identical to Dockerfile.binary so the same source
+# tree compiles cleanly. The runtime stage adds the extra tooling +
+# entrypoint wrapper.
+
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH SPARKWING_VERSION
+WORKDIR /src
+COPY . .
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    mkdir -p /out && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w -X main.Version=${SPARKWING_VERSION}" \
+      -o /out/sparkwing-runner \
+      ./cmd/sparkwing-runner
+
+FROM alpine:3.21@sha256:c3f8e73fdb79deaebaa2037150150191b9dcbfba68b4a46d70103204c53f4709
+RUN apk add --no-cache ca-certificates git
+COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner
+COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/runner-entrypoint.sh
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]
+CMD ["/usr/local/bin/sparkwing-runner"]
