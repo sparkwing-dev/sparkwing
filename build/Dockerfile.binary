@@ -47,7 +47,7 @@ FROM alpine:3.21@sha256:c3f8e73fdb79deaebaa2037150150191b9dcbfba68b4a46d70103204
 # sparkwing-runner both shell out to it (clone, fetch, advertise);
 # adding ~15MB to the other three images is cheaper than maintaining
 # per-binary apk variants.
-RUN apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates git openssh-client
 ARG BINARY
 ENV BINARY=${BINARY}
 COPY --from=build /out/${BINARY} /usr/local/bin/${BINARY}
