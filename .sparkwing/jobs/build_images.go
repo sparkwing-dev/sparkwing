@@ -47,12 +47,17 @@ type BuildImagesArgs struct {
 // components lists the binaries that get an image. Each name matches
 // both a cmd/<name>/ directory in the source tree and a deployable
 // component in the gitops manifests.
+//
+// sparkwing-runner is deliberately omitted: the warm-runner pool's
+// image needs a runner-entrypoint.sh wrapper (seeds ~/.netrc from
+// GITHUB_TOKEN before exec'ing the binary) that isn't part of the
+// OSS build/Dockerfile.binary template. Until a runner-specific
+// Dockerfile lands, runners stay on their hand-built image.
 var buildImagesComponents = []string{
 	"sparkwing-controller",
 	"sparkwing-web",
 	"sparkwing-logs",
 	"sparkwing-cache",
-	"sparkwing-runner",
 }
 
 func (BuildImages) ShortHelp() string {
