@@ -24,10 +24,10 @@ import (
 // sequences. Each entry is a path relative to the module root.
 //
 //   - pkg/color/color.go: the sanctioned helper itself.
-//   - orchestrator/logger.go: PrettyRenderer's internal palette;
-//     the renderer is only selected when stdout is a TTY (see
-//     orchestrator/main.go selectLocalRenderer), so its raw
-//     codes never reach an agent.
+//   - internal/logpretty/pretty.go: PrettyRenderer's internal palette
+//     (extracted from internal/orchestrator/logger.go). The renderer
+//     is only selected when stdout is a TTY (see orchestrator's
+//     selectLocalRenderer), so its raw codes never reach an agent.
 //   - orchestrator/jobs_cli.go,
 //     orchestrator/jobs_cli_remote.go: cursor-control escapes
 //     (\x1b[H, \x1b[J) for live-status redraws; only run in
@@ -35,7 +35,7 @@ import (
 var allowed = map[string]bool{
 	"pkg/color/color.go":                       true,
 	"pkg/color/guard_test.go":                  true,
-	"internal/orchestrator/logger.go":          true,
+	"internal/logpretty/pretty.go":             true,
 	"internal/orchestrator/jobs_cli.go":        true,
 	"internal/orchestrator/jobs_cli_remote.go": true,
 }
