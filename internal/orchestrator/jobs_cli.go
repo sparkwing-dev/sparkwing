@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -360,7 +361,7 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 // lines are trimmed so the block doesn't pad the table out.
 func writeIndentedSummary(out io.Writer, prefix, md string) {
 	fmt.Fprintf(out, "%s%s\n", prefix, color.Dim("summary:"))
-	renderMarkdownSummary(out, prefix+"  ", md)
+	logpretty.RenderMarkdownSummary(out, prefix+"  ", md)
 }
 
 func hasStepSummary(steps []*store.NodeStep) bool {
