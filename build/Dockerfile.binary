@@ -48,6 +48,12 @@ FROM alpine:3.21@sha256:c3f8e73fdb79deaebaa2037150150191b9dcbfba68b4a46d70103204
 # adding ~15MB to the other three images is cheaper than maintaining
 # per-binary apk variants.
 RUN apk add --no-cache ca-certificates git openssh-client
+# Kubernetes pods run these images under arbitrary uids set by the
+# cluster's securityContext (typically 1000). OpenSSH's client calls
+# getpwuid(getuid()) at startup and aborts with "No user exists for
+# uid N" if there's no matching /etc/passwd entry, so seed one for
+# uid 1000 with /tmp as its home directory.
+RUN echo "sparkwing:x:1000:1000::/tmp:/sbin/nologin" >> /etc/passwd
 ARG BINARY
 ENV BINARY=${BINARY}
 COPY --from=build /out/${BINARY} /usr/local/bin/${BINARY}
