@@ -100,6 +100,132 @@ linters:
               desc: "use gopkg.in/yaml.v3; v2 is unmaintained and has known issues with anchor handling."
             - pkg: github.com/stretchr/testify/assert
               desc: "use testify/require instead so a failed assertion stops the test (assert keeps going and produces follow-on noise)."
+
+        # The dispatch engine (internal/orchestrator) is heavy: it pulls in
+        # the run/node executor, the local trigger consumer, the runner
+        # pool, and the bin compile cache. Only binaries that actually
+        # run pipelines should link against it. Thin binaries
+        # (sparkwing-logs, sparkwing-web, sparkwing-cache,
+        # sparkwing-controller's entry) and the read-only dashboard
+        # support packages (internal/backend, internal/web) need only
+        # the file-layout helpers (internal/paths) and the log renderer
+        # (internal/logpretty); pulling in internal/orchestrator drags
+        # in megabytes of unrelated code and slows the build.
+        #
+        # If a new dependency on the dispatch engine is actually
+        # necessary, prefer extracting the shared concern to its own
+        # leaf package (mirror the paths / logpretty split) over
+        # weakening this rule.
+        thin-binaries-no-dispatch:
+          list-mode: lax
+          files:
+            - "**/cmd/sparkwing-logs/**"
+            - "**/cmd/sparkwing-web/**"
+            - "**/cmd/sparkwing-cache/**"
+            - "**/cmd/sparkwing-controller/**"
+            - "**/internal/backend/**"
+            - "**/internal/web/**"
+            # Tests legitimately exercise the orchestrator -- e.g.
+            # internal/web/server_test.go runs a real pipeline to
+            # verify log rendering. The rule guards production
+            # binary size and arch, not test setup code.
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/orchestrator
+              desc: "Thin binaries and the dashboard support packages must not import internal/orchestrator (the dispatch engine). Use internal/paths for file-layout helpers and internal/logpretty for log rendering. If you genuinely need a new orchestrator symbol here, extract it to its own leaf package first."
+
+        # The public SDK is the contract users build pipelines
+        # against. Importing internal/* from it would ship internal
+        # types into every consumer repo's build graph. The single
+        # legitimate exception is internal/swtags (struct-tag
+        # helpers used by the SDK's flag parsing).
+        sdk-no-internal:
+          list-mode: lax
+          # Match only the top-level SDK package files (./sparkwing/*.go),
+          # not cmd/sparkwing/ or any other path that happens to contain
+          # the word "sparkwing". The negation rules exclude the CLI
+          # binary subtree (cmd/sparkwing*) and tests.
+          files:
+            - "sparkwing/*.go"
+            - "!**/cmd/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal
+              desc: "The public sparkwing SDK package cannot import internal/* packages. Anything the SDK needs at the surface either belongs in the SDK itself or in pkg/."
+          # swtags is an internal helper the SDK already legitimately
+          # depends on for flag-tag parsing; carve it out explicitly
+          # so the rule is enforceable without re-architecting.
+          allow:
+            - $gostd
+            - github.com/sparkwing-dev/sparkwing/internal/swtags
+
+        # pkg/store is the foundation data layer. If it grows imports
+        # of internal/*, it inverts the layering -- consumers (the
+        # orchestrator, the controller) depend on store, not the
+        # other way around.
+        store-no-internal:
+          list-mode: lax
+          files:
+            - "**/pkg/store/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal
+              desc: "pkg/store is the data foundation; internal/* packages depend on it, not the reverse. If pkg/store needs a helper currently in internal/, lift it to pkg/ or inline it."
+
+        # pkg/backends owns the backends.yaml schema -- config types
+        # only. Storage / store / controller implementations consume
+        # the config; the config doesn't reach back into them.
+        backends-no-impls:
+          list-mode: lax
+          files:
+            - "**/pkg/backends/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/pkg/storage
+              desc: "pkg/backends is config-type only; pkg/storage consumes the config, not the reverse. Factory wiring lives in pkg/storage/storeurl."
+            - pkg: github.com/sparkwing-dev/sparkwing/pkg/store
+              desc: "pkg/backends is config-type only. State-store implementations belong in pkg/store or pkg/storage/storeurl."
+            - pkg: github.com/sparkwing-dev/sparkwing/pkg/controller
+              desc: "pkg/backends declares the controller backend type; the controller implementation must not bleed in here."
+            - pkg: github.com/sparkwing-dev/sparkwing/pkg/logs
+              desc: "pkg/backends declares log backend types only; log-service implementation must not bleed in here."
+
+        # The warm-runner pool's machinery (internal/cluster +
+        # internal/runners/*) is sparkwing-runner-only. If a different
+        # binary needs a piece of it, lift the piece to its own
+        # neutral package instead of widening the cluster surface.
+        cluster-runner-only:
+          list-mode: lax
+          files:
+            - "**"
+            - "!**/cmd/sparkwing-runner/**"
+            - "!**/internal/cluster/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/cluster
+              desc: "internal/cluster is the warm-runner pool's implementation; only cmd/sparkwing-runner should import it. Other binaries that need a shared concept should consume it through a neutral package."
+
+        cache-binary-only:
+          list-mode: lax
+          files:
+            - "**"
+            - "!**/cmd/sparkwing-cache/**"
+            - "!**/internal/cache/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/cache
+              desc: "internal/cache is the sparkwing-cache HTTP server's implementation; only cmd/sparkwing-cache should import it."
+
+        runners-cluster-only:
+          list-mode: lax
+          files:
+            - "**"
+            - "!**/internal/cluster/**"
+            - "!**/internal/runners/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/runners
+              desc: "internal/runners/* are the warm-runner pool's per-runtime backends (k8s, warmpool). Only internal/cluster (the pool itself) should import them."
     forbidigo:
       # Each `forbid` pattern fires on call sites by default; analyze-types=false
       # keeps the rule focused on textual matches (no need to load full type info).
