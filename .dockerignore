@@ -1,0 +1,35 @@
+# Excluded from `docker build` / `docker buildx build` contexts. Keeps
+# the build context small + skips files that reference paths that
+# only exist on a developer's machine.
+
+# go workspace files reference absolute sibling-repo paths (e.g.
+# ../sparks-core/templates) that don't exist inside the container.
+# go build inside the container resolves modules from go.mod alone.
+go.work
+go.work.sum
+
+# .git is unused by `go build`; saves ~hundreds of MB on a repo with
+# meaningful history.
+.git/
+
+# Frontend tooling. The SPA bundle is committed to
+# internal/web/next-out/ and that's what the binary embeds; the
+# rest of web/ (node_modules, build cache, src for the bundle) is
+# only needed when iterating on the dashboard via bin/build-web.sh.
+web/node_modules/
+web/.next/
+web/out/
+
+# Per-machine state and run artifacts.
+*.db
+*.db-shm
+*.db-wal
+.sparkwing/runs/
+.sparkwing/state.db*
+.claude-scratch/
+.claude/
+
+# OS / editor noise.
+.DS_Store
+.idea/
+.vscode/
