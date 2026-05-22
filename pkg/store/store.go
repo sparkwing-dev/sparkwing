@@ -2721,6 +2721,73 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 	return err
 }
 
+// reapStalePendingRuns marks runs failed whose trigger has already
+// transitioned to 'done' (terminal) but whose run row never moved
+// past 'pending'. This catches the gap a trigger consumer can leave
+// behind when it FinishTriggers a claim but crashes / errors before
+// (or instead of) calling FinishRun -- e.g. an older runner image
+// whose source-fetch path doesn't propagate failure to the run row,
+// or any future bug along that boundary. The threshold grace lets
+// the normal pending -> running transition complete without a race
+// against this sweep.
+//
+// Returns the run IDs that were reaped. Each reaped run gets
+// error="..." set to the supplied reason so operators see why it
+// flipped rather than a bare "failed" with no context.
+func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
+	cutoff := time.Now().Add(-grace).UnixNano()
+	now := time.Now().UnixNano()
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id FROM runs r
+		WHERE r.status = 'pending'
+		  AND r.started_at > 0
+		  AND r.started_at < ?
+		  AND EXISTS (
+		      SELECT 1 FROM triggers t
+		       WHERE t.id = r.id AND t.status = 'done'
+		  )
+	`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE runs SET status = 'failed', error = ?, finished_at = ?
+			  WHERE id = ? AND status = 'pending'`,
+			reason, now, id); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // ListPendingTriggersForParent returns every pending trigger whose
 // parent_run_id matches parentRunID, oldest first. Used by the
 // laptop-local trigger loop to scope its claim queue to the run

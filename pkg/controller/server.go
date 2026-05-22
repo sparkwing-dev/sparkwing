@@ -613,6 +613,25 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 					"had_run", err == nil,
 				)
 			}
+			// Stale-pending sweep: catches runs whose trigger was
+			// finished without the run row ever flipping past
+			// 'pending'. The bug this guards against is a runner
+			// that calls FinishTrigger but not FinishRun on a
+			// pre-orchestrator failure (fetch/compile/exec). The
+			// grace window has to outlast the normal claim ->
+			// FinishRun gap a healthy runner takes; 5 * trigger
+			// lease is comfortably beyond it without leaving
+			// genuinely-stuck runs visible for too long.
+			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
+				5*store.DefaultLeaseDuration,
+				"reaped: trigger consumer finished without dispatching the pipeline"); err != nil {
+				s.logger.Error("stale pending sweep failed", "err", err)
+			} else {
+				for _, id := range ids {
+					s.logger.Warn("reaped stale pending run", "run_id", id)
+				}
+			}
+
 			// Sample queue-depth + active-runner gauges on the
 			// reaper's cadence. A stale gauge is preferable to a
 			// crashed reaper.
