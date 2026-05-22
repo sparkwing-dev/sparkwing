@@ -15,8 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -42,14 +42,14 @@ func run(args []string) error {
 		"path to a file containing 32 raw bytes for secret encryption (alternative to SPARKWING_SECRETS_KEY)")
 	_ = fs.Parse(args)
 
-	paths, err := orchestrator.DefaultPaths()
+	p, err := paths.DefaultPaths()
 	if err != nil {
 		return err
 	}
-	if err := paths.EnsureRoot(); err != nil {
+	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := store.Open(p.StateDB())
 	if err != nil {
 		return fmt.Errorf("open state db: %w", err)
 	}

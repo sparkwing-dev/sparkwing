@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -14,7 +14,7 @@ import (
 // storage.LogStore or the on-disk laptop layout for log reads.
 type StoreBackend struct {
 	st       *store.Store
-	paths    orchestrator.Paths
+	paths    paths.Paths
 	logStore storage.LogStore // when nil, fall back to disk reads under paths
 
 	caps Capabilities
@@ -23,7 +23,7 @@ type StoreBackend struct {
 // NewStoreBackend constructs a StoreBackend bound to st. paths is used
 // for the disk log fallback when logStore is nil. Pass a non-nil
 // logStore to route log reads through that backend instead.
-func NewStoreBackend(st *store.Store, paths orchestrator.Paths, logStore storage.LogStore) *StoreBackend {
+func NewStoreBackend(st *store.Store, paths paths.Paths, logStore storage.LogStore) *StoreBackend {
 	return &StoreBackend{st: st, paths: paths, logStore: logStore}
 }
 

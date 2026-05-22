@@ -12,8 +12,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
 
@@ -33,11 +33,11 @@ func run(args []string) error {
 	_ = fs.Parse(args)
 
 	if *root == "" {
-		paths, err := orchestrator.DefaultPaths()
+		p, err := paths.DefaultPaths()
 		if err != nil {
 			return err
 		}
-		*root = filepath.Join(paths.Root, "logs-service")
+		*root = filepath.Join(p.Root, "logs-service")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

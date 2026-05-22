@@ -13,8 +13,8 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -54,7 +54,7 @@ func run(args []string) error {
 
 	_ = fs.Parse(args)
 
-	paths, err := orchestrator.DefaultPaths()
+	paths, err := swpaths.DefaultPaths()
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func run(args []string) error {
 // win over the config file's environment-resolved values.
 func openFromConfig(
 	ctx context.Context,
-	paths orchestrator.Paths,
+	paths swpaths.Paths,
 	configPath, stateInline, logsInline, artifactsInline string,
 ) (backend.Backend, io.Closer, error) {
 	var stateSpec, logsSpec, artifactsSpec *backends.Spec

@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -35,12 +35,12 @@ import (
 //
 // artifactsSpec is only consulted on the object-store state branch; it
 // is the artifact store the S3Backend reads NDJSON dumps from. For
-// most deployments artifactsSpec mirrors stateSpec — the same bucket
-// hosts state, logs, and cache — but they can diverge.
+// most deployments artifactsSpec mirrors stateSpec -- the same bucket
+// hosts state, logs, and cache -- but they can diverge.
 func FromSpecs(
 	ctx context.Context,
 	stateSpec, logsSpec, artifactsSpec *backends.Spec,
-	paths orchestrator.Paths,
+	paths swpaths.Paths,
 	profileLookup storeurl.ProfileLookup,
 ) (Backend, io.Closer, error) {
 	if stateSpec == nil {

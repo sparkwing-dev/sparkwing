@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -197,7 +197,7 @@ func TestFromSpecs_CapabilitiesTagsFlow(t *testing.T) {
 	}
 }
 
-func newTempPaths(t *testing.T, root string) orchestrator.Paths {
+func newTempPaths(t *testing.T, root string) paths.Paths {
 	t.Helper()
-	return orchestrator.Paths{Root: root}
+	return paths.Paths{Root: root}
 }

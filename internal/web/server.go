@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -76,7 +76,7 @@ bundle first, then reinstall:
 // Zero value is the local-mode default.
 type HandlerOptions struct {
 	Backend       backend.Backend
-	Paths         orchestrator.Paths
+	Paths         swpaths.Paths
 	ControllerURL string // if set, /api/v1/* proxies to this URL
 	LogsURL       string // sparkwing-logs base URL (for /api/v1/health/services probe)
 	Token         string // controller bearer token (cluster mode)
@@ -92,7 +92,7 @@ type HandlerOptions struct {
 
 // Serve starts the dashboard in local mode, reading state from the
 // SQLite store at paths.StateDB().
-func Serve(ctx context.Context, paths orchestrator.Paths, addr string) error {
+func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
@@ -162,6 +162,12 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token))
 	} else {
+		// Controller-less dashboard (S3-only, Postgres-direct, or local
+		// SQLite). Serve the read-only runs surface from opts.Backend;
+		// fall through to 501 for anything else (writes, retries,
+		// trigger CRUD -- those require a controller).
+		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
+		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
 		authedMux.HandleFunc("/api/v1/", notImplementedHandler)
 	}
 
