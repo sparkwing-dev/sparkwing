@@ -632,6 +632,22 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				}
 			}
 
+			// Approval-timeout sweep: enforces the per-approval
+			// timeout_ms when the dispatching orchestrator's own
+			// timeout loop isn't running it (orchestrator process
+			// crashed / lost connection between request and
+			// resolve). Writes resolution='timed_out' so a
+			// re-attached orchestrator maps it back to the
+			// author-configured on_timeout policy.
+			if pairs, err := store.Maintenance.ReapTimedOutApprovals(s.store, ctx); err != nil {
+				s.logger.Error("approval timeout sweep failed", "err", err)
+			} else {
+				for _, p := range pairs {
+					s.logger.Warn("reaped timed-out approval",
+						"run_id", p[0], "node_id", p[1])
+				}
+			}
+
 			// Sample queue-depth + active-runner gauges on the
 			// reaper's cadence. A stale gauge is preferable to a
 			// crashed reaper.

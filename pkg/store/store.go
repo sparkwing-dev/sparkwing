@@ -2721,6 +2721,85 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 	return err
 }
 
+// reapTimedOutApprovals resolves approvals whose timeout window has
+// elapsed without any human (or live orchestrator) acting first.
+// Writes ApprovalResolutionTimedOut + a sentinel approver so a
+// re-attached orchestrator can map the resolution to its
+// author-configured on_timeout policy via the usual code path. Idle
+// approver string ("controller-reaper") distinguishes
+// controller-initiated timeouts from orchestrator-initiated ones
+// ("sparkwing") in audit logs.
+//
+// Returns (run_id, node_id) pairs for the approvals that were
+// reaped. The caller logs them; no further cleanup is needed at the
+// store layer.
+//
+// Notes for future work: this only resolves the APPROVAL state. If
+// the dispatching orchestrator process is fully dead, the run row
+// will still sit at status='running' because no one drives the
+// downstream node dispatch. A run-level heartbeat reaper would
+// catch that case separately.
+func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
+	now := time.Now()
+	nowNS := now.UnixNano()
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT run_id, node_id FROM approvals
+		WHERE resolved_at IS NULL
+		  AND timeout_ms > 0
+		  AND requested_at + (timeout_ms * 1000000) < ?
+	`, nowNS)
+	if err != nil {
+		return nil, err
+	}
+	var pairs [][2]string
+	for rows.Next() {
+		var rid, nid string
+		if err := rows.Scan(&rid, &nid); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		pairs = append(pairs, [2]string{rid, nid})
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+
+	for _, p := range pairs {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE approvals
+			   SET resolved_at = ?,
+			       resolution  = ?,
+			       approver    = ?,
+			       comment     = ?
+			 WHERE run_id = ? AND node_id = ?
+			   AND resolved_at IS NULL
+		`,
+			nowNS,
+			ApprovalResolutionTimedOut,
+			"controller-reaper",
+			"timeout enforced by controller (orchestrator silent past timeout_ms)",
+			p[0], p[1],
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return pairs, nil
+}
+
 // reapStalePendingRuns marks runs failed whose trigger has already
 // transitioned to 'done' (terminal) but whose run row never moved
 // past 'pending'. This catches the gap a trigger consumer can leave
