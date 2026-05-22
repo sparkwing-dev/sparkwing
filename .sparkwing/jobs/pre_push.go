@@ -3,7 +3,10 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+
+	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -157,22 +160,67 @@ func (p *PrePush) run(ctx context.Context) error {
 // are intended for local iteration; once they leak into main they
 // break every consumer of this repo (Go module proxy can't resolve
 // a local-path replace, so anyone cloning will fail to build).
+//
+// Carve-out: .sparkwing/go.mod's dogfood self-replace
+// (`github.com/sparkwing-dev/sparkwing => ..`) is allowed. The
+// .sparkwing/ directory is a separate Go module (declared
+// `module sparkwing-pipelines`) and is excluded from the parent
+// module's proxy archive, so the replace target `..` always
+// resolves to the parent checkout for anyone who could possibly
+// build it. See isSparkwingDogfoodReplace for the exact pattern.
 func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
+	// Run from the repo root explicitly so the paths git emits are
+	// repo-root-relative regardless of where the pipeline binary's
+	// process cwd is.
 	out, err := sparkwing.Bash(ctx,
-		`git ls-files '*go.mod' | xargs -I {} grep -lE '^replace ' {} 2>/dev/null || true`,
-	).String()
+		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
+	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
 	if err != nil {
-		return fmt.Errorf("scan go.mod files: %w", err)
+		return fmt.Errorf("list go.mod files: %w", err)
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
+	var offenders []string
+	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
+		if rel == "" {
+			continue
+		}
+		abs := sparkwing.Path(rel)
+		data, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			return fmt.Errorf("read %s: %w", rel, rerr)
+		}
+		mf, perr := modfile.Parse(rel, data, nil)
+		if perr != nil {
+			return fmt.Errorf("parse %s: %w", rel, perr)
+		}
+		for _, r := range mf.Replace {
+			if isSparkwingDogfoodReplace(rel, r) {
+				continue
+			}
+			offenders = append(offenders,
+				fmt.Sprintf("%s: %s => %s", rel, r.Old.Path, r.New.Path))
+		}
+	}
+	if len(offenders) == 0 {
 		return nil
 	}
-	files := strings.Split(out, "\n")
 	return fmt.Errorf(
-		"refusing to push: %d committed go.mod file(s) contain `replace` lines (remove the replace and pin a released tag):\n    %s",
-		len(files), strings.Join(files, "\n    "),
+		"refusing to push: %d disallowed replace line(s) (remove and pin a released tag):\n    %s",
+		len(offenders), strings.Join(offenders, "\n    "),
 	)
+}
+
+// isSparkwingDogfoodReplace recognizes the one replace the sparkwing
+// repo ships in main: .sparkwing/go.mod redirects the sparkwing module
+// to the parent checkout (`..`) so the repo's own pipelines compile
+// against the in-flight SDK source rather than the last-published tag
+// via the module proxy. Anything else in .sparkwing/go.mod or any
+// replace in another go.mod still fails the check.
+func isSparkwingDogfoodReplace(path string, r *modfile.Replace) bool {
+	return path == ".sparkwing/go.mod" &&
+		r.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
+		r.Old.Version == "" &&
+		r.New.Path == ".." &&
+		r.New.Version == ""
 }
 
 // checkNoCommittedGoWorkFiles refuses to let a workspace file ship.
