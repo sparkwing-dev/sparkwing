@@ -40,6 +40,14 @@ pipelines:
     entrypoint: Build
     tags: [build]
 
+  # build-images: builds one Docker image per deployable component
+  # (controller, web, logs, cache, runner). Local single-arch by
+  # default; --registry + --push switches to multi-arch buildx push.
+  # Downstream consumers parse the final RELEASE_IMAGES summary line.
+  - name: build-images
+    entrypoint: BuildImages
+    tags: [build, release]
+
   # release: cuts a sparkwing tag and pushes it. The
   # .github/workflows/release.yaml workflow takes over from the tag
   # push to publish binaries to GH Releases and multi-arch images to
