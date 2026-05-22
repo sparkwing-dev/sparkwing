@@ -1528,10 +1528,39 @@ func resolveGitRepo(name string) (string, error) {
 	hash := repoHash(repoURL)
 	bareRepo := filepath.Join(repoDir, hash+".git")
 
-	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		return "", fmt.Errorf("repo %q registered but not cloned -- seed via POST /sync/seed?repo=%s", name, repoURL)
+	if _, err := os.Stat(bareRepo); err == nil {
+		return bareRepo, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat %s: %w", bareRepo, err)
 	}
 
+	// Registered but the bare-repo directory is missing. This is the
+	// split-brain state that follows a PVC swap, a manual rm under
+	// /data, or a register call whose original clone failed (no SSH
+	// key at the time). Self-heal: try the same clone handleGitRegister
+	// would have run on the original registration. The per-repo lock
+	// keeps concurrent resolves from racing into N parallel clones for
+	// the same path, and the post-lock re-stat short-circuits when an
+	// earlier holder already finished the clone.
+	lock := repoLock(hash)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := os.Stat(bareRepo); err == nil {
+		return bareRepo, nil
+	}
+	log.Printf("gitcache: registered repo %q missing on disk; auto-cloning %s", name, repoURL)
+	if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
+		// Most likely cause: no SSH key for a private repo. Surface
+		// the original "registered but not cloned" message so the
+		// operator still gets the /sync/seed pointer; include the
+		// clone error so the underlying reason isn't lost.
+		return "", fmt.Errorf(
+			"repo %q registered but not cloned -- auto-clone failed (%s%s); seed manually via POST /sync/seed?repo=%s",
+			name, err, sshHint(out), repoURL,
+		)
+	}
+	enableSHAFetch(bareRepo)
+	log.Printf("gitcache: auto-clone complete for %q at %s", name, bareRepo)
 	return bareRepo, nil
 }
 

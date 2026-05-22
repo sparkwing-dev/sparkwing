@@ -174,6 +174,94 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 	}
 }
 
+// TestResolveGitRepo_AutoClonesWhenMissing covers the split-brain
+// recovery path: a name is in repoNames (config persisted) but the
+// bare-repo dir is missing (disk was wiped or never cloned at
+// registration time). resolveGitRepo should clone on demand from a
+// reachable URL rather than returning "registered but not cloned"
+// forever.
+//
+// The test uses a local upstream bare repo as the registered URL so
+// no SSH / network is required.
+func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
+	root := t.TempDir()
+
+	// Local upstream the cache will clone from.
+	upstream := filepath.Join(root, "upstream.git")
+	if out, err := gitCmd("init", "--bare", upstream); err != nil {
+		t.Fatalf("init upstream: %v (%s)", err, out)
+	}
+
+	oldRepoDir := repoDir
+	oldNamesFile := namesFile
+	repoDir = filepath.Join(root, "cache")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	namesFile = filepath.Join(root, "names.json")
+	t.Cleanup(func() {
+		repoDir = oldRepoDir
+		namesFile = oldNamesFile
+		repoNamesMu.Lock()
+		delete(repoNames, "auto-clone-fixture")
+		repoNamesMu.Unlock()
+	})
+
+	repoNamesMu.Lock()
+	repoNames["auto-clone-fixture"] = upstream
+	repoNamesMu.Unlock()
+
+	// Bare-repo dir intentionally not created; resolveGitRepo should
+	// auto-clone it.
+	bare, err := resolveGitRepo("auto-clone-fixture")
+	if err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "HEAD")); err != nil {
+		t.Fatalf("cloned bare missing HEAD: %v", err)
+	}
+
+	// Second resolve returns the same path without re-cloning.
+	bare2, err := resolveGitRepo("auto-clone-fixture")
+	if err != nil {
+		t.Fatalf("second resolve: %v", err)
+	}
+	if bare2 != bare {
+		t.Fatalf("expected same bare path; got %q vs %q", bare2, bare)
+	}
+}
+
+// TestResolveGitRepo_AutoCloneFailureKeepsSeedHint verifies that a
+// failed auto-clone (bad URL / no network) still returns an error
+// pointing at the /sync/seed recovery path, so the operator's
+// playbook stays valid.
+func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
+	root := t.TempDir()
+	oldRepoDir := repoDir
+	repoDir = filepath.Join(root, "cache")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		repoDir = oldRepoDir
+		repoNamesMu.Lock()
+		delete(repoNames, "bad-url-fixture")
+		repoNamesMu.Unlock()
+	})
+
+	repoNamesMu.Lock()
+	repoNames["bad-url-fixture"] = "/this/path/does/not/exist.git"
+	repoNamesMu.Unlock()
+
+	_, err := resolveGitRepo("bad-url-fixture")
+	if err == nil {
+		t.Fatal("expected error from auto-clone of bogus URL")
+	}
+	if !strings.Contains(err.Error(), "/sync/seed") {
+		t.Fatalf("error should still point operators at /sync/seed; got %v", err)
+	}
+}
+
 func TestRepoHash_Deterministic(t *testing.T) {
 	h1 := repoHash("git@github.com:user/repo.git")
 	h2 := repoHash("git@github.com:user/repo.git")
