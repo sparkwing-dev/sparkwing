@@ -48,8 +48,9 @@ func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 	defer func() { _ = st2.Close() }()
 
 	count := schemaVersionRowCount(t, st2.DB())
-	if count != 1 {
-		t.Errorf("version rows = %d after reopen, want 1", count)
+	want := store.ExpectedSchemaVersion()
+	if count != want {
+		t.Errorf("version rows = %d after reopen, want %d", count, want)
 	}
 }
 
@@ -213,8 +214,9 @@ func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 	}
 	defer func() { _ = verify.Close() }()
 	count := schemaVersionRowCount(t, verify.DB())
-	if count != 1 {
-		t.Errorf("version rows = %d after %d concurrent opens, want 1", count, n)
+	want := store.ExpectedSchemaVersion()
+	if count != want {
+		t.Errorf("version rows = %d after %d concurrent opens, want %d", count, n, want)
 	}
 }
 

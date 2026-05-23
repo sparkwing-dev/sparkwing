@@ -454,7 +454,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 1
+const expectedSchemaVersion = 2
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -616,6 +616,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 			return err
 		}
 		return s.backfillRunAnnotationRollup()
+	case 2:
+		return s.ensureColumnsAll()
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -631,6 +633,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		if _, err := tx.ExecContext(ctx, schemaPostgres); err != nil {
 			return err
 		}
+		return s.ensureColumnsAllTx(ctx, tx)
+	case 2:
 		return s.ensureColumnsAllTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
