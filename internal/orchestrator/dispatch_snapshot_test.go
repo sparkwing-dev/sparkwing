@@ -64,6 +64,7 @@ func (b *captureBackend) ListNodeSteps(ctx context.Context, _ string) ([]*store.
 	return nil, nil
 }
 func (b *captureBackend) TouchNodeHeartbeat(ctx context.Context, _, _ string) error { return nil }
+func (b *captureBackend) TouchRunHeartbeat(ctx context.Context, _ string) error     { return nil }
 func (b *captureBackend) AppendEvent(ctx context.Context, _, _, _ string, _ []byte) error {
 	return nil
 }

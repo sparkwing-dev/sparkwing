@@ -309,6 +309,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
+	// Run-level heartbeat: tied to ctx so it stops when the run
+	// finishes (or its parent ctx cancels). Lets the controller's
+	// reaper detect a fully-orphaned dispatcher whose run isn't
+	// holding a node claim at the moment the laptop dies.
+	hbCtx, cancelHeartbeat := context.WithCancel(ctx)
+	defer cancelHeartbeat()
+	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID)
+
 	// Pre-register secret-marked Inputs values before any node runs.
 	// Same masker is reused for resolver + log redaction.
 	masker := secrets.NewMasker()

@@ -230,6 +230,10 @@ func (l localState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string
 	return l.st.TouchNodeHeartbeat(ctx, runID, nodeID)
 }
 
+func (l localState) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	return l.st.TouchRunHeartbeat(ctx, runID)
+}
+
 func (l localState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return l.st.AddNodeMetricSample(ctx, runID, nodeID, sample)
 }

@@ -70,6 +70,9 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 	if err := st.FinishRun(ctx, runID, "succeeded", "non-fatal warning"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
+	if err := st.TouchRunHeartbeat(ctx, runID); err != nil {
+		t.Fatalf("TouchRunHeartbeat: %v", err)
+	}
 	// Populate the annotation rollup columns directly: live runs get
 	// these via AppendNodeAnnotation, but the dump-format bijection
 	// cares about the fields surviving the round-trip, not the mutation
@@ -204,6 +207,10 @@ func normalizeRunTimes(r *store.Run) {
 	if r.FinishedAt != nil {
 		t := r.FinishedAt.UTC()
 		r.FinishedAt = &t
+	}
+	if r.LastHeartbeatAt != nil {
+		t := r.LastHeartbeatAt.UTC()
+		r.LastHeartbeatAt = &t
 	}
 }
 

@@ -223,6 +223,10 @@ func (f *fakeState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string
 	return nil
 }
 
+func (f *fakeState) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	return nil
+}
+
 func (f *fakeState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
