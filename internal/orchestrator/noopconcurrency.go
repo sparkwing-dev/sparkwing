@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,15 +21,36 @@ import (
 // same key write identical bytes -- but the leader/waiter coalesce
 // path that Mode 3 (Postgres) and Mode 4 (controller) provide is
 // deliberately absent. See DESIGN-shared-state.md for the tradeoff.
-type noopConcurrency struct{}
+type noopConcurrency struct {
+	warnedKeys sync.Map // map[string]struct{} - emit each (key, policy) warning once
+}
 
 // NoopConcurrency returns a ConcurrencyBackend that always grants
 // every slot acquire. Exposed for the S3Backends bundle and for
 // tests that want to bypass coordination without standing up a
 // store.
-func NoopConcurrency() ConcurrencyBackend { return noopConcurrency{} }
+func NoopConcurrency() ConcurrencyBackend { return &noopConcurrency{} }
 
-func (noopConcurrency) AcquireSlot(_ context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+func (n *noopConcurrency) AcquireSlot(_ context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	// Surface the silent-no-op once per (key, policy) so authors who
+	// declared .Cache(OnLimit:Fail|Queue|Skip|CancelOthers) realize the
+	// coordination guarantee they wrote is unenforced in this mode.
+	// Without the warning, a deploy gate built on Max=1+Fail looks
+	// like it's working when in fact both candidates are running.
+	if isCoordinatingPolicy(req.Policy) {
+		warnKey := req.Key + "|" + req.Policy
+		if _, loaded := n.warnedKeys.LoadOrStore(warnKey, struct{}{}); !loaded {
+			slog.Warn("cache concurrency policy is a no-op in this state backend; "+
+				"cross-runner reservation requires Mode 3 (postgres) or Mode 4 (controller). "+
+				"Multiple runners may run this node concurrently.",
+				"key", req.Key,
+				"policy", req.Policy,
+				"capacity", req.Capacity,
+				"run_id", req.RunID,
+				"node_id", req.NodeID,
+			)
+		}
+	}
 	holderID := req.HolderID
 	if holderID == "" {
 		holderID = req.RunID + "/" + req.NodeID
@@ -43,21 +66,30 @@ func (noopConcurrency) AcquireSlot(_ context.Context, req store.AcquireSlotReque
 	}, nil
 }
 
-func (noopConcurrency) HeartbeatSlot(_ context.Context, _, _ string, lease time.Duration) (time.Time, bool, error) {
+func (*noopConcurrency) HeartbeatSlot(_ context.Context, _, _ string, lease time.Duration) (time.Time, bool, error) {
 	if lease <= 0 {
 		lease = store.DefaultConcurrencyLease
 	}
 	return time.Now().Add(lease), false, nil
 }
 
-func (noopConcurrency) ReleaseSlot(_ context.Context, _, _, _, _, _ string, _ time.Duration) error {
+func (*noopConcurrency) ReleaseSlot(_ context.Context, _, _, _, _, _ string, _ time.Duration) error {
 	return nil
 }
 
-func (noopConcurrency) ResolveWaiter(_ context.Context, _, _, _, _, _, _ string) (store.WaiterResolution, error) {
+func (*noopConcurrency) ResolveWaiter(_ context.Context, _, _, _, _, _, _ string) (store.WaiterResolution, error) {
 	return store.WaiterResolution{Status: store.WaiterLeaderFinished}, nil
 }
 
-func (noopConcurrency) ForceReleaseSuperseded(_ context.Context, _ string) ([]store.ConcurrencyHolder, error) {
+func (*noopConcurrency) ForceReleaseSuperseded(_ context.Context, _ string) ([]store.ConcurrencyHolder, error) {
 	return nil, nil
+}
+
+// isCoordinatingPolicy reports whether the requested OnLimit policy
+// implies a coordination contract this backend cannot honor. Empty
+// policy means "no Cache() declared, no coordination expected";
+// everything else expects a leader/waiter/reject decision the noop
+// backend silently skips.
+func isCoordinatingPolicy(p string) bool {
+	return p != ""
 }

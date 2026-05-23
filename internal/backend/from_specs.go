@@ -71,11 +71,16 @@ func FromSpecs(
 		return b, &multiCloser{closers: []io.Closer{st}}, nil
 
 	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
-		spec := stateSpec
-		if artifactsSpec != nil {
-			spec = artifactsSpec
-		}
-		art, err := storeurl.OpenArtifactStoreFromSpec(ctx, *spec, profileLookup)
+		// Mode 2 reader: read state.ndjson from the STATE prefix
+		// because that's where s3state.Backend writes it. The legacy
+		// behavior of preferring artifactsSpec made sense only when
+		// state lived in SQLite locally and a separate
+		// `DumpRunState` mirror landed under the cache prefix; once
+		// state is object-store-native, the writer's prefix is the
+		// authoritative location. artifactsSpec stays available for
+		// downstream surfaces (cache lookups) but is no longer the
+		// dashboard's read path.
+		art, err := storeurl.OpenArtifactStoreFromSpec(ctx, *stateSpec, profileLookup)
 		if err != nil {
 			return nil, nopCloser{}, fmt.Errorf("artifact backend: %w", err)
 		}

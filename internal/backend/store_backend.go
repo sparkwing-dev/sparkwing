@@ -32,6 +32,13 @@ var _ Backend = (*StoreBackend)(nil)
 // SetCapabilities binds the static capabilities body.
 func (b *StoreBackend) SetCapabilities(c Capabilities) { b.caps = c }
 
+// Store returns the underlying *store.Store. Exposed so the local
+// CLI's read commands can call sqlite-specific helpers (orphan
+// reconcile, step lookup) when this backend is in use, without
+// committing those helpers to the Backend interface for impls that
+// don't have an equivalent.
+func (b *StoreBackend) Store() *store.Store { return b.st }
+
 func (b *StoreBackend) Capabilities(context.Context) (Capabilities, error) {
 	if b.caps.Mode == "" {
 		return Capabilities{

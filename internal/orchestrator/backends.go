@@ -90,7 +90,7 @@ func S3Backends(log storage.LogStore, state *s3state.Backend) Backends {
 	return Backends{
 		State:       s3StateAdapter{Backend: state},
 		Logs:        NewLogStoreBackend(log, nil),
-		Concurrency: noopConcurrency{},
+		Concurrency: &noopConcurrency{},
 	}
 }
 

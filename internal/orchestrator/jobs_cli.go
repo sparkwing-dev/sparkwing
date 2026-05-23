@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -49,17 +50,22 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	b, closer, err := OpenReadBackend(ctx, paths)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = closer.Close() }()
 
 	// Lazy orphan reconciliation: any "running" rows whose orchestrator
 	// process is dead get transitioned to "failed" before we read.
-	// Errors are swallowed -- a stale-heartbeat sweep failing mustn't
-	// break the list itself.
-	_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	// Only meaningful when the underlying state is a local SQLite store
+	// the CLI itself can write to; S3 / controller backends are
+	// reconciled by their own owners (orchestrator process / controller
+	// reaper). Errors are swallowed -- a stale-heartbeat sweep failing
+	// mustn't break the list itself.
+	if st := localStore(b); st != nil {
+		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	}
 
 	filter := store.RunFilter{
 		Limit:     listFetchLimit(opts),
@@ -69,7 +75,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)
 	}
-	runs, err := st.ListRuns(ctx, filter)
+	runs, err := b.ListRuns(ctx, filter)
 	if err != nil {
 		return err
 	}
@@ -186,21 +192,40 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	b, closer, err := OpenReadBackend(ctx, paths)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = closer.Close() }()
 
-	// Lazy orphan reconciliation -- see ListJobs.
-	_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	// Lazy orphan reconciliation only applies to the local SQLite
+	// backend; remote / object-store backends are reconciled by
+	// their own owners.
+	if st := localStore(b); st != nil {
+		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	}
 
 	if opts.JSON {
-		return writeRunDetailJSON(ctx, st, runID, out)
+		if st := localStore(b); st != nil {
+			return writeRunDetailJSON(ctx, st, runID, out)
+		}
+		// Backend-backed JSON: a minimal shape with run + nodes,
+		// without the local-only step/approval expansion. Matches the
+		// keys the SPA needs from S3 / controller modes; richer fields
+		// stay sqlite-only until we lift them onto Backend.
+		run, err := b.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		nodes, err := b.ListNodes(ctx, runID)
+		if err != nil {
+			return err
+		}
+		return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
 	}
 
 	if !opts.Follow {
-		return renderStatus(ctx, st, runID, out, false, opts.Steps)
+		return renderStatus(ctx, b, runID, out, false, opts.Steps)
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -211,10 +236,10 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 			fmt.Fprint(out, "\033[H\033[J")
 		}
 		first = false
-		if err := renderStatus(ctx, st, runID, out, true, opts.Steps); err != nil {
+		if err := renderStatus(ctx, b, runID, out, true, opts.Steps); err != nil {
 			return err
 		}
-		run, err := st.GetRun(ctx, runID)
+		run, err := b.GetRun(ctx, runID)
 		if err != nil {
 			return err
 		}
@@ -229,16 +254,23 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 }
 
-func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Writer, followBanner, includeSteps bool) error {
-	run, err := st.GetRun(ctx, runID)
+func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.Writer, followBanner, includeSteps bool) error {
+	run, err := b.GetRun(ctx, runID)
 	if err != nil {
 		return err
 	}
-	nodes, err := st.ListNodes(ctx, runID)
+	nodes, err := b.ListNodes(ctx, runID)
 	if err != nil {
 		return err
 	}
-	steps, _ := st.ListNodeSteps(ctx, runID)
+	// Steps and approvals aren't on the Backend interface yet -- they
+	// live on the local *store.Store path. Render as empty when the
+	// backend is S3 or controller. The rest of the status surface
+	// (run header, node table, errors) still renders.
+	var steps []*store.NodeStep
+	if st := localStore(b); st != nil {
+		steps, _ = st.ListNodeSteps(ctx, runID)
+	}
 	stepsByNode := groupStepsByNode(steps)
 
 	if followBanner {
@@ -290,9 +322,11 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 		}
 	}
 
-	approvals, err := st.ListApprovalsForRun(ctx, runID)
-	if err == nil {
-		renderApprovalsSection(out, approvals)
+	if st := localStore(b); st != nil {
+		approvals, err := st.ListApprovalsForRun(ctx, runID)
+		if err == nil {
+			renderApprovalsSection(out, approvals)
+		}
 	}
 	return nil
 }
@@ -576,6 +610,22 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	if opts.EventsOnly && opts.NoEvents {
 		return fmt.Errorf("jobs logs: --events-only and --no-events are mutually exclusive")
 	}
+	// Logs reading currently uses the on-disk envelope file and
+	// per-node body files under paths.RunDir, which only the local
+	// SQLite backend writes. For S3 / controller modes the dashboard
+	// is the supported reader; the CLI doesn't yet stream through the
+	// generic backend.Backend log methods. Surface a clear error
+	// rather than silently reading an empty local-disk directory.
+	b, closer, berr := OpenReadBackend(ctx, paths)
+	if berr != nil {
+		return berr
+	}
+	if st := localStore(b); st == nil {
+		_ = closer.Close()
+		return fmt.Errorf("sparkwing runs logs: the configured state backend stores logs remotely; " +
+			"point a dashboard (sparkwing dashboard start) at the same backends.yaml to read them, or pass --sw-local-only to scope the run to local storage")
+	}
+	_ = closer.Close()
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return err
