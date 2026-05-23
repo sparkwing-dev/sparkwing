@@ -29,6 +29,7 @@ type StateStore interface {
 	UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 	GetRun(ctx context.Context, runID string) (*store.Run, error)
 	GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
+	TouchRunHeartbeat(ctx context.Context, runID string) error
 
 	// Nodes.
 	CreateNode(ctx context.Context, n store.Node) error

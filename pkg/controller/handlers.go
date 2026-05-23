@@ -1233,6 +1233,27 @@ func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleTouchRunHeartbeat bumps last_heartbeat_at on the run row.
+// Orchestrators call this on a ticker while the run is active so the
+// controller's reaper can detect a fully-orphaned dispatcher and
+// flip the run to failed instead of leaving it pinned at 'running'.
+func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	if _, err := s.store.GetRun(r.Context(), runID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.store.TouchRunHeartbeat(r.Context(), runID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var body store.DebugPause

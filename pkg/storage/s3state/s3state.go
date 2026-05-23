@@ -627,6 +627,12 @@ func (b *Backend) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) 
 	})
 }
 
+// TouchRunHeartbeat is a no-op in S3 mode. The controller-side orphan
+// reaper that consumes last_heartbeat_at runs against a SQL store
+// the laptop owns directly; S3 mode reconciles orphans via per-node
+// heartbeats on the laptop instead.
+func (b *Backend) TouchRunHeartbeat(_ context.Context, _ string) error { return nil }
+
 func (b *Backend) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) {
 		n.Annotations = append(n.Annotations, msg)

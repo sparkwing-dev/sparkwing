@@ -281,6 +281,15 @@ func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) e
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
+// TouchRunHeartbeat POSTs a run-level liveness ping. The orchestrator
+// calls this on a ticker while a run is active so the controller's
+// reaper can detect a fully-orphaned dispatcher (closed laptop, lost
+// network, killed process) and flip the run to failed.
+func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/heartbeat", url.PathEscape(runID))
+	return c.post(ctx, path, nil, http.StatusNoContent, nil)
+}
+
 // AppendNodeAnnotation POSTs a single persistent summary string to
 // append to the node's annotations list. Driven by sparkwing.Annotate.
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {

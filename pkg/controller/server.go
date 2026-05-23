@@ -336,6 +336,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleMarkNodeReady)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRevokeNodeReady)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
+	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchRunHeartbeat)))
 
 	// Activity / heartbeat surface for the dashboard's liveness dot.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleUpdateNodeActivity)))
@@ -629,6 +630,22 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale pending run", "run_id", id)
+				}
+			}
+
+			// Stale-running sweep: catches fully-orphaned dispatching
+			// orchestrators (closed laptop, network gone, process
+			// killed) whose runs aren't actively claiming a node, so
+			// the node-claim reaper has nothing to expire. The
+			// orchestrator pings every 30s; 3 minutes of silence is
+			// unambiguous orphan territory.
+			if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
+				3*time.Minute,
+				"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
+				s.logger.Error("stale running sweep failed", "err", err)
+			} else {
+				for _, id := range ids {
+					s.logger.Warn("reaped stale running run", "run_id", id)
 				}
 			}
 
