@@ -603,6 +603,18 @@ func parseInt(s string) (int, error) {
 }
 
 // JobLogs streams a run's logs. Empty Node = all nodes in sequence.
+//
+// Dispatches by backend kind:
+//
+//   - Local SQLite: reads the tee'd _envelope.ndjson plus per-node
+//     body files under paths.RunDir. Includes merged lifecycle +
+//     exec_line stream and --tree descendant-run merging.
+//   - S3 / controller (any non-local Backend): reads per-node body
+//     output via Backend.ReadNodeLog and lifecycle events via
+//     Backend.ListEventsAfter. The merged envelope-style stream that
+//     the local path produces is not synthesized -- run-level events
+//     are available via `runs logs --events-only` or via `runs
+//     status`; per-node bodies are the default. --tree is local-only.
 func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -610,22 +622,47 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	if opts.EventsOnly && opts.NoEvents {
 		return fmt.Errorf("jobs logs: --events-only and --no-events are mutually exclusive")
 	}
-	// Logs reading currently uses the on-disk envelope file and
-	// per-node body files under paths.RunDir, which only the local
-	// SQLite backend writes. For S3 / controller modes the dashboard
-	// is the supported reader; the CLI doesn't yet stream through the
-	// generic backend.Backend log methods. Surface a clear error
-	// rather than silently reading an empty local-disk directory.
 	b, closer, berr := OpenReadBackend(ctx, paths)
 	if berr != nil {
 		return berr
 	}
+	defer func() { _ = closer.Close() }()
+
 	if st := localStore(b); st == nil {
-		_ = closer.Close()
-		return fmt.Errorf("sparkwing runs logs: the configured state backend stores logs remotely; " +
-			"point a dashboard (sparkwing dashboard start) at the same backends.yaml to read them, or pass --sw-local-only to scope the run to local storage")
+		// Non-local backend (S3 / controller). --tree assumes
+		// local descendant-run discovery; reject it with a clear
+		// error rather than silently behaving wrong.
+		if opts.Tree {
+			return fmt.Errorf("--tree is only supported against local SQLite state; " +
+				"unset --tree to read this run from the configured remote backend")
+		}
+		if opts.EventsOnly {
+			return writeEventsViaBackend(ctx, b, runID, opts, out)
+		}
+		nodes, err := b.ListNodes(ctx, runID)
+		if err != nil {
+			return err
+		}
+		target := nodes
+		if opts.Node != "" {
+			target = nil
+			for _, n := range nodes {
+				if n.NodeID == opts.Node {
+					target = append(target, n)
+					break
+				}
+			}
+			if len(target) == 0 {
+				return fmt.Errorf("node %q not found in run %s", opts.Node, runID)
+			}
+		}
+		target = filterNodesBySince(target, opts.Since)
+		if opts.Follow {
+			return followLogsViaBackend(ctx, b, runID, opts.Node, out)
+		}
+		return writeLogsViaBackend(ctx, b, runID, target, opts, out)
 	}
-	_ = closer.Close()
+
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return err
