@@ -35,6 +35,15 @@ RUN apk add --no-cache ca-certificates git
 # client + git's getpwuid lookups don't fail when the pod runs under
 # a cluster-set uid that isn't in alpine's default /etc/passwd.
 RUN echo "sparkwing:x:1000:1000::/tmp:/sbin/nologin" >> /etc/passwd
+# Go toolchain: the runner falls back to `go build` when the
+# pipeline binary isn't in the bincache (every first build after a
+# .sparkwing/ change). Without this, those runs die with "go
+# toolchain not on PATH". Pinned to the same minor as the build
+# stage so generated binaries match the runtime expectations.
+COPY --from=golang:1.26-alpine /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:$PATH \
+    GOCACHE=/tmp/.gocache \
+    GOPATH=/tmp/.gopath
 COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner
 COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/runner-entrypoint.sh
