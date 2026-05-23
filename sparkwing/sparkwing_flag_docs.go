@@ -62,6 +62,8 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-target", Argument: "TARGET", Desc: "Run against the named target (i.e. local, dev, prod)", Group: "System", Hot: true},
 	{Name: "sw-profile", Argument: "PROFILE", Desc: "Run via the named profile instead of locally", Group: "System", Hot: true},
+	{Name: "sw-box-slots", Argument: "N", Desc: "Max concurrent sparkwing run processes on this host (default: max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable)", Group: "System"},
+	{Name: "sw-no-wait", Desc: "Fail immediately when box slots are full instead of queueing", Group: "System"},
 }
 
 // SparkwingFlagDocs returns the canonical sparkwing-owned flag

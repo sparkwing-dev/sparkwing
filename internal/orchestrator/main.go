@@ -171,7 +171,21 @@ func Main() {
 		opts.SecretSource = src
 	}
 
-	res, err := RunLocal(context.Background(), paths, opts)
+	// Host-local box-slot semaphore: caps concurrent `sparkwing run`
+	// orchestrators on this machine. Acquisition wraps RunLocal only;
+	// the handle-trigger / run-node / replay-node subcommands above
+	// run inside cluster pods whose CPU is already capped by k8s.
+	// See acquireBoxSlot for env-var precedence.
+	ctx, stopBoxWait := context.WithCancel(context.Background())
+	defer stopBoxWait()
+	release, err := acquireBoxSlot(ctx, paths, workersHintForBoxSlot())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run:", err)
+		os.Exit(1)
+	}
+	defer release()
+
+	res, err := RunLocal(ctx, paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)

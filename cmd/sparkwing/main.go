@@ -255,6 +255,16 @@ func dispatchRun(args []string) error {
 	if wf.backendsConfig != "" {
 		env = append(env, "SPARKWING_BACKENDS_CONFIG="+wf.backendsConfig)
 	}
+	// Host-local box-slot semaphore knobs (see internal/boxslot).
+	// Forwarded to the inner pipeline binary, which acquires the
+	// slot before RunLocal so the wait blocks at run start rather
+	// than wasting compile cycles on a pre-rejected run.
+	if wf.boxSlots != "" {
+		env = append(env, "SPARKWING_BOX_SLOTS="+wf.boxSlots)
+	}
+	if wf.boxNoWait {
+		env = append(env, "SPARKWING_BOX_NO_WAIT=1")
+	}
 
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
 		compileOptions{NoUpdate: wf.noUpdate})

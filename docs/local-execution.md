@@ -103,6 +103,49 @@ sparkwing to block them.
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
 | `sparkwing pipeline run --pipeline X --on prof` | Cluster | Medium | Explicit (canonical) form of remote dispatch |
 
+## Per-host concurrency
+
+Two `sparkwing run` invocations on the same machine compete for the
+same CPU. By default sparkwing admits one run at a time per host and
+queues additional invocations until a slot frees. The cap scales with
+how many worker goroutines each run is configured to use, so the
+defaults keep total in-flight work close to one machine's worth of
+parallelism even when several invocations land at once.
+
+Defaults:
+
+- `--sw-box-slots` (or `SPARKWING_BOX_SLOTS`) defaults to
+  `max(1, NumCPU / SPARKWING_WORKERS)`. With the dispatcher's default
+  workers (= all cores) this resolves to 1, so overlapping runs
+  serialize. With `SPARKWING_WORKERS=2` on a 10-core box it resolves
+  to 5.
+- Extra invocations queue FIFO with a periodic
+  `waiting for box slot (N active, max M)` line on stderr. Ctrl-C
+  cancels the wait cleanly.
+- A single run alone on the host keeps its full worker count -- the
+  gate is admission, not a shared resource pool. The cap is on
+  *concurrent runs*, so total worker goroutines on the host is
+  `(admitted runs) × SPARKWING_WORKERS`.
+
+Overrides:
+
+- `sparkwing run X --sw-box-slots 4` raises the cap for that
+  invocation. IO-bound workloads (web scrapes, downloads) overcommit
+  safely; CPU-bound builds may want a tighter cap.
+- `SPARKWING_BOX_SLOTS=4 sparkwing run X` does the same via the
+  environment, useful in shell profiles or CI config.
+- `sparkwing run X --sw-box-slots 0` (or `--sw-box-slots off`)
+  disables the gate entirely.
+- `sparkwing run X --sw-no-wait` fails immediately with
+  `box slots full (max=N)` instead of queueing -- the shape CI
+  runners want when they would rather decline overlap than block.
+
+The gate is host-local. Two laptops pointed at the same shared state
+backend (Mode 2 / 3 / 4) each keep their own slot count; nothing
+coordinates CPU across machines. Cluster runner pods skip the gate
+because their CPU is already capped by Kubernetes and the warm-runner
+pool's own concurrency budget.
+
 ## Pipeline configuration
 
 Local vs remote is decided at invocation time (`--on` or absent), not

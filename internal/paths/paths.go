@@ -34,6 +34,10 @@ func PathsAt(root string) Paths { return Paths{Root: root} }
 // StateDB is the path to the SQLite database that holds run state.
 func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
+// BoxSlotDir is the directory that holds the host-local concurrency
+// semaphore's lock files. See internal/boxslot.
+func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
+
 // RunsDir is the parent directory for per-run artifacts.
 func (p Paths) RunsDir() string { return filepath.Join(p.Root, "runs") }
 
