@@ -137,7 +137,14 @@ CREATE TABLE IF NOT EXISTS runs (
     retry_source    TEXT NOT NULL DEFAULT '',
     -- replay_of_*: single-node replay lineage.
     replay_of_run_id  TEXT NOT NULL DEFAULT '',
-    replay_of_node_id TEXT NOT NULL DEFAULT ''
+    replay_of_node_id TEXT NOT NULL DEFAULT '',
+    -- last_heartbeat_at: orchestrator liveness ping for the run as a
+    -- whole. NULL for rows that predate the column or come from
+    -- backends that don't drive a run-level heartbeat (local + S3
+    -- modes reconcile orphans via per-node heartbeats instead). The
+    -- controller's reaper uses this to detect orchestrators that died
+    -- between node dispatches.
+    last_heartbeat_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
@@ -681,6 +688,7 @@ var columnMigrations = []columnSpec{
 		"top_annotation":    "TEXT NOT NULL DEFAULT ''",
 		"annotations_json":  "BLOB",
 		"invocation_json":   "BLOB",
+		"last_heartbeat_at": "INTEGER",
 	}},
 	{"triggers", map[string]string{
 		"parent_run_id":  "TEXT",
@@ -911,6 +919,11 @@ type Run struct {
 	AnnotationCount int      `json:"annotation_count,omitempty"`
 	TopAnnotation   string   `json:"top_annotation,omitempty"`
 	Annotations     []string `json:"annotations,omitempty"`
+	// LastHeartbeatAt is the most recent run-level liveness ping from
+	// the dispatching orchestrator. NULL for rows that predate the
+	// column or come from backends that don't ping it (local + S3
+	// modes use per-node heartbeats for orphan detection instead).
+	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
@@ -988,6 +1001,18 @@ UPDATE runs
 	return err
 }
 
+// TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
+// dispatching orchestrator calls this on a ticker while the run is
+// active so the controller's reaper can detect a fully-orphaned run
+// (laptop closed, network gone, process killed) and flip it to
+// failed instead of leaving status='running' forever.
+func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	_, err := s.exec(ctx,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+		time.Now().UnixNano(), runID)
+	return err
+}
+
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	_, err := s.exec(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
@@ -1051,7 +1076,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 		next := frontier[:0:0]
 		for _, id := range frontier {
 			rows, err := s.query(ctx,
-				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
 				   FROM runs WHERE retry_of = ?`, id)
 			if err != nil {
 				return nil, err
@@ -1085,7 +1110,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.queryRow(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -1145,7 +1170,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
@@ -1189,7 +1214,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -1259,7 +1284,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
-	var finishedNS sql.NullInt64
+	var finishedNS, heartbeatNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
@@ -1267,7 +1292,8 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
-		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON)
+		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
+		&heartbeatNS)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -1281,6 +1307,10 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t
+	}
+	if heartbeatNS.Valid {
+		t := time.Unix(0, heartbeatNS.Int64)
+		r.LastHeartbeatAt = &t
 	}
 	if parent.Valid {
 		r.ParentRunID = parent.String
@@ -2863,6 +2893,74 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	return ids, nil
+}
+
+// reapStaleRunningRuns marks runs failed whose last_heartbeat_at is
+// older than grace. Catches fully-orphaned dispatching orchestrators
+// in Mode 4 (hosted controller): the laptop died between node
+// dispatches with no active claim to expire via the node-claim
+// reaper. Rows with NULL last_heartbeat_at are ignored -- those
+// predate the column or come from backends that don't drive a
+// run-level heartbeat (local + S3 modes reconcile orphans via per-
+// node heartbeats elsewhere). Each reaped run also has its non-done
+// nodes cascade-failed: running -> failed, pending -> cancelled, both
+// with failure_reason='orphaned', matching the local orphan
+// reconciler so downstream readers don't have to special-case the
+// controller-side sweep.
+func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
+	cutoff := time.Now().Add(-grace).UnixNano()
+	now := time.Now().UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT id FROM runs
+ WHERE status = 'running'
+   AND last_heartbeat_at IS NOT NULL
+   AND last_heartbeat_at < ?`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range ids {
+		if _, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = 'done',
+       outcome        = 'failed',
+       error          = ?,
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = 'running'`,
+			reason, now, id); err != nil {
+			return nil, err
+		}
+		if _, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = 'done',
+       outcome        = 'cancelled',
+       error          = 'orphaned: orchestrator process exited before this node ran',
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = 'pending'`,
+			now, id); err != nil {
+			return nil, err
+		}
+		if err := s.FinishRun(ctx, id, "failed", reason); err != nil {
+			return nil, err
+		}
 	}
 	return ids, nil
 }
