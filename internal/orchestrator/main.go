@@ -188,6 +188,10 @@ func Main() {
 	res, err := RunLocal(ctx, paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
+		// os.Exit skips deferred functions; release the box slot
+		// explicitly so the holder file is unlinked rather than
+		// relying on stale-detection in the next acquirer.
+		release()
 		os.Exit(1)
 	}
 	// run_finish is emitted inside Run() so the envelope tee
@@ -204,6 +208,7 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}
 	if res != nil && res.Status != "success" {
+		release()
 		os.Exit(1)
 	}
 }

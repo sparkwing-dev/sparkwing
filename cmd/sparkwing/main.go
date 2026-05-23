@@ -65,6 +65,22 @@ func exitError(code int, err error) error {
 	return &cliError{code: code, err: err}
 }
 
+// setEnv returns env with key set to value, removing any prior
+// occurrence of the same key. Use instead of append when the flag
+// value must override a preexisting shell-environment value; bare
+// append leaves duplicates and POSIX getenv returns the first
+// match, so the shell var would silently shadow the flag.
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return append(out, prefix+value)
+}
+
 func exitCodeFor(err error) int {
 	if err == nil {
 		return 0
@@ -259,11 +275,17 @@ func dispatchRun(args []string) error {
 	// Forwarded to the inner pipeline binary, which acquires the
 	// slot before RunLocal so the wait blocks at run start rather
 	// than wasting compile cycles on a pre-rejected run.
+	//
+	// Use setEnv (not append) so the flag overrides any preexisting
+	// shell-environment SPARKWING_BOX_SLOTS / SPARKWING_BOX_NO_WAIT.
+	// Plain append would leave duplicates, and POSIX getenv returns
+	// the first match, so the user's shell var would silently
+	// shadow the explicit flag.
 	if wf.boxSlots != "" {
-		env = append(env, "SPARKWING_BOX_SLOTS="+wf.boxSlots)
+		env = setEnv(env, "SPARKWING_BOX_SLOTS", wf.boxSlots)
 	}
 	if wf.boxNoWait {
-		env = append(env, "SPARKWING_BOX_NO_WAIT=1")
+		env = setEnv(env, "SPARKWING_BOX_NO_WAIT", "1")
 	}
 
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,

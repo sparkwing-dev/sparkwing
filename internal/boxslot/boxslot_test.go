@@ -269,3 +269,55 @@ func max1(n int) int {
 	}
 	return n
 }
+
+// TestAcquire_RejectsMissingLockDir asserts the precondition guard
+// fires before any filesystem work, so callers get a useful error
+// instead of a confusing flock failure.
+func TestAcquire_RejectsMissingLockDir(t *testing.T) {
+	_, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1,
+		LockDir:  "",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty LockDir, got nil")
+	}
+}
+
+// TestAcquire_ReadOnlyLockDirFails covers the "user's $SPARKWING_HOME
+// became read-only" case (e.g. a mounted volume went read-only, or
+// permissions got clobbered). Should surface a clean error from the
+// preparation step rather than crash.
+func TestAcquire_ReadOnlyLockDirFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses POSIX file permissions; skipping")
+	}
+	parent := t.TempDir()
+	// Pre-create the lock dir then strip write perms so MkdirAll
+	// short-circuits and the OpenFile of coord.lock fails.
+	lockDir := filepath.Join(parent, "box-slots")
+	if err := os.Mkdir(lockDir, 0o500); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockDir, 0o700) })
+
+	_, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1, LockDir: lockDir,
+	})
+	if err == nil {
+		t.Fatal("expected error on read-only lock dir, got nil")
+	}
+}
+
+// TestAcquire_ReleaseIdempotent: calling release more than once is
+// safe. The closure must guard against double-unlink / double-close.
+func TestAcquire_ReleaseIdempotent(t *testing.T) {
+	release, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1, LockDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	release()
+	release()
+	release()
+}
