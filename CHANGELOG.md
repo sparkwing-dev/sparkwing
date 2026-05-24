@@ -48,6 +48,66 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `sparkwing pipeline trigger <name> --profile <p>` submits a
+  trigger to the named profile's controller and tails the remote run by
+  default; `--detach` for fire-and-forget. Replaces `sparkwing run --on`
+  for remote dispatch. `sparkwing run` now exclusively means "execute
+  here."
+- **cli:** `sparkwing profile` prints the resolved profile and the
+  resolution chain (flag, project hint, default) without running
+  anything.
+- **config:** Per-profile `detect:` block in `profiles.yaml` for
+  environment auto-selection. Replaces the `environments:` block in
+  `backends.yaml`. `gha` and `kubernetes` ship as built-in profiles
+  that detect their respective env vars.
+- **config:** Per-profile `mirror_local:` flag (default `true`) controls
+  whether local execution against a remote profile also writes to local
+  SQLite for offline post-hoc viewing.
+
+### Changed
+
+- **config (Breaking):** Project YAML collapses to a single
+  `.sparkwing/sparkwing.yaml` file. See
+  [migration guide](docs/migrations/v0.5.0.md#single-sparkwingsparkwingyaml-per-repo).
+  The separate `pipelines.yaml`, `backends.yaml`, `runners.yaml`,
+  `sources.yaml`, and `sparks.yaml` files are no longer read; sparkwing
+  errors at startup if any of them exist in a `.sparkwing/` directory.
+- **config (Breaking):** `~/.config/sparkwing/profiles.yaml` profiles
+  now carry the full backend triple (`state`, `cache`, `logs`) alongside
+  any `controller` / `token`. See
+  [migration guide](docs/migrations/v0.5.0.md#profiles-absorb-all-backend-specs).
+- **cli (Breaking):** `--on`, `--sw-on`, and `--sw-target` are removed;
+  `--profile` replaces all three. See
+  [migration guide](docs/migrations/v0.5.0.md#-profile-is-the-only-where-flag).
+- **cli (Breaking):** `sparkwing run --on prof` no longer dispatches
+  to a remote controller; use `sparkwing pipeline trigger ... --profile prof`.
+  See
+  [migration guide](docs/migrations/v0.5.0.md#sparkwing-pipeline-trigger-for-remote-execution).
+- **orchestrator (Breaking):** Local execution against a remote profile
+  dual-writes state to local SQLite + the profile's backend. Previously
+  state went only to the resolved backend. See
+  [migration guide](docs/migrations/v0.5.0.md#dual-write-state-when-local-execution-writes-to-a-profile).
+
+### Removed
+
+- **config (Breaking):** `.sparkwing/backends.yaml` is removed. State,
+  cache, and logs specs move to per-profile entries in
+  `~/.config/sparkwing/profiles.yaml`. See
+  [migration guide](docs/migrations/v0.5.0.md#profiles-absorb-all-backend-specs).
+- **config (Breaking):** `.sparkwing/sources.yaml`, `.sparkwing/runners.yaml`,
+  `.sparkwing/sparks.yaml`, and `.sparkwing/pipelines.yaml` are removed
+  as standalone files. Their content moves under top-level keys in
+  `.sparkwing/sparkwing.yaml`. See
+  [migration guide](docs/migrations/v0.5.0.md#single-sparkwingsparkwingyaml-per-repo).
+
+### Docs
+
+- **docs:** New migration guide at `docs/migrations/v0.5.0.md` covering
+  the config flatten, the new `pipeline trigger` verb, the `--profile`
+  unification, and the dual-write state model.
+
 ## [v0.4.0] - 2026-05-20
 
 A large release that converges on the v1-ready API surface. Two
