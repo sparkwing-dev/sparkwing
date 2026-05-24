@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -191,6 +192,21 @@ type Options struct {
 	// would error there, which is the right signal since those paths
 	// declare URL + token via CLI flags rather than profile names.
 	ProfileLookup sparkwing.ProfileLookup
+
+	// Profile, when non-nil, is the resolved storage profile from
+	// `sparkwing run --profile NAME`. RunLocal routes state/logs/cache
+	// through it via ApplyProfileBackendsWithMirror (instead of
+	// ApplyBackendsConfig). Nil preserves the legacy backends.yaml flow.
+	// Cluster boot paths leave it nil.
+	Profile *profile.Profile
+
+	// MirrorLocal, when non-nil, is an opened local SQLite store that
+	// RunLocal tees state writes to alongside the canonical state
+	// backend (see mirrorStateBackend). ApplyProfileBackendsWithMirror
+	// opens it for `sparkwing run --profile <non-local>` from a laptop;
+	// RunLocal wraps Backends.State around it and owns closing it.
+	// Cluster boot paths leave it nil so pods never carry a mirror.
+	MirrorLocal *store.Store
 }
 
 // DebugDirectives is the ephemeral pause surface for one run.
@@ -575,7 +591,11 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		opts.ProfileLookup = profileLookupCallback()
 	}
 	ownsState := opts.State == nil
-	if err := ApplyBackendsConfig(ctx, &opts); err != nil {
+	if opts.Profile != nil {
+		if err := ApplyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths); err != nil {
+			return nil, fmt.Errorf("profile backends: %w", err)
+		}
+	} else if err := ApplyBackendsConfig(ctx, &opts); err != nil {
 		return nil, fmt.Errorf("backends: %w", err)
 	}
 	if opts.State == nil {
@@ -610,6 +630,15 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		backends = RemoteBackends(s, logsBackend, 0)
 	default:
 		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
+	}
+	// Dual-write state mirror: when local execution targets a non-local
+	// profile, tee every state write to a local SQLite shadow so the
+	// laptop can browse the run afterward. ApplyProfileBackendsWithMirror
+	// opened the local store; wrap the canonical StateBackend here and
+	// own closing it. Cluster paths never set MirrorLocal.
+	if opts.MirrorLocal != nil {
+		backends.State = newMirrorStateBackend(backends.State, opts.MirrorLocal, nil)
+		defer func() { _ = opts.MirrorLocal.Close() }()
 	}
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)

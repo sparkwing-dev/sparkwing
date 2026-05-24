@@ -62,6 +62,12 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-target", Argument: "TARGET", Desc: "Run against the named target (i.e. local, dev, prod)", Group: "System", Hot: true},
 	{Name: "sw-profile", Argument: "PROFILE", Desc: "Run via the named profile instead of locally", Group: "System", Hot: true},
+	// profile is the one deliberately unprefixed sparkwing-owned flag:
+	// the v0.5.0 surface reserves the flat --profile for "run / read
+	// against this storage profile". It claims `profile` from the
+	// pipeline-author namespace by design (documented in the migration
+	// guide). The sw- prefix invariant carves it out explicitly.
+	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop)", Group: "System", Hot: true},
 	{Name: "sw-box-slots", Argument: "N", Desc: "Max concurrent sparkwing run processes on this host (default: max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable)", Group: "System"},
 	{Name: "sw-no-wait", Desc: "Fail immediately when box slots are full instead of queueing", Group: "System"},
 }

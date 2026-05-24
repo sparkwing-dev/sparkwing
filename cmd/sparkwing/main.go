@@ -119,6 +119,22 @@ func dispatchRun(args []string) error {
 	wf, passthrough := parseRunFlags(args[1:])
 	var err error
 
+	// --profile (local execution against a storage profile) and the
+	// legacy --sw-profile (remote-trigger dispatch, parsed into wf.on)
+	// are mutually exclusive. Catch it before any discovery/compile so
+	// the failure is fast and unambiguous.
+	if wf.profile != "" && wf.on != "" {
+		return profileOnMutualExclusion("--sw-profile")
+	}
+	// Validate --profile against profiles.yaml up front so a bad name
+	// errors before we compile or exec the pipeline binary. The inner
+	// binary re-resolves from SPARKWING_PROFILE at run time.
+	if wf.profile != "" {
+		if _, perr := resolveProfileFlag(wf.profile); perr != nil {
+			return perr
+		}
+	}
+
 	// `-C <path>` re-anchors discovery (same shape as `git -C`).
 	var dir string
 	if wf.changeDir != "" {
@@ -235,6 +251,15 @@ func dispatchRun(args []string) error {
 		// upstream silently flipped that. Forward anyway so the run
 		// record reflects the intent.
 		env = append(env, "SPARKWING_PROFILE="+wf.on)
+	}
+	// --profile drives local execution against a storage profile. The
+	// inner binary reads SPARKWING_PROFILE, resolves it, and routes
+	// state/logs/cache through the profile (with a local mirror).
+	// setEnv overrides any shell-inherited SPARKWING_PROFILE so the
+	// flag wins. --sw-local-only still takes precedence inside the
+	// inner binary's resolver.
+	if wf.profile != "" {
+		env = setEnv(env, "SPARKWING_PROFILE", wf.profile)
 	}
 	if wf.secrets != "" {
 		env = append(env, "SPARKWING_SECRETS_PROFILE="+wf.secrets)
@@ -479,11 +504,15 @@ func runJobs(args []string) error {
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
+		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
 			}
 			return err
+		}
+		if *profileName != "" && *on != "" {
+			return profileOnMutualExclusion("--on")
 		}
 		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs list")
 		if err != nil {
@@ -569,6 +598,13 @@ func runJobs(args []string) error {
 				Style:        sparkStyle,
 			},
 		}
+		if *profileName != "" {
+			p, perr := resolveProfileFlag(*profileName)
+			if perr != nil {
+				return perr
+			}
+			listOpts.Profile = p
+		}
 		if *on != "" {
 			prof, err := resolveProfile(*on)
 			if err != nil {
@@ -588,6 +624,7 @@ func runJobs(args []string) error {
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
 		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
+		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
 		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
@@ -596,12 +633,22 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
+		if *profileName != "" && *on != "" {
+			return profileOnMutualExclusion("--on")
+		}
 		*runID = normalizeRunID(*runID)
 		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs status")
 		if err != nil {
 			return err
 		}
 		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow, Steps: *steps}
+		if *profileName != "" {
+			p, perr := resolveProfileFlag(*profileName)
+			if perr != nil {
+				return perr
+			}
+			statusOpts.Profile = p
+		}
 		if *on != "" {
 			prof, err := resolveProfile(*on)
 			if err != nil {
@@ -635,6 +682,7 @@ func runJobs(args []string) error {
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
 		on := fs.String("on", "",
 			"profile name (cluster mode). Omit to read logs from the local SQLite store.")
+		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
@@ -649,6 +697,9 @@ func runJobs(args []string) error {
 				return nil
 			}
 			return err
+		}
+		if *profileName != "" && *on != "" {
+			return profileOnMutualExclusion("--on")
 		}
 		*runID = normalizeRunID(*runID)
 		if *tree && *on != "" {
@@ -674,6 +725,13 @@ func runJobs(args []string) error {
 			Tree:       *tree,
 			EventsOnly: *eventsOnly,
 			NoEvents:   *noEvents,
+		}
+		if *profileName != "" {
+			p, perr := resolveProfileFlag(*profileName)
+			if perr != nil {
+				return perr
+			}
+			opts.Profile = p
 		}
 		if *on != "" {
 			prof, err := resolveProfile(*on)

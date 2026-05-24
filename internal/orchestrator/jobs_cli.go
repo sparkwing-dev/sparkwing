@@ -15,18 +15,36 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // ListOpts configures `sparkwing jobs list`.
+// readBackendFor opens the read backend a `runs` command should consult:
+// the profile-resolved backend when --profile was passed, otherwise the
+// legacy cwd-backends.yaml flow. Centralizes the branch so list/status/
+// logs stay consistent. Mirror is never engaged here -- reads are
+// single-source (the mirror is a write-side concern).
+func readBackendFor(ctx context.Context, paths Paths, p *profile.Profile) (backend.Backend, io.Closer, error) {
+	if p != nil {
+		return OpenReadBackendForProfile(ctx, paths, p)
+	}
+	return OpenReadBackend(ctx, paths)
+}
+
 type ListOpts struct {
 	Limit     int
 	Pipelines []string
 	Statuses  []string
 	Since     time.Duration
 	JSON      bool
+
+	// Profile, when non-nil, routes the read through the resolved
+	// storage profile's backend (--profile NAME) instead of the legacy
+	// cwd backends.yaml.
+	Profile *profile.Profile
 
 	// Quiet prints only ids (or a JSON id array with JSON).
 	Quiet bool
@@ -50,7 +68,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	b, closer, err := OpenReadBackend(ctx, paths)
+	b, closer, err := readBackendFor(ctx, paths, opts.Profile)
 	if err != nil {
 		return err
 	}
@@ -155,6 +173,10 @@ type StatusOpts struct {
 	// JSON output always carries steps when the run has them; this
 	// flag is for human-readable mode only.
 	Steps bool
+
+	// Profile, when non-nil, routes the read through the resolved
+	// storage profile's backend (--profile NAME).
+	Profile *profile.Profile
 }
 
 // nodeWithSteps wraps store.Node with its per-step state for the
@@ -192,7 +214,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	b, closer, err := OpenReadBackend(ctx, paths)
+	b, closer, err := readBackendFor(ctx, paths, opts.Profile)
 	if err != nil {
 		return err
 	}
@@ -519,6 +541,10 @@ type LogsOpts struct {
 	// legacy behavior of `runs logs`. Useful as an explicit opt-out
 	// when scripts depend on the legacy shape.
 	NoEvents bool
+
+	// Profile, when non-nil, routes the read through the resolved
+	// storage profile's backend (--profile NAME).
+	Profile *profile.Profile
 }
 
 // applyClientFilters is the local-mode equivalent of pkg/logs filters.
@@ -622,7 +648,7 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	if opts.EventsOnly && opts.NoEvents {
 		return fmt.Errorf("jobs logs: --events-only and --no-events are mutually exclusive")
 	}
-	b, closer, berr := OpenReadBackend(ctx, paths)
+	b, closer, berr := readBackendFor(ctx, paths, opts.Profile)
 	if berr != nil {
 		return berr
 	}

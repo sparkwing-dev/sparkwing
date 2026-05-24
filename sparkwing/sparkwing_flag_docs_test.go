@@ -59,8 +59,16 @@ func TestSparkwingFlagDocs_CoversSafetyFlags(t *testing.T) {
 // entire reservation mechanism -- it lets pipeline-author Inputs
 // flags occupy the unprefixed namespace without collision.
 func TestSparkwingFlagDocs_AllSwPrefixed(t *testing.T) {
+	// flatTopLevel lists the deliberately unprefixed sparkwing-owned
+	// flags. The v0.5.0 config redesign reserves --profile as a flat
+	// top-level flag ("run / read against this storage profile"),
+	// claiming it from the pipeline-author namespace by design.
+	flatTopLevel := map[string]bool{"profile": true}
 	for _, d := range SparkwingFlagDocs() {
-		if d.Name[:3] != "sw-" {
+		if flatTopLevel[d.Name] {
+			continue
+		}
+		if len(d.Name) < 3 || d.Name[:3] != "sw-" {
 			t.Errorf("--%s lacks sw- prefix; every sparkwing-owned flag must be sw-prefixed so pipeline-author flags are collision-free", d.Name)
 		}
 	}

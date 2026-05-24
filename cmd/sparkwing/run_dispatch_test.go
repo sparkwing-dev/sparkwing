@@ -65,3 +65,39 @@ func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
 		t.Errorf("passthrough = %v, want %v", pass, wantPass)
 	}
 }
+
+func TestParseRunFlags_Profile(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"space-separated", []string{"--profile", "prod"}, "prod"},
+		{"equals-form", []string{"--profile=prod"}, "prod"},
+		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, pass := parseRunFlags(tc.args)
+			if wf.profile != tc.want {
+				t.Errorf("profile = %q, want %q", wf.profile, tc.want)
+			}
+			if tc.want == "" && !slices.Contains(pass, "--profile") {
+				t.Errorf("incomplete --profile should pass through; got passthrough=%v", pass)
+			}
+		})
+	}
+}
+
+// --profile (local execution) and --sw-profile (legacy remote-trigger,
+// parsed into wf.on) are distinct fields, not aliases.
+func TestParseRunFlags_ProfileVsSwProfileAreDistinct(t *testing.T) {
+	wf, _ := parseRunFlags([]string{"--sw-profile", "remote"})
+	if wf.on != "remote" || wf.profile != "" {
+		t.Errorf("--sw-profile should set on=remote, profile=\"\"; got on=%q profile=%q", wf.on, wf.profile)
+	}
+	wf, _ = parseRunFlags([]string{"--profile", "local"})
+	if wf.profile != "local" || wf.on != "" {
+		t.Errorf("--profile should set profile=local, on=\"\"; got on=%q profile=%q", wf.on, wf.profile)
+	}
+}

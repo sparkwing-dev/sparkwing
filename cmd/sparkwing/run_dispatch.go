@@ -30,8 +30,16 @@ func atoiNonNeg(s string) (int, error) {
 }
 
 type runFlags struct {
-	ref      string
-	on       string
+	ref string
+	on  string
+	// profile names a storage profile from
+	// ~/.config/sparkwing/profiles.yaml for local execution: state,
+	// logs, and cache route through the profile (with a local SQLite
+	// mirror for non-local profiles). Distinct from --on (legacy
+	// remote-trigger dispatch); the two are mutually exclusive. Parsed
+	// from the flat --profile flag, forwarded to the inner binary as
+	// SPARKWING_PROFILE.
+	profile  string
 	noUpdate bool
 	verbose  bool
 	// secrets sources secrets from the named profile's controller.
@@ -181,6 +189,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--sw-profile="):
 			wf.on = strings.TrimPrefix(a, "--sw-profile=")
+			i++
+		case a == "--profile":
+			if i+1 < len(args) {
+				wf.profile = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--profile="):
+			wf.profile = strings.TrimPrefix(a, "--profile=")
 			i++
 		case a == "--sw-no-update":
 			wf.noUpdate = true

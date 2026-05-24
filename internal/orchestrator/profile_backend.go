@@ -8,7 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/mirror"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -81,22 +80,24 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 
 // ApplyProfileBackendsWithMirror is the dual-write variant of
 // ApplyProfileBackends. When p resolves to a non-local state backend AND
-// p.EffectiveMirrorLocal() is true AND opts is not LocalOnly, it wraps
-// opts.State in a mirror that ALSO writes to a local SQLite store at
-// paths.StateDB(), so the laptop keeps a browsable shadow of runs it
-// executed against a remote profile. Otherwise it behaves identically to
-// ApplyProfileBackends (single-write to whatever p resolves to).
+// p.EffectiveMirrorLocal() is true AND opts is not LocalOnly, it opens a
+// local SQLite store at paths.StateDB() and hands it to RunLocal via
+// opts.MirrorLocal, which tees every state write to it alongside the
+// canonical backend (see mirrorStateBackend). The laptop thus keeps a
+// browsable shadow of runs it executed against a remote profile.
+// Otherwise it behaves identically to ApplyProfileBackends (single-write
+// to whatever p resolves to) and leaves opts.MirrorLocal nil.
+//
+// It deliberately does NOT wrap opts.State itself: the run path consumes
+// state at the richer StateBackend layer (with AppendEvent / GetNodeOutput
+// / EnqueueTrigger), so the tee is applied by RunLocal once the canonical
+// Backends bundle is built. opts.State stays the canonical handle.
 //
 // "Non-local" is judged by the RESOLVED state spec, not p.State alone: a
 // controller-only profile (p.State == nil but controller: set) resolves
 // to a controller state surface and IS mirrored. A profile resolving to
 // SQLite (the laptop fallback, or an explicit sqlite state) is already
 // local and is a no-op.
-//
-// The local *store.Store is opened here and owned by the returned
-// opts.State: the mirror's Close cascades to it, so the run's existing
-// defer opts.State.Close() releases it. paths.EnsureRoot() must have run
-// upstream so paths.StateDB()'s directory exists.
 //
 // Used by `sparkwing run --profile X` from a laptop (step 5). Cluster-side
 // callers (handle-trigger, run-node) MUST use ApplyProfileBackends
@@ -120,7 +121,7 @@ func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profi
 	if err != nil {
 		return fmt.Errorf("mirror: open local state %s: %w", paths.StateDB(), err)
 	}
-	opts.State = mirror.New(opts.State, local, nil)
+	opts.MirrorLocal = local
 	return nil
 }
 
