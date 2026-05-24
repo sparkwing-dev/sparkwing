@@ -8,7 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/mirror"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // OpenReadBackendForProfile opens the dashboard-shaped read backend from
@@ -75,6 +77,58 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 		opts.State = st
 	}
 	return nil
+}
+
+// ApplyProfileBackendsWithMirror is the dual-write variant of
+// ApplyProfileBackends. When p resolves to a non-local state backend AND
+// p.EffectiveMirrorLocal() is true AND opts is not LocalOnly, it wraps
+// opts.State in a mirror that ALSO writes to a local SQLite store at
+// paths.StateDB(), so the laptop keeps a browsable shadow of runs it
+// executed against a remote profile. Otherwise it behaves identically to
+// ApplyProfileBackends (single-write to whatever p resolves to).
+//
+// "Non-local" is judged by the RESOLVED state spec, not p.State alone: a
+// controller-only profile (p.State == nil but controller: set) resolves
+// to a controller state surface and IS mirrored. A profile resolving to
+// SQLite (the laptop fallback, or an explicit sqlite state) is already
+// local and is a no-op.
+//
+// The local *store.Store is opened here and owned by the returned
+// opts.State: the mirror's Close cascades to it, so the run's existing
+// defer opts.State.Close() releases it. paths.EnsureRoot() must have run
+// upstream so paths.StateDB()'s directory exists.
+//
+// Used by `sparkwing run --profile X` from a laptop (step 5). Cluster-side
+// callers (handle-trigger, run-node) MUST use ApplyProfileBackends
+// instead -- pods have no use for a local shadow and limited disk.
+func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {
+	hadState := opts.State != nil
+	if err := ApplyProfileBackends(ctx, opts, p); err != nil {
+		return err
+	}
+	if opts.LocalOnly || hadState || opts.State == nil {
+		return nil
+	}
+	if p == nil || !p.EffectiveMirrorLocal() {
+		return nil
+	}
+	state, _, _ := profileSurfaceSpecs(p, opts.DefaultStateDB)
+	if isLocalState(state) {
+		return nil
+	}
+	local, err := store.Open(paths.StateDB())
+	if err != nil {
+		return fmt.Errorf("mirror: open local state %s: %w", paths.StateDB(), err)
+	}
+	opts.State = mirror.New(opts.State, local, nil)
+	return nil
+}
+
+// isLocalState reports whether a resolved state spec already lives on the
+// local machine, in which case there is nothing to mirror to. SQLite is
+// the only local state type today.
+func isLocalState(spec *backends.Spec) bool {
+	return spec == nil || spec.Type == backends.TypeSQLite
 }
 
 // profileSurfaceSpecs derives the state/logs/cache specs for opening
