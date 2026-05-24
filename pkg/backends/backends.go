@@ -501,14 +501,19 @@ func mergeSpec(repo, user *Spec) *Spec {
 func DetectEnvironment(f File) (string, Environment, bool) {
 	for _, name := range f.EnvironmentOrder() {
 		env := f.Environments[name]
-		if matchesDetect(env.Detect) {
+		if env.Detect.Match() {
 			return name, env, true
 		}
 	}
 	return "", Environment{}, false
 }
 
-func matchesDetect(d Detect) bool {
+// Match reports whether this detect rule evaluates true against the
+// current process environment. A zero EnvVar never matches; Equals
+// requires the variable to equal that value; Present requires it to be
+// set and non-empty. This is the canonical detect predicate, shared by
+// environment auto-detection here and by profile resolution.
+func (d Detect) Match() bool {
 	if d.EnvVar == "" {
 		return false
 	}
