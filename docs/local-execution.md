@@ -103,6 +103,8 @@ sparkwing to block them.
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
 | `sparkwing pipeline run --pipeline X --on prof` | Cluster | Medium | Explicit (canonical) form of remote dispatch |
 
+v0.5.0 prefers `sparkwing pipeline trigger --profile PROF`; see [migration guide](migrations/v0.5.0.md).
+
 ## Per-host concurrency
 
 Two `sparkwing run` invocations on the same machine compete for the

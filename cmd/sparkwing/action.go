@@ -75,6 +75,11 @@ func runPipeline(args []string) error {
 		// Canonical run path. `sparkwing run <name>` is an alias for
 		// this; both end up at the same dispatch entrypoint.
 		return dispatchRun(args[1:])
+	case "trigger":
+		// Submit a trigger to a profile's controller for remote
+		// execution; follows the run by default. The v0.5.0 successor
+		// to `sparkwing run --sw-profile`.
+		return runPipelineTrigger(args[1:])
 	case "publish":
 		// : compile + upload pipeline binary to the
 		// configured ArtifactStore. Explicit operator action -- the

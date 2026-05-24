@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -392,8 +393,22 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 	return tmpDir, sub, cleanup, nil
 }
 
-// dispatchRemote POSTs a TriggerRequest to the profile's controller.
-// Does NOT compile locally -- assumes the remote already has the pipeline.
+// triggerSource builds the trigger_source string a remote dispatch
+// records, tagging the originating verb so runs are distinguishable in
+// `runs list`: "sparkwing@host" for `run --sw-profile`,
+// "pipeline-trigger@host" for `pipeline trigger`. Falls back to the bare
+// prefix when the hostname can't be read.
+func triggerSource(prefix string) string {
+	if host, err := os.Hostname(); err == nil && host != "" {
+		return prefix + "@" + host
+	}
+	return prefix
+}
+
+// dispatchRemote POSTs a TriggerRequest to the profile's controller
+// (today's `sparkwing run --sw-profile` path) and prints the run id plus
+// next-step suggestions. Does NOT compile locally -- assumes the remote
+// already has the pipeline.
 func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) error {
 	prof, err := resolveProfile(wf.on)
 	if err != nil {
@@ -402,12 +417,31 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 	if err := requireController(prof, "sparkwing run --on"); err != nil {
 		return err
 	}
-
-	args := collectPipelineArgs(passthrough)
-	source := "sparkwing"
-	if host, err := os.Hostname(); err == nil && host != "" {
-		source = "sparkwing@" + host
+	resp, err := createRemoteTrigger(prof, pipelineName, triggerSource("sparkwing"), wf, passthrough)
+	if err != nil {
+		return err
 	}
+
+	fmt.Fprintf(os.Stdout, "dispatched %s on %s as %s (status=%s)\n",
+		pipelineName, prof.Name, resp.RunID, resp.Status)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "tail logs:\n")
+	fmt.Fprintf(os.Stderr, "  sparkwing runs logs --run %s --on %s --follow\n",
+		resp.RunID, prof.Name)
+	fmt.Fprintf(os.Stderr, "check status:\n")
+	fmt.Fprintf(os.Stderr, "  sparkwing runs status --run %s --on %s\n",
+		resp.RunID, prof.Name)
+	return nil
+}
+
+// createRemoteTrigger builds and POSTs a TriggerRequest to prof's
+// controller, returning the controller's response. It is the shared core
+// of `sparkwing run --sw-profile` (via dispatchRemote) and `sparkwing
+// pipeline trigger`; the wire payload is identical between the two except
+// for source (the trigger_source tag). It does NOT print or tail -- the
+// caller decides how to report. prof must already carry a controller.
+func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
+	args := collectPipelineArgs(passthrough)
 	var userName string
 	if u, err := user.Current(); err == nil {
 		userName = u.Username
@@ -493,19 +527,9 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 	c := client.NewWithToken(prof.Controller, nil, prof.Token)
 	resp, err := c.CreateTrigger(context.Background(), req)
 	if err != nil {
-		return fmt.Errorf("create trigger on %s: %w", prof.Name, err)
+		return nil, fmt.Errorf("create trigger on %s: %w", prof.Name, err)
 	}
-
-	fmt.Fprintf(os.Stdout, "dispatched %s on %s as %s (status=%s)\n",
-		pipelineName, prof.Name, resp.RunID, resp.Status)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "tail logs:\n")
-	fmt.Fprintf(os.Stderr, "  sparkwing runs logs --run %s --on %s --follow\n",
-		resp.RunID, prof.Name)
-	fmt.Fprintf(os.Stderr, "check status:\n")
-	fmt.Fprintf(os.Stderr, "  sparkwing runs status --run %s --on %s\n",
-		resp.RunID, prof.Name)
-	return nil
+	return resp, nil
 }
 
 // detectRemoteGit reads cwd's git state. Unresolved fields return empty.

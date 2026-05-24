@@ -863,6 +863,7 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 		{"explain", "Render the pipeline's Plan DAG without running"},
 		{"plan", "Render the runtime-resolved DAG (would-run/would-skip) without running"},
 		{"run", "Invoke a pipeline (canonical form of `sparkwing run <name>`)"},
+		{"trigger", "Submit a pipeline to a profile's controller (remote execution)"},
 		{"hooks", "Git pre-commit / pre-push hooks: install / uninstall / status"},
 		{"sparks", "Manage sparks libraries: list / add / remove / lint / resolve / update / warmup"},
 	},
@@ -907,6 +908,46 @@ Args.`,
 		{"Pass a typed pipeline arg", "sparkwing pipeline run release --version v0.28.1"},
 		{"Run from a different git ref", "sparkwing pipeline run build-test-deploy --from feature/xyz"},
 		{"Dispatch remotely", "sparkwing pipeline run deploy --on prod"},
+	},
+}
+
+// cmdPipelineTrigger submits a trigger to a profile's controller for
+// remote execution -- the v0.5.0 successor to `sparkwing run
+// --sw-profile`. Positional pipeline name (mirrors `pipeline run`), a
+// required --profile naming the controller, and pass-through pipeline
+// args.
+var cmdPipelineTrigger = Command{
+	Path:     "sparkwing pipeline trigger",
+	Synopsis: "Submit a pipeline to a profile's controller (remote execution)",
+	Description: `Submits a trigger to the controller defined by --profile and
+follows the remote run until it reaches a terminal state.
+
+When the profile defines a logs URL, the follow streams full log
+output; otherwise it shows node-status updates from the
+controller. --detach skips the follow and prints the run id once
+the trigger is registered (the trigger POST itself always
+completes before the command exits, so the run is guaranteed
+queued).
+
+Any flag not recognized here is forwarded to the pipeline as a
+typed Arg, e.g. 'sparkwing pipeline trigger release --profile
+prod --version v1.2.3' passes --version through to the trigger
+payload -- same shape as 'sparkwing run'.
+
+Requires a profile with controller: set. For local execution
+against a profile's storage, use 'sparkwing run --profile X'.`,
+	PosArgs: []PosArg{
+		{Name: "<pipeline>", Desc: "Pipeline name registered on the controller", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline", Group: "System", Required: true},
+		{Name: "detach", Desc: "Return once the trigger is registered (print the run id); don't follow", Group: "System"},
+	},
+	GroupOrder:  []string{"System", "Other"},
+	UsageSuffix: "[-- pipeline-flags...]",
+	Examples: []Example{
+		{"Submit and follow", "sparkwing pipeline trigger release --profile prod --version v1.2.3"},
+		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger release --profile prod --detach"},
 	},
 }
 
@@ -1149,7 +1190,10 @@ typed many times a day. Every other input is a named flag.
 
 Any flag not recognized by run itself is forwarded to the
 pipeline binary, e.g. 'sparkwing run release --version
-v1.2.3' passes --version through to the pipeline's Args.`,
+v1.2.3' passes --version through to the pipeline's Args.
+
+For remote execution on a profile's controller, use
+'sparkwing pipeline trigger <name> --profile PROF'.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
 	},
@@ -1161,7 +1205,7 @@ v1.2.3' passes --version through to the pipeline's Args.`,
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
 		{"Run from a different git ref", "sparkwing run build-test-deploy --from feature/xyz"},
 		{"Retry a failed run", "sparkwing runs retry RUN_ID --failed"},
-		{"Dispatch remotely", "sparkwing run deploy --on prod --region us-west-2"},
+		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
 	},
 }
 

@@ -60,6 +60,7 @@ Per-project surface: list / describe / new pipelines plus the SDK pin (version /
 | `sparkwing pipeline new --name NAME [--template minimal\|build-test-deploy] [--hidden] [--short ...]` | Scaffold a new pipeline (refuses to clobber; auto-bootstraps `.sparkwing/` on first use; default template is `minimal` -- pass `--template build-test-deploy` for a build/test/deploy DAG) |
 | `sparkwing pipeline explain --name NAME [--flag value ...] [-o ...]` | Render the Plan DAG without running; unknown flags forward to the pipeline |
 | `sparkwing pipeline run NAME [--flag value ...]` | Invoke the pipeline (canonical form). `sparkwing run NAME` and `sparkwing NAME` are the positional shortcuts. |
+| `sparkwing pipeline trigger NAME --profile PROF [--detach] [--flag value ...]` | Submit the pipeline to a profile's controller for remote execution; follows the run until terminal (`--detach` returns the run id immediately) |
 | `sparkwing pipeline hooks {install\|uninstall\|status}` | Git pre-commit / pre-push hooks for triggers |
 | `sparkwing pipeline sparks ...` | Manage sparks libraries declared in `.sparkwing/sparks.yaml` (see "sparks" below) |
 
