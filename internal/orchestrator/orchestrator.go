@@ -200,6 +200,13 @@ type Options struct {
 	// Cluster boot paths leave it nil.
 	Profile *profile.Profile
 
+	// ProfileChain is the resolution chain that picked Profile (which
+	// rule matched, and the alternatives considered). Set alongside
+	// Profile so run_start can record *why* this profile was chosen.
+	// Nil when Profile is nil; the run_start profile block is omitted
+	// unless both are set.
+	ProfileChain *profile.Chain
+
 	// MirrorLocal, when non-nil, is an opened local SQLite store that
 	// RunLocal tees state writes to alongside the canonical state
 	// backend (see mirrorStateBackend). ApplyProfileBackendsWithMirror
@@ -851,6 +858,26 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 	}
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
+	}
+	// Profile resolution: which profile was picked, how, and the
+	// effective backends. Emitted only when --profile drove this run
+	// (opts.Profile + opts.ProfileChain both set); the legacy
+	// backends.yaml path leaves both nil and the block is omitted so
+	// existing run_start consumers are unaffected. Tokens and
+	// controller URLs are deliberately excluded.
+	if opts.Profile != nil && opts.ProfileChain != nil {
+		state, logs, cache := opts.Profile.SurfaceStrings()
+		inv["profile"] = map[string]any{
+			"name":         opts.ProfileChain.Selected,
+			"source":       string(opts.ProfileChain.Source),
+			"detect_via":   opts.ProfileChain.DetectVia,
+			"mirror_local": opts.Profile.EffectiveMirrorLocal(),
+		}
+		inv["backends"] = map[string]any{
+			"state": state,
+			"logs":  logs,
+			"cache": cache,
+		}
 	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv

@@ -18,12 +18,12 @@ func writeInnerProfiles(t *testing.T, body string) {
 
 func TestProfileFromEnv_Unset(t *testing.T) {
 	os.Unsetenv("SPARKWING_PROFILE")
-	p, err := profileFromEnv()
+	p, chain, err := profileFromEnv()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p != nil {
-		t.Fatalf("unset SPARKWING_PROFILE should yield nil profile, got %#v", p)
+	if p != nil || chain != nil {
+		t.Fatalf("unset SPARKWING_PROFILE should yield nil profile + chain, got %#v / %#v", p, chain)
 	}
 }
 
@@ -34,12 +34,15 @@ profiles:
     state: { type: s3, bucket: team, prefix: state }
 `)
 	t.Setenv("SPARKWING_PROFILE", "team")
-	p, err := profileFromEnv()
+	p, chain, err := profileFromEnv()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if p == nil || p.Name != "team" || p.State == nil || p.State.Bucket != "team" {
 		t.Fatalf("resolved %#v", p)
+	}
+	if chain == nil || chain.Selected != "team" {
+		t.Fatalf("chain should report team selected, got %#v", chain)
 	}
 }
 
@@ -49,7 +52,7 @@ profiles:
   team: { state: { type: sqlite } }
 `)
 	t.Setenv("SPARKWING_PROFILE", "ghost")
-	_, err := profileFromEnv()
+	_, _, err := profileFromEnv()
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}

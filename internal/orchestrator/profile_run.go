@@ -8,27 +8,29 @@ import (
 )
 
 // profileFromEnv resolves the SPARKWING_PROFILE env var (set by the
-// outer CLI for `sparkwing run --profile NAME`) to a *profile.Profile.
-// Returns (nil, nil) when SPARKWING_PROFILE is unset, leaving the legacy
-// backends.yaml flow in place. Resolution mirrors the outer CLI: load
-// profiles.yaml and resolve the name through the chain resolver at the
-// flag level (the project hint is wired in a later step).
-func profileFromEnv() (*profile.Profile, error) {
+// outer CLI for `sparkwing run --profile NAME`) to a *profile.Profile
+// and the resolution chain that picked it. Returns (nil, nil, nil) when
+// SPARKWING_PROFILE is unset, leaving the legacy backends.yaml flow in
+// place. Resolution mirrors the outer CLI: load profiles.yaml and
+// resolve the name through the chain resolver at the flag level (the
+// project hint is wired in a later step). The chain feeds run_start's
+// profile block.
+func profileFromEnv() (*profile.Profile, *profile.Chain, error) {
 	name := os.Getenv("SPARKWING_PROFILE")
 	if name == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	path, err := profile.DefaultPath()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	p, _, err := profile.ResolveChain(name, "", cfg)
+	p, chain, err := profile.ResolveChain(name, "", cfg)
 	if err != nil {
-		return nil, fmt.Errorf("resolve profile %q: %w", name, err)
+		return nil, nil, fmt.Errorf("resolve profile %q: %w", name, err)
 	}
-	return p, nil
+	return p, &chain, nil
 }

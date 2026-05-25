@@ -161,12 +161,13 @@ func Main() {
 	// state/logs/cache through the named storage profile, with a local
 	// SQLite mirror for non-local profiles. Resolved here; RunLocal
 	// branches on opts.Profile.
-	prof, profErr := profileFromEnv()
+	prof, profChain, profErr := profileFromEnv()
 	if profErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
 		os.Exit(1)
 	}
 	opts.Profile = prof
+	opts.ProfileChain = profChain
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
 		os.Exit(1)

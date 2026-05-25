@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -1006,6 +1007,10 @@ func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.
 		}
 	}
 
+	if runStart != nil {
+		p.writeProfileBlock(w, runStart)
+	}
+
 	if plan != nil {
 		fmt.Fprintln(w)
 		p.writePlan(w, *plan)
@@ -1018,6 +1023,64 @@ func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.
 		fmt.Fprintln(w, "  "+p.color("status ", ansiDim)+" "+p.color("sparkwing runs status --run "+runID, ansiCyan))
 	}
 	fmt.Fprintln(w, p.sectionRule("Logs"))
+}
+
+// writeProfileBlock renders the resolved-profile banner before the plan
+// when run_start carries a profile/backends object (i.e. the run was
+// driven by --profile). Omitted entirely otherwise, so legacy runs and
+// historical envelopes without these keys render unchanged. Never prints
+// the token or controller URL.
+func (p *PrettyRenderer) writeProfileBlock(w io.Writer, runStart *sparkwing.LogRecord) {
+	prof := anyMap(runStart.Attrs["profile"])
+	if len(prof) == 0 {
+		return
+	}
+	backends := anyMap(runStart.Attrs["backends"])
+	name, _ := prof["name"].(string)
+	source, _ := prof["source"].(string)
+	detectVia, _ := prof["detect_via"].(string)
+	mirrorLocal, _ := prof["mirror_local"].(bool)
+	state, _ := backends["state"].(string)
+	logs, _ := backends["logs"].(string)
+	cache, _ := backends["cache"].(string)
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, p.color("profile:", ansiDim)+"  "+name)
+	fmt.Fprintln(w, "  "+p.color(padRight("via:", 7), ansiDim)+" "+profileViaPhrase(source, detectVia))
+	fmt.Fprintln(w, "  "+p.color(padRight("state:", 7), ansiDim)+" "+state)
+	fmt.Fprintln(w, "  "+p.color(padRight("logs:", 7), ansiDim)+" "+logs)
+	fmt.Fprintln(w, "  "+p.color(padRight("cache:", 7), ansiDim)+" "+cache)
+	// The mirror only engages for non-local (non-sqlite) state, so the
+	// line is noise for a local profile; omit it there.
+	if !strings.HasPrefix(state, "sqlite") {
+		mirror := "off"
+		if mirrorLocal {
+			mirror = "on"
+		}
+		fmt.Fprintln(w, "  "+p.color(padRight("mirror:", 7), ansiDim)+" "+mirror)
+	}
+}
+
+// profileViaPhrase maps a ChainSource (+ detect env var when present) to
+// the human phrase shown on the banner's `via:` line.
+func profileViaPhrase(source, detectVia string) string {
+	switch source {
+	case string(profile.ChainSourceFlag):
+		return "--profile flag"
+	case string(profile.ChainSourceProject):
+		return "project hint (.sparkwing/sparkwing.yaml profile:)"
+	case string(profile.ChainSourceDetect):
+		if v := os.Getenv(detectVia); v != "" {
+			return "detect via " + detectVia + "=" + v
+		}
+		return "detect via " + detectVia
+	case string(profile.ChainSourceDefault):
+		return "default (" + profile.DisplayDefaultPath() + ")"
+	case string(profile.ChainSourceBuiltin):
+		return "built-in fallback"
+	default:
+		return source
+	}
 }
 
 func outcomeIcon(outcome string) (icon, code string) {

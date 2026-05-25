@@ -20,7 +20,6 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
 func runProfileCmd(args []string) error {
@@ -78,7 +77,7 @@ type profileReportJSON struct {
 }
 
 func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) error {
-	state, logs, cache := effectiveSurfaces(p)
+	state, logs, cache := p.SurfaceStrings()
 	report := profileReportJSON{
 		Effective: profileEffectiveJSON{
 			Name:        chain.Selected,
@@ -100,7 +99,7 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 // --- pretty output ---
 
 func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string, out io.Writer) error {
-	state, logs, cache := effectiveSurfaces(p)
+	state, logs, cache := p.SurfaceStrings()
 
 	fmt.Fprintf(out, "effective profile: %s\n", chain.Selected)
 	fmt.Fprintf(out, "  source:           %s\n", effectiveSourceDetail(chain, cfgPath))
@@ -179,59 +178,4 @@ func chainRows(chain profile.Chain) []profileConsideredJSON {
 		}
 	}
 	return rows
-}
-
-// effectiveSurfaces renders the resolved profile's state/logs/cache as
-// the strings shown in both output modes. It mirrors the orchestrator's
-// profileSurfaceSpecs precedence (explicit surfaces > controller
-// implication > local sqlite fallback) without filling concrete paths,
-// so the output reflects what the profile declares.
-func effectiveSurfaces(p *profile.Profile) (state, logs, cache string) {
-	surf := p.Surfaces()
-	if surf.State == nil && surf.Cache == nil && surf.Logs == nil && p.Controller != "" {
-		c := "controller://" + p.Name
-		return c, c, c
-	}
-	state = specString(surf.State)
-	if surf.State == nil && p.Controller == "" {
-		// Bare profile: the run path falls back to local SQLite state
-		// with no shared logs/cache.
-		state = "sqlite"
-	}
-	return state, specString(surf.Logs), specString(surf.Cache)
-}
-
-// specString stringifies a backend spec for display. It never emits a
-// postgres/mysql DSN URL (those carry credentials); only the type and an
-// optional url_source indirection.
-func specString(s *backends.Spec) string {
-	if s == nil {
-		return "-"
-	}
-	switch s.Type {
-	case backends.TypeSQLite:
-		if s.Path != "" {
-			return "sqlite:" + s.Path
-		}
-		return "sqlite"
-	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
-		out := s.Type + "://" + s.Bucket
-		if s.Prefix != "" {
-			out += "/" + s.Prefix
-		}
-		return out
-	case backends.TypeFilesystem:
-		return "filesystem:" + s.Path
-	case backends.TypeController:
-		return "controller://" + s.Controller
-	case backends.TypePostgres, backends.TypeMySQL:
-		if s.URLSource != "" {
-			return s.Type + ":" + s.URLSource
-		}
-		return s.Type
-	case backends.TypeStdout:
-		return "stdout"
-	default:
-		return s.Type
-	}
 }
