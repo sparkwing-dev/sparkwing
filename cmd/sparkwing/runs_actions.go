@@ -48,8 +48,8 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 	}
 	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
 	if ctrlURL == "" {
-		return nil, nil, fmt.Errorf("%s: no --on profile and no local dashboard running "+
-			"(start it with `sparkwing dashboard start`, or pass --on <profile>)", cmd)
+		return nil, nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
+			"(start it with `sparkwing dashboard start`, or pass --profile <profile>)", cmd)
 	}
 	c = client.New(ctrlURL, nil)
 	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
@@ -136,7 +136,7 @@ func reportResults(out io.Writer, action string, results []runResult) error {
 func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
 	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
@@ -197,14 +197,14 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	return nil
 }
 
-// profileSuffix renders the trailing ` --on <name>` segment for hint
+// profileSuffix renders the trailing ` --profile <name>` segment for hint
 // strings only when the caller used a non-local profile, so the
 // suggested command is copy-pasteable in either mode.
 func profileSuffix(on string) string {
 	if on == "" {
 		return ""
 	}
-	return " --on " + on
+	return " --profile " + on
 }
 
 // ---- cancel --------------------------------------------------------
@@ -212,7 +212,7 @@ func profileSuffix(on string) string {
 func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -248,7 +248,7 @@ func runRunsCancel(ctx context.Context, args []string) error {
 
 func runRunsPrune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	olderThan := fs.Duration("older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
 	dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
 	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; use --run - to read ids from stdin)")

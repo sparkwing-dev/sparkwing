@@ -28,7 +28,7 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 	maxMatches := fs.Int("max-matches", 5, "per-node match cap (0 = no cap)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	quiet := fs.BoolP("quiet", "q", false, "print only the unique matching run ids")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsGrep, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

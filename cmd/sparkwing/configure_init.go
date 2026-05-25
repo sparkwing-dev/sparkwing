@@ -151,7 +151,7 @@ func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
 func profileSummary(path string) string {
 	cfg, err := profile.Load(path)
 	if err != nil || cfg == nil {
-		return "remote-cluster profiles for `--on <name>` dispatch"
+		return "remote-cluster profiles for `--profile <name>` dispatch"
 	}
 	n := len(cfg.Profiles)
 	if n == 0 {
@@ -197,7 +197,7 @@ func probeToolchain() ConfigureInitToolchain {
 func configureInitNextSteps() []InfoNextStep {
 	return []InfoNextStep{
 		{Command: "cd <repo> && sparkwing pipeline new --name release", Purpose: "auto-bootstrap .sparkwing/ + scaffold a single-node pipeline"},
-		{Command: "sparkwing configure profiles", Purpose: "manage remote-cluster profiles for `--on <name>`"},
+		{Command: "sparkwing configure profiles", Purpose: "manage remote-cluster profiles for `--profile <name>`"},
 		{Command: "sparkwing info", Purpose: "current project + tooling cheat sheet"},
 	}
 }

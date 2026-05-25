@@ -1,7 +1,7 @@
 // Handlers for the restored jobs verbs: failures, stats, last, tree,
 // get. Each one follows the handler skeleton spelled out in
-// help_registry.go: parseAndCheck, resolve --on (optional, defaults
-// to local), dispatch.
+// help_registry.go: parseAndCheck, resolve --profile (optional,
+// defaults to local), dispatch.
 package main
 
 import (
@@ -54,7 +54,7 @@ func (f failureRow) clusterKey(groupBy string) string {
 
 func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsFailures.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	limit := fs.Int("limit", 20, "max failures to analyze")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only failures newer than this (e.g. 24h, 7d)")
@@ -272,7 +272,7 @@ type pipelineStats struct {
 
 func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsStats.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only runs newer than this (e.g. 7d)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -401,7 +401,7 @@ func aggregateRuns(name string, runs []*store.Run) pipelineStats {
 
 func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsLast.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	watch := fs.BoolP("watch", "w", false, "tail for new runs (reprints whenever a newer run appears)")
@@ -508,7 +508,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsTree.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "root run identifier")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdJobsTree, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -625,7 +625,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsGet.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	if err := parseAndCheck(cmdJobsGet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -655,7 +655,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 	timeout := fs.Duration("timeout", 10*time.Minute, "give up (exit 2) after this long")
 	poll := fs.Duration("poll", 3*time.Second, "poll interval")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	on := fs.String("on", "", "profile name (cluster mode). Omit to poll the local store.")
+	on := fs.String("profile", "", "profile name (cluster mode). Omit to poll the local store.")
 	if err := parseAndCheck(cmdJobsWait, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -763,7 +763,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	findTimeout := fs.Duration("find-timeout", 2*time.Minute, "give up after this long when --wait is set")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
-	on := fs.String("on", "", "profile name (cluster mode). Omit to search local.")
+	on := fs.String("profile", "", "profile name (cluster mode). Omit to search local.")
 	if err := parseAndCheck(cmdJobsFind, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

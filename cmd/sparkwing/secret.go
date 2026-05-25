@@ -54,7 +54,7 @@ func runSecretSet(args []string) error {
 	value := v.String("value")
 	file := v.String("file")
 	plain := v.Bool("plain")
-	on := v.String("on")
+	on := v.String("profile")
 	if !fs.Changed("value") && !fs.Changed("file") {
 		return errors.New("secret set: either --value or --file is required")
 	}
@@ -76,7 +76,7 @@ func runSecretSet(args []string) error {
 
 	masked := !plain
 
-	if !fs.Changed("on") {
+	if !fs.Changed("profile") {
 		// Local: pick the file by mask intent. Plain values go to
 		// config.env so an operator can chmod / share / version-
 		// control them independently of the (still-0600) secrets
@@ -139,12 +139,12 @@ func runSecretGet(args []string) error {
 		return err
 	}
 	name := v.String("name")
-	on := v.String("on")
+	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret get: --name is required")
 	}
 
-	if !fs.Changed("on") {
+	if !fs.Changed("profile") {
 		src := secrets.NewDotenvSource("")
 		val, _, err := src.Read(name)
 		if err != nil {
@@ -189,10 +189,10 @@ func runSecretList(args []string) error {
 		}
 		return err
 	}
-	on := v.String("on")
+	on := v.String("profile")
 	grep := v.String("grep")
 
-	if !fs.Changed("on") {
+	if !fs.Changed("profile") {
 		// Read both files: secrets.env (masked) and config.env (plain).
 		// On collision, plain wins -- mirrors DotenvSource.Read so
 		// what the list shows is what jobs will see.
@@ -297,12 +297,12 @@ func runSecretDelete(args []string) error {
 		return err
 	}
 	name := v.String("name")
-	on := v.String("on")
+	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret delete: --name is required")
 	}
 
-	if !fs.Changed("on") {
+	if !fs.Changed("profile") {
 		// Try both files; either may hold the entry. At least one
 		// must hit -- otherwise the name is genuinely absent.
 		secretsPath, _ := secrets.DefaultDotenvPath()

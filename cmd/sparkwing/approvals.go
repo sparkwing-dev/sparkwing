@@ -34,7 +34,7 @@ func runDeny(ctx context.Context, paths orchestrator.Paths, args []string) error
 // Exit codes:
 func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []string, cmd Command, resolution, pastTense string) error {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: local)")
+	on := fs.String("profile", "", "profile name (default: local)")
 	comment := fs.String("comment", "", "optional operator note recorded on the approval")
 	runIDFlag := fs.String("run", "", "run ID holding the approval gate")
 	nodeIDFlag := fs.String("node", "", "node ID of the approval gate")
@@ -98,7 +98,7 @@ func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, 
 // runApprovalsList handles `sparkwing approvals list`.
 func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdApprovalsList.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: local)")
+	on := fs.String("profile", "", "profile name (default: local)")
 	runID := fs.String("run", "", "restrict to one run's approvals (pending + history)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdApprovalsList, fs, args); err != nil {

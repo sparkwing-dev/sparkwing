@@ -406,8 +406,8 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	}
 	// Forward --dry-run to the remote runner via the same env-var
 	// protocol the local-exec path uses. Behavior is identical
-	// across venues so `sparkwing run X --on prod --dry-run` previews the
-	// same way it does locally.
+	// across venues so `sparkwing pipeline trigger X --profile prod --dry-run`
+	// previews the same way a local run does.
 	if wf.dryRun {
 		envMap["SPARKWING_DRY_RUN"] = "1"
 	}
@@ -447,8 +447,8 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	}
 
 	// Best-effort eager refresh closes the
-	// `git push && sparkwing run X --on prod` race where the gitcache
-	// hasn't yet mirrored the just-pushed SHA. The retry in the
+	// `git push && sparkwing pipeline trigger X --profile prod` race where
+	// the gitcache hasn't yet mirrored the just-pushed SHA. The retry in the
 	// runner's trigger loop catches the residual race; this just
 	// shrinks the window to ~zero on the happy path. 5s ceiling so
 	// a wedged or unreachable cache never blocks dispatch -- log a

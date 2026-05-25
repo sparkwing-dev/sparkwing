@@ -227,7 +227,7 @@ func runProfilesRemove(args []string) error {
 	if cfg.Default == name {
 		cfg.Default = ""
 		fmt.Fprintln(os.Stderr, "note: removed profile was the default; no default is now set.")
-		fmt.Fprintln(os.Stderr, "run `sparkwing profiles use <name>` to pick a new default, or pass --on on every call.")
+		fmt.Fprintln(os.Stderr, "run `sparkwing profiles use <name>` to pick a new default, or pass --profile on every call.")
 	}
 	if err := profile.Save(path, cfg); err != nil {
 		return err

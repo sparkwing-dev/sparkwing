@@ -104,12 +104,12 @@ func runDashboardStart(args []string) error {
 	var readOnly, noLocalStore bool
 	fs.StringVar(&addr, "addr", "127.0.0.1:4343", "bind address for the unified dashboard+api server")
 	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	fs.StringVar(&on, "on", "",
+	fs.StringVar(&on, "profile", "",
 		"profile name from ~/.config/sparkwing/profiles.yaml; uses its log_store + artifact_store fields")
 	fs.StringVar(&logStore, "log-store", "",
-		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. Overrides --on. Intended for ci-embedded VMs without a profiles.yaml")
+		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml")
 	fs.StringVar(&artifactStore, "artifact-store", "",
-		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix. Overrides --on. Intended for ci-embedded VMs without a profiles.yaml")
+		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix. Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml")
 	fs.BoolVar(&readOnly, "read-only", false,
 		"reject writes on /api/v1/* (auth + webhooks remain open)")
 	fs.BoolVar(&noLocalStore, "no-local-store", false,
@@ -128,7 +128,7 @@ func runDashboardStart(args []string) error {
 		return err
 	}
 
-	// --on resolves to a profile; URL flags override its storage
+	// --profile resolves to a profile; URL flags override its storage
 	// fields when both are set so an operator can spot-check a bucket
 	// without editing profiles.yaml.
 	if on != "" {
@@ -187,7 +187,7 @@ func runDashboardStart(args []string) error {
 	}
 	if noLocalStore {
 		if logStore == "" || artifactStore == "" {
-			return fmt.Errorf("--no-local-store requires --log-store and --artifact-store (or an --on profile that supplies them)")
+			return fmt.Errorf("--no-local-store requires --log-store and --artifact-store (or an --profile profile that supplies them)")
 		}
 		superviseArgs = append(superviseArgs, "--no-local-store")
 	}

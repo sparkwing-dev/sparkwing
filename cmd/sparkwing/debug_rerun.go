@@ -36,7 +36,7 @@ func parseRerunFlags(args []string) (rerunFlags, error) {
 	fs := flag.NewFlagSet(cmdDebugRerun.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
-	on := fs.String("on", "", "profile name (cluster mode)")
+	on := fs.String("profile", "", "profile name (cluster mode)")
 	seq := fs.Int("seq", -1, "attempt index; -1 selects most recent")
 	image := fs.String("image", "", "runner image for cluster-mode debug pod (overrides $SPARKWING_RERUN_IMAGE)")
 	if err := parseAndCheck(cmdDebugRerun, fs, args); err != nil {

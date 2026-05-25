@@ -428,7 +428,7 @@ _sparkwing_complete() {
 
     # Subcommand / verb: ask the binary what children are legal at
     # this depth. Empty path -> top-level subcommands. Value completion
-    # for specific flags (above: --on, --pipeline) happens before this
+    # for specific flags (above: --profile, --pipeline) happens before this
     # block.
     local -a kids
     mapfile -t kids < <(sparkwing _complete-verbs "${swpath[@]}" 2>/dev/null | cut -f1)

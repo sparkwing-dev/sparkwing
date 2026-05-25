@@ -112,6 +112,13 @@ var errHelpRequested = errors.New("help requested")
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
 
+	// A retired/renamed where-flag (--on / --sw-on / --sw-profile /
+	// --sw-target) gets a migration pointer instead of the bare pflag
+	// "unknown flag" error.
+	if err := checkRetiredWhereFlags(args); err != nil {
+		return err
+	}
+
 	if fs.Lookup("help") == nil {
 		fs.BoolP("help", "h", false, helpFlag.Desc)
 	}

@@ -1,7 +1,7 @@
 // Client-command profile resolution. Shared by every human-driven
 // subcommand that talks to a remote controller or logs service
 // (tokens, users, jobs retry/cancel/prune/logs, gc, fleet-worker,
-// cluster-mode web). Each subcommand registers `--on <name>` via
+// cluster-mode web). Each subcommand registers `--profile <name>` via
 // addProfileFlag, then calls resolveProfile to fetch the connection
 // info.
 package main
@@ -16,15 +16,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-// addProfileFlag registers a `--on <name>` flag on fs. The returned
-// pointer is populated after fs.Parse. Empty = use the default
+// addProfileFlag registers a `--profile <name>` flag on fs. The
+// returned pointer is populated after fs.Parse. Empty = use the default
 // profile.
 func addProfileFlag(fs *flag.FlagSet) *string {
-	return fs.String("on", "",
+	return fs.String("profile", "",
 		"profile name from ~/.config/sparkwing/profiles.yaml (default: current default)")
 }
 
-// resolveProfile loads profiles.yaml, picks the profile per `--on`
+// resolveProfile loads profiles.yaml, picks the profile per `--profile`
 // and the file's default, and returns it. On any failure it prints
 // a helpful hint to stderr and returns a non-nil error so callers
 // can exit 1 without extra formatting.

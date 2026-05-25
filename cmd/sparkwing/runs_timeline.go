@@ -18,7 +18,7 @@ func runJobsTimeline(ctx context.Context, paths orchestrator.Paths, args []strin
 	steps := fs.Bool("steps", false, "include per-step rows under each node")
 	width := fs.Int("width", 60, "bar width in characters")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsTimeline, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

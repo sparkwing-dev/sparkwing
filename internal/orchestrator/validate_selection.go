@@ -25,7 +25,11 @@ func validateTargetSelection(opts Options) error {
 		}
 	default:
 		if opts.Target == "" {
-			return nil
+			if len(targets) == 1 {
+				return nil // sole declared target auto-selects
+			}
+			return fmt.Errorf("pipeline %q declares multiple targets %v; pass --target to pick one",
+				opts.Pipeline, targets)
 		}
 		if !opts.PipelineYAML.HasTarget(opts.Target) {
 			return fmt.Errorf("pipeline %q has no target %q; declared: %v",

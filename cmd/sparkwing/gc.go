@@ -22,7 +22,7 @@ func runGC(args []string) error {
 	fs := flag.NewFlagSet(cmdGC.Path, flag.ContinueOnError)
 	root := fs.String("root", "",
 		"warm-PVC root (default: SPARKWING_HOME resolution via DefaultPaths)")
-	on := fs.String("on", "",
+	on := fs.String("profile", "",
 		"profile name (optional; without it the run-dir sweep is skipped)")
 	if err := parseAndCheck(cmdGC, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

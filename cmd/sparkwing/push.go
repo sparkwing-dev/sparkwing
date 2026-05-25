@@ -1,8 +1,8 @@
 // `sparkwing push` -- ship the current repo's HEAD commit to the
 // gitcache as a timestamped branch so a remote runner can clone it
 // without waiting for a push to GitHub. Companion to
-// `sparkwing run --on <profile> --from <ref>`: push first, then
-// trigger against the ref that push reports.
+// `sparkwing pipeline trigger <name> --profile <profile> --sw-ref <ref>`:
+// push first, then trigger against the ref that push reports.
 package main
 
 import (
@@ -125,7 +125,7 @@ func runPush(args []string) error {
 	fmt.Fprintf(os.Stderr, "pushed %s (%s)\n", out.Commit, out.Ref)
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "trigger a pipeline with:")
-	fmt.Fprintf(os.Stderr, "  sparkwing run --pipeline <name> --on %s --from %s\n", prof.Name, out.Ref)
+	fmt.Fprintf(os.Stderr, "  sparkwing pipeline trigger <name> --profile %s --sw-ref %s\n", prof.Name, out.Ref)
 	// Machine-readable line to stdout in case operators script around
 	// push. Keep it stable -- "ref=<ref>" is the contract.
 	fmt.Printf("ref=%s repo=%s commit=%s\n", out.Ref, out.RepoName, out.Commit)

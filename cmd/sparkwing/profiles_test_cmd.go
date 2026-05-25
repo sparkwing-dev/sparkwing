@@ -41,7 +41,7 @@ type profileTestReport struct {
 
 func runProfilesTest(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesTest.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdProfilesTest, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

@@ -37,12 +37,10 @@ func runTriggers(args []string) error {
 	}
 }
 
-// 'sparkwing triggers fire' was a functional duplicate of
-// 'sparkwing pipeline run --on <profile>'. Both called CreateTrigger
-// on the controller with the same request shape, so the fire
-// subcommand was removed. Use 'sparkwing pipeline run --pipeline X
-// --on <profile>' instead; pass --from, --config the same way you
-// would locally.
+// 'sparkwing triggers fire' was a functional duplicate of submitting a
+// trigger to a controller. Both called CreateTrigger on the controller
+// with the same request shape, so the fire subcommand was removed. Use
+// 'sparkwing pipeline trigger X --profile <profile>' instead.
 
 // --- list -------------------------------------------------------
 

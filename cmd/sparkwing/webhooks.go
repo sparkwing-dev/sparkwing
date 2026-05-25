@@ -140,7 +140,7 @@ func runWebhooksList(args []string) error {
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table). Matches kubectl/gh")
 	on := addProfileFlag(fs)
-	_ = on // --on is accepted for symmetry with other verbs; list doesn't need controller state.
+	_ = on // --profile is accepted for symmetry with other verbs; list doesn't need controller state.
 	if err := parseAndCheck(cmdWebhooksList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -259,7 +259,7 @@ func runWebhooksDeliveries(args []string) error {
 		return errors.New("webhooks deliveries: --hook is required")
 	}
 	if *on == "" {
-		return errors.New("webhooks deliveries: --on is required (needed to cross-reference trigger state)")
+		return errors.New("webhooks deliveries: --profile is required (needed to cross-reference trigger state)")
 	}
 	if err := ghCLIAvailable(); err != nil {
 		return fmt.Errorf("webhooks deliveries: %w", err)

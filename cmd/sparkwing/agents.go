@@ -67,7 +67,7 @@ func runAgentsList(args []string) error {
 		return err
 	}
 	if *on == "" {
-		return errors.New("agents list: --on is required")
+		return errors.New("agents list: --profile is required")
 	}
 	prof, err := resolveProfile(*on)
 	if err != nil {

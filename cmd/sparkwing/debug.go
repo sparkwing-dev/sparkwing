@@ -142,7 +142,7 @@ func runDebugRun(args []string) error {
 	return dispatchRun(append([]string{pipelineName}, remaining...))
 }
 
-// debugTargetFlags are the shared --run/--node/--on parse surface
+// debugTargetFlags are the shared --run/--node/--profile parse surface
 // for release/attach/env. Pulling this into a helper keeps the three
 // CLI entry points terse.
 type debugTargetFlags struct {
@@ -155,7 +155,7 @@ func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
-	on := fs.String("on", "", "profile name (cluster mode)")
+	on := fs.String("profile", "", "profile name (cluster mode)")
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		return debugTargetFlags{}, err
 	}

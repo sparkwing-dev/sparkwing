@@ -36,10 +36,10 @@ type publishedBinary struct {
 
 func runPipelinePublish(args []string) error {
 	fs := flag.NewFlagSet("pipeline publish", flag.ContinueOnError)
-	on := fs.String("on", "",
+	on := fs.String("profile", "",
 		"profile name; uses its artifact_store field as the upload target")
 	artifactStore := fs.String("artifact-store", "",
-		"artifact-store URL (fs:///path or s3://bucket/prefix). Overrides --on.")
+		"artifact-store URL (fs:///path or s3://bucket/prefix). Overrides --profile.")
 	platforms := fs.String("platform", "",
 		"comma-separated GOOS/GOARCH pairs to cross-compile + publish "+
 			"(e.g. linux/amd64,linux/arm64,darwin/arm64). Default: current platform.")
@@ -56,7 +56,7 @@ func runPipelinePublish(args []string) error {
 		return err
 	}
 	if storeURL == "" {
-		return errors.New("pipeline publish: no artifact-store configured. Pass --on PROFILE (with artifact_store set) or --artifact-store URL")
+		return errors.New("pipeline publish: no artifact-store configured. Pass --profile PROFILE (with artifact_store set) or --artifact-store URL")
 	}
 	store, err := storeurl.OpenArtifactStore(context.Background(), storeURL)
 	if err != nil {
@@ -240,7 +240,7 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 }
 
 // resolveArtifactStoreURL picks the storage URL to publish to.
-// Explicit --artifact-store URL beats --on profile's field;
+// Explicit --artifact-store URL beats --profile profile's field;
 // returning "" means neither was provided.
 func resolveArtifactStoreURL(on, urlFlag string) (string, error) {
 	if urlFlag != "" {

@@ -141,27 +141,20 @@ func TestRun_OnTargetSkipsNonMatchingJobs(t *testing.T) {
 	}
 }
 
-func TestRun_OnTargetEmptyTargetSkipsAllNonUniversal(t *testing.T) {
-	onTargetProdRan.Store(0)
-	onTargetDevRan.Store(0)
-	onTargetCommonRan.Store(0)
+func TestRun_MultiTargetRequiresTarget(t *testing.T) {
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+	// A pipeline declaring multiple targets must be run with --target;
+	// an empty target errors before the run rather than silently
+	// skipping every OnTarget job.
+	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "on-target-multi",
 		PipelineYAML: multiTargetYAML(),
 	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
+	if err == nil {
+		t.Fatal("expected a must-disambiguate error for a multi-target pipeline with no --target")
 	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
-	}
-	if onTargetProdRan.Load() != 0 || onTargetDevRan.Load() != 0 {
-		t.Errorf("only universal jobs should run, got prod=%d dev=%d",
-			onTargetProdRan.Load(), onTargetDevRan.Load())
-	}
-	if onTargetCommonRan.Load() != 1 {
-		t.Errorf("common universal job should run, got %d", onTargetCommonRan.Load())
+	if !strings.Contains(err.Error(), "declares multiple targets") {
+		t.Fatalf("want multiple-targets error, got %v", err)
 	}
 }
 

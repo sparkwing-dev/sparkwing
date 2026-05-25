@@ -60,7 +60,7 @@ func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []st
 	stepID := fs.String("step", "", "limit to one step id (implies node-scope or step-scope reads)")
 	includeSteps := fs.Bool("steps", false, "include per-step annotations as separate rows")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdAnnotationsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -229,7 +229,7 @@ func runAnnotationsAdd(ctx context.Context, paths orchestrator.Paths, args []str
 	nodeID := fs.String("node", "", "node identifier (required)")
 	stepID := fs.String("step", "", "step identifier (optional; annotates the step instead of the node)")
 	msg := fs.StringP("message", "m", "", "annotation text (required)")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdAnnotationsAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

@@ -55,12 +55,23 @@ func TestValidateTargetSelection(t *testing.T) {
 			wantErr: "does not declare any targets",
 		},
 		{
-			name: "pipeline with targets, --for empty",
+			name: "multiple targets, --target empty -> must disambiguate",
 			opts: Options{
 				Pipeline: "release",
 				PipelineYAML: &pipelines.Pipeline{
 					Name:    "release",
 					Targets: map[string]pipelines.Target{"prod": {}, "staging": {}},
+				},
+			},
+			wantErr: "declares multiple targets",
+		},
+		{
+			name: "single target, --target empty -> auto-selects",
+			opts: Options{
+				Pipeline: "deploy",
+				PipelineYAML: &pipelines.Pipeline{
+					Name:    "deploy",
+					Targets: map[string]pipelines.Target{"prod": {}},
 				},
 			},
 		},

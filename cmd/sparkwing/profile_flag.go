@@ -33,11 +33,18 @@ func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, 
 	if err != nil {
 		return nil, profile.Chain{}, path, err
 	}
-	p, chain, err := profile.Resolve(name, projectProfileHint(), cfg)
+	hint := projectProfileHint()
+	p, chain, err := profile.Resolve(name, hint, cfg)
 	if err != nil {
 		if errors.Is(err, profile.ErrProfileNotFound) {
+			// The offending name is the flag when set, else the project
+			// hint -- not the (possibly empty) flag arg.
+			bad := name
+			if bad == "" {
+				bad = hint
+			}
 			return nil, profile.Chain{}, path, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
-				name, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
+				bad, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
 		}
 		return nil, profile.Chain{}, path, err
 	}

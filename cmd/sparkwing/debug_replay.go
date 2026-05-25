@@ -84,7 +84,7 @@ func parseReplayFlags(args []string) (replayFlags, error) {
 	fs := flag.NewFlagSet(cmdDebugReplay.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
-	on := fs.String("on", "", "profile name; sideloads the run+dispatch from the named controller, then replays locally")
+	on := fs.String("profile", "", "profile name; sideloads the run+dispatch from the named controller, then replays locally")
 	if err := parseAndCheck(cmdDebugReplay, fs, args); err != nil {
 		return replayFlags{}, err
 	}
