@@ -99,7 +99,7 @@ clones over HTTP so runners do not need SSH keys.
 
 Also stores:
 
-- **Code uploads**: tarballs from `sparkwing run --on` invocations
+- **Code uploads**: tarballs from `sparkwing pipeline trigger` invocations
 - **Artifacts**: job output files
 - **Binary cache**: compiled pipeline binaries
 - **Dependency cache**: saved / restored by pipelines (gems, node_modules, etc.)
@@ -236,12 +236,12 @@ sparkwing run build-deploy
   → pipeline does whatever its code says (build, test, deploy, etc.)
 ```
 
-### Remote Execution (--on)
+### Remote Execution (pipeline trigger)
 
 ```
-sparkwing run build-deploy --on <cluster>
-  1. sparkwing run resolves profile -> controller URL
-  2. sparkwing run uploads code tarball to cache (incremental when possible)
+sparkwing pipeline trigger build-deploy --profile <cluster>
+  1. sparkwing resolves the profile -> controller URL
+  2. sparkwing uploads code tarball to cache (incremental when possible)
   3. sparkwing POST /trigger to controller (with upload_ref)
   4. controller enqueues run
   5. dispatcher creates a k8s Job

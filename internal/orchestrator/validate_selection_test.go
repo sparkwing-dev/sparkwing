@@ -13,13 +13,24 @@ import (
 
 var _ = context.Background // imported for fakeClusterRunner signature
 
+// writeSourcesYAML nests a sources.File body under the sparkwing.yaml
+// sources: section so the projectconfig-backed resolver picks it up.
 func writeSourcesYAML(t *testing.T, dir, body string) {
 	t.Helper()
 	swDir := filepath.Join(dir, ".sparkwing")
 	if err := os.MkdirAll(swDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(swDir, "sources.yaml"), []byte(body), 0o644); err != nil {
+	var nested strings.Builder
+	nested.WriteString("sources:\n")
+	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
+		if line == "" {
+			nested.WriteString("\n")
+			continue
+		}
+		nested.WriteString("  " + line + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(swDir, "sparkwing.yaml"), []byte(nested.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -96,7 +107,7 @@ func TestValidateTargetSelection(t *testing.T) {
 func TestValidateSourceRunnerPortability_RejectsLaptopOnlyOnCluster(t *testing.T) {
 	dir := t.TempDir()
 	writeSourcesYAML(t, dir, `
-sources:
+entries:
   dotenv:
     type: file
     path: .sparkwing/secrets.local.env
@@ -119,7 +130,7 @@ sources:
 func TestValidateSourceRunnerPortability_AcceptsLocalRunner(t *testing.T) {
 	dir := t.TempDir()
 	writeSourcesYAML(t, dir, `
-sources:
+entries:
   dotenv:
     type: file
     path: .sparkwing/secrets.local.env
@@ -145,10 +156,10 @@ sources:
 func TestValidateSourceRunnerPortability_AcceptsRemoteController(t *testing.T) {
 	dir := t.TempDir()
 	writeSourcesYAML(t, dir, `
-sources:
+entries:
   prod-vault:
-    type: remote-controller
-    controller: prod
+    type: profile
+    profile: prod
 `)
 	opts := Options{
 		Target:       "prod",
@@ -167,7 +178,7 @@ sources:
 func TestValidateSourceRunnerPortability_AcceptsEnvSource(t *testing.T) {
 	dir := t.TempDir()
 	writeSourcesYAML(t, dir, `
-sources:
+entries:
   shell-env:
     type: env
     prefix: SW_

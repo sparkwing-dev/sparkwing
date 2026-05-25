@@ -100,7 +100,7 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	// factory handles the http wiring; we just supply the URL+token
 	// via the profile-lookup callback.
 	src := sources.Source{
-		Name: "pod-controller", Type: sources.TypeRemoteController, Controller: "pod-profile",
+		Name: "pod-controller", Type: sources.TypeProfile, Profile: "pod-profile",
 	}
 	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
 		func(_ string) (string, string, error) { return srv.URL, wantToken, nil })
@@ -185,7 +185,7 @@ func TestClusterPodRoundTrip_AuthFailureSurfacesAsError(t *testing.T) {
 	defer srv.Close()
 
 	src := sources.Source{
-		Name: "pod-controller", Type: sources.TypeRemoteController, Controller: "pod-profile",
+		Name: "pod-controller", Type: sources.TypeProfile, Profile: "pod-profile",
 	}
 	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
 		func(_ string) (string, string, error) { return srv.URL, "bad-token", nil })

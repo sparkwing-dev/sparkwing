@@ -81,7 +81,7 @@ sparkwing configure profiles add --name prod \
     --logs https://sparkwing-logs.example.com \
     --token "$ADMIN_TOKEN"
 
-# Optional: set it as the default so you don't need --on on every call.
+# Optional: set it as the default so you don't need --profile on every call.
 sparkwing configure profiles use --name prod
 ```
 
@@ -89,9 +89,9 @@ Then the tokens commands are terse:
 
 ```sh
 # Mint a user admin token. Emits the raw token ONCE. Stash it.
-sparkwing cluster tokens create --type user --principal alice --scope admin --on prod
+sparkwing cluster tokens create --type user --principal alice --scope admin --profile prod
 
-# List all active tokens (omits --on because prod is the default).
+# List all active tokens (omits --profile because prod is the default).
 sparkwing cluster tokens list
 
 # List including revoked, for audit.

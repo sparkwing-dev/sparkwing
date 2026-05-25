@@ -43,9 +43,7 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 			return nil, nil, perr
 		}
 		c = client.NewWithToken(prof.Controller, nil, prof.Token)
-		if prof.Logs != "" {
-			logc = sparkwinglogs.New(prof.Logs, nil, prof.Token)
-		}
+		logc = sparkwinglogs.New(prof.Controller, nil, prof.Token)
 		return c, logc, nil
 	}
 	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")

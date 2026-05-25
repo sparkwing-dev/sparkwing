@@ -3,12 +3,39 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+// resolveProjectSource resolves a source by name from the project's
+// .sparkwing/sparkwing.yaml sources section. An empty name falls back to
+// the section's default. Returns (_, false, nil) when sparkwingDir is
+// empty, the file declares no sources, or the name is absent.
+func resolveProjectSource(sparkwingDir, name string) (sources.Source, bool, error) {
+	if sparkwingDir == "" {
+		return sources.Source{}, false, nil
+	}
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	if err != nil {
+		return sources.Source{}, false, err
+	}
+	if cfg == nil || cfg.Sources == nil {
+		return sources.Source{}, false, nil
+	}
+	if name == "" {
+		name = cfg.Sources.Default
+		if name == "" {
+			return sources.Source{}, false, nil
+		}
+	}
+	s, ok := cfg.Sources.Sources[name]
+	return s, ok, nil
+}
 
 // selectSecretResolver picks the secrets.Source for this run based on
 // the pipelines.yaml target's source binding (when available),
@@ -31,7 +58,7 @@ func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, er
 			srcName = t.Source
 		}
 	}
-	src, ok, err := sources.Resolve(opts.SparkwingDir, srcName)
+	src, ok, err := resolveProjectSource(opts.SparkwingDir, srcName)
 	if err != nil {
 		return nil, fmt.Errorf("source binding: %w", err)
 	}
@@ -54,7 +81,7 @@ func resolverAsSource(ctx context.Context, r sparkwing.SecretResolver) secrets.S
 }
 
 // profileLookupCallback returns the closure the SDK factory calls
-// for remote-controller sources. The orchestrator already imports
+// for type=profile sources. The orchestrator already imports
 // the profile package, so the lookup goes through profile.Load +
 // profile.Resolve directly.
 func profileLookupCallback() sparkwing.ProfileLookup {
@@ -67,7 +94,7 @@ func profileLookupCallback() sparkwing.ProfileLookup {
 		if err != nil {
 			return "", "", err
 		}
-		p, err := profile.Resolve(cfg, name)
+		p, _, err := profile.Resolve(name, "", cfg)
 		if err != nil {
 			return "", "", err
 		}

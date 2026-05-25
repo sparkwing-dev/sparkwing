@@ -32,8 +32,6 @@ func init() {
 }
 
 func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
-	t.Parallel()
-
 	logRoot := t.TempDir()
 	artRoot := t.TempDir()
 	logStore, err := fs.NewLogStore(logRoot)
@@ -102,8 +100,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 func TestCIEmbedded_LogStore_OverridesLocalLogs(t *testing.T) {
 	// When LogStore is set, the local on-disk LogBackend is bypassed.
 	// The dispatcher's log lines never appear under paths.RunDir().
-	t.Parallel()
-
 	logStore, err := fs.NewLogStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewLogStore: %v", err)

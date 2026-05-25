@@ -163,21 +163,15 @@ type Options struct {
 	ArtifactStore storage.ArtifactStore
 
 	// State, when non-nil, is the run-record store RunLocal wraps into
-	// LocalBackends. ApplyBackendsConfig populates this from
-	// backends.yaml (defaults / environment / target overlay) or
-	// synthesizes a sqlite spec at paths.StateDB() when nothing is
-	// configured. Pre-set values from the caller are preserved.
+	// LocalBackends. ApplyProfileBackends populates this from the resolved
+	// profile's surfaces (with the per-target backend overlay layered on
+	// top) or synthesizes a sqlite spec at paths.StateDB() when the
+	// profile declares no state. Pre-set values from the caller are
+	// preserved.
 	State storage.StateStore
 
-	// BackendsConfig, when non-empty, names an extra backends.yaml
-	// fragment to layer underneath repo+user defaults. The outer
-	// sparkwing CLI uses this to forward profile-derived storage
-	// settings to the child pipeline binary. The file is expected to be
-	// cleaned up by the caller.
-	BackendsConfig string
-
-	// DefaultStateDB names the SQLite file ApplyBackendsConfig falls
-	// back to when no state surface is configured in backends.yaml and
+	// DefaultStateDB names the SQLite file the profile resolver falls
+	// back to when the resolved profile declares no state surface and
 	// the caller didn't pre-set State. RunLocal sets this to
 	// paths.StateDB() so every code path opens the state store through
 	// the factory. Cluster boot paths leave it empty; they wire State
@@ -193,11 +187,11 @@ type Options struct {
 	// declare URL + token via CLI flags rather than profile names.
 	ProfileLookup sparkwing.ProfileLookup
 
-	// Profile, when non-nil, is the resolved storage profile from
-	// `sparkwing run --profile NAME`. RunLocal routes state/logs/cache
-	// through it via ApplyProfileBackendsWithMirror (instead of
-	// ApplyBackendsConfig). Nil preserves the legacy backends.yaml flow.
-	// Cluster boot paths leave it nil.
+	// Profile is the resolved storage profile RunLocal routes
+	// state/logs/cache through via ApplyProfileBackendsWithMirror. The
+	// laptop path always sets it (profileFromEnv resolves the chain down
+	// to the built-in laptop fallback); a nil Profile falls back to local
+	// SQLite. Cluster boot paths leave it nil and wire State directly.
 	Profile *profile.Profile
 
 	// ProfileChain is the resolution chain that picked Profile (which
@@ -598,12 +592,12 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		opts.ProfileLookup = profileLookupCallback()
 	}
 	ownsState := opts.State == nil
-	if opts.Profile != nil {
-		if err := ApplyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths); err != nil {
-			return nil, fmt.Errorf("profile backends: %w", err)
-		}
-	} else if err := ApplyBackendsConfig(ctx, &opts); err != nil {
-		return nil, fmt.Errorf("backends: %w", err)
+	// Local execution always resolves through a storage profile (the
+	// laptop path sets opts.Profile via profileFromEnv; a nil profile
+	// falls back to local SQLite). The mirror engages only for non-local
+	// profiles, so a laptop/sqlite profile is a single-write no-op.
+	if err := ApplyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths); err != nil {
+		return nil, fmt.Errorf("profile backends: %w", err)
 	}
 	if opts.State == nil {
 		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")

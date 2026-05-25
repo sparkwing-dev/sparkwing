@@ -133,7 +133,7 @@ func TestWriteOverlayAppendsMissingRequire(t *testing.T) {
 func TestResolveAndWriteNoManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, nil)
-	changed, err := ResolveAndWrite(context.Background(), dir)
+	changed, err := ResolveAndWrite(context.Background(), dir, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,16 +152,10 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 		"github.com/sparkwing-dev/sparks-core": "v0.9.0",
 	})
 	// Manifest pins to exact version v0.10.3; no network needed.
-	manifest := `libraries:
-  - name: sparks-core
-    source: github.com/sparkwing-dev/sparks-core
-    version: v0.10.3
-`
-	if err := os.WriteFile(filepath.Join(dir, ManifestFilename), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := ResolveAndWrite(context.Background(), dir)
+	m1 := &Manifest{Libraries: []Library{
+		{Name: "sparks-core", Source: "github.com/sparkwing-dev/sparks-core", Version: "v0.10.3"},
+	}}
+	changed, err := ResolveAndWrite(context.Background(), dir, m1)
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -169,16 +163,11 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 		t.Fatal("expected first call to change overlay")
 	}
 
-	// Rewrite manifest with a newer exact pin; resolution changes.
-	manifest2 := `libraries:
-  - name: sparks-core
-    source: github.com/sparkwing-dev/sparks-core
-    version: v0.11.0
-`
-	if err := os.WriteFile(filepath.Join(dir, ManifestFilename), []byte(manifest2), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	changed2, err := ResolveAndWrite(context.Background(), dir)
+	// A newer exact pin; resolution changes.
+	m2 := &Manifest{Libraries: []Library{
+		{Name: "sparks-core", Source: "github.com/sparkwing-dev/sparks-core", Version: "v0.11.0"},
+	}}
+	changed2, err := ResolveAndWrite(context.Background(), dir, m2)
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -190,8 +179,8 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 		t.Fatalf("overlay did not update to v0.11.0:\n%s", overlay)
 	}
 
-	// Third call with unchanged manifest: fast path.
-	changed3, err := ResolveAndWrite(context.Background(), dir)
+	// Third call with the same manifest: fast path.
+	changed3, err := ResolveAndWrite(context.Background(), dir, m2)
 	if err != nil {
 		t.Fatalf("third: %v", err)
 	}

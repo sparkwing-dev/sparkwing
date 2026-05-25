@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -40,6 +41,54 @@ import (
 
 // Filename is the combined project-config file name inside .sparkwing/.
 const Filename = "sparkwing.yaml"
+
+// migrationGuideURL points adopters at the v0.5.0 config-flatten guide.
+const migrationGuideURL = "https://sparkwing.dev/docs/migration-guide/v0.5.0"
+
+// legacyFiles are the pre-v0.5.0 standalone config files that
+// sparkwing.yaml absorbed; their presence is now a hard error.
+var legacyFiles = []string{
+	"pipelines.yaml",
+	"backends.yaml",
+	"runners.yaml",
+	"sources.yaml",
+	"sparks.yaml",
+}
+
+// CheckLegacy walks up from startDir for the first .sparkwing/ directory
+// and errors if it holds any pre-v0.5.0 standalone config file
+// (pipelines/backends/runners/sources/sparks.yaml). The error names every
+// offending file and points at the migration guide. It returns nil when
+// no .sparkwing/ is found or the directory holds only sparkwing.yaml, so
+// a fully-migrated repo is silent and a half-migrated one is loud.
+func CheckLegacy(startDir string) error {
+	dir := startDir
+	for {
+		sw := filepath.Join(dir, ".sparkwing")
+		if info, statErr := os.Stat(sw); statErr == nil && info.IsDir() {
+			var present []string
+			for _, f := range legacyFiles {
+				if _, ferr := os.Stat(filepath.Join(sw, f)); ferr == nil {
+					present = append(present, ".sparkwing/"+f)
+				}
+			}
+			if len(present) == 0 {
+				return nil
+			}
+			verb := "is"
+			if len(present) > 1 {
+				verb = "are"
+			}
+			return fmt.Errorf("%s %s no longer read in v0.5.0; combine this project's YAML into .sparkwing/%s -- see %s for the layout",
+				strings.Join(present, ", "), verb, Filename, migrationGuideURL)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+}
 
 // Config is the parsed .sparkwing/sparkwing.yaml. Each section mirrors
 // the shape of the per-file YAML it absorbs; see the package doc.
@@ -105,6 +154,106 @@ func Discover(startDir string) (path string, cfg *Config, err error) {
 		}
 		dir = parent
 	}
+}
+
+// DiscoverPipelines walks up from startDir for .sparkwing/sparkwing.yaml
+// and returns the pipelines section as a *pipelines.Config. It is a
+// drop-in for the retired pipelines.Discover: it returns a non-nil error
+// when no sparkwing.yaml is found anywhere on the walk-up, and the path
+// it returns is the sparkwing.yaml path (so filepath.Dir yields the
+// .sparkwing/ directory, same as before).
+func DiscoverPipelines(startDir string) (path string, cfg *pipelines.Config, err error) {
+	p, pc, err := Discover(startDir)
+	if err != nil {
+		return "", nil, err
+	}
+	if p == "" || pc == nil {
+		return "", nil, fmt.Errorf("no .sparkwing/%s found from %s up", Filename, startDir)
+	}
+	return p, &pipelines.Config{Pipelines: pc.Pipelines}, nil
+}
+
+// LoadSparksManifest reads the sparks section of
+// <sparkwingDir>/sparkwing.yaml as a *sparks.Manifest. Returns (nil, nil)
+// when the file is absent or declares no sparks, mirroring the contract
+// the retired sparks.LoadManifest had.
+func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error) {
+	if sparkwingDir == "" {
+		return nil, errors.New("sparks: sparkwingDir must not be empty")
+	}
+	cfg, err := Load(filepath.Join(sparkwingDir, Filename))
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil || len(cfg.Sparks) == 0 {
+		return nil, nil
+	}
+	return &sparks.Manifest{Libraries: cfg.Sparks}, nil
+}
+
+// WriteSparksSection rewrites the top-level sparks: section of the
+// sparkwing.yaml at path to libs, preserving every other section
+// (including comments and key order). It creates the file when absent
+// and removes the section when libs is empty. This is a surgical
+// yaml.Node edit -- it never re-marshals the unrelated sections, so a
+// `sparkwing sparks add` can't perturb pipeline/runner/source config.
+func WriteSparksSection(path string, libs []sparks.Library) error {
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc yaml.Node
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if uerr := yaml.Unmarshal(raw, &doc); uerr != nil {
+			return fmt.Errorf("parse %s: %w", path, uerr)
+		}
+	}
+	if doc.Kind == 0 {
+		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: top-level YAML is not a mapping", path)
+	}
+	root := doc.Content[0]
+
+	idx := -1
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "sparks" {
+			idx = i
+			break
+		}
+	}
+	if len(libs) == 0 {
+		if idx >= 0 {
+			root.Content = append(root.Content[:idx], root.Content[idx+2:]...)
+		}
+	} else {
+		var val yaml.Node
+		if eerr := val.Encode(libs); eerr != nil {
+			return fmt.Errorf("encode sparks: %w", eerr)
+		}
+		if idx >= 0 {
+			root.Content[idx+1] = &val
+		} else {
+			root.Content = append(root.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Value: "sparks"}, &val)
+		}
+	}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if eerr := enc.Encode(&doc); eerr != nil {
+		_ = enc.Close()
+		return fmt.Errorf("encode %s: %w", path, eerr)
+	}
+	if cerr := enc.Close(); cerr != nil {
+		return cerr
+	}
+	if mkerr := os.MkdirAll(filepath.Dir(path), 0o755); mkerr != nil {
+		return mkerr
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 // normalize applies the same per-section post-decode work the

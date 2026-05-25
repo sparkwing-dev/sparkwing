@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -330,7 +331,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, cfg, err := pipelines.Discover(cwd)
+	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil {
 		return nil, err
 	}

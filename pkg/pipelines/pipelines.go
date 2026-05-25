@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -40,8 +38,8 @@ type Pipeline struct {
 
 	// Targets enumerates the named environments this pipeline can
 	// act on. Zero targets means the pipeline has no target concept
-	// and the CLI rejects --for; one target auto-selects; two or
-	// more require --for to disambiguate.
+	// and the CLI rejects --target; one target auto-selects; two or
+	// more require --target to disambiguate.
 	Targets map[string]Target `yaml:"targets,omitempty"`
 
 	// Values is the layered config-value surface for this pipeline.
@@ -78,31 +76,32 @@ type Target struct {
 	Values map[string]any `yaml:"values,omitempty"`
 
 	// Backend overrides cache / logs / state destinations for runs
-	// against this target. Per-surface shape is intentionally left
-	// as map[string]any here; the typed BackendSpec lands with
-	// backends.yaml in a later step.
+	// against this target, layered on top of the resolved profile's
+	// surfaces. Per-surface shape is intentionally left as
+	// map[string]any here so it accepts any backend spec without a
+	// parser update.
 	Backend *TargetBackend `yaml:"backend,omitempty"`
 }
 
 // PipelineValues is the layered config-value surface declared on a
 // pipeline. Base applies to every run; Runners is a per-runner
-// overlay keyed by the runner name (matching runners.yaml). The
-// per-target Values overlay (Target.Values) sits between these two:
-// Base < Target.Values < Runners[chosen-runner].
+// overlay keyed by the runner name (matching the runners: block in
+// sparkwing.yaml). The per-target Values overlay (Target.Values) sits
+// between these two: Base < Target.Values < Runners[chosen-runner].
 type PipelineValues struct {
 	// Base values applied to every run regardless of target or
 	// runner. Equivalent to a "default" key in earlier prototypes.
 	Base map[string]any `yaml:"base,omitempty"`
 
 	// Runners is a per-runner overlay, applied after the target's
-	// Values. Key is the runner name from runners.yaml.
+	// Values. Key is the runner name from the runners: block.
 	Runners map[string]map[string]any `yaml:"runners,omitempty"`
 }
 
 // TargetBackend carries per-surface backend overrides for runs
 // against a target. Each surface stays untyped (map[string]any) so
-// callers can declare any shape backends.yaml will support without
-// requiring a parser update here.
+// callers can declare any backend spec without requiring a parser
+// update here.
 type TargetBackend struct {
 	Cache map[string]any `yaml:"cache,omitempty"`
 	Logs  map[string]any `yaml:"logs,omitempty"`
@@ -268,17 +267,9 @@ type PreHookTrigger struct{}
 // checks like full test suites.
 type PostHookTrigger struct{}
 
-// Load reads and parses the pipelines.yaml at path.
-func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return Parse(f)
-}
-
-// Parse decodes a pipelines.yaml from r.
+// Parse decodes a pipelines config from r (the pipelines: section of
+// sparkwing.yaml, as a standalone document). Retained for tests and
+// round-trip helpers; project config is read via pkg/projectconfig.
 func Parse(r io.Reader) (*Config, error) {
 	var cfg Config
 	dec := yaml.NewDecoder(r)
@@ -484,27 +475,6 @@ func (c *Config) Names() []string {
 		out = append(out, p.Name)
 	}
 	return out
-}
-
-// Discover walks up from startDir looking for a .sparkwing/pipelines.yaml.
-// Returns the absolute path and its loaded Config.
-func Discover(startDir string) (path string, cfg *Config, err error) {
-	dir := startDir
-	for {
-		candidate := filepath.Join(dir, ".sparkwing", "pipelines.yaml")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			loaded, lerr := Load(candidate)
-			if lerr != nil {
-				return candidate, nil, lerr
-			}
-			return candidate, loaded, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", nil, fmt.Errorf("no .sparkwing/pipelines.yaml found from %s up", startDir)
-		}
-		dir = parent
-	}
 }
 
 // EntrypointsByName returns a map of pipeline name -> entrypoint type

@@ -3,10 +3,10 @@
 Pipelines fire from three places:
 
 1. **Webhooks** -- the controller matches an incoming GitHub event
-   against `on:` blocks in `.sparkwing/pipelines.yaml`.
-2. **Manual / API invocation** -- `sparkwing run <pipeline>`, `sparkwing run
-   <pipeline>`, `sparkwing run <pipeline> --on prof` for remote
-   dispatch.
+   against `on:` blocks under `pipelines:` in `.sparkwing/sparkwing.yaml`.
+2. **Manual / API invocation** -- `sparkwing run <pipeline>` for local
+   execution, `sparkwing pipeline trigger <pipeline> --profile prof` for
+   remote dispatch.
 3. **Git hooks** (optional) -- `sparkwing pipeline hooks install` writes
    pre-commit / pre-push hook files into `.git/hooks/` that fan out to
    pipelines declaring `pre_commit:` / `pre_push:` triggers. Hooks are
@@ -16,14 +16,15 @@ Pipelines fire from three places:
 ## Webhook triggers
 
 ```yaml
-# .sparkwing/pipelines.yaml
-build-deploy:
-  description: Build and deploy on push to main
-  on:
-    push:
-      branches: [main]
-      paths: ["*.go", "go.mod"]      # optional path filter
-  tags: [ci, deploy]
+# .sparkwing/sparkwing.yaml
+pipelines:
+  - name: build-deploy
+    description: Build and deploy on push to main
+    on:
+      push:
+        branches: [main]
+        paths: ["*.go", "go.mod"]      # optional path filter
+    tags: [ci, deploy]
 ```
 
 | Trigger | When |
@@ -40,21 +41,20 @@ verification.
 ## Manual / API invocation
 
 ```bash
-sparkwing run build-deploy                                       # local
-sparkwing run build-deploy --on prod                             # remote dispatch
-sparkwing run build-deploy --on prod                    # canonical form
-sparkwing pipeline run --pipeline build-deploy --on prod  # explicit form
+sparkwing run build-deploy                                  # local execution
+sparkwing run build-deploy --profile prod                   # local, state via prod
+sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
 ```
 
-`sparkwing runs triggers list --on prod` surfaces queued / claimed /
+`sparkwing runs triggers list --profile prod` surfaces queued / claimed /
 done triggers on the controller; `sparkwing runs triggers get --id ...`
 inspects one. To fire a fresh trigger (the sparkwing equivalent of
-`gh workflow run`), invoke the pipeline directly with `--on PROF`.
+`gh workflow run`), use `sparkwing pipeline trigger <pipeline> --profile PROF`.
 
 ## Git hooks
 
 Git hooks are opt-in. After declaring `pre_commit:` or `pre_push:` on
-a pipeline in `pipelines.yaml`, install them once per checkout:
+a pipeline in `.sparkwing/sparkwing.yaml`, install them once per checkout:
 
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push

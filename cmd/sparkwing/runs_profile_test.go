@@ -16,16 +16,13 @@ func setProfilesFixture(t *testing.T, body string) {
 	t.Setenv("SPARKWING_PROFILES", path)
 }
 
-func TestRunsList_ProfileAndOnMutuallyExclusive(t *testing.T) {
-	err := runJobs([]string{"list", "--on", "prod", "--profile", "team"})
+func TestRunsList_OnFlagRetired(t *testing.T) {
+	err := runJobs([]string{"list", "--on", "prod"})
 	if err == nil {
-		t.Fatal("expected mutual-exclusion error")
+		t.Fatal("expected retired-flag error for --on")
 	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("message = %q, want mutual-exclusion text", err.Error())
-	}
-	if code := exitCodeFor(err); code != 2 {
-		t.Errorf("exit code = %d, want 2", code)
+	if !strings.Contains(err.Error(), "--on") || !strings.Contains(err.Error(), "--profile") {
+		t.Errorf("message = %q, want --on -> --profile migration pointer", err.Error())
 	}
 }
 
@@ -43,16 +40,16 @@ profiles:
 	}
 }
 
-func TestRunsStatus_ProfileAndOnMutuallyExclusive(t *testing.T) {
-	err := runJobs([]string{"status", "--run", "r1", "--on", "prod", "--profile", "team"})
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("status: want mutual-exclusion error, got %v", err)
+func TestRunsStatus_OnFlagRetired(t *testing.T) {
+	err := runJobs([]string{"status", "--run", "r1", "--on", "prod"})
+	if err == nil || !strings.Contains(err.Error(), "--on") {
+		t.Fatalf("status: want retired --on pointer, got %v", err)
 	}
 }
 
-func TestRunsLogs_ProfileAndOnMutuallyExclusive(t *testing.T) {
-	err := runJobs([]string{"logs", "--run", "r1", "--on", "prod", "--profile", "team"})
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("logs: want mutual-exclusion error, got %v", err)
+func TestRunsLogs_OnFlagRetired(t *testing.T) {
+	err := runJobs([]string{"logs", "--run", "r1", "--on", "prod"})
+	if err == nil || !strings.Contains(err.Error(), "--on") {
+		t.Fatalf("logs: want retired --on pointer, got %v", err)
 	}
 }

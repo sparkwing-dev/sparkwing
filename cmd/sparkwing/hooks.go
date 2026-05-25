@@ -11,7 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // sparkwingHookMarker identifies hook files this command manages.
@@ -54,9 +54,12 @@ func runHooksInstall(args []string) error {
 		return fmt.Errorf("hooks install: %w", err)
 	}
 
-	cfg, err := pipelines.Load(filepath.Join(sparkwingDir, "pipelines.yaml"))
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil {
 		return fmt.Errorf("hooks install: %w", err)
+	}
+	if cfg == nil {
+		cfg = &projectconfig.Config{}
 	}
 
 	// Collect hook -> pipelines mapping so one hook can fan out to

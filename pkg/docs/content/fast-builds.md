@@ -57,9 +57,9 @@ if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 
 ## 3. Use upload triggers, not git pushes, for iteration
 
-`sparkwing run build-deploy --on prod` uploads an incremental diff from the
-current commit to the cache and triggers the pipeline in-cluster.
-Versus `git commit && git push`:
+`sparkwing pipeline trigger build-deploy --profile prod` uploads an
+incremental diff from the current commit to the cache and triggers the
+pipeline in-cluster. Versus `git commit && git push`:
 
 - no commit pollution of history for every experimental edit
 - incremental sync is `HEAD` + changed files, typically a few KB
@@ -86,13 +86,13 @@ POST /git/register?name=<repo>&repo=<ssh-url>
 
 ## 5. Let sparkwing resolve spark libraries automatically
 
-Spark libraries are resolved at build time from `.sparkwing/sparks.yaml` -
-you do not need to bump `go.mod` across repos when a new version ships.
-See [sparks.md](sparks.md) for details.
+Spark libraries are resolved at build time from the `sparks:` block in
+`.sparkwing/sparkwing.yaml` - you do not need to bump `go.mod` across
+repos when a new version ships. See [sparks.md](sparks.md) for details.
 
 ```yaml
-# .sparkwing/sparks.yaml
-libraries:
+# .sparkwing/sparkwing.yaml
+sparks:
   - name: my-spark-lib
     source: github.com/example/my-spark-lib
     version: latest

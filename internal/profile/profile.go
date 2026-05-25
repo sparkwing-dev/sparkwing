@@ -1,5 +1,7 @@
-// Package profile manages named bundles of controller connection info
-// (URL, logs URL, token, gitcache URL) used by `--on <name>`.
+// Package profile manages named storage/connection profiles selected by
+// `--profile <name>`. A profile describes where a run's state, cache, and
+// logs live (the backend triple) plus any controller URL / token needed
+// to reach a remote controller.
 //
 // Path resolution (first match wins):
 //
@@ -9,18 +11,19 @@
 //
 // On-disk shape:
 //
-//	default: local
+//	default: laptop
 //	profiles:
-//	  local:
-//	    controller: http://127.0.0.1:4344
-//	    logs: http://127.0.0.1:4345
+//	  laptop:
+//	    state: { type: sqlite }
+//	    cache: { type: filesystem, path: ~/.cache/sparkwing }
+//	    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
 //	  prod:
 //	    controller: https://api.example.dev
-//	    logs: https://logs.example.dev
 //	    token: swu_...
 //	    gitcache: https://gitcache.example.dev
+//	    # state/cache/logs implied by the controller when omitted.
 //
-// Missing optional fields come back as empty strings.
+// Missing optional fields come back as nil specs / empty strings.
 package profile
 
 import (
@@ -40,7 +43,6 @@ import (
 type Profile struct {
 	Name       string `yaml:"-"`
 	Controller string `yaml:"controller,omitempty"`
-	Logs       string `yaml:"logs,omitempty"`
 	Token      string `yaml:"token,omitempty"`
 	Gitcache   string `yaml:"gitcache,omitempty"`
 
@@ -72,19 +74,14 @@ type Profile struct {
 	// EffectiveDefaultRunner so the fallback lives in one place.
 	DefaultRunner string `yaml:"default_runner,omitempty"`
 
-	// State, Cache, and LogsSpec carry the full backend triple so a
-	// profile fully describes where its runs persist. Consume them as
-	// a unit via Surfaces. A nil pointer means "not specified at this
-	// layer"; callers layer the result against project / built-in
-	// surfaces with backends.Effective.
-	//
-	// LogsSpec is tagged logs_backend rather than logs because the
-	// legacy Logs field above already owns the logs key as a controller
-	// URL string. The two keys coexist until the breaking release folds
-	// LogsSpec onto logs and retires the URL field.
-	State    *backends.Spec `yaml:"state,omitempty"`
-	Cache    *backends.Spec `yaml:"cache,omitempty"`
-	LogsSpec *backends.Spec `yaml:"logs_backend,omitempty"`
+	// State, Cache, and Logs carry the full backend triple so a profile
+	// fully describes where its runs persist. Consume them as a unit via
+	// Surfaces. A nil pointer means "not specified at this layer"; a
+	// controller-only profile leaves all three nil and routes every
+	// surface through its controller.
+	State *backends.Spec `yaml:"state,omitempty"`
+	Cache *backends.Spec `yaml:"cache,omitempty"`
+	Logs  *backends.Spec `yaml:"logs,omitempty"`
 
 	// Detect, when set, makes this profile the auto-selected one while
 	// its environment condition holds (e.g. GITHUB_ACTIONS=true),
@@ -110,7 +107,7 @@ func (p *Profile) Surfaces() backends.Surfaces {
 	}
 	return backends.Surfaces{
 		Cache: p.Cache,
-		Logs:  p.LogsSpec,
+		Logs:  p.Logs,
 		State: p.State,
 	}
 }
@@ -247,9 +244,6 @@ func mergeProfile(over, base *Profile) *Profile {
 	if m.Controller == "" {
 		m.Controller = base.Controller
 	}
-	if m.Logs == "" {
-		m.Logs = base.Logs
-	}
 	if m.Token == "" {
 		m.Token = base.Token
 	}
@@ -277,8 +271,8 @@ func mergeProfile(over, base *Profile) *Profile {
 	if m.Cache == nil {
 		m.Cache = base.Cache
 	}
-	if m.LogsSpec == nil {
-		m.LogsSpec = base.LogsSpec
+	if m.Logs == nil {
+		m.Logs = base.Logs
 	}
 	m.Detect = mergeDetect(m.Detect, base.Detect)
 	if m.MirrorLocal == nil {
@@ -360,32 +354,10 @@ func Save(path string, cfg *Config) error {
 	return nil
 }
 
-// Resolve returns the profile matching the caller's intent:
-//
-//   - explicitName non-empty -> look up that profile.
-//   - else cfg.Default if set.
-//   - else ErrNoProfile.
-//
-// The returned pointer is owned by cfg.
-func Resolve(cfg *Config, explicitName string) (*Profile, error) {
-	if cfg == nil {
-		return nil, ErrNoProfile
-	}
-	name := explicitName
-	if name == "" {
-		name = cfg.Default
-	}
-	if name == "" {
-		return nil, ErrNoProfile
-	}
-	p, ok := cfg.Profiles[name]
-	if !ok || p == nil {
-		return nil, fmt.Errorf("%w: %q", ErrProfileNotFound, name)
-	}
-	return p, nil
-}
-
-// LoadAndResolve does DefaultPath + Load + Resolve in one call.
+// LoadAndResolve does DefaultPath + Load + Resolve in one call,
+// resolving explicitName through the chain (flag level; no project
+// hint). A nil profile is never returned for an empty name: the chain
+// falls through to the default and finally the built-in laptop profile.
 func LoadAndResolve(explicitName string) (*Profile, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -395,7 +367,8 @@ func LoadAndResolve(explicitName string) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Resolve(cfg, explicitName)
+	p, _, err := Resolve(explicitName, "", cfg)
+	return p, err
 }
 
 // Names returns the profile names sorted alphabetically.
@@ -413,8 +386,8 @@ func (c *Config) Names() []string {
 func HintMissing(err error, cfg *Config) string {
 	base := err.Error()
 	if cfg != nil && len(cfg.Profiles) > 0 {
-		return fmt.Sprintf("%s\n\nAvailable profiles: %v\nPass --on <name>, or set a default via `sparkwing profiles use <name>`.",
+		return fmt.Sprintf("%s\n\nAvailable profiles: %v\nPass --profile <name>, or set a default via `sparkwing profiles use <name>`.",
 			base, cfg.Names())
 	}
-	return fmt.Sprintf("%s\n\nRegister a profile first:\n  sparkwing profiles add local --controller http://127.0.0.1:4344 --logs http://127.0.0.1:4345\nOr point at a remote controller:\n  sparkwing profiles add prod --controller https://api.example.dev --token swu_...", base)
+	return fmt.Sprintf("%s\n\nRegister a profile first:\n  sparkwing profiles add local --controller http://127.0.0.1:4344\nOr point at a remote controller:\n  sparkwing profiles add prod --controller https://api.example.dev --token swu_...", base)
 }

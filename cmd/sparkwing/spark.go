@@ -1,5 +1,5 @@
-// `sparkwing pipeline sparks` subcommand. Manages the consumer
-// manifest .sparkwing/sparks.yaml and drives the resolver in
+// `sparkwing pipeline sparks` subcommand. Manages the sparks: section
+// of .sparkwing/sparkwing.yaml and drives the resolver in
 // internal/sparks.
 package main
 
@@ -14,11 +14,10 @@ import (
 	"text/tabwriter"
 
 	flag "github.com/spf13/pflag"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // defaultSparkwingDir resolves the --sparkwing-dir flag's default:
@@ -94,7 +93,7 @@ func runSparksList(args []string) error {
 	if sparkwingDir == "" {
 		sparkwingDir = defaultSparkwingDir()
 	}
-	m, err := sparks.LoadManifest(sparkwingDir)
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -133,7 +132,7 @@ func runSparksList(args []string) error {
 		return nil
 	default:
 		if m == nil {
-			fmt.Fprintf(os.Stdout, "no %s in %s\n", sparks.ManifestFilename, sparkwingDir)
+			fmt.Fprintf(os.Stdout, "no sparks declared in %s/%s\n", sparkwingDir, projectconfig.Filename)
 			return nil
 		}
 		if len(entries) == 0 {
@@ -371,7 +370,7 @@ func runSparksResolve(args []string) error {
 		sparkwingDir = defaultSparkwingDir()
 	}
 	ctx := context.Background()
-	changed, err := sparks.ResolveAndWrite(ctx, sparkwingDir)
+	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -430,7 +429,7 @@ func runSparksUpdate(args []string) error {
 		}
 	}
 	ctx := context.Background()
-	changed, err := sparks.ResolveAndWrite(ctx, sparkwingDir)
+	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -559,7 +558,7 @@ func runSparksWarmup(args []string) error {
 	// absent; the rest of warmup is still worth running so a consumer
 	// with just a go.mod-pinned build can still pre-compile.
 	ctx := context.Background()
-	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir); err != nil {
+	if _, err := sparksResolveAndWrite(ctx, sparkwingDir); err != nil {
 		return fmt.Errorf("spark warmup: resolve: %w", err)
 	}
 
@@ -579,7 +578,7 @@ func runSparksWarmup(args []string) error {
 	// pipeline entry -- the binary dispatches internally on the
 	// pipeline name, and bincache keys the binary on the whole
 	// sparkwing dir, not per pipeline.
-	_, cfg, err := pipelines.Discover(sparkwingDir)
+	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)
 	if err != nil {
 		// Discover walks up from the start dir; a consumer repo with
 		// a sparks.yaml but no pipelines.yaml is still a valid warmup
@@ -637,8 +636,8 @@ func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error)
 	} else if !info.IsDir() {
 		return nil, "", fmt.Errorf("sparkwing-dir %s is not a directory", sparkwingDir)
 	}
-	path := filepath.Join(sparkwingDir, sparks.ManifestFilename)
-	m, err := sparks.LoadManifest(sparkwingDir)
+	path := filepath.Join(sparkwingDir, projectconfig.Filename)
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
 	if err != nil {
 		return nil, path, err
 	}
@@ -648,31 +647,20 @@ func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error)
 	return m, path, nil
 }
 
-// writeSparksYAML serializes m to path with stable indent. Uses
-// go.yaml.in/yaml/v3 directly so the on-disk format stays close to
-// what the resolver reads. Library names/sources/versions are short
-// strings; no quoting concerns.
-func writeSparksYAML(path string, m *sparks.Manifest) error {
-	var buf strings.Builder
-	buf.WriteString("# Managed by `sparkwing pipeline sparks add|remove|update`. See docs/sparks.md.\n")
-	enc := yaml.NewEncoder(&writerAdapter{s: &buf})
-	enc.SetIndent(2)
-	if err := enc.Encode(m); err != nil {
-		_ = enc.Close()
-		return fmt.Errorf("encode %s: %w", path, err)
+// sparksResolveAndWrite loads the sparks manifest from the project's
+// sparkwing.yaml and resolves + writes the overlay modfile.
+func sparksResolveAndWrite(ctx context.Context, sparkwingDir string) (bool, error) {
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
+	if err != nil {
+		return false, err
 	}
-	if err := enc.Close(); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(buf.String()), 0o644)
+	return sparks.ResolveAndWrite(ctx, sparkwingDir, m)
 }
 
-// writerAdapter lets us feed a strings.Builder to yaml.Encoder, which
-// requires an io.Writer. Avoids pulling in a bytes.Buffer solely for
-// the interface satisfaction.
-type writerAdapter struct{ s *strings.Builder }
-
-func (w *writerAdapter) Write(p []byte) (int, error) { return w.s.Write(p) }
+// writeSparksYAML writes m's libraries into the sparks: section of the
+// project's sparkwing.yaml (path), preserving every other section. A
+// surgical yaml edit -- the unrelated pipeline/runner/source config is
+// never re-marshaled.
+func writeSparksYAML(path string, m *sparks.Manifest) error {
+	return projectconfig.WriteSparksSection(path, m.Libraries)
+}

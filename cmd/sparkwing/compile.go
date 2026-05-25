@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
@@ -58,8 +59,8 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	// aren't available here -- compile runs before the pipeline-aware
 	// orchestrator init -- so only defaults and the auto-detected
 	// environment apply.
-	if cache := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
-		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache, nil); err == nil {
+	if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
+		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache, lookup); err == nil {
 			if err := bincache.FetchFromArtifactStore(context.Background(), as, key, binPath); err == nil {
 				ensureDescribeCache(sparkwingDir, binPath)
 				env = append(env, "SPARKWING_BINARY_SOURCE=artifact-store")
@@ -226,7 +227,11 @@ func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions
 		// is still honored by the compile step.
 		return nil
 	}
-	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir); err != nil {
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
+	if err != nil {
+		return fmt.Errorf("sparks resolve: %w", err)
+	}
+	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir, m); err != nil {
 		return fmt.Errorf("sparks resolve: %w (use --sw-no-update to compile against existing go.mod pins)", err)
 	}
 	return nil

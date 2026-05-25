@@ -26,11 +26,19 @@ with Docker installed. This means:
 # Run locally -- uses your Docker, your caches, your machine
 sparkwing run build-deploy
 
-# Run on a cluster -- triggers remote execution via the controller
-sparkwing run build-deploy --on prod
+# Run locally, but record state to a remote profile's backend
+sparkwing run build-deploy --profile prod
+
+# Trigger remote execution -- the cluster runs it via the controller
+sparkwing pipeline trigger build-deploy --profile prod
 ```
 
-Both run the same pipeline code. The difference is where.
+`sparkwing run` always executes on the machine you invoke it from.
+`--profile` only changes *where state/cache/logs live* and which auth is
+used to reach them; the work still happens locally. To hand execution to
+a cluster, use `sparkwing pipeline trigger` (covered below). All three
+run the same pipeline code -- the difference is where the work happens and
+where its records land.
 
 ### Local execution
 
@@ -48,13 +56,21 @@ under `~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
 Run `sparkwing dashboard start` once and leave it up to watch
 concurrent runs in a browser without needing any remote service.
 
+When you run locally against a remote profile (`sparkwing run X --profile
+prod`), the run dual-writes state to both the profile's backend and the
+local SQLite store. The remote is canonical; the local copy is a free
+byproduct, so `sparkwing runs list` on your laptop sees the run afterward
+even with no network. Set `mirror_local: false` on a profile to skip the
+local copy for automated workers that fire off many runs.
+
 See [native-mode.md](native-mode.md) for the full local-mode design.
 
 ### Remote execution
 
 ```
 Your laptop:
-  1. sparkwing run tarballs .sparkwing/ + working tree (incremental sync)
+  1. sparkwing pipeline trigger tarballs .sparkwing/ + working tree
+     (incremental sync)
   2. sparkwing POSTs the upload + a trigger to the profile's controller
 
 Cluster:
@@ -66,6 +82,15 @@ Cluster:
 The controller is the gatekeeper for prod-side execution: only the
 cluster can push to ECR, update gitops, and dispatch warm runners.
 
+`sparkwing pipeline trigger <pipeline> --profile prod` submits the trigger
+to the profile's controller for remote execution. The chosen profile must
+have a `controller:` set; passing a controller-less profile errors with a
+clear message. By default the command follows the remote run until it
+reaches a terminal state -- full log streaming when the profile defines a
+logs URL, node-status updates from the controller otherwise. Pass
+`--detach` to return as soon as the trigger is registered without
+following.
+
 ## Authorization model
 
 Sparkwing intentionally does **not** try to be a permissions boundary
@@ -76,8 +101,8 @@ without sparkwing.
 
 **What sparkwing controls:**
 
-- Which clusters a pipeline can dispatch to (via `--on PROFILE` and the
-  controller's bearer token / scope).
+- Which clusters a pipeline can dispatch to (via the `--profile` target's
+  controller and its bearer token / scope).
 - Audit trail of who ran what, when, from where (in the runs store).
 - Consistent workflow (tests always run before deploy, declared once
   in the Plan).
@@ -99,11 +124,9 @@ sparkwing to block them.
 | Mode | Where it runs | Speed | When to use |
 |------|--------------|-------|-------------|
 | `sparkwing run <pipeline>` | Your laptop | Fast (local caches) | Day-to-day development, fast iteration, local-only deploys |
-| `sparkwing run <pipeline> --on prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
+| `sparkwing run <pipeline> --profile prof` | Your laptop | Fast | Local execution that records state to a shared profile's backend |
+| `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
-| `sparkwing pipeline run --pipeline X --on prof` | Cluster | Medium | Explicit (canonical) form of remote dispatch |
-
-v0.5.0 prefers `sparkwing pipeline trigger --profile PROF`; see [migration guide](migrations/v0.5.0.md).
 
 ## Per-host concurrency
 
@@ -150,22 +173,24 @@ pool's own concurrency budget.
 
 ## Pipeline configuration
 
-Local vs remote is decided at invocation time (`--on` or absent), not
-declared per-pipeline. Pipelines themselves only declare *triggers*:
+Local vs remote is decided at invocation time (`sparkwing run` for here,
+`sparkwing pipeline trigger` for the cluster), not declared per-pipeline.
+Pipelines themselves only declare *triggers*:
 
 ```yaml
-# .sparkwing/pipelines.yaml
-build-test-deploy:
-  description: Build, test, and deploy
-  on:
-    push:
-      branches: [main]
-  tags: [ci, deploy]
+# .sparkwing/sparkwing.yaml
+pipelines:
+  - name: build-test-deploy
+    description: Build, test, and deploy
+    on:
+      push:
+        branches: [main]
+    tags: [ci, deploy]
 ```
 
 If a pipeline is locally-runnable (most are), `sparkwing run build-test-deploy`
 just works. If a step needs cluster credentials it cannot reach from a
-laptop, the pipeline author either uses `--on` to dispatch the whole
-run remotely, or splits the deploy into a sub-pipeline that runs on
-the cluster (`PipelineRef` / `AwaitPipelineJob`; see
+laptop, the pipeline author either dispatches the whole run remotely with
+`sparkwing pipeline trigger`, or splits the deploy into a sub-pipeline that
+runs on the cluster (`PipelineRef` / `AwaitPipelineJob`; see
 [pipelines.md](pipelines.md)).

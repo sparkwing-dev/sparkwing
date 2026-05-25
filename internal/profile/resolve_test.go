@@ -19,7 +19,7 @@ func TestResolveChain_FlagWins(t *testing.T) {
 		"team": {Name: "team"},
 		"dev":  {Name: "dev"},
 	}, "dev")
-	p, chain, err := profile.ResolveChain("prod", "team", cfg)
+	p, chain, err := profile.Resolve("prod", "team", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestResolveChain_ProjectHintWins(t *testing.T) {
 		"team": {Name: "team"},
 		"dev":  {Name: "dev"},
 	}, "dev")
-	_, chain, err := profile.ResolveChain("", "team", cfg)
+	_, chain, err := profile.Resolve("", "team", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestResolveChain_DetectWins(t *testing.T) {
 		"ci":  {Name: "ci", Detect: &backends.Detect{EnvVar: "MY_CI_FLAG", Equals: "yes"}},
 		"dev": {Name: "dev"},
 	}, "dev")
-	_, chain, err := profile.ResolveChain("", "", cfg)
+	_, chain, err := profile.Resolve("", "", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestResolveChain_DefaultWins(t *testing.T) {
 	cfg := cfgWith(map[string]*profile.Profile{
 		"dev": {Name: "dev"},
 	}, "dev")
-	_, chain, err := profile.ResolveChain("", "", cfg)
+	_, chain, err := profile.Resolve("", "", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestResolveChain_BuiltinLaptopFallback(t *testing.T) {
 		{"empty config", cfgWith(map[string]*profile.Profile{}, "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, chain, err := profile.ResolveChain("", "", tc.cfg)
+			p, chain, err := profile.Resolve("", "", tc.cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +105,7 @@ func TestResolveChain_BuiltinLaptopFallback(t *testing.T) {
 
 func TestResolveChain_FlagNotFound(t *testing.T) {
 	cfg := cfgWith(map[string]*profile.Profile{"dev": {Name: "dev"}}, "dev")
-	_, _, err := profile.ResolveChain("ghost", "", cfg)
+	_, _, err := profile.Resolve("ghost", "", cfg)
 	if !errors.Is(err, profile.ErrProfileNotFound) {
 		t.Fatalf("want ErrProfileNotFound, got %v", err)
 	}
@@ -116,7 +116,7 @@ func TestResolveChain_FlagNotFound(t *testing.T) {
 
 func TestResolveChain_ProjectHintNotFound(t *testing.T) {
 	cfg := cfgWith(map[string]*profile.Profile{"dev": {Name: "dev"}}, "dev")
-	_, _, err := profile.ResolveChain("", "absent", cfg)
+	_, _, err := profile.Resolve("", "absent", cfg)
 	if !errors.Is(err, profile.ErrProfileNotFound) {
 		t.Fatalf("want ErrProfileNotFound, got %v", err)
 	}
@@ -135,7 +135,7 @@ func TestResolveChain_DetectIsDeterministic(t *testing.T) {
 		"mango": {Name: "mango", Detect: &backends.Detect{EnvVar: "SHARED_ENV", Present: true}},
 	}, "")
 	for i := range 20 {
-		_, chain, err := profile.ResolveChain("", "", cfg)
+		_, chain, err := profile.Resolve("", "", cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

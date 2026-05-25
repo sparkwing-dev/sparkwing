@@ -37,7 +37,7 @@ func resolveProfile(name string) (*profile.Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := profile.Resolve(cfg, name)
+	p, _, err := profile.Resolve(name, "", cfg)
 	if err != nil {
 		// Format with hint inline so the caller just returns the err
 		// and the user sees a full, actionable message.

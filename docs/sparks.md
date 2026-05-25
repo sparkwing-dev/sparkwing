@@ -1,8 +1,8 @@
 # Sparks Libraries
 
 Formal reference for the sparks library ecosystem: the `spark.json` manifest,
-the consumer `.sparkwing/sparks.yaml` file, version resolution, and the
-`sparkwing pipeline sparks` CLI.
+the consumer `sparks:` block in `.sparkwing/sparkwing.yaml`, version
+resolution, and the `sparkwing pipeline sparks` CLI.
 
 This document is the source of truth. Where an item is still pending
 implementation, this document marks it.
@@ -53,14 +53,14 @@ valid JSON with the following fields.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Short library name. Must be unique in a consumer's `sparks.yaml`. Conventionally matches the last path segment of the module (e.g. `sparks-core` for `github.com/sparkwing-dev/sparks-core`). |
+| `name` | string | yes | Short library name. Must be unique in a consumer's `sparks:` block. Conventionally matches the last path segment of the module (e.g. `sparks-core` for `github.com/sparkwing-dev/sparks-core`). |
 | `description` | string | yes | One-sentence summary. Shown in `sparkwing pipeline sparks list` and registry tooling. |
 | `author` | string | yes | GitHub handle, org, or author name. Used only for display. |
 | `version` | string | no | Current library version, semver with `v` prefix (e.g. `v0.4.6`). When absent, the resolver uses the latest Go module tag as truth. Kept in `spark.json` mostly for local inspection; the Go module tag is authoritative. |
 | `sdk_min_version` | string | no | Minimum compatible sparkwing SDK version (semver with `v` prefix). The resolver warns when a consumer's SDK is older. Omit during pre-1.0 churn. |
 | `stability` | string | no | One of `experimental`, `beta`, `stable`. Defaults to `experimental`. Informational only; does not affect resolution. |
 | `packages` | array | yes | Non-empty list of sub-packages within the module. Each entry documents an import path. See the `packages[]` schema below. |
-| `dependencies` | array | no | Other sparks libraries this one depends on. Pure metadata - actual Go module resolution still happens via the dependent library's own `go.mod`. Shape mirrors `sparks.yaml` entries: `{name, source, version}`. |
+| `dependencies` | array | no | Other sparks libraries this one depends on. Pure metadata - actual Go module resolution still happens via the dependent library's own `go.mod`. Shape mirrors `sparks:` entries: `{name, source, version}`. |
 
 ### `packages[]` entry schema
 
@@ -99,27 +99,22 @@ Current-truth reference is `sparks-core/spark.json`. Abbreviated:
 }
 ```
 
-## Consumer manifest: `.sparkwing/sparks.yaml`
+## Consumer manifest: the `sparks:` block
 
-A consumer repo declares the sparks libraries it wants live-tracked in
-`.sparkwing/sparks.yaml`. The file is optional - if absent, the pipeline
-compiles using the exact versions pinned in the consumer's `go.mod` and no
-overlay is created.
+A consumer repo declares the sparks libraries it wants live-tracked under
+the `sparks:` key in `.sparkwing/sparkwing.yaml`. The block is optional -
+if absent, the pipeline compiles using the exact versions pinned in the
+consumer's `go.mod` and no overlay is created.
 
 ### Schema
 
 ```yaml
-libraries:
+# .sparkwing/sparkwing.yaml
+sparks:
   - name: <short name>            # must match the library's spark.json "name"
     source: <go module path>      # e.g. github.com/sparkwing-dev/sparks-core
     version: <constraint>         # exact tag, range, or "latest"
 ```
-
-Top-level fields:
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `libraries` | array | yes | Entries as described above. |
 
 Per-entry fields:
 
@@ -132,7 +127,7 @@ Per-entry fields:
 ### Example: exact pins
 
 ```yaml
-libraries:
+sparks:
   - name: sparks-core
     source: github.com/sparkwing-dev/sparks-core
     version: v0.10.3
@@ -147,7 +142,7 @@ module proxy on the hot path.
 ### Example: `latest`
 
 ```yaml
-libraries:
+sparks:
   - name: sparks-core
     source: github.com/sparkwing-dev/sparks-core
     version: latest
@@ -160,7 +155,7 @@ the user opted in. Use `--no-update` to bypass when offline.
 ### Example: semver ranges
 
 ```yaml
-libraries:
+sparks:
   - name: sparks-core
     source: github.com/sparkwing-dev/sparks-core
     version: ^v0.10.0       # any v0.10.x or higher minor within v0.x
@@ -185,7 +180,7 @@ in their `go.mod`.
 
 On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline sparks resolve`):
 
-1. If `.sparkwing/sparks.yaml` is absent, no-op. Compile with plain `go build`
+1. If the `sparks:` block is absent, no-op. Compile with plain `go build`
    against the user's `go.mod`.
 2. Otherwise resolve each entry to a concrete version:
    - exact tag: no network call, used as-is
@@ -203,7 +198,7 @@ On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline spa
    `go build -modfile=.sparkwing/.resolved.mod ...`.
 
 The git-tracked `go.mod` and `go.sum` remain pristine; `git status` after a
-`sparkwing` run shows no changes. Consumers who never create a `sparks.yaml` see
+`sparkwing` run shows no changes. Consumers who never declare a `sparks:` block see
 behavior identical to plain Go builds.
 
 ### Fast-path skip
@@ -245,7 +240,7 @@ while debugging a stale pin without touching the network.
 
 ### Ghost pin guidance
 
-A `sparks.yaml` overlay MASKS a stale or ghost version in `go.mod` at
+A `sparks:` overlay MASKS a stale or ghost version in `go.mod` at
 build time - the overlay's rewritten `require` lines take precedence during
 compile. It does NOT replace normal `go.mod` hygiene.
 
@@ -325,10 +320,10 @@ Subcommands and one-line purposes:
 |---|---|
 | `sparkwing pipeline sparks list` | Show declared sparks libraries in the current repo and their resolved versions. |
 | `sparkwing pipeline sparks lint [path]` | Validate the `spark.json` at `path` (defaults to current directory). Checks schema, required fields, package path existence. |
-| `sparkwing pipeline sparks resolve` | Resolve versions per `sparks.yaml` and materialize the overlay modfile at `.sparkwing/.resolved.mod` + `.resolved.sum`. Idempotent. Cheap when nothing has drifted. Never modifies git-tracked `go.mod`. |
-| `sparkwing pipeline sparks update [name]` | Bump one or all libraries to the latest version within their declared range. Updates `sparks.yaml` only; still does not touch `go.mod`. |
-| `sparkwing pipeline sparks add <source> [--version X]` | Add a library to `sparks.yaml`. Defaults `version` to `latest` if not specified. |
-| `sparkwing pipeline sparks remove <name>` | Remove a library from `sparks.yaml`. |
+| `sparkwing pipeline sparks resolve` | Resolve versions per the `sparks:` block and materialize the overlay modfile at `.sparkwing/.resolved.mod` + `.resolved.sum`. Idempotent. Cheap when nothing has drifted. Never modifies git-tracked `go.mod`. |
+| `sparkwing pipeline sparks update [name]` | Bump one or all libraries to the latest version within their declared range. Updates the `sparks:` block only; still does not touch `go.mod`. |
+| `sparkwing pipeline sparks add <source> [--version X]` | Add a library to the `sparks:` block. Defaults `version` to `latest` if not specified. |
+| `sparkwing pipeline sparks remove <name>` | Remove a library from the `sparks:` block. |
 | `sparkwing pipeline sparks warmup` | Pre-compile pipeline binaries across consumer repos after a sparks library release. See "Warmup" below. |
 
 ### Warmup
@@ -387,10 +382,10 @@ Explicit scope limits, baked in to avoid drift:
 - **No binary plugins.** Sparks libraries are Go modules, linked at pipeline
   compile time. No `.so` loading, no RPC plugin model, no Wasm runtime.
 - **No forced updates.** Consumers who pin exact versions stay on those
-  versions forever. `latest` is opt-in per library entry in `sparks.yaml`.
+  versions forever. `latest` is opt-in per library entry in the `sparks:` block.
   Sparkwing never silently bumps a library the consumer did not ask to track.
 - **No auto-discovery.** Consumers explicitly list every sparks library they
-  use in `sparks.yaml`. There is no classpath scan, no `go.mod` walk to
+  use in the `sparks:` block. There is no classpath scan, no `go.mod` walk to
   detect libraries by manifest presence, no implicit enrollment.
 - **No modification of git-tracked files.** `go.mod`, `go.sum`, and the rest
   of the repo stay pristine after any `sparkwing pipeline sparks *` or `sparkwing` run.

@@ -24,7 +24,7 @@ import (
 // import the profile package directly.
 //
 // The lookup is called exactly once per NewSecretResolverFromSource
-// for type=remote-controller sources; the returned resolver caches
+// for type=profile sources; the returned resolver caches
 // the result internally and reuses it for every Resolve call.
 type ProfileLookup func(name string) (controller, token string, err error)
 
@@ -36,7 +36,7 @@ type ProfileLookup func(name string) (controller, token string, err error)
 //
 // Supported source types:
 //
-//   - remote-controller: HTTPS GET against the profile's
+//   - profile: HTTPS GET against the profile's
 //     /api/v1/secrets/<name> endpoint with the profile's token in
 //     the Authorization header. The profileLookup callback resolves
 //     the named profile to (controller, token).
@@ -53,13 +53,13 @@ type ProfileLookup func(name string) (controller, token string, err error)
 // token refresh). The current backends construct synchronously.
 func NewSecretResolverFromSource(_ context.Context, src sources.Source, profileLookup ProfileLookup) (SecretResolver, error) {
 	switch src.Type {
-	case sources.TypeRemoteController:
+	case sources.TypeProfile:
 		if profileLookup == nil {
 			return nil, fmt.Errorf("source %q: type=%s requires a profile lookup", src.Name, src.Type)
 		}
-		controller, token, err := profileLookup(src.Controller)
+		controller, token, err := profileLookup(src.Profile)
 		if err != nil {
-			return nil, fmt.Errorf("source %q: profile lookup for %q: %w", src.Name, src.Controller, err)
+			return nil, fmt.Errorf("source %q: profile lookup for %q: %w", src.Name, src.Profile, err)
 		}
 		return newRemoteControllerResolver(src, controller, token), nil
 	case sources.TypeMacosKeychain:

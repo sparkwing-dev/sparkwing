@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -89,15 +90,23 @@ func TestParseRunFlags_Profile(t *testing.T) {
 	}
 }
 
-// --profile (local execution) and --sw-profile (legacy remote-trigger,
-// parsed into wf.on) are distinct fields, not aliases.
-func TestParseRunFlags_ProfileVsSwProfileAreDistinct(t *testing.T) {
-	wf, _ := parseRunFlags([]string{"--sw-profile", "remote"})
-	if wf.on != "remote" || wf.profile != "" {
-		t.Errorf("--sw-profile should set on=remote, profile=\"\"; got on=%q profile=%q", wf.on, wf.profile)
+// --profile picks the storage profile; --target picks the pipeline's
+// deployment target. They are distinct, both consumed by parseRunFlags.
+func TestParseRunFlags_ProfileAndTarget(t *testing.T) {
+	wf, _ := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
+	if wf.profile != "local" || wf.target != "prod" {
+		t.Errorf("got profile=%q target=%q, want local/prod", wf.profile, wf.target)
 	}
-	wf, _ = parseRunFlags([]string{"--profile", "local"})
-	if wf.profile != "local" || wf.on != "" {
-		t.Errorf("--profile should set profile=local, on=\"\"; got on=%q profile=%q", wf.on, wf.profile)
+}
+
+// The retired --sw-profile flag is no longer parsed; it falls through to
+// passthrough where checkRetiredWhereFlags catches it with a pointer.
+func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-profile", "remote"})
+	if wf.profile != "" {
+		t.Errorf("--sw-profile should not set profile; got %q", wf.profile)
+	}
+	if err := checkRetiredWhereFlags(pass); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
+		t.Errorf("checkRetiredWhereFlags: want --sw-profile pointer, got %v", err)
 	}
 }

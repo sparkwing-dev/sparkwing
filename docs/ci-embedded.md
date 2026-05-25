@@ -41,9 +41,10 @@ jobs:
         run: sparkwing run release-prod --mode=ci-embedded --workers=4
 ```
 
-Cache and logs destinations come from `.sparkwing/backends.yaml`,
-which auto-detects GHA via the built-in `environments.gha` rule.
-See [storage backends](backends) for the configuration shape.
+State, cache, and logs destinations come from the resolved profile in
+`~/.config/sparkwing/profiles.yaml`. The built-in `gha` profile
+auto-selects when `GITHUB_ACTIONS=true`. See
+[storage backends](backends) for the configuration shape.
 
 A pipeline node that fails fails the GHA job (exit code propagates).
 
@@ -51,11 +52,11 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 
 1. `--mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
    via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
-2. The orchestrator resolves cache and logs through
-   `.sparkwing/backends.yaml`. In GHA the built-in `gha` environment
-   rule matches and the `environments.gha` block selects (e.g.) S3.
-3. SQLite handles fast lifecycle writes; state goes to the configured
-   state backend if declared.
+2. The orchestrator resolves state, cache, and logs from the active
+   profile. In GHA the built-in `gha` profile auto-detects and selects
+   (e.g.) S3.
+3. SQLite handles fast lifecycle writes; state goes to the profile's
+   configured state backend.
 4. Per-node log lines route to the resolved `Logs` backend instead
    of `~/.sparkwing/runs/<id>/`.
 5. When the pipeline exits, run + node records are serialized to
@@ -69,14 +70,14 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | ---- | ------- | ----------- |
 | `--mode=ci-embedded` | (off) | Enables this mode. |
 | `--workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. GHA hosted runners are 2-CPU; setting `--workers=4` on small VMs over-subscribes -- pick deliberately. |
-| `--on PROFILE` | (off) | Selects a controller profile from `~/.config/sparkwing/profiles.yaml`. |
+| `--profile PROFILE` | (auto) | Selects a profile from `~/.config/sparkwing/profiles.yaml`. Absent, the auto-detected (`gha`) or default profile applies. |
 
-Cache and logs come from `.sparkwing/backends.yaml`; see
-[backends.yaml](backends) for the configuration shape.
+State, cache, and logs come from the resolved profile; see
+[storage backends](backends) for the configuration shape.
 
 ### Recommended: `SPARKWING_NO_SPARKS_RESOLVE=1` in CI
 
-If your `.sparkwing/` repo declares a `sparks.yaml`, sparkwing
+If your `.sparkwing/sparkwing.yaml` declares a `sparks:` block, sparkwing
 auto-refreshes the resolved overlay at run time by default. That
 shells out to `go env` / `go list`, which means CI runners would
 need a Go toolchain even on a cache hit. **Set
@@ -96,7 +97,7 @@ git push                          # triggers publish + run with frozen overlay
 
 CI never re-resolves; the publish step on your laptop (or in a
 publish-on-merge workflow) is the deliberate "go fresh" surface.
-Repos without `sparks.yaml` ignore this var -- it's a no-op.
+Repos without a `sparks:` block ignore this var -- it's a no-op.
 
 ## Profile-based config (laptop)
 
@@ -105,14 +106,15 @@ Repos without `sparks.yaml` ignore this var -- it's a no-op.
 ```yaml
 profiles:
   ci-team:
-    log_store:      s3://my-team-sparkwing/logs
-    artifact_store: s3://my-team-sparkwing/cache
+    state: { type: s3, bucket: my-team-sparkwing, prefix: state }
+    cache: { type: s3, bucket: my-team-sparkwing, prefix: cache }
+    logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs }
 ```
 
 Then:
 
 ```sh
-sparkwing run release-prod --mode=ci-embedded --on ci-team
+sparkwing run release-prod --mode=ci-embedded --profile ci-team
 ```
 
 ## Watching from a laptop dashboard
@@ -122,7 +124,7 @@ the same bucket:
 
 ```sh
 sparkwing dashboard start \
-    --on ci-team \
+    --profile ci-team \
     --read-only
 ```
 
@@ -143,7 +145,7 @@ and have the dashboard list runs directly from
 
 ```sh
 sparkwing dashboard start \
-    --on ci-team \
+    --profile ci-team \
     --no-local-store \
     --read-only
 ```
@@ -151,7 +153,7 @@ sparkwing dashboard start \
 This mode is read-only by construction: the orchestrator's write
 endpoints (cancel, retry, approvals) are not mounted, since there's
 no local SQLite to persist to. Passing `--no-local-store` without
-both `--log-store` and `--artifact-store` (directly or via `--on`)
+both `--log-store` and `--artifact-store` (directly or via `--profile`)
 errors out -- the dashboard would have nowhere to read from.
 
 ## S3 layout
@@ -202,14 +204,16 @@ steps:
           role: arn:aws:iam::1234:role/buildkite-sparkwing
 ```
 
-Cache and logs come from `.sparkwing/backends.yaml`. Buildkite
-doesn't have a built-in detect rule out of the box; declare your
-own environment if you want a Buildkite-specific overlay:
+State, cache, and logs come from the resolved profile. Buildkite
+doesn't have a built-in detect rule out of the box; declare a profile
+with its own `detect:` block if you want a Buildkite-specific overlay:
 
 ```yaml
-environments:
+# ~/.config/sparkwing/profiles.yaml
+profiles:
   buildkite:
     detect: { env_var: BUILDKITE, equals: "true" }
+    state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
     cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
     logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
 ```
@@ -226,8 +230,9 @@ release:
     - sparkwing run release-prod --mode=ci-embedded --workers=4
 ```
 
-Declare a `gitlab` environment in `.sparkwing/backends.yaml` keyed
-off `GITLAB_CI=true` if you want a GitLab-specific overlay.
+Declare a `gitlab` profile with `detect: { env_var: GITLAB_CI, equals:
+"true" }` in `~/.config/sparkwing/profiles.yaml` if you want a
+GitLab-specific overlay.
 
 ## Related
 

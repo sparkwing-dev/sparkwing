@@ -65,7 +65,6 @@ func runProfilesAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesAdd.Path, flag.ContinueOnError)
 	name := fs.String("name", "", "profile name (unique per profiles.yaml)")
 	controller := fs.String("controller", "", "controller base URL (required)")
-	logs := fs.String("logs", "", "logs-service base URL (optional)")
 	token := fs.String("token", "", "bearer token (optional -- omit for local/unauthed stacks)")
 	gitcache := fs.String("gitcache", "", "gitcache URL (optional; fleet-worker uses this)")
 	defaultRunner := fs.String("default-runner", "", "runner name to dispatch to when a job's Prefers don't match and several runners satisfy Requires (omit for local)")
@@ -87,7 +86,6 @@ func runProfilesAdd(args []string) error {
 	cfg.Profiles[*name] = &profile.Profile{
 		Name:          *name,
 		Controller:    *controller,
-		Logs:          *logs,
 		Token:         *token,
 		Gitcache:      *gitcache,
 		DefaultRunner: *defaultRunner,
@@ -135,7 +133,7 @@ func runProfilesList(args []string) error {
 			marker = "* "
 		}
 		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\n",
-			marker, name, p.Controller, emptyDash(p.Logs),
+			marker, name, p.Controller, profile.SpecString(p.Logs),
 			redactToken(p.Token), emptyDash(p.Gitcache))
 	}
 	_ = tw.Flush()
@@ -169,7 +167,7 @@ func runProfilesShow(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "name:       %s\n", p.Name)
 	fmt.Fprintf(os.Stdout, "controller: %s\n", p.Controller)
-	fmt.Fprintf(os.Stdout, "logs:       %s\n", emptyDash(p.Logs))
+	fmt.Fprintf(os.Stdout, "logs:       %s\n", profile.SpecString(p.Logs))
 	if *showToken {
 		fmt.Fprintf(os.Stdout, "token:      %s\n", emptyDash(p.Token))
 	} else {
@@ -246,7 +244,6 @@ func runProfilesSet(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesSet.Path, flag.ContinueOnError)
 	nameFlag := fs.String("name", "", "profile name to mutate")
 	controller := fs.String("controller", "", "new controller URL")
-	logs := fs.String("logs", "", "new logs-service URL")
 	token := fs.String("token", "", "new bearer token")
 	gitcache := fs.String("gitcache", "", "new gitcache URL")
 	defaultRunner := fs.String("default-runner", "", "runner name to dispatch to when a job's Prefers don't match and several runners satisfy Requires (empty clears, falls back to local)")
@@ -270,9 +267,6 @@ func runProfilesSet(args []string) error {
 	// value" via fs.Changed.
 	if fs.Changed("controller") {
 		p.Controller = *controller
-	}
-	if fs.Changed("logs") {
-		p.Logs = *logs
 	}
 	if fs.Changed("token") {
 		p.Token = *token

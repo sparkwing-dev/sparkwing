@@ -12,17 +12,18 @@ and what infrastructure you have to host.
 | Postgres + object storage | object store + Postgres | yes | yes | yes | DB roles + bucket IAM |
 | Hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
 
-Pick the lowest row that meets your requirements. The selection lives
-in `backends.yaml` (see [Storage backends](backends.md)) and applies
-uniformly to `sparkwing run`, `sparkwing-web`, and any cluster-side
-binaries.
+Pick the lowest row that meets your requirements. The selection lives in
+the profile you run under -- each profile in
+`~/.config/sparkwing/profiles.yaml` carries a `state` / `cache` / `logs`
+triple (see [Storage backends](backends.md)) -- and applies uniformly to
+`sparkwing run`, `sparkwing-web`, and any cluster-side binaries.
 
 ## Mode 1: Local
 
 SQLite under `~/.sparkwing/state.db`, on-disk caches and logs under
 `~/.sparkwing/cache` and `~/.sparkwing/logs`. Zero shared
-infrastructure. This is the default behavior when no `backends.yaml`
-exists and no shared-backend environment variables are set.
+infrastructure. This is the default behavior -- the built-in `laptop`
+profile -- when no `--profile` is given and no profile auto-detects.
 
 For: a developer working on pipelines on their own laptop.
 
@@ -54,9 +55,13 @@ cache PUTs, and log appends stage to a local SQLite outbox
 (`~/.sparkwing/outbox.db`) and replay when connectivity returns.
 
 ```yaml
-# .sparkwing/backends.yaml
-environments:
+# ~/.config/sparkwing/profiles.yaml
+profiles:
   shared:
+    state:
+      type: s3
+      bucket: my-org-sparkwing
+      prefix: state
     cache:
       type: s3
       bucket: my-org-sparkwing
@@ -65,13 +70,10 @@ environments:
       type: s3
       bucket: my-org-sparkwing
       prefix: logs
-    state:
-      type: s3
-      bucket: my-org-sparkwing
-      prefix: state
 ```
 
-Point `sparkwing-web` at the same bucket:
+Run against it with `sparkwing run <pipeline> --profile shared`, then
+point `sparkwing-web` at the same bucket:
 
 ```sh
 sparkwing-web --state-spec=s3://my-org-sparkwing/state \
@@ -105,9 +107,12 @@ infrastructure; not suitable for untrusted CI against shared infra
 (use Mode 4 for that).
 
 ```yaml
-# .sparkwing/backends.yaml
-environments:
+# ~/.config/sparkwing/profiles.yaml
+profiles:
   shared:
+    state:
+      type: postgres
+      url_source: env:SPARKWING_PG_URL
     cache:
       type: s3
       bucket: my-org-sparkwing
@@ -116,9 +121,6 @@ environments:
       type: s3
       bucket: my-org-sparkwing
       prefix: logs
-    state:
-      type: postgres
-      url_source: env:SPARKWING_PG_URL
 ```
 
 `url_source: env:SPARKWING_PG_URL` reads the DSN from the named
@@ -169,61 +171,58 @@ section covers a small VPS + docker-compose setup that fits most
 teams.
 
 ```yaml
-# .sparkwing/backends.yaml
-environments:
+# ~/.config/sparkwing/profiles.yaml
+profiles:
   prod:
-    cache:
-      type: controller
-      controller: prod
-    logs:
-      type: controller
-      controller: prod
-    state:
-      type: controller
-      controller: prod
+    controller: https://api.example.dev
+    token: swu_xxx
+    # state/cache/logs are implied by controller; reads/writes go through it.
 ```
 
-The `controller:` field names a profile registered with
-`sparkwing configure profiles add`; the profile carries the
-controller URL and bearer token. See
+A profile with a `controller:` set routes state, cache, and logs through
+that controller over HTTP; the `token:` authenticates. Register or edit
+profiles with `sparkwing configure profiles`. See
 [Self-hosting](self-hosting.md) for the controller deployment.
 
 ## Forcing local mode for a single run
 
-`sparkwing run --sw-local-only <pipeline>` ignores `backends.yaml`
-and pins state, cache, and logs to the local SQLite + filesystem
-layout, regardless of how shared backends are configured. Useful for
-ad-hoc work that shouldn't appear in the team dashboard, or for
-reproducing an issue against a known-clean local state.
+`sparkwing run --sw-local-only <pipeline>` ignores any resolved profile
+and pins state, cache, and logs to the local SQLite + filesystem layout,
+regardless of which profile would otherwise apply. Useful for ad-hoc work
+that shouldn't appear in the team dashboard, or for reproducing an issue
+against a known-clean local state.
 
 The flag only affects the one run; subsequent runs without the flag
-honor `backends.yaml` again.
+resolve a profile normally again.
 
 ## Environment auto-detection
 
-`backends.yaml` supports per-environment auto-detection so the same
-configuration covers laptops, CI, and cluster contexts. The built-in
-`gha` rule fires when `GITHUB_ACTIONS=true`; `kubernetes` fires when
-`KUBERNETES_SERVICE_HOST` is set. Declaring the same environment
-name in your file overrides per-field while preserving the built-in
-detect predicate.
+A profile can carry a `detect:` block so the same configuration covers
+laptops, CI, and cluster contexts. When a profile's env condition matches,
+it is auto-selected ahead of the project hint. The built-in `gha` profile
+fires when `GITHUB_ACTIONS=true`; `kubernetes` fires when
+`KUBERNETES_SERVICE_HOST` is set. Declaring a profile of the same name
+overrides it per-field while preserving the built-in detect predicate.
 
 ```yaml
-defaults:
-  cache: { type: filesystem, path: ~/.cache/sparkwing }
-  logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
-  state: { type: sqlite,     path: ~/.cache/sparkwing/state.db }
+# ~/.config/sparkwing/profiles.yaml
+default: laptop
+profiles:
+  laptop:
+    state: { type: sqlite,     path: ~/.cache/sparkwing/state.db }
+    cache: { type: filesystem, path: ~/.cache/sparkwing }
+    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
 
-environments:
   gha:
+    detect: { env_var: GITHUB_ACTIONS, equals: "true" }
+    state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
     cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
     logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
-    state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
 ```
 
-A laptop with no `GITHUB_ACTIONS` set falls through to `defaults:`
-(Mode 1). A GitHub Actions job picks up the shared S3 backends
-(Mode 2).
+A laptop with no `GITHUB_ACTIONS` set falls through to the `default:`
+profile (Mode 1). A GitHub Actions job auto-selects the `gha` profile and
+picks up the shared S3 backends (Mode 2).
 
 ## Choosing a mode
 
@@ -231,7 +230,7 @@ A practical decision order:
 
 1. **One person, one laptop?** Mode 1.
 2. **Multiple people, no expensive cacheable steps?** Mode 2 -- a
-   bucket and a `backends.yaml` is the entire setup.
+   bucket and a shared profile is the entire setup.
 3. **Multiple people, expensive cacheable steps where you want
    exactly-one-runs semantics?** Mode 3 -- add a Postgres on top of
    Mode 2.
@@ -239,5 +238,5 @@ A practical decision order:
    want every runner holding DB credentials?** Mode 4 -- host a
    controller.
 
-You can move between modes by editing `backends.yaml`; pipeline code
-doesn't change.
+You can move between modes by editing a profile (or selecting a
+different one with `--profile`); pipeline code doesn't change.

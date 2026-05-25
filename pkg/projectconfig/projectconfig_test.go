@@ -52,15 +52,15 @@ runners:
     labels: [local, "os=darwin"]
   cloud-linux:
     type: kubernetes
-    controller: shared
+    profile: shared
     labels: [cloud-linux, "os=linux"]
 
 sources:
   default: prod-secrets
-  sources:
+  entries:
     prod-secrets:
-      type: remote-controller
-      controller: prod
+      type: profile
+      profile: prod
     laptop-dotenv:
       type: file
       path: .env
@@ -187,59 +187,67 @@ func TestLoad_PipelinesMatchesParse(t *testing.T) {
 	}
 }
 
-func TestLoad_RunnersMatchesLoad(t *testing.T) {
+func TestLoad_RunnersNormalized(t *testing.T) {
 	const bare = `runners:
   local:
     type: local
     labels: [local, "os=darwin"]
   cloud-linux:
     type: kubernetes
-    controller: shared
+    profile: shared
     labels: [cloud-linux, "os=linux"]
     spec:
       resources:
         requests:
           cpu: "2"
 `
-	wantPath := writeYAML(t, t.TempDir(), "runners.yaml", bare)
-	want, err := runners.Load(wantPath)
-	if err != nil {
-		t.Fatalf("runners.Load: %v", err)
+	want := map[string]runners.Runner{
+		"local": {Name: "local", Type: "local", Labels: []string{"local", "os=darwin"}},
+		"cloud-linux": {
+			Name:    "cloud-linux",
+			Type:    "kubernetes",
+			Profile: "shared",
+			Labels:  []string{"cloud-linux", "os=linux"},
+			Spec:    runners.Spec{Resources: runners.Resources{Requests: map[string]string{"cpu": "2"}}},
+		},
 	}
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, bare)
 	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !reflect.DeepEqual(cfg.Runners, want.Runners) {
-		t.Fatalf("runners mismatch:\n got %#v\nwant %#v", cfg.Runners, want.Runners)
+	if !reflect.DeepEqual(cfg.Runners, want) {
+		t.Fatalf("runners mismatch:\n got %#v\nwant %#v", cfg.Runners, want)
 	}
 }
 
-func TestLoad_SourcesMatchesLoad(t *testing.T) {
-	const bare = `default: team-vault
-sources:
-  team-vault:
-    type: remote-controller
-    controller: prod
-  keychain:
-    type: macos-keychain
-    service: sparkwing
-  dotenv:
-    type: file
-    path: .env
-  shell:
-    type: env
-    prefix: SW_
+func TestLoad_SourcesNormalized(t *testing.T) {
+	const bare = `sources:
+  default: team-vault
+  entries:
+    team-vault:
+      type: profile
+      profile: prod
+    keychain:
+      type: macos-keychain
+      service: sparkwing
+    dotenv:
+      type: file
+      path: .env
+    shell:
+      type: env
+      prefix: SW_
 `
-	wantPath := writeYAML(t, t.TempDir(), "sources.yaml", bare)
-	want, err := sources.Load(wantPath)
-	if err != nil {
-		t.Fatalf("sources.Load: %v", err)
+	want := sources.File{
+		Default: "team-vault",
+		Sources: map[string]sources.Source{
+			"team-vault": {Name: "team-vault", Type: sources.TypeProfile, Profile: "prod"},
+			"keychain":   {Name: "keychain", Type: sources.TypeMacosKeychain, Service: "sparkwing"},
+			"dotenv":     {Name: "dotenv", Type: sources.TypeFile, Path: ".env"},
+			"shell":      {Name: "shell", Type: sources.TypeEnv, Prefix: "SW_"},
+		},
 	}
-	// The merged file nests the whole sources.yaml File under sources:.
-	merged := "sources:\n" + indent(bare, "  ")
-	path := writeYAML(t, t.TempDir(), projectconfig.Filename, merged)
+	path := writeYAML(t, t.TempDir(), projectconfig.Filename, bare)
 	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -252,7 +260,7 @@ sources:
 	}
 }
 
-func TestLoad_SparksMatchesLoadManifest(t *testing.T) {
+func TestLoad_SparksSection(t *testing.T) {
 	const bareList = `  - name: sparks-core
     source: github.com/sparkwing-dev/sparks-core
     version: ^v0.10.0
@@ -260,21 +268,42 @@ func TestLoad_SparksMatchesLoadManifest(t *testing.T) {
     source: github.com/example/my-sparks
     version: latest
 `
-	// sparks.yaml wraps the list under libraries:.
-	manifestDir := t.TempDir()
-	writeYAML(t, manifestDir, sparks.ManifestFilename, "libraries:\n"+bareList)
-	want, err := sparks.LoadManifest(manifestDir)
-	if err != nil {
-		t.Fatalf("sparks.LoadManifest: %v", err)
+	want := []sparks.Library{
+		{Name: "sparks-core", Source: "github.com/sparkwing-dev/sparks-core", Version: "^v0.10.0"},
+		{Name: "my-sparks", Source: "github.com/example/my-sparks", Version: "latest"},
 	}
-	// The merged file carries the same list directly under sparks:.
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, "sparks:\n"+bareList)
 	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if !reflect.DeepEqual(cfg.Sparks, want.Libraries) {
-		t.Fatalf("sparks mismatch:\n got %#v\nwant %#v", cfg.Sparks, want.Libraries)
+	if !reflect.DeepEqual(cfg.Sparks, want) {
+		t.Fatalf("sparks mismatch:\n got %#v\nwant %#v", cfg.Sparks, want)
+	}
+}
+
+func TestCheckLegacy_ErrorsOnStandaloneFiles(t *testing.T) {
+	root := t.TempDir()
+	sw := filepath.Join(root, ".sparkwing")
+	writeYAML(t, sw, "pipelines.yaml", "pipelines: []\n")
+	writeYAML(t, sw, "backends.yaml", "defaults: {}\n")
+	err := projectconfig.CheckLegacy(root)
+	if err == nil {
+		t.Fatal("expected an error when legacy files are present")
+	}
+	for _, want := range []string{".sparkwing/pipelines.yaml", ".sparkwing/backends.yaml", projectconfig.Filename} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestCheckLegacy_SilentWhenOnlySparkwingYAML(t *testing.T) {
+	root := t.TempDir()
+	sw := filepath.Join(root, ".sparkwing")
+	writeYAML(t, sw, projectconfig.Filename, "pipelines: []\n")
+	if err := projectconfig.CheckLegacy(root); err != nil {
+		t.Fatalf("migrated repo should be silent, got %v", err)
 	}
 }
 
@@ -307,14 +336,4 @@ func TestDiscover_NotFoundReturnsNilNilNil(t *testing.T) {
 	if path != "" || cfg != nil {
 		t.Fatalf("want empty path + nil cfg, got path=%q cfg=%#v", path, cfg)
 	}
-}
-
-func indent(s, prefix string) string {
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		if line != "" {
-			lines[i] = prefix + line
-		}
-	}
-	return strings.Join(lines, "\n")
 }

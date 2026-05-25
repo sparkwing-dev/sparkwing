@@ -45,8 +45,8 @@ func runWorker(args []string) error {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "sparkwing worker: profile=%s controller=%s logs=%s poll=%s\n",
-		prof.Name, prof.Controller, prof.Logs, *poll)
+	fmt.Fprintf(os.Stderr, "sparkwing worker: profile=%s controller=%s poll=%s\n",
+		prof.Name, prof.Controller, *poll)
 
 	cli := client.NewWithToken(prof.Controller, nil, prof.Token)
 	// Empty pipeline and source filters = accept any trigger. The
@@ -71,7 +71,7 @@ func runWorker(args []string) error {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.Controller, prof.Logs, prof.Token, *heartbeat)
+		dispatchTrigger(ctx, self, trigger.ID, prof.Controller, prof.Controller, prof.Token, *heartbeat)
 	}
 }
 

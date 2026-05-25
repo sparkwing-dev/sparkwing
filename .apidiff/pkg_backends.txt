@@ -1,29 +1,12 @@
 # pkg/backends
 
-func BuiltinEnvironments() File
 type Detect struct {
 	EnvVar  string
 	Equals  string
 	Present bool
 }
-func DetectEnvironment(f File) (string, Environment, bool)
-func Effective(f File, envName string, target Surfaces) Surfaces
-type Environment struct {
-	Name   string
-	Detect Detect
-	Surfaces
-}
-type File struct {
-	Defaults     Surfaces
-	Environments map[string]Environment
-}
-func (f *File) EnvironmentOrder() []string
-func (f *File) Validate() error
-func Load(path string) (File, error)
-func Merge(repo, user File) File
-func RepoConfigPath(sparkwingDir string) string
-func Resolve(sparkwingDir string) (File, error)
-func ResolveWithOverlay(sparkwingDir, overlayPath string) (File, error)
+func (d Detect) Match() bool
+func LayerSurfaces(base, over Surfaces) Surfaces
 type Spec struct {
 	Type string
 
@@ -38,10 +21,6 @@ type Spec struct {
 
 	Binaries *Spec
 }
-type Surface string
-const SurfaceCache Surface = "cache"
-const SurfaceLogs Surface = "logs"
-const SurfaceState Surface = "state"
 type Surfaces struct {
 	Cache *Spec
 	Logs  *Spec
@@ -56,4 +35,3 @@ const TypePostgres = "postgres"
 const TypeS3 = "s3"
 const TypeSQLite = "sqlite"
 const TypeStdout = "stdout"
-func UserConfigPath() (string, error)

@@ -786,7 +786,7 @@ dry-run             --dry-run            // dry-run dispatch
 from                --from               // compile pipeline from a git ref
 mode                --mode               // run mode override
 no-update           --no-update          // skip auto-update on invocation
-on                  --on                 // remote-controller dispatch
+profile             --profile            // storage / dispatch profile
 secrets             --secrets            // ad-hoc secret injection
 start-at            --start-at           // skip nodes before this step
 stop-at             --stop-at            // skip nodes after this step

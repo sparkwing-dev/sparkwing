@@ -57,11 +57,12 @@ func writeSparkwingDir(t *testing.T) (string, string) {
 
 func TestRun_PerTargetSourceWiring_EnvBackend(t *testing.T) {
 	repoDir, _ := writeSparkwingDir(t)
-	if err := os.WriteFile(filepath.Join(repoDir, "sources.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(repoDir, "sparkwing.yaml"), []byte(`
 sources:
-  shell-env:
-    type: env
-    prefix: SWTEST_
+  entries:
+    shell-env:
+      type: env
+      prefix: SWTEST_
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestRun_SparkwingDirNoBinding_FallsBackToOptionsSecretSource(t *testing.T) 
 	// erroring.
 	repoDir, _ := writeSparkwingDir(t)
 	// Empty sources.yaml.
-	if err := os.WriteFile(filepath.Join(repoDir, "sources.yaml"), []byte(""), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "sparkwing.yaml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	capturedEnvSecret = ""
@@ -142,11 +143,12 @@ func TestRun_SparkwingDirNoBinding_FallsBackToOptionsSecretSource(t *testing.T) 
 
 func TestRun_PlanSnapshotCarriesTargetAndConfig(t *testing.T) {
 	repoDir, _ := writeSparkwingDir(t)
-	if err := os.WriteFile(filepath.Join(repoDir, "sources.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(repoDir, "sparkwing.yaml"), []byte(`
 sources:
-  shell-env:
-    type: env
-    prefix: SWTEST_
+  entries:
+    shell-env:
+      type: env
+      prefix: SWTEST_
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

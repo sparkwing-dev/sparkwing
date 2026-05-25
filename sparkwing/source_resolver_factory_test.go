@@ -34,7 +34,7 @@ func TestNewSecretResolverFromSource_RemoteController(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := sources.Source{Name: "team", Type: sources.TypeRemoteController, Controller: "shared"}
+	src := sources.Source{Name: "team", Type: sources.TypeProfile, Profile: "shared"}
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
 		func(_ string) (string, string, error) { return srv.URL, wantToken, nil })
 	if err != nil {
@@ -59,7 +59,7 @@ func TestNewSecretResolverFromSource_RemoteController_AuthFailure(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	src := sources.Source{Name: "team", Type: sources.TypeRemoteController, Controller: "shared"}
+	src := sources.Source{Name: "team", Type: sources.TypeProfile, Profile: "shared"}
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
 		func(_ string) (string, string, error) { return srv.URL, "bad", nil })
 	if err != nil {
@@ -75,7 +75,7 @@ func TestNewSecretResolverFromSource_RemoteController_AuthFailure(t *testing.T) 
 }
 
 func TestNewSecretResolverFromSource_RemoteController_RequiresProfileLookup(t *testing.T) {
-	src := sources.Source{Name: "team", Type: sources.TypeRemoteController, Controller: "shared"}
+	src := sources.Source{Name: "team", Type: sources.TypeProfile, Profile: "shared"}
 	_, err := sparkwing.NewSecretResolverFromSource(context.Background(), src, nil)
 	if err == nil || !strings.Contains(err.Error(), "profile lookup") {
 		t.Errorf("got %v", err)

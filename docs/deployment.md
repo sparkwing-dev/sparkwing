@@ -6,19 +6,20 @@ pipeline code decides what to do with it.
 
 ## Run Targets
 
-Every pipeline supports `--on` to target a cluster:
+`sparkwing run` executes locally; `sparkwing pipeline trigger` dispatches
+to a cluster via a profile's controller:
 
 | Source | Target | Command |
 |--------|--------|---------|
 | Local code | Local machine | `sparkwing run build` |
-| Local code | Any cluster | `sparkwing run build --on dev` |
-| Remote (git ref) | Any cluster | `sparkwing run build --from main --on prod` |
+| Local code | Any cluster | `sparkwing pipeline trigger build --profile dev` |
+| Remote (git ref) | Any cluster | `sparkwing pipeline trigger build --from main --profile prod` |
 
-The `--on` flag resolves a **profile** - a named cluster endpoint. Every
-profile follows the same dispatch flow:
+The `--profile` flag resolves a **profile** - a named cluster endpoint.
+Every profile with a controller follows the same dispatch flow:
 
 ```
-sparkwing run <pipeline> --on <profile>
+sparkwing pipeline trigger <pipeline> --profile <profile>
   → upload code to controller (or trigger by SHA if clean)
   → controller enqueues run
   → dispatcher creates k8s Job

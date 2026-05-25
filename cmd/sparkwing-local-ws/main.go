@@ -23,15 +23,15 @@ func main() {
 	addr := fs.String("addr", "127.0.0.1:4343", "bind address")
 	home := fs.String("home", "",
 		"sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	on := fs.String("on", "",
+	on := fs.String("profile", "",
 		"profile name from ~/.config/sparkwing/profiles.yaml; "+
 			"uses its log_store + artifact_store fields")
 	logStoreURL := fs.String("log-store", "",
 		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. "+
-			"Overrides --on. Intended for ci-embedded VMs without a profiles.yaml.")
+			"Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml.")
 	artifactStoreURL := fs.String("artifact-store", "",
 		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix. "+
-			"Overrides --on. Intended for ci-embedded VMs without a profiles.yaml.")
+			"Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml.")
 	readOnly := fs.Bool("read-only", false,
 		"reject POST/PUT/DELETE/PATCH on /api/v1/* (auth + webhooks remain open)")
 	noLocalStore := fs.Bool("no-local-store", false,
@@ -52,9 +52,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sparkwing-local-ws: profiles load:", err)
 			os.Exit(1)
 		}
-		prof, err := profile.Resolve(cfg, *on)
+		prof, _, err := profile.Resolve(*on, "", cfg)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing-local-ws: --on:", err)
+			fmt.Fprintln(os.Stderr, "sparkwing-local-ws: --profile:", err)
 			os.Exit(1)
 		}
 		if *logStoreURL == "" {

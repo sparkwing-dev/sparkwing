@@ -110,21 +110,21 @@ func runPipelineTrigger(args []string) error {
 	fmt.Fprintf(os.Stderr, "triggered %s on %s as %s (status=%s); following...\n",
 		pipelineName, prof.Name, resp.RunID, resp.Status)
 
-	if prof.Logs != "" {
+	if prof.Logs != nil {
 		format, ferr := resolveTTYAwareOutput("", "pipeline trigger")
 		if ferr != nil {
 			return ferr
 		}
-		return orchestrator.JobLogsRemoteWithTokens(ctx, prof.Controller, prof.Logs, prof.Token,
+		return orchestrator.JobLogsRemoteWithTokens(ctx, prof.Controller, prof.Controller, prof.Token,
 			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
 	}
 
-	// No logs URL: fall back to following node status from the
-	// controller so a controller-only profile still gets a blocking
-	// "watch it finish" UX.
+	// Controller-only profile (no logs: spec): follow node status from
+	// the controller so the run still gets a blocking "watch it finish"
+	// UX without log bodies.
 	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
-		"note: profile %q has no logs URL; following node status (no log bodies). "+
-			"Configure logs: in profiles.yaml to see streaming output.", prof.Name)))
+		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
+			"Add a logs: spec in profiles.yaml to see streaming output.", prof.Name)))
 	return orchestrator.JobStatusRemote(ctx, prof.Controller, prof.Token,
 		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout)
 }

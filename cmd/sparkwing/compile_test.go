@@ -121,7 +121,11 @@ func newSparksFixture(t *testing.T, manifest string) string {
 	writeFile(t, filepath.Join(dir, "go.mod"),
 		"module example.com/consumer\n\ngo 1.22\n")
 	if manifest != "" {
-		writeFile(t, filepath.Join(dir, "sparks.yaml"), manifest)
+		// The sparks: section of sparkwing.yaml carries the library list
+		// directly (no `libraries:` wrapper). Fixtures pass the legacy
+		// wrapper form for brevity; rewrite it to the section key.
+		section := strings.Replace(manifest, "libraries:", "sparks:", 1)
+		writeFile(t, filepath.Join(dir, "sparkwing.yaml"), section)
 	}
 	return dir
 }

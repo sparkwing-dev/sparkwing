@@ -1,9 +1,6 @@
 package orchestrator
 
 import (
-	"context"
-	"fmt"
-
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -12,91 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ApplyBackendsConfig resolves backends.yaml + built-in detect
-// rules + the legacy env-var shim, picks an environment via
-// auto-detect, layers the per-target Backend overlay on top, and
-// populates opts.LogStore + opts.ArtifactStore when not already set
-// by the caller.
-//
-// Resolution precedence (per-surface, first non-zero wins):
-//
-//	target overlay > environment auto-detect > defaults > legacy env-var shim
-//
-// Existing opts.LogStore / opts.ArtifactStore values pre-set by the
-// caller (e.g. cluster worker plumbing) take precedence over the
-// resolved configuration.
-func ApplyBackendsConfig(ctx context.Context, opts *Options) error {
-	// --sw-local-only short-circuits the resolver: ignore backends.yaml,
-	// ignore the env-var shim, ignore any caller-supplied LogStore /
-	// ArtifactStore. Pin state to a SQLite store at the default path
-	// and leave logs + cache as the orchestrator's built-in local
-	// fallback (per-node files under paths.RunDir, no shared cache).
-	if opts.LocalOnly {
-		opts.LogStore = nil
-		opts.ArtifactStore = nil
-		opts.State = nil
-		if opts.DefaultStateDB == "" {
-			return fmt.Errorf("--sw-local-only: no default state database path resolved")
-		}
-		spec := backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
-		st, err := storeurl.OpenStateStoreFromSpec(ctx, spec, nil)
-		if err != nil {
-			return fmt.Errorf("--sw-local-only: open sqlite state: %w", err)
-		}
-		opts.State = st
-		return nil
-	}
-
-	file, err := backends.ResolveWithOverlay(opts.SparkwingDir, opts.BackendsConfig)
-	if err != nil {
-		return fmt.Errorf("backends.yaml: %w", err)
-	}
-
-	target := decodeTargetBackend(opts.PipelineYAML, opts.Target)
-
-	envName, _, _ := backends.DetectEnvironment(file)
-	eff := backends.Effective(file, envName, target)
-
-	lookup := storeurlProfileLookup(opts.ProfileLookup)
-	if opts.ArtifactStore == nil && eff.Cache != nil {
-		store, err := storeurl.OpenArtifactStoreFromSpec(ctx, *eff.Cache, lookup)
-		if err != nil {
-			return fmt.Errorf("cache backend: %w", err)
-		}
-		opts.ArtifactStore = store
-	}
-	if opts.LogStore == nil && eff.Logs != nil {
-		store, err := storeurl.OpenLogStoreFromSpec(ctx, *eff.Logs, lookup)
-		if err != nil {
-			return fmt.Errorf("logs backend: %w", err)
-		}
-		opts.LogStore = store
-	}
-	if opts.State == nil {
-		spec := eff.State
-		if spec == nil && opts.DefaultStateDB != "" {
-			spec = &backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
-		} else if spec != nil && spec.Type == backends.TypeSQLite && spec.Path == "" && opts.DefaultStateDB != "" {
-			// User declared sqlite without an explicit path; fall back to the
-			// process default so `state: { type: sqlite }` round-trips to the
-			// historical ~/.sparkwing/state.db location.
-			filled := *spec
-			filled.Path = opts.DefaultStateDB
-			spec = &filled
-		}
-		if spec != nil {
-			st, err := storeurl.OpenStateStoreFromSpec(ctx, *spec, lookup)
-			if err != nil {
-				return fmt.Errorf("state backend: %w", err)
-			}
-			opts.State = st
-		}
-	}
-	return nil
-}
-
 // storeurlProfileLookup adapts the orchestrator's profile-lookup
-// callback (which the SDK also consumes for remote-controller secret
+// callback (which the SDK also consumes for type=profile secret
 // sources) to the storeurl factory's named type. Returns nil when the
 // caller didn't install one; the factory then errors loudly the
 // moment a controller-typed spec arrives.

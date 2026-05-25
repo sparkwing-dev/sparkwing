@@ -32,10 +32,12 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
+func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
+func (c *Client) Close() error
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
 func (c *Client) CreateNode(ctx context.Context, n store.Node) error
@@ -86,7 +88,9 @@ func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md s
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (c *Client) Token() string
 func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
+func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error

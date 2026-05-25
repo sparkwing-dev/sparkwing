@@ -8,9 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
-// validateTargetSelection enforces the --for contract: pipelines
+// validateTargetSelection enforces the --target contract: pipelines
 // with no declared targets reject the flag outright; declared
-// targets require --for to name one of them. Empty --for on a
+// targets require --target to name one of them. Empty --target on a
 // single-target pipeline is permitted -- the resolver auto-picks.
 func validateTargetSelection(opts Options) error {
 	if opts.PipelineYAML == nil {
@@ -20,7 +20,7 @@ func validateTargetSelection(opts Options) error {
 	switch {
 	case len(targets) == 0:
 		if opts.Target != "" {
-			return fmt.Errorf("pipeline %q does not declare any targets; --for is not applicable",
+			return fmt.Errorf("pipeline %q does not declare any targets; --target is not applicable",
 				opts.Pipeline)
 		}
 	default:
@@ -65,7 +65,7 @@ func validateSourceRunnerPortability(opts Options, active runner.Runner) error {
 	if !ok || t.Source == "" {
 		return nil
 	}
-	src, ok, err := sources.Resolve(opts.SparkwingDir, t.Source)
+	src, ok, err := resolveProjectSource(opts.SparkwingDir, t.Source)
 	if err != nil || !ok {
 		// Missing source surfaces via the normal resolver path; we
 		// only police portability when we actually have a source.
@@ -80,7 +80,7 @@ func validateSourceRunnerPortability(opts Options, active runner.Runner) error {
 	return fmt.Errorf(
 		"target %q binds to source %q (type: %s), which is laptop-only; "+
 			"this run dispatches to a non-local runner that can't reach it. "+
-			"Choose a remote-controller source for cluster targets, or run without --on",
+			"Choose a type=profile source for cluster targets, or run on a local runner",
 		opts.Target, src.Name, src.Type,
 	)
 }

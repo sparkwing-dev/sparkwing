@@ -10,12 +10,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/runners"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // runInternalCompleteTargets emits the pipeline's declared targets.
@@ -29,7 +29,7 @@ func runInternalCompleteTargets(args []string) error {
 	if err != nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
-	_, cfg, err := pipelines.Discover(cwd)
+	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil || cfg == nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
@@ -43,9 +43,8 @@ func runInternalCompleteTargets(args []string) error {
 	return nil
 }
 
-// runInternalCompleteRunners emits runner names from runners.yaml
-// (merged with the user overlay), including the implicit "local"
-// entry when neither file declares it.
+// runInternalCompleteRunners emits runner names from the project's
+// sparkwing.yaml runners section, including the implicit "local" entry.
 func runInternalCompleteRunners(_ []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -55,9 +54,15 @@ func runInternalCompleteRunners(_ []string) error {
 	if !ok {
 		return nil
 	}
-	names, err := runners.Names(sparkwingDir)
-	if err != nil {
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	if err != nil || cfg == nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
+	}
+	names := []string{"local"}
+	for n := range cfg.Runners {
+		if n != "local" {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 	for _, n := range names {
@@ -88,7 +93,7 @@ func runInternalCompleteProfilesForPipeline(args []string) error {
 	if err != nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
-	_, pcfg, _ := pipelines.Discover(cwd)
+	_, pcfg, _ := projectconfig.DiscoverPipelines(cwd)
 	var allowed map[string]bool
 	if pcfg != nil {
 		if p := pcfg.Find(args[0]); p != nil && len(p.Runners) > 0 {
@@ -106,7 +111,7 @@ func runInternalCompleteProfilesForPipeline(args []string) error {
 		return nil
 	}
 	for _, name := range cfg.Names() {
-		p, err := profile.Resolve(cfg, name)
+		p, _, err := profile.Resolve(name, "", cfg)
 		if err != nil {
 			continue
 		}

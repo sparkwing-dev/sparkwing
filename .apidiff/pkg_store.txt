@@ -94,6 +94,11 @@ const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = 3 * time.Minute
 const DefaultLeaseDuration = 3 * time.Minute
+func DetectDialect(dsn string) Dialect
+type Dialect int
+func (d Dialect) String() string
+const DialectPostgres
+const DialectSQLite Dialect = iota
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrLockHeld = errors.New("held by another holder")
 var ErrNotFound = errors.New("not found")
@@ -105,6 +110,7 @@ type Event struct {
 	TS      time.Time
 	Payload json.RawMessage
 }
+func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
 const FailureLogsAuth = "logs_auth"
 const FailureOOMKilled = "oom_killed"
@@ -114,6 +120,9 @@ const FailureTimeout = "timeout"
 const FailureUnknown = ""
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
+	ReapStalePendingRuns:         (*Store).reapStalePendingRuns,
+	ReapStaleRunningRuns:         (*Store).reapStaleRunningRuns,
+	ReapTimedOutApprovals:        (*Store).reapTimedOutApprovals,
 	FailNodesInRun:               (*Store).failNodesInRun,
 	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
 	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
@@ -190,6 +199,7 @@ const OnLimitFail = "fail"
 const OnLimitQueue = "queue"
 const OnLimitSkip = "skip"
 func Open(path string) (*Store, error)
+func OpenPostgres(_ context.Context, dsn string) (*Store, error)
 func ParseRunFilter(q url.Values) RunFilter
 const PauseReasonAfter = "pause-after"
 const PauseReasonBefore = "pause-before"
@@ -236,6 +246,8 @@ type Run struct {
 	AnnotationCount int
 	TopAnnotation   string
 	Annotations     []string
+
+	LastHeartbeatAt *time.Time
 }
 type RunFilter struct {
 	Pipelines   []string
@@ -262,6 +274,11 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+type SkewError struct {
+	DBVersion     int
+	BinaryVersion int
+}
+func (e *SkewError) Error() string
 type SpawnedChild struct {
 	ParentNodeID string
 	Pipeline     string
@@ -303,6 +320,7 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name string) error
+func (s *Store) Dialect() Dialect
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
@@ -366,6 +384,7 @@ func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) 
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
+func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
@@ -449,3 +468,13 @@ type WaiterResolution struct {
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
+
+# methods on un-declared receiver types (likely a bug)
+func (t *storeTx) Commit() error
+func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
+func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error)
+func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+func (t *storeTx) QueryRow(q string, args ...any) *sql.Row
+func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row
+func (t *storeTx) Rollback() error

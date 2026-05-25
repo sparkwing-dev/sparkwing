@@ -15,7 +15,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 func runPipelineNew(args []string) error {
@@ -57,7 +57,7 @@ func runPipelineNew(args []string) error {
 	}
 
 	// Refuse silent clobber on duplicate name.
-	if _, cfg, derr := pipelines.Discover(cwd); derr == nil && cfg != nil {
+	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			if p.Name == name {
 				return fmt.Errorf("pipeline %q already exists in pipelines.yaml (entrypoint %q)", name, p.Entrypoint)

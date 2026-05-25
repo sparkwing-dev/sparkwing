@@ -15,11 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
 func main() {
@@ -45,9 +47,9 @@ func run(args []string) error {
 		"redirect unauthed browsers to /login (prod). Leave off for laptop-local dev where the tokens table is empty and login would loop.")
 
 	// Shared-backends configuration. Specs accept the compact URL
-	// form parsed by backend.ParseInlineSpec; config-file path points
-	// at a backends.yaml (same shape sparkwing run consumes).
-	configPath := fs.String("config", "", "path to backends.yaml; if unset, the repo's .sparkwing/backends.yaml is used when present")
+	// form parsed by backend.ParseInlineSpec; --profile names a storage
+	// profile whose state/cache/logs surfaces the dashboard reads from.
+	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/profiles.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
 	logsSpecFlag := fs.String("logs-spec", "", "inline logs backend spec, e.g. s3://bucket/logs or stdout:")
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")
@@ -73,14 +75,14 @@ func run(args []string) error {
 	}
 
 	// Resolution precedence: explicit per-surface inline specs and/or
-	// --config override the historical --controller/--logs/local SQLite
+	// --profile override the historical --controller/--logs/local SQLite
 	// paths. The legacy flags remain so existing dashboard deployments
 	// (k8s manifests pointing at the in-cluster controller) keep
 	// working unchanged.
-	usingNewConfig := *configPath != "" || *stateSpec != "" || *logsSpecFlag != "" || *artifactsSpec != ""
+	usingNewConfig := *profileName != "" || *stateSpec != "" || *logsSpecFlag != "" || *artifactsSpec != ""
 
 	if usingNewConfig {
-		b, closer, err := openFromConfig(ctx, paths, *configPath, *stateSpec, *logsSpecFlag, *artifactsSpec)
+		b, closer, err := openFromConfig(ctx, paths, *profileName, *stateSpec, *logsSpecFlag, *artifactsSpec)
 		if err != nil {
 			return err
 		}
@@ -135,30 +137,38 @@ func run(args []string) error {
 	return web.Serve(ctx, paths, *addr)
 }
 
-// openFromConfig resolves the backends.yaml + inline-spec precedence
-// and opens the Backend the dashboard should serve from. Inline specs
-// win over the config file's environment-resolved values.
+// openFromConfig resolves the profile + inline-spec precedence and opens
+// the Backend the dashboard should serve from. Inline specs win over the
+// profile's surfaces.
 func openFromConfig(
 	ctx context.Context,
 	paths swpaths.Paths,
-	configPath, stateInline, logsInline, artifactsInline string,
+	profileName, stateInline, logsInline, artifactsInline string,
 ) (backend.Backend, io.Closer, error) {
 	var stateSpec, logsSpec, artifactsSpec *backends.Spec
+	var lookup storeurl.ProfileLookup
 
-	// 1. backends.yaml resolution. Mirror sparkwing run's path so a
-	// single file describes the deployment for both binaries. The web
-	// binary doesn't sit inside a .sparkwing/ project directory, so
-	// pass empty for the repo-config path and rely on --config plus
-	// the user-level ~/.config/sparkwing/backends.yaml.
-	file, err := backends.ResolveWithOverlay("", configPath)
-	if err != nil {
-		return nil, nopCloser{}, fmt.Errorf("backends.yaml: %w", err)
+	// 1. Profile resolution: a named profile supplies the backend triple.
+	// A controller-only profile routes every surface through its
+	// controller. Skipped when only inline specs are passed.
+	if profileName != "" {
+		path, err := profile.DefaultPath()
+		if err != nil {
+			return nil, nopCloser{}, err
+		}
+		cfg, err := profile.Load(path)
+		if err != nil {
+			return nil, nopCloser{}, err
+		}
+		p, _, err := profile.Resolve(profileName, "", cfg)
+		if err != nil {
+			return nil, nopCloser{}, fmt.Errorf("--profile %s: %w", profileName, err)
+		}
+		stateSpec, logsSpec, artifactsSpec = profileWebSpecs(p)
+		if p.Controller != "" {
+			lookup = func(string) (string, string, error) { return p.Controller, p.Token, nil }
+		}
 	}
-	envName, _, _ := backends.DetectEnvironment(file)
-	eff := backends.Effective(file, envName, backends.Surfaces{})
-	stateSpec = eff.State
-	logsSpec = eff.Logs
-	artifactsSpec = eff.Cache
 
 	// 2. Inline overrides.
 	if stateInline != "" {
@@ -184,10 +194,24 @@ func openFromConfig(
 	}
 
 	if stateSpec == nil {
-		return nil, nopCloser{}, fmt.Errorf("no state backend configured; pass --state-spec or point --config at a backends.yaml that defines one")
+		return nil, nopCloser{}, fmt.Errorf("no state backend configured; pass --state-spec or --profile <name> with a profile that declares a state surface (or a controller)")
 	}
 
-	return backend.FromSpecs(ctx, stateSpec, logsSpec, artifactsSpec, paths, nil)
+	return backend.FromSpecs(ctx, stateSpec, logsSpec, artifactsSpec, paths, lookup)
+}
+
+// profileWebSpecs derives the dashboard's state/logs/cache specs from a
+// resolved profile: explicit surfaces as declared, or -- for a
+// controller-only profile -- every surface routed through the
+// controller. A bare/laptop profile yields nil specs (the caller then
+// requires an inline --state-spec).
+func profileWebSpecs(p *profile.Profile) (state, logs, cache *backends.Spec) {
+	surf := p.Surfaces()
+	if surf.State == nil && surf.Logs == nil && surf.Cache == nil && p.Controller != "" {
+		c := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
+		return c(), c(), c()
+	}
+	return surf.State, surf.Logs, surf.Cache
 }
 
 type nopCloser struct{}

@@ -9,8 +9,6 @@ func (c *Config) Find(name string) *Pipeline
 func (c *Config) Names() []string
 func (c *Config) Validate() error
 type DeployTrigger struct{}
-func Discover(startDir string) (path string, cfg *Config, err error)
-func Load(path string) (*Config, error)
 type ManualTrigger struct{}
 func Parse(r io.Reader) (*Config, error)
 type Pipeline struct {

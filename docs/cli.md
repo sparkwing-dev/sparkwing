@@ -22,9 +22,15 @@ Wing-owned flags (consumed before the pipeline sees them):
 
 | Flag | Description |
 |---|---|
-| `--on <profile>` | Dispatch remotely via the profile's controller instead of running locally |
+| `--profile <name>` | Resolve state/cache/logs (and any controller auth) from the named profile; execution still happens locally |
+| `--target <name>` | Run against the named pipeline target (e.g. `local`, `dev`, `prod`) declared under the pipeline's `targets:` |
 | `--from <ref>` | Compile from a git ref (branch/tag/SHA) instead of the working tree |
 | `--verbose`, `-v` | Set `SPARKWING_LOG_LEVEL=debug` on the pipeline binary |
+
+`--profile` and `--target` are orthogonal: `--profile` picks the storage
+and dispatch addressing; `--target` picks which deployment target inside
+the pipeline definition is active. To hand execution to a cluster, use
+`sparkwing pipeline trigger` instead of `sparkwing run`.
 
 All other `--flag value` tokens are forwarded to the pipeline binary and parsed against the pipeline's typed `Args` struct.
 
@@ -40,7 +46,7 @@ sparkwing runs        list / status / logs / retry / cancel / approvals / trigge
 sparkwing version     Composite: CLI + SDK + sparks pins; `update --cli|--sdk`
 sparkwing dashboard   start / kill / status -- detached local dashboard server
 sparkwing cluster     status / agents / worker / gc / push / users / tokens / image / webhooks
-sparkwing secrets     set / get / list / delete (laptop dotenv or controller-stored with --on)
+sparkwing secrets     set / get / list / delete (laptop dotenv or controller-stored with --profile)
 sparkwing configure   init / profiles / xrepo
 sparkwing debug       run / release / attach / env / rerun / replay
 sparkwing docs        list / read / all / search (embedded user docs)
@@ -50,7 +56,7 @@ sparkwing completion  Shell completion (run once)
 
 ### pipelines
 
-Per-project surface: list / describe / new pipelines plus the SDK pin (version / update). Every entry in `.sparkwing/pipelines.yaml` is a pipeline; entries with an `on:` trigger auto-fire on push / webhook / schedule, entries without are manual-only.
+Per-project surface: list / describe / new pipelines plus the SDK pin (version / update). Every entry under `pipelines:` in `.sparkwing/sparkwing.yaml` is a pipeline; entries with an `on:` trigger auto-fire on push / webhook / schedule, entries without are manual-only.
 
 | Command | What |
 |---|---|
@@ -62,7 +68,7 @@ Per-project surface: list / describe / new pipelines plus the SDK pin (version /
 | `sparkwing pipeline run NAME [--flag value ...]` | Invoke the pipeline (canonical form). `sparkwing run NAME` and `sparkwing NAME` are the positional shortcuts. |
 | `sparkwing pipeline trigger NAME --profile PROF [--detach] [--flag value ...]` | Submit the pipeline to a profile's controller for remote execution; follows the run until terminal (`--detach` returns the run id immediately) |
 | `sparkwing pipeline hooks {install\|uninstall\|status}` | Git pre-commit / pre-push hooks for triggers |
-| `sparkwing pipeline sparks ...` | Manage sparks libraries declared in `.sparkwing/sparks.yaml` (see "sparks" below) |
+| `sparkwing pipeline sparks ...` | Manage sparks libraries declared under `sparks:` in `.sparkwing/sparkwing.yaml` (see "sparks" below) |
 
 To inspect or bump the SDK pin in `.sparkwing/go.mod`, use the top-level `sparkwing version` (composite report) and `sparkwing version update --sdk`.
 
@@ -72,7 +78,7 @@ For repo-local bash chores (formatters, port-forwards, the small Makefile-style 
 
 ### runs
 
-Inspect and manage runs. Reads from the local SQLite store by default; `--on <profile>` routes to a remote controller.
+Inspect and manage runs. Reads from the local SQLite store by default; `--profile <name>` routes to that profile's backend (a remote controller, a shared bucket, etc.).
 
 | Command | What |
 |---|---|
@@ -112,19 +118,19 @@ Read-side introspection: which profile a sparkwing command would resolve to righ
 
 ### cluster
 
-Operate + inspect a sparkwing cluster. Profile via `--on NAME` picks which cluster.
+Operate + inspect a sparkwing cluster. `--profile NAME` picks which cluster.
 
 | Command | What |
 |---|---|
-| `sparkwing cluster status [--on NAME]` | Roll-up: controller health + fleet + queue + recent runs |
-| `sparkwing cluster agents [--on NAME]` | Fleet-view detail (GET /api/v1/agents) |
-| `sparkwing cluster worker [--on NAME]` | Laptop-side queue drainer against a remote cluster |
-| `sparkwing cluster gc [--on NAME]` | Sweep stale warm-PVC state |
-| `sparkwing cluster push [--on NAME]` | Publish HEAD to the profile's gitcache |
-| `sparkwing cluster users {add\|list\|delete} [--on NAME]` | Dashboard login users stored on the controller |
-| `sparkwing cluster tokens {create\|list\|revoke\|lookup\|rotate} [--on NAME]` | Controller API tokens |
-| `sparkwing cluster image rollout --image NAME --tag TAG --on NAME [--wait] [--dry-run]` | Bump a gitops image tag, push, optionally sync + wait |
-| `sparkwing cluster webhooks {list\|deliveries\|replay} [--on NAME]` | GitHub webhook debug (wraps `gh api`) |
+| `sparkwing cluster status [--profile NAME]` | Roll-up: controller health + fleet + queue + recent runs |
+| `sparkwing cluster agents [--profile NAME]` | Fleet-view detail (GET /api/v1/agents) |
+| `sparkwing cluster worker [--profile NAME]` | Laptop-side queue drainer against a remote cluster |
+| `sparkwing cluster gc [--profile NAME]` | Sweep stale warm-PVC state |
+| `sparkwing cluster push [--profile NAME]` | Publish HEAD to the profile's gitcache |
+| `sparkwing cluster users {add\|list\|delete} [--profile NAME]` | Dashboard login users stored on the controller |
+| `sparkwing cluster tokens {create\|list\|revoke\|lookup\|rotate} [--profile NAME]` | Controller API tokens |
+| `sparkwing cluster image rollout --image NAME --tag TAG --profile NAME [--wait] [--dry-run]` | Bump a gitops image tag, push, optionally sync + wait |
+| `sparkwing cluster webhooks {list\|deliveries\|replay} [--profile NAME]` | GitHub webhook debug (wraps `gh api`) |
 
 For the laptop-local dashboard server, see `sparkwing dashboard` (next).
 Secrets moved out of `cluster` to top-level `sparkwing secrets`.
@@ -144,14 +150,14 @@ the SQLite store on the same port (default `http://127.0.0.1:4343`).
 ### secrets
 
 Top-level since secrets straddle laptop dotenv (default) and
-controller-stored (`--on PROF`) and are referenced constantly.
+controller-stored (`--profile NAME`) and are referenced constantly.
 
 | Command | What |
 |---|---|
-| `sparkwing secrets set --name K --value V [--on NAME] [--plain]` | Store a secret (laptop or controller) |
-| `sparkwing secrets get --name K [--on NAME]` | Print a secret's raw value to stdout |
-| `sparkwing secrets list [--on NAME]` | List secret names + metadata (never values) |
-| `sparkwing secrets delete --name K [--on NAME]` | Remove a secret |
+| `sparkwing secrets set --name K --value V [--profile NAME] [--plain]` | Store a secret (laptop or controller) |
+| `sparkwing secrets get --name K [--profile NAME]` | Print a secret's raw value to stdout |
+| `sparkwing secrets list [--profile NAME]` | List secret names + metadata (never values) |
+| `sparkwing secrets delete --name K [--profile NAME]` | Remove a secret |
 
 ### configure
 
@@ -173,7 +179,7 @@ Laptop-local config: laptop bootstrap (`init`), connection profiles
 
 ### spark
 
-Sparks-library management. Reads `.sparkwing/sparks.yaml`.
+Sparks-library management. Reads the `sparks:` block in `.sparkwing/sparkwing.yaml`.
 
 | Command | What |
 |---|---|
@@ -181,8 +187,8 @@ Sparks-library management. Reads `.sparkwing/sparks.yaml`.
 | `sparkwing pipeline sparks lint [--path DIR]` | Validate a spark.json manifest |
 | `sparkwing pipeline sparks resolve` | Resolve versions + materialize the overlay go.mod |
 | `sparkwing pipeline sparks update [--name NAME]` | Re-resolve one or all libraries |
-| `sparkwing pipeline sparks add --source PATH [--version VER] [--name NAME]` | Append a library to sparks.yaml |
-| `sparkwing pipeline sparks remove --name NAME` | Remove a library from sparks.yaml |
+| `sparkwing pipeline sparks add --source PATH [--version VER] [--name NAME]` | Append a library to the `sparks:` block |
+| `sparkwing pipeline sparks remove --name NAME` | Remove a library from the `sparks:` block |
 | `sparkwing pipeline sparks warmup` | Pre-compile pipeline binaries + upload to gitcache |
 
 ### debug
@@ -248,7 +254,7 @@ zsh + fish get per-entry descriptions; bash is name-only (compgen limitation).
 
 - **No positional args on `sparkwing`.** Every input is `--flag value`. `sparkwing` is the exception.
 - **Structured output.** Every list / describe / get verb accepts `-o pretty|json|plain` (default `pretty`). `-o`/`--output` is the single output-format selector across the CLI.
-- **Remote dispatch.** `--on NAME` picks a profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
+- **Profile addressing.** `--profile NAME` picks the storage/dispatch profile. Absent, commands read local state (SQLite under `~/.sparkwing/`). `sparkwing run` always executes locally; `sparkwing pipeline trigger` is the verb for remote (cluster) execution.
 - **Required flags.** Marked `[required]` in `--help`. Missing required flags fail before any side effect.
 - **Hidden entries.** Pipelines marked `hidden: true` (yaml) or `# hidden: true` (scripts) don't appear in `pipelines list` / tab-complete. Still invocable by exact name. Pass `--all` to `pipelines list` to see them.
 
@@ -264,4 +270,4 @@ sparkwing pipeline explain --name X -o json    # Plan DAG before running
 sparkwing run X --flag value  # invoke
 ```
 
-The JSON schema matches `sparkwing.DescribePipeline` plus `kind` / `group` / `tags` / `triggers` drawn from `pipelines.yaml`.
+The JSON schema matches `sparkwing.DescribePipeline` plus `kind` / `group` / `tags` / `triggers` drawn from the `pipelines:` block in `.sparkwing/sparkwing.yaml`.

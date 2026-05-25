@@ -1,8 +1,6 @@
 package pipelines_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,41 +139,6 @@ func TestParse_Empty(t *testing.T) {
 	}
 	if len(cfg.Pipelines) != 0 {
 		t.Fatalf("expected empty config, got %d", len(cfg.Pipelines))
-	}
-}
-
-func TestDiscover_WalksUp(t *testing.T) {
-	// Repo-like layout: /tmp/repo/.sparkwing/pipelines.yaml, start from /tmp/repo/sub/dir
-	root := t.TempDir()
-	sw := filepath.Join(root, ".sparkwing")
-	if err := os.MkdirAll(sw, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	yamlPath := filepath.Join(sw, "pipelines.yaml")
-	if err := os.WriteFile(yamlPath, []byte("pipelines:\n  - name: a\n    entrypoint: A\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	deep := filepath.Join(root, "sub", "dir")
-	if err := os.MkdirAll(deep, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	path, cfg, err := pipelines.Discover(deep)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if path != yamlPath {
-		t.Fatalf("path = %q, want %q", path, yamlPath)
-	}
-	if cfg.Find("a") == nil {
-		t.Fatal("pipeline a missing")
-	}
-}
-
-func TestDiscover_NotFound(t *testing.T) {
-	_, _, err := pipelines.Discover(t.TempDir())
-	if err == nil {
-		t.Fatal("expected not-found error")
 	}
 }
 

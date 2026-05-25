@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -177,49 +176,5 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	}
 	if !sawFollow {
 		t.Fatalf("non-detach should follow the run (GET /api/v1/runs/run-test); got %v", reqs)
-	}
-}
-
-// TestPipelineTrigger_ParityWithRunSwProfile asserts the new verb POSTs a
-// byte-identical trigger payload to today's `run --sw-profile` path,
-// modulo the trigger_source tag.
-func TestPipelineTrigger_ParityWithRunSwProfile(t *testing.T) {
-	spy := &triggerSpy{}
-	srv := httptest.NewServer(spy.handler())
-	defer srv.Close()
-	writeTriggerProfiles(t, srv.URL)
-
-	// Legacy path (dispatchRemote, called directly to avoid the
-	// compile/discovery dispatchRun does first).
-	_ = captureStdout(t, func() {
-		if err := dispatchRemote("release", runFlags{on: "prod"}, []string{"--version", "v1.2.3"}); err != nil {
-			t.Errorf("dispatchRemote: %v", err)
-		}
-	})
-	// New verb, detached so we compare only the POST.
-	_ = captureStdout(t, func() {
-		if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach", "--version", "v1.2.3"}); err != nil {
-			t.Errorf("pipeline trigger: %v", err)
-		}
-	})
-
-	if len(spy.bodies) != 2 {
-		t.Fatalf("expected 2 trigger bodies (legacy + new), got %d", len(spy.bodies))
-	}
-	var legacy, fresh client.TriggerRequest
-	if err := json.Unmarshal(spy.bodies[0], &legacy); err != nil {
-		t.Fatalf("decode legacy: %v", err)
-	}
-	if err := json.Unmarshal(spy.bodies[1], &fresh); err != nil {
-		t.Fatalf("decode new: %v", err)
-	}
-	// trigger_source intentionally differs; everything else must match.
-	if legacy.Trigger.Source == fresh.Trigger.Source {
-		t.Errorf("trigger sources should differ; both %q", legacy.Trigger.Source)
-	}
-	legacy.Trigger.Source = ""
-	fresh.Trigger.Source = ""
-	if !reflect.DeepEqual(legacy, fresh) {
-		t.Errorf("payloads differ (modulo source):\nlegacy: %+v\nnew:    %+v", legacy, fresh)
 	}
 }

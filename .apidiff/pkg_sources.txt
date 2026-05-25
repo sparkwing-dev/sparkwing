@@ -2,19 +2,16 @@
 
 type File struct {
 	Default string
+
 	Sources map[string]Source
 }
 func (f *File) Validate() error
-func Load(path string) (File, error)
-func Names(sparkwingDir string) ([]string, error)
-func RepoConfigPath(sparkwingDir string) string
-func Resolve(sparkwingDir, name string) (Source, bool, error)
 type Source struct {
 	Name string
 
 	Type string
 
-	Controller string
+	Profile string
 
 	Service string
 
@@ -25,5 +22,4 @@ type Source struct {
 const TypeEnv = "env"
 const TypeFile = "file"
 const TypeMacosKeychain = "macos-keychain"
-const TypeRemoteController = "remote-controller"
-func UserConfigPath() (string, error)
+const TypeProfile = "profile"

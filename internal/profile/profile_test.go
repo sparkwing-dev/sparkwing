@@ -1,7 +1,6 @@
 package profile_test
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,75 +85,6 @@ func TestSave_0600Mode(t *testing.T) {
 	}
 }
 
-func TestResolve_ExplicitWins(t *testing.T) {
-	cfg := &profile.Config{
-		Default: "local",
-		Profiles: map[string]*profile.Profile{
-			"local": {Name: "local", Controller: "http://127.0.0.1:4344"},
-			"prod":  {Name: "prod", Controller: "https://api.example.dev"},
-		},
-	}
-	p, err := profile.Resolve(cfg, "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.Name != "prod" {
-		t.Fatalf("resolved %q, want prod", p.Name)
-	}
-}
-
-func TestResolve_DefaultFallback(t *testing.T) {
-	cfg := &profile.Config{
-		Default: "local",
-		Profiles: map[string]*profile.Profile{
-			"local": {Name: "local", Controller: "http://127.0.0.1:4344"},
-		},
-	}
-	p, err := profile.Resolve(cfg, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.Name != "local" {
-		t.Fatalf("default: got %q, want local", p.Name)
-	}
-}
-
-func TestResolve_NoProfile(t *testing.T) {
-	cfg := &profile.Config{Profiles: map[string]*profile.Profile{}}
-	_, err := profile.Resolve(cfg, "")
-	if !errors.Is(err, profile.ErrNoProfile) {
-		t.Fatalf("want ErrNoProfile, got %v", err)
-	}
-}
-
-func TestResolve_ProfileNotFound(t *testing.T) {
-	cfg := &profile.Config{
-		Profiles: map[string]*profile.Profile{
-			"local": {Name: "local"},
-		},
-	}
-	_, err := profile.Resolve(cfg, "staging")
-	if !errors.Is(err, profile.ErrProfileNotFound) {
-		t.Fatalf("want ErrProfileNotFound, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "staging") {
-		t.Fatalf("error should name the requested profile: %v", err)
-	}
-}
-
-// TestResolve_DefaultMissing covers the case where the default points
-// at a deleted profile.
-func TestResolve_DefaultMissing(t *testing.T) {
-	cfg := &profile.Config{
-		Default:  "gone",
-		Profiles: map[string]*profile.Profile{},
-	}
-	_, err := profile.Resolve(cfg, "")
-	if !errors.Is(err, profile.ErrProfileNotFound) {
-		t.Fatalf("want ErrProfileNotFound, got %v", err)
-	}
-}
-
 func TestNames_Sorted(t *testing.T) {
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
@@ -200,7 +130,7 @@ profiles:
   shared-team:
     state: { type: s3, bucket: team, prefix: state }
     cache: { type: s3, bucket: team, prefix: cache }
-    logs_backend: { type: s3, bucket: team, prefix: logs }
+    logs: { type: s3, bucket: team, prefix: logs }
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +150,7 @@ profiles:
 		t.Fatalf("cache surface: %+v", s.Cache)
 	}
 	if s.Logs == nil || s.Logs.Prefix != "logs" {
-		t.Fatalf("logs surface (from logs_backend): %+v", s.Logs)
+		t.Fatalf("logs surface: %+v", s.Logs)
 	}
 }
 

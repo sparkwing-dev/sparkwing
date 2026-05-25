@@ -78,8 +78,12 @@ code change to unlock.
   now carry the full backend triple (`state`, `cache`, `logs`) alongside
   any `controller` / `token`. See
   [migration guide](docs/migrations/v0.5.0.md#profiles-absorb-all-backend-specs).
-- **cli (Breaking):** `--on`, `--sw-on`, and `--sw-target` are removed;
-  `--profile` replaces all three. See
+- **cli (Breaking):** `--on` and `--sw-on` are removed; `--profile`
+  replaces them for storage / dispatch addressing. See
+  [migration guide](docs/migrations/v0.5.0.md#-profile-is-the-only-where-flag).
+- **cli (Breaking):** `--sw-target` is renamed to `--target` (same
+  semantics -- the pipeline-internal deployment-environment selector,
+  moved out of the `--sw-` namespace). See
   [migration guide](docs/migrations/v0.5.0.md#-profile-is-the-only-where-flag).
 - **cli (Breaking):** `sparkwing run --on prof` no longer dispatches
   to a remote controller; use `sparkwing pipeline trigger ... --profile prof`.

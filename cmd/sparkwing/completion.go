@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 func runCompletion(args []string) error {
@@ -91,7 +92,7 @@ func runInternalCompletePipelines(_ []string) error {
 	}
 	var rows []completionRow
 	pipelineNames := map[string]struct{}{}
-	if _, cfg, derr := pipelines.Discover(cwd); derr == nil && cfg != nil {
+	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			pipelineNames[p.Name] = struct{}{}
 			if p.Hidden {
@@ -523,8 +524,8 @@ _sparkwing() {
         return
     fi
 
-    # Value completion: --sw-target <TAB> -> the pipeline's declared targets.
-    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--sw-target" ]]; then
+    # Value completion: --target <TAB> -> the pipeline's declared targets.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--target" ]]; then
         local pipe=""
         if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
             pipe="${swpath[2]}"

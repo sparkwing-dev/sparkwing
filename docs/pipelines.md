@@ -15,26 +15,28 @@ tour; for the full Go SDK reference see [sdk.md](sdk.md).
 
 ## Pipeline registry
 
-`.sparkwing/pipelines.yaml` is the registry of every pipeline in the repo
-(pipelines plus commands). It is named `pipelines.yaml` for historical
-reasons; the file holds both kinds.
+The `pipelines:` block in `.sparkwing/sparkwing.yaml` is the registry of
+every pipeline in the repo (pipelines plus commands); the block holds both
+kinds. Each entry is a list item with a `name:`.
 
 ```yaml
-build-deploy:
-  description: Build and deploy the app
-  on:
-    push:
-      branches: [main]
-  tags: [ci, deploy]
+# .sparkwing/sparkwing.yaml
+pipelines:
+  - name: build-deploy
+    description: Build and deploy the app
+    on:
+      push:
+        branches: [main]
+    tags: [ci, deploy]
 
-release:
-  description: Cut a release
-  # no on: -> command, manual-only
+  - name: release
+    description: Cut a release
+    # no on: -> command, manual-only
 ```
 
 Each entry has:
 
-- **name** - the pipeline name (`sparkwing run build-deploy`), from the YAML map key
+- **name** - the pipeline name (`sparkwing run build-deploy`)
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block. Absent means "manual only" (a command).
 - **tags** - labels for filtering and grouping
@@ -49,28 +51,30 @@ Each entry has:
 Trigger types live under `on:`:
 
 ```yaml
-# Run on git push to main
-build:
-  on:
-    push:
-      branches: [main]
-      branches_ignore: [dependabot/*]  # optional exclusion
-      paths: ["*.go", "go.mod"]        # optional path filter
-      paths_ignore: ["docs/*"]         # optional path exclusion
+# .sparkwing/sparkwing.yaml
+pipelines:
+  # Run on git push to main
+  - name: build
+    on:
+      push:
+        branches: [main]
+        branches_ignore: [dependabot/*]  # optional exclusion
+        paths: ["*.go", "go.mod"]        # optional path filter
+        paths_ignore: ["docs/*"]         # optional path exclusion
 
-# Run on pull requests
-review:
-  on:
-    pull_request:
-      branches: [main]
-      types: [opened, synchronize]
-      labels: [deploy]                 # optional label filter
-      paths_ignore: ["*.md"]
+  # Run on pull requests
+  - name: review
+    on:
+      pull_request:
+        branches: [main]
+        types: [opened, synchronize]
+        labels: [deploy]                 # optional label filter
+        paths_ignore: ["*.md"]
 
-# Scheduled (cron)
-nightly:
-  on:
-    schedule: "0 2 * * *"
+  # Scheduled (cron)
+  - name: nightly
+    on:
+      schedule: "0 2 * * *"
 ```
 
 Webhook delivery is handled by the controller - see

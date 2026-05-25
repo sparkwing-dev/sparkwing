@@ -49,14 +49,14 @@ type Chain struct {
 // auto-detected profile, so it never participates in detect or default.
 func BuiltinLaptopProfile() *Profile {
 	return &Profile{
-		Name:     "laptop",
-		State:    &backends.Spec{Type: backends.TypeSQLite},
-		Cache:    &backends.Spec{Type: backends.TypeFilesystem, Path: "~/.cache/sparkwing"},
-		LogsSpec: &backends.Spec{Type: backends.TypeFilesystem, Path: "~/.cache/sparkwing/logs"},
+		Name:  "laptop",
+		State: &backends.Spec{Type: backends.TypeSQLite},
+		Cache: &backends.Spec{Type: backends.TypeFilesystem, Path: "~/.cache/sparkwing"},
+		Logs:  &backends.Spec{Type: backends.TypeFilesystem, Path: "~/.cache/sparkwing/logs"},
 	}
 }
 
-// ResolveChain picks the active profile. Precedence (highest first):
+// Resolve picks the active profile. Precedence (highest first):
 //
 //  1. cliFlag      — `--profile X` was passed on the command line
 //  2. projectHint  — sparkwing.yaml declares `profile: X`
@@ -75,11 +75,7 @@ func BuiltinLaptopProfile() *Profile {
 //
 // The returned Profile is owned by file (or the synthesized laptop) and
 // must not be mutated.
-//
-// The name is transitional: the package still carries the older
-// --on-coupled Resolve(cfg, explicitName). When that flag is retired
-// this becomes the canonical Resolve.
-func ResolveChain(cliFlag, projectHint string, file *Config) (*Profile, Chain, error) {
+func Resolve(cliFlag, projectHint string, file *Config) (*Profile, Chain, error) {
 	profiles := map[string]*Profile{}
 	def := ""
 	if file != nil {

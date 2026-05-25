@@ -25,7 +25,7 @@ func remoteSecretSource(profName string) (secrets.Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	prof, err := profile.Resolve(cfg, profName)
+	prof, _, err := profile.Resolve(profName, "", cfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve profile %q: %w", profName, err)
 	}

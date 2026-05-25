@@ -49,6 +49,14 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 
 	state, logs, cache := profileSurfaceSpecs(p, opts.DefaultStateDB)
 
+	// Layer the pipeline's per-target backend: overlay (deployment-
+	// specific state/cache/logs override) on top of the profile surfaces.
+	eff := backends.LayerSurfaces(
+		backends.Surfaces{State: state, Logs: logs, Cache: cache},
+		decodeTargetBackend(opts.PipelineYAML, opts.Target),
+	)
+	state, logs, cache = eff.State, eff.Logs, eff.Cache
+
 	lookup := profileControllerLookup(p)
 	if l := storeurlProfileLookup(opts.ProfileLookup); l != nil {
 		lookup = l

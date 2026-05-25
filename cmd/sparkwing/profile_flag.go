@@ -12,17 +12,18 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // resolveProfileChain loads profiles.yaml and resolves NAME through the
-// chain resolver (flag level only; the project hint is wired in step 9).
-// It returns the resolved profile, the resolution chain (for the
-// `sparkwing profile` introspection command), and the resolved
-// profiles.yaml path (for display). A missing profile returns a
-// not-found error naming the file and the available profiles. Shared by
-// `sparkwing run` / `pipeline trigger` / the read commands (via
-// resolveProfileFlag) and `sparkwing profile` so all report the same
-// resolution.
+// chain resolver, layering the project hint (.sparkwing/sparkwing.yaml
+// `profile:`) below the explicit flag. It returns the resolved profile,
+// the resolution chain (for the `sparkwing profile` introspection
+// command), and the resolved profiles.yaml path (for display). A missing
+// profile returns a not-found error naming the file and the available
+// profiles. Shared by `sparkwing run` / `pipeline trigger` / the read
+// commands (via resolveProfileFlag) and `sparkwing profile` so all
+// report the same resolution.
 func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -32,7 +33,7 @@ func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, 
 	if err != nil {
 		return nil, profile.Chain{}, path, err
 	}
-	p, chain, err := profile.ResolveChain(name, "", cfg)
+	p, chain, err := profile.Resolve(name, projectProfileHint(), cfg)
 	if err != nil {
 		if errors.Is(err, profile.ErrProfileNotFound) {
 			return nil, profile.Chain{}, path, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
@@ -41,6 +42,22 @@ func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, 
 		return nil, profile.Chain{}, path, err
 	}
 	return p, chain, path, nil
+}
+
+// projectProfileHint reads .sparkwing/sparkwing.yaml's profile: field
+// (discovered by walking up from cwd) -- the project-level resolution
+// hint below an explicit --profile flag. Returns "" when no sparkwing.yaml
+// is found or it declares no profile:.
+func projectProfileHint() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	_, cfg, err := projectconfig.Discover(cwd)
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.Profile
 }
 
 // resolveProfileFlag is the connection-side use of resolveProfileChain:
@@ -52,17 +69,36 @@ func resolveProfileFlag(name string) (*profile.Profile, error) {
 	return p, err
 }
 
-// profileOnMutualExclusion returns the exit-code-2 error fired when a
-// command receives both --profile and the legacy remote-trigger flag.
-// otherFlag names the legacy flag for the surface in question
-// (--sw-profile on `run`, --on on the read commands) so the message
-// points at what the user actually typed.
-func profileOnMutualExclusion(otherFlag string) error {
-	return exitErrorf(2,
-		"--profile and %s are mutually exclusive. Use --profile for local execution "+
-			"against a profile's storage; use %s for the legacy remote-trigger path "+
-			"(slated for removal in v0.5.0; see docs/migrations/v0.5.0.md)",
-		otherFlag, otherFlag)
+// migrationLinkWhereFlag points at the v0.5.0 guide section covering the
+// retired "where" flags.
+const migrationLinkWhereFlag = "https://sparkwing.dev/docs/migration-guide/v0.5.0#-profile-is-the-only-where-flag"
+
+// retiredWhereFlags maps a removed or renamed flag to its one-line
+// migration pointer. --on / --sw-on / --sw-profile are gone (storage
+// addressing is --profile; remote dispatch is `sparkwing pipeline
+// trigger`); --sw-target was renamed to --target with identical
+// semantics.
+var retiredWhereFlags = map[string]string{
+	"--on":         "v0.5.0 replaces --on with --profile.",
+	"--sw-on":      "v0.5.0 replaces --sw-on with --profile.",
+	"--sw-profile": "v0.5.0 removes --sw-profile; `sparkwing run` always executes locally. Use `sparkwing pipeline trigger --profile X` for remote dispatch.",
+	"--sw-target":  "--sw-target was renamed to --target in v0.5.0; same semantics.",
+}
+
+// checkRetiredWhereFlags scans args for a flag the v0.5.0 cut removed or
+// renamed and, when found, returns a migration-pointer error instead of
+// letting the standard "unknown flag" handler fire with no guidance.
+func checkRetiredWhereFlags(args []string) error {
+	for _, a := range args {
+		name := a
+		if eq := strings.IndexByte(a, '='); eq >= 0 {
+			name = a[:eq]
+		}
+		if msg, ok := retiredWhereFlags[name]; ok {
+			return fmt.Errorf("unknown flag %s. %s\nSee %s", name, msg, migrationLinkWhereFlag)
+		}
+	}
+	return nil
 }
 
 // displayConfigPath collapses a leading $HOME to ~ so error messages

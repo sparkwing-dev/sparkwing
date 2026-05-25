@@ -1,13 +1,9 @@
 // `sparkwing profile` is read-side introspection: it reports which
 // profile a sparkwing command would pick right now, and why, using the
-// same profile.ResolveChain machinery `sparkwing run` / `pipeline
-// trigger` use. No execution side-effects.
-//
-// projectHint is passed as "" (matching step 5): the `.sparkwing/
-// sparkwing.yaml` profile: field is not read here. Step 9 wires that
-// hint into both the run flow AND this introspection at once, so this
-// command never reports a project level the real commands don't honor.
-// Until then the project row reads "not yet wired (step 9)".
+// same profile.Resolve machinery `sparkwing run` / `pipeline trigger`
+// use -- including the project hint (.sparkwing/sparkwing.yaml profile:),
+// so it never reports a level the real commands don't honor. No
+// execution side-effects.
 package main
 
 import (
@@ -146,11 +142,10 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 
 // chainRows reconstructs the five canonical resolution levels in
 // precedence order, merging the chain's selected level back with its
-// Considered entries. The project row always reads "not yet wired (step
-// 9)" (projectHint is unwired here); the builtin row reads "not reached"
-// when something higher won; everything else reuses the resolver's
-// reason so this command, the run flow, and step 8's run_start banner
-// stay a single source of truth.
+// Considered entries. The builtin row reads "not reached" when something
+// higher won; every other non-selected row (including the project hint)
+// reuses the resolver's own reason so this command, the run flow, and the
+// run_start banner stay a single source of truth.
 func chainRows(chain profile.Chain) []profileConsideredJSON {
 	order := []profile.ChainSource{
 		profile.ChainSourceFlag,
@@ -168,8 +163,6 @@ func chainRows(chain profile.Chain) []profileConsideredJSON {
 		switch {
 		case src == chain.Source:
 			rows = append(rows, profileConsideredJSON{Source: string(src), Name: chain.Selected, Reason: "selected"})
-		case src == profile.ChainSourceProject:
-			rows = append(rows, profileConsideredJSON{Source: string(src), Name: "", Reason: "not yet wired (step 9)"})
 		case src == profile.ChainSourceBuiltin:
 			rows = append(rows, profileConsideredJSON{Source: string(src), Name: "", Reason: "not reached"})
 		default:

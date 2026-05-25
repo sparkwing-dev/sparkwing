@@ -158,13 +158,14 @@ and returns a DAG of nodes. One-node pipelines return a Plan with a single
 [`pipelines.md`](pipelines.md) for the Plan/Work model.
 
 ```yaml
-# .sparkwing/pipelines.yaml
-build-deploy:
-  description: Build and deploy the app
-  on:
-    push:
-      branches: [main]
-  tags: [ci, deploy]
+# .sparkwing/sparkwing.yaml
+pipelines:
+  - name: build-deploy
+    description: Build and deploy the app
+    on:
+      push:
+        branches: [main]
+    tags: [ci, deploy]
 ```
 
 ```go
@@ -252,17 +253,20 @@ silent releases possible.
 
 ## Run Targets
 
-Every pipeline supports `--on` and `--from` flags:
+`sparkwing run` executes locally; `sparkwing pipeline trigger` hands
+execution to a profile's controller. Both take `--profile` to pick where
+state lives and which controller to talk to, and `--from` to compile a git
+ref instead of the working tree:
 
 ```bash
-sparkwing run build                          # run locally with local code
-sparkwing run build --on dev                 # run on the "dev" cluster with local code
-sparkwing run build --on prod                # run on the "prod" cluster with local code
-sparkwing run build --from main --on dev     # run main branch code on "dev" cluster
-sparkwing run build --from main --on prod    # run main branch code on "prod" cluster
+sparkwing run build                                    # run locally with local code
+sparkwing run build --profile dev                      # local code, state via "dev"
+sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
+sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
+sparkwing pipeline trigger build --from main --profile prod  # main branch code on "prod"
 ```
 
 Cluster names are profiles you configure with `sparkwing configure profiles
-add`. Sparkwing itself does not run in-cluster locally - clusters that
-appear in `--on` are user-managed deploy targets, not local sparkwing
+add`. Sparkwing itself does not run in-cluster locally - clusters named by
+`--profile` are user-managed deploy targets, not local sparkwing
 deployments.

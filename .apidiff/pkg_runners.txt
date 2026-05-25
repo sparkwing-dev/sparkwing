@@ -4,10 +4,6 @@ type File struct {
 	Runners map[string]Runner
 }
 func (f *File) Validate() error
-func Load(path string) (File, error)
-func Names(sparkwingDir string) ([]string, error)
-func RepoConfigPath(sparkwingDir string) string
-func Resolve(sparkwingDir, name string) (Runner, bool, error)
 type Resources struct {
 	Requests map[string]string
 	Limits   map[string]string
@@ -17,7 +13,7 @@ type Runner struct {
 
 	Type string
 
-	Controller string
+	Profile string
 
 	Labels []string
 
@@ -34,4 +30,3 @@ type Toleration struct {
 	Value    string
 	Effect   string
 }
-func UserConfigPath() (string, error)

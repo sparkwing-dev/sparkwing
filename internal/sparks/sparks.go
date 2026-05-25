@@ -2,15 +2,12 @@ package sparks
 
 import "context"
 
-// ResolveAndWrite is the full pipeline: load manifest, resolve, write
-// overlay. Returns (true, nil) if the overlay was (re)written. Returns
-// (false, nil) on the fast path (no manifest, or overlay already up to
-// date).
-func ResolveAndWrite(ctx context.Context, sparkwingDir string) (bool, error) {
-	m, err := LoadManifest(sparkwingDir)
-	if err != nil {
-		return false, err
-	}
+// ResolveAndWrite is the full pipeline: resolve the supplied manifest
+// and write the overlay modfile. Returns (true, nil) if the overlay was
+// (re)written. Returns (false, nil) on the fast path (nil/empty manifest,
+// or overlay already up to date). The caller loads the manifest from the
+// project's sparkwing.yaml (via projectconfig.LoadSparksManifest).
+func ResolveAndWrite(ctx context.Context, sparkwingDir string, m *Manifest) (bool, error) {
 	if m == nil || len(m.Libraries) == 0 {
 		return false, nil
 	}

@@ -123,7 +123,7 @@ func TestFactory_RemoteControllerSource(t *testing.T) {
 		return srv.URL, "testtoken", nil
 	})
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "team-vault", Type: sources.TypeRemoteController, Controller: "shared"},
+		sources.Source{Name: "team-vault", Type: sources.TypeProfile, Profile: "shared"},
 		lookup)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
@@ -148,7 +148,7 @@ func TestFactory_RemoteControllerSource(t *testing.T) {
 
 func TestFactory_RemoteController_RequiresProfileLookup(t *testing.T) {
 	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "x", Type: sources.TypeRemoteController, Controller: "shared"}, nil)
+		sources.Source{Name: "x", Type: sources.TypeProfile, Profile: "shared"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "profile lookup") {
 		t.Fatalf("expected profile-lookup-required error, got %v", err)
 	}
@@ -157,7 +157,7 @@ func TestFactory_RemoteController_RequiresProfileLookup(t *testing.T) {
 func TestFactory_RemoteController_PropagatesLookupError(t *testing.T) {
 	bumpy := errors.New("profiles.yaml missing")
 	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "x", Type: sources.TypeRemoteController, Controller: "shared"},
+		sources.Source{Name: "x", Type: sources.TypeProfile, Profile: "shared"},
 		sparkwing.ProfileLookup(func(string) (string, string, error) { return "", "", bumpy }))
 	if err == nil || !errors.Is(err, bumpy) {
 		t.Fatalf("expected lookup error to propagate, got %v", err)

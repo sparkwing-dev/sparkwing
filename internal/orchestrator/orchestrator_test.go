@@ -121,12 +121,26 @@ func init() {
 // newPaths returns a Paths under t.TempDir() with the root created.
 func newPaths(t *testing.T) orchestrator.Paths {
 	t.Helper()
+	isolateProfiles(t)
 	root := t.TempDir()
 	p := orchestrator.PathsAt(root)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
 	return p
+}
+
+// isolateProfiles points profile resolution at an empty profiles.yaml and
+// neutralizes the detect env vars, so a run/read in tests resolves the
+// built-in laptop profile (local sqlite) rather than the developer's real
+// ~/.config/sparkwing/profiles.yaml.
+func isolateProfiles(t *testing.T) {
+	t.Helper()
+	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 }
 
 // --- tests ---

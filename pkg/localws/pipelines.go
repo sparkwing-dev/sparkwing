@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // pipelinesResponse mirrors the shape the dashboard's TriggerForm
@@ -57,9 +57,9 @@ func aggregatedPipelinesHandler() http.HandlerFunc {
 			return
 		}
 		for _, e := range cfg.Repos {
-			ymlPath := filepath.Join(e.Path, ".sparkwing", "pipelines.yaml")
-			loaded, lerr := pipelines.Load(ymlPath)
-			if lerr != nil {
+			ymlPath := filepath.Join(e.Path, ".sparkwing", projectconfig.Filename)
+			loaded, lerr := projectconfig.Load(ymlPath)
+			if lerr != nil || loaded == nil {
 				continue
 			}
 			for _, p := range loaded.Pipelines {

@@ -129,10 +129,10 @@ laptop-side queue drainer).
 
 ```bash
 SPARKWING_AGENT_TAINTS=agent=local:NoSchedule \
-  sparkwing cluster worker --on prod
+  sparkwing cluster worker --profile prod
 ```
 
-(`--on prod` pulls controller URL + token from the prod profile;
+(`--profile prod` pulls controller URL + token from the prod profile;
 see `docs/auth.md` on registering profiles.)
 
 ### Pseudo-labels: `name` and `type`
@@ -160,8 +160,9 @@ empty string to advertise no taints at all (and accept any job).
 
 ## Direct invocations (`sparkwing`) bypass taints
 
-When you run a pipeline directly with `sparkwing` (without `--on <cluster>`),
-sparkwing marks the job as **`Direct`**. Direct jobs:
+When you run a pipeline directly with `sparkwing run` (rather than
+`sparkwing pipeline trigger`), sparkwing marks the job as **`Direct`**.
+Direct jobs:
 
 - Skip the taint check entirely -- you've already chosen the agent (your
   laptop, this terminal), so untolerated `NoSchedule` taints don't repel.
@@ -170,8 +171,9 @@ sparkwing marks the job as **`Direct`**. Direct jobs:
 This is the key distinction the user cares about: **webhook → controller
 → scheduling matters; `sparkwing run build-deploy` → just run it here**.
 
-`sparkwing run build-deploy --on prod` is *not* direct: you've explicitly chosen
-to dispatch to a remote controller, which then schedules normally.
+`sparkwing pipeline trigger build-deploy --profile prod` is *not* direct:
+you've explicitly chosen to dispatch to a remote controller, which then
+schedules normally.
 
 `require` and `prefer` are still respected for `sparkwing` invocations --
 nothing forces a `linux` pipeline to compile on a Mac.

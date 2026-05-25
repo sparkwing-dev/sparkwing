@@ -23,7 +23,7 @@ func TestPipelinesHandler_DiscoversYAML(t *testing.T) {
     entrypoint: Deploy
     tags: [ci, prod]
 `
-	if err := os.WriteFile(filepath.Join(spark, "pipelines.yaml"), []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(spark, "sparkwing.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

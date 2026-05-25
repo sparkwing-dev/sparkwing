@@ -20,7 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -119,12 +119,11 @@ func dispatchRun(args []string) error {
 	wf, passthrough := parseRunFlags(args[1:])
 	var err error
 
-	// --profile (local execution against a storage profile) and the
-	// legacy --sw-profile (remote-trigger dispatch, parsed into wf.on)
-	// are mutually exclusive. Catch it before any discovery/compile so
-	// the failure is fast and unambiguous.
-	if wf.profile != "" && wf.on != "" {
-		return profileOnMutualExclusion("--sw-profile")
+	// Catch a retired/renamed where-flag (--on / --sw-on / --sw-profile /
+	// --sw-target) before it falls through to the pipeline binary, so the
+	// user gets a migration pointer instead of an opaque pipeline error.
+	if err := checkRetiredWhereFlags(passthrough); err != nil {
+		return err
 	}
 	// Validate --profile against profiles.yaml up front so a bad name
 	// errors before we compile or exec the pipeline binary. The inner
@@ -133,6 +132,20 @@ func dispatchRun(args []string) error {
 		if _, perr := resolveProfileFlag(wf.profile); perr != nil {
 			return perr
 		}
+	}
+
+	// Hard-error on a half-migrated repo (legacy pipelines.yaml etc. in
+	// .sparkwing/) before compile so the failure is fast and names the
+	// migration guide. A fully-migrated repo (only sparkwing.yaml) is
+	// silent.
+	legacyStart := wf.changeDir
+	if legacyStart == "" {
+		if cwd, cerr := os.Getwd(); cerr == nil {
+			legacyStart = cwd
+		}
+	}
+	if err := projectconfig.CheckLegacy(legacyStart); err != nil {
+		return err
 	}
 
 	// `-C <path>` re-anchors discovery (same shape as `git -C`).
@@ -165,20 +178,16 @@ func dispatchRun(args []string) error {
 	// degrades to "no labels detected, no gate fires"; the next
 	// --describe refresh populates it.
 	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
+		// Resolve the active profile (flag, else default/detect/laptop)
+		// so a profile-level auto_allow can pre-authorize risk labels.
+		// Best-effort: a resolution failure leaves the gate profile-less.
 		var prof *profile.Profile
-		if wf.on != "" {
-			p, perr := resolveProfile(wf.on)
-			if perr == nil {
-				prof = p
-			}
+		if p, perr := resolveProfileFlag(wf.profile); perr == nil {
+			prof = p
 		}
 		if err := enforceRiskGate(pipelineName, findings, wf, prof); err != nil {
 			return err
 		}
-	}
-
-	if wf.on != "" {
-		return dispatchRemote(pipelineName, wf, passthrough)
 	}
 
 	// --sw-ref re-roots compilation on a git worktree; cleanup must run on both paths.
@@ -245,13 +254,6 @@ func dispatchRun(args []string) error {
 	if wf.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")
 	}
-	if wf.on != "" {
-		// --on routes to dispatchRemote() and we wouldn't reach the
-		// local exec path; this branch only fires when something
-		// upstream silently flipped that. Forward anyway so the run
-		// record reflects the intent.
-		env = append(env, "SPARKWING_PROFILE="+wf.on)
-	}
 	// --profile drives local execution against a storage profile. The
 	// inner binary reads SPARKWING_PROFILE, resolves it, and routes
 	// state/logs/cache through the profile (with a local mirror).
@@ -270,31 +272,13 @@ func dispatchRun(args []string) error {
 		if wf.workers > 0 {
 			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", wf.workers))
 		}
-		if wf.on != "" {
-			prof, err := resolveProfile(wf.on)
-			if err != nil {
-				return err
-			}
-			path, cleanup, err := writeProfileBackendsConfig(prof.LogStore, prof.ArtifactStore)
-			if err != nil {
-				return fmt.Errorf("--sw-profile %s: materialize backends config: %w", wf.on, err)
-			}
-			if path != "" {
-				defer cleanup()
-				if wf.backendsConfig == "" {
-					wf.backendsConfig = path
-				}
-			}
-		}
 	}
 
-	// Forward the new selection flags as env vars; the inner
-	// orchestrator/main.go lifts these onto Options at run start.
-	if wf.forTarget != "" {
-		env = append(env, "SPARKWING_TARGET="+wf.forTarget)
-	}
-	if wf.backendsConfig != "" {
-		env = append(env, "SPARKWING_BACKENDS_CONFIG="+wf.backendsConfig)
+	// --target picks the pipeline's deployment target. Forwarded as
+	// SPARKWING_TARGET; the inner orchestrator/main.go lifts it onto
+	// Options at run start.
+	if wf.target != "" {
+		env = append(env, "SPARKWING_TARGET="+wf.target)
 	}
 	// Host-local box-slot semaphore knobs (see internal/boxslot).
 	// Forwarded to the inner pipeline binary, which acquires the
@@ -505,16 +489,15 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
 		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
 			}
 			return err
-		}
-		if *profileName != "" && *on != "" {
-			return profileOnMutualExclusion("--on")
 		}
 		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs list")
 		if err != nil {
@@ -607,16 +590,6 @@ func runJobs(args []string) error {
 			}
 			listOpts.Profile = p
 		}
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
-			}
-			if err := requireController(prof, "jobs list"); err != nil {
-				return err
-			}
-			return orchestrator.ListJobsRemote(ctx, prof.Controller, prof.Token, listOpts, os.Stdout)
-		}
 		return orchestrator.ListJobs(ctx, paths, listOpts, os.Stdout)
 
 	case "status":
@@ -625,18 +598,17 @@ func runJobs(args []string) error {
 		outFmt := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
 		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
 			}
 			return err
-		}
-		if *profileName != "" && *on != "" {
-			return profileOnMutualExclusion("--on")
 		}
 		*runID = normalizeRunID(*runID)
 		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs status")
@@ -650,23 +622,6 @@ func runJobs(args []string) error {
 				return perr
 			}
 			statusOpts.Profile = p
-		}
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
-			}
-			if err := requireController(prof, "jobs status"); err != nil {
-				return err
-			}
-			if err := orchestrator.JobStatusRemote(ctx, prof.Controller, prof.Token,
-				*runID, statusOpts, os.Stdout); err != nil {
-				return err
-			}
-			if *exitZero {
-				return nil
-			}
-			return remoteStatusExitCheck(ctx, prof.Controller, prof.Token, *runID)
 		}
 		if err := orchestrator.JobStatus(ctx, paths, *runID, statusOpts, os.Stdout); err != nil {
 			return err
@@ -682,8 +637,6 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		on := fs.String("on", "",
-			"profile name (cluster mode). Omit to read logs from the local SQLite store.")
 		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
@@ -694,19 +647,16 @@ func runJobs(args []string) error {
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
 		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout")
 		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- useful when scripts depend on the legacy shape")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
 			}
 			return err
 		}
-		if *profileName != "" && *on != "" {
-			return profileOnMutualExclusion("--on")
-		}
 		*runID = normalizeRunID(*runID)
-		if *tree && *on != "" {
-			return errors.New("jobs logs: --tree is local-mode only (cannot combine with --on)")
-		}
 		resolvedFmt, err := resolveTTYAwareOutput(*outFmt, "jobs logs")
 		if err != nil {
 			return err
@@ -735,24 +685,15 @@ func runJobs(args []string) error {
 			}
 			opts.Profile = p
 		}
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
-			}
-			if prof.Controller == "" || prof.Logs == "" {
-				return fmt.Errorf("jobs logs: profile %q must have both controller and logs URLs", prof.Name)
-			}
-			return orchestrator.JobLogsRemoteWithTokens(ctx, prof.Controller, prof.Logs, prof.Token,
-				*runID, opts, os.Stdout)
-		}
 		return orchestrator.JobLogs(ctx, paths, *runID, opts, os.Stdout)
 
 	case "errors":
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsErrors, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -765,17 +706,6 @@ func runJobs(args []string) error {
 			return err
 		}
 		emitJSON := resolvedFmt == "json"
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
-			}
-			if err := requireController(prof, "jobs errors"); err != nil {
-				return err
-			}
-			return orchestrator.JobErrorsRemote(ctx, prof.Controller, prof.Token,
-				*runID, emitJSON, os.Stdout)
-		}
 		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
 
 	case "cancel":
@@ -909,7 +839,7 @@ func pipelinesWithTags(tags []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, cfg, err := pipelines.Discover(cwd)
+	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil {
 		// Missing pipelines.yaml = no tag resolution possible; not a hard error.
 		return nil, nil

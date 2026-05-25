@@ -229,29 +229,24 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	return r
 }
 
-// probeLogs GETs <logs>/health when the profile carries a logs URL.
-// Missing URL => warn (logs are optional; some operators only use
-// the controller's built-in log tail).
-func probeLogs(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "logs", Target: prof.Logs}
-	if prof.Logs == "" {
+// probeLogs reports the profile's logs backend. Logs route through the
+// controller unless the profile declares an explicit logs: backend, so
+// reachability is covered by the controller probe; this only describes
+// where log bodies land.
+func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
+	r := profileProbeResult{Name: "logs", Target: profile.SpecString(prof.Logs)}
+	if prof.Logs == nil {
+		if prof.Controller != "" {
+			r.Status = "ok"
+			r.Detail = "logs route through the controller"
+			return r
+		}
 		r.Status = "warn"
-		r.Detail = "logs URL not set in profile"
-		return r
-	}
-	start := time.Now()
-	resp, err := httpGetNoAuth(ctx, strings.TrimRight(prof.Logs, "/")+"/api/v1/health")
-	r.LatencyMS = time.Since(start).Milliseconds()
-	if err != nil {
-		r.Status = "fail"
-		r.Detail = err.Error()
-		return r
-	}
-	defer resp.Body.Close()
-	if interpretHealthBody(&r, resp) {
+		r.Detail = "no logs: backend configured"
 		return r
 	}
 	r.Status = "ok"
+	r.Detail = "logs backend: " + profile.SpecString(prof.Logs)
 	return r
 }
 

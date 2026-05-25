@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -100,17 +101,14 @@ func pickSourceName(p *pipelines.Pipeline, target, sparkwingDir string) string {
 }
 
 func defaultSourceName(sparkwingDir string) string {
-	user, err := sources.UserConfigPath()
-	if err != nil {
+	if sparkwingDir == "" {
 		return ""
 	}
-	uf, _ := sources.Load(user)
-	if sparkwingDir != "" {
-		if rf, err := sources.Load(sources.RepoConfigPath(sparkwingDir)); err == nil && rf.Default != "" {
-			return rf.Default
-		}
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	if err != nil || cfg == nil || cfg.Sources == nil {
+		return ""
 	}
-	return uf.Default
+	return cfg.Sources.Default
 }
 
 func printConfigInspectPretty(w io.Writer, pipeline, target, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) {

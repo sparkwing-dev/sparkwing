@@ -80,8 +80,9 @@ This keeps repos fresh so that:
 
 ## Code Uploads
 
-When running `sparkwing run <pipeline> --on prod --from local`, the sparkwing CLI
-uploads a code tarball directly to the cache (not through the controller):
+When running `sparkwing pipeline trigger <pipeline> --profile prod --from local`,
+the sparkwing CLI uploads a code tarball directly to the cache (not through the
+controller):
 
 ```
 sparkwing CLI -> cache /upload (stores tarball, returns ref ID)

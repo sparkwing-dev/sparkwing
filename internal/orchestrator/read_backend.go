@@ -4,81 +4,34 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // OpenReadBackend opens the dashboard-shaped read backend the local
-// CLI's `runs list` / `runs status` / `runs logs` commands should
-// consult. It mirrors `sparkwing run`'s resolution rules so a single
-// .sparkwing/backends.yaml describes both write and read paths:
-//
-//  1. Discover .sparkwing/ from cwd (or honor SPARKWING_DIR if set).
-//  2. Resolve backends.yaml (repo + user + built-in environments).
-//  3. Auto-detect the active environment (gha, kubernetes, etc.) and
-//     pick the effective state/logs/cache specs.
-//  4. Dispatch through [backend.FromSpecs] to the right impl --
-//     StoreBackend over local SQLite, S3Backend over the bucket, or
-//     ClientBackend over the configured controller URL.
-//
-// When no backends.yaml is found AND no environment auto-detects,
-// falls back to the historical SQLite-at-paths.StateDB() default so
-// pre-Mode-2 setups keep working with zero config. Callers MUST defer
-// the returned Closer.
-//
-// Until this helper existed, every read command opened
-// store.Open(paths.StateDB()) directly, silently ignoring an S3 or
-// Postgres backends.yaml and reading from a phantom local DB that the
-// orchestrator never wrote to. Mode 2 users saw "no runs yet" against
-// a bucket full of runs.
+// CLI's `runs list` / `runs status` / `runs logs` commands consult when
+// no explicit --profile was passed. It resolves the active profile
+// through the same chain `sparkwing run` uses (project hint >
+// profiles.yaml default > matching detect > built-in laptop), then opens
+// that profile's surfaces -- StoreBackend over local SQLite, S3Backend
+// over a bucket, or ClientBackend over the profile's controller. Callers
+// MUST defer the returned Closer.
 func OpenReadBackend(ctx context.Context, paths Paths) (backend.Backend, io.Closer, error) {
-	sparkwingDir := discoverSparkwingDir()
-
-	file, err := backends.Resolve(sparkwingDir)
+	path, err := profile.DefaultPath()
 	if err != nil {
-		return nil, nopCloser{}, fmt.Errorf("backends.yaml: %w", err)
+		return nil, nopCloser{}, err
 	}
-	envName, _, _ := backends.DetectEnvironment(file)
-	eff := backends.Effective(file, envName, backends.Surfaces{})
-
-	state := eff.State
-	if state == nil {
-		state = &backends.Spec{Type: backends.TypeSQLite, Path: paths.StateDB()}
-	}
-	if state.Type == backends.TypeSQLite && state.Path == "" {
-		state.Path = paths.StateDB()
-	}
-	return backend.FromSpecs(ctx, state, eff.Logs, eff.Cache, paths, nil)
-}
-
-// discoverSparkwingDir walks up from cwd looking for a .sparkwing
-// directory containing pipelines.yaml. Returns "" when none is found
-// so Resolve falls back to user-level + built-in configuration.
-func discoverSparkwingDir() string {
-	cwd, err := os.Getwd()
+	cfg, err := profile.Load(path)
 	if err != nil {
-		return ""
+		return nil, nopCloser{}, fmt.Errorf("profiles.yaml: %w", err)
 	}
-	if yamlPath, _, err := pipelines.Discover(cwd); err == nil && yamlPath != "" {
-		return filepathDir(yamlPath)
+	p, _, err := profile.Resolve("", projectProfileHint(), cfg)
+	if err != nil {
+		return nil, nopCloser{}, err
 	}
-	return ""
-}
-
-// filepathDir is filepath.Dir without an extra import; the function
-// is one line so keeping the package list trimmed isn't worth a new
-// import line.
-func filepathDir(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' || p[i] == '\\' {
-			return p[:i]
-		}
-	}
-	return "."
+	return OpenReadBackendForProfile(ctx, paths, p)
 }
 
 type nopCloser struct{}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -140,22 +141,21 @@ func Main() {
 
 	delegate := selectLocalRenderer()
 	opts := Options{
-		Pipeline:       pipeline,
-		Args:           argsMap,
-		Git:            detectGit(),
-		Delegate:       delegate,
-		Debug:          readDebugDirectivesFromEnv(),
-		StartAt:        os.Getenv("SPARKWING_START_AT"),
-		StopAt:         os.Getenv("SPARKWING_STOP_AT"),
-		Only:           os.Getenv("SPARKWING_ONLY"),
-		NoCache:        os.Getenv("SPARKWING_NO_CACHE") == "1",
-		DryRun:         os.Getenv("SPARKWING_DRY_RUN") == "1",
-		LocalOnly:      os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
-		MaxParallel:    runtime.NumCPU(),
-		Target:         os.Getenv("SPARKWING_TARGET"),
-		BackendsConfig: os.Getenv("SPARKWING_BACKENDS_CONFIG"),
-		PipelineYAML:   pipelineYAML,
-		SparkwingDir:   sparkwingDir,
+		Pipeline:     pipeline,
+		Args:         argsMap,
+		Git:          detectGit(),
+		Delegate:     delegate,
+		Debug:        readDebugDirectivesFromEnv(),
+		StartAt:      os.Getenv("SPARKWING_START_AT"),
+		StopAt:       os.Getenv("SPARKWING_STOP_AT"),
+		Only:         os.Getenv("SPARKWING_ONLY"),
+		NoCache:      os.Getenv("SPARKWING_NO_CACHE") == "1",
+		DryRun:       os.Getenv("SPARKWING_DRY_RUN") == "1",
+		LocalOnly:    os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
+		MaxParallel:  runtime.NumCPU(),
+		Target:       os.Getenv("SPARKWING_TARGET"),
+		PipelineYAML: pipelineYAML,
+		SparkwingDir: sparkwingDir,
 	}
 	// --profile NAME (forwarded as SPARKWING_PROFILE): route
 	// state/logs/cache through the named storage profile, with a local
@@ -597,17 +597,17 @@ func readDebugDirectivesFromEnv() DebugDirectives {
 }
 
 // loadPipelineYAML walks up from cwd looking for
-// .sparkwing/pipelines.yaml and returns the entry for the named
-// pipeline (nil when there's no pipelines.yaml or the pipeline isn't
+// .sparkwing/sparkwing.yaml and returns the entry for the named
+// pipeline (nil when there's no sparkwing.yaml or the pipeline isn't
 // listed). Also returns the resolved .sparkwing/ directory so the
-// orchestrator can consult sources.yaml / backends.yaml from the
+// orchestrator can consult the same file's sources section from the
 // same root.
 func loadPipelineYAML(pipeline string) (*pipelines.Pipeline, string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, ""
 	}
-	yamlPath, cfg, err := pipelines.Discover(cwd)
+	yamlPath, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil || cfg == nil {
 		return nil, ""
 	}

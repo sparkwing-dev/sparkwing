@@ -32,24 +32,21 @@ func atoiNonNeg(s string) (int, error) {
 
 type runFlags struct {
 	ref string
-	on  string
 	// profile names a storage profile from
 	// ~/.config/sparkwing/profiles.yaml for local execution: state,
 	// logs, and cache route through the profile (with a local SQLite
-	// mirror for non-local profiles). Distinct from --on (legacy
-	// remote-trigger dispatch); the two are mutually exclusive. Parsed
-	// from the flat --profile flag, forwarded to the inner binary as
-	// SPARKWING_PROFILE.
+	// mirror for non-local profiles). Parsed from the flat --profile
+	// flag, forwarded to the inner binary as SPARKWING_PROFILE.
 	profile  string
 	noUpdate bool
 	verbose  bool
 	// secrets sources secrets from the named profile's controller.
-	// Orthogonal to --on: --secrets prod resolves against prod even
+	// Orthogonal to --profile: --secrets prod resolves against prod even
 	// when running locally. Empty = laptop dotenv.
 	secrets   string
 	changeDir string
 	// mode: "" / "local" = in-process workers; "ci-embedded" = capped
-	// local procs + S3 storage; "distributed" is reached via --on.
+	// local procs + S3 storage.
 	mode string
 	// workers caps concurrent nodes in ci-embedded mode; 0 = NumCPU.
 	workers int
@@ -86,15 +83,11 @@ type runFlags struct {
 	// regardless. The gate degrades gracefully (no labels declared =
 	// no block).
 	allow []string
-	// forTarget picks the pipelines.yaml target the run resolves
-	// against. Empty means "use the single declared target if there's
-	// one, else no target."
-	forTarget string
-	// backendsConfig points at a (possibly synthesized) backends.yaml
-	// fragment the inner binary layers underneath defaults. The
-	// outer CLI uses this to forward profile-derived storage
-	// settings to the child via a temp file.
-	backendsConfig string
+	// target picks the pipeline target the run resolves against
+	// (deployment intent: runner / secret bindings). Empty means "use
+	// the single declared target if there's one, else no target."
+	// Parsed from --target (renamed from --sw-target in v0.5.0).
+	target string
 	// localOnly forces SQLite state + filesystem logs + filesystem
 	// cache for this run, ignoring any configured shared backends.
 	// The escape hatch when shared state is misbehaving (stale
@@ -179,17 +172,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--sw-ref="):
 			wf.ref = strings.TrimPrefix(a, "--sw-ref=")
-			i++
-		case a == "--sw-profile":
-			if i+1 < len(args) {
-				wf.on = args[i+1]
-				i += 2
-				continue
-			}
-			pass = append(pass, a)
-			i++
-		case strings.HasPrefix(a, "--sw-profile="):
-			wf.on = strings.TrimPrefix(a, "--sw-profile=")
 			i++
 		case a == "--profile":
 			if i+1 < len(args) {
@@ -312,27 +294,16 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-cd="):
 			wf.changeDir = strings.TrimPrefix(a, "--sw-cd=")
 			i++
-		case a == "--sw-target":
+		case a == "--target":
 			if i+1 < len(args) {
-				wf.forTarget = args[i+1]
+				wf.target = args[i+1]
 				i += 2
 				continue
 			}
 			pass = append(pass, a)
 			i++
-		case strings.HasPrefix(a, "--sw-target="):
-			wf.forTarget = strings.TrimPrefix(a, "--sw-target=")
-			i++
-		case a == "--sw-backends-config":
-			if i+1 < len(args) {
-				wf.backendsConfig = args[i+1]
-				i += 2
-				continue
-			}
-			pass = append(pass, a)
-			i++
-		case strings.HasPrefix(a, "--sw-backends-config="):
-			wf.backendsConfig = strings.TrimPrefix(a, "--sw-backends-config=")
+		case strings.HasPrefix(a, "--target="):
+			wf.target = strings.TrimPrefix(a, "--target=")
 			i++
 		case a == "--sw-box-slots":
 			if i+1 < len(args) {
@@ -395,9 +366,8 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 
 // triggerSource builds the trigger_source string a remote dispatch
 // records, tagging the originating verb so runs are distinguishable in
-// `runs list`: "sparkwing@host" for `run --sw-profile`,
-// "pipeline-trigger@host" for `pipeline trigger`. Falls back to the bare
-// prefix when the hostname can't be read.
+// `runs list`: "pipeline-trigger@host" for `pipeline trigger`. Falls
+// back to the bare prefix when the hostname can't be read.
 func triggerSource(prefix string) string {
 	if host, err := os.Hostname(); err == nil && host != "" {
 		return prefix + "@" + host
@@ -405,41 +375,10 @@ func triggerSource(prefix string) string {
 	return prefix
 }
 
-// dispatchRemote POSTs a TriggerRequest to the profile's controller
-// (today's `sparkwing run --sw-profile` path) and prints the run id plus
-// next-step suggestions. Does NOT compile locally -- assumes the remote
-// already has the pipeline.
-func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) error {
-	prof, err := resolveProfile(wf.on)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "sparkwing run --on"); err != nil {
-		return err
-	}
-	resp, err := createRemoteTrigger(prof, pipelineName, triggerSource("sparkwing"), wf, passthrough)
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(os.Stdout, "dispatched %s on %s as %s (status=%s)\n",
-		pipelineName, prof.Name, resp.RunID, resp.Status)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "tail logs:\n")
-	fmt.Fprintf(os.Stderr, "  sparkwing runs logs --run %s --on %s --follow\n",
-		resp.RunID, prof.Name)
-	fmt.Fprintf(os.Stderr, "check status:\n")
-	fmt.Fprintf(os.Stderr, "  sparkwing runs status --run %s --on %s\n",
-		resp.RunID, prof.Name)
-	return nil
-}
-
 // createRemoteTrigger builds and POSTs a TriggerRequest to prof's
-// controller, returning the controller's response. It is the shared core
-// of `sparkwing run --sw-profile` (via dispatchRemote) and `sparkwing
-// pipeline trigger`; the wire payload is identical between the two except
-// for source (the trigger_source tag). It does NOT print or tail -- the
-// caller decides how to report. prof must already carry a controller.
+// controller, returning the controller's response. It backs `sparkwing
+// pipeline trigger`. It does NOT print or tail -- the caller decides how
+// to report. prof must already carry a controller.
 func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
 	var userName string

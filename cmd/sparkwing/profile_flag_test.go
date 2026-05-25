@@ -51,18 +51,16 @@ profiles:
 	}
 }
 
-func TestDispatchRun_ProfileAndOnMutuallyExclusive(t *testing.T) {
-	// Both --profile (local) and --sw-profile (legacy remote, => wf.on)
-	// set: must error with exit code 2 before any discovery/compile.
+func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
+	// The retired --sw-profile flag must error with a migration pointer
+	// before any discovery/compile rather than falling through to the
+	// pipeline binary.
 	err := dispatchRun([]string{"some-pipeline", "--profile", "x", "--sw-profile", "y"})
 	if err == nil {
-		t.Fatal("expected mutual-exclusion error")
+		t.Fatal("expected retired-flag error for --sw-profile")
 	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("message = %q, want mutual-exclusion text", err.Error())
-	}
-	if code := exitCodeFor(err); code != 2 {
-		t.Errorf("exit code = %d, want 2", code)
+	if !strings.Contains(err.Error(), "--sw-profile") {
+		t.Errorf("message = %q, want --sw-profile migration pointer", err.Error())
 	}
 }
 
