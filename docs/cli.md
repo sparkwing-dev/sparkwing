@@ -101,6 +101,15 @@ Nested surfaces under `runs`:
 | `sparkwing runs triggers list` | Pending / claimed / done triggers |
 | `sparkwing runs triggers get --id ID` | One trigger's metadata |
 
+### profile
+
+Read-side introspection: which profile a sparkwing command would resolve to right now, and the chain that picked it (flag > project hint > detect > default > builtin laptop). Same resolver `sparkwing run` and `pipeline trigger` use, so the answer matches what they would do. Tokens are never printed.
+
+| Command | What |
+|---|---|
+| `sparkwing profile [-o pretty\|json]` | Show the active no-flag resolution + chain |
+| `sparkwing profile --profile NAME [-o ...]` | Hypothetical: what `--profile NAME` would select |
+
 ### cluster
 
 Operate + inspect a sparkwing cluster. Profile via `--on NAME` picks which cluster.

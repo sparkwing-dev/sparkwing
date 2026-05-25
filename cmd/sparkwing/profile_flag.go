@@ -14,29 +14,42 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-// resolveProfileFlag loads profiles.yaml and resolves NAME through the
-// chain resolver (flag level only; project hint lands in step 9). A
-// missing profile returns a not-found error naming the file and the
-// available profiles. The caller returns the error as-is; main() prints
-// it under the "sparkwing error:" prefix and exits 1.
-func resolveProfileFlag(name string) (*profile.Profile, error) {
+// resolveProfileChain loads profiles.yaml and resolves NAME through the
+// chain resolver (flag level only; the project hint is wired in step 9).
+// It returns the resolved profile, the resolution chain (for the
+// `sparkwing profile` introspection command), and the resolved
+// profiles.yaml path (for display). A missing profile returns a
+// not-found error naming the file and the available profiles. Shared by
+// `sparkwing run` / `pipeline trigger` / the read commands (via
+// resolveProfileFlag) and `sparkwing profile` so all report the same
+// resolution.
+func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {
-		return nil, err
+		return nil, profile.Chain{}, "", err
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
-		return nil, err
+		return nil, profile.Chain{}, path, err
 	}
-	p, _, err := profile.ResolveChain(name, "", cfg)
+	p, chain, err := profile.ResolveChain(name, "", cfg)
 	if err != nil {
 		if errors.Is(err, profile.ErrProfileNotFound) {
-			return nil, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
+			return nil, profile.Chain{}, path, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
 				name, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
 		}
-		return nil, err
+		return nil, profile.Chain{}, path, err
 	}
-	return p, nil
+	return p, chain, path, nil
+}
+
+// resolveProfileFlag is the connection-side use of resolveProfileChain:
+// it returns just the resolved profile (the chain is for introspection).
+// The caller returns the error as-is; main() prints it under the
+// "sparkwing error:" prefix and exits 1.
+func resolveProfileFlag(name string) (*profile.Profile, error) {
+	p, _, _, err := resolveProfileChain(name)
+	return p, err
 }
 
 // profileOnMutualExclusion returns the exit-code-2 error fired when a

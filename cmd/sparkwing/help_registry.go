@@ -41,6 +41,7 @@ for agent-facing discovery.`,
 		{"pipeline", "This repo's pipelines"},
 		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
 		{"runs", "Inspect or manage runs"},
+		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
 		// Local + remote ops
@@ -1206,6 +1207,35 @@ For remote execution on a profile's controller, use
 		{"Run from a different git ref", "sparkwing run build-test-deploy --from feature/xyz"},
 		{"Retry a failed run", "sparkwing runs retry RUN_ID --failed"},
 		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
+	},
+}
+
+// ---- sparkwing profile -----------------------------------------
+
+// cmdProfile is read-side introspection: which profile would sparkwing
+// pick right now, and why. No positional args; --profile NAME drives the
+// hypothetical "what if I passed --profile NAME" case.
+var cmdProfile = Command{
+	Path:     "sparkwing profile",
+	Synopsis: "Show which profile sparkwing would use right now, and why",
+	Description: `Reports the profile a sparkwing command would resolve to and
+the chain that picked it (flag > project hint > detect > default
+> builtin laptop), using the same resolver 'sparkwing run' and
+'sparkwing pipeline trigger' use -- so the answer matches what
+they would actually do.
+
+With no flag it shows the active no-flag resolution. With
+--profile NAME it shows the hypothetical: what adding that flag
+to your next command would select. Tokens are never printed.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Show the hypothetical resolution for `--profile NAME`", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Active profile with no flag", "sparkwing profile"},
+		{"What would --profile prod pick", "sparkwing profile --profile prod"},
+		{"Machine-readable", "sparkwing profile -o json"},
 	},
 }
 
