@@ -191,8 +191,7 @@ func runExec(bin string, args []string, dir string, env []string) error {
 // produce the same actionable error message when Go is missing.
 func runGo(dir string, args, env []string) error {
 	if !goOnPath() {
-		//lint:ignore ST1005 user-facing multi-line install instructions, not a wrap target
-		return fmt.Errorf(
+		return fmt.Errorf( //nolint:staticcheck // user-facing multi-line install instructions, not a wrap target
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via the `go` command.\n" +
 				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.",
 		)

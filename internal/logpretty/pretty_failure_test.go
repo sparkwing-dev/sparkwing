@@ -36,8 +36,10 @@ func renderRunFailure(t *testing.T, nodes []any) string {
 func TestRunSummary_HeadlineLeadsWithRootCauseLeaf(t *testing.T) {
 	out := renderRunFailure(t, []any{
 		map[string]any{"id": "build", "outcome": "success", "duration_ms": int64(2000)},
-		map[string]any{"id": "deploy", "outcome": "failed", "duration_ms": int64(900),
-			"error": `step "push": connection refused`},
+		map[string]any{
+			"id": "deploy", "outcome": "failed", "duration_ms": int64(900),
+			"error": `step "push": connection refused`,
+		},
 		map[string]any{"id": "verify", "outcome": "cancelled"},
 		map[string]any{"id": "notify", "outcome": "cancelled"},
 	})

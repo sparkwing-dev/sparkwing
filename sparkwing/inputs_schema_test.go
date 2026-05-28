@@ -193,7 +193,7 @@ func TestParseInputsSchema_MapWithoutExtraRejected(t *testing.T) {
 type withUntaggedField struct {
 	Tagged string `flag:"x"`
 	//lint:ignore U1000 exists to exercise the untagged-field skip path
-	internal int //nolint:unused
+	internal int //nolint:unused // paired with the lint:ignore U1000 above; both target this field
 }
 
 func TestParseInputsSchema_SkipsUntagged(t *testing.T) {

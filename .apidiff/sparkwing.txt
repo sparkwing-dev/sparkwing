@@ -55,6 +55,8 @@ type CacheOptions struct {
 	CacheTTL time.Duration
 
 	CancelTimeout time.Duration
+
+	QueueTimeout time.Duration
 }
 func (o CacheOptions) HasNamespace() bool
 const Cached Outcome = "cached"

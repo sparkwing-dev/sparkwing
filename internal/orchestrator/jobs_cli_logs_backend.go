@@ -229,7 +229,7 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 				if multi.Load() {
 					fmt.Fprintf(out, "[%s] ", nodeID)
 				}
-				out.Write(line)
+				_, _ = out.Write(line)
 				fmt.Fprintln(out)
 				mu.Unlock()
 			}
@@ -267,7 +267,7 @@ func copyNodeStream(ctx context.Context, rc io.Reader, nodeID string, multi *ato
 				if multi.Load() {
 					fmt.Fprintf(out, "[%s] ", nodeID)
 				}
-				out.Write(line)
+				_, _ = out.Write(line)
 				fmt.Fprintln(out)
 				mu.Unlock()
 			}
@@ -278,7 +278,7 @@ func copyNodeStream(ctx context.Context, rc io.Reader, nodeID string, multi *ato
 				if multi.Load() {
 					fmt.Fprintf(out, "[%s] ", nodeID)
 				}
-				out.Write(partial)
+				_, _ = out.Write(partial)
 				fmt.Fprintln(out)
 				mu.Unlock()
 			}

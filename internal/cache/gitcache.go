@@ -1555,7 +1555,7 @@ func resolveGitRepo(name string) (string, error) {
 		// operator still gets the /sync/seed pointer; include the
 		// clone error so the underlying reason isn't lost.
 		return "", fmt.Errorf(
-			"repo %q registered but not cloned -- auto-clone failed (%s%s); seed manually via POST /sync/seed?repo=%s",
+			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s",
 			name, err, sshHint(out), repoURL,
 		)
 	}

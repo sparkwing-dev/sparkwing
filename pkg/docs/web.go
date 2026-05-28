@@ -309,7 +309,7 @@ func (c *WebClient) httpGetWithRetry(ctx context.Context, fullURL string) ([]byt
 		}
 		lastErr = err
 	}
-	return nil, cacheMeta{}, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
+	return nil, cacheMeta{}, fmt.Errorf("%w: %w", ErrUnavailable, lastErr)
 }
 
 // statusErr lets callers branch on HTTP status without parsing the

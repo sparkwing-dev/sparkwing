@@ -239,6 +239,12 @@ linters:
         - pattern: ^fmt\.Println$
           msg: "fmt.Println bypasses the structured logger; use sparkwing.Info/Error or slog directly. Allowed in cmd/**/main.go and _test.go (see exclusions)."
   exclusions:
+    # Path-level skip: third-party Go ports vendored under web/ via
+    # npm (e.g. the flatted JS library ships a parallel Go source
+    # tree). Not first-party code; their formatting + lint posture
+    # belongs to upstream.
+    paths:
+      - web/node_modules/
     rules:
       # Tests often ignore errors deliberately.
       - path: _test\.go

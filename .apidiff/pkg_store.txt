@@ -200,6 +200,7 @@ const OnLimitQueue = "queue"
 const OnLimitSkip = "skip"
 func Open(path string) (*Store, error)
 func OpenPostgres(_ context.Context, dsn string) (*Store, error)
+func OpenReadOnly(path string) (*Store, error)
 func ParseRunFilter(q url.Values) RunFilter
 const PauseReasonAfter = "pause-after"
 const PauseReasonBefore = "pause-before"
