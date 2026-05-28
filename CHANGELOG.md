@@ -50,15 +50,19 @@ code change to unlock.
 
 ### Changed
 
-- **release:** The `release` pipeline now runs the `pre-commit` and
-  `pre-push` pipelines as child-run gates before any mutation step.
-  Previously a release tag pushed via `sparkwing run release` skipped
-  both, so lint / em-dash / race / vuln regressions catchable by an
-  everyday push could ship past the release path. The gates run in
-  parallel after `check-clean-tree` and block `prepare-changelog` +
-  `bump-self-replace` + `push-tag` -- if either fails, no commit
-  lands. See `docs/proposals/release-pipeline-gates.md` for the DAG
-  and rationale. Wall-clock cost: about 35 seconds added per release.
+- **release:** The `release` pipeline now composes the `PreCommit`
+  and `PrePush` job types directly into its plan as `gate-pre-commit`
+  and `gate-pre-push` nodes, gating every mutating step on their
+  success. Previously a release tag pushed via `sparkwing run release`
+  skipped both pipelines entirely, so lint / em-dash / race / vuln
+  regressions catchable by an everyday push could ship past the
+  release path. The gates run in parallel after `check-clean-tree`
+  and block `prepare-changelog` + `bump-self-replace` + `push-tag`
+  -- if either fails, no commit lands. See
+  `docs/proposals/release-pipeline-gates.md` for the DAG, the
+  alternatives considered (subprocess, `RunAndAwait`), and the
+  general lesson on local-composition vs remote-dispatch primitives.
+  Wall-clock cost: about 35 seconds added per release.
 
 ## [v0.5.0] - 2026-05-28
 ### Added
