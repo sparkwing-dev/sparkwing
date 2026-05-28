@@ -55,9 +55,51 @@ type Store struct {
 func (s *Store) Dialect() Dialect { return s.dialect }
 
 // Open initializes a SQLite database at path with WAL + foreign keys.
+//
+// busy_timeout is set high (30s) so that under N concurrent writers on
+// one host -- multiple `sparkwing run` invocations plus the dashboard
+// daemon sharing one state.db -- a writer waits on a busy lock instead
+// of erroring immediately with SQLITE_BUSY and aborting the run. WAL
+// lets readers proceed while a writer commits, so the wait is bounded
+// to the brief windows when two writers genuinely overlap.
+//
+// txlock=immediate makes every transaction take the write lock at BEGIN
+// rather than upgrading a read lock to a write lock mid-transaction.
+// Without it, two connections that each SELECT-then-INSERT (the shape
+// of AcquireConcurrencySlot and most state mutations) can both read the
+// same snapshot and then collide on the upgrade -- which surfaces as
+// SQLITE_BUSY_SNAPSHOT, a conflict busy_timeout does NOT retry. Taking
+// the lock up front turns that race into an ordinary busy-wait the
+// timeout absorbs. Single-statement reads outside a transaction are
+// unaffected, so read-only queries don't pay for the write lock.
 func Open(path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)", path)
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(30000)", path)
 	return openSQL("sqlite", dsn, DialectSQLite)
+}
+
+// OpenReadOnly opens an existing SQLite state database for reads only.
+// The connection sets PRAGMA query_only so it can never take a write
+// lock; a read-mostly consumer like the dashboard daemon therefore
+// can't starve out the `sparkwing run` processes that actually mutate
+// the database. WAL readers don't block the writer either way, so this
+// is belt-and-suspenders on top of WAL.
+//
+// No migration runs: the caller is responsible for ensuring the schema
+// exists (the controller / runner that writes the database does this on
+// its own Open). Opening a database whose schema this binary doesn't
+// understand surfaces as query errors at read time, not here.
+func OpenReadOnly(path string) (*Store, error) {
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(30000)&_pragma=query_only(true)", path)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	// WAL permits several concurrent readers; a small pool lets the
+	// dashboard serve overlapping HTTP reads without serializing them
+	// behind a single connection.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
+	return &Store{db: db, dialect: DialectSQLite}, nil
 }
 
 // OpenPostgres initializes a Store against the Postgres database

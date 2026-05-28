@@ -106,6 +106,15 @@ code change to unlock.
   `.sparkwing/sparkwing.yaml`. See
   [migration guide](docs/migrations/v0.5.0.md#single-sparkwingsparkwingyaml-per-repo).
 
+### Fixed
+
+- **store:** `SQLITE_BUSY` under concurrent writers no longer fails the
+  run. The state store opens with a 30s `busy_timeout` and takes its
+  write lock at transaction start, so multiple `sparkwing run`
+  invocations sharing one `state.db` wait their turn instead of aborting
+  with `database is locked`. The local dashboard reads through a
+  read-only connection so it can't starve out active runs.
+
 ### Docs
 
 - **docs:** New migration guide at `docs/migrations/v0.5.0.md` covering

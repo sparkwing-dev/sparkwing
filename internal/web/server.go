@@ -92,11 +92,23 @@ type HandlerOptions struct {
 
 // Serve starts the dashboard in local mode, reading state from the
 // SQLite store at paths.StateDB().
+//
+// The dashboard never writes state, so it serves through a read-only
+// connection: it can't take a write lock and starve out the
+// `sparkwing run` processes that share the same state.db. A brief
+// read-write open first guarantees the schema exists (the runner that
+// populated the database may not have run yet on a fresh home) before
+// the long-lived read-only connection takes over.
 func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	if rw, err := store.Open(paths.StateDB()); err != nil {
+		return err
+	} else {
+		_ = rw.Close()
+	}
+	st, err := store.OpenReadOnly(paths.StateDB())
 	if err != nil {
 		return err
 	}
