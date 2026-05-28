@@ -45,7 +45,7 @@ type Chain struct {
 // The state path is left empty so the caller fills it from its Paths
 // (the historical ~/.sparkwing/state.db); the filesystem cache/logs
 // paths are expanded by the storeurl factories at open time. This is
-// NOT one of BuiltinProfiles() — laptop is a fallback, not an
+// NOT one of BuiltinProfiles() -- laptop is a fallback, not an
 // auto-detected profile, so it never participates in detect or default.
 func BuiltinLaptopProfile() *Profile {
 	return &Profile{
@@ -58,19 +58,19 @@ func BuiltinLaptopProfile() *Profile {
 
 // Resolve picks the active profile. Precedence (highest first):
 //
-//  1. cliFlag      — `--profile X` was passed on the command line
-//  2. projectHint  — sparkwing.yaml declares `profile: X`
-//  3. detect       — some profile's `detect:` block matches the env
-//  4. default      — profiles.yaml `default: X`
-//  5. builtin      — synthesized "laptop" profile (sqlite + filesystem)
+//  1. cliFlag      -- `--profile X` was passed on the command line
+//  2. projectHint  -- sparkwing.yaml declares `profile: X`
+//  3. detect       -- some profile's `detect:` block matches the env
+//  4. default      -- profiles.yaml `default: X`
+//  5. builtin      -- synthesized "laptop" profile (sqlite + filesystem)
 //
 // cliFlag == "" means no flag; projectHint == "" means no hint; file ==
 // nil means no profiles.yaml loaded (the builtin laptop still resolves).
 //
 // Returns ErrProfileNotFound when cliFlag or projectHint names a profile
 // absent from file.Profiles; the wrapped message identifies which level
-// triggered it. The detect and default levels never error — a default:
-// naming an unknown profile is skipped rather than fatal — so the
+// triggered it. The detect and default levels never error -- a default:
+// naming an unknown profile is skipped rather than fatal -- so the
 // builtin laptop guarantees a non-nil result with a nil error.
 //
 // The returned Profile is owned by file (or the synthesized laptop) and

@@ -135,7 +135,7 @@ func Load(path string) (*Config, error) {
 // Discover walks up from startDir looking for
 // <dir>/.sparkwing/sparkwing.yaml, stopping at the filesystem root. It
 // returns the absolute path and loaded Config of the first match, or
-// ("", nil, nil) when nothing is found anywhere on the walk-up — the
+// ("", nil, nil) when nothing is found anywhere on the walk-up -- the
 // caller falls back to the legacy per-file discovery.
 func Discover(startDir string) (path string, cfg *Config, err error) {
 	dir := startDir
