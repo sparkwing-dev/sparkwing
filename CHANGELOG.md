@@ -73,22 +73,23 @@ code change to unlock.
 
 ### Changed
 
-- **cli (Changed):** The `run_summary` headline now leads with the
+- **cli:** The `run_summary` headline now leads with the
   root-cause node -- the one that actually errored -- and a one-line
   error tail, then reports cascaded cancellations separately
   ("N nodes cancelled by the failure"). The node tally splits
   `cancelled` (an upstream-failure cascade) from `skipped` (a SkipIf /
   filter decision) instead of lumping both, so a single broken leaf no
   longer reads as a wall of failures.
-- **orchestrator (Changed):** A node that spawns a child pipeline via
+- **orchestrator (Breaking):** A node that spawns a child pipeline via
   `RunAndAwait` now emits structured `child_run_start` and
-  `child_run_finish` events into the parent's stream. `child_run_finish`
+  `child_run_finish` events into the parent's stream, replacing the
+  prior single `pipeline_await_spawned` audit event. `child_run_finish`
   carries the child's `run_id`, terminal `status`
   (success/failed/cancelled/timeout), and `duration_ms`, so the parent
   links to the child without inlining its output. Read the child's own
   logs with `sparkwing runs logs --run <child_id>` or
-  `sparkwing runs logs --run <parent> --tree`. Replaces the prior
-  single `pipeline_await_spawned` audit event.
+  `sparkwing runs logs --run <parent> --tree`. See
+  [migration guide](docs/migrations/v0.5.0.md#audit-stream-events-for-spawned-children).
 - **config (Breaking):** Project YAML collapses to a single
   `.sparkwing/sparkwing.yaml` file. See
   [migration guide](docs/migrations/v0.5.0.md#single-sparkwingsparkwingyaml-per-repo).
@@ -101,11 +102,11 @@ code change to unlock.
   [migration guide](docs/migrations/v0.5.0.md#profiles-absorb-all-backend-specs).
 - **cli (Breaking):** `--on` and `--sw-on` are removed; `--profile`
   replaces them for storage / dispatch addressing. See
-  [migration guide](docs/migrations/v0.5.0.md#-profile-is-the-only-where-flag).
+  [migration guide](docs/migrations/v0.5.0.md#--profile-is-the-only-where-flag).
 - **cli (Breaking):** `--sw-target` is renamed to `--target` (same
   semantics -- the pipeline-internal deployment-environment selector,
   moved out of the `--sw-` namespace). See
-  [migration guide](docs/migrations/v0.5.0.md#-profile-is-the-only-where-flag).
+  [migration guide](docs/migrations/v0.5.0.md#--profile-is-the-only-where-flag).
 - **cli (Breaking):** `sparkwing run --on prof` no longer dispatches
   to a remote controller; use `sparkwing pipeline trigger ... --profile prof`.
   See
