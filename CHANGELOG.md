@@ -130,6 +130,16 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** The dispatcher no longer hangs indefinitely when a
+  per-node goroutine fails to terminate. `dispatch` bounds its
+  post-DAG `wg.Wait` with `Options.DispatchWaitTimeout` (env
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT`, default 30m). On timeout it emits
+  a `dispatch_wait_timeout` event with the list of stuck nodes and a
+  full goroutine stack dump, then returns -- which fires the deferred
+  concurrency-namespace release so a wedged run can't lock the rest
+  of the fleet behind a process that will never make progress. Set to
+  a negative duration (or `SPARKWING_DISPATCH_WAIT_TIMEOUT=off`) to
+  restore the historical wait-forever behavior.
 - **store:** `SQLITE_BUSY` under concurrent writers no longer fails the
   run. The state store opens with a 30s `busy_timeout` and takes its
   write lock at transaction start, so multiple `sparkwing run`

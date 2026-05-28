@@ -154,6 +154,16 @@ type Options struct {
 	// to active execution; dep-wait goroutines are uncapped.
 	MaxParallel int
 
+	// DispatchWaitTimeout bounds the dispatcher's post-DAG drain. If
+	// every per-node goroutine hasn't returned within the duration,
+	// the dispatcher emits a `dispatch_wait_timeout` event with a
+	// goroutine stack dump and returns -- which fires the deferred
+	// concurrency-slot release so a wedged run doesn't lock the rest
+	// of the fleet behind a process that will never complete. Zero
+	// uses DefaultDispatchWaitTimeout (30m). Negative disables the
+	// watchdog entirely (historical wait-forever behavior).
+	DispatchWaitTimeout time.Duration
+
 	// LogStore, when non-nil, replaces the default filesystem
 	// LogBackend used by RunLocal.
 	LogStore storage.LogStore
@@ -520,7 +530,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		go runLocalTriggerLoop(consumerCtx, ls.st, runID, nil)
 	}
 
-	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip)
+	dispatchWaitTimeout := opts.DispatchWaitTimeout
+	if dispatchWaitTimeout == 0 {
+		dispatchWaitTimeout = DefaultDispatchWaitTimeout
+	}
+	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip, dispatchWaitTimeout)
 
 	finalStatus := "success"
 	errMsg := ""
@@ -707,7 +721,7 @@ func DumpRunState(ctx context.Context, st *store.Store, runID string, art storag
 // dispatch runs nodes in parallel where deps allow. Failed upstreams
 // produce Cancelled downstreams (reason "upstream-failed"). OnFailure
 // recoveries dispatch only when their parent fails.
-func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta, onlySkip map[string]string) error {
+func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta, onlySkip map[string]string, dispatchWaitTimeout time.Duration) error {
 	runStart := time.Now()
 
 	// Plan-level .Cache() gates the whole run before any dispatch.
@@ -766,7 +780,37 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 		state.scheduleExpansion(exp)
 	}
 
-	state.wg.Wait()
+	if waitForDispatch(&state.wg, dispatchWaitTimeout) == dispatchWaitTimedOut {
+		// All per-node goroutines failed to return inside the
+		// watchdog. Emit evidence (active nodes + full goroutine
+		// dump) so the wedge is debuggable post-mortem, then return:
+		// the deferred planRelease above frees the namespace slot so
+		// the rest of the fleet can move on. The leaked goroutines
+		// outlive this function and die with the process.
+		stuck := stuckNodeIDs(plan, state)
+		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
+		summary, _ := json.Marshal(map[string]any{
+			"timeout":     dispatchWaitTimeout.String(),
+			"stuck_nodes": stuck,
+			"stack_bytes": len(stack),
+		})
+		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_wait_timeout", summary)
+		if delegate != nil {
+			delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "error",
+				Event: "dispatch_wait_timeout",
+				Msg:   stack,
+				Attrs: map[string]any{
+					"timeout_ms":  dispatchWaitTimeout.Milliseconds(),
+					"stuck_nodes": stuck,
+				},
+			})
+		}
+		planReleaseOutcome = "failed"
+		return fmt.Errorf("dispatch_wait_timeout: %d node(s) did not terminate within %s: %v",
+			len(stuck), dispatchWaitTimeout, stuck)
+	}
 
 	// Optional nodes don't propagate failure to run-level.
 	var failed []string

@@ -141,21 +141,22 @@ func Main() {
 
 	delegate := selectLocalRenderer()
 	opts := Options{
-		Pipeline:     pipeline,
-		Args:         argsMap,
-		Git:          detectGit(),
-		Delegate:     delegate,
-		Debug:        readDebugDirectivesFromEnv(),
-		StartAt:      os.Getenv("SPARKWING_START_AT"),
-		StopAt:       os.Getenv("SPARKWING_STOP_AT"),
-		Only:         os.Getenv("SPARKWING_ONLY"),
-		NoCache:      os.Getenv("SPARKWING_NO_CACHE") == "1",
-		DryRun:       os.Getenv("SPARKWING_DRY_RUN") == "1",
-		LocalOnly:    os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
-		MaxParallel:  runtime.NumCPU(),
-		Target:       os.Getenv("SPARKWING_TARGET"),
-		PipelineYAML: pipelineYAML,
-		SparkwingDir: sparkwingDir,
+		Pipeline:            pipeline,
+		Args:                argsMap,
+		Git:                 detectGit(),
+		Delegate:            delegate,
+		Debug:               readDebugDirectivesFromEnv(),
+		StartAt:             os.Getenv("SPARKWING_START_AT"),
+		StopAt:              os.Getenv("SPARKWING_STOP_AT"),
+		Only:                os.Getenv("SPARKWING_ONLY"),
+		NoCache:             os.Getenv("SPARKWING_NO_CACHE") == "1",
+		DryRun:              os.Getenv("SPARKWING_DRY_RUN") == "1",
+		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
+		MaxParallel:         runtime.NumCPU(),
+		DispatchWaitTimeout: parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
+		Target:              os.Getenv("SPARKWING_TARGET"),
+		PipelineYAML:        pipelineYAML,
+		SparkwingDir:        sparkwingDir,
 	}
 	// --profile NAME (forwarded as SPARKWING_PROFILE): route
 	// state/logs/cache through the named storage profile, with a local
