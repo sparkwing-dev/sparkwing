@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-05-28
 ### Changed
 
 - **release:** The `release` pipeline now composes the `PreCommit`
