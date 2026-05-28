@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -358,6 +359,33 @@ type CompileError struct {
 func (e *CompileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
 func (e *CompileError) Unwrap() error { return e.Err }
 
+// lockedBuffer is a mutex-guarded bytes.Buffer. exec.Cmd drains
+// stdout and stderr from separate goroutines; when both target the
+// same buffer (as CompilePipeline does to interleave them in capture
+// order), the writes need serialization or the race detector trips.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (lb *lockedBuffer) Write(p []byte) (int, error) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return lb.buf.Write(p)
+}
+
+func (lb *lockedBuffer) String() string {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return lb.buf.String()
+}
+
+func (lb *lockedBuffer) Bytes() []byte {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return append([]byte(nil), lb.buf.Bytes()...)
+}
+
 // CompilePipeline `go build`s sparkwingDir -> dest. Stdout + stderr
 // stream to the parent's stderr (so pod logs still show progress);
 // both are also captured into a buffer so a failure returns a
@@ -376,8 +404,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	// Bare exec.Command("go", ...) with no Go on PATH surfaces a
 	// confusing message; preempt with a clearer one.
 	if _, err := exec.LookPath("go"); err != nil {
-		//lint:ignore ST1005 user-facing multi-line install instructions, not a wrap target
-		return fmt.Errorf(
+		return fmt.Errorf( //nolint:staticcheck // user-facing multi-line install instructions, not a wrap target
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
 				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.",
 		)
@@ -405,7 +432,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	// and stderr depending on flags / toolchain stage (e.g. the
 	// `go: go.mod requires go >= X` toolchain check writes to stderr,
 	// while compiler errors land on stdout). We surface both.
-	var captured bytes.Buffer
+	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = os.Environ()
@@ -413,7 +440,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
 		}
-		return &CompileError{Output: append([]byte(nil), captured.Bytes()...), Err: err}
+		return &CompileError{Output: captured.Bytes(), Err: err}
 	}
 	return nil
 }
