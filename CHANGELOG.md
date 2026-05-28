@@ -73,6 +73,15 @@ code change to unlock.
 
 ### Changed
 
+- **orchestrator (Changed):** A node that spawns a child pipeline via
+  `RunAndAwait` now emits structured `child_run_start` and
+  `child_run_finish` events into the parent's stream. `child_run_finish`
+  carries the child's `run_id`, terminal `status`
+  (success/failed/cancelled/timeout), and `duration_ms`, so the parent
+  links to the child without inlining its output. Read the child's own
+  logs with `sparkwing runs logs --run <child_id>` or
+  `sparkwing runs logs --run <parent> --tree`. Replaces the prior
+  single `pipeline_await_spawned` audit event.
 - **config (Breaking):** Project YAML collapses to a single
   `.sparkwing/sparkwing.yaml` file. See
   [migration guide](docs/migrations/v0.5.0.md#single-sparkwingsparkwingyaml-per-repo).

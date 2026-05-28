@@ -240,16 +240,43 @@ func RunNodeOnce(
 			if err != nil {
 				return nil, fmt.Errorf("enqueue trigger: %w", err)
 			}
+			startedAt := time.Now()
+			// child_run_finish links the child's run_id + terminal
+			// status into the parent's stream; the child's own output
+			// stays in its envelope (read via `sparkwing runs logs
+			// --run <child>` or `--run <parent> --tree`).
+			emitChildFinish := func(status, errMsg string) {
+				if currentNode == "" {
+					return
+				}
+				attrs := map[string]any{
+					"child_run_id": childRunID,
+					"pipeline":     req.Pipeline,
+					"status":       status,
+					"duration_ms":  time.Since(startedAt).Milliseconds(),
+				}
+				if errMsg != "" {
+					attrs["error"] = errMsg
+				}
+				payload, _ := json.Marshal(attrs)
+				if evErr := stateClient.AppendEvent(context.WithoutCancel(innerCtx), runID, currentNode,
+					"child_run_finish", payload); evErr != nil {
+					logger.Warn("child_run_finish audit event append failed",
+						"run_id", runID, "node", currentNode, "err", evErr)
+				}
+			}
+
 			if currentNode != "" {
 				payload, _ := json.Marshal(map[string]any{
+					"child_run_id":    childRunID,
 					"pipeline":        req.Pipeline,
 					"node_id":         req.NodeID,
-					"child_run_id":    childRunID,
+					"args":            req.Args,
 					"timeout_seconds": int64(req.Timeout.Seconds()),
 				})
 				if evErr := stateClient.AppendEvent(innerCtx, runID, currentNode,
-					"pipeline_await_spawned", payload); evErr != nil {
-					logger.Warn("pipeline_await audit event append failed",
+					"child_run_start", payload); evErr != nil {
+					logger.Warn("child_run_start audit event append failed",
 						"run_id", runID, "node", currentNode, "err", evErr)
 				}
 			}
@@ -266,6 +293,7 @@ func RunNodeOnce(
 				if err == nil {
 					switch run.Status {
 					case "success":
+						emitChildFinish("success", "")
 						// Empty NodeID = caller doesn't need output.
 						if req.NodeID == "" {
 							return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
@@ -276,13 +304,16 @@ func RunNodeOnce(
 						}
 						return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: data}, nil
 					case "failed":
+						emitChildFinish("failed", run.Error)
 						return nil, fmt.Errorf("child run %s failed: %s", childRunID, run.Error)
 					case "cancelled":
+						emitChildFinish("cancelled", "")
 						return nil, fmt.Errorf("child run %s was cancelled", childRunID)
 					}
 				}
 				select {
 				case <-pollCtx.Done():
+					emitChildFinish("timeout", pollCtx.Err().Error())
 					return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
 				case <-ticker.C:
 				}

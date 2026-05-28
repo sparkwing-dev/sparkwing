@@ -1375,16 +1375,41 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			"spawned child run %s (pipeline=%s%s)",
 			childRunID, req.Pipeline, repoSuffix(req.Repo))
 
+		startedAt := time.Now()
+		// child_run_finish links the child's run_id + terminal status
+		// back into the parent's stream. The child's own per-line output
+		// stays in the child's envelope (read it with
+		// `sparkwing runs logs --run <child>` or `--run <parent> --tree`)
+		// rather than being inlined here. Uses WithoutCancel so a
+		// timed-out / cancelled await still records the transition.
+		emitChildFinish := func(status, errMsg string) {
+			if currentNode == "" {
+				return
+			}
+			attrs := map[string]any{
+				"child_run_id": childRunID,
+				"pipeline":     req.Pipeline,
+				"status":       status,
+				"duration_ms":  time.Since(startedAt).Milliseconds(),
+			}
+			if errMsg != "" {
+				attrs["error"] = errMsg
+			}
+			payload, _ := json.Marshal(attrs)
+			_ = s.backends.State.AppendEvent(context.WithoutCancel(ctx), s.runID, currentNode, "child_run_finish", payload)
+		}
+
 		if currentNode != "" {
 			payload, _ := json.Marshal(map[string]any{
+				"child_run_id":    childRunID,
 				"pipeline":        req.Pipeline,
 				"node_id":         req.NodeID,
-				"child_run_id":    childRunID,
+				"args":            req.Args,
 				"timeout_seconds": int64(req.Timeout.Seconds()),
 			})
 			if ev := s.backends.State.AppendEvent(ctx, s.runID, currentNode,
-				"pipeline_await_spawned", payload); ev != nil {
-				sparkwing.Warn(ctx, "pipeline_await audit event append failed: %v", ev)
+				"child_run_start", payload); ev != nil {
+				sparkwing.Warn(ctx, "child_run_start audit event append failed: %v", ev)
 			}
 		}
 
@@ -1401,7 +1426,6 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		// wedged.
 		heartbeat := time.NewTicker(30 * time.Second)
 		defer heartbeat.Stop()
-		startedAt := time.Now()
 		lastStatus := "pending"
 		for {
 			run, err := s.backends.State.GetRun(pollCtx, childRunID)
@@ -1409,6 +1433,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				lastStatus = run.Status
 				switch run.Status {
 				case "success":
+					emitChildFinish("success", "")
 					// Empty NodeID = caller wants only success, no output.
 					if req.NodeID == "" {
 						return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
@@ -1419,13 +1444,16 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 					}
 					return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: data}, nil
 				case "failed":
+					emitChildFinish("failed", run.Error)
 					return nil, fmt.Errorf("child run %s failed: %s", childRunID, run.Error)
 				case "cancelled":
+					emitChildFinish("cancelled", "")
 					return nil, fmt.Errorf("child run %s was cancelled", childRunID)
 				}
 			}
 			select {
 			case <-pollCtx.Done():
+				emitChildFinish("timeout", pollCtx.Err().Error())
 				return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
 			case <-heartbeat.C:
 				sparkwing.Info(ctx,
