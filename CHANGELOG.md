@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-05-28
 ### Added
 
 - **sdk:** `CacheOptions.QueueTimeout` for queue-shaped concurrency.
