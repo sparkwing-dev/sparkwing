@@ -48,6 +48,22 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **release:** `prepare-changelog` and `bump-self-replace` no longer
+  race on `git commit`. They previously ran in parallel and both did
+  `git add <file>` + `git commit -m ...` without path scoping, so
+  whichever committed second found "nothing to commit" because the
+  first commit swept up both staged files. Now `bump-self-replace`
+  is serialized after `prepare-changelog`. Observed on the v0.5.0
+  and v0.5.1 cuts; both needed manual finishing.
+- **sparks:** The resolver no longer errors when a `go.work` is in
+  scope. The overlay's `.resolved.sum` write is skipped (with a
+  single-line warning) instead of failing, matching the existing
+  workspace-mode tolerance in `internal/bincache`. Operators
+  iterating against a local dogfood workspace can run
+  `sparkwing run <pipeline>` without setting `GOWORK=off` first.
+
 ## [v0.5.1] - 2026-05-28
 ### Changed
 

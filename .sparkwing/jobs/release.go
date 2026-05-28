@@ -117,7 +117,12 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	bumpSelf.Needs(discover, gatePreCommit, gatePrePush)
+	// Serialized after changelog: both jobs stage a file and then
+	// `git commit -m ...` without path scoping. Running in parallel
+	// caused whichever committed second to find "nothing to commit"
+	// because the first commit swept up both staged files. Observed
+	// on the v0.5.0 and v0.5.1 cuts; both needed manual finishing.
+	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, changelog)
 
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,

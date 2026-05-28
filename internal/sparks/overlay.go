@@ -143,13 +143,19 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 
 func materializeSum(ctx context.Context, workDir, overlayPath string) error {
 	if work, present := goWorkInScope(workDir); present {
-		return fmt.Errorf(
-			"sparks: cannot materialize sum file while %s is in effect "+
-				"(go toolchain refuses -modfile in workspace mode). "+
-				"Rename or remove the workspace file to refresh sparks pins, "+
-				"or set GOWORK=off in this shell for the resolve step",
+		// Workspace mode: skip with a single-line warning. The build
+		// step (internal/bincache) already detects the same workspace
+		// and skips `-modfile=overlay` accordingly, so an unmaterialized
+		// .resolved.sum is harmless -- the overlay is dormant for this
+		// build regardless. Erroring here forced operators to choose
+		// between dogfood workspaces and any sparkwing command at all;
+		// matching bincache's tolerant behavior is the consistent fix.
+		fmt.Fprintf(os.Stderr,
+			"sparks: %s in effect; skipping .resolved.sum materialization "+
+				"(workspace mode resolves modules from go.work, not the overlay).\n",
 			work,
 		)
+		return nil
 	}
 	// `go mod download -modfile=X` without a pattern only resolves
 	// the modules explicitly listed in X -- not their transitive
