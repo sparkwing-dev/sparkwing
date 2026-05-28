@@ -16,6 +16,21 @@ import (
 // sparkwing.RefToLastRun, which reads the most recent successful
 // run without triggering anything.
 //
+// Remote-handoff primitive: RunAndAwait always submits the new run
+// as a trigger through the controller, which dispatches it to a
+// runner that fetches source via gitcache and executes the pipeline
+// in a separate process. That makes it the right tool for
+// cross-process work (different repo, different fleet, different
+// schedule) and the wrong tool for in-process composition. When
+// pipeline A in this repo wants to invoke pipeline B's job(s)
+// inline -- same package, same orchestrator, same filesystem --
+// import B's exported job type and add it to A's plan via
+// sparkwing.Job(plan, name, &B{}). The job runs as a regular node,
+// sub-steps appear natively in the parent's event stream, and
+// there's no controller hop. See .sparkwing/jobs/release.go for an
+// example (the release pipeline composes PreCommit and PrePush
+// directly as gate-pre-commit and gate-pre-push nodes).
+//
 // The two type parameters:
 //
 //   - Out: the JSON-decoded return type (the target node's output).
