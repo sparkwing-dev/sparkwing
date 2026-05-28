@@ -601,6 +601,15 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 		fmt.Fprintln(w, "  "+p.color("status ", ansiDim)+" "+statusLine)
 	}
 
+	// Lead with the root cause: the node(s) that actually errored
+	// (outcome=failed) and a one-line error tail, with cascaded
+	// cancellations summarized separately so they don't read as
+	// failures.
+	if status == "failed" && summary != nil {
+		nodes, _ := summary.Attrs["nodes"].([]any)
+		p.writeFailureHeadline(w, nodes)
+	}
+
 	type nodeErr struct {
 		nodeID string
 		errMsg string
@@ -726,6 +735,65 @@ func (p *PrettyRenderer) writeRunBlockSummaries(w io.Writer, nodes []any) {
 	}
 }
 
+// writeFailureHeadline names the root-cause node(s) -- those whose
+// outcome is "failed", i.e. they ran and errored -- with a one-line
+// error tail, then summarizes how many downstream nodes were cancelled
+// by that failure. The cancelled count is a cascade, not a set of
+// independent failures, so it's reported separately rather than mixed
+// into the failure list.
+func (p *PrettyRenderer) writeFailureHeadline(w io.Writer, nodes []any) {
+	cancelled := 0
+	var failed []map[string]any
+	for _, n := range nodes {
+		m, ok := n.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch m["outcome"] {
+		case "failed":
+			failed = append(failed, m)
+		case "cancelled":
+			cancelled++
+		}
+	}
+	for _, m := range failed {
+		id, _ := m["id"].(string)
+		line := "  " + p.color("cause  ", ansiDim) + " " + p.color(id, p.hueFor(id))
+		if msg, _ := m["error"].(string); msg != "" {
+			_, body := splitStepErrorPrefix(msg)
+			if tail := errorTail(body); tail != "" {
+				line += p.color(" │ ", ansiDim) + p.color(tail, ansiRed)
+			}
+		}
+		fmt.Fprintln(w, line)
+	}
+	if cancelled > 0 {
+		fmt.Fprintln(w, "  "+p.color("cascade", ansiDim)+" "+
+			p.color(fmt.Sprintf("%d node%s cancelled by the failure", cancelled, pluralS(cancelled)), ansiYellow))
+	}
+}
+
+// errorTail collapses a (possibly multi-line) error to its last
+// non-empty line, truncated for the one-line headline. The last line
+// is usually the proximate cause; the full text stays in the Errors
+// block below.
+func errorTail(body string) string {
+	const max = 120
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	tail := ""
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			tail = strings.TrimSpace(lines[i])
+			break
+		}
+	}
+	r := []rune(tail)
+	if len(r) > max {
+		return string(r[:max-1]) + "…"
+	}
+	return tail
+}
+
 func (p *PrettyRenderer) writeRunBlockNodeRow(w io.Writer, m map[string]any) {
 	id, _ := m["id"].(string)
 	oc, _ := m["outcome"].(string)
@@ -749,11 +817,12 @@ func (p *PrettyRenderer) writeRunBlockNodeRow(w io.Writer, m map[string]any) {
 }
 
 type summaryCounts struct {
-	total   int
-	passed  int
-	failed  int
-	skipped int
-	other   int
+	total     int
+	passed    int
+	failed    int
+	cancelled int
+	skipped   int
+	other     int
 }
 
 func summaryTally(nodes []any) summaryCounts {
@@ -770,7 +839,12 @@ func summaryTally(nodes []any) summaryCounts {
 			c.passed++
 		case "failed":
 			c.failed++
-		case "skipped", "skipped-concurrent", "cancelled":
+		case "cancelled":
+			// Upstream-failure cascade; kept distinct from skipped (a
+			// SkipIf / filter decision) so the tally doesn't read as
+			// "everything downstream also broke."
+			c.cancelled++
+		case "skipped", "skipped-concurrent":
 			c.skipped++
 		default:
 			c.other++
@@ -786,6 +860,9 @@ func (c summaryCounts) format(p *PrettyRenderer) string {
 	}
 	if c.failed > 0 {
 		parts = append(parts, p.color(fmt.Sprintf("%d failed", c.failed), ansiRed))
+	}
+	if c.cancelled > 0 {
+		parts = append(parts, p.color(fmt.Sprintf("%d cancelled", c.cancelled), ansiYellow))
 	}
 	if c.skipped > 0 {
 		parts = append(parts, p.color(fmt.Sprintf("%d skipped", c.skipped), ansiDim))

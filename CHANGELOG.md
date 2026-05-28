@@ -73,6 +73,13 @@ code change to unlock.
 
 ### Changed
 
+- **cli (Changed):** The `run_summary` headline now leads with the
+  root-cause node -- the one that actually errored -- and a one-line
+  error tail, then reports cascaded cancellations separately
+  ("N nodes cancelled by the failure"). The node tally splits
+  `cancelled` (an upstream-failure cascade) from `skipped` (a SkipIf /
+  filter decision) instead of lumping both, so a single broken leaf no
+  longer reads as a wall of failures.
 - **orchestrator (Changed):** A node that spawns a child pipeline via
   `RunAndAwait` now emits structured `child_run_start` and
   `child_run_finish` events into the parent's stream. `child_run_finish`
