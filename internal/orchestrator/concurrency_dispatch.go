@@ -282,6 +282,14 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 		defer timer.Stop()
 	}
 
+	// QueueTimeout bounds a queued waiter's wait. Zero = wait forever
+	// (historical behavior). Only the Queue policy honors it; Coalesce
+	// and CancelOthers resolve on the leader / eviction path instead.
+	var queueDeadline time.Time
+	if opts.QueueTimeout > 0 && initial.Kind == store.AcquireQueued {
+		queueDeadline = time.Now().Add(opts.QueueTimeout)
+	}
+
 	// In-process only (cluster's HTTPConcurrency stubs ResolveWaiter).
 	const pollInterval = 100 * time.Millisecond
 	ticker := time.NewTicker(pollInterval)
@@ -304,6 +312,9 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 
 		switch res.Status {
 		case store.WaiterStillWaiting:
+			if !queueDeadline.IsZero() && time.Now().After(queueDeadline) {
+				return r.failQueueTimeout(ctx, req, opts)
+			}
 			continue
 		case store.WaiterPromoted:
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
@@ -319,6 +330,26 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 			return runner.Result{Outcome: sparkwing.Superseded, Err: err}
 		}
 	}
+}
+
+// failQueueTimeout cleans up a waiter that exhausted its QueueTimeout:
+// it drops the parked waiter row so a later release can't promote a
+// node that already gave up, then finalizes the node as failed with
+// failure_reason "queue_timeout".
+func (r *InProcessRunner) failQueueTimeout(ctx context.Context, req runner.Request, opts sparkwing.CacheOptions) runner.Result {
+	if _, err := r.backends.Concurrency.CancelWaiter(ctx, opts.Namespace, req.RunID, req.Node.ID()); err != nil {
+		slog.Warn("cancel waiter after queue timeout failed; reaper will sweep it",
+			"key", opts.Namespace, "run", req.RunID, "node", req.Node.ID(), "err", err)
+	}
+	err := fmt.Errorf("concurrency key %q: queued %s without a slot under OnLimit:Queue", opts.Namespace, opts.QueueTimeout)
+	payload, _ := json.Marshal(map[string]any{
+		"key":           opts.Namespace,
+		"queue_timeout": opts.QueueTimeout.String(),
+	})
+	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_queue_timeout", payload)
+	_ = r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(),
+		string(sparkwing.Failed), err.Error(), nil, store.FailureQueueTimeout, nil)
+	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
 // inheritLeaderOutcome adopts the leader's terminal outcome + output

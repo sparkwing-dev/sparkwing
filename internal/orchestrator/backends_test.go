@@ -364,6 +364,10 @@ func (f *fakeConcurrency) ForceReleaseSuperseded(ctx context.Context, key string
 	return nil, nil
 }
 
+func (f *fakeConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	return false, nil
+}
+
 func errIs(err error, substr string) bool {
 	return err != nil && (err.Error() == substr || containsStr(err.Error(), substr))
 }

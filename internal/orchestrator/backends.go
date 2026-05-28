@@ -69,6 +69,11 @@ type ConcurrencyBackend interface {
 	// ForceReleaseSuperseded drops superseded=1 holders so a stuck
 	// CancelOthers eviction can't block forward progress.
 	ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error)
+
+	// CancelWaiter removes a parked waiter row so it won't later be
+	// promoted to a holder. The QueueTimeout path uses it to clean up
+	// after a waiter that gave up. Reports whether a row matched.
+	CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 }
 
 // LocalBackends builds a Backends bundle over a local SQLite store
@@ -436,6 +441,10 @@ func (l localConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 
 func (l localConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
 	return l.st.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID)
+}
+
+func (l localConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	return l.st.CancelWaiter(ctx, key, runID, nodeID)
 }
 
 func (l localConcurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {

@@ -94,7 +94,11 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 			defer timer.Stop()
 		}
 
-		promoted, err := waitForPlanSlot(ctx, backends, opts.Namespace, runID, holderID)
+		queueTimeout := time.Duration(0)
+		if resp.Kind == store.AcquireQueued {
+			queueTimeout = opts.QueueTimeout
+		}
+		promoted, err := waitForPlanSlot(ctx, backends, opts.Namespace, runID, holderID, queueTimeout)
 		if err != nil {
 			return nil, "", err
 		}
@@ -112,8 +116,14 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 }
 
 // waitForPlanSlot polls until promoted or cancelled. Plans never
-// inherit output, so only those two outcomes are meaningful.
-func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderID string) (bool, error) {
+// inherit output, so only those two outcomes are meaningful. A
+// non-zero queueTimeout bounds the wait: once it elapses the parked
+// waiter is cancelled and the run fails with a queue_timeout error.
+func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderID string, queueTimeout time.Duration) (bool, error) {
+	var deadline time.Time
+	if queueTimeout > 0 {
+		deadline = time.Now().Add(queueTimeout)
+	}
 	const pollInterval = 100 * time.Millisecond
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -129,6 +139,17 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 		}
 		switch res.Status {
 		case store.WaiterStillWaiting:
+			if !deadline.IsZero() && time.Now().After(deadline) {
+				if _, cerr := backends.Concurrency.CancelWaiter(ctx, key, runID, ""); cerr != nil {
+					slog.Warn("cancel plan waiter after queue timeout failed; reaper will sweep it",
+						"key", key, "run", runID, "err", cerr)
+				}
+				payload, _ := json.Marshal(map[string]any{
+					"scope": "plan", "key": key, "queue_timeout": queueTimeout.String(),
+				})
+				_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_queue_timeout", payload)
+				return false, fmt.Errorf("plan concurrency namespace %q: queued %s without a slot under OnLimit:Queue", key, queueTimeout)
+			}
 			continue
 		case store.WaiterPromoted:
 			return true, nil

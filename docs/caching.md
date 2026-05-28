@@ -1,7 +1,7 @@
 # Caching
 
 The current cache model is content-addressed **node** caching via the
-`*Job.CacheKey(fn)` modifier plus a top-level `sparkwing.Key(...)`
+`.Cache(CacheOptions{...})` modifier plus a top-level `sparkwing.Key(...)`
 builder. See [sdk.md](sdk.md) for the modifier reference and
 [pipelines.md](pipelines.md) for usage in the Plan/Work model.
 
@@ -20,10 +20,10 @@ This doc is about (1).
 ## The model
 
 ```go
-build := sw.Job(plan, "build", &Build{}).Cache(sw.CacheOptions{
-    Key: "build",
-    CacheKey: func(ctx context.Context) sw.CacheKey {
-        return sw.Key("build", target, sourceDigest.Get(ctx))
+build := plan.Add("build", &Build{}).Cache(sparkwing.CacheOptions{
+    Namespace: "build",
+    ContentHash: func(ctx context.Context) sparkwing.CacheKey {
+        return sparkwing.Key("build", target, sourceDigest.Get(ctx))
     },
 })
 ```
@@ -70,6 +70,40 @@ Determinism caveats (from `sparkwing/cachekey.go`):
 The entire node body. No `Run` invocation, no step logs, no exec. The
 cached output is materialized into the downstream `Ref[T]` as if the
 node had just completed. Downstream nodes observe no difference.
+
+## Gate-shaped pipelines: queue, don't fail
+
+When several processes contend for one shared resource -- a deploy slot,
+a migration lock, a single-writer index -- the instinct is to reach for
+`OnLimit: Fail` and have callers retry. Don't. `OnLimit: Fail` pushes the
+poll-and-retry loop onto every caller, and a CI gate run that loses the
+race aborts with `slot full under OnLimit:Fail` instead of waiting its
+turn. The gate-shaped pattern is `OnLimit: Queue`: arrivals line up FIFO
+on the namespace and run one at a time, no caller-side retry loop.
+
+The one thing a queue needs that a naive mutex doesn't is a way out. Set
+`QueueTimeout` so a contending run waits a bounded time for the slot
+rather than blocking forever behind a wedged holder:
+
+```go
+gate := plan.Add("deploy", &Deploy{}).Cache(sparkwing.CacheOptions{
+    Namespace:    "deploy-prod",
+    OnLimit:      sparkwing.Queue,
+    QueueTimeout: 30 * time.Second,
+})
+```
+
+On timeout the node fails with `failure_reason: queue_timeout` (distinct
+from a generic failure, so dashboards and `sparkwing runs` can tell "lost
+the race for too long" apart from "the work itself broke"). The waiter is
+removed from the queue, so a later release won't hand the slot to a run
+that already gave up. The calling layer can then retry the trigger once
+or surface a clean "gate busy" failure -- its choice, not the SDK's.
+
+`QueueTimeout` is zero by default, which preserves the historical
+"wait indefinitely" behavior. It only applies to `OnLimit: Queue`;
+`Coalesce` and `CancelOthers` resolve on their own leader / eviction
+paths.
 
 ## Limitations
 

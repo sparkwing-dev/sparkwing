@@ -50,6 +50,11 @@ code change to unlock.
 
 ### Added
 
+- **sdk:** `CacheOptions.QueueTimeout` for queue-shaped concurrency.
+  When set, a queued arrival under `OnLimit: Queue` that doesn't get a
+  slot within the duration fails cleanly with `failure_reason:
+  queue_timeout` instead of waiting indefinitely. Zero (the default)
+  preserves the wait-forever behavior.
 - **cli:** `sparkwing pipeline trigger <name> --profile <p>` submits a
   trigger to the named profile's controller and tails the remote run by
   default; `--detach` for fire-and-forget. Replaces `sparkwing run --on`
@@ -117,6 +122,10 @@ code change to unlock.
 
 ### Docs
 
+- **docs:** New "Gate-shaped pipelines" section in `docs/caching.md`
+  documenting `OnLimit: Queue` plus `QueueTimeout` as the recommended
+  pattern for CI gates contended across processes, instead of
+  hand-rolling poll-and-retry around `OnLimit: Fail`.
 - **docs:** New migration guide at `docs/migrations/v0.5.0.md` covering
   the config flatten, the new `pipeline trigger` verb, the `--profile`
   unification, and the dual-write state model.

@@ -108,6 +108,17 @@ type CacheOptions struct {
 	// terminal state before the controller force-releases the slot.
 	// Default 60s.
 	CancelTimeout time.Duration
+
+	// QueueTimeout applies only to OnLimit: Queue. Bounds how long a
+	// queued arrival waits for a slot before giving up. Zero (the
+	// default) means wait indefinitely -- the historical behavior. When
+	// set, a waiter that hasn't been promoted within the duration fails
+	// cleanly with failure_reason "queue_timeout" instead of blocking
+	// the run forever. This is the knob a gate-shaped pipeline shared
+	// across processes wants: serialize on the namespace, but don't hang
+	// a contending run indefinitely. Only meaningful with a set
+	// Namespace and OnLimit: Queue.
+	QueueTimeout time.Duration
 }
 
 // HasNamespace reports whether these options declare coordination.
@@ -139,6 +150,9 @@ func (o CacheOptions) rejectTypoShape(ctx string) {
 	if o.CancelTimeout != 0 {
 		set = append(set, "CancelTimeout")
 	}
+	if o.QueueTimeout != 0 {
+		set = append(set, "QueueTimeout")
+	}
 	if len(set) == 0 {
 		return
 	}
@@ -155,6 +169,9 @@ func (o *CacheOptions) validate(ctx string, isPlan bool) {
 	}
 	if o.CacheTTL < 0 {
 		panic(fmt.Sprintf("sparkwing: Cache on %s: CacheTTL must be >= 0, got %s", ctx, o.CacheTTL))
+	}
+	if o.QueueTimeout < 0 {
+		panic(fmt.Sprintf("sparkwing: Cache on %s: QueueTimeout must be >= 0, got %s", ctx, o.QueueTimeout))
 	}
 	if isPlan && o.OnLimit == Coalesce {
 		panic("sparkwing: Cache on plan: OnLimit:Coalesce is node-only (coalescing whole runs is meaningless; scope .Cache() to a gate node instead)")

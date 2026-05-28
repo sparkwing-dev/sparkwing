@@ -85,6 +85,10 @@ func (*noopConcurrency) ForceReleaseSuperseded(_ context.Context, _ string) ([]s
 	return nil, nil
 }
 
+func (*noopConcurrency) CancelWaiter(_ context.Context, _, _, _ string) (bool, error) {
+	return false, nil
+}
+
 // isCoordinatingPolicy reports whether the requested OnLimit policy
 // implies a coordination contract this backend cannot honor. Empty
 // policy means "no Cache() declared, no coordination expected";

@@ -112,6 +112,43 @@ func TestCacheOptions_PanicsOnNegativeTTL(t *testing.T) {
 	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Namespace: "k", CacheTTL: -time.Second})
 }
 
+func TestCacheOptions_QueueTimeoutPreserved(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	n := sparkwing.Job(plan, "gate", &buildJob{}).Cache(sparkwing.CacheOptions{
+		Namespace:    "deploy-prod",
+		OnLimit:      sparkwing.Queue,
+		QueueTimeout: 30 * time.Second,
+	})
+	if got := n.CacheOpts().QueueTimeout; got != 30*time.Second {
+		t.Fatalf("QueueTimeout = %s, want 30s", got)
+	}
+}
+
+func TestCacheOptions_PanicsOnNegativeQueueTimeout(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on QueueTimeout<0")
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Namespace: "k", QueueTimeout: -time.Second})
+}
+
+func TestCacheOptions_NodeRejectsTypoShape_QueueTimeoutWithoutNamespace(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on QueueTimeout without Namespace")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "QueueTimeout") || !strings.Contains(msg, "Namespace") {
+			t.Fatalf("panic should name QueueTimeout and Namespace, got %q", msg)
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{QueueTimeout: time.Second})
+}
+
 func TestCacheOptions_PlanLevelRejectsCoalesce(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	defer func() {

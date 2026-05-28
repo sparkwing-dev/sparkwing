@@ -96,3 +96,15 @@ func (h *HTTPConcurrency) ForceReleaseSuperseded(ctx context.Context, key string
 	_ = key
 	return nil, nil
 }
+
+// CancelWaiter has no HTTP wire today: in-pod orchestrators don't wait
+// locally (ResolveWaiter is stubbed), so the QueueTimeout path that
+// cancels a waiter never runs against this backend. The controller's
+// reaper sweeps stale waiters on age.
+func (h *HTTPConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	_ = ctx
+	_ = key
+	_ = runID
+	_ = nodeID
+	return false, nil
+}
