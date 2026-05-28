@@ -88,11 +88,23 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
+	// Substance gates: run the same pre-commit + pre-push pipelines a
+	// human push faces, as child runs (via RunAndAwait), before any
+	// release-time mutation. Each runs in parallel with the other after
+	// check-clean-tree. Without these, lint / em-dash / race / vuln
+	// regressions catchable by an everyday push slip past the release
+	// path -- see docs/proposals/release-pipeline-gates.md.
+	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &runPipelineGateJob{Pipeline: "pre-commit"})
+	gatePreCommit.Needs(clean)
+
+	gatePrePush := sparkwing.Job(plan, "gate-pre-push", &runPipelineGateJob{Pipeline: "pre-push"})
+	gatePrePush.Needs(clean)
+
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	changelog.Needs(discover, clean)
+	changelog.Needs(discover, gatePreCommit, gatePrePush)
 
 	// Bump .sparkwing/go.mod's sparkwing pin to the release version
 	// and strip the dogfood self-replace before push-tag. The replace
@@ -104,7 +116,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	bumpSelf.Needs(discover, clean)
+	bumpSelf.Needs(discover, gatePreCommit, gatePrePush)
 
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
@@ -121,6 +133,32 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 	restoreSelf.Needs(pushTag)
+	return nil
+}
+
+// runPipelineGateJob runs another sparkwing pipeline as a child run
+// and fails this run if the child fails. The release pipeline uses it
+// to enforce that pre-commit + pre-push pass before any release-time
+// mutation (CHANGELOG rewrite, self-replace strip, tag push). The
+// child pipeline name doubles as the awaited node name -- both
+// pre-commit and pre-push are single-node pipelines whose node id
+// matches the pipeline name.
+type runPipelineGateJob struct {
+	sparkwing.Base
+	Pipeline string
+}
+
+func (j *runPipelineGateJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+	return nil, nil
+}
+
+func (j *runPipelineGateJob) run(ctx context.Context) error {
+	sparkwing.Info(ctx, "gating release on child pipeline %q", j.Pipeline)
+	_, err := sparkwing.RunAndAwait[any, sparkwing.NoInputs](ctx, j.Pipeline, j.Pipeline)
+	if err != nil {
+		return fmt.Errorf("release gate %q failed: %w", j.Pipeline, err)
+	}
 	return nil
 }
 
