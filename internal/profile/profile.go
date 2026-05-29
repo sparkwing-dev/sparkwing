@@ -94,6 +94,18 @@ type Profile struct {
 	// default (true); set false for automated workers that fire and
 	// forget. Consume via EffectiveMirrorLocal.
 	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
+
+	// DefaultArgs supplies default values for pipeline-declared args
+	// when this profile is the resolved one. Keys are arg names
+	// (matching the CLI flag form, e.g. "target"); values are strings
+	// that the resolution chain converts to the arg's declared Go
+	// type at run time. Supports ${VAR} env interpolation -- nothing
+	// fancier; see ResolveDefaultArgs for the supported syntax.
+	//
+	// An explicit --flag on the CLI overrides DefaultArgs; DefaultArgs
+	// in turn overrides per-field Default declarations on the
+	// pipeline's schema.
+	DefaultArgs map[string]string `yaml:"default-args,omitempty"`
 }
 
 // Surfaces returns the profile's State/Cache/Logs as a
