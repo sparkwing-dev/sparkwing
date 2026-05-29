@@ -25,12 +25,19 @@ type Pipeline struct {
 
 	Targets map[string]Target
 
+	Args PipelineArgs
+
 	Values PipelineValues
 }
+func (p *Pipeline) EffectiveTargets() map[string]Target
+func (p *Pipeline) HasLegacyTargets() bool
 func (p *Pipeline) HasTarget(name string) bool
 func (p *Pipeline) TargetNames() []string
 func (p *Pipeline) TriggerTarget(source string) string
 func (p *Pipeline) TriggerValues(source string) map[string]any
+func (p *Pipeline) ValidateArgs() error
+type PipelineArgs map[string]map[string]Target
+func (a PipelineArgs) Target() map[string]Target
 type PipelineValues struct {
 	Base map[string]any
 

@@ -48,6 +48,50 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** Typed-args system for jobs via `sparkwing.WithArgs[T]`.
+  Jobs embed `WithArgs[ArgsStruct]` to declare a typed args struct;
+  the framework reflects on the struct at registration time to build
+  the CLI flag surface (kebab-cased from field names; `flag:"..."`
+  tag overrides; `desc:"..."` tag carries help text). Step bodies
+  read the resolved args via `j.Args(ctx)`. Jobs without typed args
+  keep working unchanged.
+- **sdk:** Optional `Schema()` method on a job declares constraints:
+  `Required`, `RequiredWhen(predicate)`, `Default`, `Computed(fn)`,
+  `DependsOn`, `Bind`, `OneOf`, `Min`/`Max`/`Range`/`Positive`,
+  `Custom(fn)`. Cross-field rules via `Group(...).ExactlyOne()` /
+  `.AtLeastOne()` / `.AtMostOne()` / `.AllOrNone()` with optional
+  `.When(predicate)` and `.Desc(msg)` decorators. See
+  [migration guide](docs/migrations/v0.6.0.md) for the full vocabulary.
+- **sdk:** Predicate vocabulary for the resolution chain:
+  `ArgEq`/`ArgNeq`/`ArgIn`/`ArgSet`/`ArgUnset` plus combinators
+  `And`/`Or`/`Not` and context predicates `Local`/`Remote`/
+  `Profile(name)`/`Always`. All real Go values, composable.
+- **sdk:** `sparkwing.Arg[T](ctx, name)` accessor reads any resolved
+  arg by its CLI flag name; pairs with `sparkwing.ArgOrDefault[T]`
+  for the fallback case.
+- **config:** Per-pipeline `args:` block in `.sparkwing/sparkwing.yaml`.
+  `args.target:` is the v0.6 home for the schema-bearing target
+  binding (runners/source/secrets per target value). Legacy top-level
+  `targets:` keeps parsing for back-compat; mixing both on one
+  pipeline errors at load time. See
+  [migration guide](docs/migrations/v0.6.0.md).
+- **config:** Profile `default-args:` block defaults any pipeline-
+  declared arg when the profile is active. Supports `${VAR}` env
+  interpolation; richer shell-style syntax is rejected at parse time.
+
+### Changed
+
+- **cli:** `sparkwing.Target(ctx)` is deprecated in favor of
+  `sparkwing.Arg[string](ctx, "target")`. The old accessor stays as
+  a sugar wrapper through v0.6; removal is targeted for v0.7.
+- **cli:** `--target` is no longer a framework-defined flag; it
+  surfaces only when the active pipeline declares an `args.target:`
+  block. The v0.5 "multi-target requires `--target`" gate generalizes
+  to "arg X has multiple values and no default; pass `--X` or set
+  `default-args.X` on the profile".
+
 ### Fixed
 
 - **release:** `prepare-changelog` and `bump-self-replace` no longer
@@ -63,6 +107,13 @@ code change to unlock.
   workspace-mode tolerance in `internal/bincache`. Operators
   iterating against a local dogfood workspace can run
   `sparkwing run <pipeline>` without setting `GOWORK=off` first.
+
+### Docs
+
+- **docs:** New v0.6.0 migration guide at
+  `docs/migrations/v0.6.0.md` covering the `targets:` →
+  `args.target:` rewrite, optional `WithArgs[T]` adoption, profile
+  `default-args:`, and the `sparkwing.Target(ctx)` deprecation.
 
 ## [v0.5.1] - 2026-05-28
 ### Changed
