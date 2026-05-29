@@ -20,12 +20,6 @@ type ResolveInputs struct {
 	// Go type during binding.
 	FlagValues map[string]string
 
-	// ProfileDefaults is the resolved profile's default-args map,
-	// keyed identically to FlagValues. Lower priority than explicit
-	// FlagValues -- the resolver only consults it when FlagValues
-	// has no entry for that flag.
-	ProfileDefaults map[string]string
-
 	// ProfileName / ProfileIsLocal feed the predicate context used
 	// by RequiredWhen and group .When() evaluation. ProfileIsLocal
 	// is true when the resolved profile has no controller.
@@ -148,7 +142,8 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 // returns (value, set, err). set=false means no source provided a
 // value; the caller leaves the struct field at its zero value.
 func (s *Schema) resolveField(m *fieldMeta, args reflect.Value, resolved map[string]any, in ResolveInputs) (reflect.Value, bool, error) {
-	// 1. Explicit CLI flag wins.
+	// 1. Explicit CLI flag wins (post-merge with YAML defaults at the
+	//    orchestrator boundary, so this layer sees the union).
 	if raw, ok := in.FlagValues[m.Flag]; ok {
 		v, err := parseTypedValue(raw, m.GoType)
 		if err != nil {
@@ -156,20 +151,12 @@ func (s *Schema) resolveField(m *fieldMeta, args reflect.Value, resolved map[str
 		}
 		return v, true, nil
 	}
-	// 2. Profile default-args.
-	if raw, ok := in.ProfileDefaults[m.Flag]; ok {
-		v, err := parseTypedValue(raw, m.GoType)
-		if err != nil {
-			return reflect.Value{}, false, fmt.Errorf("parse profile default-args value %q: %w", raw, err)
-		}
-		return v, true, nil
-	}
-	// 3. Computed (function of already-resolved args).
+	// 2. Computed (function of already-resolved args).
 	if m.HasComputed {
 		out := m.Computed.Call([]reflect.Value{args})
 		return out[0].Convert(m.GoType), true, nil
 	}
-	// 4. Literal default.
+	// 3. Literal default.
 	if m.HasDefault {
 		v, err := coerceToType(m.Default, m.GoType)
 		if err != nil {

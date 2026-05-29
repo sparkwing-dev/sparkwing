@@ -25,27 +25,20 @@ func mustBuild[T any](t *testing.T, fn func(*SchemaBuilder[T])) *Schema {
 	return s
 }
 
-func TestResolve_FlagBeatsProfileBeatsDefault(t *testing.T) {
+func TestResolve_FlagBeatsDefault(t *testing.T) {
 	s := mustBuild(t, func(sb *SchemaBuilder[argresArgs]) {
 		sb.Field("Replicas").Default(1)
 	})
 
-	// Default kicks in: no flag, no profile -> 1.
+	// Default kicks in: no flag -> 1.
 	a, err := ResolveAs[argresArgs](s, ResolveInputs{})
 	if err != nil || a.Replicas != 1 {
 		t.Fatalf("default tier: got %+v err=%v", a, err)
 	}
 
-	// Profile beats default.
-	a, err = ResolveAs[argresArgs](s, ResolveInputs{ProfileDefaults: map[string]string{"replicas": "5"}})
-	if err != nil || a.Replicas != 5 {
-		t.Fatalf("profile tier: got %+v err=%v", a, err)
-	}
-
-	// Flag beats profile.
+	// Flag beats default.
 	a, err = ResolveAs[argresArgs](s, ResolveInputs{
-		FlagValues:      map[string]string{"replicas": "9"},
-		ProfileDefaults: map[string]string{"replicas": "5"},
+		FlagValues: map[string]string{"replicas": "9"},
 	})
 	if err != nil || a.Replicas != 9 {
 		t.Fatalf("flag tier: got %+v err=%v", a, err)
@@ -217,18 +210,18 @@ func TestResolve_BoolFlagParsing(t *testing.T) {
 	}
 }
 
-func TestResolve_ProfileDefaultArgsApplyByFlagName(t *testing.T) {
+func TestResolve_FlagValuesApplyByFlagName(t *testing.T) {
 	s := mustBuild(t, func(sb *SchemaBuilder[argresArgs]) {
-		// no constraints; just verify profile default-args route by flag.
+		// no constraints; just verify flag-keyed values route by flag.
 	})
 	a, err := ResolveAs[argresArgs](s, ResolveInputs{
-		ProfileDefaults: map[string]string{"pool-size": "12", "image": "foo"},
+		FlagValues: map[string]string{"pool-size": "12", "image": "foo"},
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if a.PoolSize != 12 || a.Image != "foo" {
-		t.Errorf("profile defaults didn't apply by flag name; got %+v", a)
+		t.Errorf("flag values didn't apply by flag name; got %+v", a)
 	}
 }
 

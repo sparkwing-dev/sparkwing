@@ -10,9 +10,8 @@ import (
 
 func TestWithProfileResolution_InstallsRoundTrip(t *testing.T) {
 	pr := sparkwing.ProfileResolutionContext{
-		Defaults: map[string]string{"target": "prod", "version": "0.6.1"},
-		Name:     "prod",
-		IsLocal:  false,
+		Name:    "prod",
+		IsLocal: false,
 	}
 	ctx := sparkwingruntime.WithProfileResolution(context.Background(), pr)
 
@@ -20,7 +19,7 @@ func TestWithProfileResolution_InstallsRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("install did not register the ProfileResolutionContext under the runtime key")
 	}
-	if got.Name != "prod" || got.IsLocal != false || got.Defaults["target"] != "prod" {
+	if got.Name != "prod" || got.IsLocal != false {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", got, pr)
 	}
 }

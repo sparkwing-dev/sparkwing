@@ -11,11 +11,11 @@ import (
 // SDK's Schema.Resolve sees them at registration-invoke time.
 // Counterpart to WithResolvedArgs on the post-resolve side.
 //
-// Pass a zero-valued struct (or nil-equivalent fields) to skip the
-// install. A truly zero context is treated by the resolver as "no
-// profile defaults, no name, local execution".
+// Pass a zero-valued struct to skip the install. A truly zero
+// context is treated by the resolver as "no profile name, not local"
+// -- predicates like Local() and Profile(name) evaluate to false.
 func WithProfileResolution(ctx context.Context, pr sparkwing.ProfileResolutionContext) context.Context {
-	if pr.Defaults == nil && pr.Name == "" && !pr.IsLocal {
+	if pr.Name == "" && !pr.IsLocal {
 		return ctx
 	}
 	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.ProfileResolution, pr)

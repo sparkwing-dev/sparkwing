@@ -179,10 +179,9 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		if !skipArgResolveFromContext(ctx) {
 			pr := profileResolutionFromContext(ctx)
 			resolveIn := ResolveInputs{
-				FlagValues:      args,
-				ProfileDefaults: pr.Defaults,
-				ProfileName:     pr.Name,
-				ProfileIsLocal:  pr.IsLocal,
+				FlagValues:     args,
+				ProfileName:    pr.Name,
+				ProfileIsLocal: pr.IsLocal,
 			}
 			resolved, err := resolveAndBindJobArgs(plan, resolveIn)
 			if err != nil {

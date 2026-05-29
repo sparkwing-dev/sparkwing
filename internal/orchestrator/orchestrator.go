@@ -383,49 +383,56 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwing.WithPipelineConfig(ctx, pipeCfg)
 	}
 
-	// Mirror opts.Target into Args["target"] so v0.6 schema-driven
-	// jobs (WithArgs[T] with a Bind("target") field, or pipelines that
-	// declared args.target: in YAML) see the resolved value through
-	// the same FlagValues path that --replicas / --image / etc. take.
-	// opts.Target itself stays the canonical source for OnTarget /
-	// PipelineYAML overlays / SetGit / SPARKWING_TARGET env-var
-	// forwarding -- this is purely additive for the args resolver.
-	invokeArgs := opts.Args
-	if opts.Target != "" {
-		if _, set := invokeArgs["target"]; !set {
-			merged := make(map[string]string, len(invokeArgs)+1)
-			for k, v := range invokeArgs {
-				merged[k] = v
+	// Lock enforcement: when the pipeline YAML lists a flag as
+	// `locked:`, the operator may not pass it explicitly. Surfaces
+	// before any plan / dispatch work so the error mode is loud and
+	// the pipeline's policy override is honored verbatim.
+	if opts.PipelineYAML != nil {
+		if locked := opts.PipelineYAML.LockedSet(); len(locked) > 0 {
+			for k := range opts.Args {
+				if _, isLocked := locked[k]; isLocked {
+					err := fmt.Errorf("--%s is locked by pipeline %q; remove the flag or use a different pipeline",
+						k, opts.Pipeline)
+					_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+					return &Result{RunID: runID, Status: "failed", Error: err}, nil
+				}
 			}
-			merged["target"] = opts.Target
-			invokeArgs = merged
 		}
 	}
 
-	// Profile resolution for the v0.6 args resolver: default-args
-	// map, profile name (for Profile(name) predicates), and
-	// local-vs-remote flag (for Local/Remote predicates). Install on
-	// ctx so the registration's invoke() can hand it to
-	// Schema.Resolve. Local-only profiles are detected by the absence
-	// of a controller URL; nil opts.Profile (no profile chain in
-	// scope) collapses to a zero-value install that's a no-op.
-	var profDefaults map[string]string
+	// Defaults layering: build the invokeArgs map by merging the
+	// pipeline YAML's defaults: block under the operator's explicit
+	// CLI args. Explicit args always win; YAML defaults fill what
+	// the operator omitted. Schema-level Default() and Computed()
+	// run inside the registration's resolver, below the YAML layer
+	// (priority: schema.Default < YAML.defaults < schema.Computed <
+	// CLI).
+	invokeArgs := opts.Args
+	if opts.PipelineYAML != nil && len(opts.PipelineYAML.Defaults) > 0 {
+		merged := make(map[string]string, len(invokeArgs)+len(opts.PipelineYAML.Defaults))
+		for k, v := range opts.PipelineYAML.Defaults {
+			merged[k] = v
+		}
+		for k, v := range invokeArgs {
+			merged[k] = v
+		}
+		invokeArgs = merged
+	}
+
+	// Profile resolution context (name + local/remote) feeds the
+	// predicate evaluator inside the schema resolver -- Local(),
+	// Remote(), Profile(name) gates against args resolution. The
+	// per-arg defaults map is intentionally NOT plumbed here: the
+	// v0.6 redesign moved defaults into pipeline YAML.
 	var profName string
 	var profIsLocal bool
 	if opts.Profile != nil {
-		var darErr error
-		profDefaults, darErr = opts.Profile.ResolveDefaultArgs()
-		if darErr != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", darErr.Error())
-			return &Result{RunID: runID, Status: "failed", Error: darErr}, nil
-		}
 		profName = opts.Profile.Name
 		profIsLocal = opts.Profile.Controller == ""
 	}
 	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
-		Defaults: profDefaults,
-		Name:     profName,
-		IsLocal:  profIsLocal,
+		Name:    profName,
+		IsLocal: profIsLocal,
 	})
 
 	// Plan build (parse Args -> typed Inputs -> Plan). Failures fail
