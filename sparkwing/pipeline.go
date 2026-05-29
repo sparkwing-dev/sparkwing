@@ -43,7 +43,16 @@ type Registration struct {
 
 var (
 	registryMu sync.RWMutex
-	registry   = map[string]*Registration{}
+	// registry is keyed by *pipeline* name -- what the operator types
+	// after `sparkwing run`. A single registry entry produces a *Plan
+	// per invocation.
+	registry = map[string]*Registration{}
+	// entrypointRegistry is keyed by *entrypoint* name -- the YAML
+	// `entrypoint:` field. The v0.6 redesign separates the two so one
+	// entrypoint can back many pipelines: Go calls RegisterEntrypoint
+	// once with the entrypoint name; YAML enumerates pipelines and
+	// names the entrypoint for each.
+	entrypointRegistry = map[string]*Registration{}
 )
 
 // Register installs a pipeline under the given name. The factory is
@@ -82,21 +91,44 @@ var (
 //	    SkipFilterArgs   // --skip and --only become first-class flags
 //	}
 func Register[T any](name string, factory func() Pipeline[T]) {
+	reg := buildRegistration(name, factory, "sparkwing.Register")
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, exists := registry[name]; exists {
+		panic(fmt.Sprintf("sparkwing.Register(%q): already registered", name))
+	}
+	registry[name] = reg
+	// Back-compat: also register as an entrypoint under the same name
+	// so the v0.6 YAML-driven dispatch path can resolve a
+	// `entrypoint: <name>` pipeline against this same factory.
+	if _, exists := entrypointRegistry[name]; !exists {
+		entrypointRegistry[name] = reg
+	}
+}
+
+// buildRegistration is the private workhorse shared by [Register]
+// and [RegisterEntrypoint]. It builds the schema, the invoke closure,
+// and the *Registration; the caller writes the entry into the
+// appropriate registry map.
+//
+// callerLabel is the SDK-author-facing identifier ("sparkwing.Register"
+// or "sparkwing.RegisterEntrypoint") that surfaces in panic messages.
+func buildRegistration[T any](name string, factory func() Pipeline[T], callerLabel string) *Registration {
 	if name == "" {
-		panic("sparkwing.Register: name must not be empty")
+		panic(callerLabel + ": name must not be empty")
 	}
 	if factory == nil {
-		panic("sparkwing.Register: factory must not be nil")
+		panic(callerLabel + ": factory must not be nil")
 	}
 	if factory() == nil {
-		panic(fmt.Sprintf("sparkwing.Register(%q): factory returned nil", name))
+		panic(fmt.Sprintf("%s(%q): factory returned nil", callerLabel, name))
 	}
 
 	var zero T
 	t := reflect.TypeOf(zero)
 	schema, err := parseInputsSchema(t)
 	if err != nil {
-		panic(fmt.Sprintf("sparkwing.Register(%q): invalid Inputs schema on %s: %v", name, t, err))
+		panic(fmt.Sprintf("%s(%q): invalid Inputs schema on %s: %v", callerLabel, name, t, err))
 	}
 	// Wing-owned flags are prefixed sw-* (--sw-ref, --sw-profile,
 	// --sw-start-at, ...), so pipeline `flag:"..."` tags have the
@@ -192,20 +224,93 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		return plan, nil
 	}
 
-	reg := &Registration{
+	return &Registration{
 		Name:      name,
 		InputType: t,
 		Schema:    schema,
 		Invoke:    invoke,
 		instance:  func() any { return factory() },
 	}
+}
 
+// RegisterEntrypoint installs a Go work unit (the entrypoint) under
+// the given type-name, matching the `entrypoint:` field in
+// pipelines.yaml. One entrypoint can back many pipelines -- each
+// pipeline in YAML names this entrypoint and supplies its own
+// defaults / dispatch / guards / locked policy.
+//
+//	sparkwing.RegisterEntrypoint[DeployArgs]("Deploy", func() sparkwing.Pipeline[DeployArgs] {
+//	    return Deploy{}
+//	})
+//
+//	# .sparkwing/sparkwing.yaml
+//	pipelines:
+//	  - name: deploy-prod
+//	    entrypoint: Deploy
+//	    dispatch: { runners: [prod-pool] }
+//	  - name: deploy-dev
+//	    entrypoint: Deploy
+//
+// Both `sparkwing run deploy-prod` and `sparkwing run deploy-dev`
+// resolve to this same factory after [BindPipelinesFromYAML] runs
+// at the orchestrator's bootstrap.
+//
+// For the older one-pipeline-per-Go-entry model, [Register] is
+// kept as a deprecation-marked sugar wrapper that registers the
+// entrypoint AND inserts an implicit pipeline binding under the
+// same name.
+func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]) {
+	reg := buildRegistration(entrypointName, factory, "sparkwing.RegisterEntrypoint")
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if _, exists := registry[name]; exists {
-		panic(fmt.Sprintf("sparkwing.Register(%q): already registered", name))
+	if _, exists := entrypointRegistry[entrypointName]; exists {
+		panic(fmt.Sprintf("sparkwing.RegisterEntrypoint(%q): already registered", entrypointName))
 	}
-	registry[name] = reg
+	entrypointRegistry[entrypointName] = reg
+}
+
+// BindPipelinesFromYAML walks every pipeline entry in cfg and
+// installs a Registration under the pipeline's name, sharing the
+// Invoke / Schema / Instance of the registered entrypoint. The
+// orchestrator's bootstrap calls this after loading pipelines.yaml
+// so `sparkwing run <pipeline-name>` resolves via the standard
+// [Lookup] path.
+//
+// Pipelines whose entrypoint isn't registered are skipped silently
+// (the SDK doesn't know which binaries will be linked into the
+// pipeline binary); the orchestrator surfaces "pipeline X not
+// registered" at lookup time.
+//
+// Safe to call multiple times; existing pipeline-name bindings are
+// preserved (a name that was registered via the legacy [Register]
+// API doesn't get clobbered by a YAML rebind).
+func BindPipelinesFromYAML(cfg interface {
+	EachPipeline(func(name, entrypoint string))
+}) {
+	if cfg == nil {
+		return
+	}
+	cfg.EachPipeline(func(name, entrypoint string) {
+		if name == "" || entrypoint == "" {
+			return
+		}
+		registryMu.Lock()
+		defer registryMu.Unlock()
+		if _, exists := registry[name]; exists {
+			return
+		}
+		ep, ok := entrypointRegistry[entrypoint]
+		if !ok {
+			return
+		}
+		// Synthesize a Registration under the pipeline name that
+		// shares the entrypoint's factory. Same Schema and Invoke;
+		// Name swaps to the pipeline-side name so error messages
+		// surface the operator-typed identifier.
+		bound := *ep
+		bound.Name = name
+		registry[name] = &bound
+	})
 }
 
 // Lookup returns the Registration for a registered pipeline name, or

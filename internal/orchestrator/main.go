@@ -132,12 +132,23 @@ func Main() {
 		os.Exit(1)
 	}
 
-	// Load the on-disk pipelines.yaml entry (if any) so target /
-	// source / backend overlays resolve at run start. A missing
-	// pipelines.yaml is not an error -- pipelines that don't declare
-	// targets or values still work the same way they did before
-	// step 6 landed.
+	// Load the on-disk pipelines.yaml entry (if any) so dispatch
+	// metadata + guards / defaults / locked resolve at run start.
+	// A missing pipelines.yaml is not an error -- pipelines declared
+	// in Go via sparkwing.Register still work via the legacy
+	// pipeline-name-as-entrypoint-name registry binding.
 	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
+
+	// v0.6: bind every YAML-declared pipeline name to its registered
+	// entrypoint factory, so `sparkwing run <pipeline-name>` resolves
+	// even when multiple pipelines share one Go entrypoint. Safe when
+	// pipelineYAML is nil (no-op) or when names were already bound via
+	// the legacy Register path (existing entries are preserved).
+	if cwd, err := os.Getwd(); err == nil {
+		if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
+			sparkwing.BindPipelinesFromYAML(cfg)
+		}
+	}
 
 	delegate := selectLocalRenderer()
 	opts := Options{

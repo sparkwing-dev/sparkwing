@@ -509,6 +509,19 @@ func (c *Config) EntrypointsByName() map[string]string {
 	return out
 }
 
+// EachPipeline calls fn for every (pipeline name, entrypoint name)
+// pair in file order. Matches the iteration shape sparkwing's
+// BindPipelinesFromYAML expects, avoiding a hard import cycle from
+// pkg/pipelines into sparkwing.
+func (c *Config) EachPipeline(fn func(name, entrypoint string)) {
+	if c == nil {
+		return
+	}
+	for _, p := range c.Pipelines {
+		fn(p.Name, p.Entrypoint)
+	}
+}
+
 // PipelinesByEntrypoint returns every pipeline keyed by its entrypoint
 // type name. Multiple pipelines can share an entrypoint (the whole
 // point of the v0.6 redesign); the returned slice preserves file
