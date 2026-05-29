@@ -126,3 +126,69 @@ func TestWithResolvedArgs_NilMapIsNoop(t *testing.T) {
 		t.Error("nil map install should leave context without resolved args")
 	}
 }
+
+func TestProfileResolutionFromContext_DefaultsFeedIntoResolver(t *testing.T) {
+	p := NewPlan()
+	j := &resolveE2EJob{}
+	Job(p, "deploy", j)
+
+	in := ResolveInputs{
+		FlagValues:      map[string]string{},
+		ProfileDefaults: map[string]string{"replicas": "9", "image": "redis:7"},
+	}
+	merged, err := resolveAndBindJobArgs(p, in)
+	if err != nil {
+		t.Fatalf("resolveAndBindJobArgs: %v", err)
+	}
+	a := j.Args(context.Background())
+	if a.Replicas != 9 {
+		t.Errorf("Replicas from profile defaults: got %d, want 9", a.Replicas)
+	}
+	if a.Image != "redis:7" {
+		t.Errorf("Image from profile defaults: got %q, want redis:7", a.Image)
+	}
+	if v, _ := merged["replicas"].(int); v != 9 {
+		t.Errorf("merged[replicas]: got %v, want 9", merged["replicas"])
+	}
+}
+
+func TestProfileResolutionFromContext_FlagWinsOverProfileDefault(t *testing.T) {
+	p := NewPlan()
+	j := &resolveE2EJob{}
+	Job(p, "deploy", j)
+
+	in := ResolveInputs{
+		FlagValues:      map[string]string{"replicas": "2"},
+		ProfileDefaults: map[string]string{"replicas": "9", "image": "redis:7"},
+	}
+	if _, err := resolveAndBindJobArgs(p, in); err != nil {
+		t.Fatalf("resolveAndBindJobArgs: %v", err)
+	}
+	a := j.Args(context.Background())
+	if a.Replicas != 2 {
+		t.Errorf("explicit flag should win over profile default; got %d, want 2", a.Replicas)
+	}
+	if a.Image != "redis:7" {
+		t.Errorf("Image (profile default): got %q, want redis:7", a.Image)
+	}
+}
+
+func TestProfileResolutionFromContext_ZeroValueIsNoop(t *testing.T) {
+	pr := profileResolutionFromContext(context.Background())
+	if pr.Defaults != nil || pr.Name != "" || pr.IsLocal {
+		t.Errorf("zero-value context should produce zero ProfileResolutionContext; got %+v", pr)
+	}
+}
+
+func TestProfileResolutionFromContext_RoundTrips(t *testing.T) {
+	want := ProfileResolutionContext{
+		Defaults: map[string]string{"target": "prod"},
+		Name:     "prod",
+		IsLocal:  false,
+	}
+	ctx := context.WithValue(context.Background(), keyProfileResolution, want)
+	got := profileResolutionFromContext(ctx)
+	if got.Name != want.Name || got.IsLocal != want.IsLocal || got.Defaults["target"] != "prod" {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", got, want)
+	}
+}

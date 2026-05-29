@@ -28,6 +28,13 @@ type runtimePlumbingKeys struct {
 	// via sparkwing.Arg[T](ctx, name). The framework installs it on
 	// the run context after running Schema.Resolve.
 	ResolvedArgs any
+
+	// ProfileResolution carries the active profile's default-args,
+	// name, and local/remote flag for the v0.6 args resolver. The
+	// orchestrator installs it on the plan-time ctx so the
+	// registration's invoke() can feed it into ResolveInputs. Read
+	// path is internal to the sparkwing package.
+	ProfileResolution any
 }
 
 // runtimePlumbingFns bundles function pointers to unexported runtime-
@@ -59,21 +66,22 @@ var RuntimePlumbing = struct {
 	Fns  runtimePlumbingFns
 }{
 	Keys: runtimePlumbingKeys{
-		DryRun:           dryRunKey{},
-		Runner:           runnerCtxKey{},
-		SpawnHandler:     keySpawnHandler,
-		StepRange:        stepRangeKey{},
-		Target:           targetKey{},
-		RefResolver:      keyRefResolver,
-		JSONRefResolver:  keyJSONRefResolver,
-		PipelineResolver: keyPipelineResolver,
-		PipelineAwaiter:  keyPipelineAwaiter,
-		Inputs:           keyInputs,
-		PipelineSecrets:  keyPipelineSecrets,
-		SecretResolver:   keySecretResolver,
-		Logger:           keyLogger,
-		Node:             keyNode,
-		ResolvedArgs:     keyResolvedArgs,
+		DryRun:            dryRunKey{},
+		Runner:            runnerCtxKey{},
+		SpawnHandler:      keySpawnHandler,
+		StepRange:         stepRangeKey{},
+		Target:            targetKey{},
+		RefResolver:       keyRefResolver,
+		JSONRefResolver:   keyJSONRefResolver,
+		PipelineResolver:  keyPipelineResolver,
+		PipelineAwaiter:   keyPipelineAwaiter,
+		Inputs:            keyInputs,
+		PipelineSecrets:   keyPipelineSecrets,
+		SecretResolver:    keySecretResolver,
+		Logger:            keyLogger,
+		Node:              keyNode,
+		ResolvedArgs:      keyResolvedArgs,
+		ProfileResolution: keyProfileResolution,
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,

@@ -406,6 +406,32 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 	}
 
+	// Profile resolution for the v0.6 args resolver: default-args
+	// map, profile name (for Profile(name) predicates), and
+	// local-vs-remote flag (for Local/Remote predicates). Install on
+	// ctx so the registration's invoke() can hand it to
+	// Schema.Resolve. Local-only profiles are detected by the absence
+	// of a controller URL; nil opts.Profile (no profile chain in
+	// scope) collapses to a zero-value install that's a no-op.
+	var profDefaults map[string]string
+	var profName string
+	var profIsLocal bool
+	if opts.Profile != nil {
+		var darErr error
+		profDefaults, darErr = opts.Profile.ResolveDefaultArgs()
+		if darErr != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", darErr.Error())
+			return &Result{RunID: runID, Status: "failed", Error: darErr}, nil
+		}
+		profName = opts.Profile.Name
+		profIsLocal = opts.Profile.Controller == ""
+	}
+	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
+		Defaults: profDefaults,
+		Name:     profName,
+		IsLocal:  profIsLocal,
+	})
+
 	// Plan build (parse Args -> typed Inputs -> Plan). Failures fail
 	// the run with no nodes dispatched.
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
