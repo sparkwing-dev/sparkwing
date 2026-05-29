@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 )
 
 // pushShortCommitLen is how many hex chars we echo back in the
@@ -56,9 +57,18 @@ func runPush(args []string) error {
 	if err != nil {
 		return err
 	}
-	if prof.Gitcache == "" {
-		return fmt.Errorf("push: profile %q has no gitcache URL (set one via `sparkwing profiles set --name %s --gitcache URL`)",
-			prof.Name, prof.Name)
+	if !prof.HasController() {
+		return fmt.Errorf("push: profile %q has no controller (push needs a controller-bound profile so it can discover the cache pod)", prof.Name)
+	}
+	discoverCtx, dCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
+	dCancel()
+	if derr != nil {
+		return fmt.Errorf("push: discover cache pod via controller %q: %w", prof.ControllerURL(), derr)
+	}
+	cachePodURL := services.CachePod
+	if cachePodURL == "" {
+		return fmt.Errorf("push: controller at %q announced no cache pod URL; ask the controller operator to set --cache-pod-url", prof.ControllerURL())
 	}
 
 	repoRoot, err := runGit("", "rev-parse", "--show-toplevel")
@@ -88,15 +98,15 @@ func runPush(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "registering %s with gitcache\n", repoName)
-	if err := pushRegisterRepo(prof, repoName, originURL); err != nil {
+	if err := pushRegisterRepo(cachePodURL, prof.ControllerToken(), repoName, originURL); err != nil {
 		return fmt.Errorf("register repo: %w", err)
 	}
 
 	// Timestamped ref so concurrent pushes don't stomp each other.
 	// UTC + colon-free so the ref name survives git's ref-name rules.
 	ref := "local-" + time.Now().UTC().Format("2006-01-02T15-04-05Z")
-	pushURL := pushAuthURL(prof, repoName)
-	safeURL := strings.TrimRight(prof.Gitcache, "/") + "/git/" + repoName
+	pushURL := pushAuthURL(cachePodURL, prof.ControllerToken(), repoName)
+	safeURL := strings.TrimRight(cachePodURL, "/") + "/git/" + repoName
 	fmt.Fprintf(os.Stderr, "pushing HEAD -> %s:refs/heads/%s\n", safeURL, ref)
 
 	cmd := exec.Command("git", "push", pushURL, "HEAD:refs/heads/"+ref)
@@ -132,21 +142,21 @@ func runPush(args []string) error {
 	return nil
 }
 
-// pushAuthURL embeds the profile's bearer into the git push URL as
-// HTTP basic auth so `git push` authenticates without needing a
-// `git config credential.helper` dance. Gitcache accepts any
-// non-empty username; we use "x-access-token" to mimic GitHub's
-// convention and make it obvious in gitcache logs.
-func pushAuthURL(prof *profile.Profile, repoName string) string {
-	base := strings.TrimRight(prof.Gitcache, "/")
-	if prof.Token == "" {
+// pushAuthURL embeds the bearer into the git push URL as HTTP basic
+// auth so `git push` authenticates without needing a `git config
+// credential.helper` dance. Gitcache accepts any non-empty username;
+// we use "x-access-token" to mimic GitHub's convention and make it
+// obvious in gitcache logs.
+func pushAuthURL(cachePodURL, token, repoName string) string {
+	base := strings.TrimRight(cachePodURL, "/")
+	if token == "" {
 		return base + "/git/" + repoName
 	}
 	u, err := neturl.Parse(base)
 	if err != nil {
 		return base + "/git/" + repoName
 	}
-	u.User = neturl.UserPassword("x-access-token", prof.Token)
+	u.User = neturl.UserPassword("x-access-token", token)
 	u.Path = strings.TrimRight(u.Path, "/") + "/git/" + repoName
 	return u.String()
 }
@@ -154,8 +164,8 @@ func pushAuthURL(prof *profile.Profile, repoName string) string {
 // pushRegisterRepo POSTs /git/register on the gitcache. Idempotent:
 // gitcache returns 200 for "already registered, canonical URL
 // unchanged" and only errors on name conflicts.
-func pushRegisterRepo(prof *profile.Profile, name, repoURL string) error {
-	base := strings.TrimRight(prof.Gitcache, "/")
+func pushRegisterRepo(cachePodURL, token, name, repoURL string) error {
+	base := strings.TrimRight(cachePodURL, "/")
 	q := neturl.Values{}
 	q.Set("name", name)
 	q.Set("repo", repoURL)
@@ -163,8 +173,8 @@ func pushRegisterRepo(prof *profile.Profile, name, repoURL string) error {
 	if err != nil {
 		return err
 	}
-	if prof.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+prof.Token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {

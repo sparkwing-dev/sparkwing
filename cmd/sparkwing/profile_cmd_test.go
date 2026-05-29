@@ -21,7 +21,7 @@ func TestProfileCmd_NoFlagUsesDefault(t *testing.T) {
 	setProfileCmdFixture(t, `
 default: prod
 profiles:
-  prod: { controller: https://api.example.dev }
+  prod: { controller: { url: https://api.example.dev } }
   team: { state: { type: s3, bucket: team, prefix: state } }
 `)
 	out := captureStdout(t, func() {
@@ -41,7 +41,7 @@ func TestProfileCmd_FlagSelectsHypothetical(t *testing.T) {
 	setProfileCmdFixture(t, `
 default: prod
 profiles:
-  prod: { controller: https://api.example.dev }
+  prod: { controller: { url: https://api.example.dev } }
   team: { state: { type: s3, bucket: team, prefix: state } }
 `)
 	out := captureStdout(t, func() {
@@ -60,7 +60,7 @@ profiles:
 func TestProfileCmd_NotFound(t *testing.T) {
 	setProfileCmdFixture(t, `
 profiles:
-  prod: { controller: https://api.example.dev }
+  prod: { controller: { url: https://api.example.dev } }
 `)
 	err := runProfileCmd([]string{"--profile", "bogus"})
 	if err == nil {
@@ -75,7 +75,7 @@ func TestProfileCmd_JSONEffectiveName(t *testing.T) {
 	setProfileCmdFixture(t, `
 default: prod
 profiles:
-  prod: { controller: https://api.example.dev, token: swu_secret }
+  prod: { controller: { url: https://api.example.dev, token: swu_secret } }
 `)
 	out := captureStdout(t, func() {
 		if err := runProfileCmd([]string{"-o", "json"}); err != nil {
@@ -129,7 +129,7 @@ func TestProfileCmd_BuiltinLaptopFallback(t *testing.T) {
 }
 
 func TestProfileCmd_RejectsPositionalArg(t *testing.T) {
-	setProfileCmdFixture(t, "profiles:\n  prod: { controller: https://x }\n")
+	setProfileCmdFixture(t, "profiles:\n  prod: { controller: { url: https://x } }\n")
 	err := runProfileCmd([]string{"prod"})
 	if err == nil {
 		t.Fatal("expected error on positional arg")

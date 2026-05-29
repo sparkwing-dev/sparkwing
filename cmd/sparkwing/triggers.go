@@ -80,7 +80,7 @@ func runTriggersList(args []string) error {
 		f.Repo = *repo
 	}
 
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	trigs, err := c.ListTriggers(ctx, f)
@@ -153,7 +153,7 @@ func runTriggersGet(args []string) error {
 	if err := requireController(prof, "triggers get"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	trig, err := c.GetTrigger(ctx, *id)

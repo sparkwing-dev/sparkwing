@@ -95,5 +95,5 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 	if err := requireController(prof, cmdJobsGrep.Path); err != nil {
 		return err
 	}
-	return orchestrator.RunGrepRemote(ctx, prof.Controller, prof.Controller, prof.Token, opts, os.Stdout)
+	return orchestrator.RunGrepRemote(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(), opts, os.Stdout)
 }

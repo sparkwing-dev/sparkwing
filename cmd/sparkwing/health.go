@@ -149,14 +149,14 @@ func runHealth(args []string) error {
 // still in the controller's memory but hasn't heartbeated recently.
 // Zero agents returns warn (fleet is idle, not broken).
 func probeAgentsFleet(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "agents", Target: prof.Controller}
-	if prof.Controller == "" {
+	r := profileProbeResult{Name: "agents", Target: prof.ControllerURL()}
+	if prof.ControllerURL() == "" {
 		r.Status = "fail"
 		r.Detail = "no controller URL in profile"
 		return r
 	}
 	start := time.Now()
-	agents, err := fetchAgents(ctx, prof.Controller, prof.Token)
+	agents, err := fetchAgents(ctx, prof.ControllerURL(), prof.ControllerToken())
 	r.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Status = "fail"
@@ -198,21 +198,21 @@ func probeAgentsFleet(ctx context.Context, prof *profile.Profile) profileProbeRe
 // warm runners) rather than fail -- triggers still run via the K8s
 // Runner fallback path.
 func probePool(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "pool", Target: prof.Controller}
-	if prof.Controller == "" {
+	r := profileProbeResult{Name: "pool", Target: prof.ControllerURL()}
+	if prof.ControllerURL() == "" {
 		r.Status = "fail"
 		r.Detail = "no controller URL in profile"
 		return r
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(prof.Controller, "/")+"/api/v1/pool", nil)
+		strings.TrimRight(prof.ControllerURL(), "/")+"/api/v1/pool", nil)
 	if err != nil {
 		r.Status = "fail"
 		r.Detail = err.Error()
 		return r
 	}
-	if prof.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+prof.Token)
+	if prof.ControllerToken() != "" {
+		req.Header.Set("Authorization", "Bearer "+prof.ControllerToken())
 	}
 	start := time.Now()
 	resp, err := http.DefaultClient.Do(req)
@@ -263,13 +263,13 @@ func probePool(ctx context.Context, prof *profile.Profile) profileProbeResult {
 // typically means the claiming worker died without calling /done --
 // something an operator wants to know about immediately.
 func probeStuckTriggers(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "triggers", Target: prof.Controller}
-	if prof.Controller == "" {
+	r := profileProbeResult{Name: "triggers", Target: prof.ControllerURL()}
+	if prof.ControllerURL() == "" {
 		r.Status = "fail"
 		r.Detail = "no controller URL in profile"
 		return r
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	start := time.Now()
 	triggers, err := c.ListTriggers(ctx, store.TriggerFilter{
 		Statuses: []string{"claimed"},
@@ -307,13 +307,13 @@ func probeStuckTriggers(ctx context.Context, prof *profile.Profile) profileProbe
 // depend on pipelines always succeeding -- a buggy release can
 // tank success rate without any controller / agent problem.
 func probeRecentRuns(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "runs (24h)", Target: prof.Controller}
-	if prof.Controller == "" {
+	r := profileProbeResult{Name: "runs (24h)", Target: prof.ControllerURL()}
+	if prof.ControllerURL() == "" {
 		r.Status = "fail"
 		r.Detail = "no controller URL in profile"
 		return r
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	start := time.Now()
 	runs, err := c.ListRuns(ctx, store.RunFilter{
 		Since: time.Now().Add(-24 * time.Hour),

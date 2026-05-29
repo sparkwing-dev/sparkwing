@@ -82,7 +82,7 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		if err := requireController(prof, "jobs failures"); err != nil {
 			return err
 		}
-		rows, err = collectRemoteFailures(ctx, prof.Controller, prof.Token, *pipeline, *since, *limit)
+		rows, err = collectRemoteFailures(ctx, prof.ControllerURL(), prof.ControllerToken(), *pipeline, *since, *limit)
 	} else {
 		rows, err = collectLocalFailures(ctx, paths, *pipeline, *since, *limit)
 	}
@@ -297,7 +297,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		if err := requireController(prof, "jobs stats"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		filter := store.RunFilter{Limit: 500}
 		if *pipeline != "" {
 			filter.Pipelines = []string{*pipeline}
@@ -430,7 +430,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 			if err := requireController(prof, "jobs last"); err != nil {
 				return nil, err
 			}
-			c := client.NewWithToken(prof.Controller, nil, prof.Token)
+			c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 			runs, err := c.ListRuns(ctx, filter)
 			if err != nil {
 				return nil, err
@@ -538,7 +538,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := requireController(prof, "jobs tree"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		r, err := c.GetRun(ctx, *runID)
 		if err != nil {
 			return err
@@ -640,7 +640,7 @@ func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) er
 		if err := requireController(prof, "jobs get"); err != nil {
 			return err
 		}
-		return orchestrator.GetRunJSONRemote(ctx, prof.Controller, prof.Token, *runID, os.Stdout)
+		return orchestrator.GetRunJSONRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, os.Stdout)
 	}
 	return orchestrator.GetRunJSONLocal(ctx, paths, *runID, os.Stdout)
 }
@@ -681,7 +681,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := requireController(prof, "jobs wait"); err != nil {
 			return exitError(4, err)
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		fetch = func() (*store.Run, error) { return c.GetRun(ctx, *runID) }
 	} else {
 		if err := paths.EnsureRoot(); err != nil {
@@ -788,7 +788,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := requireController(prof, "jobs find"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		searchOnce = func() ([]*store.Run, error) {
 			return findRunsRemote(ctx, c, *gitSHA, *pipeline, *repo, *since, *limit)
 		}

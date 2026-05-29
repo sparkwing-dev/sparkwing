@@ -135,7 +135,7 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	if err := requireController(prof, "debug rerun"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 
 	snap, err := c.GetNodeDispatch(ctx, t.run, t.node, t.seq)
 	if err != nil {

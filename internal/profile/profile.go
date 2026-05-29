@@ -40,10 +40,15 @@ import (
 
 // Profile is one named connection bundle.
 type Profile struct {
-	Name       string `yaml:"-"`
-	Controller string `yaml:"controller,omitempty"`
-	Token      string `yaml:"token,omitempty"`
-	Gitcache   string `yaml:"gitcache,omitempty"`
+	Name string `yaml:"-"`
+
+	// Controller bundles the remote controller's URL and bearer token.
+	// Nil = laptop-local profile (no remote dispatch). When set, the
+	// operator's CLI talks to this controller for triggers, run state,
+	// log streaming, and auxiliary-service discovery (the cache pod
+	// URL for `sparkwing push` etc.). The token authenticates every
+	// request; nil/empty token = no Authorization header sent.
+	Controller *ControllerSpec `yaml:"controller,omitempty"`
 
 	// State, Cache, and Logs carry the full backend triple so a profile
 	// fully describes where its runs persist. Consume them as a unit via
@@ -59,6 +64,38 @@ type Profile struct {
 	// default (true); set false for automated workers that fire and
 	// forget. Consume via EffectiveMirrorLocal.
 	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
+}
+
+// ControllerSpec is the nested controller block on a Profile.
+type ControllerSpec struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token,omitempty"`
+}
+
+// ControllerURL returns the profile's controller URL or "" when no
+// controller is configured. Nil-safe at every level so callers don't
+// need a Controller != nil check before reading.
+func (p *Profile) ControllerURL() string {
+	if p == nil || p.Controller == nil {
+		return ""
+	}
+	return p.Controller.URL
+}
+
+// ControllerToken returns the profile's controller bearer token or
+// "" when none is configured. Nil-safe like ControllerURL.
+func (p *Profile) ControllerToken() string {
+	if p == nil || p.Controller == nil {
+		return ""
+	}
+	return p.Controller.Token
+}
+
+// HasController reports whether this profile dispatches to a remote
+// controller. Equivalent to ControllerURL() != "" but reads more
+// naturally at call sites.
+func (p *Profile) HasController() bool {
+	return p.ControllerURL() != ""
 }
 
 // Surfaces returns the profile's State/Cache/Logs as a

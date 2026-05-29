@@ -79,7 +79,7 @@ func runAgentsList(args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	agents, err := fetchAgents(ctx, prof.Controller, prof.Token)
+	agents, err := fetchAgents(ctx, prof.ControllerURL(), prof.ControllerToken())
 	if err != nil {
 		return fmt.Errorf("agents list: %w", err)
 	}

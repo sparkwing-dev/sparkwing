@@ -165,8 +165,8 @@ func openFromConfig(
 			return nil, nopCloser{}, fmt.Errorf("--profile %s: %w", profileName, err)
 		}
 		stateSpec, logsSpec, artifactsSpec = profileWebSpecs(p)
-		if p.Controller != "" {
-			lookup = func(string) (string, string, error) { return p.Controller, p.Token, nil }
+		if p.ControllerURL() != "" {
+			lookup = func(string) (string, string, error) { return p.ControllerURL(), p.ControllerToken(), nil }
 		}
 	}
 
@@ -207,7 +207,7 @@ func openFromConfig(
 // requires an inline --state-spec).
 func profileWebSpecs(p *profile.Profile) (state, logs, cache *backends.Spec) {
 	surf := p.Surfaces()
-	if surf.State == nil && surf.Logs == nil && surf.Cache == nil && p.Controller != "" {
+	if surf.State == nil && surf.Logs == nil && surf.Cache == nil && p.ControllerURL() != "" {
 		c := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
 		return c(), c(), c()
 	}

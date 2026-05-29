@@ -19,6 +19,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
@@ -154,14 +155,14 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) bool {
 // explicitly unauthenticated (k8s livenessProbes can't carry bearer
 // tokens), so a 200 here without a token is expected.
 func probeController(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "controller", Target: prof.Controller}
-	if prof.Controller == "" {
+	r := profileProbeResult{Name: "controller", Target: prof.ControllerURL()}
+	if prof.ControllerURL() == "" {
 		r.Status = "fail"
 		r.Detail = "no controller URL in profile"
 		return r
 	}
 	start := time.Now()
-	resp, err := httpGetNoAuth(ctx, strings.TrimRight(prof.Controller, "/")+"/api/v1/health")
+	resp, err := httpGetNoAuth(ctx, strings.TrimRight(prof.ControllerURL(), "/")+"/api/v1/health")
 	r.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Status = "fail"
@@ -181,12 +182,12 @@ func probeController(ctx context.Context, prof *profile.Profile) profileProbeRes
 // implies a controller issue already surfaced by probeController.
 func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "auth"}
-	if prof.Controller == "" {
+	if prof.ControllerURL() == "" {
 		r.Status = "skip"
 		r.Detail = "controller URL not set"
 		return r
 	}
-	if prof.Token == "" {
+	if prof.ControllerToken() == "" {
 		// Missing token is a warn, not a fail: laptop dev mode runs
 		// with auth disabled, and that's a legitimate configuration.
 		r.Status = "warn"
@@ -194,7 +195,7 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 		return r
 	}
 	start := time.Now()
-	resp, err := httpGetWithToken(ctx, strings.TrimRight(prof.Controller, "/")+"/api/v1/runs?limit=1", prof.Token)
+	resp, err := httpGetWithToken(ctx, strings.TrimRight(prof.ControllerURL(), "/")+"/api/v1/runs?limit=1", prof.ControllerToken())
 	r.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Status = "fail"
@@ -236,7 +237,7 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "logs", Target: profile.SpecString(prof.Logs)}
 	if prof.Logs == nil {
-		if prof.Controller != "" {
+		if prof.ControllerURL() != "" {
 			r.Status = "ok"
 			r.Detail = "logs route through the controller"
 			return r
@@ -250,20 +251,32 @@ func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
 	return r
 }
 
-// probeGitcache probes <gitcache>/health when set. Gitcache is
-// optional per-profile (only cluster-mode laptop dispatch needs it),
-// so missing => warn. Gitcache was the first service to adopt the
-// problems[] shape (background-fetch failures, cache dir unwritable);
-// interpretHealthBody surfaces those to the operator as warnings.
+// probeGitcache discovers the cache pod URL via the controller's
+// /api/v1/services endpoint, then probes its /health. Missing
+// controller or no announced cache pod => warn. interpretHealthBody
+// surfaces background-fetch failures / cache-dir-unwritable problems
+// to the operator as warnings.
 func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "gitcache", Target: prof.Gitcache}
-	if prof.Gitcache == "" {
+	r := profileProbeResult{Name: "gitcache"}
+	if !prof.HasController() {
 		r.Status = "warn"
-		r.Detail = "gitcache URL not set in profile"
+		r.Detail = "no controller on profile (gitcache URL is discovered via controller)"
+		return r
+	}
+	services, err := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken())
+	if err != nil {
+		r.Status = "fail"
+		r.Detail = "discover services: " + err.Error()
+		return r
+	}
+	r.Target = services.CachePod
+	if services.CachePod == "" {
+		r.Status = "warn"
+		r.Detail = "controller announced no cache pod URL"
 		return r
 	}
 	start := time.Now()
-	resp, err := httpGetNoAuth(ctx, strings.TrimRight(prof.Gitcache, "/")+"/health")
+	resp, err := httpGetNoAuth(ctx, strings.TrimRight(services.CachePod, "/")+"/health")
 	r.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Status = "fail"
@@ -289,7 +302,7 @@ type whoamiResp struct {
 }
 
 func fetchWhoami(ctx context.Context, prof *profile.Profile) (*whoamiResp, error) {
-	resp, err := httpGetWithToken(ctx, strings.TrimRight(prof.Controller, "/")+"/api/v1/auth/whoami", prof.Token)
+	resp, err := httpGetWithToken(ctx, strings.TrimRight(prof.ControllerURL(), "/")+"/api/v1/auth/whoami", prof.ControllerToken())
 	if err != nil {
 		return nil, err
 	}

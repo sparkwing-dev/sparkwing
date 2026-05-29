@@ -83,7 +83,7 @@ func runUsersAdd(args []string) error {
 		"name":     *name,
 		"password": password,
 	}
-	if _, err := tokensPost(prof.Controller, prof.Token, "/api/v1/users", body); err != nil {
+	if _, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users", body); err != nil {
 		return err
 	}
 	fmt.Printf("created user %q\n", *name)
@@ -106,7 +106,7 @@ func runUsersList(args []string) error {
 	if err := requireController(prof, "users list"); err != nil {
 		return err
 	}
-	resp, err := tokensGet(prof.Controller, prof.Token, "/api/v1/users")
+	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users")
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func runUsersDelete(args []string) error {
 	if err := requireController(prof, "users delete"); err != nil {
 		return err
 	}
-	if _, err := tokensDelete(prof.Controller, prof.Token, "/api/v1/users/"+*name); err != nil {
+	if _, err := tokensDelete(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users/"+*name); err != nil {
 		return err
 	}
 	fmt.Printf("deleted user %q\n", *name)

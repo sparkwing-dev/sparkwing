@@ -41,7 +41,7 @@ func resolveEffectiveCacheSpec(_ string) (*backends.Spec, storeurl.ProfileLookup
 	if cache := p.Surfaces().Cache; cache != nil {
 		return cache, lookup
 	}
-	if p.Controller != "" {
+	if p.ControllerURL() != "" {
 		return &backends.Spec{Type: backends.TypeController, Controller: p.Name}, lookup
 	}
 	return nil, nil
@@ -51,10 +51,10 @@ func resolveEffectiveCacheSpec(_ string) (*backends.Spec, storeurl.ProfileLookup
 // factory lookup, so a controller-typed cache spec resolves. Returns nil
 // when the profile declares no controller.
 func controllerLookup(p *profile.Profile) storeurl.ProfileLookup {
-	if p == nil || p.Controller == "" {
+	if p == nil || p.ControllerURL() == "" {
 		return nil
 	}
 	return func(string) (string, string, error) {
-		return p.Controller, p.Token, nil
+		return p.ControllerURL(), p.ControllerToken(), nil
 	}
 }

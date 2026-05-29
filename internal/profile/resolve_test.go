@@ -124,7 +124,7 @@ func TestBuiltinLaptopProfile_Surfaces(t *testing.T) {
 	if s.Logs == nil || s.Logs.Type != backends.TypeFilesystem || s.Logs.Path != "~/.cache/sparkwing/logs" {
 		t.Errorf("logs = %#v, want filesystem ~/.cache/sparkwing/logs", s.Logs)
 	}
-	if p.Controller != "" || p.Token != "" {
+	if p.ControllerURL() != "" || p.ControllerToken() != "" {
 		t.Errorf("laptop should carry no controller/token: %#v", p)
 	}
 }

@@ -73,7 +73,7 @@ func runTokensCreate(args []string) error {
 	if *ttl > 0 {
 		body["ttl_secs"] = int64((*ttl).Seconds())
 	}
-	resp, err := tokensPost(prof.Controller, prof.Token, "/api/v1/tokens", body)
+	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens", body)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func runTokensList(args []string) error {
 	if *includeRevoked {
 		q = q.with("include_revoked", "1")
 	}
-	resp, err := tokensGet(prof.Controller, prof.Token, "/api/v1/tokens"+q.encode())
+	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens"+q.encode())
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func runTokensRevoke(args []string) error {
 	if err := requireController(prof, "tokens revoke"); err != nil {
 		return err
 	}
-	if _, err := tokensDelete(prof.Controller, prof.Token, "/api/v1/tokens/"+*prefix); err != nil {
+	if _, err := tokensDelete(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix); err != nil {
 		return err
 	}
 	fmt.Printf("revoked %s\n", *prefix)
@@ -236,7 +236,7 @@ func runTokensLookup(args []string) error {
 	if err := requireController(prof, "tokens lookup"); err != nil {
 		return err
 	}
-	resp, err := tokensGet(prof.Controller, prof.Token, "/api/v1/tokens/"+*prefix)
+	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix)
 	if err != nil {
 		return err
 	}
@@ -274,7 +274,7 @@ func runTokensRotate(args []string) error {
 	if *ttl > 0 {
 		body["ttl_secs"] = int64((*ttl).Seconds())
 	}
-	resp, err := tokensPost(prof.Controller, prof.Token, "/api/v1/tokens/"+*prefix+"/rotate", body)
+	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix+"/rotate", body)
 	if err != nil {
 		return err
 	}

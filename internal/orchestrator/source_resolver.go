@@ -96,9 +96,9 @@ func profileLookupCallback() sparkwing.ProfileLookup {
 		if err != nil {
 			return "", "", err
 		}
-		if p.Controller == "" {
+		if p.ControllerURL() == "" {
 			return "", "", fmt.Errorf("profile %q has no controller URL", p.Name)
 		}
-		return p.Controller, p.Token, nil
+		return p.ControllerURL(), p.ControllerToken(), nil
 	}
 }

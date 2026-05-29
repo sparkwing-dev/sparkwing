@@ -45,5 +45,5 @@ func runJobsTimeline(ctx context.Context, paths orchestrator.Paths, args []strin
 	if err := requireController(prof, cmdJobsTimeline.Path); err != nil {
 		return err
 	}
-	return orchestrator.RunTimelineRemote(ctx, prof.Controller, prof.Token, *runID, opts, os.Stdout)
+	return orchestrator.RunTimelineRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, opts, os.Stdout)
 }

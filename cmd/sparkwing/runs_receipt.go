@@ -53,7 +53,7 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 		if err := requireController(prof, "runs receipt"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		body, err := c.GetRunReceipt(ctx, *runID)
 		if err != nil {
 			return err

@@ -39,5 +39,5 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 	if err := requireController(prof, cmdJobsSummary.Path); err != nil {
 		return err
 	}
-	return orchestrator.RunSummaryRemote(ctx, prof.Controller, prof.Token, *runID, opts, os.Stdout)
+	return orchestrator.RunSummaryRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, opts, os.Stdout)
 }

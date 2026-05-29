@@ -77,7 +77,7 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 		Effective: profileEffectiveJSON{
 			Name:        chain.Selected,
 			Source:      string(chain.Source),
-			Controller:  p.Controller,
+			Controller:  p.ControllerURL(),
 			State:       state,
 			Logs:        logs,
 			Cache:       cache,
@@ -97,8 +97,8 @@ func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string
 
 	fmt.Fprintf(out, "effective profile: %s\n", chain.Selected)
 	fmt.Fprintf(out, "  source:           %s\n", effectiveSourceDetail(chain, cfgPath))
-	if p.Controller != "" {
-		fmt.Fprintf(out, "  controller:       %s\n", p.Controller)
+	if p.ControllerURL() != "" {
+		fmt.Fprintf(out, "  controller:       %s\n", p.ControllerURL())
 	}
 	fmt.Fprintf(out, "  state:            %s\n", state)
 	fmt.Fprintf(out, "  logs:             %s\n", logs)

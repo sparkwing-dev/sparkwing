@@ -29,10 +29,10 @@ func remoteSecretSource(profName string) (secrets.Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve profile %q: %w", profName, err)
 	}
-	if prof.Controller == "" {
+	if prof.ControllerURL() == "" {
 		return nil, fmt.Errorf("profile %q has no controller URL", prof.Name)
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
 		sec, gerr := c.GetSecret(context.Background(), name)
 		if gerr != nil {

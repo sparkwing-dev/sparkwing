@@ -29,7 +29,7 @@ func TestRunsList_OnFlagRetired(t *testing.T) {
 func TestRunsList_ProfileNotFound(t *testing.T) {
 	setProfilesFixture(t, `
 profiles:
-  prod: { controller: https://api.example.dev }
+  prod: { controller: { url: https://api.example.dev } }
 `)
 	err := runJobs([]string{"list", "--profile", "ghost"})
 	if err == nil {

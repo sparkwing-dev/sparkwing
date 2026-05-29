@@ -93,8 +93,7 @@ func TestOpenReadBackendForProfile_ControllerProfile(t *testing.T) {
 	neutralizeEnv(t)
 	p := &profile.Profile{
 		Name:       "prod",
-		Controller: "https://api.example.dev",
-		Token:      "swu_test",
+		Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"},
 	}
 	b, closer, err := OpenReadBackendForProfile(context.Background(), Paths{Root: t.TempDir()}, p)
 	if err != nil {
@@ -147,7 +146,7 @@ func TestApplyProfileBackends_BuiltinLaptop(t *testing.T) {
 
 func TestApplyProfileBackends_ControllerProfile(t *testing.T) {
 	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: "https://api.example.dev", Token: "swu_test"}
+	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"}}
 	opts := Options{}
 	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
 		t.Fatalf("ApplyProfileBackends(controller): %v", err)
@@ -166,7 +165,7 @@ func TestApplyProfileBackends_ControllerProfile(t *testing.T) {
 
 func TestApplyProfileBackends_LocalOnlyShortCircuits(t *testing.T) {
 	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: "https://api.example.dev"}
+	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}
 	opts := Options{LocalOnly: true, DefaultStateDB: filepath.Join(t.TempDir(), "state.db")}
 	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
 		t.Fatalf("ApplyProfileBackends(LocalOnly): %v", err)

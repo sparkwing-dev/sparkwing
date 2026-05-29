@@ -61,7 +61,7 @@ func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
 	body := "profiles:\n" +
-		"  prod: { controller: " + controllerURL + " }\n" +
+		"  prod: { controller: { url: " + controllerURL + " } }\n" +
 		"  laptop: { state: { type: sqlite } }\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
@@ -123,10 +123,23 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 		}
 	})
 
-	// --detach: exactly the trigger POST, no follow GETs.
+	// --detach: the trigger POST and no follow GETs (services
+	// discovery may fire once as a side effect of gitcache eager-
+	// refresh; we accept it but reject any /runs poll).
 	reqs := spy.requests()
-	if len(reqs) != 1 || reqs[0] != "POST /api/v1/triggers" {
-		t.Fatalf("detach should fire only the trigger POST; got %v", reqs)
+	sawTrigger := false
+	for _, r := range reqs {
+		switch {
+		case r == "POST /api/v1/triggers":
+			sawTrigger = true
+		case r == "GET /api/v1/services":
+			// allowed -- discovery for gitcache lives here
+		case strings.HasPrefix(r, "GET /api/v1/runs"):
+			t.Fatalf("detach should not follow the run; got %v", reqs)
+		}
+	}
+	if !sawTrigger {
+		t.Fatalf("expected POST /api/v1/triggers; got %v", reqs)
 	}
 	// stdout is the run id alone, machine-parseable.
 	if strings.TrimSpace(out) != "run-test" {
@@ -164,15 +177,17 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	})
 
 	reqs := spy.requests()
-	if len(reqs) == 0 || reqs[0] != "POST /api/v1/triggers" {
-		t.Fatalf("first request should be the trigger POST; got %v", reqs)
-	}
-	// Without --detach the verb follows: it polls the run after the POST.
-	sawFollow := false
-	for _, r := range reqs[1:] {
-		if r == "GET /api/v1/runs/run-test" {
+	sawTrigger, sawFollow := false, false
+	for _, r := range reqs {
+		switch r {
+		case "POST /api/v1/triggers":
+			sawTrigger = true
+		case "GET /api/v1/runs/run-test":
 			sawFollow = true
 		}
+	}
+	if !sawTrigger {
+		t.Fatalf("expected POST /api/v1/triggers; got %v", reqs)
 	}
 	if !sawFollow {
 		t.Fatalf("non-detach should follow the run (GET /api/v1/runs/run-test); got %v", reqs)

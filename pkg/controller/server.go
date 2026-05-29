@@ -65,6 +65,13 @@ type Server struct {
 	// route is unregistered and 404s.
 	artifactStore storage.ArtifactStore
 
+	// cachePodURL is the externally-reachable URL of the sparkwing-cache
+	// pod (gitcache + artifact store + registry proxy). Surfaced via
+	// GET /api/v1/services so the operator CLI can discover it without
+	// hardcoding it in profiles.yaml. Empty = endpoint returns 404,
+	// callers fall back to "no cache pod configured."
+	cachePodURL string
+
 	// reconcileHook runs before list/get-run reads when non-nil.
 	// Laptop mode sets this to a closure over
 	// orchestrator.ReconcileOrphanedLocalRuns so a dashboard refresh
@@ -114,6 +121,15 @@ func (s *Server) WithCostRate(rate float64, source string) *Server {
 // dedicated process and leaves this nil.
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 	s.artifactStore = a
+	return s
+}
+
+// WithCachePodURL announces the externally-reachable sparkwing-cache
+// pod URL via GET /api/v1/services so the operator CLI can discover
+// it without configuring `gitcache:` in profiles.yaml. Empty disables
+// the announcement (clients fall back to "no cache pod").
+func (s *Server) WithCachePodURL(url string) *Server {
+	s.cachePodURL = url
 	return s
 }
 
@@ -427,6 +443,7 @@ func (s *Server) Handler() http.Handler {
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
+	router.HandleFunc("GET /api/v1/services", s.handleServices)
 	router.Handle("POST /api/v1/auth/login", http.HandlerFunc(s.handleLogin))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))

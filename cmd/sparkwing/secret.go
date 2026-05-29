@@ -109,7 +109,7 @@ func runSecretSet(args []string) error {
 	if err := requireController(prof, "secret set"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := c.CreateSecret(ctx, name, raw, masked); err != nil {
@@ -164,7 +164,7 @@ func runSecretGet(args []string) error {
 	if err := requireController(prof, "secret get"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	sec, err := c.GetSecret(ctx, name)
@@ -251,7 +251,7 @@ func runSecretList(args []string) error {
 	if err := requireController(prof, "secret list"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	secs, err := c.ListSecrets(ctx)
@@ -336,7 +336,7 @@ func runSecretDelete(args []string) error {
 	if err := requireController(prof, "secret delete"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := c.DeleteSecret(ctx, name); err != nil {

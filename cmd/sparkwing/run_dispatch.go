@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -434,20 +435,24 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	// `git push && sparkwing pipeline trigger X --profile prod` race where
 	// the gitcache hasn't yet mirrored the just-pushed SHA. The retry in the
 	// runner's trigger loop catches the residual race; this just
-	// shrinks the window to ~zero on the happy path. 5s ceiling so
-	// a wedged or unreachable cache never blocks dispatch -- log a
-	// warning and continue.
-	if prof.Gitcache != "" && repoURL != "" {
-		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := bincache.RefreshRepo(refreshCtx, prof.Gitcache, repoURL); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"sparkwing run: gitcache eager refresh failed (%v); proceeding -- runner will retry on stale-SHA\n",
-				err)
+	// shrinks the window to ~zero on the happy path. 5s ceiling so a
+	// wedged or unreachable cache never blocks dispatch.
+	if repoURL != "" {
+		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
+		dCancel()
+		if derr == nil && services.CachePod != "" {
+			refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := bincache.RefreshRepo(refreshCtx, services.CachePod, repoURL); err != nil {
+				fmt.Fprintf(os.Stderr,
+					"sparkwing run: gitcache eager refresh failed (%v); proceeding -- runner will retry on stale-SHA\n",
+					err)
+			}
+			cancel()
 		}
-		cancel()
 	}
 
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	resp, err := c.CreateTrigger(context.Background(), req)
 	if err != nil {
 		return nil, fmt.Errorf("create trigger on %s: %w", prof.Name, err)

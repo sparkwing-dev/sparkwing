@@ -187,7 +187,7 @@ func runDebugRelease(args []string) error {
 		if err := requireController(prof, "debug release"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		if err := c.ReleaseDebugPause(ctx, t.run, t.node, releasedBy, store.PauseReleaseManual); err != nil {
 			return fmt.Errorf("release %s/%s: %w", t.run, t.node, err)
 		}
@@ -245,7 +245,7 @@ func runDebugAttach(args []string) error {
 	if err := requireController(prof, "debug attach"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	node, err := c.GetNode(ctx, t.run, t.node)
 	if err != nil {
 		return fmt.Errorf("get node %s/%s: %w", t.run, t.node, err)
@@ -290,7 +290,7 @@ func runDebugEnv(args []string) error {
 		if err := requireController(prof, "debug env"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		node, err = c.GetNode(ctx, t.run, t.node)
 		if err != nil {
 			return fmt.Errorf("get node: %w", err)

@@ -161,7 +161,7 @@ func listRemoteAnnotations(ctx context.Context, profileName, runID, nodeFilter, 
 	if err := requireController(prof, cmdAnnotationsList.Path); err != nil {
 		return nil, err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	var out []annotationEntry
 	if stepFilter == "" {
 		nodes, err := c.ListNodes(ctx, runID)
@@ -281,7 +281,7 @@ func addRemoteAnnotation(ctx context.Context, profileName, runID, nodeID, stepID
 	if err := requireController(prof, cmdAnnotationsAdd.Path); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	if stepID != "" {
 		if err := c.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
 			return err

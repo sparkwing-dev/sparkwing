@@ -45,7 +45,7 @@ func runDebugReplay(args []string) error {
 			_ = st.Close()
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		fmt.Fprintf(os.Stderr, "fetching dispatch state from %s for replay...\n", prof.Name)
 		if err := orchestrator.SideloadRemoteForReplay(ctx, st, c, t.run, t.node); err != nil {
 			_ = st.Close()

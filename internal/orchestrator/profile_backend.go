@@ -155,7 +155,7 @@ func isLocalState(spec *backends.Spec) bool {
 func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, cache *backends.Spec) {
 	surf := p.Surfaces()
 	if surf.State == nil && surf.Logs == nil && surf.Cache == nil {
-		if p != nil && p.Controller != "" {
+		if p != nil && p.ControllerURL() != "" {
 			ctrl := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
 			return ctrl(), ctrl(), ctrl()
 		}
@@ -180,10 +180,10 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 // give their usual "no lookup provided" error if a controller spec
 // nonetheless appears.
 func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {
-	if p == nil || p.Controller == "" {
+	if p == nil || p.ControllerURL() == "" {
 		return nil
 	}
 	return func(string) (string, string, error) {
-		return p.Controller, p.Token, nil
+		return p.ControllerURL(), p.ControllerToken(), nil
 	}
 }

@@ -64,10 +64,8 @@ func loadCfg() (*profile.Config, string, error) {
 func runProfilesAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesAdd.Path, flag.ContinueOnError)
 	name := fs.String("name", "", "profile name (unique per profiles.yaml)")
-	controller := fs.String("controller", "", "controller base URL (required)")
-	token := fs.String("token", "", "bearer token (optional -- omit for local/unauthed stacks)")
-	gitcache := fs.String("gitcache", "", "gitcache URL (optional; fleet-worker uses this)")
-	defaultRunner := fs.String("default-runner", "", "runner name to dispatch to when a job's Prefers don't match and several runners satisfy Requires (omit for local)")
+	controller := fs.String("controller", "", "controller base URL (required for remote dispatch)")
+	token := fs.String("token", "", "bearer token (optional -- omit for unauthed controllers)")
 	makeDefault := fs.Bool("default", false, "set this profile as the default")
 	if err := parseAndCheck(cmdProfilesAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -83,13 +81,11 @@ func runProfilesAdd(args []string) error {
 	if _, existed := cfg.Profiles[*name]; existed {
 		return fmt.Errorf("profiles add: %q already exists (use `profiles remove` first, or `profiles duplicate` into a new name)", *name)
 	}
-	_ = defaultRunner
-	cfg.Profiles[*name] = &profile.Profile{
-		Name:       *name,
-		Controller: *controller,
-		Token:      *token,
-		Gitcache:   *gitcache,
+	p := &profile.Profile{Name: *name}
+	if *controller != "" || *token != "" {
+		p.Controller = &profile.ControllerSpec{URL: *controller, Token: *token}
 	}
+	cfg.Profiles[*name] = p
 	// Auto-set as default when it's the first profile. The implicit
 	// behavior matches what new users expect: "I added one profile,
 	// now every command just works." Later profiles have to opt in
@@ -125,16 +121,16 @@ func runProfilesList(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  NAME\tCONTROLLER\tLOGS\tTOKEN\tGITCACHE")
+	fmt.Fprintln(tw, "  NAME\tCONTROLLER\tLOGS\tTOKEN")
 	for _, name := range cfg.Names() {
 		p := cfg.Profiles[name]
 		marker := "  "
 		if name == cfg.Default {
 			marker = "* "
 		}
-		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\t%s\n",
-			marker, name, p.Controller, profile.SpecString(p.Logs),
-			redactToken(p.Token), emptyDash(p.Gitcache))
+		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n",
+			marker, name, emptyDash(p.ControllerURL()), profile.SpecString(p.Logs),
+			redactToken(p.ControllerToken()))
 	}
 	_ = tw.Flush()
 	return nil
@@ -166,14 +162,13 @@ func runProfilesShow(args []string) error {
 		return fmt.Errorf("profiles show: %q not found", name)
 	}
 	fmt.Fprintf(os.Stdout, "name:       %s\n", p.Name)
-	fmt.Fprintf(os.Stdout, "controller: %s\n", p.Controller)
+	fmt.Fprintf(os.Stdout, "controller: %s\n", p.ControllerURL())
 	fmt.Fprintf(os.Stdout, "logs:       %s\n", profile.SpecString(p.Logs))
 	if *showToken {
-		fmt.Fprintf(os.Stdout, "token:      %s\n", emptyDash(p.Token))
+		fmt.Fprintf(os.Stdout, "token:      %s\n", emptyDash(p.ControllerToken()))
 	} else {
-		fmt.Fprintf(os.Stdout, "token:      %s\n", redactToken(p.Token))
+		fmt.Fprintf(os.Stdout, "token:      %s\n", redactToken(p.ControllerToken()))
 	}
-	fmt.Fprintf(os.Stdout, "gitcache:   %s\n", emptyDash(p.Gitcache))
 	if cfg.Default == p.Name {
 		fmt.Fprintln(os.Stdout, "default:    yes")
 	}
@@ -244,8 +239,6 @@ func runProfilesSet(args []string) error {
 	nameFlag := fs.String("name", "", "profile name to mutate")
 	controller := fs.String("controller", "", "new controller URL")
 	token := fs.String("token", "", "new bearer token")
-	gitcache := fs.String("gitcache", "", "new gitcache URL")
-	defaultRunner := fs.String("default-runner", "", "runner name to dispatch to when a job's Prefers don't match and several runners satisfy Requires (empty clears, falls back to local)")
 	if err := parseAndCheck(cmdProfilesSet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -264,16 +257,17 @@ func runProfilesSet(args []string) error {
 	// Only overwrite fields the user passed a flag for. pflag
 	// distinguishes "flag not given" from "flag given with empty
 	// value" via fs.Changed.
-	if fs.Changed("controller") {
-		p.Controller = *controller
+	if fs.Changed("controller") || fs.Changed("token") {
+		if p.Controller == nil {
+			p.Controller = &profile.ControllerSpec{}
+		}
+		if fs.Changed("controller") {
+			p.Controller.URL = *controller
+		}
+		if fs.Changed("token") {
+			p.Controller.Token = *token
+		}
 	}
-	if fs.Changed("token") {
-		p.Token = *token
-	}
-	if fs.Changed("gitcache") {
-		p.Gitcache = *gitcache
-	}
-	_ = defaultRunner
 	if err := profile.Save(path, cfg); err != nil {
 		return err
 	}

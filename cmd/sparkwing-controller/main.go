@@ -40,6 +40,10 @@ func run(args []string) error {
 		"kubeconfig path when --pool is set (empty = in-cluster)")
 	secretsKeyFile := fs.String("secrets-key-file", "",
 		"path to a file containing 32 raw bytes for secret encryption (alternative to SPARKWING_SECRETS_KEY)")
+	cachePodURL := fs.String("cache-pod-url", os.Getenv("CACHE_POD_URL"),
+		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
+			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
+			"hardcoding it in profiles.yaml. Empty disables the announcement.")
 	_ = fs.Parse(args)
 
 	p, err := paths.DefaultPaths()
@@ -74,7 +78,8 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		EnableAuthFromStore().
-		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET"))
+		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
+		WithCachePodURL(*cachePodURL)
 	// Wire the cipher only when one was configured; a typed-nil
 	// *secrets.Cipher passed through the Cipher interface would still
 	// register as non-nil at the handler's seam.

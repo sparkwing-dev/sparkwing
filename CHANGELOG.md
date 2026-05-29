@@ -89,6 +89,23 @@ code change to unlock.
 
 ### Changed (Breaking)
 
+- **config:** Profile `controller:` is now a nested block with
+  `url:` + `token:` fields (was two flat fields, `controller:` and
+  `token:`, alongside the rest of the profile). Makes the binding
+  unambiguous and leaves room for the controller block to grow.
+- **config:** Profile `gitcache:` field removed. The CLI now
+  discovers the sparkwing-cache pod's URL via the controller's new
+  `GET /api/v1/services` endpoint, then talks to the cache pod
+  directly for `sparkwing push` and the eager-refresh on dispatch.
+  Operators with a controller-bound profile don't need to set the
+  gitcache URL anywhere; operators without a controller (no remote
+  dispatch) lose the gitcache-backed flows, which they wouldn't be
+  using anyway.
+- **controller:** New `--cache-pod-url` flag (or `CACHE_POD_URL` env
+  var) on `sparkwing-controller`. When set, the controller announces
+  the URL via `GET /api/v1/services` so operator CLIs can discover
+  it. Empty disables the announcement; clients get a 404 and fall
+  back to "no cache pod" (the few flows that need one fail loud).
 - **config:** Profile fields removed: `cost_per_runner_hour` (was
   decorative receipt cost; receipts now show compute_seconds only),
   `auto_allow` (was a footgun -- pre-authorizing risk labels per

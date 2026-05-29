@@ -22,7 +22,7 @@ func TestBuildRunInvocation_NoProfileOmitsBlocks(t *testing.T) {
 func TestBuildRunInvocation_ProfileSetButNoChainOmits(t *testing.T) {
 	// Defensive: a profile without a chain (caller forgot, legacy path)
 	// emits nothing rather than a partial block.
-	opts := Options{Pipeline: "demo", Profile: &profile.Profile{Name: "prod", Controller: "https://api.example.dev"}}
+	opts := Options{Pipeline: "demo", Profile: &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}}
 	inv := buildRunInvocation(opts, "run-1")
 	if _, ok := inv["profile"]; ok {
 		t.Error("profile block must be omitted when ProfileChain is nil")
@@ -32,7 +32,7 @@ func TestBuildRunInvocation_ProfileSetButNoChainOmits(t *testing.T) {
 func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
 	opts := Options{
 		Pipeline:     "demo",
-		Profile:      &profile.Profile{Name: "prod", Controller: "https://api.example.dev", Token: "swu_secret"},
+		Profile:      &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 		ProfileChain: &profile.Chain{Selected: "prod", Source: profile.ChainSourceFlag},
 	}
 	inv := buildRunInvocation(opts, "run-1")

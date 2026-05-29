@@ -46,9 +46,9 @@ func runWorker(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "sparkwing worker: profile=%s controller=%s poll=%s\n",
-		prof.Name, prof.Controller, *poll)
+		prof.Name, prof.ControllerURL(), *poll)
 
-	cli := client.NewWithToken(prof.Controller, nil, prof.Token)
+	cli := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	// Empty pipeline and source filters = accept any trigger. The
 	// claim loop here doesn't know the consumer's registry; the
 	// spawned handle-trigger child will reject the trigger at Plan()
@@ -71,7 +71,7 @@ func runWorker(args []string) error {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.Controller, prof.Controller, prof.Token, *heartbeat)
+		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(), *heartbeat)
 	}
 }
 

@@ -26,9 +26,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		Default: "prod",
 		Profiles: map[string]*profile.Profile{
 			"prod": {
-				Controller:  "https://api.example.dev",
-				Token:       "swu_x",
-				Gitcache:    "https://gitcache.example.dev",
+				Controller:  &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
 				State:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
 				MirrorLocal: &mirror,
 			},
@@ -45,11 +43,8 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	if prod == nil {
 		t.Fatal("prod profile missing on reload")
 	}
-	if prod.Controller != "https://api.example.dev" || prod.Token != "swu_x" {
+	if prod.ControllerURL() != "https://api.example.dev" || prod.ControllerToken() != "swu_x" {
 		t.Errorf("controller/token: %+v", prod)
-	}
-	if prod.Gitcache != "https://gitcache.example.dev" {
-		t.Errorf("gitcache: %q", prod.Gitcache)
 	}
 	if prod.State == nil || prod.State.Type != backends.TypeSQLite {
 		t.Errorf("state: %+v", prod.State)

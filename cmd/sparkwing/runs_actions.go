@@ -42,8 +42,8 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 		if perr := requireController(prof, cmd); perr != nil {
 			return nil, nil, perr
 		}
-		c = client.NewWithToken(prof.Controller, nil, prof.Token)
-		logc = sparkwinglogs.New(prof.Controller, nil, prof.Token)
+		c = client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+		logc = sparkwinglogs.New(prof.ControllerURL(), nil, prof.ControllerToken())
 		return c, logc, nil
 	}
 	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")

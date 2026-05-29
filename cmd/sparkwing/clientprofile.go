@@ -52,7 +52,7 @@ func resolveProfile(name string) (*profile.Profile, error) {
 // command -- some (jobs logs) have local-only paths when no profile
 // is active -- but common enough to centralize.
 func requireController(p *profile.Profile, cmd string) error {
-	if p.Controller == "" {
+	if p.ControllerURL() == "" {
 		return fmt.Errorf("%s: profile %q has no controller URL", cmd, p.Name)
 	}
 	return nil

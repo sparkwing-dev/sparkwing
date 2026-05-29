@@ -284,7 +284,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		if opts.Profile != nil {
 			guardCtx.ProfileName = opts.Profile.Name
-			guardCtx.ProfileIsLocal = opts.Profile.Controller == ""
+			guardCtx.ProfileIsLocal = opts.Profile.ControllerURL() == ""
 		}
 		if err := opts.PipelineYAML.Guards.Evaluate(opts.Pipeline, guardCtx); err != nil {
 			return nil, err
@@ -399,7 +399,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	var profIsLocal bool
 	if opts.Profile != nil {
 		profName = opts.Profile.Name
-		profIsLocal = opts.Profile.Controller == ""
+		profIsLocal = opts.Profile.ControllerURL() == ""
 	}
 	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
 		Name:    profName,

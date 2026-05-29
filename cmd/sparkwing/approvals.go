@@ -70,7 +70,7 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 		if err := requireController(prof, cmd.Path); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		got, err = c.ResolveApproval(ctx, runID, nodeID, resolution, approver, *comment)
 	}
 	if err != nil {
@@ -125,7 +125,7 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 		if err := requireController(prof, cmdApprovalsList.Path); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		if *runID != "" {
 			rows, err = c.ListApprovalsForRun(ctx, *runID)
 		} else {

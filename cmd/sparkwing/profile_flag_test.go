@@ -21,7 +21,7 @@ func writeProfilesFixture(t *testing.T, body string) {
 func TestResolveProfileFlag_NotFound(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
-  prod: { controller: https://api.example.dev }
+  prod: { controller: { url: https://api.example.dev } }
   team: { state: { type: sqlite } }
 `)
 	_, err := resolveProfileFlag("bogus")
@@ -40,13 +40,13 @@ profiles:
 func TestResolveProfileFlag_Success(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
-  prod: { controller: https://api.example.dev, token: swu_x }
+  prod: { controller: { url: https://api.example.dev, token: swu_x } }
 `)
 	p, err := resolveProfileFlag("prod")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if p == nil || p.Name != "prod" || p.Controller != "https://api.example.dev" {
+	if p == nil || p.Name != "prod" || p.ControllerURL() != "https://api.example.dev" {
 		t.Fatalf("resolved %#v", p)
 	}
 }
@@ -67,7 +67,7 @@ func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
 func TestDispatchRun_ProfileNotFoundBeforeCompile(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
-  prod: { controller: https://api.example.dev }
+  prod: { controller: { url: https://api.example.dev } }
 `)
 	// A bad --profile must fail fast (before findSparkwingDir / compile),
 	// so this resolves and errors even outside any .sparkwing/ project.

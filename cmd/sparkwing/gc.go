@@ -54,7 +54,7 @@ func runGC(args []string) error {
 		if err := requireController(prof, "gc"); err != nil {
 			return err
 		}
-		ctrl = client.NewWithToken(prof.Controller, nil, prof.Token)
+		ctrl = client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	}
 
 	logger := slog.Default()

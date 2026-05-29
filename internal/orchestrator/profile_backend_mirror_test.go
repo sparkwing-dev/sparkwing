@@ -83,7 +83,7 @@ func TestApplyProfileBackendsWithMirror_SqliteLaptopNoMirror(t *testing.T) {
 
 func TestApplyProfileBackendsWithMirror_ControllerSetsMirrorLocal(t *testing.T) {
 	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: "https://api.example.dev", Token: "swu_test"}
+	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"}}
 	paths := Paths{Root: t.TempDir()}
 	opts := Options{}
 	if err := ApplyProfileBackendsWithMirror(context.Background(), &opts, p, paths); err != nil {
@@ -98,7 +98,7 @@ func TestApplyProfileBackendsWithMirror_ControllerSetsMirrorLocal(t *testing.T) 
 
 func TestApplyProfileBackendsWithMirror_LocalOnlyNoMirror(t *testing.T) {
 	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: "https://api.example.dev"}
+	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}
 	paths := Paths{Root: t.TempDir()}
 	opts := Options{LocalOnly: true, DefaultStateDB: paths.StateDB()}
 	if err := ApplyProfileBackendsWithMirror(context.Background(), &opts, p, paths); err != nil {

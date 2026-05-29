@@ -87,7 +87,7 @@ func runPipelineTrigger(args []string) error {
 	if err != nil {
 		return err
 	}
-	if prof.Controller == "" {
+	if prof.ControllerURL() == "" {
 		return fmt.Errorf("pipeline trigger: profile %q has no controller; `pipeline trigger` requires a profile that defines controller:. "+
 			"Use sparkwing run --profile %s for local execution against this profile's storage instead", prof.Name, prof.Name)
 	}
@@ -115,7 +115,7 @@ func runPipelineTrigger(args []string) error {
 		if ferr != nil {
 			return ferr
 		}
-		return orchestrator.JobLogsRemoteWithTokens(ctx, prof.Controller, prof.Controller, prof.Token,
+		return orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(),
 			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
 	}
 
@@ -125,6 +125,6 @@ func runPipelineTrigger(args []string) error {
 	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
 		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
 			"Add a logs: spec in profiles.yaml to see streaming output.", prof.Name)))
-	return orchestrator.JobStatusRemote(ctx, prof.Controller, prof.Token,
+	return orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
 		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout)
 }
