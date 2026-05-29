@@ -274,12 +274,6 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	// --target picks the pipeline's deployment target. Forwarded as
-	// SPARKWING_TARGET; the inner orchestrator/main.go lifts it onto
-	// Options at run start.
-	if wf.target != "" {
-		env = append(env, "SPARKWING_TARGET="+wf.target)
-	}
 	// Host-local box-slot semaphore knobs (see internal/boxslot).
 	// Forwarded to the inner pipeline binary, which acquires the
 	// slot before RunLocal so the wait blocks at run start rather

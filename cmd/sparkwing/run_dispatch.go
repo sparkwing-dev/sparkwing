@@ -83,11 +83,6 @@ type runFlags struct {
 	// regardless. The gate degrades gracefully (no labels declared =
 	// no block).
 	allow []string
-	// target picks the pipeline target the run resolves against
-	// (deployment intent: runner / secret bindings). Empty means "use
-	// the single declared target if there's one, else no target."
-	// Parsed from --target (renamed from --sw-target in v0.5.0).
-	target string
 	// localOnly forces SQLite state + filesystem logs + filesystem
 	// cache for this run, ignoring any configured shared backends.
 	// The escape hatch when shared state is misbehaving (stale
@@ -294,17 +289,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-cd="):
 			wf.changeDir = strings.TrimPrefix(a, "--sw-cd=")
 			i++
-		case a == "--target":
-			if i+1 < len(args) {
-				wf.target = args[i+1]
-				i += 2
-				continue
-			}
-			pass = append(pass, a)
-			i++
-		case strings.HasPrefix(a, "--target="):
-			wf.target = strings.TrimPrefix(a, "--target=")
-			i++
 		case a == "--sw-box-slots":
 			if i+1 < len(args) {
 				wf.boxSlots = args[i+1]
@@ -381,17 +365,6 @@ func triggerSource(prefix string) string {
 // to report. prof must already carry a controller.
 func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
-	// parseRunFlags strips --target into wf.target before the
-	// passthrough is collected, so for the v0.6 schema-driven path
-	// to see it we have to thread it back into the args map sent
-	// over the wire. The remote orchestrator lifts args["target"]
-	// onto opts.Target if no other source set it, so OnTarget and
-	// PipelineYAML target overlays keep working too.
-	if wf.target != "" {
-		if _, set := args["target"]; !set {
-			args["target"] = wf.target
-		}
-	}
 	var userName string
 	if u, err := user.Current(); err == nil {
 		userName = u.Username

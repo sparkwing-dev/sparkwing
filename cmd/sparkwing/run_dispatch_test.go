@@ -90,12 +90,16 @@ func TestParseRunFlags_Profile(t *testing.T) {
 	}
 }
 
-// --profile picks the storage profile; --target picks the pipeline's
-// deployment target. They are distinct, both consumed by parseRunFlags.
-func TestParseRunFlags_ProfileAndTarget(t *testing.T) {
-	wf, _ := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
-	if wf.profile != "local" || wf.target != "prod" {
-		t.Errorf("got profile=%q target=%q, want local/prod", wf.profile, wf.target)
+// --profile picks the storage profile; --target falls through to the
+// pipeline binary as a regular pass-through arg in v0.6 (no longer
+// framework-special).
+func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
+	if wf.profile != "local" {
+		t.Errorf("profile = %q, want local", wf.profile)
+	}
+	if !slices.Contains(pass, "--target") || !slices.Contains(pass, "prod") {
+		t.Errorf("--target should fall through to pipeline args; passthrough=%v", pass)
 	}
 }
 
