@@ -1382,6 +1382,14 @@ func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, r
 	if in := plan.Inputs(); in != nil {
 		s.resolverCtx = sparkwingruntime.WithInputs(s.resolverCtx, in)
 	}
+	// v0.6: install the resolved-args map (merged across every job
+	// that embeds WithArgs[T]) so step bodies can call
+	// sparkwing.Arg[T](ctx, "name") for cross-job arg lookups.
+	// Per-job WithArgs[T].Args(ctx) reads independently from the
+	// holder; this install backs the by-name accessor.
+	if ra := plan.ResolvedArgs(); ra != nil {
+		s.resolverCtx = sparkwingruntime.WithResolvedArgs(s.resolverCtx, ra)
+	}
 	return s
 }
 

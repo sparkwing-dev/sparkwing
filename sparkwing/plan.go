@@ -42,6 +42,13 @@ type Plan struct {
 	// the pipeline's transitive arg surface. Absent entries mean the
 	// job declared no typed args.
 	jobArgs map[string]*Schema
+
+	// resolvedArgs is the merged map of every job's typed-args
+	// resolution result, keyed by CLI flag name. Populated by
+	// resolveAndBindJobArgs in the pipeline-registration invoke
+	// flow; the orchestrator installs it on per-step contexts so
+	// sparkwing.Arg[T] can read across jobs.
+	resolvedArgs map[string]any
 }
 
 // LintWarning is a non-fatal Plan-time advisory attached to a node.

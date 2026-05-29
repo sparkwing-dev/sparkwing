@@ -174,3 +174,29 @@ type TransitiveArg struct {
 	Desc      string
 	Schema    *Schema
 }
+
+// setResolvedArgs stores the merged resolved-args map on the plan.
+// Called by [resolveAndBindJobArgs] in the pipeline-registration
+// invoke flow; pipeline authors don't call this directly.
+func (p *Plan) setResolvedArgs(m map[string]any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resolvedArgs = m
+}
+
+// ResolvedArgs returns the merged map of every job's typed-args
+// resolution result, keyed by CLI flag name. Nil before
+// [resolveAndBindJobArgs] runs; otherwise a shallow copy callers
+// can read freely without locking.
+func (p *Plan) ResolvedArgs() map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.resolvedArgs) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(p.resolvedArgs))
+	for k, v := range p.resolvedArgs {
+		out[k] = v
+	}
+	return out
+}

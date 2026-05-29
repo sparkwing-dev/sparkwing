@@ -125,6 +125,19 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		if err := p.Plan(planguard.With(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
+		// v0.6: resolve every job's typed args (via WithArgs[T]) and
+		// bind the result onto each job's WithArgs holder. The merged
+		// args map is stored on the plan so the orchestrator can
+		// install it on per-step contexts for sparkwing.Arg[T] reads.
+		// Profile defaults + predicate context get plumbed from the
+		// outer CLI in a follow-up; for now the resolve sees CLI args
+		// only, which still drives Required / Default / Computed.
+		resolveIn := ResolveInputs{FlagValues: args}
+		resolved, err := resolveAndBindJobArgs(plan, resolveIn)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline %q: %w", name, err)
+		}
+		plan.setResolvedArgs(resolved)
 		return plan, nil
 	}
 
