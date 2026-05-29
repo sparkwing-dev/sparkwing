@@ -71,13 +71,10 @@ type Pipeline struct {
 
 	Defaults map[string]string
 
-	Locked []string
-
 	Dispatch *Dispatch
 
 	Values PipelineValues
 }
-func (p *Pipeline) LockedSet() map[string]struct{}
 func (p *Pipeline) TriggerValues(source string) map[string]any
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
 type PipelineValues struct {

@@ -67,10 +67,13 @@ code change to unlock.
   AND-composed; `reject:` is OR-composed; `reject:` fires first so
   "you can't dispatch this" beats "missing prereq" when both apply.
 - **config:** Pipeline-level `defaults:` map supplies per-arg
-  fallback values. Resolution priority: schema `Default()` <
-  YAML `defaults:` < schema `Computed()` < operator CLI flag.
-- **config:** Pipeline-level `locked:` list refuses operator
-  override of named flags with a hard error.
+  fallback values. Resolution priority for any one arg, low to high:
+  schema `Default()` -> schema `Computed()` -> YAML `defaults:` ->
+  operator CLI flag. Explicit values (operator CLI > deployer YAML)
+  always beat SDK-author fallback rules (Computed > Default). To
+  declare a value the operator cannot override, use `values:` +
+  `PipelineConfig` -- that's the typed pipeline-binding-only
+  surface; args are by definition operator-controllable.
 - **sdk:** Typed-args system for jobs via `sparkwing.WithArgs[T]` +
   optional `Schema()` method (`Required` / `RequiredWhen(predicate)`
   / `Default` / `Computed(fn)` / `OneOf` / `Min` / `Max` / `Range` /

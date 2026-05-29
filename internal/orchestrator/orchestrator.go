@@ -383,30 +383,15 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwing.WithPipelineConfig(ctx, pipeCfg)
 	}
 
-	// Lock enforcement: when the pipeline YAML lists a flag as
-	// `locked:`, the operator may not pass it explicitly. Surfaces
-	// before any plan / dispatch work so the error mode is loud and
-	// the pipeline's policy override is honored verbatim.
-	if opts.PipelineYAML != nil {
-		if locked := opts.PipelineYAML.LockedSet(); len(locked) > 0 {
-			for k := range opts.Args {
-				if _, isLocked := locked[k]; isLocked {
-					err := fmt.Errorf("--%s is locked by pipeline %q; remove the flag or use a different pipeline",
-						k, opts.Pipeline)
-					_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-					return &Result{RunID: runID, Status: "failed", Error: err}, nil
-				}
-			}
-		}
-	}
-
 	// Defaults layering: build the invokeArgs map by merging the
 	// pipeline YAML's defaults: block under the operator's explicit
-	// CLI args. Explicit args always win; YAML defaults fill what
-	// the operator omitted. Schema-level Default() and Computed()
-	// run inside the registration's resolver, below the YAML layer
-	// (priority: schema.Default < YAML.defaults < schema.Computed <
-	// CLI).
+	// CLI args. Resolution priority for any one arg, low to high:
+	// schema.Default (SDK author's literal fallback) -> schema.Computed
+	// (SDK author's derivation rule) -> YAML.defaults (deployment
+	// binding's policy) -> operator CLI flag. YAML defaults land in
+	// the resolver's FlagValues map and are picked up before the
+	// resolver consults Default/Computed, so the deployer's explicit
+	// value always overrides the SDK author's fallback rules.
 	invokeArgs := opts.Args
 	if opts.PipelineYAML != nil && len(opts.PipelineYAML.Defaults) > 0 {
 		merged := make(map[string]string, len(invokeArgs)+len(opts.PipelineYAML.Defaults))

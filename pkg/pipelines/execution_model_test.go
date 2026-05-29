@@ -138,7 +138,6 @@ pipelines:
     defaults:
       image: "registry.prod.com/myapp:latest"
       replicas: "10"
-    locked: [protected]
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -153,9 +152,6 @@ pipelines:
 	}
 	if p.Defaults["replicas"] != "10" {
 		t.Errorf("defaults: %+v", p.Defaults)
-	}
-	if _, ok := p.LockedSet()["protected"]; !ok {
-		t.Errorf("locked set: %+v", p.LockedSet())
 	}
 }
 
@@ -173,16 +169,16 @@ pipelines:
 	}
 }
 
-func TestParse_LockedDuplicateRejected(t *testing.T) {
+func TestParse_LockedKeyRejectedWithMigrationMessage(t *testing.T) {
 	yaml := `
 pipelines:
   - name: deploy
     entrypoint: Deploy
-    locked: [protected, protected]
+    locked: [protected]
 `
 	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "duplicated") {
-		t.Fatalf("expected duplicate-lock rejection; got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown-field rejection for `locked:` (removed in v0.6); got %v", err)
 	}
 }
 

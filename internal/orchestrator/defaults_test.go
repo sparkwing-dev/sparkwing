@@ -2,7 +2,6 @@ package orchestrator_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -81,29 +80,6 @@ func TestRun_ExplicitArgBeatsPipelineDefault(t *testing.T) {
 	}
 	if lockDefaultsCapturedReplicas != 3 {
 		t.Errorf("explicit --replicas should win; got %d, want 3", lockDefaultsCapturedReplicas)
-	}
-}
-
-func TestRun_LockedFlagRejected(t *testing.T) {
-	registerLockDefaultsPipe(t)
-	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "lock-defaults-pipe",
-		Args:     map[string]string{"protected": "true"},
-		PipelineYAML: &pipelines.Pipeline{
-			Name:       "lock-defaults-pipe",
-			Entrypoint: "LockDefaults",
-			Locked:     []string{"protected"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed (locked flag should reject)", res.Status)
-	}
-	if res.Error == nil || !strings.Contains(res.Error.Error(), "locked by pipeline") {
-		t.Errorf("error should name the lock; got %v", res.Error)
 	}
 }
 

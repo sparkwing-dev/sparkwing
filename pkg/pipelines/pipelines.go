@@ -39,18 +39,16 @@ type Pipeline struct {
 	// `arg:<flag>=<value>`. See pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
-	// Defaults supplies per-arg fallback values. Lower priority than
-	// schema Computed and explicit CLI flags; higher priority than
-	// schema Default. Keyed by CLI flag name (kebab-case, matching
-	// what the SDK's WithArgs[T] field tags resolve to).
+	// Defaults supplies per-arg fallback values. Higher priority than
+	// schema Default and Computed; lower than an explicit operator
+	// CLI flag. Keyed by CLI flag name (kebab-case, matching what
+	// the SDK's WithArgs[T] field tags resolve to).
+	//
+	// Args are by definition operator-controllable. If you want a
+	// value the operator cannot override, declare it as PipelineConfig
+	// via values: -- that's the typed pipeline-binding-only surface
+	// the operator has no CLI access to.
 	Defaults map[string]string `yaml:"defaults,omitempty"`
-
-	// Locked lists CLI flag names the operator may not override. The
-	// CLI rejects `--<name>` invocations with a clear error naming
-	// the locking pipeline. Use when a pipeline must enforce policy
-	// the operator can't unset (e.g. `locked: [protected]` on the
-	// prod-deployment pipeline).
-	Locked []string `yaml:"locked,omitempty"`
 
 	// Dispatch carries the per-pipeline scheduling metadata: runner
 	// allowlist, secret source, protected gate, approvals, optional
@@ -274,7 +272,7 @@ func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
 		"on": {}, "secrets": {}, "tags": {}, "hidden": {},
-		"guards": {}, "defaults": {}, "locked": {},
+		"guards": {}, "defaults": {},
 		"dispatch": {}, "values": {},
 	}
 }
@@ -388,9 +386,6 @@ func (c *Config) Validate() error {
 		if err := p.Guards.Validate(p.Name); err != nil {
 			return err
 		}
-		if err := p.validateLocked(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -410,37 +405,6 @@ func (d *Dispatch) Validate(pipeline string) error {
 			pipeline, d.Approvals)
 	}
 	return nil
-}
-
-// validateLocked ensures locked flag names are well-formed (non-empty,
-// no duplicates). The actual lock enforcement happens at CLI parse
-// time when an operator passes a locked --flag.
-func (p *Pipeline) validateLocked() error {
-	seen := map[string]struct{}{}
-	for _, name := range p.Locked {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return fmt.Errorf("pipeline %q: locked entry is empty", p.Name)
-		}
-		if _, dup := seen[name]; dup {
-			return fmt.Errorf("pipeline %q: locked entry %q is duplicated", p.Name, name)
-		}
-		seen[name] = struct{}{}
-	}
-	return nil
-}
-
-// LockedSet returns the locked flag names as a set for O(1) lookups
-// from the CLI flag parser.
-func (p *Pipeline) LockedSet() map[string]struct{} {
-	if len(p.Locked) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(p.Locked))
-	for _, n := range p.Locked {
-		out[strings.TrimSpace(n)] = struct{}{}
-	}
-	return out
 }
 
 // Validate checks every secret entry under one pipeline.
