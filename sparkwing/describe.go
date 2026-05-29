@@ -121,4 +121,10 @@ type DescribeArg struct {
 	Default  string   `json:"default,omitempty"`
 	Enum     []string `json:"enum,omitempty"`
 	Secret   bool     `json:"secret,omitempty"`
+	// JobID identifies the job that declared this arg when the arg
+	// came from a [WithArgs] embedding rather than the pipeline-level
+	// [Register] Inputs struct. Empty for pipeline-level args. Used by
+	// the help renderer to group "from job X" annotations and by
+	// tooling that needs to attribute flags to their source.
+	JobID string `json:"job_id,omitempty"`
 }

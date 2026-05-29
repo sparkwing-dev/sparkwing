@@ -325,6 +325,9 @@ func printPipelineHelp(pipeline string) error {
 			if a.Secret {
 				suffix += " [secret]"
 			}
+			if a.JobID != "" {
+				suffix += fmt.Sprintf(" [from job %s]", a.JobID)
+			}
 			fmt.Fprintf(w, "  %-30s %s %s  %s%s\n",
 				head, tag, a.Type, a.Desc, suffix)
 		}

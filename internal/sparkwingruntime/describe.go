@@ -67,48 +67,85 @@ func DescribePipelineByName(name string) (sparkwing.DescribePipeline, bool, erro
 			Secret:   f.Secret,
 		})
 	}
-	// Best-effort risk-label union + per-step breakdown.
-	// We invoke Plan() with empty args to walk the DAG; pipelines
-	// with required Inputs (or that panic at Plan-time without args)
-	// gracefully degrade to empty labels. The sparkwing dispatcher
-	// treats absent labels as "no gate fires" so a pipeline that
-	// can't be described stays dispatchable -- the next manual run
-	// will enforce the gate via the actual Plan walk.
-	if union, perStep, ok := collectRisks(reg); ok {
-		if len(union) > 0 {
-			dp.Risks = union
+	// Best-effort risk-label union + per-step breakdown + transitive
+	// WithArgs[T] args. All three need a Plan() walk, so we share one
+	// invocation. Pipelines with required Inputs (or that panic at
+	// Plan-time without args) gracefully degrade -- the dispatcher
+	// treats absent labels as "no gate fires" and an absent transitive
+	// args list as "no extra flags," both safe defaults.
+	if plan, ok := bestEffortPlan(reg); ok {
+		if union, perStep := collectRisksFromPlan(plan); len(union) > 0 || len(perStep) > 0 {
+			if len(union) > 0 {
+				dp.Risks = union
+			}
+			if len(perStep) > 0 {
+				dp.RisksBySteps = perStep
+			}
 		}
-		if len(perStep) > 0 {
-			dp.RisksBySteps = perStep
-		}
+		dp.Args = appendTransitiveArgs(dp.Args, plan)
 	}
 	return dp, true, nil
 }
 
-// collectRisks best-effort invokes the pipeline's Plan() with an
-// empty args map, walks every reachable WorkStep, and returns the
-// sorted union of declared risk labels plus the per-step breakdown.
-// Failures (panics, required-Inputs errors) are swallowed so an
-// older or required-flag pipeline doesn't break --describe -- the
-// dispatcher's gate degrades gracefully when labels are absent.
-func collectRisks(reg *sparkwing.Registration) (union []string, perStep []sparkwing.DescribeStepRisks, ok bool) {
+// appendTransitiveArgs walks the plan's WithArgs[T] schemas and
+// appends one DescribeArg per declared flag. Flags already present
+// in args (pipeline-level Inputs) are skipped on name match so a
+// pipeline that re-declares a job-owned arg at the Inputs level
+// stays the authoritative entry. JobID is stamped from the
+// transitive surface so the help renderer can show "[from <job>]".
+func appendTransitiveArgs(args []sparkwing.DescribeArg, plan *sparkwing.Plan) []sparkwing.DescribeArg {
+	surface := plan.TransitiveArgsSurface()
+	if len(surface) == 0 {
+		return args
+	}
+	have := make(map[string]bool, len(args))
+	for _, a := range args {
+		have[a.Name] = true
+	}
+	jobsByFlag := make(map[string]string, len(surface))
+	schemasSeen := map[*sparkwing.Schema]string{}
+	for flag, t := range surface {
+		jobsByFlag[flag] = t.JobID
+		schemasSeen[t.Schema] = t.JobID
+	}
+	for s, jobID := range schemasSeen {
+		for _, da := range s.DescribeArgs() {
+			if have[da.Name] {
+				continue
+			}
+			da.JobID = jobID
+			args = append(args, da)
+			have[da.Name] = true
+		}
+	}
+	return args
+}
+
+// bestEffortPlan best-effort invokes the pipeline's Plan() with an
+// empty args map so describe-time consumers (risk labels, transitive
+// args) can walk the DAG. Failures (panics, required-Inputs errors)
+// are swallowed -- the describe cache degrades gracefully so an
+// older or required-flag pipeline doesn't break --help.
+func bestEffortPlan(reg *sparkwing.Registration) (plan *sparkwing.Plan, ok bool) {
 	if reg == nil || reg.Invoke == nil {
-		return nil, nil, false
+		return nil, false
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			// A pipeline that panics under empty args (e.g. asserts a
-			// required input is non-empty inside Plan) is allowed --
-			// the label walk is best-effort, and the dispatcher's
-			// "no labels detected" path keeps that dispatch safe-
-			// by-default rather than blocked-by-default.
-			union, perStep, ok = nil, nil, false
+			plan, ok = nil, false
 		}
 	}()
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: reg.Name})
-	if err != nil || plan == nil {
-		return nil, nil, false
+	p, err := reg.Invoke(sparkwing.SkipArgResolve(context.Background()), nil, sparkwing.RunContext{Pipeline: reg.Name})
+	if err != nil || p == nil {
+		return nil, false
 	}
+	return p, true
+}
+
+// collectRisksFromPlan returns the union + per-step breakdown of
+// declared risk labels reachable in plan. Caller already obtained
+// plan via bestEffortPlan so failures upstream short-circuit out.
+func collectRisksFromPlan(plan *sparkwing.Plan) (union []string, perStep []sparkwing.DescribeStepRisks) {
 	var perStepLabels [][]string
 	for _, n := range plan.Nodes() {
 		w := n.Work()
@@ -129,5 +166,5 @@ func collectRisks(reg *sparkwing.Registration) (union []string, perStep []sparkw
 		}
 	}
 	union = SortedUniqueRisks(perStepLabels...)
-	return union, perStep, true
+	return union, perStep
 }

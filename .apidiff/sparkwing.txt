@@ -127,6 +127,8 @@ type DescribeArg struct {
 	Default  string
 	Enum     []string
 	Secret   bool
+
+	JobID string
 }
 type DescribePipeline struct {
 	Name     string
@@ -412,6 +414,7 @@ func (p *Plan) JobArgSchemas() map[string]*Schema
 func (p *Plan) JobGroupNames(id string) []string
 func (p *Plan) LintWarnings() []LintWarning
 func (p *Plan) Nodes() []*JobNode
+func (p *Plan) ResolvedArgs() map[string]any
 func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg
 func Positive() Constraint
 type Predicate interface {
@@ -434,6 +437,13 @@ type PrefersProvider interface {
 type Produces[T any] struct{}
 func Profile(name string) Predicate
 type ProfileLookup func(name string) (controller, token string, err error)
+type ProfileResolutionContext struct {
+	Defaults map[string]string
+
+	Name string
+
+	IsLocal bool
+}
 const Queue OnLimitPolicy = "queue"
 func Range(min, max any) Constraint
 func ReadFile(path string) ([]byte, error)
@@ -532,21 +542,22 @@ var RuntimePlumbing = struct {
 	Fns  runtimePlumbingFns
 }{
 	Keys: runtimePlumbingKeys{
-		DryRun:           dryRunKey{},
-		Runner:           runnerCtxKey{},
-		SpawnHandler:     keySpawnHandler,
-		StepRange:        stepRangeKey{},
-		Target:           targetKey{},
-		RefResolver:      keyRefResolver,
-		JSONRefResolver:  keyJSONRefResolver,
-		PipelineResolver: keyPipelineResolver,
-		PipelineAwaiter:  keyPipelineAwaiter,
-		Inputs:           keyInputs,
-		PipelineSecrets:  keyPipelineSecrets,
-		SecretResolver:   keySecretResolver,
-		Logger:           keyLogger,
-		Node:             keyNode,
-		ResolvedArgs:     keyResolvedArgs,
+		DryRun:            dryRunKey{},
+		Runner:            runnerCtxKey{},
+		SpawnHandler:      keySpawnHandler,
+		StepRange:         stepRangeKey{},
+		Target:            targetKey{},
+		RefResolver:       keyRefResolver,
+		JSONRefResolver:   keyJSONRefResolver,
+		PipelineResolver:  keyPipelineResolver,
+		PipelineAwaiter:   keyPipelineAwaiter,
+		Inputs:            keyInputs,
+		PipelineSecrets:   keyPipelineSecrets,
+		SecretResolver:    keySecretResolver,
+		Logger:            keyLogger,
+		Node:              keyNode,
+		ResolvedArgs:      keyResolvedArgs,
+		ProfileResolution: keyProfileResolution,
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,
@@ -561,6 +572,7 @@ var RuntimePlumbing = struct {
 const Satisfied Outcome = "satisfied"
 type Schema struct {
 }
+func (s *Schema) DescribeArgs() []DescribeArg
 func (s *Schema) Fields() []string
 func (s *Schema) GoType() reflect.Type
 func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error)
@@ -602,6 +614,7 @@ type ShortHelpProvider interface {
 	ShortHelp() string
 }
 const Skip OnLimitPolicy = "skip"
+func SkipArgResolve(ctx context.Context) context.Context
 func SkipBudget(d time.Duration) SkipOption
 type SkipOption func(*JobNode)
 type SkipPredicate func(ctx context.Context) bool
@@ -690,6 +703,7 @@ func WithFreshInputs[T any](in T) AwaitOption
 func WithFreshRepo(repo string) AwaitOption
 func WithFreshTimeout(d time.Duration) AwaitOption
 func WithPipelineConfig(ctx context.Context, v any) context.Context
+func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context
 func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context
 func WithStep(ctx context.Context, stepID string) context.Context
 type Work struct {

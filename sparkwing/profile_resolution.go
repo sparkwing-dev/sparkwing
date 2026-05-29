@@ -53,3 +53,29 @@ func profileResolutionFromContext(ctx context.Context) ProfileResolutionContext 
 	}
 	return ProfileResolutionContext{}
 }
+
+type keySkipArgResolveType struct{}
+
+var keySkipArgResolve = keySkipArgResolveType{}
+
+// SkipArgResolve marks ctx so the registration's invoke() builds a
+// plan without running the v0.6 args resolution+bind pass. Intended
+// for describe-time consumers (internal/sparkwingruntime.DescribePipelineByName,
+// the risk-label walker, the tab-completion warmer) that need to
+// walk the plan graph without erroring on missing required args.
+//
+// Production dispatch never sets this -- run paths want resolve to
+// fire so missing required args fail loud before any step runs.
+func SkipArgResolve(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keySkipArgResolve, true)
+}
+
+// skipArgResolveFromContext reports whether ctx carries the describe-
+// mode marker installed by [SkipArgResolve]. Internal to the package.
+func skipArgResolveFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(keySkipArgResolve).(bool)
+	return v
+}

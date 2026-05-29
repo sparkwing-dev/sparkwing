@@ -172,18 +172,24 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		// arrive through ctx via the runtime's WithProfileResolution
 		// install; when absent the resolver treats the run as local
 		// with no profile defaults.
-		pr := profileResolutionFromContext(ctx)
-		resolveIn := ResolveInputs{
-			FlagValues:      args,
-			ProfileDefaults: pr.Defaults,
-			ProfileName:     pr.Name,
-			ProfileIsLocal:  pr.IsLocal,
+		//
+		// The describe path installs SkipArgResolve(ctx) so it can
+		// walk the plan's transitive args + risk labels without
+		// having the resolve step error out on missing required args.
+		if !skipArgResolveFromContext(ctx) {
+			pr := profileResolutionFromContext(ctx)
+			resolveIn := ResolveInputs{
+				FlagValues:      args,
+				ProfileDefaults: pr.Defaults,
+				ProfileName:     pr.Name,
+				ProfileIsLocal:  pr.IsLocal,
+			}
+			resolved, err := resolveAndBindJobArgs(plan, resolveIn)
+			if err != nil {
+				return nil, fmt.Errorf("pipeline %q: %w", name, err)
+			}
+			plan.setResolvedArgs(resolved)
 		}
-		resolved, err := resolveAndBindJobArgs(plan, resolveIn)
-		if err != nil {
-			return nil, fmt.Errorf("pipeline %q: %w", name, err)
-		}
-		plan.setResolvedArgs(resolved)
 		return plan, nil
 	}
 

@@ -47,6 +47,95 @@ func (s *Schema) field(name string) *fieldMeta { return s.fields[name] }
 // the resolution chain.
 func (s *Schema) groupMetas() []*groupMeta { return s.groups }
 
+// DescribeArgs projects the schema's fields into the wire-format
+// [DescribeArg] shape so the describe-cache / --help renderer / tab-
+// completion all see a job's WithArgs[T] fields in the same envelope
+// as pipeline-level Inputs fields. JobID is left empty -- callers
+// stamp it from the registration context (no JobID on pipeline-level
+// args; the owning job id on WithArgs[T] args). Stable order:
+// resolution order from the topo sort.
+func (s *Schema) DescribeArgs() []DescribeArg {
+	if s == nil || len(s.order) == 0 {
+		return nil
+	}
+	out := make([]DescribeArg, 0, len(s.order))
+	for _, name := range s.order {
+		m := s.fields[name]
+		if m == nil {
+			continue
+		}
+		out = append(out, DescribeArg{
+			Name:     m.Flag,
+			GoName:   m.Name,
+			Type:     argTypeString(m.GoType),
+			Required: m.Required,
+			Desc:     m.Desc,
+			Default:  argDefaultString(m),
+			Enum:     argEnumStrings(m),
+		})
+	}
+	return out
+}
+
+// argTypeString mirrors parseInputsSchema's classifyKind switch so
+// WithArgs[T] fields render the same Type tokens that Inputs fields
+// do ("string", "bool", "int", "int64", "float64", "duration",
+// "[]string"). Unsupported types render as the empty string so the
+// renderer can show a "[?]" rather than crash; Schema.Build already
+// catches unsupported field types at registration time.
+func argTypeString(t reflect.Type) string {
+	if t == nil {
+		return ""
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "bool"
+	case reflect.Int:
+		return "int"
+	case reflect.Int64:
+		// time.Duration also lands here -- classifyKind disambiguates
+		// by type name, not kind, so mirror that here.
+		if t.PkgPath() == "time" && t.Name() == "Duration" {
+			return "duration"
+		}
+		return "int64"
+	case reflect.Float64:
+		return "float64"
+	case reflect.Slice:
+		if t.Elem().Kind() == reflect.String {
+			return "[]string"
+		}
+	}
+	return ""
+}
+
+// argDefaultString renders the fieldMeta's literal Default value into
+// the wire string format. Computed defaults are not pre-rendered --
+// the operator can read the Go schema for the formula and --help shows
+// the field as "computed" via the absence of Default.
+func argDefaultString(m *fieldMeta) string {
+	if m == nil || !m.HasDefault || m.Default == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", m.Default)
+}
+
+// argEnumStrings renders the OneOf allowed set as []string so tab
+// completion can offer the values directly. Only string-typed enums
+// land here; numeric enums (Min/Max ranges) aren't enumerable.
+func argEnumStrings(m *fieldMeta) []string {
+	if m == nil || !m.HasOneOf || len(m.OneOf) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m.OneOf))
+	for _, v := range m.OneOf {
+		out = append(out, fmt.Sprintf("%v", v))
+	}
+	return out
+}
+
 // SchemaBuilder is the chainable builder for a job's args schema.
 // The type parameter T binds to the args struct; Field(name) returns
 // a FieldBuilder[T] that accumulates per-field constraints; Group

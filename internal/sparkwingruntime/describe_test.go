@@ -102,6 +102,74 @@ func (envDocPipe) EnvVars() []sparkwing.EnvVarDoc {
 	}
 }
 
+type describeJobArgs struct {
+	Replicas int    `desc:"replica count"`
+	Image    string `desc:"OCI image ref"`
+}
+
+type describeJob struct {
+	sparkwing.Base
+	sparkwing.WithArgs[describeJobArgs]
+}
+
+func (j *describeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", func(_ context.Context) error { return nil }), nil
+}
+
+func (describeJob) Schema() (*sparkwing.Schema, error) {
+	s := sparkwing.NewSchema[describeJobArgs]()
+	s.Field("Replicas").Required().Range(1, 100)
+	s.Field("Image").Default("nginx:latest")
+	return s.Build()
+}
+
+type withJobArgsPipe struct{ sparkwing.Base }
+
+func (withJobArgsPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "deploy", &describeJob{})
+	return nil
+}
+
+func TestDescribePipeline_TransitiveWithArgsAppearInDescribe(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("describe-with-args-fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return withJobArgsPipe{}
+	})
+
+	dp, ok, err := sparkwingruntime.DescribePipelineByName("describe-with-args-fixture")
+	if err != nil || !ok {
+		t.Fatalf("describe: ok=%v err=%v", ok, err)
+	}
+
+	byName := map[string]sparkwing.DescribeArg{}
+	for _, a := range dp.Args {
+		byName[a.Name] = a
+	}
+	rep, hasRep := byName["replicas"]
+	if !hasRep {
+		t.Fatalf("--replicas not surfaced; got args=%+v", dp.Args)
+	}
+	if rep.JobID != "deploy" {
+		t.Errorf("--replicas JobID = %q, want deploy", rep.JobID)
+	}
+	if !rep.Required {
+		t.Error("--replicas should be marked Required by Schema()")
+	}
+	if rep.Type != "int" {
+		t.Errorf("--replicas Type = %q, want int", rep.Type)
+	}
+	if rep.Desc != "replica count" {
+		t.Errorf("--replicas Desc = %q, want %q", rep.Desc, "replica count")
+	}
+
+	img, hasImg := byName["image"]
+	if !hasImg {
+		t.Fatalf("--image not surfaced; got args=%+v", dp.Args)
+	}
+	if img.Default != "nginx:latest" {
+		t.Errorf("--image Default = %q, want nginx:latest", img.Default)
+	}
+}
+
 func TestDescribePipeline_EnvVarDocer(t *testing.T) {
 	sparkwing.Register[sparkwing.NoInputs]("describe-envvars-fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return envDocPipe{}
