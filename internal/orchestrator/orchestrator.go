@@ -263,36 +263,32 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		trigger.Source = "manual"
 	}
 
-	// Remote triggers carry --target as args["target"] over the wire
-	// (the local CLI's createRemoteTrigger injects it there). Lift it
-	// back onto opts.Target so the existing OnTarget validation,
-	// PipelineYAML target-overlay lookup, sparkwing.Target(ctx)
-	// accessor, and run-row Target column all see the value. The
-	// downstream args-resolver mirror still re-injects opts.Target
-	// into Args["target"] before reg.Invoke, so a target supplied
-	// either way reaches both surfaces.
-	if opts.Target == "" {
-		if t := opts.Args["target"]; t != "" {
-			opts.Target = t
+	// v0.6 removed --target as a framework concept; the pipeline IS
+	// the deployment shape. opts.Target stays as a zero-value plumbing
+	// field for the SDK's OnTarget filter machinery (which now skips
+	// every OnTarget-declaring step because no target is ever set --
+	// authors who relied on OnTarget must split into one-pipeline-per-
+	// target instead, per docs/migrations/v0.6.0.md).
+
+	// Pipeline-level guards fire before any other plan / dispatch
+	// work. Both reject (any-match) and require (every-match) tokens
+	// evaluate against the resolved profile + already-resolved args
+	// (which here is just the CLI-passed args; YAML defaults + schema
+	// resolution haven't run yet, so guards see only what the operator
+	// typed). For most guards that's enough -- profile-local /
+	// profile-controller / profile-name don't need resolved args at
+	// all, and arg:flag=value reads the operator's explicit values.
+	if opts.PipelineYAML != nil {
+		guardCtx := pipelines.GuardContext{
+			Args: opts.Args,
 		}
-	}
-
-	// Trigger-supplied --for default. The CLI (and webhook payloads
-	// that name a target) populate opts.Target explicitly; this
-	// fallback only applies when neither did. A pipeline declaring
-	// push: { target: prod } therefore dispatches release --for prod
-	// on a push event without an explicit override. Applied before
-	// target validation so a misconfigured trigger.target surfaces
-	// the same "undeclared target" error a misconfigured --for does.
-	if opts.Target == "" && opts.PipelineYAML != nil {
-		opts.Target = opts.PipelineYAML.TriggerTarget(trigger.Source)
-	}
-
-	// Pre-flight validation that doesn't need the plan or run row.
-	// These errors fire before CreateRun so the failure mode is
-	// loud, fast, and leaves no orphan run state behind.
-	if err := validateTargetSelection(opts); err != nil {
-		return nil, err
+		if opts.Profile != nil {
+			guardCtx.ProfileName = opts.Profile.Name
+			guardCtx.ProfileIsLocal = opts.Profile.Controller == ""
+		}
+		if err := opts.PipelineYAML.Guards.Evaluate(opts.Pipeline, guardCtx); err != nil {
+			return nil, err
+		}
 	}
 
 	runID := opts.RunID

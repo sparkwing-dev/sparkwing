@@ -147,18 +147,14 @@ func ResolvePipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 		}
 	}
 
-	// Layers 2 + 3 + 4: base values, per-target values, then the
-	// matched trigger's values.
+	// Layers 2 + 3: base values, then the matched trigger's values.
+	// (Per-target overlay disappeared in v0.6 -- one pipeline IS one
+	// deployment shape, so the only layered surfaces left are
+	// pipeline.values.base and the per-trigger values block.)
+	_ = target
 	if yamlEntry != nil {
 		if err := applyValueOverlay(elem, specs, yamlEntry.Values.Base, reg.Name); err != nil {
 			return nil, err
-		}
-		if target != "" {
-			if t, ok := yamlEntry.Targets[target]; ok {
-				if err := applyValueOverlay(elem, specs, t.Values, reg.Name); err != nil {
-					return nil, err
-				}
-			}
 		}
 		if triggerSource != "" {
 			if err := applyValueOverlay(elem, specs, yamlEntry.TriggerValues(triggerSource), reg.Name); err != nil {

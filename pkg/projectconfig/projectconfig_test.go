@@ -42,9 +42,8 @@ pipelines:
         paths: ["cmd/**"]
     secrets:
       - {name: DEPLOY_TOKEN, required: true}
-    targets:
-      prod:
-        source: prod-secrets
+    dispatch:
+      source: prod-secrets
 
 runners:
   local:

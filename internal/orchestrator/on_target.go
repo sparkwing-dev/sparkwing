@@ -59,37 +59,16 @@ func quoteAll(in []string) []string {
 	return out
 }
 
-// validateOnTargetSelection rejects Plan-level OnTarget declarations
-// that name an undeclared target, or that appear on a pipeline with
-// no targets block at all. Runs after Plan() so it sees every
-// JobNode (including statically-declared inner WorkSteps) and before
-// dispatch so misconfiguration surfaces alongside the existing job
-// override + target selection guards.
+// validateOnTargetSelection was the v0.5 gate that rejected
+// OnTarget declarations referring to undeclared targets. In v0.6
+// pipeline YAML no longer carries a targets block, so OnTarget
+// declarations always pass this gate -- the runtime simply skips
+// every OnTarget-declaring step because no target is ever set. See
+// docs/migrations/v0.6.0.md for the recommended replacement
+// (one-pipeline-per-target).
 func validateOnTargetSelection(opts Options, plan *sparkwing.Plan) error {
-	if plan == nil {
-		return nil
-	}
-	var declared map[string]struct{}
-	hasTargets := false
-	if opts.PipelineYAML != nil {
-		hasTargets = len(opts.PipelineYAML.Targets) > 0
-		declared = make(map[string]struct{}, len(opts.PipelineYAML.Targets))
-		for name := range opts.PipelineYAML.Targets {
-			declared[name] = struct{}{}
-		}
-	}
-	for _, n := range plan.Nodes() {
-		if err := checkJobOnTarget(opts.Pipeline, n, declared, hasTargets, opts.PipelineYAML); err != nil {
-			return err
-		}
-		if w := n.Work(); w != nil {
-			for _, s := range w.Steps() {
-				if err := checkStepOnTarget(opts.Pipeline, n.ID(), s, declared, hasTargets, opts.PipelineYAML); err != nil {
-					return err
-				}
-			}
-		}
-	}
+	_ = opts
+	_ = plan
 	return nil
 }
 

@@ -54,21 +54,17 @@ func registerConfigOnlyPipe(t *testing.T) *sparkwing.Registration {
 	})
 }
 
-func TestResolvePipelineConfig_BaseAndTargetLayer(t *testing.T) {
+func TestResolvePipelineConfig_BaseLayer(t *testing.T) {
 	reg := registerConfigOnlyPipe(t)
 	yamlEntry := &pipelines.Pipeline{
 		Name:       "release",
 		Entrypoint: "Release",
 		Values: pipelines.PipelineValues{
-			Base: map[string]any{"image_repo": "example.dev/api", "replicas": 1},
-		},
-		Targets: map[string]pipelines.Target{
-			"prod": {Values: map[string]any{"replicas": 5}},
-			"dev":  {Values: map[string]any{}},
+			Base: map[string]any{"image_repo": "example.dev/api", "replicas": 5},
 		},
 	}
 
-	out, err := sparkwing.ResolvePipelineConfig(reg, yamlEntry, "prod", "")
+	out, err := sparkwing.ResolvePipelineConfig(reg, yamlEntry, "", "")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -77,23 +73,20 @@ func TestResolvePipelineConfig_BaseAndTargetLayer(t *testing.T) {
 		t.Errorf("ImageRepo = %q (base should fill)", cfg.ImageRepo)
 	}
 	if cfg.Replicas != 5 {
-		t.Errorf("Replicas = %d (target should win over base)", cfg.Replicas)
+		t.Errorf("Replicas = %d (base should fill)", cfg.Replicas)
 	}
 	if cfg.Region != "us-west-2" {
-		t.Errorf("Region = %q (default should apply when neither yaml nor target sets)", cfg.Region)
+		t.Errorf("Region = %q (default should apply when yaml doesn't set)", cfg.Region)
 	}
 }
 
-func TestResolvePipelineConfig_TriggerValuesWinOverTarget(t *testing.T) {
+func TestResolvePipelineConfig_TriggerValuesWinOverBase(t *testing.T) {
 	reg := registerConfigOnlyPipe(t)
 	yamlEntry := &pipelines.Pipeline{
 		Name:       "release",
 		Entrypoint: "Release",
 		Values: pipelines.PipelineValues{
 			Base: map[string]any{"image_repo": "base.dev/api", "replicas": 1},
-		},
-		Targets: map[string]pipelines.Target{
-			"prod": {Values: map[string]any{"replicas": 5}},
 		},
 		On: pipelines.Triggers{
 			Push: &pipelines.PushTrigger{
@@ -104,13 +97,13 @@ func TestResolvePipelineConfig_TriggerValuesWinOverTarget(t *testing.T) {
 			},
 		},
 	}
-	out, err := sparkwing.ResolvePipelineConfig(reg, yamlEntry, "prod", "push")
+	out, err := sparkwing.ResolvePipelineConfig(reg, yamlEntry, "", "push")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	cfg := out.(*releaseCfg)
 	if cfg.Replicas != 9 {
-		t.Errorf("Replicas = %d, want 9 (trigger.values should win over targets[prod])", cfg.Replicas)
+		t.Errorf("Replicas = %d, want 9 (trigger.values should win over base)", cfg.Replicas)
 	}
 	if cfg.ImageRepo != "push.dev/api" {
 		t.Errorf("ImageRepo = %q, want push.dev/api (trigger.values fills base too)", cfg.ImageRepo)

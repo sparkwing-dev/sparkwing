@@ -76,11 +76,8 @@ sources:
 		PipelineYAML: &pipelines.Pipeline{
 			Name:       "env-reading-pipe",
 			Entrypoint: "EnvReading",
-			Targets: map[string]pipelines.Target{
-				"dev": {Source: "shell-env"},
-			},
+			Dispatch:   &pipelines.Dispatch{Source: "shell-env"},
 		},
-		Target: "dev",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -162,11 +159,8 @@ sources:
 			Name:       "env-reading-pipe",
 			Entrypoint: "EnvReading",
 			Secrets:    pipelines.SecretsField{{Name: "TOKEN", Required: true}},
-			Targets: map[string]pipelines.Target{
-				"dev": {Source: "shell-env"},
-			},
+			Dispatch:   &pipelines.Dispatch{Source: "shell-env"},
 		},
-		Target: "dev",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -184,9 +178,6 @@ sources:
 		t.Fatalf("GetRun: %v", err)
 	}
 	snap := string(run.PlanSnapshot)
-	if !contains(snap, `"target":"dev"`) {
-		t.Errorf("snapshot missing target field:\n%s", snap)
-	}
 	if !contains(snap, `"name":"TOKEN"`) {
 		t.Errorf("snapshot missing persisted SecretsField:\n%s", snap)
 	}

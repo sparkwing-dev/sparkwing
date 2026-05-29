@@ -94,19 +94,10 @@ func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, tar
 		}
 	}
 
-	// Layer 3: pipelines.yaml targets.<target>.values.
-	if yamlEntry != nil && target != "" {
-		if t, ok := yamlEntry.Targets[target]; ok && len(t.Values) > 0 {
-			for _, s := range specs {
-				if _, ok := t.Values[s.Name]; ok {
-					sources[s.Name] = fmt.Sprintf("pipelines.yaml targets.%s.values", target)
-				}
-			}
-			if err := applyValueOverlay(elem, specs, t.Values, reg.Name); err != nil {
-				return nil, err
-			}
-		}
-	}
+	// Layer 3 (v0.5 per-target overlay) removed in v0.6 -- the
+	// pipeline IS the deployment shape, so the only layered surfaces
+	// left below are pipeline.values.base and the per-trigger values.
+	_ = target
 
 	// Layer 4: matched trigger spec's values: block.
 	if yamlEntry != nil && triggerSource != "" {

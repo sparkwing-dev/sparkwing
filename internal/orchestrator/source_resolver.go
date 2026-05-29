@@ -53,10 +53,8 @@ func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, er
 		return nil, nil
 	}
 	srcName := ""
-	if opts.PipelineYAML != nil && opts.Target != "" {
-		if t, ok := opts.PipelineYAML.Targets[opts.Target]; ok {
-			srcName = t.Source
-		}
+	if opts.PipelineYAML != nil && opts.PipelineYAML.Dispatch != nil {
+		srcName = opts.PipelineYAML.Dispatch.Source
 	}
 	src, ok, err := resolveProjectSource(opts.SparkwingDir, srcName)
 	if err != nil {

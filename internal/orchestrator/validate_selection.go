@@ -8,37 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
-// validateTargetSelection enforces the --target contract: pipelines
-// with no declared targets reject the flag outright; declared
-// targets require --target to name one of them. Empty --target on a
-// single-target pipeline is permitted -- the resolver auto-picks.
-func validateTargetSelection(opts Options) error {
-	if opts.PipelineYAML == nil {
-		return nil
-	}
-	targets := opts.PipelineYAML.TargetNames()
-	switch {
-	case len(targets) == 0:
-		if opts.Target != "" {
-			return fmt.Errorf("pipeline %q does not declare any targets; --target is not applicable",
-				opts.Pipeline)
-		}
-	default:
-		if opts.Target == "" {
-			if len(targets) == 1 {
-				return nil // sole declared target auto-selects
-			}
-			return fmt.Errorf("pipeline %q declares multiple targets %v; pass --target to pick one",
-				opts.Pipeline, targets)
-		}
-		if !opts.PipelineYAML.HasTarget(opts.Target) {
-			return fmt.Errorf("pipeline %q has no target %q; declared: %v",
-				opts.Pipeline, opts.Target, targets)
-		}
-	}
-	return nil
-}
-
 // laptopOnlySourceTypes lists source backends that only work when
 // the run dispatches to a local in-process runner. macos-keychain
 // is unambiguously laptop-only (shells out to /usr/bin/security on
@@ -51,10 +20,10 @@ var laptopOnlySourceTypes = map[string]bool{
 	sources.TypeMacosKeychain: true,
 }
 
-// validateSourceRunnerPortability rejects runs whose target binds
-// to a laptop-only source backend when dispatch will go to a
-// non-local runner. Fires before any node executes so the failure
-// mode is the same as a missing source.
+// validateSourceRunnerPortability rejects runs whose pipeline
+// dispatch binds to a laptop-only source backend when dispatch will
+// go to a non-local runner. Fires before any node executes so the
+// failure mode is the same as a missing source.
 //
 // Local runner detection: the in-process runner (the default) is
 // the only known-local kind today. A nil opts.Runner falls back to
@@ -62,17 +31,15 @@ var laptopOnlySourceTypes = map[string]bool{
 // pool / k8s / static runners report any non-nil, non-InProcess
 // type and trigger the guard.
 func validateSourceRunnerPortability(opts Options, active runner.Runner) error {
-	if opts.PipelineYAML == nil || opts.Target == "" {
+	if opts.PipelineYAML == nil || opts.PipelineYAML.Dispatch == nil {
 		return nil
 	}
-	t, ok := opts.PipelineYAML.Targets[opts.Target]
-	if !ok || t.Source == "" {
+	sourceName := opts.PipelineYAML.Dispatch.Source
+	if sourceName == "" {
 		return nil
 	}
-	src, ok, err := resolveProjectSource(opts.SparkwingDir, t.Source)
+	src, ok, err := resolveProjectSource(opts.SparkwingDir, sourceName)
 	if err != nil || !ok {
-		// Missing source surfaces via the normal resolver path; we
-		// only police portability when we actually have a source.
 		return nil
 	}
 	if !laptopOnlySourceTypes[src.Type] {
@@ -82,10 +49,10 @@ func validateSourceRunnerPortability(opts Options, active runner.Runner) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"target %q binds to source %q (type: %s), which is laptop-only; "+
+		"pipeline %q binds to source %q (type: %s), which is laptop-only; "+
 			"this run dispatches to a non-local runner that can't reach it. "+
 			"Choose a type=profile source for cluster targets, or run on a local runner",
-		opts.Target, src.Name, src.Type,
+		opts.Pipeline, src.Name, src.Type,
 	)
 }
 

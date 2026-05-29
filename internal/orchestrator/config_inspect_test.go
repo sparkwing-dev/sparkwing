@@ -41,13 +41,10 @@ func TestInspectPipelineConfig_Layering(t *testing.T) {
 	yamlEntry := &pipelines.Pipeline{
 		Name: "inspect-pipe",
 		Values: pipelines.PipelineValues{
-			Base: map[string]any{"image_repo": "base.dev/api"},
-		},
-		Targets: map[string]pipelines.Target{
-			"prod": {Values: map[string]any{"replicas": 5}},
+			Base: map[string]any{"image_repo": "base.dev/api", "replicas": 5},
 		},
 	}
-	fields, err := sparkwing.InspectPipelineConfig(reg, yamlEntry, "prod", "")
+	fields, err := sparkwing.InspectPipelineConfig(reg, yamlEntry, "", "")
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -61,7 +58,7 @@ func TestInspectPipelineConfig_Layering(t *testing.T) {
 	if got["image_repo"].Value != "base.dev/api" {
 		t.Errorf("image_repo value = %v", got["image_repo"].Value)
 	}
-	if got["replicas"].Source != "pipelines.yaml targets.prod.values" {
+	if got["replicas"].Source != "pipelines.yaml values.base" {
 		t.Errorf("replicas source = %q", got["replicas"].Source)
 	}
 	if got["region"].Source != "struct default" || got["region"].Value != "us-west-2" {
@@ -139,19 +136,17 @@ func TestInspectPipelineSecrets_ResolverHits(t *testing.T) {
 }
 
 func TestPickSourceName(t *testing.T) {
-	p := &pipelines.Pipeline{
-		Targets: map[string]pipelines.Target{
-			"prod": {Source: "prod-vault"},
-			"dev":  {},
-		},
+	withSource := &pipelines.Pipeline{
+		Dispatch: &pipelines.Dispatch{Source: "prod-vault"},
 	}
-	if got := pickSourceName(p, "prod", ""); got != "prod-vault" {
-		t.Errorf("prod target: got %q, want prod-vault", got)
+	withoutSource := &pipelines.Pipeline{}
+	if got := pickSourceName(withSource, ""); got != "prod-vault" {
+		t.Errorf("dispatch.source: got %q, want prod-vault", got)
 	}
-	if got := pickSourceName(p, "dev", ""); got != "" {
-		t.Errorf("dev target (no binding, no defaults file): got %q, want empty", got)
+	if got := pickSourceName(withoutSource, ""); got != "" {
+		t.Errorf("no dispatch (no defaults file): got %q, want empty", got)
 	}
-	if got := pickSourceName(nil, "", ""); got != "" {
+	if got := pickSourceName(nil, ""); got != "" {
 		t.Errorf("nil pipeline: got %q, want empty", got)
 	}
 }

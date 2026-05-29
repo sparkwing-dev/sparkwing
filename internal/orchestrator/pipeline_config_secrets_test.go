@@ -44,13 +44,9 @@ func TestOrchestratorRun_InstallsPipelineConfigOnCtx(t *testing.T) {
 			Name:       "orch-cfg-reader",
 			Entrypoint: "ConfigReader",
 			Values: pipelines.PipelineValues{
-				Base: map[string]any{"image_repo": "example.dev/api"},
-			},
-			Targets: map[string]pipelines.Target{
-				"prod": {Values: map[string]any{"replicas": 9}},
+				Base: map[string]any{"image_repo": "example.dev/api", "replicas": 9},
 			},
 		},
-		Target: "prod",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

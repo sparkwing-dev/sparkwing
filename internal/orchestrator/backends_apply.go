@@ -23,22 +23,23 @@ func storeurlProfileLookup(lookup sparkwing.ProfileLookup) storeurl.ProfileLooku
 	}
 }
 
-// decodeTargetBackend converts the target's per-surface
+// decodeDispatchBackend converts the pipeline's per-surface
 // map[string]any blobs into typed backends.Surfaces by yaml
 // round-trip. An empty / missing entry produces nil for that
-// surface so Effective leaves the lower layer in place.
+// surface so Effective leaves the lower layer in place. The
+// target-name argument is retained for caller compatibility but
+// ignored -- v0.6 dispatch metadata lives on the pipeline, not on
+// per-target sub-blocks.
 func decodeTargetBackend(p *pipelines.Pipeline, targetName string) backends.Surfaces {
-	if p == nil || targetName == "" {
+	_ = targetName
+	if p == nil || p.Dispatch == nil || p.Dispatch.Backend == nil {
 		return backends.Surfaces{}
 	}
-	t, ok := p.Targets[targetName]
-	if !ok || t.Backend == nil {
-		return backends.Surfaces{}
-	}
+	b := p.Dispatch.Backend
 	return backends.Surfaces{
-		Cache: decodeSpec(t.Backend.Cache),
-		Logs:  decodeSpec(t.Backend.Logs),
-		State: decodeSpec(t.Backend.State),
+		Cache: decodeSpec(b.Cache),
+		Logs:  decodeSpec(b.Logs),
+		State: decodeSpec(b.State),
 	}
 }
 

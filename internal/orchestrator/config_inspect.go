@@ -24,9 +24,6 @@ import (
 //
 //	--output / -o   pretty | json (default pretty)
 //	--json          alias for --output json
-//
-// --sw-target is honored via the SPARKWING_TARGET env var the outer
-// sparkwing CLI already forwards; no separate parse here.
 func runPipelineConfigInspect(pipeline string, extra []string) error {
 	format := "pretty"
 	for i := 0; i < len(extra); i++ {
@@ -52,28 +49,17 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 		return unknownPipelineErr(pipeline)
 	}
 	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
-	target := os.Getenv("SPARKWING_TARGET")
-
-	if pipelineYAML != nil {
-		if err := validateTargetSelection(Options{
-			Pipeline:     pipeline,
-			Target:       target,
-			PipelineYAML: pipelineYAML,
-		}); err != nil {
-			return err
-		}
-	}
 
 	// `run <pipeline> config` is a pure inspection: no Plan, no
 	// dispatch, no trigger. Pass an empty trigger source so the
 	// trigger-values layer always no-ops -- the operator sees the
 	// pre-trigger config that would resolve on a manual run.
-	cfgFields, err := sparkwing.InspectPipelineConfig(reg, pipelineYAML, target, "")
+	cfgFields, err := sparkwing.InspectPipelineConfig(reg, pipelineYAML, "", "")
 	if err != nil {
 		return err
 	}
 
-	sourceName := pickSourceName(pipelineYAML, target, sparkwingDir)
+	sourceName := pickSourceName(pipelineYAML, sparkwingDir)
 
 	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML, sourceName)
 	if err != nil {
@@ -81,21 +67,19 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	}
 
 	if format == "json" {
-		return printConfigInspectJSON(pipeline, target, sourceName, cfgFields, secFields)
+		return printConfigInspectJSON(pipeline, sourceName, cfgFields, secFields)
 	}
-	printConfigInspectPretty(os.Stdout, pipeline, target, sourceName, cfgFields, secFields)
+	printConfigInspectPretty(os.Stdout, pipeline, sourceName, cfgFields, secFields)
 	return nil
 }
 
-// pickSourceName returns the sources.yaml entry name that backs
-// the pipeline run, taking the target's bound source first and
+// pickSourceName returns the sources.yaml entry name that backs the
+// pipeline run, preferring the pipeline's Dispatch.Source and
 // falling back to the sources.yaml default. Empty when nothing
 // applies.
-func pickSourceName(p *pipelines.Pipeline, target, sparkwingDir string) string {
-	if p != nil && target != "" {
-		if t, ok := p.Targets[target]; ok && t.Source != "" {
-			return t.Source
-		}
+func pickSourceName(p *pipelines.Pipeline, sparkwingDir string) string {
+	if p != nil && p.Dispatch != nil && p.Dispatch.Source != "" {
+		return p.Dispatch.Source
 	}
 	return defaultSourceName(sparkwingDir)
 }
@@ -111,11 +95,8 @@ func defaultSourceName(sparkwingDir string) string {
 	return cfg.Sources.Default
 }
 
-func printConfigInspectPretty(w io.Writer, pipeline, target, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) {
+func printConfigInspectPretty(w io.Writer, pipeline, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) {
 	header := pipeline + " config"
-	if target != "" {
-		header += " (--for " + target + ")"
-	}
 	fmt.Fprintln(w, header)
 	fmt.Fprintln(w)
 	if len(cfgFields) == 0 {
@@ -177,10 +158,9 @@ func printConfigInspectPretty(w io.Writer, pipeline, target, source string, cfgF
 	}
 }
 
-func printConfigInspectJSON(pipeline, target, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) error {
+func printConfigInspectJSON(pipeline, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) error {
 	out := map[string]any{
 		"pipeline": pipeline,
-		"target":   target,
 		"source":   source,
 		"config":   cfgFields,
 		"secrets":  secFields,

@@ -37,9 +37,11 @@ func runInternalCompleteTargets(args []string) error {
 	if p == nil {
 		return nil
 	}
-	for _, name := range p.TargetNames() {
-		fmt.Println(name)
-	}
+	// v0.6 removed the per-pipeline targets block; --target is no
+	// longer a flag. Leave this completer in place as a no-op so any
+	// stale shell completion script referencing the verb doesn't
+	// error -- it just emits an empty list.
+	_ = p
 	return nil
 }
 
@@ -96,9 +98,9 @@ func runInternalCompleteProfilesForPipeline(args []string) error {
 	_, pcfg, _ := projectconfig.DiscoverPipelines(cwd)
 	var allowed map[string]bool
 	if pcfg != nil {
-		if p := pcfg.Find(args[0]); p != nil && len(p.Runners) > 0 {
+		if p := pcfg.Find(args[0]); p != nil && p.Dispatch != nil && len(p.Dispatch.Runners) > 0 {
 			allowed = map[string]bool{}
-			for _, r := range p.Runners {
+			for _, r := range p.Dispatch.Runners {
 				allowed[r] = true
 			}
 		}
