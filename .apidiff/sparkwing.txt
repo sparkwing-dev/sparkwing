@@ -90,22 +90,6 @@ const Coalesce OnLimitPolicy = "coalesce"
 func CoerceSpawnEachJob(v any) (Workable, error)
 func Computed(fn any) Constraint
 func Config(ctx context.Context, name string) (string, error)
-type ConfigField struct {
-	Name string
-
-	GoField string
-
-	TypeName string
-
-	Value any
-
-	Source string
-
-	Required bool
-}
-type ConfigProvider interface {
-	Config() any
-}
 type Constraint interface {
 	applyTo(*fieldMeta) error
 	isConstraint()
@@ -263,7 +247,6 @@ type InputSchema struct {
 	Extra  bool
 }
 func Inputs[T any](ctx context.Context) T
-func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, target, triggerSource string) ([]ConfigField, error)
 func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline, sourceName string) ([]SecretField, error)
 func IsDryRun(ctx context.Context) bool
 func Job(p *Plan, id string, x any) *JobNode
@@ -397,7 +380,6 @@ type PipelineAwaiter interface {
 }
 type PipelineAwaiterFunc func(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
 func (f PipelineAwaiterFunc) Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
-func PipelineConfig[T any](ctx context.Context) *T
 type PipelineResolver interface {
 	resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error)
 }
@@ -491,7 +473,6 @@ type ResolveInputs struct {
 	ProfileName    string
 	ProfileIsLocal bool
 }
-func ResolvePipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, target, triggerSource string) (any, error)
 type ResolvedPipelineRef struct {
 	RunID string
 	Data  []byte
@@ -702,7 +683,6 @@ func WithFreshBranch(branch string) AwaitOption
 func WithFreshInputs[T any](in T) AwaitOption
 func WithFreshRepo(repo string) AwaitOption
 func WithFreshTimeout(d time.Duration) AwaitOption
-func WithPipelineConfig(ctx context.Context, v any) context.Context
 func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context
 func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context
 func WithStep(ctx context.Context, stepID string) context.Context

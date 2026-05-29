@@ -79,13 +79,10 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	defer srv.Close()
 
 	// 2. Build the snapshot the orchestrator would persist. The pod
-	// receives only declarations and the resolved Config blob -- no
-	// secret values.
-	cfgBlob, _ := json.Marshal(&podRTCfg{ImageRepo: "example.dev/api", Replicas: 3})
+	// receives only secret declarations -- never values.
 	snap, err := json.Marshal(planSnapshot{
-		Pipeline:       "pod-rt-pipe",
-		RunID:          "run-pod-rt",
-		PipelineConfig: cfgBlob,
+		Pipeline: "pod-rt-pipe",
+		RunID:    "run-pod-rt",
 		Secrets: pipelines.SecretsField{
 			{Name: "DEPLOY_TOKEN", Required: true},
 			{Name: "SLACK_HOOK", Optional: true},
@@ -109,18 +106,7 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	}
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
 
-	// 4. Rehydrate config from the snapshot. Same call the pod's
-	// run-node path makes.
-	gotCfg, err := rehydratePipelineConfig(snap, reg)
-	if err != nil {
-		t.Fatalf("rehydrate config: %v", err)
-	}
-	c := gotCfg.(*podRTCfg)
-	if c.ImageRepo != "example.dev/api" || c.Replicas != 3 {
-		t.Errorf("config rehydrated wrong: %+v", c)
-	}
-
-	// 5. Re-resolve secrets against the controller-backed resolver.
+	// 4. Re-resolve secrets against the controller-backed resolver.
 	// DEPLOY_TOKEN must come back with the value the fake server
 	// served; SLACK_HOOK is optional so a 404 doesn't fail the run.
 	gotSec, err := rehydratePipelineSecrets(ctx, snap, reg)

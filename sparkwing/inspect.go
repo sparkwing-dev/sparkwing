@@ -3,134 +3,11 @@ package sparkwing
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/swtags"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
-
-// ConfigField is one entry in the result of InspectPipelineConfig:
-// the resolved value of one sw-tagged Config field plus which
-// layering source contributed the winning value.
-type ConfigField struct {
-	// Name is the sw tag (e.g. "image_repo"). Matches keys in
-	// pipelines.yaml values blocks.
-	Name string
-	// GoField is the Go struct field name (e.g. "ImageRepo").
-	GoField string
-	// TypeName is the Go type as printed by reflect.Type.String()
-	// (e.g. "string", "int", "[]string").
-	TypeName string
-	// Value is the resolved value as the typed struct holds it.
-	// Marshal-ready (json.Marshal renders it the same way the
-	// pipeline body sees it).
-	Value any
-	// Source is a human-readable provenance string:
-	//   - "pipelines.yaml targets.<target>.values"
-	//   - "pipelines.yaml values.base"
-	//   - "struct default"
-	//   - "not set"
-	Source string
-	// Required reports whether the sw tag marked the field
-	// `,required`. Reflects the declared contract, not the
-	// resolved value.
-	Required bool
-}
-
-// InspectPipelineConfig walks the same layering ResolvePipelineConfig
-// uses, but records which source supplied the winning value per
-// field instead of just returning the populated struct. Useful for
-// operator-facing config introspection.
-//
-// Returns (nil, nil) when the pipeline does not implement
-// ConfigProvider. Other failure modes (yaml type coercion, required
-// missing) propagate as errors so the inspection surfaces the same
-// failure the dispatcher would see.
-func InspectPipelineConfig(reg *Registration, yamlEntry *pipelines.Pipeline, target, triggerSource string) ([]ConfigField, error) {
-	if reg == nil || reg.instance == nil {
-		return nil, nil
-	}
-	p := reg.instance()
-	cp, ok := p.(ConfigProvider)
-	if !ok {
-		return nil, nil
-	}
-	cfg := cp.Config()
-	if cfg == nil {
-		return nil, nil
-	}
-	rv := reflect.ValueOf(cfg)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("pipeline %q config: Config() must return a non-nil pointer to a struct, got %T", reg.Name, cfg)
-	}
-	specs, err := swtags.Parse(rv.Type())
-	if err != nil {
-		return nil, fmt.Errorf("pipeline %q config: %w", reg.Name, err)
-	}
-	elem := rv.Elem()
-	sources := make(map[string]string, len(specs))
-
-	// Layer 1: struct defaults.
-	for _, s := range specs {
-		if !s.HasDefault {
-			continue
-		}
-		if err := swtags.CoerceAssign(elem.FieldByIndex(s.Field.Index), s.DefaultRaw, s.Field.Name); err != nil {
-			return nil, fmt.Errorf("pipeline %q config: %w", reg.Name, err)
-		}
-		sources[s.Name] = "struct default"
-	}
-
-	// Layer 2: pipelines.yaml values.base.
-	if yamlEntry != nil && len(yamlEntry.Values.Base) > 0 {
-		for _, s := range specs {
-			if _, ok := yamlEntry.Values.Base[s.Name]; ok {
-				sources[s.Name] = "pipelines.yaml values.base"
-			}
-		}
-		if err := applyValueOverlay(elem, specs, yamlEntry.Values.Base, reg.Name); err != nil {
-			return nil, err
-		}
-	}
-
-	// Layer 3 (v0.5 per-target overlay) removed in v0.6 -- the
-	// pipeline IS the deployment shape, so the only layered surfaces
-	// left below are pipeline.values.base and the per-trigger values.
-	_ = target
-
-	// Layer 4: matched trigger spec's values: block.
-	if yamlEntry != nil && triggerSource != "" {
-		if tv := yamlEntry.TriggerValues(triggerSource); len(tv) > 0 {
-			for _, s := range specs {
-				if _, ok := tv[s.Name]; ok {
-					sources[s.Name] = fmt.Sprintf("pipelines.yaml on.%s.values", triggerSource)
-				}
-			}
-			if err := applyValueOverlay(elem, specs, tv, reg.Name); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	out := make([]ConfigField, 0, len(specs))
-	for _, s := range specs {
-		fv := elem.FieldByIndex(s.Field.Index).Interface()
-		src := sources[s.Name]
-		if src == "" {
-			src = "not set"
-		}
-		out = append(out, ConfigField{
-			Name:     s.Name,
-			GoField:  s.Field.Name,
-			TypeName: s.Field.Type.String(),
-			Value:    fv,
-			Source:   src,
-			Required: s.Required,
-		})
-	}
-	return out, nil
-}
 
 // SecretField is one entry in the result of
 // InspectPipelineSecrets: the declared secret + (when a SecretResolver
@@ -171,16 +48,15 @@ type SecretField struct {
 // ResolvePipelineSecrets uses (struct fields can declare required).
 //
 // sourceName is informational only: pass the resolved sources.yaml
-// entry name (e.g. opts.PipelineYAML.Targets[opts.Target].Source or
-// the sources.yaml default) so the per-entry SourceName column
-// renders for the operator. Empty is fine; the column reports empty.
+// entry name (e.g. opts.PipelineYAML.Dispatch.Source or the
+// sources.yaml default) so the per-entry SourceName column renders
+// for the operator. Empty is fine; the column reports empty.
 //
 // Returns (nil, nil) when the pipeline declares no secrets at all.
 func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline, sourceName string) ([]SecretField, error) {
 	if reg == nil || reg.instance == nil {
 		return nil, nil
 	}
-	// Gather declarations from both sources.
 	type entry struct {
 		name       string
 		goField    string
@@ -204,7 +80,6 @@ func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *p
 		}
 	}
 
-	// Pull struct-declared secrets via reflection.
 	p := reg.instance()
 	if sp, ok := p.(SecretsProvider); ok {
 		raw := sp.Secrets()
@@ -215,7 +90,6 @@ func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *p
 				if err == nil {
 					for _, s := range specs {
 						if idx, ok := seen[s.Name]; ok {
-							// Struct-declared required tightens the yaml entry.
 							if s.Required {
 								entries[idx].required = true
 							}

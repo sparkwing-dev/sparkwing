@@ -369,20 +369,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// fit.
 	ctx = sparkwingruntime.WithTarget(ctx, opts.Target)
 
-	// Resolve the typed Config struct before Plan runs so pipelines
-	// can read PipelineConfig[T](ctx) from their Plan() body. Secrets
-	// are resolved later, after the SecretResolver is installed; Plan
-	// is not expected to read PipelineSecrets (the plan-time guard
-	// blocks Secret/Config calls anyway).
-	pipeCfg, err := sparkwing.ResolvePipelineConfig(reg, opts.PipelineYAML, opts.Target, trigger.Source)
-	if err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-		return &Result{RunID: runID, Status: "failed", Error: err}, nil
-	}
-	if pipeCfg != nil {
-		ctx = sparkwing.WithPipelineConfig(ctx, pipeCfg)
-	}
-
 	// Defaults layering: build the invokeArgs map by merging the
 	// pipeline YAML's defaults: block under the operator's explicit
 	// CLI args. Resolution priority for any one arg, low to high:
@@ -438,20 +424,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
-	// Pre-build the per-run snapshot metadata (target, resolved
-	// Config json, SecretsField) so the cluster pod can rehydrate
-	// PipelineConfig and re-resolve PipelineSecrets without re-
-	// reading pipelines.yaml on its end.
+	// Pre-build the per-run snapshot metadata (SecretsField) so the
+	// cluster pod can re-resolve PipelineSecrets without re-reading
+	// pipelines.yaml on its end.
 	snapMeta := planSnapshotMeta{
 		Target: opts.Target,
-	}
-	if pipeCfg != nil {
-		raw, merr := json.Marshal(pipeCfg)
-		if merr != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("marshal pipeline config: %v", merr))
-			return &Result{RunID: runID, Status: "failed", Error: merr}, nil
-		}
-		snapMeta.PipelineConfig = raw
 	}
 	if opts.PipelineYAML != nil {
 		snapMeta.Secrets = opts.PipelineYAML.Secrets
@@ -2540,13 +2517,6 @@ type planSnapshot struct {
 	// same target the orchestrator used.
 	Target string `json:"target,omitempty"`
 
-	// PipelineConfig is the resolved Config struct (json-encoded)
-	// returned by sparkwing.ResolvePipelineConfig. The cluster pod
-	// re-installs this via WithPipelineConfig after decoding into
-	// the pipeline's typed struct via reg.instance().Config().
-	// Empty when the pipeline does not implement ConfigProvider.
-	PipelineConfig json.RawMessage `json:"pipeline_config,omitempty"`
-
 	// Secrets is the typed declaration the pipelines.yaml file
 	// shipped (name + required/optional). The cluster pod uses it
 	// to drive ResolvePipelineSecrets against the pod's existing
@@ -2652,22 +2622,19 @@ type snapshotSpawnEach struct {
 }
 
 // planSnapshotMeta carries the run-level fields the cluster pod
-// needs to rehydrate PipelineConfig and re-resolve PipelineSecrets
-// when it picks up a node. Zero-value omits the fields from the
-// emitted JSON.
+// needs to re-resolve PipelineSecrets when it picks up a node.
+// Zero-value omits the fields from the emitted JSON.
 type planSnapshotMeta struct {
-	Target         string
-	PipelineConfig json.RawMessage
-	Secrets        pipelines.SecretsField
+	Target  string
+	Secrets pipelines.SecretsField
 }
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
 	snap := planSnapshot{
-		Pipeline:       rc.Pipeline,
-		RunID:          rc.RunID,
-		Target:         meta.Target,
-		PipelineConfig: meta.PipelineConfig,
-		Secrets:        meta.Secrets,
+		Pipeline: rc.Pipeline,
+		RunID:    rc.RunID,
+		Target:   meta.Target,
+		Secrets:  meta.Secrets,
 	}
 	// Cycle detection threads through the snapshot walk to catch
 	// A->B->A loops in one pass.

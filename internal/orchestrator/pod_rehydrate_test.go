@@ -10,22 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type podCfg struct {
-	ImageRepo string `sw:"image_repo"`
-	Replicas  int    `sw:"replicas"`
-}
 type podSec struct {
 	Token string `sw:"DEPLOY_TOKEN,required"`
 }
 type podPipe struct{ sparkwing.Base }
 
-func (podPipe) Config() any  { return &podCfg{} }
 func (podPipe) Secrets() any { return &podSec{} }
 func (podPipe) Plan(_ context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	return nil
 }
-
-var podRegistered bool
 
 func ensurePodPipe(t *testing.T) *sparkwing.Registration {
 	t.Helper()
@@ -34,39 +27,21 @@ func ensurePodPipe(t *testing.T) *sparkwing.Registration {
 	}
 	sparkwing.Register[sparkwing.NoInputs]("pod-rehydrate-pipe",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return &podPipe{} })
-	podRegistered = true
 	reg, _ := sparkwing.Lookup("pod-rehydrate-pipe")
 	return reg
 }
 
-func TestRehydratePipelineConfig_DecodesFromSnapshot(t *testing.T) {
-	reg := ensurePodPipe(t)
-	want := &podCfg{ImageRepo: "example.dev/api", Replicas: 5}
-	cfgJSON, _ := json.Marshal(want)
-	snap, _ := json.Marshal(planSnapshot{PipelineConfig: cfgJSON})
-	got, err := rehydratePipelineConfig(snap, reg)
-	if err != nil {
-		t.Fatalf("rehydrate: %v", err)
-	}
-	cfg := got.(*podCfg)
-	if cfg.ImageRepo != "example.dev/api" || cfg.Replicas != 5 {
-		t.Errorf("rehydrated cfg = %+v", cfg)
+func TestRehydrateTarget_DecodesFromSnapshot(t *testing.T) {
+	snap, _ := json.Marshal(planSnapshot{Target: "prod"})
+	got, err := rehydrateTarget(snap)
+	if err != nil || got != "prod" {
+		t.Errorf("rehydrate target: got (%q, %v), want (\"prod\", nil)", got, err)
 	}
 }
 
-func TestRehydratePipelineConfig_EmptySnapshotReturnsNil(t *testing.T) {
-	reg := ensurePodPipe(t)
-	got, err := rehydratePipelineConfig(nil, reg)
-	if err != nil || got != nil {
-		t.Fatalf("got %v / %v", got, err)
-	}
-}
-
-func TestRehydratePipelineConfig_MalformedSnapshot(t *testing.T) {
-	reg := ensurePodPipe(t)
-	_, err := rehydratePipelineConfig([]byte("not json"), reg)
-	if err == nil {
-		t.Fatal("expected decode error")
+func TestRehydrateTarget_EmptySnapshot(t *testing.T) {
+	if got, err := rehydrateTarget(nil); err != nil || got != "" {
+		t.Errorf("nil snapshot: got (%q, %v)", got, err)
 	}
 }
 
@@ -104,12 +79,5 @@ func TestRehydratePipelineSecrets_MissingRequiredFails(t *testing.T) {
 	_, err := rehydratePipelineSecrets(ctx, snap, reg)
 	if err == nil || !errors.Is(err, sparkwing.ErrSecretMissing) {
 		t.Fatalf("expected ErrSecretMissing, got %v", err)
-	}
-}
-
-func TestRehydratePipelineConfig_NilReg(t *testing.T) {
-	got, err := rehydratePipelineConfig([]byte(`{"pipeline_config":{}}`), nil)
-	if err != nil || got != nil {
-		t.Fatalf("got %v / %v", got, err)
 	}
 }

@@ -72,23 +72,13 @@ type Pipeline struct {
 	Defaults map[string]string
 
 	Dispatch *Dispatch
-
-	Values PipelineValues
 }
-func (p *Pipeline) TriggerValues(source string) map[string]any
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
-type PipelineValues struct {
-	Base map[string]any
-
-	Runners map[string]map[string]any
-}
 type PostHookTrigger struct{}
 type PreHookTrigger struct{}
 type PushTrigger struct {
 	Branches []string
 	Paths    []string
-
-	Values map[string]any
 }
 type SecretEntry struct {
 	Name     string

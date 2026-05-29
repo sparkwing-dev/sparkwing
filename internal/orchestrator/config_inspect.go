@@ -14,11 +14,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// runPipelineConfigInspect prints the layered Config struct for the
-// given pipeline + --for selection, plus the declared Secrets list
-// with per-field provenance. Pure inspection: no Plan(), no
+// runPipelineConfigInspect prints the declared secrets list (with
+// per-field provenance and resolution status when a source is
+// configured) for the given pipeline. Pure inspection: no Plan, no
 // dispatch, no SecretResolver wiring beyond what the source binding
 // would install.
+//
+// The verb retains the historical `<pipeline> config` name even
+// though v0.6 removed the typed-Config surface; what's left is the
+// secrets view. Future verb rename targeted for v0.7.
 //
 // Flags consumed from extra:
 //
@@ -49,16 +53,6 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 		return unknownPipelineErr(pipeline)
 	}
 	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
-
-	// `run <pipeline> config` is a pure inspection: no Plan, no
-	// dispatch, no trigger. Pass an empty trigger source so the
-	// trigger-values layer always no-ops -- the operator sees the
-	// pre-trigger config that would resolve on a manual run.
-	cfgFields, err := sparkwing.InspectPipelineConfig(reg, pipelineYAML, "", "")
-	if err != nil {
-		return err
-	}
-
 	sourceName := pickSourceName(pipelineYAML, sparkwingDir)
 
 	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML, sourceName)
@@ -67,9 +61,9 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	}
 
 	if format == "json" {
-		return printConfigInspectJSON(pipeline, sourceName, cfgFields, secFields)
+		return printConfigInspectJSON(pipeline, sourceName, secFields)
 	}
-	printConfigInspectPretty(os.Stdout, pipeline, sourceName, cfgFields, secFields)
+	printConfigInspectPretty(os.Stdout, pipeline, sourceName, secFields)
 	return nil
 }
 
@@ -95,43 +89,16 @@ func defaultSourceName(sparkwingDir string) string {
 	return cfg.Sources.Default
 }
 
-func printConfigInspectPretty(w io.Writer, pipeline, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) {
-	header := pipeline + " config"
-	fmt.Fprintln(w, header)
-	fmt.Fprintln(w)
-	if len(cfgFields) == 0 {
-		fmt.Fprintln(w, "  (pipeline declares no Config struct)")
-	} else {
-		nameWidth, valueWidth := 4, 5
-		strVals := make([]string, len(cfgFields))
-		for i, f := range cfgFields {
-			if n := len(f.Name); n > nameWidth {
-				nameWidth = n
-			}
-			strVals[i] = renderValue(f.Value)
-			if n := len(strVals[i]); n > valueWidth {
-				valueWidth = n
-			}
-		}
-		for i, f := range cfgFields {
-			req := ""
-			if f.Required {
-				req = " *required"
-			}
-			fmt.Fprintf(w, "  %-*s = %-*s  [%s]%s\n",
-				nameWidth, f.Name, valueWidth, strVals[i], f.Source, req)
-		}
-	}
+func printConfigInspectPretty(w io.Writer, pipeline, source string, secFields []sparkwing.SecretField) {
+	fmt.Fprintln(w, pipeline+" secrets")
 	fmt.Fprintln(w)
 	if len(secFields) == 0 {
-		fmt.Fprintln(w, "secrets: (none declared)")
+		fmt.Fprintln(w, "  (none declared)")
 		return
 	}
-	fmt.Fprintf(w, "secrets (%d declared)", len(secFields))
 	if source != "" {
-		fmt.Fprintf(w, "  source: %s", source)
+		fmt.Fprintf(w, "source: %s\n\n", source)
 	}
-	fmt.Fprintln(w, ":")
 	nameWidth := 4
 	for _, s := range secFields {
 		if n := len(s.Name); n > nameWidth {
@@ -158,33 +125,13 @@ func printConfigInspectPretty(w io.Writer, pipeline, source string, cfgFields []
 	}
 }
 
-func printConfigInspectJSON(pipeline, source string, cfgFields []sparkwing.ConfigField, secFields []sparkwing.SecretField) error {
+func printConfigInspectJSON(pipeline, source string, secFields []sparkwing.SecretField) error {
 	out := map[string]any{
 		"pipeline": pipeline,
 		"source":   source,
-		"config":   cfgFields,
 		"secrets":  secFields,
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
-}
-
-func renderValue(v any) string {
-	if v == nil {
-		return "<nil>"
-	}
-	switch t := v.(type) {
-	case string:
-		if t == "" {
-			return "\"\""
-		}
-		return t
-	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprintf("%v", v)
-		}
-		return string(b)
-	}
 }

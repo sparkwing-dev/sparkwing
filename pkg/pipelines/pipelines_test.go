@@ -33,8 +33,6 @@ pipelines:
     on:
       push:
         branches: [main]
-        values:
-          target: prod
       schedule: "0 */6 * * *"
       webhook:
         path: /hooks/btd
@@ -53,9 +51,6 @@ pipelines:
 	}
 	if p.On.Push == nil || len(p.On.Push.Branches) != 1 || p.On.Push.Branches[0] != "main" {
 		t.Fatalf("push branches mis-parsed: %+v", p.On.Push)
-	}
-	if got := p.On.Push.Values["target"]; got != "prod" {
-		t.Fatalf("push values[target] = %v, want prod", got)
 	}
 	if p.On.Schedule != "0 */6 * * *" {
 		t.Fatalf("schedule mis-parsed: %q", p.On.Schedule)

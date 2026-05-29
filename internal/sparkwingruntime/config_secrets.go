@@ -2,7 +2,6 @@ package sparkwingruntime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -15,41 +14,6 @@ import (
 // WithPipelineSecrets installs the resolved Secrets struct on ctx.
 func WithPipelineSecrets(ctx context.Context, v any) context.Context {
 	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.PipelineSecrets, v)
-}
-
-// DecodePipelineConfig rehydrates a previously-resolved Config
-// struct from a JSON blob. The struct's typed shape comes from the
-// pipeline's Config() factory; the blob carries only values. Used
-// by the cluster pod path to restore the typed Config the
-// orchestrator-side resolution produced without re-running the
-// yaml-layering logic on the pod.
-//
-// Returns (nil, nil) when the pipeline does not implement
-// ConfigProvider or the blob is empty.
-func DecodePipelineConfig(reg *sparkwing.Registration, raw []byte) (any, error) {
-	if reg == nil || len(raw) == 0 {
-		return nil, nil
-	}
-	inst := reg.Instance()
-	if inst == nil {
-		return nil, nil
-	}
-	cp, ok := inst.(sparkwing.ConfigProvider)
-	if !ok {
-		return nil, nil
-	}
-	cfg := cp.Config()
-	if cfg == nil {
-		return nil, nil
-	}
-	rv := reflect.ValueOf(cfg)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("pipeline %q config: Config() must return a non-nil pointer to a struct, got %T", reg.Name, cfg)
-	}
-	if err := json.Unmarshal(raw, cfg); err != nil {
-		return nil, fmt.Errorf("pipeline %q config: decode persisted blob: %w", reg.Name, err)
-	}
-	return cfg, nil
 }
 
 // ResolvePipelineSecrets resolves every required secret declared by

@@ -55,10 +55,6 @@ type Pipeline struct {
 	// backend overrides. Absent block means "laptop default":
 	// in-process runner, no source binding, no protection gate.
 	Dispatch *Dispatch `yaml:"dispatch,omitempty"`
-
-	// Values is the layered config-value surface for this pipeline.
-	// See PipelineValues for the layering rule.
-	Values PipelineValues `yaml:"values,omitempty"`
 }
 
 // Dispatch carries one pipeline's scheduling metadata. All fields
@@ -113,19 +109,6 @@ type DispatchBackend struct {
 type Guards struct {
 	Require []string `yaml:"require,omitempty"`
 	Reject  []string `yaml:"reject,omitempty"`
-}
-
-// PipelineValues is the layered config-value surface declared on a
-// pipeline. Base applies to every run; Runners is a per-runner
-// overlay keyed by the runner name (matching the runners: block in
-// sparkwing.yaml).
-type PipelineValues struct {
-	// Base values applied to every run regardless of runner.
-	Base map[string]any `yaml:"base,omitempty"`
-
-	// Runners is a per-runner overlay, applied after Base. Key is the
-	// runner name from the runners: block.
-	Runners map[string]map[string]any `yaml:"runners,omitempty"`
 }
 
 // SecretEntry is one typed secret declaration. Name names the secret
@@ -273,7 +256,7 @@ func pipelineKnownYAMLFields() map[string]struct{} {
 		"name": {}, "entrypoint": {}, "description": {},
 		"on": {}, "secrets": {}, "tags": {}, "hidden": {},
 		"guards": {}, "defaults": {},
-		"dispatch": {}, "values": {},
+		"dispatch": {},
 	}
 }
 
@@ -317,10 +300,6 @@ type ManualTrigger struct{}
 type PushTrigger struct {
 	Branches []string `yaml:"branches,omitempty"`
 	Paths    []string `yaml:"paths,omitempty"`
-	// Values overlays onto the pipeline's typed Config struct for
-	// runs initiated by this trigger. Layered after Pipeline.Values.Base
-	// by sparkwing.ResolvePipelineConfig.
-	Values map[string]any `yaml:"values,omitempty"`
 }
 
 // WebhookTrigger exposes an HTTP path that fires the pipeline. The
@@ -424,23 +403,6 @@ func (s SecretsField) Validate(pipeline string) error {
 // start. Defaults to true when neither field is set.
 func (e SecretEntry) IsRequired() bool {
 	return !e.Optional
-}
-
-// TriggerValues returns the values: block declared on the trigger
-// spec whose source matches the run's TriggerInfo.Source string
-// ("push"). Returns nil when no matching spec is declared or the
-// spec carries no Values.
-func (p *Pipeline) TriggerValues(source string) map[string]any {
-	if p == nil {
-		return nil
-	}
-	switch source {
-	case "push":
-		if p.On.Push != nil {
-			return p.On.Push.Values
-		}
-	}
-	return nil
 }
 
 // Find returns the pipeline with the given name, or nil if absent.

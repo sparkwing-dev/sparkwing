@@ -152,18 +152,6 @@ func RunNodeOnce(
 	}
 
 	// Pod-side install of the PipelineConfig the orchestrator already
-	// resolved (Values.Base + Target.Values layering happened on the
-	// controller side). The snapshot carries the resolved struct as
-	// JSON; we decode it back into the typed struct produced by the
-	// pipeline's Config() factory. Failure leaves the accessor nil --
-	// step bodies that depend on it will hit the same nil they would
-	// have hit in the pre-step-7 world.
-	if cfg, cerr := rehydratePipelineConfig(run.PlanSnapshot, reg); cerr != nil {
-		logger.Warn("pod: rehydrate pipeline config", "err", cerr)
-	} else if cfg != nil {
-		ctx = sparkwing.WithPipelineConfig(ctx, cfg)
-	}
-
 	// Pod-side install of the run's active target so step bodies see
 	// the same sparkwing.Target(ctx) value as the orchestrator side.
 	// The snapshot carries the value; we read it back without

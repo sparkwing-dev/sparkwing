@@ -7,7 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-func TestParse_PushTriggerValues_RoundTrip(t *testing.T) {
+func TestParse_PushTriggerBranchesAndPaths(t *testing.T) {
 	yaml := `
 pipelines:
   - name: release
@@ -15,22 +15,21 @@ pipelines:
     on:
       push:
         branches: [main]
-        values:
-          phase: prerelease
+        paths: ["cmd/**"]
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	p := cfg.Find("release")
-	if p == nil {
-		t.Fatal("pipeline not found")
-	}
-	if p.On.Push == nil {
+	if p == nil || p.On.Push == nil {
 		t.Fatal("push trigger missing")
 	}
-	if p.On.Push.Values["phase"] != "prerelease" {
-		t.Errorf("push.values[phase] = %v, want prerelease", p.On.Push.Values["phase"])
+	if len(p.On.Push.Branches) != 1 || p.On.Push.Branches[0] != "main" {
+		t.Errorf("branches: %v", p.On.Push.Branches)
+	}
+	if len(p.On.Push.Paths) != 1 || p.On.Push.Paths[0] != "cmd/**" {
+		t.Errorf("paths: %v", p.On.Push.Paths)
 	}
 }
 
@@ -233,36 +232,17 @@ pipelines:
 
 // --- Values + round-trip ------------------------------------------
 
-func TestParse_PipelineValuesLayered(t *testing.T) {
+func TestParse_LegacyValuesBlockRejected(t *testing.T) {
 	yaml := `
 pipelines:
   - name: app
     entrypoint: App
     values:
-      base:   {region: us-west-2}
-      runners:
-        prod-pool: {region: eu-central-1}
+      base: { region: us-west-2 }
 `
-	cfg, err := pipelines.Parse(strings.NewReader(yaml))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	p := cfg.Find("app")
-	if p == nil {
-		t.Fatal("missing")
-	}
-	if p.Values.Base["region"] != "us-west-2" {
-		t.Errorf("base: %v", p.Values.Base)
-	}
-	if p.Values.Runners["prod-pool"]["region"] != "eu-central-1" {
-		t.Errorf("runners overlay: %v", p.Values.Runners)
-	}
-}
-
-func TestPipeline_TriggerValues_NilPipelineSafe(t *testing.T) {
-	var p *pipelines.Pipeline
-	if got := p.TriggerValues("push"); got != nil {
-		t.Errorf("nil-receiver should return nil; got %v", got)
+	_, err := pipelines.Parse(strings.NewReader(yaml))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown-field rejection for `values:` (removed in v0.6); got %v", err)
 	}
 }
 

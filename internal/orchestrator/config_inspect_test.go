@@ -8,18 +8,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type inspectCfg struct {
-	ImageRepo string `sw:"image_repo" default:"default.dev/api"`
-	Replicas  int    `sw:"replicas"`
-	Region    string `sw:"region" default:"us-west-2"`
-}
 type inspectSec struct {
 	DeployToken string `sw:"DEPLOY_TOKEN,required"`
 	SlackHook   string `sw:"SLACK_HOOK"`
 }
 type inspectPipe struct{ sparkwing.Base }
 
-func (inspectPipe) Config() any  { return &inspectCfg{} }
 func (inspectPipe) Secrets() any { return &inspectSec{} }
 func (inspectPipe) Plan(_ context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	return nil
@@ -34,49 +28,6 @@ func ensureInspectPipe(t *testing.T) *sparkwing.Registration {
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return &inspectPipe{} })
 	reg, _ := sparkwing.Lookup("inspect-pipe")
 	return reg
-}
-
-func TestInspectPipelineConfig_Layering(t *testing.T) {
-	reg := ensureInspectPipe(t)
-	yamlEntry := &pipelines.Pipeline{
-		Name: "inspect-pipe",
-		Values: pipelines.PipelineValues{
-			Base: map[string]any{"image_repo": "base.dev/api", "replicas": 5},
-		},
-	}
-	fields, err := sparkwing.InspectPipelineConfig(reg, yamlEntry, "", "")
-	if err != nil {
-		t.Fatalf("inspect: %v", err)
-	}
-	got := map[string]sparkwing.ConfigField{}
-	for _, f := range fields {
-		got[f.Name] = f
-	}
-	if got["image_repo"].Source != "pipelines.yaml values.base" {
-		t.Errorf("image_repo source = %q", got["image_repo"].Source)
-	}
-	if got["image_repo"].Value != "base.dev/api" {
-		t.Errorf("image_repo value = %v", got["image_repo"].Value)
-	}
-	if got["replicas"].Source != "pipelines.yaml values.base" {
-		t.Errorf("replicas source = %q", got["replicas"].Source)
-	}
-	if got["region"].Source != "struct default" || got["region"].Value != "us-west-2" {
-		t.Errorf("region = %+v", got["region"])
-	}
-}
-
-func TestInspectPipelineConfig_UnsetField(t *testing.T) {
-	reg := ensureInspectPipe(t)
-	fields, err := sparkwing.InspectPipelineConfig(reg, nil, "", "")
-	if err != nil {
-		t.Fatalf("inspect: %v", err)
-	}
-	for _, f := range fields {
-		if f.Name == "replicas" && f.Source != "not set" {
-			t.Errorf("replicas source = %q, want 'not set'", f.Source)
-		}
-	}
 }
 
 func TestInspectPipelineSecrets_UnionsYAMLAndStruct(t *testing.T) {

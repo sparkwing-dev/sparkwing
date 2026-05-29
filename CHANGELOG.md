@@ -89,6 +89,19 @@ code change to unlock.
 
 ### Changed (Breaking)
 
+- **sdk:** `PipelineConfig[T]` accessor, `ConfigProvider` interface,
+  `ResolvePipelineConfig`, `InspectPipelineConfig`, `ConfigField`,
+  `WithPipelineConfig` all removed. (Breaking) The typed-Config
+  surface is gone; use `WithArgs[T]` with YAML `defaults:` for
+  values that vary per deployment binding (operator can override),
+  or hardcode constants in Go. `SecretsProvider` and
+  `PipelineSecrets[T]` stay since secrets are a distinct concern
+  (resolver chain, masking, source binding).
+- **config:** `pipelines[].values:` block removed. (Breaking) Was
+  the YAML side of `PipelineConfig`; now rejected at parse time
+  with an unknown-field error.
+- **config:** `pipelines[].on.push.values:` removed. (Breaking)
+  Same reason -- it fed the dropped `PipelineConfig` layering.
 - **config:** `pipelines[].targets:` block removed. (Breaking) One
   pipeline now binds one deployment shape; split multi-target
   pipelines into N pipelines, each with its own `dispatch:` block.

@@ -10,28 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// rehydratePipelineConfig decodes the resolved Config blob the
-// orchestrator persisted into the pipeline's typed Config struct.
-// The struct's shape comes from reg.instance().Config() (the
-// pipeline's ConfigProvider implementation); the snapshot ships
-// only the json-encoded values, never the type information. Returns
-// nil, nil when the pipeline does not implement ConfigProvider, the
-// snapshot carries no pipeline_config field, or the snapshot can't
-// be parsed (the caller logs and proceeds with a nil accessor in
-// that case).
-func rehydratePipelineConfig(snapshot []byte, reg *sparkwing.Registration) (any, error) {
-	if len(snapshot) == 0 || reg == nil {
-		return nil, nil
-	}
-	var meta struct {
-		PipelineConfig json.RawMessage `json:"pipeline_config"`
-	}
-	if err := json.Unmarshal(snapshot, &meta); err != nil {
-		return nil, fmt.Errorf("decode snapshot: %w", err)
-	}
-	return sparkwingruntime.DecodePipelineConfig(reg, meta.PipelineConfig)
-}
-
 // rehydrateTarget reads the run's active target out of the persisted
 // plan snapshot so the pod sees the same sparkwing.Target(ctx) value
 // the orchestrator-side dispatch saw. Empty (with nil error) when
