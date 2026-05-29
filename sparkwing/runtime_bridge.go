@@ -23,6 +23,11 @@ type runtimePlumbingKeys struct {
 	SecretResolver   any
 	Logger           any
 	Node             any
+	// ResolvedArgs carries the v0.6 typed-args resolution result --
+	// a map keyed by flag name with each resolved Go value. Reads
+	// via sparkwing.Arg[T](ctx, name). The framework installs it on
+	// the run context after running Schema.Resolve.
+	ResolvedArgs any
 }
 
 // runtimePlumbingFns bundles function pointers to unexported runtime-
@@ -68,6 +73,7 @@ var RuntimePlumbing = struct {
 		SecretResolver:   keySecretResolver,
 		Logger:           keyLogger,
 		Node:             keyNode,
+		ResolvedArgs:     keyResolvedArgs,
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,
