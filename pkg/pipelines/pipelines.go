@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -17,20 +15,15 @@ type Config struct {
 
 // Pipeline is one registry entry. A pipeline binds a Go entrypoint
 // (declared via [sparkwing.RegisterEntrypoint]) to one named
-// deployment shape: defaults, guards, locked flags, dispatch metadata,
-// triggers, secrets surface. One Go entrypoint can back many
-// pipelines, each with its own policy.
+// deployment shape: defaults, guards, dispatch metadata, triggers,
+// secrets surface. One Go entrypoint can back many pipelines, each
+// with its own policy.
 type Pipeline struct {
 	Name        string       `yaml:"name"`
 	Entrypoint  string       `yaml:"entrypoint"`
 	Description string       `yaml:"description,omitempty"`
 	On          Triggers     `yaml:"on,omitempty"`
 	Secrets     SecretsField `yaml:"secrets,omitempty"`
-	Tags        []string     `yaml:"tags,omitempty"`
-
-	// Hidden omits the entry from default `sparkwing run <TAB>`
-	// listings. Still invocable by typing the exact name.
-	Hidden bool `yaml:"hidden,omitempty"`
 
 	// Guards gate dispatch on the resolved profile + args. Reject
 	// fires before any step runs when any token matches; Require
@@ -72,9 +65,11 @@ type Dispatch struct {
 	// declared in sources.yaml.
 	Source string `yaml:"source,omitempty"`
 
-	// Approvals, when non-empty, gates dispatch on a human response
-	// before any jobs run. Today only "required" is accepted.
-	Approvals string `yaml:"approvals,omitempty"`
+	// RequiresApproval gates dispatch on a human response before any
+	// jobs run. Approval is collected via the controller's approvals
+	// API; local-mode dispatch resolves it via the CLI's
+	// `sparkwing approvals` verb.
+	RequiresApproval bool `yaml:"requires_approval,omitempty"`
 
 	// Protected refuses non-default-branch sources and surfaces a
 	// loud banner in the dashboard. Use on production-binding
@@ -234,7 +229,7 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
-		"on": {}, "secrets": {}, "tags": {}, "hidden": {},
+		"on": {}, "secrets": {},
 		"guards": {}, "defaults": {},
 		"dispatch": {},
 	}
@@ -258,23 +253,15 @@ func nodeKindName(k yaml.Kind) string {
 }
 
 // Triggers groups the declared trigger rules. All fields are optional;
-// a pipeline with no triggers can still be invoked manually via
+// a pipeline with no triggers is manually invocable via
 // `sparkwing run <name>`.
 type Triggers struct {
-	Manual   *ManualTrigger   `yaml:"manual,omitempty"`
 	Push     *PushTrigger     `yaml:"push,omitempty"`
 	Schedule string           `yaml:"schedule,omitempty"`
 	Webhook  *WebhookTrigger  `yaml:"webhook,omitempty"`
-	Deploy   *DeployTrigger   `yaml:"deploy,omitempty"`
 	PreHook  *PreHookTrigger  `yaml:"pre_commit,omitempty"`
 	PostHook *PostHookTrigger `yaml:"pre_push,omitempty"`
 }
-
-// ManualTrigger is the explicit opt-in for `sparkwing run <name>`.
-// Pipelines without any trigger declared are still manually
-// invocable; this exists so authors can tag a pipeline as manual-only
-// for clarity.
-type ManualTrigger struct{}
 
 // PushTrigger fires on git push events matching the rules.
 type PushTrigger struct {
@@ -287,11 +274,6 @@ type PushTrigger struct {
 type WebhookTrigger struct {
 	Path string `yaml:"path"`
 }
-
-// DeployTrigger is the implicit trigger for deployment pipelines that
-// want to run when another pipeline reports a deployable artifact.
-// Kept as a typed placeholder until cluster mode lands.
-type DeployTrigger struct{}
 
 // PreHookTrigger fires from a pre-commit git hook. Scoped to fast
 // local checks.
@@ -350,18 +332,11 @@ func (c *Config) Validate() error {
 }
 
 // Validate checks Dispatch's structural invariants. Today only the
-// Approvals value is constrained; future approvals types
-// ("two-person", etc.) extend the accepted set.
-func (d *Dispatch) Validate(pipeline string) error {
+// RequiresApproval is a bool with no validation surface today; the
+// hook is kept so future approval-policy fields land in one place.
+func (d *Dispatch) Validate(_ string) error {
 	if d == nil {
 		return nil
-	}
-	switch d.Approvals {
-	case "", "required":
-		// ok
-	default:
-		return fmt.Errorf("pipeline %q dispatch: approvals = %q is not a recognized value (accepted: required)",
-			pipeline, d.Approvals)
 	}
 	return nil
 }
@@ -460,15 +435,6 @@ func (c *Config) Equal(other *Config) bool {
 		if lp.Entrypoint != p.Entrypoint {
 			return false
 		}
-		if !strings.EqualFold(joinSorted(lp.Tags), joinSorted(p.Tags)) {
-			return false
-		}
 	}
 	return true
-}
-
-func joinSorted(s []string) string {
-	cp := append([]string(nil), s...)
-	sort.Strings(cp)
-	return strings.Join(cp, ",")
 }

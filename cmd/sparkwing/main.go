@@ -471,7 +471,6 @@ func runJobs(args []string) error {
 		since := fs.Duration("since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
 		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
 		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
-		tags := multiFlagVar(fs, "tag", "filter by pipelines.yaml tag (repeatable, OR semantics)")
 		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
 		shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
 		errorSubstr := fs.String("error", "", "substring match against the persisted failure reason")
@@ -504,22 +503,6 @@ func runJobs(args []string) error {
 		shaInc, shaExc := orchestrator.SplitExcludes(*shas)
 
 		pipelineSet := pipelineInc
-		if len(*tags) > 0 {
-			extra, err := pipelinesWithTags(*tags)
-			if err != nil {
-				return err
-			}
-			pipelineSet = append(pipelineSet, extra...)
-			if len(pipelineSet) == 0 {
-				// Tag filter matched nothing; don't degrade to "no filter".
-				if resolvedFmt == "json" {
-					fmt.Fprintln(os.Stdout, "[]")
-					return nil
-				}
-				fmt.Fprintln(os.Stdout, "no runs match the requested tags")
-				return nil
-			}
-		}
 
 		compiled := orchestrator.CompiledFilter{
 			Branches:       branchInc,
@@ -826,32 +809,6 @@ func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {
 	var dest []string
 	fs.StringSliceVar(&dest, name, nil, usage)
 	return &dest
-}
-
-func pipelinesWithTags(tags []string) ([]string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
-	if err != nil {
-		// Missing pipelines.yaml = no tag resolution possible; not a hard error.
-		return nil, nil
-	}
-	want := map[string]struct{}{}
-	for _, t := range tags {
-		want[t] = struct{}{}
-	}
-	var matched []string
-	for _, p := range cfg.Pipelines {
-		for _, t := range p.Tags {
-			if _, ok := want[t]; ok {
-				matched = append(matched, p.Name)
-				break
-			}
-		}
-	}
-	return matched, nil
 }
 
 // findSparkwingDir walks up from cwd looking for a .sparkwing/main.go.

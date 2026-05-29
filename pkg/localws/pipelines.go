@@ -19,7 +19,6 @@ type pipelinesResponse struct {
 
 type pipelineEntry struct {
 	Args []pipelineArg `json:"args"`
-	Tags []string      `json:"tags,omitempty"`
 }
 
 type pipelineArg struct {
@@ -63,15 +62,11 @@ func aggregatedPipelinesHandler() http.HandlerFunc {
 				continue
 			}
 			for _, p := range loaded.Pipelines {
-				if p.Hidden {
-					continue
-				}
 				if _, dup := out.Pipelines[p.Name]; dup {
 					continue
 				}
 				out.Pipelines[p.Name] = pipelineEntry{
 					Args: []pipelineArg{},
-					Tags: p.Tags,
 				}
 			}
 		}

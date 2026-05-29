@@ -18,10 +18,8 @@ func TestPipelinesHandler_DiscoversYAML(t *testing.T) {
 	yaml := `pipelines:
   - name: build
     entrypoint: Build
-    tags: [ci]
   - name: deploy
     entrypoint: Deploy
-    tags: [ci, prod]
 `
 	if err := os.WriteFile(filepath.Join(spark, "sparkwing.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
@@ -40,8 +38,7 @@ func TestPipelinesHandler_DiscoversYAML(t *testing.T) {
 	}
 	var body struct {
 		Pipelines map[string]struct {
-			Args []any    `json:"args"`
-			Tags []string `json:"tags"`
+			Args []any `json:"args"`
 		} `json:"pipelines"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -50,12 +47,8 @@ func TestPipelinesHandler_DiscoversYAML(t *testing.T) {
 	if len(body.Pipelines) != 2 {
 		t.Fatalf("pipelines=%d want 2", len(body.Pipelines))
 	}
-	deploy, ok := body.Pipelines["deploy"]
-	if !ok {
+	if _, ok := body.Pipelines["deploy"]; !ok {
 		t.Fatalf("deploy pipeline missing: %+v", body.Pipelines)
-	}
-	if len(deploy.Tags) != 2 {
-		t.Errorf("deploy tags=%v want [ci prod]", deploy.Tags)
 	}
 }
 

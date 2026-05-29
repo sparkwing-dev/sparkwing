@@ -89,6 +89,21 @@ code change to unlock.
 
 ### Changed (Breaking)
 
+- **config:** Trimmed pipelines.yaml + profile YAML surface:
+  - Dropped `pipelines[].tags` (display-only, no filter behavior).
+    The `--tag` flag on `runs list` is gone with it.
+  - Dropped `pipelines[].hidden` (no-shows in tab-completion menus
+    were a footgun; delete pipelines that shouldn't be dispatchable).
+  - Dropped `pipelines[].on.manual` (pipelines are manual-by-default
+    when no other trigger is declared; the explicit tag was noise).
+  - Dropped `pipelines[].on.deploy` (unused placeholder type).
+  - Renamed `pipelines[].dispatch.approvals: "required"` to
+    `pipelines[].dispatch.requires_approval: true` -- collapses
+    a single-value enum to a bool.
+  - Dropped `runners[].type: static` (no actual static-runner
+    registration flow today; `local` and `kubernetes` remain).
+  - Dropped `sources[].type: macos-keychain` (darwin-only, niche;
+    the `profile` / `file` / `env` types cover everything in use).
 - **config:** Profile `controller:` is now a nested block with
   `url:` + `token:` fields (was two flat fields, `controller:` and
   `token:`, alongside the rest of the profile). Makes the binding

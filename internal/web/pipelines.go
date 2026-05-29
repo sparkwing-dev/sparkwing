@@ -14,7 +14,6 @@ type pipelinesPayload struct {
 
 type pipelineEntry struct {
 	Args []pipelineArg `json:"args"`
-	Tags []string      `json:"tags,omitempty"`
 }
 
 type pipelineArg struct {
@@ -46,7 +45,6 @@ func pipelinesHandler() http.HandlerFunc {
 		for _, p := range cfg.Pipelines {
 			payload.Pipelines[p.Name] = pipelineEntry{
 				Args: []pipelineArg{},
-				Tags: p.Tags,
 			}
 		}
 		writeJSON(w, http.StatusOK, payload)

@@ -13,13 +13,10 @@ type Source struct {
 
 	Profile string
 
-	Service string
-
 	Path string
 
 	Prefix string
 }
 const TypeEnv = "env"
 const TypeFile = "file"
-const TypeMacosKeychain = "macos-keychain"
 const TypeProfile = "profile"

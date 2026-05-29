@@ -39,7 +39,6 @@ pipelines:
     secrets:
       - {name: SPARKWING_ARGOCD_SERVER, required: true}
       - {name: SPARKWING_ARGOCD_TOKEN, required: true}
-    tags: [ci, deploy]
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -69,9 +68,6 @@ pipelines:
 		if !e.Required {
 			t.Fatalf("legacy bare-string secret should be Required, got %+v", e)
 		}
-	}
-	if len(p.Tags) != 2 {
-		t.Fatalf("tags count = %d", len(p.Tags))
 	}
 }
 

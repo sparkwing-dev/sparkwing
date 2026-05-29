@@ -12,7 +12,6 @@ func TestValidate_AcceptsEverySourceType(t *testing.T) {
 		Default: "team",
 		Sources: map[string]sources.Source{
 			"team":  {Type: sources.TypeProfile, Profile: "shared"},
-			"kc":    {Type: sources.TypeMacosKeychain, Service: "sparkwing"},
 			"dot":   {Type: sources.TypeFile, Path: ".env"},
 			"shell": {Type: sources.TypeEnv, Prefix: "SW_"},
 		},

@@ -747,7 +747,6 @@ func (k groupKind) String() string
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
 func (localPredicate) Eval(ctx PredicateContext) bool
 func (localPredicate) String() string
-func (k *macosKeychainResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
 func (p notPredicate) Eval(ctx PredicateContext) bool

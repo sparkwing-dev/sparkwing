@@ -15,10 +15,8 @@ func ExampleParse() {
 pipelines:
   - name: lint
     entrypoint: Lint
-    tags: [ci, checks]
   - name: build
     entrypoint: Build
-    tags: [build]
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {

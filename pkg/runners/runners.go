@@ -21,13 +21,10 @@ type Runner struct {
 	// Type is the runner kind. Valid values:
 	//   "local"      -- in-process, on whichever host runs the CLI or controller
 	//   "kubernetes" -- pod materialized by a Kubernetes runner pool
-	//   "static"     -- long-lived runner that registers itself
 	Type string `yaml:"type"`
 
 	// Profile is the named profile from profiles.yaml that hosts this
-	// runner. Required for type=="kubernetes"; ignored for "local" and
-	// "static". (Renamed from controller: in v0.5.0 -- the field always
-	// referenced a profile by name.)
+	// runner. Required for type=="kubernetes"; ignored for "local".
 	Profile string `yaml:"profile,omitempty"`
 
 	// Labels are the equality strings the runner advertises. Empty
@@ -70,12 +67,12 @@ type Resources struct {
 func (f *File) Validate() error {
 	for name, r := range f.Runners {
 		switch r.Type {
-		case "local", "kubernetes", "static":
+		case "local", "kubernetes":
 			// ok
 		case "":
-			return fmt.Errorf("runner %q: type is required (one of: local, kubernetes, static)", name)
+			return fmt.Errorf("runner %q: type is required (one of: local, kubernetes)", name)
 		default:
-			return fmt.Errorf("runner %q: unknown type %q (valid: local, kubernetes, static)", name, r.Type)
+			return fmt.Errorf("runner %q: unknown type %q (valid: local, kubernetes)", name, r.Type)
 		}
 		if r.Type == "kubernetes" && r.Profile == "" {
 			return fmt.Errorf("runner %q: type=kubernetes requires a profile field", name)

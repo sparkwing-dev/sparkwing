@@ -19,7 +19,6 @@ func TestValidate_AcceptsEveryRunnerType(t *testing.T) {
 				Resources:    runners.Resources{Requests: map[string]string{"cpu": "2"}},
 			},
 		},
-		"self": {Type: "static", Labels: []string{"self"}},
 	}}
 	if err := f.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)

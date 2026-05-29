@@ -30,8 +30,6 @@ type Pipeline struct {
 	Name       string                  `json:"name"`
 	Short      string                  `json:"short,omitempty"`
 	Help       string                  `json:"help,omitempty"`
-	Hidden     bool                    `json:"hidden,omitempty"`
-	Tags       []string                `json:"tags,omitempty"`
 	Triggers   []string                `json:"triggers,omitempty"`
 	Entrypoint string                  `json:"entrypoint,omitempty"`
 	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
@@ -223,7 +221,6 @@ func scorePipeline(a Pipeline, tokens []string) int {
 	}{
 		{100, a.Name},
 		{40, a.Short},
-		{25, strings.Join(a.Tags, " ")},
 		{20, a.Help},
 		{20, strings.Join(a.Triggers, " ")},
 	}
@@ -343,17 +340,13 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 			}
 		}
 	}
+	_ = includeHidden
 	var out []Pipeline
 	seen := map[string]struct{}{}
 	if cfg != nil {
 		for _, p := range cfg.Pipelines {
-			if p.Hidden && !includeHidden {
-				continue
-			}
 			a := Pipeline{
 				Name:       p.Name,
-				Hidden:     p.Hidden,
-				Tags:       p.Tags,
 				Entrypoint: p.Entrypoint,
 				Triggers:   summarizeTriggerList(p.On),
 			}
@@ -394,9 +387,6 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 	}
 	if t.Schedule != "" {
 		out = append(out, "schedule:"+t.Schedule)
-	}
-	if t.Deploy != nil {
-		out = append(out, "deploy")
 	}
 	if t.PreHook != nil {
 		out = append(out, "pre-commit")
@@ -440,17 +430,11 @@ func printPipelineDetail(a *Pipeline) {
 	if a.Entrypoint != "" {
 		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
 	}
-	if len(a.Tags) > 0 {
-		fmt.Printf("tags:  %s\n", strings.Join(a.Tags, ", "))
-	}
 	if len(a.Risks) > 0 {
 		fmt.Printf("risks: %s\n", strings.Join(a.Risks, ", "))
 	}
 	if len(a.Triggers) > 0 {
 		fmt.Printf("triggers: %s\n", strings.Join(a.Triggers, ", "))
-	}
-	if a.Hidden {
-		fmt.Println("hidden: true")
 	}
 	if a.Short != "" {
 		fmt.Printf("\nshort: %s\n", a.Short)

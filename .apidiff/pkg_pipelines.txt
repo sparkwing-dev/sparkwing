@@ -10,19 +10,18 @@ func (c *Config) Find(name string) *Pipeline
 func (c *Config) Names() []string
 func (c *Config) PipelinesByEntrypoint() map[string][]*Pipeline
 func (c *Config) Validate() error
-type DeployTrigger struct{}
 type Dispatch struct {
 	Runners []string
 
 	Source string
 
-	Approvals string
+	RequiresApproval bool
 
 	Protected bool
 
 	Backend *DispatchBackend
 }
-func (d *Dispatch) Validate(pipeline string) error
+func (d *Dispatch) Validate(_ string) error
 type DispatchBackend struct {
 	Cache map[string]any
 	Logs  map[string]any
@@ -54,7 +53,6 @@ const KindProfileController
 const KindProfileLocal
 const KindProfileName
 const KindUnknown GuardKind = iota
-type ManualTrigger struct{}
 func Parse(r io.Reader) (*Config, error)
 func ParseGuardToken(raw string) (GuardToken, error)
 type Pipeline struct {
@@ -63,9 +61,6 @@ type Pipeline struct {
 	Description string
 	On          Triggers
 	Secrets     SecretsField
-	Tags        []string
-
-	Hidden bool
 
 	Guards Guards
 
@@ -91,11 +86,9 @@ func (s SecretsField) MarshalYAML() (any, error)
 func (s *SecretsField) UnmarshalYAML(node *yaml.Node) error
 func (s SecretsField) Validate(pipeline string) error
 type Triggers struct {
-	Manual   *ManualTrigger
 	Push     *PushTrigger
 	Schedule string
 	Webhook  *WebhookTrigger
-	Deploy   *DeployTrigger
 	PreHook  *PreHookTrigger
 	PostHook *PostHookTrigger
 }

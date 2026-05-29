@@ -94,7 +94,7 @@ pipelines:
       runners: [prod-pool]
       source: prod-secrets
       protected: true
-      approvals: required
+      requires_approval: true
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -107,22 +107,8 @@ pipelines:
 	if p.Dispatch.Runners[0] != "prod-pool" {
 		t.Errorf("runners: %+v", p.Dispatch.Runners)
 	}
-	if p.Dispatch.Source != "prod-secrets" || !p.Dispatch.Protected || p.Dispatch.Approvals != "required" {
+	if p.Dispatch.Source != "prod-secrets" || !p.Dispatch.Protected || !p.Dispatch.RequiresApproval {
 		t.Errorf("dispatch fields: %+v", p.Dispatch)
-	}
-}
-
-func TestParse_DispatchUnknownApprovalsRejected(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    dispatch:
-      approvals: maybe
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "approvals") {
-		t.Fatalf("expected approvals rejection; got %v", err)
 	}
 }
 

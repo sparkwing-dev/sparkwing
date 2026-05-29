@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
-	goruntime "runtime"
 	"strings"
 	"sync"
 
@@ -40,9 +38,6 @@ type ProfileLookup func(name string) (controller, token string, err error)
 //     /api/v1/secrets/<name> endpoint with the profile's token in
 //     the Authorization header. The profileLookup callback resolves
 //     the named profile to (controller, token).
-//   - macos-keychain: invokes /usr/bin/security find-generic-password
-//     against the configured Service. Returns an actionable error on
-//     non-darwin GOOS so misconfigured cluster runs fail loudly.
 //   - file: reads a dotenv file at Path. Keys without values resolve
 //     to ErrSecretMissing rather than the empty string.
 //   - env: looks up os.Getenv(Prefix + name). An unset env var
@@ -62,8 +57,6 @@ func NewSecretResolverFromSource(_ context.Context, src sources.Source, profileL
 			return nil, fmt.Errorf("source %q: profile lookup for %q: %w", src.Name, src.Profile, err)
 		}
 		return newRemoteControllerResolver(src, controller, token), nil
-	case sources.TypeMacosKeychain:
-		return newMacosKeychainResolver(src), nil
 	case sources.TypeFile:
 		return newFileResolver(src)
 	case sources.TypeEnv:
@@ -132,41 +125,6 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 		return "", false, fmt.Errorf("source %q: decode response: %w", r.src.Name, err)
 	}
 	return body.Value, body.Masked, nil
-}
-
-// macosKeychainResolver shells out to /usr/bin/security on darwin.
-// Reports a clear error on other GOOS so cluster runs that
-// accidentally bind to a laptop-only source surface a useful message
-// instead of hanging.
-type macosKeychainResolver struct {
-	src sources.Source
-}
-
-func newMacosKeychainResolver(src sources.Source) *macosKeychainResolver {
-	return &macosKeychainResolver{src: src}
-}
-
-func (k *macosKeychainResolver) Resolve(_ context.Context, name string) (string, bool, error) {
-	if goruntime.GOOS != "darwin" {
-		return "", false, fmt.Errorf("source %q: macos-keychain is available only on darwin (current: %s)", k.src.Name, goruntime.GOOS)
-	}
-	cmd := exec.Command("/usr/bin/security", "find-generic-password",
-		"-s", k.src.Service,
-		"-a", name,
-		"-w") // print only the password to stdout
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			// security returns 44 when the item is missing.
-			if exitErr.ExitCode() == 44 {
-				return "", false, ErrSecretMissing
-			}
-			return "", false, fmt.Errorf("source %q: security exited %d: %s", k.src.Name, exitErr.ExitCode(), strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", false, fmt.Errorf("source %q: %w", k.src.Name, err)
-	}
-	return strings.TrimRight(string(out), "\n"), true, nil
 }
 
 // fileResolver reads KEY=value pairs from a dotenv file. Values are

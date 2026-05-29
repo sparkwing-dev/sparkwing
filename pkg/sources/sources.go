@@ -24,12 +24,12 @@ type File struct {
 // SourceType discriminator values.
 const (
 	// TypeProfile resolves secrets via an HTTPS GET against the named
-	// profile's controller. (Renamed from "remote-controller" in
-	// v0.5.0 -- it always pointed at a profile.)
-	TypeProfile       = "profile"
-	TypeMacosKeychain = "macos-keychain"
-	TypeFile          = "file"
-	TypeEnv           = "env"
+	// profile's controller.
+	TypeProfile = "profile"
+	// TypeFile reads secrets from a dotenv file at the given path.
+	TypeFile = "file"
+	// TypeEnv reads secrets from process env vars, optionally prefixed.
+	TypeEnv = "env"
 )
 
 // Source is one named entry under sources:. Name is populated from
@@ -38,20 +38,14 @@ type Source struct {
 	Name string `yaml:"-"`
 
 	// Type is the backend kind. Valid values:
-	//   "profile"        -- HTTPS GET against the named profile's controller
-	//   "macos-keychain" -- /usr/bin/security find-generic-password
-	//   "file"           -- dotenv file at Path
-	//   "env"            -- os.Getenv with optional Prefix
+	//   "profile" -- HTTPS GET against the named profile's controller
+	//   "file"    -- dotenv file at Path
+	//   "env"     -- os.Getenv with optional Prefix
 	Type string `yaml:"type"`
 
 	// Profile is the profile name (from profiles.yaml) hosting the
-	// vault for type=profile. Required for that type. (Renamed from
-	// controller: in v0.5.0.)
+	// vault for type=profile. Required for that type.
 	Profile string `yaml:"profile,omitempty"`
-
-	// Service is the macOS keychain service name for
-	// type=macos-keychain. Required for that type.
-	Service string `yaml:"service,omitempty"`
 
 	// Path is the dotenv file location for type=file. Required for
 	// that type.
@@ -71,10 +65,6 @@ func (f *File) Validate() error {
 			if s.Profile == "" {
 				return fmt.Errorf("source %q: type=%s requires a profile field", name, s.Type)
 			}
-		case TypeMacosKeychain:
-			if s.Service == "" {
-				return fmt.Errorf("source %q: type=%s requires a service field", name, s.Type)
-			}
 		case TypeFile:
 			if s.Path == "" {
 				return fmt.Errorf("source %q: type=%s requires a path field", name, s.Type)
@@ -82,11 +72,11 @@ func (f *File) Validate() error {
 		case TypeEnv:
 			// prefix is optional
 		case "":
-			return fmt.Errorf("source %q: type is required (one of: %s, %s, %s, %s)",
-				name, TypeProfile, TypeMacosKeychain, TypeFile, TypeEnv)
+			return fmt.Errorf("source %q: type is required (one of: %s, %s, %s)",
+				name, TypeProfile, TypeFile, TypeEnv)
 		default:
-			return fmt.Errorf("source %q: unknown type %q (valid: %s, %s, %s, %s)",
-				name, s.Type, TypeProfile, TypeMacosKeychain, TypeFile, TypeEnv)
+			return fmt.Errorf("source %q: unknown type %q (valid: %s, %s, %s)",
+				name, s.Type, TypeProfile, TypeFile, TypeEnv)
 		}
 	}
 	if f.Default != "" {

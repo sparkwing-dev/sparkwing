@@ -227,9 +227,6 @@ func TestLoad_SourcesNormalized(t *testing.T) {
     team-vault:
       type: profile
       profile: prod
-    keychain:
-      type: macos-keychain
-      service: sparkwing
     dotenv:
       type: file
       path: .env
@@ -241,7 +238,6 @@ func TestLoad_SourcesNormalized(t *testing.T) {
 		Default: "team-vault",
 		Sources: map[string]sources.Source{
 			"team-vault": {Name: "team-vault", Type: sources.TypeProfile, Profile: "prod"},
-			"keychain":   {Name: "keychain", Type: sources.TypeMacosKeychain, Service: "sparkwing"},
 			"dotenv":     {Name: "dotenv", Type: sources.TypeFile, Path: ".env"},
 			"shell":      {Name: "shell", Type: sources.TypeEnv, Prefix: "SW_"},
 		},

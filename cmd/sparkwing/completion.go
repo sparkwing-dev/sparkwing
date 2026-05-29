@@ -95,9 +95,6 @@ func runInternalCompletePipelines(_ []string) error {
 	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			pipelineNames[p.Name] = struct{}{}
-			if p.Hidden {
-				continue
-			}
 			rows = append(rows, completionRow{
 				name: p.Name,
 				desc: shortPipelineHint(shortByName[p.Name], helpByName[p.Name], p),
@@ -304,16 +301,13 @@ func summarizePipelineTriggers(t pipelines.Triggers) string {
 	if t.Schedule != "" {
 		bits = append(bits, "schedule="+t.Schedule)
 	}
-	if t.Deploy != nil {
-		bits = append(bits, "deploy")
-	}
 	if t.PreHook != nil {
 		bits = append(bits, "pre-commit")
 	}
 	if t.PostHook != nil {
 		bits = append(bits, "pre-push")
 	}
-	if t.Manual != nil && len(bits) == 0 {
+	if len(bits) == 0 {
 		bits = append(bits, "manual")
 	}
 	return strings.Join(bits, " ")

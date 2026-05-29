@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -161,20 +160,6 @@ func TestFactory_RemoteController_PropagatesLookupError(t *testing.T) {
 		sparkwing.ProfileLookup(func(string) (string, string, error) { return "", "", bumpy }))
 	if err == nil || !errors.Is(err, bumpy) {
 		t.Fatalf("expected lookup error to propagate, got %v", err)
-	}
-}
-
-func TestFactory_MacosKeychain_NonDarwinActionable(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("non-darwin only")
-	}
-	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "kc", Type: sources.TypeMacosKeychain, Service: "x"}, nil)
-	if err != nil {
-		t.Fatalf("factory: %v", err)
-	}
-	if _, _, rerr := r.Resolve(context.Background(), "anything"); rerr == nil || !strings.Contains(rerr.Error(), "darwin") {
-		t.Errorf("expected darwin-only error, got %v", rerr)
 	}
 }
 

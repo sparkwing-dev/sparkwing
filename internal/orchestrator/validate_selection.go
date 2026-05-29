@@ -16,8 +16,7 @@ import (
 // excluded -- cluster pods can legitimately have env vars set via
 // Kubernetes Secret mounts.
 var laptopOnlySourceTypes = map[string]bool{
-	sources.TypeFile:          true,
-	sources.TypeMacosKeychain: true,
+	sources.TypeFile: true,
 }
 
 // validateSourceRunnerPortability rejects runs whose pipeline
