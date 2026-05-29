@@ -23,14 +23,14 @@ Wing-owned flags (consumed before the pipeline sees them):
 | Flag | Description |
 |---|---|
 | `--profile <name>` | Resolve state/cache/logs (and any controller auth) from the named profile; execution still happens locally |
-| `--target <name>` | Run against the named pipeline target (e.g. `local`, `dev`, `prod`) declared under the pipeline's `targets:` |
 | `--from <ref>` | Compile from a git ref (branch/tag/SHA) instead of the working tree |
 | `--verbose`, `-v` | Set `SPARKWING_LOG_LEVEL=debug` on the pipeline binary |
 
-`--profile` and `--target` are orthogonal: `--profile` picks the storage
-and dispatch addressing; `--target` picks which deployment target inside
-the pipeline definition is active. To hand execution to a cluster, use
-`sparkwing pipeline trigger` instead of `sparkwing run`.
+`--profile` picks the storage and dispatch addressing. The pipeline
+itself is the deployment shape — different shapes (dev, prod, etc.)
+are separate pipelines in YAML that share a Go entrypoint. To hand
+execution to a cluster, use `sparkwing pipeline trigger` instead of
+`sparkwing run`.
 
 All other `--flag value` tokens are forwarded to the pipeline binary and parsed against the pipeline's typed `Args` struct.
 

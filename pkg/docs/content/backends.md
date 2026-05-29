@@ -100,16 +100,16 @@ requirement. The override lives under the pipeline definition in
 ```yaml
 # .sparkwing/sparkwing.yaml
 pipelines:
-  - name: release
-    targets:
-      prod:
-        runners: [prod-builders]
-        backend:
-          logs: { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
+  - name: release-prod
+    entrypoint: Release
+    dispatch:
+      runners: [prod-builders]
+      backend:
+        logs: { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
 ```
 
-Selection precedence per surface is: per-target overlay first, then the
-resolved profile's `state` / `cache` / `logs`.
+Selection precedence per surface: the pipeline's `dispatch.backend`
+overlay first, then the resolved profile's `state` / `cache` / `logs`.
 
 ## Pipeline binary distribution
 

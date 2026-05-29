@@ -68,6 +68,31 @@ curl -X POST "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git" 
   --data-binary @/tmp/repo.bundle
 ```
 
+## Operator Discovery
+
+The operator CLI (`sparkwing push`, the eager-refresh on
+`sparkwing run --profile <controller-profile>`, the profile health
+probe) needs to talk to the cache pod directly over HTTP. It
+discovers the cache pod's URL from the controller — no per-profile
+configuration required on the operator side.
+
+Wire it up on the controller deployment:
+
+```yaml
+env:
+  - name: CACHE_POD_URL
+    value: "https://cache-sparkwing.example.dev"
+```
+
+(Or pass `--cache-pod-url=https://cache-sparkwing.example.dev` on
+the controller's command line.) The controller announces this URL
+via `GET /api/v1/services`; operator CLIs fetch it once per session
+and cache in-process.
+
+If unset, the announce endpoint returns 404 and operator flows that
+need the cache pod (push, eager-refresh) fail loud with a clear
+"controller announced no cache pod URL" message.
+
 ## Background Fetch
 
 The cache periodically fetches upstream for all registered bare repos
