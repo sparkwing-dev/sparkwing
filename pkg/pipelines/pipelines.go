@@ -40,7 +40,20 @@ type Pipeline struct {
 	// act on. Zero targets means the pipeline has no target concept
 	// and the CLI rejects --target; one target auto-selects; two or
 	// more require --target to disambiguate.
+	//
+	// Deprecated as a top-level YAML key in v0.6: prefer Args.Target
+	// which composes with other typed dispatch args. Still parsed for
+	// back-compat; the loader rejects a pipeline that declares BOTH
+	// blocks. See EffectiveTargets for the consumption side.
 	Targets map[string]Target `yaml:"targets,omitempty"`
+
+	// Args is the v0.6 typed-args dispatch block. Keys are arg names
+	// (matching the CLI flag, e.g. "target"); values are maps from
+	// the arg's allowed values to the Target binding (runners /
+	// source / secrets / etc.). The framework reads args.target via
+	// EffectiveTargets so v0.6 consumers stay on the new shape while
+	// legacy `targets:` keeps working until v0.7 removes it.
+	Args PipelineArgs `yaml:"args,omitempty"`
 
 	// Values is the layered config-value surface for this pipeline.
 	// See PipelineValues for the layering rule.
@@ -306,7 +319,15 @@ func (c *Config) Validate() error {
 		if err := p.Secrets.Validate(p.Name); err != nil {
 			return err
 		}
-		for tname, t := range p.Targets {
+		if err := p.ValidateArgs(); err != nil {
+			return err
+		}
+		// Validate every target binding -- legacy `targets:` and
+		// v0.6 `args.target:` both flow through here via the
+		// EffectiveTargets accessor so the per-target invariants
+		// apply uniformly. (EffectiveTargets prefers args.target
+		// when set, falling back to legacy Targets.)
+		for tname, t := range p.EffectiveTargets() {
 			if err := t.Validate(p.Name, tname); err != nil {
 				return err
 			}
