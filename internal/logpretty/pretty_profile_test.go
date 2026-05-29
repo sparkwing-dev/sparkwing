@@ -83,18 +83,16 @@ func TestProfileBanner_MirrorOffWhenDisabled(t *testing.T) {
 }
 
 func TestProfileBanner_ViaPhrasePerSource(t *testing.T) {
-	t.Setenv("BANNER_CI", "true")
 	cases := []struct {
-		source, detectVia, want string
+		source, want string
 	}{
-		{"flag", "", "via:    --profile flag"},
-		{"project", "", "via:    project hint (.sparkwing/sparkwing.yaml profile:)"},
-		{"detect", "BANNER_CI", "via:    detect via BANNER_CI=true"},
-		{"builtin", "", "via:    built-in fallback"},
+		{"flag", "via:    --profile flag"},
+		{"project", "via:    project hint (.sparkwing/sparkwing.yaml profile:)"},
+		{"builtin", "via:    built-in fallback"},
 	}
 	for _, tc := range cases {
 		out := renderRunStart(t,
-			map[string]any{"name": "x", "source": tc.source, "detect_via": tc.detectVia, "mirror_local": true},
+			map[string]any{"name": "x", "source": tc.source, "mirror_local": true},
 			map[string]any{"state": "s3://x/state", "logs": "-", "cache": "-"},
 		)
 		if !strings.Contains(out, tc.want) {

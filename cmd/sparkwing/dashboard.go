@@ -100,16 +100,14 @@ func readLivePID(pidPath string) (int, bool) {
 
 func runDashboardStart(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardStart.Path, flag.ContinueOnError)
-	var addr, home, on, logStore, artifactStore string
+	var addr, home, logStore, artifactStore string
 	var readOnly, noLocalStore bool
 	fs.StringVar(&addr, "addr", "127.0.0.1:4343", "bind address for the unified dashboard+api server")
 	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	fs.StringVar(&on, "profile", "",
-		"profile name from ~/.config/sparkwing/profiles.yaml; uses its log_store + artifact_store fields")
 	fs.StringVar(&logStore, "log-store", "",
-		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml")
+		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix")
 	fs.StringVar(&artifactStore, "artifact-store", "",
-		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix. Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml")
+		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix")
 	fs.BoolVar(&readOnly, "read-only", false,
 		"reject writes on /api/v1/* (auth + webhooks remain open)")
 	fs.BoolVar(&noLocalStore, "no-local-store", false,
@@ -126,22 +124,6 @@ func runDashboardStart(args []string) error {
 	// crash into dashboard.log where the user is unlikely to look.
 	if err := web.VerifyBundleEmbedded(); err != nil {
 		return err
-	}
-
-	// --profile resolves to a profile; URL flags override its storage
-	// fields when both are set so an operator can spot-check a bucket
-	// without editing profiles.yaml.
-	if on != "" {
-		prof, err := resolveProfile(on)
-		if err != nil {
-			return err
-		}
-		if logStore == "" {
-			logStore = prof.LogStore
-		}
-		if artifactStore == "" {
-			artifactStore = prof.ArtifactStore
-		}
 	}
 
 	dp, err := resolveDashboardPaths(home)

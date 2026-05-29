@@ -240,20 +240,10 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 }
 
 // resolveArtifactStoreURL picks the storage URL to publish to.
-// Explicit --artifact-store URL beats --profile profile's field;
-// returning "" means neither was provided.
-func resolveArtifactStoreURL(on, urlFlag string) (string, error) {
-	if urlFlag != "" {
-		return urlFlag, nil
-	}
-	if on == "" {
-		return "", nil
-	}
-	prof, err := resolveProfile(on)
-	if err != nil {
-		return "", err
-	}
-	return prof.ArtifactStore, nil
+// Operators pass --artifact-store URL explicitly; returning "" means
+// the flag was not provided.
+func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
+	return urlFlag, nil
 }
 
 func renderPublishResults(rows []publishedBinary, format string) error {

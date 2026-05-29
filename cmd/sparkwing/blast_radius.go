@@ -79,14 +79,10 @@ func enforceRiskGate(
 		return nil
 	}
 
+	_ = prof
 	allowed := map[string]bool{}
 	for _, l := range wf.allow {
 		allowed[l] = true
-	}
-	if prof != nil {
-		for _, l := range prof.AutoAllow {
-			allowed[l] = true
-		}
 	}
 
 	missingByStep := map[string][]string{}

@@ -12,9 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -73,54 +71,12 @@ func runInternalCompleteRunners(_ []string) error {
 	return nil
 }
 
-// runInternalCompleteProfilesForPipeline emits profile names whose
-// EffectiveDefaultRunner sits in the pipeline's resolved runner
-// allow-list (pipelines.yaml runners: intersected with runners.yaml).
-// Falls back to the full profile list when the pipeline is unknown
-// or declares no runner allow-list -- the operator still gets to
-// pick freely, no filtering surprises.
+// runInternalCompleteProfilesForPipeline emits the full profile
+// list. The pre-v0.6 version filtered to profiles whose
+// EffectiveDefaultRunner sat in the pipeline's resolved runner
+// allow-list, but default_runner is gone -- the unfiltered list is
+// the honest completion now.
 func runInternalCompleteProfilesForPipeline(args []string) error {
-	if len(args) != 1 || args[0] == "" {
-		return runInternalCompleteProfiles(nil)
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return runInternalCompleteProfiles(nil)
-	}
-	path, err := profile.DefaultPath()
-	if err != nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	cfg, err := profile.Load(path)
-	if err != nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	_, pcfg, _ := projectconfig.DiscoverPipelines(cwd)
-	var allowed map[string]bool
-	if pcfg != nil {
-		if p := pcfg.Find(args[0]); p != nil && p.Dispatch != nil && len(p.Dispatch.Runners) > 0 {
-			allowed = map[string]bool{}
-			for _, r := range p.Dispatch.Runners {
-				allowed[r] = true
-			}
-		}
-	}
-	if len(allowed) == 0 {
-		// No filter: emit everything, matching the existing default.
-		for _, n := range cfg.Names() {
-			fmt.Println(n)
-		}
-		return nil
-	}
-	for _, name := range cfg.Names() {
-		p, _, err := profile.Resolve(name, "", cfg)
-		if err != nil {
-			continue
-		}
-		eff := strings.TrimSpace(p.EffectiveDefaultRunner())
-		if eff == "" || allowed[eff] {
-			fmt.Println(name)
-		}
-	}
-	return nil
+	_ = args
+	return runInternalCompleteProfiles(nil)
 }

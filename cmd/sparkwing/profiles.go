@@ -83,12 +83,12 @@ func runProfilesAdd(args []string) error {
 	if _, existed := cfg.Profiles[*name]; existed {
 		return fmt.Errorf("profiles add: %q already exists (use `profiles remove` first, or `profiles duplicate` into a new name)", *name)
 	}
+	_ = defaultRunner
 	cfg.Profiles[*name] = &profile.Profile{
-		Name:          *name,
-		Controller:    *controller,
-		Token:         *token,
-		Gitcache:      *gitcache,
-		DefaultRunner: *defaultRunner,
+		Name:       *name,
+		Controller: *controller,
+		Token:      *token,
+		Gitcache:   *gitcache,
 	}
 	// Auto-set as default when it's the first profile. The implicit
 	// behavior matches what new users expect: "I added one profile,
@@ -174,7 +174,6 @@ func runProfilesShow(args []string) error {
 		fmt.Fprintf(os.Stdout, "token:      %s\n", redactToken(p.Token))
 	}
 	fmt.Fprintf(os.Stdout, "gitcache:   %s\n", emptyDash(p.Gitcache))
-	fmt.Fprintf(os.Stdout, "default_runner: %s\n", p.EffectiveDefaultRunner())
 	if cfg.Default == p.Name {
 		fmt.Fprintln(os.Stdout, "default:    yes")
 	}
@@ -274,9 +273,7 @@ func runProfilesSet(args []string) error {
 	if fs.Changed("gitcache") {
 		p.Gitcache = *gitcache
 	}
-	if fs.Changed("default-runner") {
-		p.DefaultRunner = *defaultRunner
-	}
+	_ = defaultRunner
 	if err := profile.Save(path, cfg); err != nil {
 		return err
 	}

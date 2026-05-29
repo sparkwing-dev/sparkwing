@@ -932,7 +932,6 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 		inv["profile"] = map[string]any{
 			"name":         opts.ProfileChain.Selected,
 			"source":       string(opts.ProfileChain.Source),
-			"detect_via":   opts.ProfileChain.DetectVia,
 			"mirror_local": opts.Profile.EffectiveMirrorLocal(),
 		}
 		inv["backends"] = map[string]any{

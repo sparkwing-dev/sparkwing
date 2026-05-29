@@ -2,7 +2,6 @@ package profile
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
@@ -13,7 +12,6 @@ type ChainSource string
 const (
 	ChainSourceFlag    ChainSource = "flag"    // --profile X
 	ChainSourceProject ChainSource = "project" // sparkwing.yaml `profile:` field
-	ChainSourceDetect  ChainSource = "detect"  // a profile's detect: matched the env
 	ChainSourceDefault ChainSource = "default" // profiles.yaml `default:` key
 	ChainSourceBuiltin ChainSource = "builtin" // synthesized "laptop" fallback
 )
@@ -28,15 +26,13 @@ type ConsideredEntry struct {
 	Reason string
 }
 
-// Chain records the resolution that picked the active profile. Selected
-// names the winning profile and Source tags the rule that chose it;
-// DetectVia carries the env-var name when Source == ChainSourceDetect.
-// Considered lists every other rule, in precedence order, with why it
-// was not selected.
+// Chain records the resolution that picked the active profile.
+// Selected names the winning profile; Source tags the rule that
+// chose it. Considered lists every other rule, in precedence order,
+// with why it was not selected.
 type Chain struct {
 	Selected   string
 	Source     ChainSource
-	DetectVia  string
 	Considered []ConsideredEntry
 }
 
@@ -96,8 +92,6 @@ func Resolve(cliFlag, projectHint string, file *Config) (*Profile, Chain, error)
 		}
 	}
 
-	detectName, detectVia := detectCandidate(profiles)
-
 	defaultName := ""
 	if def != "" {
 		if p, ok := profiles[def]; ok && p != nil {
@@ -112,7 +106,6 @@ func Resolve(cliFlag, projectHint string, file *Config) (*Profile, Chain, error)
 	}{
 		{ChainSourceFlag, cliFlag, ""},
 		{ChainSourceProject, projectHint, ""},
-		{ChainSourceDetect, detectName, detectVia},
 		{ChainSourceDefault, defaultName, ""},
 		{ChainSourceBuiltin, "laptop", ""},
 	}
@@ -126,9 +119,8 @@ func Resolve(cliFlag, projectHint string, file *Config) (*Profile, Chain, error)
 	}
 
 	chain := Chain{
-		Selected:  levels[winner].name,
-		Source:    levels[winner].source,
-		DetectVia: levels[winner].detectVia,
+		Selected: levels[winner].name,
+		Source:   levels[winner].source,
 	}
 	for i, lvl := range levels {
 		if i == winner {
@@ -147,25 +139,7 @@ func Resolve(cliFlag, projectHint string, file *Config) (*Profile, Chain, error)
 	return profiles[chain.Selected], chain, nil
 }
 
-// detectCandidate returns the first profile (sorted by name for
-// determinism) whose Detect block matches the current environment,
-// along with the env var that matched.
-func detectCandidate(profiles map[string]*Profile) (name, via string) {
-	names := make([]string, 0, len(profiles))
-	for n := range profiles {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		p := profiles[n]
-		if p != nil && p.Detect != nil && p.Detect.Match() {
-			return n, p.Detect.EnvVar
-		}
-	}
-	return "", ""
-}
-
-func consideredReason(src ChainSource, name, detectVia string, winner struct {
+func consideredReason(src ChainSource, name, _ string, winner struct {
 	source    ChainSource
 	name      string
 	detectVia string
@@ -173,20 +147,14 @@ func consideredReason(src ChainSource, name, detectVia string, winner struct {
 ) string {
 	if afterWinner {
 		if name != "" {
-			if src == ChainSourceDetect && detectVia != "" {
-				return fmt.Sprintf("overridden by %s (%s); would have matched via %s", winner.source, winner.name, detectVia)
-			}
 			return fmt.Sprintf("overridden by %s (%s)", winner.source, winner.name)
 		}
-		// Lower-precedence rule with nothing to offer anyway.
 	}
 	switch src {
 	case ChainSourceFlag:
 		return "no --profile flag passed"
 	case ChainSourceProject:
 		return "no profile: hint in sparkwing.yaml"
-	case ChainSourceDetect:
-		return "no profile's detect: matched the environment"
 	case ChainSourceDefault:
 		if def != "" {
 			return fmt.Sprintf("default: %q is not a known profile", def)

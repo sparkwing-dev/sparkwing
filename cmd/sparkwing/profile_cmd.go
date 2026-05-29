@@ -53,7 +53,6 @@ func runProfileCmd(args []string) error {
 type profileEffectiveJSON struct {
 	Name        string `json:"name"`
 	Source      string `json:"source"`
-	DetectVia   string `json:"detect_via"`
 	Controller  string `json:"controller"`
 	State       string `json:"state"`
 	Logs        string `json:"logs"`
@@ -78,7 +77,6 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 		Effective: profileEffectiveJSON{
 			Name:        chain.Selected,
 			Source:      string(chain.Source),
-			DetectVia:   chain.DetectVia,
 			Controller:  p.Controller,
 			State:       state,
 			Logs:        logs,
@@ -111,11 +109,7 @@ func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string
 	fmt.Fprintln(out, "resolution chain considered:")
 	for _, row := range chainRows(chain) {
 		if row.Source == string(chain.Source) {
-			line := fmt.Sprintf("%s ← selected", row.Name)
-			if chain.Source == profile.ChainSourceDetect && chain.DetectVia != "" {
-				line = fmt.Sprintf("%s (matched %s=%s) ← selected", row.Name, chain.DetectVia, os.Getenv(chain.DetectVia))
-			}
-			fmt.Fprintf(out, "  %-12s %s\n", row.Source, line)
+			fmt.Fprintf(out, "  %-12s %s ← selected\n", row.Source, row.Name)
 			continue
 		}
 		fmt.Fprintf(out, "  %-12s %s\n", row.Source, row.Reason)
@@ -129,8 +123,6 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 	switch chain.Source {
 	case profile.ChainSourceFlag:
 		return fmt.Sprintf("flag (--profile %s)", chain.Selected)
-	case profile.ChainSourceDetect:
-		return fmt.Sprintf("detect (matched %s=%s)", chain.DetectVia, os.Getenv(chain.DetectVia))
 	case profile.ChainSourceBuiltin:
 		return "builtin (synthesized laptop fallback; no profiles.yaml match)"
 	default:
@@ -140,17 +132,16 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 
 // --- shared chain + surface rendering ---
 
-// chainRows reconstructs the five canonical resolution levels in
+// chainRows reconstructs the four canonical resolution levels in
 // precedence order, merging the chain's selected level back with its
 // Considered entries. The builtin row reads "not reached" when something
-// higher won; every other non-selected row (including the project hint)
-// reuses the resolver's own reason so this command, the run flow, and the
-// run_start banner stay a single source of truth.
+// higher won; every other non-selected row reuses the resolver's own
+// reason so this command, the run flow, and the run_start banner stay
+// a single source of truth.
 func chainRows(chain profile.Chain) []profileConsideredJSON {
 	order := []profile.ChainSource{
 		profile.ChainSourceFlag,
 		profile.ChainSourceProject,
-		profile.ChainSourceDetect,
 		profile.ChainSourceDefault,
 		profile.ChainSourceBuiltin,
 	}

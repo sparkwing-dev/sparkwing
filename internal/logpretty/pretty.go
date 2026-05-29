@@ -1138,19 +1138,15 @@ func (p *PrettyRenderer) writeProfileBlock(w io.Writer, runStart *sparkwing.LogR
 	}
 }
 
-// profileViaPhrase maps a ChainSource (+ detect env var when present) to
-// the human phrase shown on the banner's `via:` line.
-func profileViaPhrase(source, detectVia string) string {
+// profileViaPhrase maps a ChainSource to the human phrase shown on
+// the banner's `via:` line. detectVia is retained as a no-op
+// parameter for caller-call-site compatibility.
+func profileViaPhrase(source, _ string) string {
 	switch source {
 	case string(profile.ChainSourceFlag):
 		return "--profile flag"
 	case string(profile.ChainSourceProject):
 		return "project hint (.sparkwing/sparkwing.yaml profile:)"
-	case string(profile.ChainSourceDetect):
-		if v := os.Getenv(detectVia); v != "" {
-			return "detect via " + detectVia + "=" + v
-		}
-		return "detect via " + detectVia
 	case string(profile.ChainSourceDefault):
 		return "default (" + profile.DisplayDefaultPath() + ")"
 	case string(profile.ChainSourceBuiltin):

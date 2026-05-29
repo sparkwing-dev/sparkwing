@@ -214,26 +214,6 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 		if key.Kind != yaml.ScalarNode {
 			continue
 		}
-		switch key.Value {
-		case "targets":
-			return fmt.Errorf(
-				"pipeline %q: `targets:` was removed in v0.6; one pipeline now binds one deployment shape. "+
-					"Split into N pipelines (e.g. deploy-dev, deploy-prod), each with its own dispatch block. "+
-					"See docs/migrations/v0.6.0.md",
-				name,
-			)
-		case "args":
-			return fmt.Errorf(
-				"pipeline %q: `args:` was reshaped in v0.6 -- use top-level `defaults:` for per-arg defaults "+
-					"and `dispatch:` for runner / source / protected / backend. See docs/migrations/v0.6.0.md",
-				name,
-			)
-		case "runners":
-			return fmt.Errorf(
-				"pipeline %q: top-level `runners:` was moved under `dispatch:` in v0.6. Wrap with: dispatch: { runners: [...] }",
-				name,
-			)
-		}
 		if _, ok := known[key.Value]; !ok {
 			return fmt.Errorf("pipeline %q: unknown field %q", name, key.Value)
 		}

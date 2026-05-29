@@ -40,7 +40,7 @@ func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
 	if !ok {
 		t.Fatalf("profile block missing or wrong type: %#v", inv["profile"])
 	}
-	if prof["name"] != "prod" || prof["source"] != "flag" || prof["detect_via"] != "" || prof["mirror_local"] != true {
+	if prof["name"] != "prod" || prof["source"] != "flag" || prof["mirror_local"] != true {
 		t.Errorf("profile block = %#v", prof)
 	}
 	be, ok := inv["backends"].(map[string]any)
@@ -58,24 +58,6 @@ func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
 		if s, ok := v.(string); ok && (s == "https://api.example.dev" || s == "swu_secret") {
 			t.Errorf("leaked controller/token via %s=%q", k, s)
 		}
-	}
-}
-
-func TestBuildRunInvocation_DetectSource(t *testing.T) {
-	opts := Options{
-		Pipeline: "demo",
-		Profile:  &profile.Profile{Name: "gha", State: &backends.Spec{Type: backends.TypeS3, Bucket: "ci", Prefix: "state"}},
-		ProfileChain: &profile.Chain{
-			Selected: "gha", Source: profile.ChainSourceDetect, DetectVia: "GITHUB_ACTIONS",
-		},
-	}
-	inv := buildRunInvocation(opts, "run-1")
-	prof := inv["profile"].(map[string]any)
-	if prof["source"] != "detect" {
-		t.Errorf("source = %v, want detect", prof["source"])
-	}
-	if prof["detect_via"] != "GITHUB_ACTIONS" {
-		t.Errorf("detect_via = %v, want GITHUB_ACTIONS", prof["detect_via"])
 	}
 }
 

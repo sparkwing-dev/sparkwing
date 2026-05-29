@@ -31,7 +31,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 
 	"go.yaml.in/yaml/v3"
@@ -46,34 +45,6 @@ type Profile struct {
 	Token      string `yaml:"token,omitempty"`
 	Gitcache   string `yaml:"gitcache,omitempty"`
 
-	// Pluggable storage URLs. Accepts fs:///abs/path or
-	// s3://bucket/prefix.
-	LogStore      string `yaml:"log_store,omitempty"`
-	ArtifactStore string `yaml:"artifact_store,omitempty"`
-
-	// CostPerRunnerHour feeds the simple compute-time × rate cost
-	// shown on `sparkwing runs receipt`. USD; default 0 reports
-	// compute_cents=0 instead of a misleading cost. Cloud-billing
-	// reconciliation layers on top.
-	CostPerRunnerHour float64 `yaml:"cost_per_runner_hour,omitempty"`
-
-	// AutoAllow pre-authorizes risk labels for this profile. A
-	// low-stakes environment (laptop, kind cluster) can declare
-	// `auto_allow: [destructive]` so an operator running
-	// `sparkwing run destroy-cluster --on laptop` doesn't have to
-	// pass `--sw-allow destructive` every time. Production profiles
-	// should leave this empty so the gate stays loud.
-	AutoAllow []string `yaml:"auto_allow,omitempty"`
-
-	// DefaultRunner names the runner the scheduler picks when a
-	// job's Prefers produce no match and more than one runner
-	// satisfies its Requires. The name must resolve in runners.yaml
-	// at dispatch time -- this layer does no validation against it,
-	// because runners.yaml may not exist when a profile is being
-	// authored. Empty means "local"; consume via
-	// EffectiveDefaultRunner so the fallback lives in one place.
-	DefaultRunner string `yaml:"default_runner,omitempty"`
-
 	// State, Cache, and Logs carry the full backend triple so a profile
 	// fully describes where its runs persist. Consume them as a unit via
 	// Surfaces. A nil pointer means "not specified at this layer"; a
@@ -82,12 +53,6 @@ type Profile struct {
 	State *backends.Spec `yaml:"state,omitempty"`
 	Cache *backends.Spec `yaml:"cache,omitempty"`
 	Logs  *backends.Spec `yaml:"logs,omitempty"`
-
-	// Detect, when set, makes this profile the auto-selected one while
-	// its environment condition holds (e.g. GITHUB_ACTIONS=true),
-	// ahead of the project hint. The built-in gha and kubernetes
-	// profiles ship a Detect block; see BuiltinProfiles.
-	Detect *backends.Detect `yaml:"detect,omitempty"`
 
 	// MirrorLocal toggles whether local execution against this profile
 	// also writes state to the local SQLite store. Nil means the
@@ -121,17 +86,6 @@ func (p *Profile) EffectiveMirrorLocal() bool {
 		return true
 	}
 	return *p.MirrorLocal
-}
-
-// EffectiveDefaultRunner returns the profile's declared
-// default_runner, or "local" when unset. Callers should reach for
-// this rather than the raw field so the unset-means-local rule lives
-// in one place. Nil-safe: a nil profile resolves to "local" too.
-func (p *Profile) EffectiveDefaultRunner() string {
-	if p == nil || p.DefaultRunner == "" {
-		return "local"
-	}
-	return p.DefaultRunner
 }
 
 // Config is the on-disk profiles.yaml file.
@@ -170,9 +124,7 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cfg := &Config{Profiles: map[string]*Profile{}}
-			mergeBuiltinProfiles(cfg)
-			return cfg, nil
+			return &Config{Profiles: map[string]*Profile{}}, nil
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -192,130 +144,7 @@ func Load(path string) (*Config, error) {
 			p.Name = name
 		}
 	}
-	mergeBuiltinProfiles(&cfg)
 	return &cfg, nil
-}
-
-// BuiltinProfiles returns the auto-detect profiles every install gets
-// for free: gha (GITHUB_ACTIONS=true) and kubernetes
-// (KUBERNETES_SERVICE_HOST present). Load materializes these into the
-// returned Config; a user-declared profile of the same name overrides
-// the built-in per-field.
-func BuiltinProfiles() map[string]*Profile {
-	return map[string]*Profile{
-		"gha": {
-			Name:   "gha",
-			Detect: &backends.Detect{EnvVar: "GITHUB_ACTIONS", Equals: "true"},
-		},
-		"kubernetes": {
-			Name:   "kubernetes",
-			Detect: &backends.Detect{EnvVar: "KUBERNETES_SERVICE_HOST", Present: true},
-		},
-	}
-}
-
-// mergeBuiltinProfiles layers BuiltinProfiles under cfg.Profiles:
-// user-declared values win per field, the built-in fills blanks. A
-// name absent from cfg gets the built-in verbatim.
-func mergeBuiltinProfiles(cfg *Config) {
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]*Profile{}
-	}
-	for name, builtin := range BuiltinProfiles() {
-		if user, ok := cfg.Profiles[name]; ok {
-			cfg.Profiles[name] = mergeProfile(user, builtin)
-		} else {
-			cfg.Profiles[name] = builtin
-		}
-	}
-}
-
-// mergeProfile overlays over on top of base per non-zero field, in the
-// shape of pkg/backends Merge: over (the user-declared profile) wins,
-// base (the built-in) fills blanks.
-func mergeProfile(over, base *Profile) *Profile {
-	if over == nil {
-		return base
-	}
-	if base == nil {
-		return over
-	}
-	m := *over
-	if m.Controller == "" {
-		m.Controller = base.Controller
-	}
-	if m.Token == "" {
-		m.Token = base.Token
-	}
-	if m.Gitcache == "" {
-		m.Gitcache = base.Gitcache
-	}
-	if m.LogStore == "" {
-		m.LogStore = base.LogStore
-	}
-	if m.ArtifactStore == "" {
-		m.ArtifactStore = base.ArtifactStore
-	}
-	if m.CostPerRunnerHour == 0 {
-		m.CostPerRunnerHour = base.CostPerRunnerHour
-	}
-	if len(m.AutoAllow) == 0 {
-		m.AutoAllow = base.AutoAllow
-	}
-	if m.DefaultRunner == "" {
-		m.DefaultRunner = base.DefaultRunner
-	}
-	if m.State == nil {
-		m.State = base.State
-	}
-	if m.Cache == nil {
-		m.Cache = base.Cache
-	}
-	if m.Logs == nil {
-		m.Logs = base.Logs
-	}
-	m.Detect = mergeDetect(m.Detect, base.Detect)
-	if m.MirrorLocal == nil {
-		m.MirrorLocal = base.MirrorLocal
-	}
-	return &m
-}
-
-// mergeDetect overlays over on base per non-zero field, matching the
-// per-field Detect merge in pkg/backends.
-func mergeDetect(over, base *backends.Detect) *backends.Detect {
-	if over == nil {
-		return base
-	}
-	if base == nil {
-		return over
-	}
-	m := *over
-	if m.EnvVar == "" {
-		m.EnvVar = base.EnvVar
-	}
-	if m.Equals == "" {
-		m.Equals = base.Equals
-	}
-	if !m.Present {
-		m.Present = base.Present
-	}
-	return &m
-}
-
-// isBuiltinDefault reports whether p is byte-identical to the built-in
-// profile of the given name (ignoring Name). Save uses this to avoid
-// persisting the virtual built-ins that Load materialized.
-func isBuiltinDefault(name string, p *Profile) bool {
-	builtin, ok := BuiltinProfiles()[name]
-	if !ok || p == nil {
-		return false
-	}
-	a := *p
-	b := *builtin
-	a.Name = ""
-	b.Name = ""
-	return reflect.DeepEqual(a, b)
 }
 
 // Save writes cfg to path atomically (write tmp, rename). Mode 0600
@@ -329,11 +158,6 @@ func Save(path string, cfg *Config) error {
 	out := &Config{Default: cfg.Default, Profiles: map[string]*Profile{}}
 	for name, p := range cfg.Profiles {
 		if p == nil {
-			continue
-		}
-		// Skip the virtual built-ins Load materializes; only persist
-		// them once a user has customized one.
-		if isBuiltinDefault(name, p) {
 			continue
 		}
 		cp := *p

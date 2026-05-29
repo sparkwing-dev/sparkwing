@@ -95,38 +95,12 @@ profiles:
 	if report.Effective.State != "controller://prod" {
 		t.Errorf("effective.state = %q, want controller://prod", report.Effective.State)
 	}
-	if len(report.Considered) != 5 {
-		t.Errorf("expected 5 considered rows, got %d", len(report.Considered))
+	if len(report.Considered) != 4 {
+		t.Errorf("expected 4 considered rows, got %d", len(report.Considered))
 	}
 	// Token must never appear in the output.
 	if strings.Contains(out, "swu_secret") {
 		t.Errorf("token leaked into output:\n%s", out)
-	}
-}
-
-func TestProfileCmd_DetectReportsEnvVar(t *testing.T) {
-	t.Setenv("PROFILE_CMD_CI", "yes")
-	setProfileCmdFixture(t, `
-profiles:
-  ci: { detect: { env_var: PROFILE_CMD_CI, equals: "yes" }, state: { type: s3, bucket: ci, prefix: state } }
-`)
-	out := captureStdout(t, func() {
-		if err := runProfileCmd([]string{"-o", "json"}); err != nil {
-			t.Errorf("profile: %v", err)
-		}
-	})
-	var report profileReportJSON
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("not JSON: %v\n%s", err, out)
-	}
-	if report.Effective.Source != "detect" {
-		t.Errorf("source = %q, want detect", report.Effective.Source)
-	}
-	if report.Effective.DetectVia != "PROFILE_CMD_CI" {
-		t.Errorf("detect_via = %q, want PROFILE_CMD_CI", report.Effective.DetectVia)
-	}
-	if report.Effective.Name != "ci" {
-		t.Errorf("name = %q, want ci", report.Effective.Name)
 	}
 }
 

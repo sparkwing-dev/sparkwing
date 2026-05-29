@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -95,14 +94,9 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	return enc.Encode(rec)
 }
 
-// localCostRate resolves the cost_per_runner_hour for the active
-// profile (if any) so local-mode receipts reflect the same rate the
-// operator already has configured. A missing profile yields rate=0
-// and a "(none)" source, which the receipt renders as compute_cents:0.
+// localCostRate is the always-zero local-mode cost rate.
+// cost_per_runner_hour was dropped from profile config in v0.6;
+// receipts now show compute_seconds without a derived dollar figure.
 func localCostRate() (float64, string) {
-	prof, err := profile.LoadAndResolve("")
-	if err != nil || prof == nil {
-		return 0, "local (no profile)"
-	}
-	return prof.CostPerRunnerHour, fmt.Sprintf("profile:%s (cost_per_runner_hour=$%.4f)", prof.Name, prof.CostPerRunnerHour)
+	return 0, "local (rate not configured)"
 }

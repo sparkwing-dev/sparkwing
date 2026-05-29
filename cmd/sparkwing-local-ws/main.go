@@ -13,7 +13,6 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/localws"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -23,15 +22,10 @@ func main() {
 	addr := fs.String("addr", "127.0.0.1:4343", "bind address")
 	home := fs.String("home", "",
 		"sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	on := fs.String("profile", "",
-		"profile name from ~/.config/sparkwing/profiles.yaml; "+
-			"uses its log_store + artifact_store fields")
 	logStoreURL := fs.String("log-store", "",
-		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix. "+
-			"Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml.")
+		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix")
 	artifactStoreURL := fs.String("artifact-store", "",
-		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix. "+
-			"Overrides --profile. Intended for ci-embedded VMs without a profiles.yaml.")
+		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix")
 	readOnly := fs.Bool("read-only", false,
 		"reject POST/PUT/DELETE/PATCH on /api/v1/* (auth + webhooks remain open)")
 	noLocalStore := fs.Bool("no-local-store", false,
@@ -41,34 +35,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	if *on != "" {
-		path, err := profile.DefaultPath()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing-local-ws: profiles path:", err)
-			os.Exit(1)
-		}
-		cfg, err := profile.Load(path)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing-local-ws: profiles load:", err)
-			os.Exit(1)
-		}
-		prof, _, err := profile.Resolve(*on, "", cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing-local-ws: --profile:", err)
-			os.Exit(1)
-		}
-		if *logStoreURL == "" {
-			*logStoreURL = prof.LogStore
-		}
-		if *artifactStoreURL == "" {
-			*artifactStoreURL = prof.ArtifactStore
-		}
-	}
-
 	ctx := context.Background()
 	if *noLocalStore && (*logStoreURL == "" || *artifactStoreURL == "") {
 		fmt.Fprintln(os.Stderr,
-			"sparkwing-local-ws: --no-local-store requires --log-store and --artifact-store (or an --on profile that supplies them)")
+			"sparkwing-local-ws: --no-local-store requires --log-store and --artifact-store")
 		os.Exit(1)
 	}
 	opts := localws.Options{

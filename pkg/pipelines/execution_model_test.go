@@ -168,81 +168,16 @@ pipelines:
 	}
 }
 
-func TestParse_LockedKeyRejectedWithMigrationMessage(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    locked: [protected]
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("expected unknown-field rejection for `locked:` (removed in v0.6); got %v", err)
-	}
-}
+// --- Unknown-field rejection (catch typos / removed-key holdovers) ---
 
-// --- v0.6 migration errors -----------------------------------------
-
-func TestParse_LegacyTargetsKeyRejectedWithMigrationMessage(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    targets:
-      dev: {}
-      prod: {runners: [prod-pool]}
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil {
-		t.Fatal("expected `targets:` rejection")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "targets:") || !strings.Contains(msg, "v0.6") || !strings.Contains(msg, "Split into N pipelines") {
-		t.Errorf("error message should name targets:, v0.6, and the split guidance; got %q", msg)
-	}
-}
-
-func TestParse_V06ArgsBlockRejectedWithMigrationMessage(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    args:
-      target:
-        dev: {}
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "args:") || !strings.Contains(err.Error(), "v0.6") {
-		t.Fatalf("expected args:-block rejection naming v0.6; got %v", err)
-	}
-}
-
-func TestParse_TopLevelRunnersRejectedWithMigrationMessage(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    runners: [foo]
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "dispatch:") {
-		t.Fatalf("expected runners-under-dispatch guidance; got %v", err)
-	}
-}
-
-// --- Values + round-trip ------------------------------------------
-
-func TestParse_LegacyValuesBlockRejected(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: app
-    entrypoint: App
-    values:
-      base: { region: us-west-2 }
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("expected unknown-field rejection for `values:` (removed in v0.6); got %v", err)
+func TestParse_UnknownPipelineFieldRejected(t *testing.T) {
+	cases := []string{"targets", "args", "runners", "values", "locked", "completely_bogus"}
+	for _, key := range cases {
+		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    " + key + ": [a]\n"
+		_, err := pipelines.Parse(strings.NewReader(yaml))
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Errorf("key %q: expected unknown-field error; got %v", key, err)
+		}
 	}
 }
 

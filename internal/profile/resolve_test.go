@@ -49,24 +49,6 @@ func TestResolveChain_ProjectHintWins(t *testing.T) {
 	}
 }
 
-func TestResolveChain_DetectWins(t *testing.T) {
-	t.Setenv("MY_CI_FLAG", "yes")
-	cfg := cfgWith(map[string]*profile.Profile{
-		"ci":  {Name: "ci", Detect: &backends.Detect{EnvVar: "MY_CI_FLAG", Equals: "yes"}},
-		"dev": {Name: "dev"},
-	}, "dev")
-	_, chain, err := profile.Resolve("", "", cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if chain.Selected != "ci" || chain.Source != profile.ChainSourceDetect {
-		t.Fatalf("selected %q via %q, want ci via detect", chain.Selected, chain.Source)
-	}
-	if chain.DetectVia != "MY_CI_FLAG" {
-		t.Errorf("DetectVia = %q, want MY_CI_FLAG", chain.DetectVia)
-	}
-}
-
 func TestResolveChain_DefaultWins(t *testing.T) {
 	cfg := cfgWith(map[string]*profile.Profile{
 		"dev": {Name: "dev"},
@@ -124,25 +106,6 @@ func TestResolveChain_ProjectHintNotFound(t *testing.T) {
 	// project file so the user can find the bad sparkwing.yaml.
 	if !strings.Contains(err.Error(), "absent") || !strings.Contains(err.Error(), "sparkwing.yaml") {
 		t.Errorf("message should name the bad value and the project level: %v", err)
-	}
-}
-
-func TestResolveChain_DetectIsDeterministic(t *testing.T) {
-	t.Setenv("SHARED_ENV", "1")
-	cfg := cfgWith(map[string]*profile.Profile{
-		"zebra": {Name: "zebra", Detect: &backends.Detect{EnvVar: "SHARED_ENV", Present: true}},
-		"alpha": {Name: "alpha", Detect: &backends.Detect{EnvVar: "SHARED_ENV", Present: true}},
-		"mango": {Name: "mango", Detect: &backends.Detect{EnvVar: "SHARED_ENV", Present: true}},
-	}, "")
-	for i := range 20 {
-		_, chain, err := profile.Resolve("", "", cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// Lexically-first matching profile wins, every time.
-		if chain.Selected != "alpha" {
-			t.Fatalf("iteration %d selected %q, want alpha (lexically first)", i, chain.Selected)
-		}
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -108,26 +107,6 @@ func TestEnforceRiskGate_AllowMoneyPasses(t *testing.T) {
 	wf := runFlags{allow: []string{"money"}}
 	if err := enforceRiskGate("stress-test", moneyFinding(), wf, nil); err != nil {
 		t.Fatalf("--sw-allow money should pass: %v", err)
-	}
-}
-
-func TestEnforceRiskGate_ProfileAutoAllow(t *testing.T) {
-	prof := &profile.Profile{
-		Name:      "laptop",
-		AutoAllow: []string{"destructive"},
-	}
-	if err := enforceRiskGate("cluster-down", destructiveFinding(), runFlags{}, prof); err != nil {
-		t.Fatalf("profile auto_allow should pass: %v", err)
-	}
-}
-
-func TestEnforceRiskGate_ProfileAutoAllowDoesNotLeak(t *testing.T) {
-	prof := &profile.Profile{
-		Name:      "laptop",
-		AutoAllow: []string{"destructive"},
-	}
-	if err := enforceRiskGate("migrate", prodFinding(), runFlags{}, prof); err == nil {
-		t.Fatal("auto_allow destructive should NOT authorize prod")
 	}
 }
 

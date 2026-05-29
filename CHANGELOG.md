@@ -89,6 +89,20 @@ code change to unlock.
 
 ### Changed (Breaking)
 
+- **config:** Profile fields removed: `cost_per_runner_hour` (was
+  decorative receipt cost; receipts now show compute_seconds only),
+  `auto_allow` (was a footgun -- pre-authorizing risk labels per
+  profile undermines the gate; pass `--sw-allow` explicitly or use
+  pipeline-level `guards:`), `default_runner` (only fed tab
+  completion; completion now shows the unfiltered profile list),
+  `log_store` / `artifact_store` (overlapped with the typed
+  `logs:`/`cache:` Spec blocks; the dashboard and local-ws now take
+  explicit `--log-store` / `--artifact-store` URL flags), `detect:`
+  (built-in `gha` / `kubernetes` auto-selection gone -- operators
+  always pick `--profile` explicitly).
+- **cli:** Loader migration hints removed. `pipelines.yaml` rejects
+  unknown fields with a plain "unknown field X" error; no
+  per-removed-field migration nudges.
 - **sdk:** `PipelineConfig[T]` accessor, `ConfigProvider` interface,
   `ResolvePipelineConfig`, `InspectPipelineConfig`, `ConfigField`,
   `WithPipelineConfig` all removed. (Breaking) The typed-Config
