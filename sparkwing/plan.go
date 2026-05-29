@@ -35,6 +35,13 @@ type Plan struct {
 	// bodies can call sparkwing.Inputs[T](ctx) instead of threading
 	// the value through closures.
 	inputs any
+
+	// jobArgs holds the resolved arg [Schema] per node id, populated
+	// by registerJobArgs whenever a job embedding WithArgs[T] is
+	// added to the plan. Used by the CLI flag registrar to compute
+	// the pipeline's transitive arg surface. Absent entries mean the
+	// job declared no typed args.
+	jobArgs map[string]*Schema
 }
 
 // LintWarning is a non-fatal Plan-time advisory attached to a node.
@@ -299,6 +306,12 @@ func Job(p *Plan, id string, x any) *JobNode {
 	n := newNode("Job", id, job)
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
+	// Discover and register the job's typed args schema if it embeds
+	// WithArgs[T]. Plain-function jobs and structs without an
+	// embedded WithArgs are no-ops here. Panics on schema errors
+	// (collisions, build failures) so misconfiguration surfaces at
+	// Plan() rather than at run time.
+	registerJobArgs(p, id, x)
 	return n
 }
 
