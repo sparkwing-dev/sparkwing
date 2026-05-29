@@ -2,6 +2,8 @@ package sparkwing
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // SchemaProvider is the optional interface a job implements to declare
@@ -173,6 +175,55 @@ type TransitiveArg struct {
 	FieldName string
 	Desc      string
 	Schema    *Schema
+}
+
+// assertJobArgsCoverage rejects keys in extra that no job's
+// WithArgs[T] schema claims as one of its flag names. Called from
+// invoke() after Plan() has run so the per-job schemas are known;
+// pairs with populateInputs's strict-unknown check for the v0.5
+// pipeline-level Inputs surface. The error message lists every
+// unclaimed key alphabetically so reruns produce stable output.
+func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
+	if p == nil || len(extra) == 0 {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, s := range p.jobArgs {
+		if s == nil {
+			continue
+		}
+		for _, m := range s.fields {
+			if m.Flag != "" {
+				known[m.Flag] = true
+			}
+		}
+	}
+	var unknown []string
+	for k := range extra {
+		if known[k] {
+			continue
+		}
+		// `target` is framework-injected by the orchestrator from
+		// opts.Target so v0.6 schema-driven jobs can read it via
+		// sparkwing.Arg[string](ctx, "target"). Pipelines that
+		// don't declare args.target: still receive the key; treating
+		// it as a typo here would break every v0.5-shaped pipeline
+		// invoked with --target. opts.Target carries the value for
+		// those pipelines via the existing OnTarget / PipelineYAML
+		// path; the extra key is harmless.
+		if k == "target" {
+			continue
+		}
+		unknown = append(unknown, k)
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	if len(unknown) == 1 {
+		return fmt.Errorf("unknown flag --%s", unknown[0])
+	}
+	return fmt.Errorf("unknown flags: --%s", strings.Join(unknown, ", --"))
 }
 
 // setResolvedArgs stores the merged resolved-args map on the plan.

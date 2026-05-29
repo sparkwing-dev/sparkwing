@@ -381,6 +381,17 @@ func triggerSource(prefix string) string {
 // to report. prof must already carry a controller.
 func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
+	// parseRunFlags strips --target into wf.target before the
+	// passthrough is collected, so for the v0.6 schema-driven path
+	// to see it we have to thread it back into the args map sent
+	// over the wire. The remote orchestrator lifts args["target"]
+	// onto opts.Target if no other source set it, so OnTarget and
+	// PipelineYAML target overlays keep working too.
+	if wf.target != "" {
+		if _, set := args["target"]; !set {
+			args["target"] = wf.target
+		}
+	}
 	var userName string
 	if u, err := user.Current(); err == nil {
 		userName = u.Username

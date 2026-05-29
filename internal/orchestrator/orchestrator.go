@@ -263,6 +263,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		trigger.Source = "manual"
 	}
 
+	// Remote triggers carry --target as args["target"] over the wire
+	// (the local CLI's createRemoteTrigger injects it there). Lift it
+	// back onto opts.Target so the existing OnTarget validation,
+	// PipelineYAML target-overlay lookup, sparkwing.Target(ctx)
+	// accessor, and run-row Target column all see the value. The
+	// downstream args-resolver mirror still re-injects opts.Target
+	// into Args["target"] before reg.Invoke, so a target supplied
+	// either way reaches both surfaces.
+	if opts.Target == "" {
+		if t := opts.Args["target"]; t != "" {
+			opts.Target = t
+		}
+	}
+
 	// Trigger-supplied --for default. The CLI (and webhook payloads
 	// that name a target) populate opts.Target explicitly; this
 	// fallback only applies when neither did. A pipeline declaring
@@ -373,9 +387,28 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwing.WithPipelineConfig(ctx, pipeCfg)
 	}
 
+	// Mirror opts.Target into Args["target"] so v0.6 schema-driven
+	// jobs (WithArgs[T] with a Bind("target") field, or pipelines that
+	// declared args.target: in YAML) see the resolved value through
+	// the same FlagValues path that --replicas / --image / etc. take.
+	// opts.Target itself stays the canonical source for OnTarget /
+	// PipelineYAML overlays / SetGit / SPARKWING_TARGET env-var
+	// forwarding -- this is purely additive for the args resolver.
+	invokeArgs := opts.Args
+	if opts.Target != "" {
+		if _, set := invokeArgs["target"]; !set {
+			merged := make(map[string]string, len(invokeArgs)+1)
+			for k, v := range invokeArgs {
+				merged[k] = v
+			}
+			merged["target"] = opts.Target
+			invokeArgs = merged
+		}
+	}
+
 	// Plan build (parse Args -> typed Inputs -> Plan). Failures fail
 	// the run with no nodes dispatched.
-	plan, err := reg.Invoke(ctx, opts.Args, rc)
+	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil

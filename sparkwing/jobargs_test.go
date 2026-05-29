@@ -213,6 +213,40 @@ func TestJobArgs_EmptyPlanReturnsNilSurfaces(t *testing.T) {
 	}
 }
 
+func TestAssertJobArgsCoverage_AcceptsJobDeclaredFlags(t *testing.T) {
+	p := NewPlan()
+	Job(p, "deploy", &jobargsJob1{})
+
+	if err := assertJobArgsCoverage(p, map[string]string{"replicas": "3", "image": "nginx"}); err != nil {
+		t.Errorf("flags declared by the job should pass; got %v", err)
+	}
+}
+
+func TestAssertJobArgsCoverage_RejectsTypos(t *testing.T) {
+	p := NewPlan()
+	Job(p, "deploy", &jobargsJob1{})
+
+	err := assertJobArgsCoverage(p, map[string]string{"replicass": "3"})
+	if err == nil || !strings.Contains(err.Error(), "replicass") {
+		t.Errorf("typo should be flagged by name; got %v", err)
+	}
+}
+
+func TestAssertJobArgsCoverage_AlwaysAllowsTarget(t *testing.T) {
+	p := NewPlan()
+	Job(p, "deploy", &jobargsJob1{})
+
+	if err := assertJobArgsCoverage(p, map[string]string{"target": "prod"}); err != nil {
+		t.Errorf("orchestrator-injected target should pass even when no job claims it; got %v", err)
+	}
+}
+
+func TestAssertJobArgsCoverage_NilPlanIsNoop(t *testing.T) {
+	if err := assertJobArgsCoverage(nil, map[string]string{"anything": "x"}); err != nil {
+		t.Errorf("nil plan should be a no-op; got %v", err)
+	}
+}
+
 func keysOf(m map[string]TransitiveArg) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

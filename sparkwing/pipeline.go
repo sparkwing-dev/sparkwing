@@ -104,9 +104,38 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 	// collision check needed.
 
 	invoke := func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error) {
+		// Partition incoming args by who owns each key. The pipeline-
+		// level Inputs schema gets only the keys it declares; anything
+		// else is candidate input for the per-job WithArgs[T] resolver
+		// that runs after Plan(). Without this split, populateInputs
+		// would reject every job-declared arg (and the framework-
+		// injected `target` mirror) as "unknown flag", since it has no
+		// visibility into the job schemas that only exist post-Plan.
+		pipeKnown := map[string]bool{}
+		for _, f := range schema.Fields {
+			pipeKnown[f.Name] = true
+		}
+		var pipeArgs, extraArgs map[string]string
+		if schema.Extra {
+			// Extra-bag schemas already accept arbitrary keys; no
+			// partition needed and the bag soaks up anything that
+			// isn't also claimed by a job (job-resolver wins by
+			// virtue of running on the full map separately).
+			pipeArgs = args
+		} else {
+			pipeArgs = make(map[string]string, len(args))
+			extraArgs = make(map[string]string)
+			for k, v := range args {
+				if pipeKnown[k] {
+					pipeArgs[k] = v
+				} else {
+					extraArgs[k] = v
+				}
+			}
+		}
 		var in T
 		if t != nil && t.Kind() == reflect.Struct {
-			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), args); err != nil {
+			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), pipeArgs); err != nil {
 				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)
 			}
 		}
@@ -124,6 +153,16 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		plan.setInputs(in)
 		if err := p.Plan(planguard.With(ctx), plan, in, rc); err != nil {
 			return nil, err
+		}
+		// Now that Plan() ran, every WithArgs[T] job has registered
+		// its schema. Validate the post-partition leftover against
+		// the union of all job-declared flags; anything still
+		// unclaimed is a real typo. Mirrors populateInputs's strict-
+		// unknown contract for the v0.6 args surface.
+		if len(extraArgs) > 0 {
+			if err := assertJobArgsCoverage(plan, extraArgs); err != nil {
+				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)
+			}
 		}
 		// v0.6: resolve every job's typed args (via WithArgs[T]) and
 		// bind the result onto each job's WithArgs holder. The merged
