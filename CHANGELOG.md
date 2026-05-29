@@ -80,6 +80,11 @@ code change to unlock.
 - **config:** Profile `default-args:` block defaults any pipeline-
   declared arg when the profile is active. Supports `${VAR}` env
   interpolation; richer shell-style syntax is rejected at parse time.
+- **cli:** `sparkwing run <pipeline> --help` now lists every
+  transitive `WithArgs[T]` flag declared by jobs the pipeline
+  registers, annotated with `[from job <id>]` so authors can trace
+  each flag back to its owning job. Mirrors what tab completion
+  already saw via the describe cache.
 
 ### Changed
 
