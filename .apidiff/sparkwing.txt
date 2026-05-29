@@ -49,6 +49,9 @@ type Base struct{}
 func Bash(ctx context.Context, line string) *Cmd
 type BeforeRunFn func(ctx context.Context) error
 func Bind(argName string) Constraint
+func BindPipelinesFromYAML(cfg interface {
+	EachPipeline(func(name, entrypoint string))
+})
 type Cache = storage.ArtifactStore
 type CacheKey string
 func (k CacheKey) IsNoCache() bool
@@ -438,8 +441,6 @@ type Produces[T any] struct{}
 func Profile(name string) Predicate
 type ProfileLookup func(name string) (controller, token string, err error)
 type ProfileResolutionContext struct {
-	Defaults map[string]string
-
 	Name string
 
 	IsLocal bool
@@ -464,6 +465,7 @@ type RefTarget struct {
 func RefTo[T any](n *JobNode) Ref[T]
 func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T]
 func Register[T any](name string, factory func() Pipeline[T])
+func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])
 func Registered() []string
 type Registration struct {
 	Name string
@@ -485,8 +487,6 @@ type RequiresProvider interface {
 func ResolveAs[T any](s *Schema, in ResolveInputs) (T, error)
 type ResolveInputs struct {
 	FlagValues map[string]string
-
-	ProfileDefaults map[string]string
 
 	ProfileName    string
 	ProfileIsLocal bool

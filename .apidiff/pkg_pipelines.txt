@@ -3,41 +3,83 @@
 type Config struct {
 	Pipelines []Pipeline
 }
+func (c *Config) EachPipeline(fn func(name, entrypoint string))
 func (c *Config) EntrypointsByName() map[string]string
 func (c *Config) Equal(other *Config) bool
 func (c *Config) Find(name string) *Pipeline
 func (c *Config) Names() []string
+func (c *Config) PipelinesByEntrypoint() map[string][]*Pipeline
 func (c *Config) Validate() error
 type DeployTrigger struct{}
+type Dispatch struct {
+	Runners []string
+
+	Source string
+
+	Approvals string
+
+	Protected bool
+
+	Backend *DispatchBackend
+}
+func (d *Dispatch) Validate(pipeline string) error
+type DispatchBackend struct {
+	Cache map[string]any
+	Logs  map[string]any
+	State map[string]any
+}
+type GuardContext struct {
+	ProfileName string
+
+	ProfileIsLocal bool
+
+	Args map[string]string
+}
+type GuardKind int
+type GuardToken struct {
+	Raw  string
+	Kind GuardKind
+	Arg  string
+	Val  string
+}
+func (t GuardToken) Matches(ctx GuardContext) bool
+type Guards struct {
+	Require []string
+	Reject  []string
+}
+func (g Guards) Evaluate(pipeline string, ctx GuardContext) error
+func (g Guards) Validate(pipeline string) error
+const KindArg
+const KindProfileController
+const KindProfileLocal
+const KindProfileName
+const KindUnknown GuardKind = iota
 type ManualTrigger struct{}
 func Parse(r io.Reader) (*Config, error)
+func ParseGuardToken(raw string) (GuardToken, error)
 type Pipeline struct {
-	Name       string
-	Entrypoint string
-	On         Triggers
-
-	Secrets SecretsField
-	Tags    []string
+	Name        string
+	Entrypoint  string
+	Description string
+	On          Triggers
+	Secrets     SecretsField
+	Tags        []string
 
 	Hidden bool
 
-	Runners []string
+	Guards Guards
 
-	Targets map[string]Target
+	Defaults map[string]string
 
-	Args PipelineArgs
+	Locked []string
+
+	Dispatch *Dispatch
 
 	Values PipelineValues
 }
-func (p *Pipeline) EffectiveTargets() map[string]Target
-func (p *Pipeline) HasLegacyTargets() bool
-func (p *Pipeline) HasTarget(name string) bool
-func (p *Pipeline) TargetNames() []string
-func (p *Pipeline) TriggerTarget(source string) string
+func (p *Pipeline) LockedSet() map[string]struct{}
 func (p *Pipeline) TriggerValues(source string) map[string]any
-func (p *Pipeline) ValidateArgs() error
-type PipelineArgs map[string]map[string]Target
-func (a PipelineArgs) Target() map[string]Target
+func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
 type PipelineValues struct {
 	Base map[string]any
 
@@ -50,8 +92,6 @@ type PushTrigger struct {
 	Paths    []string
 
 	Values map[string]any
-
-	Target string
 }
 type SecretEntry struct {
 	Name     string
@@ -63,25 +103,6 @@ type SecretsField []SecretEntry
 func (s SecretsField) MarshalYAML() (any, error)
 func (s *SecretsField) UnmarshalYAML(node *yaml.Node) error
 func (s SecretsField) Validate(pipeline string) error
-type Target struct {
-	Runners []string
-
-	Source string
-
-	Approvals string
-
-	Protected bool
-
-	Values map[string]any
-
-	Backend *TargetBackend
-}
-func (t Target) Validate(pipeline, name string) error
-type TargetBackend struct {
-	Cache map[string]any
-	Logs  map[string]any
-	State map[string]any
-}
 type Triggers struct {
 	Manual   *ManualTrigger
 	Push     *PushTrigger
@@ -93,6 +114,4 @@ type Triggers struct {
 }
 type WebhookTrigger struct {
 	Path string
-
-	Target string
 }

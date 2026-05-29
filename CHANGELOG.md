@@ -50,52 +50,67 @@ code change to unlock.
 
 ### Added
 
-- **sdk:** Typed-args system for jobs via `sparkwing.WithArgs[T]`.
-  Jobs embed `WithArgs[ArgsStruct]` to declare a typed args struct;
-  the framework reflects on the struct at registration time to build
-  the CLI flag surface (kebab-cased from field names; `flag:"..."`
-  tag overrides; `desc:"..."` tag carries help text). Step bodies
-  read the resolved args via `j.Args(ctx)`. Jobs without typed args
-  keep working unchanged.
-- **sdk:** Optional `Schema()` method on a job declares constraints:
-  `Required`, `RequiredWhen(predicate)`, `Default`, `Computed(fn)`,
-  `DependsOn`, `Bind`, `OneOf`, `Min`/`Max`/`Range`/`Positive`,
-  `Custom(fn)`. Cross-field rules via `Group(...).ExactlyOne()` /
-  `.AtLeastOne()` / `.AtMostOne()` / `.AllOrNone()` with optional
-  `.When(predicate)` and `.Desc(msg)` decorators. See
-  [migration guide](docs/migrations/v0.6.0.md) for the full vocabulary.
-- **sdk:** Predicate vocabulary for the resolution chain:
+- **sdk:** `RegisterEntrypoint[T](name, factory)` declares a Go work
+  unit by its entrypoint type name. Combined with the new
+  `BindPipelinesFromYAML(cfg)` bootstrap, one entrypoint can back
+  many pipelines -- each pipeline in YAML names the entrypoint and
+  supplies its own policy. The legacy `Register` API stays as a
+  deprecation-marked wrapper.
+- **config:** Pipeline-level `dispatch:` block (runners, source,
+  secrets, protected, approvals, backend). Same field set as the
+  v0.5 `targets[name]:` value, lifted to the pipeline level since
+  one pipeline now binds one deployment shape.
+- **config:** Pipeline-level `guards:` block evaluates predicate
+  tokens against the resolved profile + args at dispatch. Token
+  vocabulary: `profile-local`, `profile-controller`,
+  `profile-name:<name>`, `arg:<flag>=<value>`. `require:` is
+  AND-composed; `reject:` is OR-composed; `reject:` fires first so
+  "you can't dispatch this" beats "missing prereq" when both apply.
+- **config:** Pipeline-level `defaults:` map supplies per-arg
+  fallback values. Resolution priority: schema `Default()` <
+  YAML `defaults:` < schema `Computed()` < operator CLI flag.
+- **config:** Pipeline-level `locked:` list refuses operator
+  override of named flags with a hard error.
+- **sdk:** Typed-args system for jobs via `sparkwing.WithArgs[T]` +
+  optional `Schema()` method (`Required` / `RequiredWhen(predicate)`
+  / `Default` / `Computed(fn)` / `OneOf` / `Min` / `Max` / `Range` /
+  `Positive` / `Custom(fn)` / group rules). Predicate vocab:
   `ArgEq`/`ArgNeq`/`ArgIn`/`ArgSet`/`ArgUnset` plus combinators
   `And`/`Or`/`Not` and context predicates `Local`/`Remote`/
-  `Profile(name)`/`Always`. All real Go values, composable.
-- **sdk:** `sparkwing.Arg[T](ctx, name)` accessor reads any resolved
-  arg by its CLI flag name; pairs with `sparkwing.ArgOrDefault[T]`
-  for the fallback case.
-- **config:** Per-pipeline `args:` block in `.sparkwing/sparkwing.yaml`.
-  `args.target:` is the v0.6 home for the schema-bearing target
-  binding (runners/source/secrets per target value). Legacy top-level
-  `targets:` keeps parsing for back-compat; mixing both on one
-  pipeline errors at load time. See
-  [migration guide](docs/migrations/v0.6.0.md).
-- **config:** Profile `default-args:` block defaults any pipeline-
-  declared arg when the profile is active. Supports `${VAR}` env
-  interpolation; richer shell-style syntax is rejected at parse time.
-- **cli:** `sparkwing run <pipeline> --help` now lists every
-  transitive `WithArgs[T]` flag declared by jobs the pipeline
-  registers, annotated with `[from job <id>]` so authors can trace
-  each flag back to its owning job. Mirrors what tab completion
-  already saw via the describe cache.
+  `Profile(name)`/`Always`. `sparkwing.Arg[T](ctx, name)` accessor
+  reads any resolved arg by CLI flag name.
+- **cli:** `sparkwing run <pipeline> --help` lists every transitive
+  `WithArgs[T]` flag declared by jobs the pipeline registers,
+  annotated with `[from job <id>]` so authors can trace each flag
+  back to its owning job.
 
-### Changed
+### Changed (Breaking)
 
-- **cli:** `sparkwing.Target(ctx)` is deprecated in favor of
-  `sparkwing.Arg[string](ctx, "target")`. The old accessor stays as
-  a sugar wrapper through v0.6; removal is targeted for v0.7.
-- **cli:** `--target` is no longer a framework-defined flag; it
-  surfaces only when the active pipeline declares an `args.target:`
-  block. The v0.5 "multi-target requires `--target`" gate generalizes
-  to "arg X has multiple values and no default; pass `--X` or set
-  `default-args.X` on the profile".
+- **config:** `pipelines[].targets:` block removed. (Breaking) One
+  pipeline now binds one deployment shape; split multi-target
+  pipelines into N pipelines, each with its own `dispatch:` block.
+  Legacy YAML errors at parse time with a pointer to the migration
+  guide. See [migration guide](docs/migrations/v0.6.0.md).
+- **cli:** `--target` removed as a framework-defined flag. (Breaking)
+  The pipeline name is now the deployment selector. A pipeline can
+  still declare a `target` arg via `WithArgs[T]` if it wants the
+  value; `--target` passes through to the pipeline binary as a
+  regular arg in that case.
+- **sdk:** `sparkwing.Target(ctx)` removed. (Breaking) Use a regular
+  pipeline arg (`sparkwing.Arg[string](ctx, "target")`) if you need
+  the value, but most call sites should drop the read entirely --
+  the pipeline name itself is the selector now.
+- **config:** Profile `default-args:` block removed. (Breaking)
+  Defaults are deployment-binding policy, not dispatch-destination
+  policy; move them to the pipeline YAML `defaults:` map.
+- **sdk:** `OnTarget(...)` on Job / WorkStep / JobGroup is now inert.
+  (Breaking, soft) The API still compiles but the filter never fires
+  (no active target exists). Migrate by splitting into one pipeline
+  per target shape. Full removal targeted for v0.7.
+- **config:** `Push.target:` / `Webhook.target:` trigger fields
+  removed. (Breaking) Put the trigger directly on the pipeline you
+  want it to fire (`deploy-prod.on.push:` instead of
+  `deploy.on.push.target: prod`).
 
 ### Fixed
 
@@ -116,9 +131,14 @@ code change to unlock.
 ### Docs
 
 - **docs:** New v0.6.0 migration guide at
-  `docs/migrations/v0.6.0.md` covering the `targets:` →
-  `args.target:` rewrite, optional `WithArgs[T]` adoption, profile
-  `default-args:`, and the `sparkwing.Target(ctx)` deprecation.
+  `docs/migrations/v0.6.0.md` walks the entrypoint-vs-pipeline
+  split: how to rewrite a multi-target `targets:` block into N
+  pipelines, the new `dispatch:` / `guards:` / `defaults:` /
+  `locked:` vocabulary, the `RegisterEntrypoint` API, the inert
+  `OnTarget`, and the dropped profile `default-args:`.
+- **docs:** Design proposal `docs/proposals/v0.6-pipeline-redesign.md`
+  documents the decisions behind the redesign for the design-log
+  archive.
 
 ## [v0.5.1] - 2026-05-28
 ### Changed
