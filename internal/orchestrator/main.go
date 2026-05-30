@@ -120,6 +120,20 @@ func Main() {
 		}
 	}
 
+	// Bind YAML pipeline names to their entrypoint factories BEFORE
+	// flag parsing -- parseTypedFlags resolves typed args by Lookup,
+	// which only sees pipelines that have been Register'd or bound
+	// via BindPipelinesFromYAML. Without this ordering, YAML-only
+	// pipeline names (multiple pipelines sharing one entrypoint via
+	// RegisterEntrypoint) fail with "unknown pipeline".
+	var projectCfg *projectconfig.Config
+	if cwd, err := os.Getwd(); err == nil {
+		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
+			sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
+			projectCfg = cfg
+		}
+	}
+
 	argsMap, err := parseTypedFlags(pipeline, rest)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, pipeline+":", err)
@@ -132,25 +146,12 @@ func Main() {
 		os.Exit(1)
 	}
 
-	// Load the on-disk pipelines.yaml entry (if any) so dispatch
-	// metadata + guards / defaults / locked resolve at run start.
-	// A missing pipelines.yaml is not an error -- pipelines declared
-	// in Go via sparkwing.Register still work via the legacy
-	// pipeline-name-as-entrypoint-name registry binding.
+	// Load the on-disk pipelines.yaml entry (if any) so guards /
+	// args / profile resolve at run start. A missing sparkwing.yaml
+	// is not an error -- pipelines declared in Go via sparkwing.Register
+	// still work via the legacy pipeline-name-as-entrypoint-name
+	// registry binding.
 	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
-
-	// v0.6: bind every YAML-declared pipeline name to its registered
-	// entrypoint factory, so `sparkwing run <pipeline-name>` resolves
-	// even when multiple pipelines share one Go entrypoint. Safe when
-	// pipelineYAML is nil (no-op) or when names were already bound via
-	// the legacy Register path (existing entries are preserved).
-	var projectCfg *projectconfig.Config
-	if cwd, err := os.Getwd(); err == nil {
-		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
-			sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
-			projectCfg = cfg
-		}
-	}
 
 	delegate := selectLocalRenderer()
 	opts := Options{

@@ -48,6 +48,16 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-05-30
+
+### Fixed
+
+- **orchestrator:** `BindPipelinesFromYAML` now runs before
+  `parseTypedFlags`, so YAML-only pipeline names (multiple pipelines
+  sharing one entrypoint via `RegisterEntrypoint`) resolve correctly.
+  Previously the typed-flag parser called `sparkwing.Lookup` and got
+  "unknown pipeline" because the bind happened after.
+
 ## [v0.6.0] - 2026-05-29
 
 ### Added
