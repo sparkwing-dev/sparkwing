@@ -50,12 +50,29 @@ code change to unlock.
 
 ### Added
 
+- **`pre-push` now runs a repo-wide gofmt check.** The existing
+  golangci-lint step runs in `.sparkwing/` only, so a struct-alignment
+  fix at the top of the tree slipped past pre-push and got caught
+  later by `sparkwing run lint`. Both gates now reject the same
+  unformatted file.
 - **Dashboard nav now shows the CLI version pill.** A small monospace
   pill renders next to the "sparkwing" logo (e.g. `v0.6.2`), reading
   the value the serving binary injects via the SPA template. Operators
   can see what build they're connected to without opening dev tools.
   Source builds without an `-ldflags` version stamp fall back to the
   Go build-info pseudo-version so the pill is still informative.
+
+### Known issues
+
+- **Postgres state from a laptop + `RunAndAwait` does not work.** The
+  parent run enqueues the child trigger into postgres, but the laptop
+  trigger dispatcher reaches `handle-trigger --local` which always
+  opens the local SQLite store -- so the child can't find its own
+  trigger row and exits. Fixed paths: (a) use `sqlite` state locally;
+  (b) use postgres with a controller in the loop (cluster mode);
+  (c) avoid `RunAndAwait` in a pipeline running on a postgres-state
+  laptop profile. A proper fix requires propagating the active
+  profile to the child handler and will land in a follow-up.
 
 ### Changed
 
