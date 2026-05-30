@@ -12,8 +12,8 @@ import (
 type GuardToken struct {
 	Raw  string // original token string (for error messages)
 	Kind GuardKind
-	Arg  string // for KindProfileName / KindArg the left-hand side
-	Val  string // for KindArg the right-hand side; for KindProfileName the profile name
+	Arg  string // for KindProfileName / KindArg / KindGitBranch: the LHS / branch name
+	Val  string // for KindArg: the RHS literal
 }
 
 // GuardKind is the parsed predicate variant.
@@ -23,10 +23,10 @@ const (
 	KindUnknown GuardKind = iota
 	KindProfileLocal
 	KindProfileController
-	KindProfileName    // profile-name:<name>
-	KindGitBranch      // git-branch:<name>
-	KindGitBranchOnDef // git-branch:default
-	KindArg            // arg:<flag>=<value>
+	KindProfileName    // profile:name=NAME
+	KindGitBranch      // git:branch=NAME
+	KindGitBranchOnDef // git:branch=default
+	KindArg            // arg:FLAG=VALUE
 )
 
 // GuardContext is everything a guard token needs to evaluate: the
@@ -37,7 +37,8 @@ const (
 // hand it off. Keeps guards/predicates testable in isolation.
 type GuardContext struct {
 	// ProfileName is the active profile's name. Empty when no
-	// profile chain is in scope (e.g. an untracked dispatch).
+	// profile is in scope (no --profile, no pipeline.profile, no
+	// defaults.profile).
 	ProfileName string
 
 	// ProfileIsLocal is true when the active profile routes
@@ -45,19 +46,18 @@ type GuardContext struct {
 	ProfileIsLocal bool
 
 	// Args is the resolved args map keyed by CLI flag name.
-	// Values are stringified for comparison (the guard vocabulary
-	// is `arg:flag=value` where value is a literal). Nil-safe.
+	// Values are stringified for comparison. Nil-safe.
 	Args map[string]string
 
 	// GitBranch is the branch the dispatch originated on. Empty
 	// when no git context is in scope (cluster-side replays, etc.);
-	// git-branch tokens never match an empty branch so guards stay
+	// git:branch tokens never match an empty branch so guards stay
 	// safe by default.
 	GitBranch string
 
 	// GitDefaultBranch is the repo's default branch (typically main
-	// or master). Used by the git-branch:default token. Empty when
-	// no git context is in scope.
+	// or master). Used by git:branch=default. Empty when no git
+	// context is in scope.
 	GitDefaultBranch string
 }
 
@@ -65,49 +65,75 @@ type GuardContext struct {
 // ready for evaluation. Returns an error naming the unknown form
 // when the token doesn't match a known shape.
 //
-// Vocabulary (case-sensitive, kebab-case):
+// Vocabulary (case-sensitive):
 //
-//	profile-local            -- matches when the active profile has no controller
-//	profile-controller       -- matches when the active profile has a controller URL
-//	profile-name:<name>      -- matches when the active profile's name equals <name>
-//	git-branch:default       -- matches when dispatch is on the repo's default branch
-//	git-branch:<name>        -- matches when dispatch is on the named branch
-//	arg:<flag>=<value>       -- matches when the resolved arg equals the value
+//	profile:local            -- active profile has no controller
+//	profile:controller       -- active profile has a controller URL
+//	profile:name=NAME        -- active profile's name equals NAME
+//	git:branch=default       -- dispatch on the repo's default branch
+//	git:branch=NAME          -- dispatch on the named branch
+//	arg:FLAG=VALUE           -- resolved arg equals the value
 func ParseGuardToken(raw string) (GuardToken, error) {
 	tok := GuardToken{Raw: raw}
-	switch {
-	case raw == "profile-local":
-		tok.Kind = KindProfileLocal
-	case raw == "profile-controller":
-		tok.Kind = KindProfileController
-	case strings.HasPrefix(raw, "profile-name:"):
-		name := strings.TrimPrefix(raw, "profile-name:")
-		if name == "" {
-			return tok, fmt.Errorf("guard %q: profile-name: requires a non-empty name", raw)
-		}
-		tok.Kind = KindProfileName
-		tok.Arg = name
-	case raw == "git-branch:default":
-		tok.Kind = KindGitBranchOnDef
-	case strings.HasPrefix(raw, "git-branch:"):
-		name := strings.TrimPrefix(raw, "git-branch:")
-		if name == "" {
-			return tok, fmt.Errorf("guard %q: git-branch: requires a non-empty name (or :default)", raw)
-		}
-		tok.Kind = KindGitBranch
-		tok.Arg = name
-	case strings.HasPrefix(raw, "arg:"):
-		rest := strings.TrimPrefix(raw, "arg:")
-		eq := strings.IndexByte(rest, '=')
-		if eq <= 0 || eq == len(rest)-1 {
-			return tok, fmt.Errorf("guard %q: arg: requires <flag>=<value>", raw)
-		}
-		tok.Kind = KindArg
-		tok.Arg = rest[:eq]
-		tok.Val = rest[eq+1:]
-	default:
-		return tok, fmt.Errorf("guard %q: unknown token; vocab: profile-local, profile-controller, profile-name:<n>, git-branch:default, git-branch:<n>, arg:<f>=<v>", raw)
+	namespace, rest, hasColon := strings.Cut(raw, ":")
+	if !hasColon {
+		return tok, fmt.Errorf("guard %q: expected namespace:rest (e.g. profile:controller, git:branch=main, arg:flag=value)", raw)
 	}
+	switch namespace {
+	case "profile":
+		return parseProfileGuard(raw, rest)
+	case "git":
+		return parseGitGuard(raw, rest)
+	case "arg":
+		return parseArgGuard(raw, rest)
+	default:
+		return tok, fmt.Errorf("guard %q: unknown namespace %q (valid: profile, git, arg)", raw, namespace)
+	}
+}
+
+func parseProfileGuard(raw, rest string) (GuardToken, error) {
+	tok := GuardToken{Raw: raw}
+	switch rest {
+	case "local":
+		tok.Kind = KindProfileLocal
+		return tok, nil
+	case "controller":
+		tok.Kind = KindProfileController
+		return tok, nil
+	}
+	key, val, ok := strings.Cut(rest, "=")
+	if !ok || key != "name" || val == "" {
+		return tok, fmt.Errorf("guard %q: profile: expects 'local', 'controller', or 'name=NAME'", raw)
+	}
+	tok.Kind = KindProfileName
+	tok.Arg = val
+	return tok, nil
+}
+
+func parseGitGuard(raw, rest string) (GuardToken, error) {
+	tok := GuardToken{Raw: raw}
+	key, val, ok := strings.Cut(rest, "=")
+	if !ok || key != "branch" || val == "" {
+		return tok, fmt.Errorf("guard %q: git: expects 'branch=NAME' or 'branch=default'", raw)
+	}
+	if val == "default" {
+		tok.Kind = KindGitBranchOnDef
+		return tok, nil
+	}
+	tok.Kind = KindGitBranch
+	tok.Arg = val
+	return tok, nil
+}
+
+func parseArgGuard(raw, rest string) (GuardToken, error) {
+	tok := GuardToken{Raw: raw}
+	flag, val, ok := strings.Cut(rest, "=")
+	if !ok || flag == "" || val == "" {
+		return tok, fmt.Errorf("guard %q: arg: expects FLAG=VALUE", raw)
+	}
+	tok.Kind = KindArg
+	tok.Arg = flag
+	tok.Val = val
 	return tok, nil
 }
 
@@ -152,13 +178,9 @@ func (g Guards) Validate(pipeline string) error {
 // require token does NOT match. Reject is evaluated first so a
 // clear "you can't dispatch this" beats a vaguer "missing prereq"
 // when both happen to apply.
-//
-// The returned error is suitable for direct surface to the
-// operator -- it names the pipeline, the violated token, and
-// (for arg: tokens) the actual resolved value.
 func (g Guards) Evaluate(pipeline string, ctx GuardContext) error {
 	for _, raw := range g.Reject {
-		tok, _ := ParseGuardToken(raw) // pre-validated at load time
+		tok, _ := ParseGuardToken(raw)
 		if tok.Matches(ctx) {
 			return fmt.Errorf("pipeline %q: dispatch rejected by guard %q", pipeline, raw)
 		}
@@ -170,4 +192,11 @@ func (g Guards) Evaluate(pipeline string, ctx GuardContext) error {
 		}
 	}
 	return nil
+}
+
+// IsEmpty reports whether the guards block declares no tokens. Used
+// at resolution time to fall through to defaults.guards when a
+// pipeline declares its own (wholesale replace) only when non-empty.
+func (g Guards) IsEmpty() bool {
+	return len(g.Require) == 0 && len(g.Reject) == 0
 }

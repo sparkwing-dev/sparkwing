@@ -176,6 +176,28 @@ func Main() {
 	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
+		// Fold defaults.guards / defaults.requires into pipelineYAML
+		// (wholesale replace -- a pipeline declares its own block to
+		// opt out of defaults). The orchestrator only ever sees the
+		// resolved Pipeline.
+		if pipelineYAML != nil {
+			if pipelineYAML.Guards.IsEmpty() {
+				pipelineYAML.Guards = projectCfg.Defaults.Guards
+			}
+			if len(pipelineYAML.Requires) == 0 {
+				pipelineYAML.Requires = projectCfg.Defaults.Requires
+			}
+		}
+	}
+	// The "local" label in requires pins this run to in-process
+	// execution (same effect as --sw-local-only).
+	if pipelineYAML != nil {
+		for _, r := range pipelineYAML.Requires {
+			if r == "local" {
+				opts.LocalOnly = true
+				break
+			}
+		}
 	}
 	// Resolve the active profile through the 3-layer chain:
 	// --profile (user) > pipeline.profile (project) > project default

@@ -28,7 +28,7 @@ type Pipeline struct {
 	// Guards gate dispatch on the resolved profile + args. Reject
 	// fires before any step runs when any token matches; Require
 	// fires when not every token matches. Token vocabulary:
-	// `profile-local`, `profile-controller`, `profile-name:<name>`,
+	// `profile:local`, `profile:controller`, `profile:name=<name>`,
 	// `arg:<flag>=<value>`. See pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
@@ -40,10 +40,17 @@ type Pipeline struct {
 
 	// Profile names the project profile (from sparkwing.yaml's
 	// profiles map) this pipeline uses. Empty means "fall back to
-	// the project's top-level profile: selector". The CLI's
-	// --profile flag (which targets ~/.config/sparkwing/profiles.yaml)
+	// the project's defaults.profile selector". The CLI's --profile
+	// flag (which targets ~/.config/sparkwing/profiles.yaml)
 	// overrides this when present.
 	Profile string `yaml:"profile,omitempty"`
+
+	// Requires are runner-label requirements all jobs in this
+	// pipeline must satisfy in addition to their own Job.Requires().
+	// Wholesale replaces defaults.requires when non-empty. The
+	// reserved label "local" pins execution to the in-process
+	// runner (same effect as --sw-local-only).
+	Requires []string `yaml:"requires,omitempty"`
 }
 
 // Guards is the pipeline-level dispatch gate. Both fields are lists
@@ -182,7 +189,7 @@ func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
 		"on": {}, "secrets": {},
-		"guards": {}, "args": {}, "profile": {},
+		"guards": {}, "args": {}, "profile": {}, "requires": {},
 	}
 }
 

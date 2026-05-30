@@ -97,11 +97,14 @@ type Config struct {
 }
 
 // Defaults is the project-level block of per-pipeline defaults.
+// Resolution rules per field are documented inline; the general
+// principle is "replace, unless the field is independently keyed."
 type Defaults struct {
 	// Profile names the project profile (from Config.Profiles) that
 	// applies when neither --profile nor pipeline.profile is set.
 	// Empty means "no default" -- a pipeline without its own
 	// profile: still runs (against the sqlite-only test/dev shape).
+	// Wholesale-replaced by pipeline.profile when set.
 	Profile string `yaml:"profile,omitempty"`
 
 	// Args supplies per-arg default values for every pipeline. Each
@@ -109,6 +112,15 @@ type Defaults struct {
 	// and the merged map sits in the priority chain between
 	// schema.Computed and the explicit operator CLI flag.
 	Args map[string]string `yaml:"args,omitempty"`
+
+	// Guards apply to every pipeline. Wholesale-replaced by a
+	// pipeline that declares its own non-empty guards block.
+	Guards pipelines.Guards `yaml:"guards,omitempty"`
+
+	// Requires are runner labels every pipeline's jobs must
+	// satisfy in addition to their own Job.Requires(). Wholesale-
+	// replaced by pipeline.requires when set.
+	Requires []string `yaml:"requires,omitempty"`
 }
 
 // Load reads and parses .sparkwing/sparkwing.yaml at path. A missing
@@ -284,6 +296,9 @@ func (c *Config) normalize() error {
 		if _, ok := c.Profiles[c.Defaults.Profile]; !ok {
 			return fmt.Errorf("defaults.profile %q is not declared in profiles:", c.Defaults.Profile)
 		}
+	}
+	if err := c.Defaults.Guards.Validate("defaults"); err != nil {
+		return err
 	}
 
 	for _, p := range c.Pipelines {

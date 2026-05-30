@@ -89,8 +89,8 @@ pipelines:
   - name: deploy-prod
     entrypoint: Deploy
     guards:
-      require: [profile-controller]
-      reject:  [profile-local]
+      require: [profile:controller]
+      reject:  [profile:local]
     args:
       image: "registry.prod.com/myapp:latest"
       replicas: "10"
@@ -103,7 +103,7 @@ pipelines:
 	if p == nil {
 		t.Fatal("pipeline missing")
 	}
-	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "profile-controller" {
+	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "profile:controller" {
 		t.Errorf("guards.require: %+v", p.Guards.Require)
 	}
 	if p.Args["replicas"] != "10" {
@@ -117,11 +117,11 @@ pipelines:
   - name: deploy
     entrypoint: Deploy
     guards:
-      require: [something-bogus]
+      require: [unknown:thing]
 `
 	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "unknown token") {
-		t.Fatalf("expected unknown-token rejection; got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown namespace") {
+		t.Fatalf("expected unknown-namespace rejection; got %v", err)
 	}
 }
 

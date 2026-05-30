@@ -14,9 +14,9 @@ func TestParseGuardToken_KnownShapes(t *testing.T) {
 		arg  string
 		val  string
 	}{
-		{"profile-local", pipelines.KindProfileLocal, "", ""},
-		{"profile-controller", pipelines.KindProfileController, "", ""},
-		{"profile-name:prod", pipelines.KindProfileName, "prod", ""},
+		{"profile:local", pipelines.KindProfileLocal, "", ""},
+		{"profile:controller", pipelines.KindProfileController, "", ""},
+		{"profile:name=prod", pipelines.KindProfileName, "prod", ""},
 		{"arg:image=nginx:latest", pipelines.KindArg, "image", "nginx:latest"},
 	}
 	for _, tc := range cases {
@@ -34,7 +34,7 @@ func TestParseGuardToken_KnownShapes(t *testing.T) {
 func TestParseGuardToken_Errors(t *testing.T) {
 	cases := []string{
 		"unknown-thing",
-		"profile-name:",
+		"profile:name=",
 		"arg:noequals",
 		"arg:=novalue",
 		"arg:flag=",
@@ -55,20 +55,20 @@ func TestGuardToken_Matches(t *testing.T) {
 		return tok.Matches(c)
 	}
 
-	if !match("profile-local", ctxLocal) {
-		t.Error("profile-local should match local ctx")
+	if !match("profile:local", ctxLocal) {
+		t.Error("profile:local should match local ctx")
 	}
-	if match("profile-local", ctxProd) {
-		t.Error("profile-local should NOT match prod ctx")
+	if match("profile:local", ctxProd) {
+		t.Error("profile:local should NOT match prod ctx")
 	}
-	if !match("profile-controller", ctxProd) {
-		t.Error("profile-controller should match prod ctx")
+	if !match("profile:controller", ctxProd) {
+		t.Error("profile:controller should match prod ctx")
 	}
-	if !match("profile-name:prod", ctxProd) {
-		t.Error("profile-name:prod should match prod ctx")
+	if !match("profile:name=prod", ctxProd) {
+		t.Error("profile:name=prod should match prod ctx")
 	}
-	if match("profile-name:prod", ctxLocal) {
-		t.Error("profile-name:prod should not match local ctx")
+	if match("profile:name=prod", ctxLocal) {
+		t.Error("profile:name=prod should not match local ctx")
 	}
 	if !match("arg:image=nginx", ctxProd) {
 		t.Error("arg match should fire")
@@ -80,20 +80,20 @@ func TestGuardToken_Matches(t *testing.T) {
 
 func TestGuards_EvaluateRejectFiresFirst(t *testing.T) {
 	g := pipelines.Guards{
-		Require: []string{"profile-name:prod"},
-		Reject:  []string{"profile-local"},
+		Require: []string{"profile:name=prod"},
+		Reject:  []string{"profile:local"},
 	}
 	err := g.Evaluate("deploy-prod", pipelines.GuardContext{ProfileName: "local", ProfileIsLocal: true})
 	if err == nil {
 		t.Fatal("expected reject to fire")
 	}
-	if !strings.Contains(err.Error(), "rejected") || !strings.Contains(err.Error(), "profile-local") {
+	if !strings.Contains(err.Error(), "rejected") || !strings.Contains(err.Error(), "profile:local") {
 		t.Errorf("error should name reject + token; got %v", err)
 	}
 }
 
 func TestGuards_EvaluateRequireUnsatisfied(t *testing.T) {
-	g := pipelines.Guards{Require: []string{"profile-name:prod"}}
+	g := pipelines.Guards{Require: []string{"profile:name=prod"}}
 	err := g.Evaluate("deploy-prod", pipelines.GuardContext{ProfileName: "staging"})
 	if err == nil || !strings.Contains(err.Error(), "requires") {
 		t.Errorf("expected require failure; got %v", err)
@@ -102,8 +102,8 @@ func TestGuards_EvaluateRequireUnsatisfied(t *testing.T) {
 
 func TestGuards_EvaluateAllSatisfiedNoError(t *testing.T) {
 	g := pipelines.Guards{
-		Require: []string{"profile-controller", "arg:image=nginx"},
-		Reject:  []string{"profile-local"},
+		Require: []string{"profile:controller", "arg:image=nginx"},
+		Reject:  []string{"profile:local"},
 	}
 	err := g.Evaluate("deploy-prod", pipelines.GuardContext{
 		ProfileName:    "prod",

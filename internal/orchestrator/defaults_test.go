@@ -92,7 +92,7 @@ func TestRun_GuardRejectFiresBeforeDispatch(t *testing.T) {
 			Name:       "lock-defaults-pipe",
 			Entrypoint: "LockDefaults",
 			Guards: pipelines.Guards{
-				Reject: []string{"profile-local"},
+				Reject: []string{"profile:local"},
 			},
 		},
 	})
@@ -102,6 +102,6 @@ func TestRun_GuardRejectFiresBeforeDispatch(t *testing.T) {
 		t.Fatalf("RunLocal: %v", err)
 	}
 	if res.Status != "success" {
-		t.Fatalf("absent profile shouldn't trip profile-local guard; got %q (err=%v)", res.Status, res.Error)
+		t.Fatalf("absent profile shouldn't trip profile:local guard; got %q (err=%v)", res.Status, res.Error)
 	}
 }

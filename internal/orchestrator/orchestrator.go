@@ -278,8 +278,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// evaluate against the resolved profile + already-resolved args
 	// (which here is just the CLI-passed args; YAML defaults + schema
 	// resolution haven't run yet, so guards see only what the operator
-	// typed). For most guards that's enough -- profile-local /
-	// profile-controller / profile-name don't need resolved args at
+	// typed). For most guards that's enough -- profile:local /
+	// profile:controller / profile-name don't need resolved args at
 	// all, and arg:flag=value reads the operator's explicit values.
 	if opts.PipelineYAML != nil {
 		guardCtx := pipelines.GuardContext{
@@ -288,6 +288,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		if opts.Profile != nil {
 			guardCtx.ProfileName = opts.Profile.Name
 			guardCtx.ProfileIsLocal = opts.Profile.ControllerURL() == ""
+		}
+		if opts.Git != nil {
+			guardCtx.GitBranch = opts.Git.Branch
 		}
 		if err := opts.PipelineYAML.Guards.Evaluate(opts.Pipeline, guardCtx); err != nil {
 			return nil, err
