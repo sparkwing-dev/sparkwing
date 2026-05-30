@@ -53,10 +53,13 @@ code change to unlock.
 - **install.sh installs only `sparkwing`.** Previous revisions also
   dropped `sparkwing-local-ws` and `sparkwing-web` into `~/.local/bin`;
   both are now removed on next install (sweep is silent if absent).
-  `sparkwing-web` runs only as a cluster pod and is published as a
-  Docker image. `sparkwing-local-ws` is superseded by `sparkwing
-  dashboard start`. The release workflow no longer publishes a
-  `sparkwing-local-ws` binary tarball.
+  Cluster-side binaries (`sparkwing-cache`, `-controller`, `-logs`,
+  `-runner`, `-web`) run only as pods and are published as Docker
+  images; install.sh sweeps them from `$DEST` and from `$GOPATH/bin`
+  on every run so a stale `go install ./cmd/sparkwing-<x>` artifact
+  cannot keep shadowing the laptop CLI on PATH. `sparkwing-local-ws`
+  is superseded by `sparkwing dashboard start` and is no longer
+  published as a release binary.
 
 ### Fixed
 

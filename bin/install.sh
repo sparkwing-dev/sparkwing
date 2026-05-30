@@ -31,19 +31,32 @@ fi
 echo "build sparkwing"
 go -C "$ROOT" build -o "$DEST/sparkwing" ./cmd/sparkwing
 
-# Sweep deprecated / cluster-only binaries that prior install.sh
-# revisions used to drop in $DEST. Silent if absent.
+# Sweep deprecated / cluster-only binaries that don't belong on a user
+# laptop. We check $DEST (install target) and $GOPATH/bin (where a
+# prior `go install ./cmd/...` would have dropped them) so they can't
+# silently resolve on PATH after install. Silent if absent.
 declare -a STALE=(
+  sparkwing-cache
+  sparkwing-controller
   sparkwing-local-ws
+  sparkwing-logs
+  sparkwing-runner
   sparkwing-web
   sparkwing.dev
   sparkwing.predeploy
 )
-for s in "${STALE[@]}"; do
-  if [ -e "$DEST/$s" ]; then
-    rm -f "$DEST/$s"
-    echo "removed stale $DEST/$s"
-  fi
+declare -a SWEEP_DIRS=("$DEST")
+gopath_bin="$(go env GOPATH 2>/dev/null)/bin"
+if [ -d "$gopath_bin" ] && [ "$gopath_bin" != "$DEST" ]; then
+  SWEEP_DIRS+=("$gopath_bin")
+fi
+for d in "${SWEEP_DIRS[@]}"; do
+  for s in "${STALE[@]}"; do
+    if [ -e "$d/$s" ]; then
+      rm -f "$d/$s"
+      echo "removed stale $d/$s"
+    fi
+  done
 done
 
 echo
