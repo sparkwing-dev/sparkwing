@@ -83,31 +83,6 @@ pipelines:
 	}
 }
 
-// --- v0.6 redesign: dispatch / guards / defaults / locked ----------
-
-func TestParse_DispatchBlock(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy-prod
-    entrypoint: Deploy
-    dispatch:
-      source:
-        type: controller
-        url: https://controller.prod.example.com
-`
-	cfg, err := pipelines.Parse(strings.NewReader(yaml))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	p := cfg.Find("deploy-prod")
-	if p == nil || p.Dispatch == nil {
-		t.Fatalf("dispatch not parsed: %+v", p)
-	}
-	if p.Dispatch.Source == nil || p.Dispatch.Source.URL != "https://controller.prod.example.com" {
-		t.Errorf("dispatch fields: %+v", p.Dispatch)
-	}
-}
-
 func TestParse_GuardsAndDefaults(t *testing.T) {
 	yaml := `
 pipelines:
@@ -153,7 +128,7 @@ pipelines:
 // --- Unknown-field rejection (catch typos / removed-key holdovers) ---
 
 func TestParse_UnknownPipelineFieldRejected(t *testing.T) {
-	cases := []string{"targets", "args", "runners", "values", "locked", "completely_bogus"}
+	cases := []string{"targets", "args", "runners", "values", "locked", "dispatch", "completely_bogus"}
 	for _, key := range cases {
 		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    " + key + ": [a]\n"
 		_, err := pipelines.Parse(strings.NewReader(yaml))

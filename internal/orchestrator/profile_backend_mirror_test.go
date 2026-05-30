@@ -63,24 +63,6 @@ func TestApplyProfileBackendsWithMirror_S3NoMirrorWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestApplyProfileBackendsWithMirror_SqliteLaptopNoMirror(t *testing.T) {
-	neutralizeEnv(t)
-	redirectHome(t)
-	paths := Paths{Root: t.TempDir()}
-	opts := Options{DefaultStateDB: paths.StateDB()}
-	if err := ApplyProfileBackendsWithMirror(context.Background(), &opts, profile.BuiltinLaptopProfile(), paths); err != nil {
-		t.Fatalf("apply(laptop): %v", err)
-	}
-	defer opts.State.Close()
-	if opts.MirrorLocal != nil {
-		opts.MirrorLocal.Close()
-		t.Fatal("laptop profile is already local; MirrorLocal should be nil")
-	}
-	if _, ok := opts.State.(*store.Store); !ok {
-		t.Fatalf("laptop State = %T, want *store.Store", opts.State)
-	}
-}
-
 func TestApplyProfileBackendsWithMirror_ControllerSetsMirrorLocal(t *testing.T) {
 	neutralizeEnv(t)
 	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"}}

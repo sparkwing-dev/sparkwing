@@ -32,9 +32,12 @@ func resolveEffectiveCacheSpec(_ string) (*backends.Spec, storeurl.ProfileLookup
 		slog.Default().Debug("profiles.yaml load failed", "err", err)
 		return nil, nil
 	}
-	p, _, err := profile.Resolve(name, "", cfg)
+	p, _, err := profile.Resolve(name, cfg)
 	if err != nil {
 		slog.Default().Debug("profile resolve failed", "err", err)
+		return nil, nil
+	}
+	if p == nil {
 		return nil, nil
 	}
 	lookup := controllerLookup(p)

@@ -5,14 +5,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// envReadingSec demands TOKEN; populated via the resolver chosen by
-// the orchestrator from the pipeline's inline dispatch.source.
 type envReadingSec struct {
 	Token string `sw:"TOKEN,required"`
 }
@@ -38,19 +36,15 @@ func init() {
 	register("env-reading-pipe", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &envReadingPipe{} })
 }
 
-func TestRun_InlineDispatchSource_EnvBackend(t *testing.T) {
+func TestRun_ProjectDefaultSecretsBackend_EnvType(t *testing.T) {
 	t.Setenv("SWTEST_TOKEN", "from-env")
 
 	capturedEnvSecret = ""
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "env-reading-pipe",
-		PipelineYAML: &pipelines.Pipeline{
-			Name:       "env-reading-pipe",
-			Entrypoint: "EnvReading",
-			Dispatch: &pipelines.Dispatch{
-				Source: &sources.Source{Type: sources.TypeEnv, Prefix: "SWTEST_"},
-			},
+		ProjectBackends: backends.Surfaces{
+			Secrets: &backends.Spec{Type: backends.TypeEnv, Prefix: "SWTEST_"},
 		},
 	})
 	if err != nil {
@@ -64,7 +58,7 @@ func TestRun_InlineDispatchSource_EnvBackend(t *testing.T) {
 	}
 }
 
-func TestRun_NoDispatchSource_FallsBackToOptionsSecretSource(t *testing.T) {
+func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 	capturedEnvSecret = ""
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
@@ -92,9 +86,9 @@ func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
 			Name:       "env-reading-pipe",
 			Entrypoint: "EnvReading",
 			Secrets:    pipelines.SecretsField{{Name: "TOKEN", Required: true}},
-			Dispatch: &pipelines.Dispatch{
-				Source: &sources.Source{Type: sources.TypeEnv, Prefix: "SWTEST_"},
-			},
+		},
+		ProjectBackends: backends.Surfaces{
+			Secrets: &backends.Spec{Type: backends.TypeEnv, Prefix: "SWTEST_"},
 		},
 	})
 	if err != nil {

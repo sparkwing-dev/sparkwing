@@ -82,7 +82,7 @@ func TestBuildRunInvocation_S3StateNoController(t *testing.T) {
 	opts := Options{
 		Pipeline:     "demo",
 		Profile:      &profile.Profile{Name: "team", State: &backends.Spec{Type: backends.TypeS3, Bucket: "team", Prefix: "state"}},
-		ProfileChain: &profile.Chain{Selected: "team", Source: profile.ChainSourceDefault},
+		ProfileChain: &profile.Chain{Selected: "team", Source: profile.ChainSourceFlag},
 	}
 	inv := buildRunInvocation(opts, "run-1")
 	be := inv["backends"].(map[string]any)

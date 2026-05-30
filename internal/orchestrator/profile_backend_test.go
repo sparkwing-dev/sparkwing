@@ -13,14 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// redirectHome points HOME at a temp dir so BuiltinLaptopProfile's
-// ~/.cache/sparkwing filesystem surfaces resolve under the test sandbox
-// rather than the developer's real home.
-func redirectHome(t *testing.T) {
-	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-}
-
 // neutralizeEnv clears the detect env vars and isolates XDG_CONFIG_HOME
 // so profile resolution in tests doesn't pick up the developer's real
 // environment or a CI runner's GITHUB_ACTIONS/KUBERNETES_SERVICE_HOST.
@@ -70,25 +62,6 @@ func TestOpenReadBackendForProfile_SQLiteState(t *testing.T) {
 	}
 }
 
-func TestOpenReadBackendForProfile_BuiltinLaptop(t *testing.T) {
-	neutralizeEnv(t)
-	redirectHome(t)
-	root := t.TempDir()
-	b, closer, err := OpenReadBackendForProfile(context.Background(), Paths{Root: root}, profile.BuiltinLaptopProfile())
-	if err != nil {
-		t.Fatalf("OpenReadBackendForProfile(laptop): %v", err)
-	}
-	defer closer.Close()
-	// Laptop state is sqlite with no path; the caller's Paths fills it.
-	sb, ok := b.(*backend.StoreBackend)
-	if !ok {
-		t.Fatalf("backend = %T, want *backend.StoreBackend", b)
-	}
-	if sb == nil {
-		t.Fatal("nil StoreBackend")
-	}
-}
-
 func TestOpenReadBackendForProfile_ControllerProfile(t *testing.T) {
 	neutralizeEnv(t)
 	p := &profile.Profile{
@@ -119,28 +92,6 @@ func TestApplyProfileBackends_SQLiteState(t *testing.T) {
 	defer opts.State.Close()
 	if _, ok := opts.State.(*store.Store); !ok {
 		t.Fatalf("State = %T, want *store.Store", opts.State)
-	}
-}
-
-func TestApplyProfileBackends_BuiltinLaptop(t *testing.T) {
-	neutralizeEnv(t)
-	redirectHome(t)
-	opts := Options{DefaultStateDB: filepath.Join(t.TempDir(), "state.db")}
-	if err := ApplyProfileBackends(context.Background(), &opts, profile.BuiltinLaptopProfile()); err != nil {
-		t.Fatalf("ApplyProfileBackends(laptop): %v", err)
-	}
-	if opts.State == nil {
-		t.Fatal("State nil")
-	}
-	defer opts.State.Close()
-	if _, ok := opts.State.(*store.Store); !ok {
-		t.Fatalf("State = %T, want *store.Store (sqlite)", opts.State)
-	}
-	if opts.LogStore == nil {
-		t.Error("LogStore nil; laptop declares a filesystem logs surface")
-	}
-	if opts.ArtifactStore == nil {
-		t.Error("ArtifactStore nil; laptop declares a filesystem cache surface")
 	}
 }
 

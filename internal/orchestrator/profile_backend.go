@@ -47,15 +47,7 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 		return nil
 	}
 
-	state, logs, cache := profileSurfaceSpecs(p, opts.DefaultStateDB)
-
-	// Layer the pipeline's per-target backend: overlay (deployment-
-	// specific state/cache/logs override) on top of the profile surfaces.
-	eff := backends.LayerSurfaces(
-		backends.Surfaces{State: state, Logs: logs, Cache: cache},
-		decodeTargetBackend(opts.PipelineYAML, opts.Target),
-	)
-	state, logs, cache = eff.State, eff.Logs, eff.Cache
+	state, logs, cache := effectiveSurfaceSpecs(p, opts, opts.DefaultStateDB)
 
 	lookup := profileControllerLookup(p)
 	if opts.ProfileLookup != nil {
@@ -138,6 +130,29 @@ func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profi
 // the only local state type today.
 func isLocalState(spec *backends.Spec) bool {
 	return spec == nil || spec.Type == backends.TypeSQLite
+}
+
+// effectiveSurfaceSpecs picks the state/logs/cache specs for this
+// run. With an active profile (--profile X), the profile's Surfaces
+// wins wholesale -- project defaults are ignored, the coherence of
+// the bundle is preserved. Without one, the project's declared
+// backends apply (or the historical local sqlite fallback when the
+// project declares nothing).
+func effectiveSurfaceSpecs(p *profile.Profile, opts *Options, stateDBPath string) (state, logs, cache *backends.Spec) {
+	if p != nil {
+		return profileSurfaceSpecs(p, stateDBPath)
+	}
+	state = opts.ProjectBackends.State
+	logs = opts.ProjectBackends.Logs
+	cache = opts.ProjectBackends.Cache
+	if state == nil {
+		state = &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}
+	} else if state.Type == backends.TypeSQLite && state.Path == "" {
+		filled := *state
+		filled.Path = stateDBPath
+		state = &filled
+	}
+	return state, logs, cache
 }
 
 // profileSurfaceSpecs derives the state/logs/cache specs for opening

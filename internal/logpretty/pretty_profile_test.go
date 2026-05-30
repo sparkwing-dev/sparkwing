@@ -61,14 +61,11 @@ func TestProfileBanner_ControllerRendersAllFields(t *testing.T) {
 
 func TestProfileBanner_MirrorOmittedForLocalProfile(t *testing.T) {
 	out := renderRunStart(t,
-		map[string]any{"name": "laptop", "source": "builtin", "detect_via": "", "mirror_local": true},
+		map[string]any{"name": "local", "source": "flag", "detect_via": "", "mirror_local": true},
 		map[string]any{"state": "sqlite", "logs": "filesystem:~/.cache/sparkwing/logs", "cache": "filesystem:~/.cache/sparkwing"},
 	)
 	if strings.Contains(out, "mirror:") {
 		t.Errorf("mirror line should be omitted for a local (sqlite) profile; got:\n%s", out)
-	}
-	if !strings.Contains(out, "via:    built-in fallback") {
-		t.Errorf("builtin via phrase missing; got:\n%s", out)
 	}
 }
 
@@ -87,8 +84,7 @@ func TestProfileBanner_ViaPhrasePerSource(t *testing.T) {
 		source, want string
 	}{
 		{"flag", "via:    --profile flag"},
-		{"project", "via:    project hint (.sparkwing/sparkwing.yaml profile:)"},
-		{"builtin", "via:    built-in fallback"},
+		{"none", "via:    no --profile (project defaults)"},
 	}
 	for _, tc := range cases {
 		out := renderRunStart(t,

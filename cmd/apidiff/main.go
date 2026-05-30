@@ -48,8 +48,6 @@ var packagePaths = []string{
 	"pkg/logs",
 	"pkg/pipelines",
 	"pkg/runner",
-	"pkg/runners",
-	"pkg/sources",
 	"pkg/storage",
 	"pkg/storage/fs",
 	"pkg/storage/s3",

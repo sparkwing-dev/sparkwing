@@ -160,7 +160,7 @@ func openFromConfig(
 		if err != nil {
 			return nil, nopCloser{}, err
 		}
-		p, _, err := profile.Resolve(profileName, "", cfg)
+		p, _, err := profile.Resolve(profileName, cfg)
 		if err != nil {
 			return nil, nopCloser{}, fmt.Errorf("--profile %s: %w", profileName, err)
 		}

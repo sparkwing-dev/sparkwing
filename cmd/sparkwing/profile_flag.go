@@ -12,18 +12,14 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// resolveProfileChain loads profiles.yaml and resolves NAME through the
-// chain resolver, layering the project hint (.sparkwing/sparkwing.yaml
-// `profile:`) below the explicit flag. It returns the resolved profile,
+// resolveProfileChain loads profiles.yaml and resolves NAME. Returns
+// the resolved profile (nil when name is empty -- no profile active),
 // the resolution chain (for the `sparkwing profile` introspection
-// command), and the resolved profiles.yaml path (for display). A missing
-// profile returns a not-found error naming the file and the available
-// profiles. Shared by `sparkwing run` / `pipeline trigger` / the read
-// commands (via resolveProfileFlag) and `sparkwing profile` so all
-// report the same resolution.
+// command), and the resolved profiles.yaml path (for display). A
+// missing named profile returns a not-found error naming the file and
+// the available profiles.
 func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -33,38 +29,15 @@ func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, 
 	if err != nil {
 		return nil, profile.Chain{}, path, err
 	}
-	hint := projectProfileHint()
-	p, chain, err := profile.Resolve(name, hint, cfg)
+	p, chain, err := profile.Resolve(name, cfg)
 	if err != nil {
 		if errors.Is(err, profile.ErrProfileNotFound) {
-			// The offending name is the flag when set, else the project
-			// hint -- not the (possibly empty) flag arg.
-			bad := name
-			if bad == "" {
-				bad = hint
-			}
 			return nil, profile.Chain{}, path, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
-				bad, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
+				name, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
 		}
 		return nil, profile.Chain{}, path, err
 	}
 	return p, chain, path, nil
-}
-
-// projectProfileHint reads .sparkwing/sparkwing.yaml's profile: field
-// (discovered by walking up from cwd) -- the project-level resolution
-// hint below an explicit --profile flag. Returns "" when no sparkwing.yaml
-// is found or it declares no profile:.
-func projectProfileHint() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	_, cfg, err := projectconfig.Discover(cwd)
-	if err != nil || cfg == nil {
-		return ""
-	}
-	return cfg.Profile
 }
 
 // resolveProfileFlag is the connection-side use of resolveProfileChain:

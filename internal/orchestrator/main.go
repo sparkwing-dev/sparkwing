@@ -14,6 +14,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -144,9 +145,11 @@ func Main() {
 	// even when multiple pipelines share one Go entrypoint. Safe when
 	// pipelineYAML is nil (no-op) or when names were already bound via
 	// the legacy Register path (existing entries are preserved).
+	var projectBackends backends.Surfaces
 	if cwd, err := os.Getwd(); err == nil {
-		if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
-			sparkwing.BindPipelinesFromYAML(cfg)
+		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
+			sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
+			projectBackends = cfg.Backends
 		}
 	}
 
@@ -168,9 +171,10 @@ func Main() {
 		// Target stays as a zero-value plumbing field for the SDK's
 		// OnTarget filter (v0.5 carryover). v0.6 removed --target as
 		// a framework concept.
-		Target:       "",
-		PipelineYAML: pipelineYAML,
-		SparkwingDir: sparkwingDir,
+		Target:          "",
+		PipelineYAML:    pipelineYAML,
+		SparkwingDir:    sparkwingDir,
+		ProjectBackends: projectBackends,
 	}
 	// --profile NAME (forwarded as SPARKWING_PROFILE): route
 	// state/logs/cache through the named storage profile, with a local

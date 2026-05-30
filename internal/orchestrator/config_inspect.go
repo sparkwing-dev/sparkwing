@@ -65,13 +65,14 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	return nil
 }
 
-// pipelineSourceLabel returns the inline source spec's Describe()
-// output for display. Empty when the pipeline declares no source.
-func pipelineSourceLabel(p *pipelines.Pipeline) string {
-	if p == nil || p.Dispatch == nil || p.Dispatch.Source == nil {
-		return ""
-	}
-	return p.Dispatch.Source.Describe()
+// pipelineSourceLabel returns a short label for the effective
+// secrets backend for a pipeline run. Empty when no secrets backend
+// applies. Pipeline-scoped overrides were dropped in v0.6, so this
+// is always empty today; kept as a seam for the inspect verb to keep
+// rendering a "source:" line when project defaults or profiles
+// declare one.
+func pipelineSourceLabel(_ *pipelines.Pipeline) string {
+	return ""
 }
 
 func printConfigInspectPretty(w io.Writer, pipeline, source string, secFields []sparkwing.SecretField) {

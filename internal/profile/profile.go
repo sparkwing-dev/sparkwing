@@ -36,7 +36,6 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
 // Profile is one named connection bundle.
@@ -51,29 +50,21 @@ type Profile struct {
 	// request; nil/empty token = no Authorization header sent.
 	Controller *ControllerSpec `yaml:"controller,omitempty"`
 
-	// State, Cache, and Logs carry the full backend triple so a profile
-	// fully describes where its runs persist. Consume them as a unit via
-	// Surfaces. A nil pointer means "not specified at this layer"; a
-	// controller-only profile leaves all three nil and routes every
-	// surface through its controller.
-	State *backends.Spec `yaml:"state,omitempty"`
-	Cache *backends.Spec `yaml:"cache,omitempty"`
-	Logs  *backends.Spec `yaml:"logs,omitempty"`
+	// Secrets, State, Cache, and Logs are the per-surface backends
+	// this profile uses. Consume as a unit via Surfaces. A nil pointer
+	// means "not declared at this layer." When --profile X is active,
+	// the orchestrator uses this Surfaces bundle wholesale, ignoring
+	// any project defaults or pipeline overrides.
+	Secrets *backends.Spec `yaml:"secrets,omitempty"`
+	State   *backends.Spec `yaml:"state,omitempty"`
+	Cache   *backends.Spec `yaml:"cache,omitempty"`
+	Logs    *backends.Spec `yaml:"logs,omitempty"`
 
 	// MirrorLocal toggles whether local execution against this profile
 	// also writes state to the local SQLite store. Nil means the
 	// default (true); set false for automated workers that fire and
 	// forget. Consume via EffectiveMirrorLocal.
 	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
-
-	// SourceOverride, when set, wholesale replaces whatever
-	// dispatch.source spec a pipeline declared for runs under this
-	// profile. Used as a per-user dev/test escape hatch: a developer
-	// can point every pipeline at a local dotenv without touching
-	// pipeline YAMLs. The override is opaque to the pipeline -- if
-	// it's set on the active profile, the pipeline's source spec
-	// (URL match included) is not consulted.
-	SourceOverride *sources.Source `yaml:"source_override,omitempty"`
 }
 
 // ControllerSpec is the nested controller block on a Profile.
@@ -108,19 +99,17 @@ func (p *Profile) HasController() bool {
 	return p.ControllerURL() != ""
 }
 
-// Surfaces returns the profile's State/Cache/Logs as a
-// backends.Surfaces, suitable for handing to the backend factories.
-// A nil profile, or one with all three specs unset, yields a
-// zero-valued Surfaces so callers can layer it against project /
-// built-in surfaces with backends.Effective.
+// Surfaces returns the profile's per-surface backends as a
+// backends.Surfaces. A nil profile yields a zero-valued Surfaces.
 func (p *Profile) Surfaces() backends.Surfaces {
 	if p == nil {
 		return backends.Surfaces{}
 	}
 	return backends.Surfaces{
-		Cache: p.Cache,
-		Logs:  p.Logs,
-		State: p.State,
+		Secrets: p.Secrets,
+		Cache:   p.Cache,
+		Logs:    p.Logs,
+		State:   p.State,
 	}
 }
 
@@ -137,7 +126,6 @@ func (p *Profile) EffectiveMirrorLocal() bool {
 
 // Config is the on-disk profiles.yaml file.
 type Config struct {
-	Default  string              `yaml:"default,omitempty"`
 	Profiles map[string]*Profile `yaml:"profiles,omitempty"`
 }
 
@@ -202,7 +190,7 @@ func Save(path string, cfg *Config) error {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	// Strip .Name before marshal (duplicates the map key).
-	out := &Config{Default: cfg.Default, Profiles: map[string]*Profile{}}
+	out := &Config{Profiles: map[string]*Profile{}}
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			continue
@@ -228,7 +216,8 @@ func Save(path string, cfg *Config) error {
 // LoadAndResolve does DefaultPath + Load + Resolve in one call,
 // resolving explicitName through the chain (flag level; no project
 // hint). A nil profile is never returned for an empty name: the chain
-// falls through to the default and finally the built-in laptop profile.
+// returns (nil, nil) when explicitName is empty (the no-profile
+// path; project defaults apply at the orchestrator layer).
 func LoadAndResolve(explicitName string) (*Profile, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -238,7 +227,7 @@ func LoadAndResolve(explicitName string) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, _, err := Resolve(explicitName, "", cfg)
+	p, _, err := Resolve(explicitName, cfg)
 	return p, err
 }
 

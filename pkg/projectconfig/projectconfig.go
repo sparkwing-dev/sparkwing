@@ -23,6 +23,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
@@ -77,13 +78,13 @@ func CheckLegacy(startDir string) error {
 	}
 }
 
-// Config is the parsed .sparkwing/sparkwing.yaml. Each section mirrors
-// the shape of the per-file YAML it absorbs; see the package doc.
+// Config is the parsed .sparkwing/sparkwing.yaml.
 type Config struct {
-	// Profile is an optional hint naming which profile this repo
-	// expects when no --profile flag is passed. It is advisory only;
-	// resolution layers it below the explicit flag.
-	Profile string `yaml:"profile,omitempty"`
+	// Backends declares the project's default per-surface backends.
+	// Used when no --profile is active. When the operator passes
+	// --profile X, the profile's Surfaces wins wholesale and these
+	// defaults are ignored.
+	Backends backends.Surfaces `yaml:"backends,omitempty"`
 
 	Pipelines []pipelines.Pipeline `yaml:"pipelines,omitempty"`
 	Sparks    []sparks.Library     `yaml:"sparks,omitempty"`
@@ -245,6 +246,10 @@ func WriteSparksSection(path string, libs []sparks.Library) error {
 func (c *Config) normalize() error {
 	pcfg := pipelines.Config{Pipelines: c.Pipelines}
 	if err := pcfg.Validate(); err != nil {
+		return err
+	}
+
+	if err := c.Backends.Secrets.ValidateSecrets(); err != nil {
 		return err
 	}
 

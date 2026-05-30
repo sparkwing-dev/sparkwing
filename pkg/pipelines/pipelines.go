@@ -6,8 +6,6 @@ import (
 	"io"
 
 	"go.yaml.in/yaml/v3"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
 // Config is the whole pipelines.yaml contents.
@@ -38,51 +36,7 @@ type Pipeline struct {
 	// schema Default and Computed; lower than an explicit operator
 	// CLI flag. Keyed by CLI flag name (kebab-case, matching what
 	// the SDK's WithArgs[T] field tags resolve to).
-	//
-	// Args are by definition operator-controllable. If you want a
-	// value the operator cannot override, declare it as PipelineConfig
-	// via values: -- that's the typed pipeline-binding-only surface
-	// the operator has no CLI access to.
 	Defaults map[string]string `yaml:"defaults,omitempty"`
-
-	// Dispatch carries the per-pipeline scheduling metadata: runner
-	// allowlist, secret source, protected gate, approvals, optional
-	// backend overrides. Absent block means "laptop default":
-	// in-process runner, no source binding, no protection gate.
-	Dispatch *Dispatch `yaml:"dispatch,omitempty"`
-}
-
-// Dispatch carries one pipeline's scheduling metadata. All fields
-// are optional; an absent block (Pipeline.Dispatch == nil) means the
-// pipeline runs in the laptop default shape (in-process runner, no
-// secret source, no protection gate).
-//
-// Runner selection happens via job-level Requires() labels, not via
-// pipeline-level allowlists. Jobs declare what they need (e.g.,
-// "os=darwin", "xcode=15"); the scheduler matches against available
-// runners' advertised labels.
-type Dispatch struct {
-	// Source is the inline source spec that resolves Secret() calls
-	// for this pipeline. Absent means no source binding: Secret()
-	// calls fall back to whatever resolver the caller installed (or
-	// fail unresolved).
-	Source *sources.Source `yaml:"source,omitempty"`
-
-	// Backend overrides cache / logs / state destinations for runs
-	// against this pipeline, layered on top of the resolved
-	// profile's surfaces. Per-surface shape is intentionally left
-	// untyped here so it accepts any backend spec without a parser
-	// update.
-	Backend *DispatchBackend `yaml:"backend,omitempty"`
-}
-
-// DispatchBackend carries per-surface backend overrides for runs
-// against a pipeline. Each surface stays untyped (map[string]any) so
-// callers can declare any backend spec without a parser update here.
-type DispatchBackend struct {
-	Cache map[string]any `yaml:"cache,omitempty"`
-	Logs  map[string]any `yaml:"logs,omitempty"`
-	State map[string]any `yaml:"state,omitempty"`
 }
 
 // Guards is the pipeline-level dispatch gate. Both fields are lists
@@ -222,7 +176,6 @@ func pipelineKnownYAMLFields() map[string]struct{} {
 		"name": {}, "entrypoint": {}, "description": {},
 		"on": {}, "secrets": {},
 		"guards": {}, "defaults": {},
-		"dispatch": {},
 	}
 }
 
@@ -312,25 +265,8 @@ func (c *Config) Validate() error {
 		if err := p.Secrets.Validate(p.Name); err != nil {
 			return err
 		}
-		if err := p.Dispatch.Validate(p.Name); err != nil {
-			return err
-		}
 		if err := p.Guards.Validate(p.Name); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// Validate checks Dispatch's structural invariants. Validates the
-// inline source spec when present.
-func (d *Dispatch) Validate(pipeline string) error {
-	if d == nil {
-		return nil
-	}
-	if d.Source != nil {
-		if err := d.Source.Validate(); err != nil {
-			return fmt.Errorf("pipeline %q: dispatch.source: %w", pipeline, err)
 		}
 	}
 	return nil

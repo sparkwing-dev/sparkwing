@@ -18,19 +18,15 @@ func writeInnerProfiles(t *testing.T, body string) {
 
 func TestProfileFromEnv_Unset(t *testing.T) {
 	os.Unsetenv("SPARKWING_PROFILE")
-	writeInnerProfiles(t, "")
-	t.Setenv("GITHUB_ACTIONS", "")
-	t.Setenv("KUBERNETES_SERVICE_HOST", "")
-	t.Chdir(t.TempDir()) // no sparkwing.yaml hint in an empty cwd
 	p, chain, err := profileFromEnv()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p == nil || chain == nil {
-		t.Fatal("unset SPARKWING_PROFILE should still resolve the built-in laptop fallback")
+	if p != nil {
+		t.Fatalf("unset SPARKWING_PROFILE should return nil profile, got %#v", p)
 	}
-	if p.Name != "laptop" || string(chain.Source) != "builtin" {
-		t.Fatalf("want built-in laptop, got name=%q source=%q", p.Name, chain.Source)
+	if chain == nil || string(chain.Source) != "none" {
+		t.Fatalf("want chain source=none, got %#v", chain)
 	}
 }
 

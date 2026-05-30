@@ -1145,12 +1145,8 @@ func profileViaPhrase(source, _ string) string {
 	switch source {
 	case string(profile.ChainSourceFlag):
 		return "--profile flag"
-	case string(profile.ChainSourceProject):
-		return "project hint (.sparkwing/sparkwing.yaml profile:)"
-	case string(profile.ChainSourceDefault):
-		return "default (" + profile.DisplayDefaultPath() + ")"
-	case string(profile.ChainSourceBuiltin):
-		return "built-in fallback"
+	case string(profile.ChainSourceNone):
+		return "no --profile (project defaults)"
 	default:
 		return source
 	}

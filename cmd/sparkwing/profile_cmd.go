@@ -123,43 +123,22 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 	switch chain.Source {
 	case profile.ChainSourceFlag:
 		return fmt.Sprintf("flag (--profile %s)", chain.Selected)
-	case profile.ChainSourceBuiltin:
-		return "builtin (synthesized laptop fallback; no profiles.yaml match)"
+	case profile.ChainSourceNone:
+		return "no --profile (project defaults apply)"
 	default:
 		return fmt.Sprintf("%s (%s)", chain.Source, displayConfigPath(cfgPath))
 	}
 }
 
-// --- shared chain + surface rendering ---
-
-// chainRows reconstructs the four canonical resolution levels in
-// precedence order, merging the chain's selected level back with its
-// Considered entries. The builtin row reads "not reached" when something
-// higher won; every other non-selected row reuses the resolver's own
-// reason so this command, the run flow, and the run_start banner stay
-// a single source of truth.
+// chainRows reports the resolution. With the flag-only model there's
+// at most one selected level and no alternatives considered.
 func chainRows(chain profile.Chain) []profileConsideredJSON {
-	order := []profile.ChainSource{
-		profile.ChainSourceFlag,
-		profile.ChainSourceProject,
-		profile.ChainSourceDefault,
-		profile.ChainSourceBuiltin,
-	}
-	bySource := make(map[profile.ChainSource]profile.ConsideredEntry, len(chain.Considered))
-	for _, e := range chain.Considered {
-		bySource[e.Source] = e
-	}
-	rows := make([]profileConsideredJSON, 0, len(order))
-	for _, src := range order {
-		switch {
-		case src == chain.Source:
-			rows = append(rows, profileConsideredJSON{Source: string(src), Name: chain.Selected, Reason: "selected"})
-		case src == profile.ChainSourceBuiltin:
-			rows = append(rows, profileConsideredJSON{Source: string(src), Name: "", Reason: "not reached"})
-		default:
-			e := bySource[src]
-			rows = append(rows, profileConsideredJSON{Source: string(src), Name: e.Name, Reason: e.Reason})
+	if chain.Source == profile.ChainSourceFlag {
+		return []profileConsideredJSON{
+			{Source: string(profile.ChainSourceFlag), Name: chain.Selected, Reason: "selected"},
 		}
 	}
-	return rows
+	return []profileConsideredJSON{
+		{Source: string(profile.ChainSourceNone), Name: "", Reason: "no --profile passed; project defaults apply"},
+	}
 }

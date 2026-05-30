@@ -23,7 +23,6 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
 	mirror := false
 	cfg := &profile.Config{
-		Default: "prod",
 		Profiles: map[string]*profile.Profile{
 			"prod": {
 				Controller:  &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},

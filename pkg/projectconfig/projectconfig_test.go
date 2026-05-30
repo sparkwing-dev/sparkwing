@@ -26,10 +26,13 @@ func writeYAML(t *testing.T, dir, name, contents string) string {
 	return path
 }
 
-// A merged file that exercises every section plus the optional profile
-// hint and a typed secrets block.
+// A merged file that exercises every section.
 const mergedFixture = `
-profile: shared-team
+backends:
+  secrets:
+    type: controller
+    url: https://controller.prod.example.com
+    token_env: PROD_TOKEN
 
 pipelines:
   - name: release
@@ -40,10 +43,6 @@ pipelines:
         paths: ["cmd/**"]
     secrets:
       - {name: DEPLOY_TOKEN, required: true}
-    dispatch:
-      source:
-        type: controller
-        url: https://controller.prod.example.com
 
 sparks:
   - name: sparks-core
@@ -75,14 +74,14 @@ func TestLoad_RoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch:\n first: %#v\nsecond: %#v", cfg, cfg2)
 	}
 
-	if cfg.Profile != "shared-team" {
-		t.Errorf("profile = %q, want shared-team", cfg.Profile)
-	}
 	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "release" {
 		t.Errorf("pipelines = %#v", cfg.Pipelines)
 	}
-	if p := cfg.Pipelines[0]; p.Dispatch == nil || p.Dispatch.Source == nil || p.Dispatch.Source.URL != "https://controller.prod.example.com" {
-		t.Errorf("inline dispatch.source not parsed: %#v", p.Dispatch)
+	if cfg.Backends.Secrets == nil || cfg.Backends.Secrets.URL != "https://controller.prod.example.com" {
+		t.Errorf("project secrets backend not parsed: %#v", cfg.Backends.Secrets)
+	}
+	if cfg.Backends.Secrets.TokenEnv != "PROD_TOKEN" {
+		t.Errorf("project secrets token_env not parsed: %#v", cfg.Backends.Secrets)
 	}
 	if len(cfg.Sparks) != 1 || cfg.Sparks[0].Source != "github.com/sparkwing-dev/sparks-core" {
 		t.Errorf("sparks = %#v", cfg.Sparks)

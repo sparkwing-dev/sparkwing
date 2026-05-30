@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -84,21 +83,5 @@ func TestInspectPipelineSecrets_ResolverHits(t *testing.T) {
 				t.Errorf("SLACK_HOOK = %+v (want missing)", f)
 			}
 		}
-	}
-}
-
-func TestPipelineSourceLabel(t *testing.T) {
-	withSource := &pipelines.Pipeline{
-		Dispatch: &pipelines.Dispatch{Source: &sources.Source{Type: sources.TypeController, URL: "https://controller.prod.example.com"}},
-	}
-	withoutSource := &pipelines.Pipeline{}
-	if got := pipelineSourceLabel(withSource); got != "controller:https://controller.prod.example.com" {
-		t.Errorf("inline source: got %q, want controller:https://controller.prod.example.com", got)
-	}
-	if got := pipelineSourceLabel(withoutSource); got != "" {
-		t.Errorf("no dispatch: got %q, want empty", got)
-	}
-	if got := pipelineSourceLabel(nil); got != "" {
-		t.Errorf("nil pipeline: got %q, want empty", got)
 	}
 }

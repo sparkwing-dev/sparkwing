@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -207,6 +208,12 @@ type Options struct {
 	// Nil when Profile is nil; the run_start profile block is omitted
 	// unless both are set.
 	ProfileChain *profile.Chain
+
+	// ProjectBackends is the default backend bundle declared at the
+	// top level of .sparkwing/sparkwing.yaml. Used when no --profile
+	// is active (Profile is nil); when Profile is non-nil, it wins
+	// wholesale and ProjectBackends is ignored.
+	ProjectBackends backends.Surfaces
 
 	// MirrorLocal, when non-nil, is an opened local SQLite store that
 	// RunLocal tees state writes to alongside the canonical state
@@ -513,10 +520,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// Cross-source-type guard: a laptop-only source bound on a
 	// pipeline dispatched to a non-local runner is rejected loudly
 	// here so the run fails before any pod spins up.
-	if err := validateSourceRunnerPortability(opts, r); err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-		return &Result{RunID: runID, Status: "failed", Error: err}, nil
-	}
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", rerr.Error())
 		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil

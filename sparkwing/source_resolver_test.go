@@ -11,15 +11,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestFactory_EnvSource_HitAndMiss(t *testing.T) {
 	t.Setenv("SW_DEPLOY_TOKEN", "swu_real")
 	t.Setenv("SW_EMPTY", "")
-	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeEnv, Prefix: "SW_"}, "")
+	r, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeEnv, Prefix: "SW_"})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -40,8 +40,8 @@ func TestFactory_EnvSource_HitAndMiss(t *testing.T) {
 
 func TestFactory_EnvSource_NoPrefix(t *testing.T) {
 	t.Setenv("ABSOLUTE_NAME", "val")
-	r, _ := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeEnv}, "")
+	r, _ := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeEnv})
 	v, _, err := r.Resolve(context.Background(), "ABSOLUTE_NAME")
 	if err != nil || v != "val" {
 		t.Errorf("Resolve = %q err=%v", v, err)
@@ -54,8 +54,8 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 	if err := os.WriteFile(path, []byte("FOO=bar\n# comment\nBAZ=\"quoted\"\nEMPTY=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeFile, Path: path}, "")
+	r, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeFilesystem, Path: path})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -75,8 +75,8 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 }
 
 func TestFactory_FileSource_MissingFileTreatedAsEmpty(t *testing.T) {
-	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeFile, Path: filepath.Join(t.TempDir(), "absent.env")}, "")
+	r, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeFilesystem, Path: filepath.Join(t.TempDir(), "absent.env")})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -86,8 +86,8 @@ func TestFactory_FileSource_MissingFileTreatedAsEmpty(t *testing.T) {
 }
 
 func TestFactory_FileSource_RequiresPath(t *testing.T) {
-	if _, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeFile}, ""); err == nil {
+	if _, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeFilesystem}); err == nil {
 		t.Fatal("expected path-required error")
 	}
 }
@@ -112,8 +112,8 @@ func TestFactory_ControllerSource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeController, URL: srv.URL}, "testtoken")
+	r, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeController, URL: srv.URL, Token: "testtoken"})
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -132,25 +132,46 @@ func TestFactory_ControllerSource(t *testing.T) {
 	}
 }
 
+func TestFactory_ControllerSource_TokenFromEnv(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer envtoken" {
+			http.Error(w, "no auth", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "ok", "masked": true})
+	}))
+	defer srv.Close()
+	t.Setenv("SWTEST_CTRL_TOKEN", "envtoken")
+	r, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeController, URL: srv.URL, TokenEnv: "SWTEST_CTRL_TOKEN"})
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+	v, _, err := r.Resolve(context.Background(), "X")
+	if err != nil || v != "ok" {
+		t.Errorf("Resolve: %v %q", err, v)
+	}
+}
+
 func TestFactory_ControllerSource_RequiresURL(t *testing.T) {
-	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: sources.TypeController}, "tok")
+	_, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeController})
 	if err == nil || !strings.Contains(err.Error(), "url is empty") {
 		t.Fatalf("expected url-required error, got %v", err)
 	}
 }
 
 func TestFactory_UnknownTypeRejected(t *testing.T) {
-	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: "vault-pro"}, "")
-	if err == nil || !strings.Contains(err.Error(), "unknown type") {
-		t.Fatalf("expected unknown-type error, got %v", err)
+	_, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: "vault-pro"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported type") {
+		t.Fatalf("expected unsupported-type error, got %v", err)
 	}
 }
 
 func TestFactory_EmptyTypeRejected(t *testing.T) {
-	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Type: ""}, "")
+	_, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: ""})
 	if err == nil || !strings.Contains(err.Error(), "type is required") {
 		t.Fatalf("expected type-required error, got %v", err)
 	}
