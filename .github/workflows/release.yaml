@@ -81,28 +81,20 @@ jobs:
           restore-keys: |
             gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-
 
-      # sparkwing-web embeds the dashboard via //go:embed all:next-out.
-      # Other binaries don't import internal/web, so they skip this.
-      - name: Setup Node (sparkwing-web only)
-        if: matrix.binary == 'sparkwing-web'
+      # The dashboard SPA is embedded via //go:embed all:next-out by
+      # both sparkwing (for `sparkwing dashboard start`) and
+      # sparkwing-web (the cluster pod). Other binaries skip this.
+      - name: Setup Node (binaries that embed the dashboard)
+        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
-      - name: Build dashboard + populate next-out (sparkwing-web only)
-        if: matrix.binary == 'sparkwing-web'
-        run: |
-          set -euo pipefail
-          cd web
-          npm ci
-          npm run build
-          cd ..
-          rm -rf internal/web/next-out
-          mkdir -p internal/web/next-out
-          cp -R web/out/. internal/web/next-out/
-          touch internal/web/next-out/.gitkeep
+      - name: Build dashboard + populate next-out
+        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
+        run: bash bin/build-web.sh
 
       - name: Build ${{ matrix.binary }} for ${{ matrix.goos }}/${{ matrix.goarch }}
         env:

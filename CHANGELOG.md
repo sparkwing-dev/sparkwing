@@ -48,6 +48,22 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.6.2] - 2026-05-30
+
+### Fixed
+
+- **dashboard:** `sparkwing dashboard start` no longer ships a stale
+  embedded dashboard bundle. Two binaries embed it via
+  `//go:embed all:next-out`: `sparkwing` (powers `dashboard start`)
+  and `sparkwing-web` (cluster pod). The release workflow previously
+  rebuilt the bundle only for `sparkwing-web`, so released
+  `sparkwing` binaries used whatever stale `internal/web/next-out/`
+  was on the runner cache (committed `.gitkeep` only). `bin/install.sh`
+  also skipped the rebuild. Both paths now call `bin/build-web.sh`,
+  so every install + every released artifact ships the current
+  dashboard SPA. Set `SKIP_WEB_BUILD=1` on `install.sh` to bypass
+  during Go-only iteration.
+
 ## [v0.6.1] - 2026-05-30
 
 ### Fixed
