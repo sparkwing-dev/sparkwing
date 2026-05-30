@@ -32,8 +32,8 @@ func resolveActiveProfile(pipelineYAML *pipelines.Pipeline, projectCfg *projectc
 	if pipelineYAML != nil && pipelineYAML.Profile != "" {
 		return resolveProjectProfile(pipelineYAML.Profile, projectCfg, "pipeline")
 	}
-	if projectCfg != nil && projectCfg.Profile != "" {
-		return resolveProjectProfile(projectCfg.Profile, projectCfg, "project default")
+	if projectCfg != nil && projectCfg.Defaults.Profile != "" {
+		return resolveProjectProfile(projectCfg.Defaults.Profile, projectCfg, "defaults.profile")
 	}
 	return nil, &profile.Chain{Source: profile.ChainSourceNone}, nil
 }

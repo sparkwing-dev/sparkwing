@@ -28,7 +28,11 @@ func writeYAML(t *testing.T, dir, name, contents string) string {
 
 // A merged file that exercises every section.
 const mergedFixture = `
-profile: prod
+defaults:
+  profile: prod
+  args:
+    region: us-east
+
 profiles:
   prod:
     secrets: { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
@@ -79,8 +83,11 @@ func TestLoad_RoundTrip(t *testing.T) {
 	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "release" {
 		t.Errorf("pipelines = %#v", cfg.Pipelines)
 	}
-	if cfg.Profile != "prod" {
-		t.Errorf("project default profile = %q, want prod", cfg.Profile)
+	if cfg.Defaults.Profile != "prod" {
+		t.Errorf("defaults.profile = %q, want prod", cfg.Defaults.Profile)
+	}
+	if cfg.Defaults.Args["region"] != "us-east" {
+		t.Errorf("defaults.args[region] = %q, want us-east", cfg.Defaults.Args["region"])
 	}
 	prod, ok := cfg.Profiles["prod"]
 	if !ok || prod == nil {

@@ -174,6 +174,9 @@ func Main() {
 		PipelineYAML: pipelineYAML,
 		SparkwingDir: sparkwingDir,
 	}
+	if projectCfg != nil {
+		opts.DefaultArgs = projectCfg.Defaults.Args
+	}
 	// Resolve the active profile through the 3-layer chain:
 	// --profile (user) > pipeline.profile (project) > project default
 	// profile:. nil profile is acceptable -- the orchestrator falls

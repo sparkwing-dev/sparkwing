@@ -80,21 +80,35 @@ func CheckLegacy(startDir string) error {
 
 // Config is the parsed .sparkwing/sparkwing.yaml.
 type Config struct {
-	// Profile names the project profile (from Profiles below) that
-	// applies when no --profile is on the CLI and no pipeline
-	// declares profile:. Empty means "no default" -- pipelines must
-	// then declare profile: explicitly.
-	Profile string `yaml:"profile,omitempty"`
+	// Defaults carries the per-pipeline fields each pipeline
+	// inherits unless it declares its own. See Defaults for the
+	// per-field merge semantics.
+	Defaults Defaults `yaml:"defaults,omitempty"`
 
 	// Profiles maps profile name to its surface bundle. The same
 	// shape as ~/.config/sparkwing/profiles.yaml's profiles map;
 	// project profiles get referenced from inside the project
-	// (pipeline.profile, project default), user profiles from the
+	// (pipeline.profile, defaults.profile), user profiles from the
 	// CLI (--profile).
 	Profiles map[string]*profile.Profile `yaml:"profiles,omitempty"`
 
 	Pipelines []pipelines.Pipeline `yaml:"pipelines,omitempty"`
 	Sparks    []sparks.Library     `yaml:"sparks,omitempty"`
+}
+
+// Defaults is the project-level block of per-pipeline defaults.
+type Defaults struct {
+	// Profile names the project profile (from Config.Profiles) that
+	// applies when neither --profile nor pipeline.profile is set.
+	// Empty means "no default" -- a pipeline without its own
+	// profile: still runs (against the sqlite-only test/dev shape).
+	Profile string `yaml:"profile,omitempty"`
+
+	// Args supplies per-arg default values for every pipeline. Each
+	// key is layered under pipeline.args (pipeline wins per-key),
+	// and the merged map sits in the priority chain between
+	// schema.Computed and the explicit operator CLI flag.
+	Args map[string]string `yaml:"args,omitempty"`
 }
 
 // Load reads and parses .sparkwing/sparkwing.yaml at path. A missing
@@ -266,9 +280,9 @@ func (c *Config) normalize() error {
 		}
 	}
 
-	if c.Profile != "" {
-		if _, ok := c.Profiles[c.Profile]; !ok {
-			return fmt.Errorf("project default profile %q is not declared in profiles:", c.Profile)
+	if c.Defaults.Profile != "" {
+		if _, ok := c.Profiles[c.Defaults.Profile]; !ok {
+			return fmt.Errorf("defaults.profile %q is not declared in profiles:", c.Defaults.Profile)
 		}
 	}
 

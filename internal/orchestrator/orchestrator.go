@@ -208,6 +208,12 @@ type Options struct {
 	// unless both are set.
 	ProfileChain *profile.Chain
 
+	// DefaultArgs is the project's defaults.args block from
+	// sparkwing.yaml. Layers below PipelineYAML.Args (which layers
+	// below the explicit CLI flag). Nil when no project defaults
+	// apply.
+	DefaultArgs map[string]string
+
 	// MirrorLocal, when non-nil, is an opened local SQLite store that
 	// RunLocal tees state writes to alongside the canonical state
 	// backend (see mirrorStateBackend). ApplyProfileBackendsWithMirror
@@ -375,10 +381,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// the resolver's FlagValues map and are picked up before the
 	// resolver consults Default/Computed, so the deployer's explicit
 	// value always overrides the SDK author's fallback rules.
+	// Per-arg resolution chain (low to high):
+	// schema.Default → schema.Computed → defaults.args (project) →
+	// pipeline.args → CLI flag.
 	invokeArgs := opts.Args
-	if opts.PipelineYAML != nil && len(opts.PipelineYAML.Args) > 0 {
-		merged := make(map[string]string, len(invokeArgs)+len(opts.PipelineYAML.Args))
-		for k, v := range opts.PipelineYAML.Args {
+	pipelineArgs := map[string]string(nil)
+	if opts.PipelineYAML != nil {
+		pipelineArgs = opts.PipelineYAML.Args
+	}
+	if len(opts.DefaultArgs) > 0 || len(pipelineArgs) > 0 {
+		merged := make(map[string]string, len(opts.DefaultArgs)+len(pipelineArgs)+len(invokeArgs))
+		for k, v := range opts.DefaultArgs {
+			merged[k] = v
+		}
+		for k, v := range pipelineArgs {
 			merged[k] = v
 		}
 		for k, v := range invokeArgs {
