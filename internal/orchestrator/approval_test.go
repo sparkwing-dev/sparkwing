@@ -18,7 +18,13 @@ type approvePipe struct{ sparkwing.Base }
 func (approvePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.JobApproval(plan, "gate", sparkwing.ApprovalConfig{
 		Message: "approve?",
-		Timeout: 5 * time.Second,
+		// 30s rather than 5s because under -race + count=N the
+		// resolver goroutine has occasionally been outraced by the
+		// orchestrator's deadline. The test is meant to exercise
+		// "approval flows to success", not "approval beats the
+		// deadline" -- a wide window keeps the timing concern out
+		// of the assertion path.
+		Timeout: 30 * time.Second,
 	})
 	return nil
 }
@@ -61,24 +67,37 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	// A short initial sleep lets RunLocal open the DB first; SQLite
 	// serializes the Open migration under single-writer and we don't
 	// want the resolver's reopen-loop to starve that out.
+	// Errors are surfaced via t.Errorf -- a silent return here would
+	// leave the orchestrator to time out and the test would report a
+	// misleading "status = \"failed\"" instead of the real cause.
+	resolverDone := make(chan struct{})
 	go func() {
+		defer close(resolverDone)
 		time.Sleep(200 * time.Millisecond)
 		st, err := store.Open(dbPath)
 		if err != nil {
+			t.Errorf("resolver: store.Open: %v", err)
 			return
 		}
 		defer func() { _ = st.Close() }()
-		deadline := time.Now().Add(4 * time.Second)
+		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			pend, _ := st.ListPendingApprovals(context.Background())
+			pend, listErr := st.ListPendingApprovals(context.Background())
+			if listErr != nil {
+				t.Errorf("resolver: ListPendingApprovals: %v", listErr)
+				return
+			}
 			if len(pend) > 0 {
 				a := pend[0]
-				_, _ = st.ResolveApproval(context.Background(), a.RunID, a.NodeID,
-					store.ApprovalResolutionApproved, "alice", "ok")
+				if _, err := st.ResolveApproval(context.Background(), a.RunID, a.NodeID,
+					store.ApprovalResolutionApproved, "alice", "ok"); err != nil {
+					t.Errorf("resolver: ResolveApproval: %v", err)
+				}
 				return
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
+		t.Errorf("resolver: no pending approval appeared within 10s")
 	}()
 
 	select {
@@ -89,9 +108,10 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 		if res.Status != "success" {
 			t.Fatalf("status = %q, want success", res.Status)
 		}
-	case <-time.After(6 * time.Second):
-		t.Fatal("run did not complete within 6s")
+	case <-time.After(15 * time.Second):
+		t.Fatal("run did not complete within 15s")
 	}
+	<-resolverDone
 
 	// Confirm durable state reflects the approval.
 	st, _ := store.Open(dbPath)
