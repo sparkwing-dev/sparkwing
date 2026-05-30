@@ -139,11 +139,10 @@ func (s SecretsField) MarshalYAML() (any, error) {
 	return out, nil
 }
 
-// UnmarshalYAML on Pipeline rejects the pre-v0.6 `targets:` and
-// `args:` keys with a clear migration message pointing at the
-// entrypoint-vs-pipeline split. Both shapes were removed wholesale
-// in v0.6 in favor of one-pipeline-per-deployment-shape; the
-// migration is the docs/migrations/v0.6.0.md walkthrough.
+// UnmarshalYAML decodes a Pipeline mapping and rejects any field not
+// in pipelineKnownYAMLFields(). The strict check protects against
+// typos and silently-dropped renamed keys; node.Decode skips
+// decoder-level KnownFields strictness so we re-implement it here.
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil {
 		return nil

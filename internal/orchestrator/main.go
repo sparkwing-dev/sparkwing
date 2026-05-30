@@ -167,12 +167,8 @@ func Main() {
 		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		MaxParallel:         runtime.NumCPU(),
 		DispatchWaitTimeout: parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
-		// Target stays as a zero-value plumbing field for the SDK's
-		// OnTarget filter (v0.5 carryover). v0.6 removed --target as
-		// a framework concept.
-		Target:       "",
-		PipelineYAML: pipelineYAML,
-		SparkwingDir: sparkwingDir,
+		PipelineYAML:        pipelineYAML,
+		SparkwingDir:        sparkwingDir,
 	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args

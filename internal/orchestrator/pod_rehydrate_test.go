@@ -31,20 +31,6 @@ func ensurePodPipe(t *testing.T) *sparkwing.Registration {
 	return reg
 }
 
-func TestRehydrateTarget_DecodesFromSnapshot(t *testing.T) {
-	snap, _ := json.Marshal(planSnapshot{Target: "prod"})
-	got, err := rehydrateTarget(snap)
-	if err != nil || got != "prod" {
-		t.Errorf("rehydrate target: got (%q, %v), want (\"prod\", nil)", got, err)
-	}
-}
-
-func TestRehydrateTarget_EmptySnapshot(t *testing.T) {
-	if got, err := rehydrateTarget(nil); err != nil || got != "" {
-		t.Errorf("nil snapshot: got (%q, %v)", got, err)
-	}
-}
-
 func TestRehydratePipelineSecrets_ResolvesAgainstCtxResolver(t *testing.T) {
 	reg := ensurePodPipe(t)
 	resolver := sparkwing.SecretResolverFunc(func(_ context.Context, name string) (string, bool, error) {

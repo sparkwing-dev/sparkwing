@@ -425,14 +425,6 @@ type JobNode struct {
 	// labels behave as an additional requires term for that job.
 	whenRunner []string
 
-	// onTarget restricts the job to runs against the listed targets.
-	// Empty = universal (no constraint, may be narrowed by an
-	// inferred-OnTarget walk from downstream consumers). The
-	// orchestrator filters non-matching nodes at plan-finalize and
-	// treats the skip as satisfying downstream Needs, mirroring the
-	// WhenRunner-skip path.
-	onTarget []string
-
 	// inline marks lightweight nodes for in-process execution on the
 	// dispatcher, bypassing the configured Runner. Opt-in via
 	// .Inline(); a CPU-bound or blocking inline node stalls the
@@ -1030,42 +1022,6 @@ func (n *JobNode) WhenRunner(labels ...string) *JobNode {
 // WhenRunnerLabels returns the terms declared via WhenRunner.
 func (n *JobNode) WhenRunnerLabels() []string {
 	return copyLabels(n.whenRunner)
-}
-
-// OnTarget restricts this job to runs against the named targets. When
-// the active target (the resolved --for selection) is not in the
-// list, the orchestrator filters the job out at plan-finalize and
-// treats it as skipped; downstream Needs sees the skip marker as
-// satisfied, mirroring the WhenRunner-skip path.
-//
-// OnTarget is the topology-axis equivalent of WhenRunner on the
-// runner axis. It expresses "this job is only meaningful when the
-// run is acting on these environments" without scattering
-// branch-on-target logic across Plan() bodies.
-//
-// Calling OnTarget with no arguments clears the constraint. Order of
-// the listed values is not significant. The plan-finalize walk
-// additionally propagates the constraint upstream: a job with no
-// explicit OnTarget but whose only consumers are all OnTarget("X")
-// inherits that filter; a node feeding any universal-effective
-// consumer stays universal. The explicit list returned by
-// OnTargets reflects only what the author declared -- the
-// inferred set is not surfaced through this method.
-//
-//	deploy := sw.Job(plan, "deploy-prod", &Deploy{}).OnTarget("prod")
-//	sw.Job(plan, "publish", &Publish{}).OnTarget("staging", "prod")
-func (n *JobNode) OnTarget(targets ...string) *JobNode {
-	n.onTarget = normalizeLabels(targets)
-	return n
-}
-
-// OnTargets returns the explicit OnTarget list as declared at
-// registration time. The inferred target set computed during the
-// plan-finalize walk is NOT reflected here -- "what the author wrote"
-// and "what the scheduler resolved" are deliberately separate
-// questions.
-func (n *JobNode) OnTargets() []string {
-	return copyLabels(n.onTarget)
 }
 
 // normalizeLabels strips empty entries from a label list. Returns

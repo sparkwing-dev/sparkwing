@@ -203,17 +203,6 @@ func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
 		if known[k] {
 			continue
 		}
-		// `target` is framework-injected by the orchestrator from
-		// opts.Target so v0.6 schema-driven jobs can read it via
-		// sparkwing.Arg[string](ctx, "target"). Pipelines that
-		// don't declare args.target: still receive the key; treating
-		// it as a typo here would break every v0.5-shaped pipeline
-		// invoked with --target. opts.Target carries the value for
-		// those pipelines via the existing OnTarget / PipelineYAML
-		// path; the extra key is harmless.
-		if k == "target" {
-			continue
-		}
 		unknown = append(unknown, k)
 	}
 	if len(unknown) == 0 {

@@ -11,7 +11,6 @@ pipelines:
   # automatically after `sparkwing pipeline hooks install`.
   - name: pre-commit
     entrypoint: PreCommit
-    tags: [checks, hooks]
     on:
       pre_commit: {}
 
@@ -20,25 +19,20 @@ pipelines:
   # hard refusal to push if any committed go.mod has a `replace`.
   - name: pre-push
     entrypoint: PrePush
-    tags: [checks, hooks]
     on:
       pre_push: {}
 
   - name: lint
     entrypoint: Lint
-    tags: [ci, checks]
 
   - name: test
     entrypoint: Test
-    tags: [ci, checks]
 
   - name: static-analysis
     entrypoint: StaticAnalysis
-    tags: [ci, checks]
 
   - name: build
     entrypoint: Build
-    tags: [build]
 
   # build-images: builds one Docker image per deployable component
   # (controller, web, logs, cache, runner). Local single-arch by
@@ -46,7 +40,6 @@ pipelines:
   # Downstream consumers parse the final RELEASE_IMAGES summary line.
   - name: build-images
     entrypoint: BuildImages
-    tags: [build, release]
 
   # release: cuts a sparkwing tag and pushes it. The
   # .github/workflows/release.yaml workflow takes over from the tag
@@ -54,13 +47,8 @@ pipelines:
   # GHCR. This pipeline deliberately does NOT duplicate that work --
   # its job is just to validate the release shape (clean tree, free
   # tag, non-empty CHANGELOG [Unreleased]) and push the tag.
-  # CHANGELOG.md carries the curated migration prose for adopters
-  # (see VERSIONING.md); the GH-Actions workflow additionally emits
-  # commit-walk release notes via `gh release create --generate-notes`
-  # for the GitHub Release page.
   - name: release
     entrypoint: Release
-    tags: [release]
 
   # example: reference pipeline that exercises the two-layer
   # Plan/Work model -- a Plan with two Nodes where the first Node's
@@ -69,12 +57,8 @@ pipelines:
   # render in the dashboard.
   - name: example
     entrypoint: Example
-    tags: [example, docs]
 
   # weather-report: tiny standalone pipeline the example calls via
   # sparkwing.RunAndAwait to exercise cross-pipeline dependencies.
-  # Hidden from tab-complete; still invokable directly.
   - name: weather-report
     entrypoint: WeatherReport
-    hidden: true
-    tags: [example]

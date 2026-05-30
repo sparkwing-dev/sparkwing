@@ -232,15 +232,6 @@ func TestAssertJobArgsCoverage_RejectsTypos(t *testing.T) {
 	}
 }
 
-func TestAssertJobArgsCoverage_AlwaysAllowsTarget(t *testing.T) {
-	p := NewPlan()
-	Job(p, "deploy", &jobargsJob1{})
-
-	if err := assertJobArgsCoverage(p, map[string]string{"target": "prod"}); err != nil {
-		t.Errorf("orchestrator-injected target should pass even when no job claims it; got %v", err)
-	}
-}
-
 func TestAssertJobArgsCoverage_NilPlanIsNoop(t *testing.T) {
 	if err := assertJobArgsCoverage(nil, map[string]string{"anything": "x"}); err != nil {
 		t.Errorf("nil plan should be a no-op; got %v", err)

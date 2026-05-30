@@ -10,23 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// rehydrateTarget reads the run's active target out of the persisted
-// plan snapshot so the pod sees the same sparkwing.Target(ctx) value
-// the orchestrator-side dispatch saw. Empty (with nil error) when
-// the run had no --for selection.
-func rehydrateTarget(snapshot []byte) (string, error) {
-	if len(snapshot) == 0 {
-		return "", nil
-	}
-	var meta struct {
-		Target string `json:"target"`
-	}
-	if err := json.Unmarshal(snapshot, &meta); err != nil {
-		return "", fmt.Errorf("decode snapshot: %w", err)
-	}
-	return meta.Target, nil
-}
-
 // rehydratePipelineSecrets re-resolves the pipeline's declared
 // secrets against the SecretResolver already installed on ctx (the
 // pod's controller-backed source). The orchestrator persisted only

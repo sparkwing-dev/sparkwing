@@ -450,13 +450,6 @@ type WorkStep struct {
 	// gate doesn't fire.
 	risks []string
 
-	// onTarget restricts the step to runs against the listed
-	// targets. Empty = universal (no constraint). RunWork filters
-	// non-matching steps before scheduling and treats them as
-	// satisfied for downstream Needs, mirroring the WhenRunner-skip
-	// path on Jobs.
-	onTarget []string
-
 	mu       sync.Mutex
 	resolved bool
 	out      any
@@ -603,31 +596,6 @@ func (s *WorkStep) Optional() *WorkStep {
 // Job's rollup outcome.
 func (s *WorkStep) IsOptional() bool { return s.optional }
 
-// OnTarget restricts this step to runs against the named targets.
-// When the active target (Target(ctx)) is not in the resolved
-// effective set, RunWork skips the step before its body runs and
-// downstream Needs treats it as satisfied.
-//
-// The parent Job's OnTarget does NOT propagate into its steps; each
-// step's OnTarget is independent. Inferred-target propagation
-// happens inside the Work's own DAG only: a step with no explicit
-// OnTarget but whose only consumers are all OnTarget("X") inherits
-// that filter.
-//
-// Calling OnTarget with no arguments clears the constraint.
-//
-//	sw.Step(w, "publish-prod", j.publishProd).OnTarget("prod")
-func (s *WorkStep) OnTarget(targets ...string) *WorkStep {
-	s.onTarget = normalizeLabels(targets)
-	return s
-}
-
-// OnTargets returns the explicit OnTarget list as declared at
-// registration time. The inferred target set is not reflected here.
-func (s *WorkStep) OnTargets() []string {
-	return copyLabels(s.onTarget)
-}
-
 // markDone is called by the runner once the step terminates. Stores
 // the typed output so downstream sparkwing.StepGet[T](ctx, step) calls
 // resolve. Exposed to the orchestrator via
@@ -744,15 +712,6 @@ func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup {
 	}
 	for _, m := range g.members {
 		m.SkipIf(fn)
-	}
-	return g
-}
-
-// OnTarget restricts every member to runs against the named targets.
-// See WorkStep.OnTarget.
-func (g *StepGroup) OnTarget(targets ...string) *StepGroup {
-	for _, m := range g.members {
-		m.OnTarget(targets...)
 	}
 	return g
 }

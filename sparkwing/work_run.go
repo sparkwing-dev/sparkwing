@@ -101,22 +101,6 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		}
 	}
 
-	// OnTarget filter: walk the step DAG once to resolve effective
-	// target sets (explicit + inferred from consumers), then mark
-	// every step that doesn't match the active target with a
-	// `step_skipped` reason. Downstream Needs treats the skip as
-	// satisfied. Empty active target skips every non-universal step.
-	target := Target(ctx)
-	stepEff := effectiveStepTargets(w)
-	for id, eff := range stepEff {
-		if jobAllowsTarget(eff, target) {
-			continue
-		}
-		if it, ok := items[id]; ok {
-			it.rangeSkipReason = formatOnTargetSkip(eff, target)
-		}
-	}
-
 	// Resolve --start-at / --stop-at against this Work's
 	// items. The orchestrator already validated the strings exist
 	// somewhere in the Plan; here we apply the range only if at least

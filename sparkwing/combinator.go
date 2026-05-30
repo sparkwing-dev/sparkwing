@@ -258,15 +258,6 @@ func (g *JobGroup) WhenRunner(labels ...string) *JobGroup {
 	return g
 }
 
-// OnTarget restricts every member to runs against the named targets.
-// See Job.OnTarget.
-func (g *JobGroup) OnTarget(targets ...string) *JobGroup {
-	for _, m := range g.Members() {
-		m.OnTarget(targets...)
-	}
-	return g
-}
-
 // SkipIf registers a predicate on every member. See Job.SkipIf.
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup {
 	for _, m := range g.Members() {

@@ -135,12 +135,6 @@ type Options struct {
 	// Nil leaves both surfaces empty (existing pipelines unaffected).
 	PipelineYAML *pipelines.Pipeline
 
-	// Target is the --for selection. Empty means "no target", which
-	// layers values from PipelineYAML.Values.Base only. The CLI
-	// surface for --for lands in a later step; this field is the
-	// already-resolved value.
-	Target string
-
 	// SparkwingDir, when non-empty, is the resolved .sparkwing/
 	// directory. Used today for working-directory context; secret
 	// source binding now reads the inline spec on
@@ -266,13 +260,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		trigger.Source = "manual"
 	}
 
-	// v0.6 removed --target as a framework concept; the pipeline IS
-	// the deployment shape. opts.Target stays as a zero-value plumbing
-	// field for the SDK's OnTarget filter machinery (which now skips
-	// every OnTarget-declaring step because no target is ever set --
-	// authors who relied on OnTarget must split into one-pipeline-per-
-	// target instead, per docs/migrations/v0.6.0.md).
-
 	// Pipeline-level guards fire before any other plan / dispatch
 	// work. Both reject (any-match) and require (every-match) tokens
 	// evaluate against the resolved profile + already-resolved args
@@ -368,14 +355,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		masker.Register(v)
 	}
 
-	// Publish the resolved target on the run-wide ctx so pipeline
-	// Plan bodies and step bodies can read it via sparkwing.Target(ctx).
-	// OnTarget verbs on Job/WorkStep encode the same value at the
-	// scheduler level; this accessor is for diagnostics and the rare
-	// case where neither OnTarget nor a typed Config field is a clean
-	// fit.
-	ctx = sparkwingruntime.WithTarget(ctx, opts.Target)
-
 	// Defaults layering: build the invokeArgs map by merging the
 	// pipeline YAML's defaults: block under the operator's explicit
 	// CLI args. Resolution priority for any one arg, low to high:
@@ -431,22 +410,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
-	// OnTarget validation: every Job/WorkStep OnTarget(...) value must
-	// name a declared target; a pipeline with no targets block can't
-	// carry OnTarget at all. Fails before dispatch so authoring
-	// mistakes (typos, leftover OnTarget after a targets-block
-	// removal) surface loudly.
-	if err := validateOnTargetSelection(opts, plan); err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-		return &Result{RunID: runID, Status: "failed", Error: err}, nil
-	}
-
 	// Pre-build the per-run snapshot metadata (SecretsField) so the
 	// cluster pod can re-resolve PipelineSecrets without re-reading
 	// pipelines.yaml on its end.
-	snapMeta := planSnapshotMeta{
-		Target: opts.Target,
-	}
+	snapMeta := planSnapshotMeta{}
 	if opts.PipelineYAML != nil {
 		snapMeta.Secrets = opts.PipelineYAML.Secrets
 		snapMeta.PipelineRequires = opts.PipelineYAML.Requires
@@ -517,7 +484,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	emitRunStart(opts.Delegate, invocation)
-	emitRunPlan(opts.Delegate, plan, opts.Target)
+	emitRunPlan(opts.Delegate, plan)
 
 	r := opts.Runner
 	if r == nil {
@@ -777,7 +744,6 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	state := newDispatchState(ctx, backends, r, runID, plan, delegate, debug, retryOf, masker, maxParallel)
 	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
-	state.onTargetSkip = computeOnTargetSkip(plan, snapMeta.Target)
 	state.onlySkip = onlySkip
 
 	// Skip-passed: pre-seed succeeded nodes from the prior run so
@@ -1093,11 +1059,8 @@ func buildReproducer(opts Options, _ string) string {
 	return strings.Join(parts, " ")
 }
 
-// emitRunPlan sends a run_plan record carrying the DAG. The target
-// argument feeds OnTarget filtering metadata onto each node so
-// renderers can suppress (CLI) or label (dashboard) target-filtered
-// jobs without recomputing the effective-target walk.
-func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan, target string) {
+// emitRunPlan sends a run_plan record carrying the DAG.
+func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 	if delegate == nil {
 		return
 	}
@@ -1105,7 +1068,6 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan, target string)
 	if len(nodes) == 0 {
 		return
 	}
-	effective := sparkwingruntime.EffectiveJobTargets(plan)
 	rows := make([]any, 0, len(nodes))
 	for _, n := range nodes {
 		row := map[string]any{
@@ -1128,23 +1090,6 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan, target string)
 		// preview draws the edge.
 		if srcs := plan.GroupSourceIDs(n.ID()); len(srcs) > 0 {
 			row["group_deps"] = srcs
-		}
-		// OnTarget metadata: explicit declaration plus the effective
-		// (post-inference) target-set lets the dashboard render a
-		// "[dev|staging|prod]" label on every job that participates
-		// in target filtering. skip_reason is set only when the
-		// active target excludes the job; the CLI renderer treats
-		// it as a hide signal so target-mismatched jobs don't clutter
-		// the log view, while the dashboard keeps showing them with
-		// a "skipped" badge.
-		if onT := n.OnTargets(); len(onT) > 0 {
-			row["on_target"] = onT
-		}
-		if eff, ok := effective[n.ID()]; ok && len(eff) > 0 {
-			row["effective_targets"] = eff
-			if !sparkwingruntime.JobAllowsTarget(eff, target) {
-				row["skip_reason"] = formatJobOnTargetSkip(eff, target)
-			}
 		}
 		if w := n.Work(); w != nil {
 			workSteps := w.Steps()
@@ -1341,18 +1286,11 @@ type dispatchState struct {
 	// nodes bypass the cap.
 	sem chan struct{}
 
-	// snapMeta carries the run-level Target / PipelineConfig /
-	// SecretsField that the cluster pod reads back to rehydrate
-	// PipelineConfig and re-resolve PipelineSecrets. Captured at run
-	// start so the mid-run snapshot re-marshal (after dynamic
-	// expansion) preserves these fields.
+	// snapMeta carries the run-level SecretsField and PipelineRequires
+	// that the cluster pod reads back to re-resolve PipelineSecrets.
+	// Captured at run start so the mid-run snapshot re-marshal (after
+	// dynamic expansion) preserves these fields.
 	snapMeta planSnapshotMeta
-
-	// onTargetSkip captures the plan-finalize OnTarget filter:
-	// nodes whose effective target-set does not contain the active
-	// target are recorded here with a human-readable reason. The
-	// dispatch loop short-circuits these nodes via markSkipped.
-	onTargetSkip map[string]string
 
 	// onlySkip captures the --only job-level filter. Nodes outside the
 	// matched set (plus their transitive Needs() ancestors) are skipped
@@ -1804,17 +1742,10 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	if _, prerendered := s.getOutcome(node.ID()); prerendered {
 		return
 	}
-	// OnTarget filter: nodes whose effective target-set does not
-	// include the active target are skipped immediately. Downstream
-	// Needs treats the skip as satisfied, mirroring the
-	// WhenRunner-skip path. Recovery nodes (handled below) are
-	// reached via their parent's claimedBy map and shouldn't be
-	// filtered here -- they participate via the parent's outcome.
+	// Recovery nodes (handled below) are reached via their parent's
+	// claimedBy map and shouldn't be filtered here -- they participate
+	// via the parent's outcome.
 	if _, claimed := s.claimedBy[node.ID()]; !claimed {
-		if reason, ok := s.onTargetSkip[node.ID()]; ok {
-			s.markSkipped(node.ID(), reason)
-			return
-		}
 		if reason, ok := s.onlySkip[node.ID()]; ok {
 			s.markSkipped(node.ID(), reason)
 			return
@@ -2522,12 +2453,6 @@ type planSnapshot struct {
 	RunID    string         `json:"run_id"`
 	Nodes    []snapshotNode `json:"nodes"`
 
-	// Target is the --for selection that was resolved at run start.
-	// Empty when no target was selected. Carried in the snapshot so
-	// cluster pod-side replay (orchestrator/run_node.go) sees the
-	// same target the orchestrator used.
-	Target string `json:"target,omitempty"`
-
 	// Secrets is the typed declaration the pipelines.yaml file
 	// shipped (name + required/optional). The cluster pod uses it
 	// to drive ResolvePipelineSecrets against the pod's existing
@@ -2571,7 +2496,6 @@ type snapshotModifiers struct {
 	RunsOn          []string `json:"runs_on,omitempty"`
 	Prefers         []string `json:"prefers,omitempty"`
 	WhenRunner      []string `json:"when_runner,omitempty"`
-	OnTarget        []string `json:"on_target,omitempty"`
 	CacheKey        string   `json:"cache_key,omitempty"`
 	CacheMax        int      `json:"cache_max,omitempty"`
 	CacheOnLimit    string   `json:"cache_on_limit,omitempty"`
@@ -2636,7 +2560,6 @@ type snapshotSpawnEach struct {
 // needs to re-resolve PipelineSecrets when it picks up a node.
 // Zero-value omits the fields from the emitted JSON.
 type planSnapshotMeta struct {
-	Target           string
 	Secrets          pipelines.SecretsField
 	PipelineRequires []string
 }
@@ -2645,7 +2568,6 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 	snap := planSnapshot{
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
-		Target:   meta.Target,
 		Secrets:  meta.Secrets,
 	}
 	// Cycle detection threads through the snapshot walk to catch
@@ -2786,7 +2708,6 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 		RunsOn:          n.RequiresLabels(),
 		Prefers:         n.PrefersLabels(),
 		WhenRunner:      n.WhenRunnerLabels(),
-		OnTarget:        n.OnTargets(),
 		Inline:          n.IsInline(),
 		Optional:        n.IsOptional(),
 		ContinueOnError: n.IsContinueOnError(),
@@ -2817,7 +2738,6 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		len(m.RunsOn) == 0 &&
 		len(m.Prefers) == 0 &&
 		len(m.WhenRunner) == 0 &&
-		len(m.OnTarget) == 0 &&
 		m.CacheKey == "" &&
 		m.CacheMax == 0 &&
 		m.CacheOnLimit == "" &&
