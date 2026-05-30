@@ -48,6 +48,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **Dashboard nav now shows the CLI version pill.** A small monospace
+  pill renders next to the "sparkwing" logo (e.g. `v0.6.2`), reading
+  the value the serving binary injects via the SPA template. Operators
+  can see what build they're connected to without opening dev tools.
+  Source builds without an `-ldflags` version stamp fall back to the
+  Go build-info pseudo-version so the pill is still informative.
+
 ### Changed
 
 - **install.sh installs only `sparkwing`.** Previous revisions also
@@ -77,6 +86,14 @@ code change to unlock.
   re-running `sparkwing dashboard start` is enough to pick up the new
   embedded SPA bundle -- no manual `kill` step needed. Foreign
   processes on the bind address are still left alone (the error path).
+- **flake:** `TestApproval_ApprovedFlowsToSuccess` previously silently
+  swallowed errors from the test resolver goroutine (`store.Open`,
+  `ListPendingApprovals`, `ResolveApproval`), so any transient failure
+  there surfaced as a misleading `status = "failed"` from the
+  orchestrator's downstream timeout. The resolver now reports its own
+  errors via `t.Errorf`, the approval window was widened from 5s to
+  30s, and the test joins the resolver goroutine before returning.
+  Verified clean under `go test -race -count=100`.
 
 ## [v0.6.2] - 2026-05-30
 
