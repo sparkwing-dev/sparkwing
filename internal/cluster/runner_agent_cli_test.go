@@ -76,7 +76,7 @@ func TestAgentConfig_RejectsMissingController(t *testing.T) {
 func TestAgentConfig_RejectsUnsupportedSpawnPolicy(t *testing.T) {
 	for _, policy := range []string{"run-local", "auto", "bogus"} {
 		_, err := ValidateAgentConfig(AgentConfig{
-			Controller: "http://x",
+			Controller:  "http://x",
 			SpawnPolicy: policy,
 		})
 		if err == nil {
