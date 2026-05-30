@@ -45,7 +45,7 @@ func TestRun_PipelineDefaultsFillUnsetArgs(t *testing.T) {
 		PipelineYAML: &pipelines.Pipeline{
 			Name:       "lock-defaults-pipe",
 			Entrypoint: "LockDefaults",
-			Defaults:   map[string]string{"replicas": "7"},
+			Args: map[string]string{"replicas": "7"},
 		},
 	})
 	if err != nil {
@@ -69,7 +69,7 @@ func TestRun_ExplicitArgBeatsPipelineDefault(t *testing.T) {
 		PipelineYAML: &pipelines.Pipeline{
 			Name:       "lock-defaults-pipe",
 			Entrypoint: "LockDefaults",
-			Defaults:   map[string]string{"replicas": "7"},
+			Args: map[string]string{"replicas": "7"},
 		},
 	})
 	if err != nil {

@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -209,12 +208,6 @@ type Options struct {
 	// unless both are set.
 	ProfileChain *profile.Chain
 
-	// ProjectBackends is the default backend bundle declared at the
-	// top level of .sparkwing/sparkwing.yaml. Used when no --profile
-	// is active (Profile is nil); when Profile is non-nil, it wins
-	// wholesale and ProjectBackends is ignored.
-	ProjectBackends backends.Surfaces
-
 	// MirrorLocal, when non-nil, is an opened local SQLite store that
 	// RunLocal tees state writes to alongside the canonical state
 	// backend (see mirrorStateBackend). ApplyProfileBackendsWithMirror
@@ -383,9 +376,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// resolver consults Default/Computed, so the deployer's explicit
 	// value always overrides the SDK author's fallback rules.
 	invokeArgs := opts.Args
-	if opts.PipelineYAML != nil && len(opts.PipelineYAML.Defaults) > 0 {
-		merged := make(map[string]string, len(invokeArgs)+len(opts.PipelineYAML.Defaults))
-		for k, v := range opts.PipelineYAML.Defaults {
+	if opts.PipelineYAML != nil && len(opts.PipelineYAML.Args) > 0 {
+		merged := make(map[string]string, len(invokeArgs)+len(opts.PipelineYAML.Args))
+		for k, v := range opts.PipelineYAML.Args {
 			merged[k] = v
 		}
 		for k, v := range invokeArgs {

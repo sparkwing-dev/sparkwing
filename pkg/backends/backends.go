@@ -63,8 +63,41 @@ const (
 	TypeSQLite     = "sqlite"
 	TypePostgres   = "postgres"
 	TypeMySQL      = "mysql"
-	TypeEnv        = "env" // env vars; valid only on the secrets surface
+	TypeEnv        = "env"  // env vars; valid only on the secrets surface
+	TypeNone       = "none" // explicit "no backend"; valid only on the secrets surface
 )
+
+// ValidateBundle enforces that a Surfaces bundle declares all four
+// surfaces (secrets, state, cache, logs). Per-surface invariants are
+// checked alongside. The name is woven into the error so the operator
+// can tell which profile is invalid.
+func (s Surfaces) Validate(name string) error {
+	if s.Secrets == nil {
+		return fmt.Errorf("profile %q: secrets surface is required (use type=none for pipelines that never call Secret())", name)
+	}
+	if err := s.Secrets.ValidateSecrets(); err != nil {
+		return fmt.Errorf("profile %q: %w", name, err)
+	}
+	if s.State == nil {
+		return fmt.Errorf("profile %q: state surface is required", name)
+	}
+	if s.State.Type == TypeNone || s.State.Type == TypeEnv {
+		return fmt.Errorf("profile %q: state cannot be type=%s", name, s.State.Type)
+	}
+	if s.Cache == nil {
+		return fmt.Errorf("profile %q: cache surface is required", name)
+	}
+	if s.Cache.Type == TypeNone || s.Cache.Type == TypeEnv {
+		return fmt.Errorf("profile %q: cache cannot be type=%s", name, s.Cache.Type)
+	}
+	if s.Logs == nil {
+		return fmt.Errorf("profile %q: logs surface is required", name)
+	}
+	if s.Logs.Type == TypeNone || s.Logs.Type == TypeEnv {
+		return fmt.Errorf("profile %q: logs cannot be type=%s", name, s.Logs.Type)
+	}
+	return nil
+}
 
 // ResolvedToken returns Token directly when it's set, else reads
 // TokenEnv from the process environment. Empty string when neither is
@@ -158,10 +191,12 @@ func (s *Spec) ValidateSecrets() error {
 		}
 	case TypeEnv:
 		// prefix optional
+	case TypeNone:
+		// explicit "no secrets backend"; Secret() calls fail at runtime
 	case "":
-		return secretsErr("type is required (controller | filesystem | env)")
+		return secretsErr("type is required (controller | filesystem | env | none)")
 	default:
-		return secretsErr("unsupported type %q (controller | filesystem | env)", s.Type)
+		return secretsErr("unsupported type %q (controller | filesystem | env | none)", s.Type)
 	}
 	return nil
 }

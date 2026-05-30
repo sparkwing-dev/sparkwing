@@ -91,7 +91,7 @@ pipelines:
     guards:
       require: [profile-controller]
       reject:  [profile-local]
-    defaults:
+    args:
       image: "registry.prod.com/myapp:latest"
       replicas: "10"
 `
@@ -106,8 +106,8 @@ pipelines:
 	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "profile-controller" {
 		t.Errorf("guards.require: %+v", p.Guards.Require)
 	}
-	if p.Defaults["replicas"] != "10" {
-		t.Errorf("defaults: %+v", p.Defaults)
+	if p.Args["replicas"] != "10" {
+		t.Errorf("defaults: %+v", p.Args)
 	}
 }
 
@@ -128,7 +128,7 @@ pipelines:
 // --- Unknown-field rejection (catch typos / removed-key holdovers) ---
 
 func TestParse_UnknownPipelineFieldRejected(t *testing.T) {
-	cases := []string{"targets", "args", "runners", "values", "locked", "dispatch", "completely_bogus"}
+	cases := []string{"targets", "runners", "values", "locked", "dispatch", "defaults", "completely_bogus"}
 	for _, key := range cases {
 		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    " + key + ": [a]\n"
 		_, err := pipelines.Parse(strings.NewReader(yaml))

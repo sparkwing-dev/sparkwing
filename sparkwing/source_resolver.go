@@ -44,11 +44,23 @@ func NewSecretResolverFromSpec(_ context.Context, spec backends.Spec) (SecretRes
 		return newFileResolver(spec)
 	case backends.TypeEnv:
 		return newEnvResolver(spec), nil
+	case backends.TypeNone:
+		return noneResolver{}, nil
 	case "":
 		return nil, fmt.Errorf("secrets backend: type is required")
 	default:
-		return nil, fmt.Errorf("secrets backend: unsupported type %q (controller | filesystem | env)", spec.Type)
+		return nil, fmt.Errorf("secrets backend: unsupported type %q (controller | filesystem | env | none)", spec.Type)
 	}
+}
+
+// noneResolver is installed when the active profile's secrets surface
+// is type=none. Every Resolve fails with a clear "no secrets backend
+// configured" error so a pipeline that declares secrets surfaces the
+// misconfiguration loudly rather than silently dropping them.
+type noneResolver struct{}
+
+func (noneResolver) Resolve(_ context.Context, name string) (string, bool, error) {
+	return "", false, fmt.Errorf("secrets %q: profile declares no secrets backend (type=none)", name)
 }
 
 // remoteControllerResolver hits the controller's secrets endpoint.

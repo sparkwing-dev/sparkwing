@@ -32,11 +32,18 @@ type Pipeline struct {
 	// `arg:<flag>=<value>`. See pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
-	// Defaults supplies per-arg fallback values. Higher priority than
+	// Args supplies per-arg default values. Higher priority than
 	// schema Default and Computed; lower than an explicit operator
 	// CLI flag. Keyed by CLI flag name (kebab-case, matching what
 	// the SDK's WithArgs[T] field tags resolve to).
-	Defaults map[string]string `yaml:"defaults,omitempty"`
+	Args map[string]string `yaml:"args,omitempty"`
+
+	// Profile names the project profile (from sparkwing.yaml's
+	// profiles map) this pipeline uses. Empty means "fall back to
+	// the project's top-level profile: selector". The CLI's
+	// --profile flag (which targets ~/.config/sparkwing/profiles.yaml)
+	// overrides this when present.
+	Profile string `yaml:"profile,omitempty"`
 }
 
 // Guards is the pipeline-level dispatch gate. Both fields are lists
@@ -175,7 +182,7 @@ func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
 		"on": {}, "secrets": {},
-		"guards": {}, "defaults": {},
+		"guards": {}, "args": {}, "profile": {},
 	}
 }
 

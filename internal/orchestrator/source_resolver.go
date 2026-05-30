@@ -31,16 +31,15 @@ func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, er
 	return resolverAsSource(ctx, resolver), nil
 }
 
-// effectiveSecretsSpec returns the secrets backend that applies to
-// this run. Profile wins wholesale when active.
+// effectiveSecretsSpec returns the secrets backend for this run.
+// Pulled from the active profile's secrets surface; nil when no
+// profile is active or the profile declares no secrets surface (the
+// test/dev no-profile path).
 func effectiveSecretsSpec(opts Options) *backends.Spec {
-	if opts.Profile != nil && opts.Profile.Surfaces().Secrets != nil {
-		return opts.Profile.Surfaces().Secrets
+	if opts.Profile == nil {
+		return nil
 	}
-	if opts.ProjectBackends.Secrets != nil {
-		return opts.ProjectBackends.Secrets
-	}
-	return nil
+	return opts.Profile.Surfaces().Secrets
 }
 
 // resolverAsSource adapts a sparkwing.SecretResolver to the

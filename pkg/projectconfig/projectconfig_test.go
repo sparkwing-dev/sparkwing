@@ -28,11 +28,13 @@ func writeYAML(t *testing.T, dir, name, contents string) string {
 
 // A merged file that exercises every section.
 const mergedFixture = `
-backends:
-  secrets:
-    type: controller
-    url: https://controller.prod.example.com
-    token_env: PROD_TOKEN
+profile: prod
+profiles:
+  prod:
+    secrets: { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
+    state:   { type: sqlite, path: .sparkwing/state.db }
+    cache:   { type: filesystem, path: .sparkwing/cache }
+    logs:    { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
 
 pipelines:
   - name: release
@@ -77,11 +79,18 @@ func TestLoad_RoundTrip(t *testing.T) {
 	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "release" {
 		t.Errorf("pipelines = %#v", cfg.Pipelines)
 	}
-	if cfg.Backends.Secrets == nil || cfg.Backends.Secrets.URL != "https://controller.prod.example.com" {
-		t.Errorf("project secrets backend not parsed: %#v", cfg.Backends.Secrets)
+	if cfg.Profile != "prod" {
+		t.Errorf("project default profile = %q, want prod", cfg.Profile)
 	}
-	if cfg.Backends.Secrets.TokenEnv != "PROD_TOKEN" {
-		t.Errorf("project secrets token_env not parsed: %#v", cfg.Backends.Secrets)
+	prod, ok := cfg.Profiles["prod"]
+	if !ok || prod == nil {
+		t.Fatalf("prod profile missing: %#v", cfg.Profiles)
+	}
+	if prod.Secrets == nil || prod.Secrets.URL != "https://controller.prod.example.com" {
+		t.Errorf("prod secrets backend not parsed: %#v", prod.Secrets)
+	}
+	if prod.Secrets.TokenEnv != "PROD_TOKEN" {
+		t.Errorf("prod secrets token_env not parsed: %#v", prod.Secrets)
 	}
 	if len(cfg.Sparks) != 1 || cfg.Sparks[0].Source != "github.com/sparkwing-dev/sparks-core" {
 		t.Errorf("sparks = %#v", cfg.Sparks)

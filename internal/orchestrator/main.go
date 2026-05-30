@@ -14,7 +14,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -145,11 +144,11 @@ func Main() {
 	// even when multiple pipelines share one Go entrypoint. Safe when
 	// pipelineYAML is nil (no-op) or when names were already bound via
 	// the legacy Register path (existing entries are preserved).
-	var projectBackends backends.Surfaces
+	var projectCfg *projectconfig.Config
 	if cwd, err := os.Getwd(); err == nil {
 		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
 			sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
-			projectBackends = cfg.Backends
+			projectCfg = cfg
 		}
 	}
 
@@ -171,16 +170,15 @@ func Main() {
 		// Target stays as a zero-value plumbing field for the SDK's
 		// OnTarget filter (v0.5 carryover). v0.6 removed --target as
 		// a framework concept.
-		Target:          "",
-		PipelineYAML:    pipelineYAML,
-		SparkwingDir:    sparkwingDir,
-		ProjectBackends: projectBackends,
+		Target:       "",
+		PipelineYAML: pipelineYAML,
+		SparkwingDir: sparkwingDir,
 	}
-	// --profile NAME (forwarded as SPARKWING_PROFILE): route
-	// state/logs/cache through the named storage profile, with a local
-	// SQLite mirror for non-local profiles. Resolved here; RunLocal
-	// branches on opts.Profile.
-	prof, profChain, profErr := profileFromEnv()
+	// Resolve the active profile through the 3-layer chain:
+	// --profile (user) > pipeline.profile (project) > project default
+	// profile:. nil profile is acceptable -- the orchestrator falls
+	// back to a local sqlite shape (test/dev path).
+	prof, profChain, profErr := resolveActiveProfile(pipelineYAML, projectCfg)
 	if profErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
 		os.Exit(1)

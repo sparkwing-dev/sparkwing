@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -36,14 +37,15 @@ func init() {
 	register("env-reading-pipe", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &envReadingPipe{} })
 }
 
-func TestRun_ProjectDefaultSecretsBackend_EnvType(t *testing.T) {
+func TestRun_ProfileSecretsBackend_EnvType(t *testing.T) {
 	t.Setenv("SWTEST_TOKEN", "from-env")
 
 	capturedEnvSecret = ""
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline: "env-reading-pipe",
-		ProjectBackends: backends.Surfaces{
+		Profile: &profile.Profile{
+			Name:    "test",
 			Secrets: &backends.Spec{Type: backends.TypeEnv, Prefix: "SWTEST_"},
 		},
 	})
@@ -87,7 +89,8 @@ func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
 			Entrypoint: "EnvReading",
 			Secrets:    pipelines.SecretsField{{Name: "TOKEN", Required: true}},
 		},
-		ProjectBackends: backends.Surfaces{
+		Profile: &profile.Profile{
+			Name:    "test",
 			Secrets: &backends.Spec{Type: backends.TypeEnv, Prefix: "SWTEST_"},
 		},
 	})

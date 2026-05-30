@@ -138,21 +138,11 @@ func isLocalState(spec *backends.Spec) bool {
 // the bundle is preserved. Without one, the project's declared
 // backends apply (or the historical local sqlite fallback when the
 // project declares nothing).
-func effectiveSurfaceSpecs(p *profile.Profile, opts *Options, stateDBPath string) (state, logs, cache *backends.Spec) {
+func effectiveSurfaceSpecs(p *profile.Profile, _ *Options, stateDBPath string) (state, logs, cache *backends.Spec) {
 	if p != nil {
 		return profileSurfaceSpecs(p, stateDBPath)
 	}
-	state = opts.ProjectBackends.State
-	logs = opts.ProjectBackends.Logs
-	cache = opts.ProjectBackends.Cache
-	if state == nil {
-		state = &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}
-	} else if state.Type == backends.TypeSQLite && state.Path == "" {
-		filled := *state
-		filled.Path = stateDBPath
-		state = &filled
-	}
-	return state, logs, cache
+	return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
 }
 
 // profileSurfaceSpecs derives the state/logs/cache specs for opening

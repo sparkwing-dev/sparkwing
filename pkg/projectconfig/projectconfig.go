@@ -22,8 +22,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
@@ -80,11 +80,18 @@ func CheckLegacy(startDir string) error {
 
 // Config is the parsed .sparkwing/sparkwing.yaml.
 type Config struct {
-	// Backends declares the project's default per-surface backends.
-	// Used when no --profile is active. When the operator passes
-	// --profile X, the profile's Surfaces wins wholesale and these
-	// defaults are ignored.
-	Backends backends.Surfaces `yaml:"backends,omitempty"`
+	// Profile names the project profile (from Profiles below) that
+	// applies when no --profile is on the CLI and no pipeline
+	// declares profile:. Empty means "no default" -- pipelines must
+	// then declare profile: explicitly.
+	Profile string `yaml:"profile,omitempty"`
+
+	// Profiles maps profile name to its surface bundle. The same
+	// shape as ~/.config/sparkwing/profiles.yaml's profiles map;
+	// project profiles get referenced from inside the project
+	// (pipeline.profile, project default), user profiles from the
+	// CLI (--profile).
+	Profiles map[string]*profile.Profile `yaml:"profiles,omitempty"`
 
 	Pipelines []pipelines.Pipeline `yaml:"pipelines,omitempty"`
 	Sparks    []sparks.Library     `yaml:"sparks,omitempty"`
@@ -249,8 +256,28 @@ func (c *Config) normalize() error {
 		return err
 	}
 
-	if err := c.Backends.Secrets.ValidateSecrets(); err != nil {
-		return err
+	for name, p := range c.Profiles {
+		if p == nil {
+			return fmt.Errorf("profile %q: empty body", name)
+		}
+		p.Name = name
+		if err := p.Surfaces().Validate(name); err != nil {
+			return err
+		}
+	}
+
+	if c.Profile != "" {
+		if _, ok := c.Profiles[c.Profile]; !ok {
+			return fmt.Errorf("project default profile %q is not declared in profiles:", c.Profile)
+		}
+	}
+
+	for _, p := range c.Pipelines {
+		if p.Profile != "" {
+			if _, ok := c.Profiles[p.Profile]; !ok {
+				return fmt.Errorf("pipeline %q: profile %q is not declared in project profiles:", p.Name, p.Profile)
+			}
+		}
 	}
 
 	for i, lib := range c.Sparks {

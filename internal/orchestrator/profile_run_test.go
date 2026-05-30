@@ -16,28 +16,28 @@ func writeInnerProfiles(t *testing.T, body string) {
 	t.Setenv("SPARKWING_PROFILES", path)
 }
 
-func TestProfileFromEnv_Unset(t *testing.T) {
+func TestResolveActiveProfile_NoneSelected(t *testing.T) {
 	os.Unsetenv("SPARKWING_PROFILE")
-	p, chain, err := profileFromEnv()
+	p, chain, err := resolveActiveProfile(nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if p != nil {
-		t.Fatalf("unset SPARKWING_PROFILE should return nil profile, got %#v", p)
+		t.Fatalf("expected nil profile, got %#v", p)
 	}
 	if chain == nil || string(chain.Source) != "none" {
 		t.Fatalf("want chain source=none, got %#v", chain)
 	}
 }
 
-func TestProfileFromEnv_Resolves(t *testing.T) {
+func TestResolveActiveProfile_UserProfileViaEnv(t *testing.T) {
 	writeInnerProfiles(t, `
 profiles:
   team:
     state: { type: s3, bucket: team, prefix: state }
 `)
 	t.Setenv("SPARKWING_PROFILE", "team")
-	p, chain, err := profileFromEnv()
+	p, chain, err := resolveActiveProfile(nil, nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -49,13 +49,13 @@ profiles:
 	}
 }
 
-func TestProfileFromEnv_NotFound(t *testing.T) {
+func TestResolveActiveProfile_UserProfileNotFound(t *testing.T) {
 	writeInnerProfiles(t, `
 profiles:
   team: { state: { type: sqlite } }
 `)
 	t.Setenv("SPARKWING_PROFILE", "ghost")
-	_, _, err := profileFromEnv()
+	_, _, err := resolveActiveProfile(nil, nil)
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
