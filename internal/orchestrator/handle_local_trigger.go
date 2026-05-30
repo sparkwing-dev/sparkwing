@@ -71,7 +71,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,
 		},
-		Git:    sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir, trigger.GitSHA, trigger.GitBranch, trigger.Repo, trigger.RepoURL),
+		Git:    sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir, trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL),
 		Runner: r,
 	})
 	if err != nil {

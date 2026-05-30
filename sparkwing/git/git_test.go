@@ -109,6 +109,40 @@ func TestCurrentBranch(t *testing.T) {
 	}
 }
 
+func TestDefaultBranch(t *testing.T) {
+	// Without an origin remote, DefaultBranch returns "" without
+	// error so guards stay safe-by-default.
+	dir := withRepo(t)
+	writeFile(t, dir, "a.txt", "x")
+	commitIn(t, dir, "init")
+	ctx := context.Background()
+	def, err := DefaultBranch(ctx, dir)
+	if err != nil {
+		t.Fatalf("DefaultBranch (no origin): %v", err)
+	}
+	if def != "" {
+		t.Errorf("no origin: got %q, want empty", def)
+	}
+
+	// With an origin pointing at another local repo and HEAD symref
+	// pointed, DefaultBranch returns the branch name (no "origin/"
+	// prefix).
+	upstream := withRepo(t)
+	writeFile(t, upstream, "u.txt", "y")
+	commitIn(t, upstream, "init upstream")
+	runIn(t, dir, "git", "remote", "add", "origin", upstream)
+	runIn(t, dir, "git", "fetch", "origin")
+	runIn(t, dir, "git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	def, err = DefaultBranch(ctx, dir)
+	if err != nil {
+		t.Fatalf("DefaultBranch (with origin/HEAD): %v", err)
+	}
+	if def != "main" {
+		t.Errorf("got %q, want main", def)
+	}
+}
+
 func TestRemoteOriginURL(t *testing.T) {
 	dir := withRepo(t)
 	writeFile(t, dir, "a.txt", "x")

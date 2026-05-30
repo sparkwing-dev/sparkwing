@@ -77,6 +77,27 @@ func CurrentBranch(ctx context.Context, repoDir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// DefaultBranch returns the repo's default branch name (typically
+// "main" or "master"). Reads it from origin's HEAD symbolic ref --
+// the same source `git remote show origin` uses. Returns ("", nil)
+// when no origin remote exists or origin's HEAD isn't published; the
+// caller treats that as "no default branch known" rather than an
+// error so guards stay safe-by-default.
+func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGit(ctx, repoDir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
+			return "", sErr
+		}
+		return "", nil
+	}
+	name := strings.TrimSpace(out)
+	if rest, ok := strings.CutPrefix(name, "origin/"); ok {
+		return rest, nil
+	}
+	return name, nil
+}
+
 // RemoteOriginURL returns the URL of `origin` in repoDir, or "" with
 // nil error when no origin remote is configured. Errors only when
 // repoDir isn't a git tree.

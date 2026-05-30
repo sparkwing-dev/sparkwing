@@ -90,7 +90,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		RunID:    run.ID,
 		Pipeline: run.Pipeline,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, run.Repo, run.RepoURL),
+			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:   sparkwing.TriggerInfo{Source: "replay"},
 		StartedAt: run.StartedAt,
 	}
@@ -161,7 +161,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		Pipeline: run.Pipeline,
 		Args:     run.Args,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, run.Repo, run.RepoURL),
+			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:  sparkwing.TriggerInfo{Source: "replay"},
 		Node:     target,
 		Delegate: delegate,

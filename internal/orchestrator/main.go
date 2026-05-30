@@ -677,7 +677,7 @@ func splitCommaClean(s string) []string {
 func detectGit() *sparkwing.Git {
 	g := &sparkwing.Git{}
 	if cwd, err := os.Getwd(); err == nil {
-		g = sparkwing.NewGit(cwd, "", "", "", "")
+		g = sparkwing.NewGit(cwd, "", "", "", "", "")
 	}
 	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
 		g.SHA = strings.TrimSpace(string(out))
@@ -687,6 +687,10 @@ func detectGit() *sparkwing.Git {
 		if branch != "HEAD" { // detached -> empty
 			g.Branch = branch
 		}
+	}
+	if out, err := exec.Command("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
+		name := strings.TrimSpace(string(out))
+		g.DefaultBranch = strings.TrimPrefix(name, "origin/")
 	}
 	if out, err := exec.Command("git", "remote", "get-url", "origin").Output(); err == nil {
 		g.RepoURL = strings.TrimSpace(string(out))

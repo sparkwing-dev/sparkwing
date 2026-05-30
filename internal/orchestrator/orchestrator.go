@@ -291,6 +291,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		if opts.Git != nil {
 			guardCtx.GitBranch = opts.Git.Branch
+			guardCtx.GitDefaultBranch = opts.Git.DefaultBranch
 		}
 		if err := opts.PipelineYAML.Guards.Evaluate(opts.Pipeline, guardCtx); err != nil {
 			return nil, err
@@ -448,6 +449,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	if opts.PipelineYAML != nil {
 		snapMeta.Secrets = opts.PipelineYAML.Secrets
+		snapMeta.PipelineRequires = opts.PipelineYAML.Requires
 	}
 
 	// Snapshot only the DAG; outputs stream into the nodes table.
@@ -466,7 +468,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			NodeID:      n.ID(),
 			Status:      "pending",
 			Deps:        n.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(n),
+			NeedsLabels: effectiveClaimLabels(n, snapMeta.PipelineRequires),
 		}); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
@@ -773,6 +775,7 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	defer func() { planRelease(planReleaseOutcome) }()
 
 	state := newDispatchState(ctx, backends, r, runID, plan, delegate, debug, retryOf, masker, maxParallel)
+	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
 	state.onTargetSkip = computeOnTargetSkip(plan, snapMeta.Target)
 	state.onlySkip = onlySkip
@@ -802,7 +805,7 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 			NodeID:      rec.ID(),
 			Status:      "pending",
 			Deps:        rec.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(rec),
+			NeedsLabels: effectiveClaimLabels(rec, state.pipelineRequires),
 		})
 		state.scheduleNode(rec)
 		seen[rec.ID()] = true
@@ -1303,13 +1306,14 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 
 // dispatchState holds shared coordination state for one run.
 type dispatchState struct {
-	ctx         context.Context
-	resolverCtx context.Context
-	backends    Backends
-	runner      runner.Runner
-	runID       string
-	plan        *sparkwing.Plan
-	delegate    sparkwing.Logger
+	ctx              context.Context
+	resolverCtx      context.Context
+	backends         Backends
+	runner           runner.Runner
+	runID            string
+	plan             *sparkwing.Plan
+	delegate         sparkwing.Logger
+	pipelineRequires []string // pipeline-level label requirements unioned into every node's effective requires
 
 	mu        sync.Mutex
 	doneCh    map[string]chan struct{} // per-node completion signal
@@ -1748,7 +1752,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 			NodeID:      child.ID(),
 			Status:      "pending",
 			Deps:        child.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(child),
+			NeedsLabels: effectiveClaimLabels(child, s.pipelineRequires),
 		}); err != nil {
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 				fmt.Sprintf("ExpandFrom(%s): store child %s: %v", exp.Source.ID(), child.ID(), err))
@@ -2632,8 +2636,9 @@ type snapshotSpawnEach struct {
 // needs to re-resolve PipelineSecrets when it picks up a node.
 // Zero-value omits the fields from the emitted JSON.
 type planSnapshotMeta struct {
-	Target  string
-	Secrets pipelines.SecretsField
+	Target           string
+	Secrets          pipelines.SecretsField
+	PipelineRequires []string
 }
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
@@ -2712,8 +2717,8 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 // claim path. The orchestrator separately gates WhenRunner up-front
 // (see runOneNode) against the active runner via LabelAdvertiser, so
 // the in-process path doesn't depend on the claim-time filter.
-func effectiveClaimLabels(n *sparkwing.JobNode) []string {
-	req := n.RequiresLabels()
+func effectiveClaimLabels(n *sparkwing.JobNode, pipelineRequires []string) []string {
+	req := effectiveJobRequires(n, pipelineRequires)
 	when := n.WhenRunnerLabels()
 	if len(when) == 0 {
 		return req
@@ -2725,6 +2730,40 @@ func effectiveClaimLabels(n *sparkwing.JobNode) []string {
 		seen[l] = struct{}{}
 	}
 	for _, l := range when {
+		if _, ok := seen[l]; ok {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	return out
+}
+
+// effectiveJobRequires unions the node's own RequiresLabels with the
+// pipeline-level requires list (from pipeline.requires or
+// defaults.requires, whichever resolved). Dedupes; preserves the
+// node's label order first, then appends new ones from the pipeline.
+// The reserved "local" label is dropped here -- it pins the run to
+// in-process via opts.LocalOnly elsewhere, so passing it through to
+// runner claim filtering would over-constrain.
+func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []string {
+	own := n.RequiresLabels()
+	if len(pipelineRequires) == 0 {
+		return own
+	}
+	out := make([]string, 0, len(own)+len(pipelineRequires))
+	seen := make(map[string]struct{}, len(own)+len(pipelineRequires))
+	for _, l := range own {
+		if _, ok := seen[l]; ok {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	for _, l := range pipelineRequires {
+		if l == "local" {
+			continue
+		}
 		if _, ok := seen[l]; ok {
 			continue
 		}
