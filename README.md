@@ -85,8 +85,9 @@ flat reference.
 ## HTTP API
 
 The controller's HTTP API (served by `sparkwing-controller` in
-cluster mode and embedded in `sparkwing-local-ws` for laptop mode)
-is documented as an OpenAPI 3.0 spec at
+cluster mode and embedded in the `sparkwing` CLI for laptop mode
+via `sparkwing dashboard start`) is documented as an OpenAPI 3.0
+spec at
 [`api/openapi.yaml`](./api/openapi.yaml). Every route, request
 shape, response shape, and security requirement is described there.
 

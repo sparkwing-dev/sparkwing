@@ -35,13 +35,6 @@ else needs to be installed. `start` writes a PID + log file under
 `$SPARKWING_HOME` and prints the URL; re-running while it is already up
 just prints the URL again.
 
-### Standalone wrapper
-
-The `sparkwing-local-ws` binary is a thin opt-in wrapper around the same
-`pkg/localws` code the CLI uses. Run it as a separate process if you
-want to manage the dashboard's lifecycle yourself; otherwise prefer
-`sparkwing dashboard start`.
-
 ## Why not a daemon
 
 A daemon buys you a queue, a scheduler, and a shared HTTP API. Locally

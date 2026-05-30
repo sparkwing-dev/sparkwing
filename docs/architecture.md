@@ -7,9 +7,8 @@ a team looks at a central dashboard, and runners are pooled for work.
 **For local dev, almost none of this applies.** On a laptop, `sparkwing`
 compiles and runs your pipeline as a host subprocess and records each
 run under `~/.sparkwing/`. `sparkwing dashboard start` spawns a detached
-local web server (the standalone `sparkwing-local-ws` binary is a thin
-opt-in wrapper around the same `pkg/localws` code the CLI uses); it owns
-the SQLite store, the log files, and the dashboard on one port (default
+local web server (`pkg/localws`, embedded in the CLI); it owns the
+SQLite store, the log files, and the dashboard on one port (default
 `http://127.0.0.1:4343`) - no controller pod, no cache, no runner
 pods, no separate logs service. See [native-mode.md](native-mode.md).
 
