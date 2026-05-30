@@ -254,6 +254,7 @@ pipelines:
 CLI flag stays `--target` for the conventional `target` arg name. Pipelines that pick a different name (`--env`, `--cluster`) use whatever they declare.
 
 SDK changes:
+
 - `sparkwing.Target(ctx)` keeps working as a sugar wrapper around `sparkwing.Arg[string](ctx, "target")`. Deprecated in v0.6.0, removed in v0.7.0.
 - New tags `bind:"..."` and `required-when:"..."` on `Inputs` struct fields.
 - New `Arg[T](ctx, name)` generic accessor for reading any resolved arg from a step body.

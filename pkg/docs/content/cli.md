@@ -27,7 +27,7 @@ Wing-owned flags (consumed before the pipeline sees them):
 | `--verbose`, `-v` | Set `SPARKWING_LOG_LEVEL=debug` on the pipeline binary |
 
 `--profile` picks the storage and dispatch addressing. The pipeline
-itself is the deployment shape — different shapes (dev, prod, etc.)
+itself is the deployment shape -- different shapes (dev, prod, etc.)
 are separate pipelines in YAML that share a Go entrypoint. To hand
 execution to a cluster, use `sparkwing pipeline trigger` instead of
 `sparkwing run`.

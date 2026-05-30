@@ -73,7 +73,7 @@ curl -X POST "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git" 
 The operator CLI (`sparkwing push`, the eager-refresh on
 `sparkwing run --profile <controller-profile>`, the profile health
 probe) needs to talk to the cache pod directly over HTTP. It
-discovers the cache pod's URL from the controller — no per-profile
+discovers the cache pod's URL from the controller -- no per-profile
 configuration required on the operator side.
 
 Wire it up on the controller deployment:
