@@ -131,14 +131,14 @@ func runDashboardStart(args []string) error {
 		return err
 	}
 
+	// If a supervisor we own is already running, restart it. Common
+	// case: user upgraded the sparkwing binary and wants the fresh
+	// embedded dashboard bundle picked up without a manual kill cycle.
 	if pid, alive := readLivePID(dp.pid); alive {
-		baseURL := readBaseURL(dp.home)
-		if baseURL == "" {
-			baseURL = "http://" + addr
+		fmt.Fprintf(os.Stdout, "==> stopping previous dashboard (pid %d) for restart\n", pid)
+		if err := stopSupervisor(pid, dp.pid); err != nil {
+			return fmt.Errorf("restart: %w", err)
 		}
-		fmt.Fprintf(os.Stdout, "dashboard already running (pid %d) at %s\n", pid, baseURL)
-		fmt.Fprintln(os.Stdout, "stop with: sparkwing dashboard kill")
-		return nil
 	}
 
 	// Pre-check the bind address. If something else is already on it
@@ -245,22 +245,30 @@ func runDashboardKill(args []string) error {
 		fmt.Fprintln(os.Stdout, "dashboard not running")
 		return nil
 	}
+	if err := stopSupervisor(pid, dp.pid); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "dashboard stopped (pid %d)\n", pid)
+	return nil
+}
+
+// stopSupervisor sends SIGTERM to pid, waits up to 5s for exit, then
+// escalates to SIGKILL. Removes the PID file regardless of outcome so
+// subsequent `start` invocations don't see stale state.
+func stopSupervisor(pid int, pidPath string) error {
 	if err := signalTerminate(pid); err != nil {
 		return fmt.Errorf("terminate pid %d: %w", pid, err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !processAlive(pid) {
-			_ = os.Remove(dp.pid)
-			fmt.Fprintf(os.Stdout, "dashboard stopped (pid %d)\n", pid)
+			_ = os.Remove(pidPath)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	// Soft shutdown stalled; escalate.
 	_ = signalKill(pid)
-	_ = os.Remove(dp.pid)
-	fmt.Fprintf(os.Stdout, "dashboard force-killed (pid %d, terminate ignored)\n", pid)
+	_ = os.Remove(pidPath)
 	return nil
 }
 

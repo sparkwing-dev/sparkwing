@@ -48,6 +48,16 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **install.sh installs only `sparkwing`.** Previous revisions also
+  dropped `sparkwing-local-ws` and `sparkwing-web` into `~/.local/bin`;
+  both are now removed on next install (sweep is silent if absent).
+  `sparkwing-web` runs only as a cluster pod and is published as a
+  Docker image. `sparkwing-local-ws` is superseded by `sparkwing
+  dashboard start`. The release workflow no longer publishes a
+  `sparkwing-local-ws` binary tarball.
+
 ### Fixed
 
 - **dashboard:** `sparkwing dashboard start` now fails fast with a clear
@@ -56,9 +66,14 @@ code change to unlock.
   sparkwing-local-ws (pid 37326)`). Previously the supervisor would
   silently crash, the PID file never got written, and `sparkwing
   dashboard kill` would then report "not running" even though something
-  was visibly serving the port. `start` also now treats listener-not-
-  ready and missing-PID-file as hard errors, surfacing the tail of
+  was visibly serving the port. `start` also treats listener-not-ready
+  and missing-PID-file as hard errors, surfacing the tail of
   `dashboard.log` instead of printing a success banner with a dead PID.
+- **dashboard:** `sparkwing dashboard start` now restarts an existing
+  supervisor it owns instead of refusing. After upgrading the CLI,
+  re-running `sparkwing dashboard start` is enough to pick up the new
+  embedded SPA bundle -- no manual `kill` step needed. Foreign
+  processes on the bind address are still left alone (the error path).
 
 ## [v0.6.2] - 2026-05-30
 

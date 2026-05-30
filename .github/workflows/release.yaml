@@ -13,8 +13,11 @@
 # sequential to ~1-2 min parallel; trades runner-minutes for latency.
 #
 # Per-binary platform constraints:
-#   - sparkwing, sparkwing-local-ws -- run on user laptops; 6 platforms
-#     (linux/darwin/windows × amd64/arm64).
+#   - sparkwing -- the user-facing CLI; 6 platforms (linux/darwin/
+#     windows × amd64/arm64). It also bundles the local dashboard
+#     server, so `sparkwing dashboard start` is the supported way to
+#     run a long-lived local UI -- there is no separately-released
+#     daemon binary anymore.
 #   - sparkwing-cache, controller, runner, logs, web -- server-side
 #     components meant for Linux containers. linux + darwin (for local
 #     dev) only; windows is excluded because (a) nobody runs these on
@@ -43,7 +46,6 @@ jobs:
       matrix:
         binary:
           - sparkwing
-          - sparkwing-local-ws
           - sparkwing-cache
           - sparkwing-controller
           - sparkwing-runner
