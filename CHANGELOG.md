@@ -48,6 +48,8 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-05-29
+
 ### Added
 
 - **sdk:** `RegisterEntrypoint[T](name, factory)` declares a Go work
