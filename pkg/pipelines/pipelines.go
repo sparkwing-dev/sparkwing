@@ -6,6 +6,8 @@ import (
 	"io"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
 // Config is the whole pipelines.yaml contents.
@@ -54,28 +56,17 @@ type Pipeline struct {
 // are optional; an absent block (Pipeline.Dispatch == nil) means the
 // pipeline runs in the laptop default shape (in-process runner, no
 // secret source, no protection gate).
+//
+// Runner selection happens via job-level Requires() labels, not via
+// pipeline-level allowlists. Jobs declare what they need (e.g.,
+// "os=darwin", "xcode=15"); the scheduler matches against available
+// runners' advertised labels.
 type Dispatch struct {
-	// Runners is the runner pool / label allowlist. Empty means
-	// any runner is acceptable. Layered atop the per-job Requires
-	// declared via the SDK's RequiresProvider interface.
-	Runners []string `yaml:"runners,omitempty"`
-
-	// Source names an entry in sources.yaml that resolves Secret /
-	// Config calls. Empty means fall back to the global default
-	// declared in sources.yaml.
-	Source string `yaml:"source,omitempty"`
-
-	// RequiresApproval gates dispatch on a human response before any
-	// jobs run. Approval is collected via the controller's approvals
-	// API; local-mode dispatch resolves it via the CLI's
-	// `sparkwing approvals` verb.
-	RequiresApproval bool `yaml:"requires_approval,omitempty"`
-
-	// Protected refuses non-default-branch sources and surfaces a
-	// loud banner in the dashboard. Use on production-binding
-	// pipelines to keep an ad-hoc branch run from reaching real
-	// infra.
-	Protected bool `yaml:"protected,omitempty"`
+	// Source is the inline source spec that resolves Secret() calls
+	// for this pipeline. Absent means no source binding: Secret()
+	// calls fall back to whatever resolver the caller installed (or
+	// fail unresolved).
+	Source *sources.Source `yaml:"source,omitempty"`
 
 	// Backend overrides cache / logs / state destinations for runs
 	// against this pipeline, layered on top of the resolved
@@ -331,12 +322,16 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Validate checks Dispatch's structural invariants. Today only the
-// RequiresApproval is a bool with no validation surface today; the
-// hook is kept so future approval-policy fields land in one place.
-func (d *Dispatch) Validate(_ string) error {
+// Validate checks Dispatch's structural invariants. Validates the
+// inline source spec when present.
+func (d *Dispatch) Validate(pipeline string) error {
 	if d == nil {
 		return nil
+	}
+	if d.Source != nil {
+		if err := d.Source.Validate(); err != nil {
+			return fmt.Errorf("pipeline %q: dispatch.source: %w", pipeline, err)
+		}
 	}
 	return nil
 }

@@ -91,10 +91,9 @@ pipelines:
   - name: deploy-prod
     entrypoint: Deploy
     dispatch:
-      runners: [prod-pool]
-      source: prod-secrets
-      protected: true
-      requires_approval: true
+      source:
+        type: controller
+        url: https://controller.prod.example.com
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -104,10 +103,7 @@ pipelines:
 	if p == nil || p.Dispatch == nil {
 		t.Fatalf("dispatch not parsed: %+v", p)
 	}
-	if p.Dispatch.Runners[0] != "prod-pool" {
-		t.Errorf("runners: %+v", p.Dispatch.Runners)
-	}
-	if p.Dispatch.Source != "prod-secrets" || !p.Dispatch.Protected || !p.Dispatch.RequiresApproval {
+	if p.Dispatch.Source == nil || p.Dispatch.Source.URL != "https://controller.prod.example.com" {
 		t.Errorf("dispatch fields: %+v", p.Dispatch)
 	}
 }

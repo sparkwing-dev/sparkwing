@@ -36,6 +36,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
 // Profile is one named connection bundle.
@@ -64,6 +65,15 @@ type Profile struct {
 	// default (true); set false for automated workers that fire and
 	// forget. Consume via EffectiveMirrorLocal.
 	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
+
+	// SourceOverride, when set, wholesale replaces whatever
+	// dispatch.source spec a pipeline declared for runs under this
+	// profile. Used as a per-user dev/test escape hatch: a developer
+	// can point every pipeline at a local dotenv without touching
+	// pipeline YAMLs. The override is opaque to the pipeline -- if
+	// it's set on the active profile, the pipeline's source spec
+	// (URL match included) is not consulted.
+	SourceOverride *sources.Source `yaml:"source_override,omitempty"`
 }
 
 // ControllerSpec is the nested controller block on a Profile.

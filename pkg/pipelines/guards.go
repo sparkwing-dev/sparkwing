@@ -23,8 +23,10 @@ const (
 	KindUnknown GuardKind = iota
 	KindProfileLocal
 	KindProfileController
-	KindProfileName // profile-name:<name>
-	KindArg         // arg:<flag>=<value>
+	KindProfileName    // profile-name:<name>
+	KindGitBranch      // git-branch:<name>
+	KindGitBranchOnDef // git-branch:default
+	KindArg            // arg:<flag>=<value>
 )
 
 // GuardContext is everything a guard token needs to evaluate: the
@@ -46,6 +48,17 @@ type GuardContext struct {
 	// Values are stringified for comparison (the guard vocabulary
 	// is `arg:flag=value` where value is a literal). Nil-safe.
 	Args map[string]string
+
+	// GitBranch is the branch the dispatch originated on. Empty
+	// when no git context is in scope (cluster-side replays, etc.);
+	// git-branch tokens never match an empty branch so guards stay
+	// safe by default.
+	GitBranch string
+
+	// GitDefaultBranch is the repo's default branch (typically main
+	// or master). Used by the git-branch:default token. Empty when
+	// no git context is in scope.
+	GitDefaultBranch string
 }
 
 // ParseGuardToken parses one flat token string into a GuardToken
@@ -57,6 +70,8 @@ type GuardContext struct {
 //	profile-local            -- matches when the active profile has no controller
 //	profile-controller       -- matches when the active profile has a controller URL
 //	profile-name:<name>      -- matches when the active profile's name equals <name>
+//	git-branch:default       -- matches when dispatch is on the repo's default branch
+//	git-branch:<name>        -- matches when dispatch is on the named branch
 //	arg:<flag>=<value>       -- matches when the resolved arg equals the value
 func ParseGuardToken(raw string) (GuardToken, error) {
 	tok := GuardToken{Raw: raw}
@@ -72,6 +87,15 @@ func ParseGuardToken(raw string) (GuardToken, error) {
 		}
 		tok.Kind = KindProfileName
 		tok.Arg = name
+	case raw == "git-branch:default":
+		tok.Kind = KindGitBranchOnDef
+	case strings.HasPrefix(raw, "git-branch:"):
+		name := strings.TrimPrefix(raw, "git-branch:")
+		if name == "" {
+			return tok, fmt.Errorf("guard %q: git-branch: requires a non-empty name (or :default)", raw)
+		}
+		tok.Kind = KindGitBranch
+		tok.Arg = name
 	case strings.HasPrefix(raw, "arg:"):
 		rest := strings.TrimPrefix(raw, "arg:")
 		eq := strings.IndexByte(rest, '=')
@@ -82,7 +106,7 @@ func ParseGuardToken(raw string) (GuardToken, error) {
 		tok.Arg = rest[:eq]
 		tok.Val = rest[eq+1:]
 	default:
-		return tok, fmt.Errorf("guard %q: unknown token; vocab: profile-local, profile-controller, profile-name:<n>, arg:<f>=<v>", raw)
+		return tok, fmt.Errorf("guard %q: unknown token; vocab: profile-local, profile-controller, profile-name:<n>, git-branch:default, git-branch:<n>, arg:<f>=<v>", raw)
 	}
 	return tok, nil
 }
@@ -96,6 +120,10 @@ func (t GuardToken) Matches(ctx GuardContext) bool {
 		return !ctx.ProfileIsLocal
 	case KindProfileName:
 		return ctx.ProfileName == t.Arg
+	case KindGitBranch:
+		return ctx.GitBranch != "" && ctx.GitBranch == t.Arg
+	case KindGitBranchOnDef:
+		return ctx.GitBranch != "" && ctx.GitDefaultBranch != "" && ctx.GitBranch == ctx.GitDefaultBranch
 	case KindArg:
 		return ctx.Args[t.Arg] == t.Val
 	}

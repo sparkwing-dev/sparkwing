@@ -27,9 +27,9 @@ type SecretField struct {
 	// from the yaml list, "Secrets() struct" when it came from the
 	// pipeline's typed Secrets struct.
 	DeclaredIn string
-	// SourceName is the sources.yaml entry the resolver is bound
-	// to for this run (e.g. "team-vault"). Empty when no source
-	// binding is in effect.
+	// SourceName is a short label for the source the resolver is
+	// bound to for this run (e.g. "profile:prod", "file:.env",
+	// "env:SW_"). Empty when no source binding is in effect.
 	SourceName string
 	// Resolved reports whether the resolver returned a value.
 	// Set when a SecretResolver was installed on ctx; left at the
@@ -47,10 +47,10 @@ type SecretField struct {
 // pipeline's Secrets() struct fields, matching the same precedence
 // ResolvePipelineSecrets uses (struct fields can declare required).
 //
-// sourceName is informational only: pass the resolved sources.yaml
-// entry name (e.g. opts.PipelineYAML.Dispatch.Source or the
-// sources.yaml default) so the per-entry SourceName column renders
-// for the operator. Empty is fine; the column reports empty.
+// sourceName is informational only: pass the inline dispatch.source
+// Describe() label (e.g. "profile:prod") so the per-entry SourceName
+// column renders for the operator. Empty is fine; the column reports
+// empty.
 //
 // Returns (nil, nil) when the pipeline declares no secrets at all.
 func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline, sourceName string) ([]SecretField, error) {

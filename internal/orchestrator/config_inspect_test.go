@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -86,18 +87,18 @@ func TestInspectPipelineSecrets_ResolverHits(t *testing.T) {
 	}
 }
 
-func TestPickSourceName(t *testing.T) {
+func TestPipelineSourceLabel(t *testing.T) {
 	withSource := &pipelines.Pipeline{
-		Dispatch: &pipelines.Dispatch{Source: "prod-vault"},
+		Dispatch: &pipelines.Dispatch{Source: &sources.Source{Type: sources.TypeController, URL: "https://controller.prod.example.com"}},
 	}
 	withoutSource := &pipelines.Pipeline{}
-	if got := pickSourceName(withSource, ""); got != "prod-vault" {
-		t.Errorf("dispatch.source: got %q, want prod-vault", got)
+	if got := pipelineSourceLabel(withSource); got != "controller:https://controller.prod.example.com" {
+		t.Errorf("inline source: got %q, want controller:https://controller.prod.example.com", got)
 	}
-	if got := pickSourceName(withoutSource, ""); got != "" {
-		t.Errorf("no dispatch (no defaults file): got %q, want empty", got)
+	if got := pipelineSourceLabel(withoutSource); got != "" {
+		t.Errorf("no dispatch: got %q, want empty", got)
 	}
-	if got := pickSourceName(nil, ""); got != "" {
+	if got := pipelineSourceLabel(nil); got != "" {
 		t.Errorf("nil pipeline: got %q, want empty", got)
 	}
 }

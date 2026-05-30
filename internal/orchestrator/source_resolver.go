@@ -3,71 +3,71 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// resolveProjectSource resolves a source by name from the project's
-// .sparkwing/sparkwing.yaml sources section. An empty name falls back to
-// the section's default. Returns (_, false, nil) when sparkwingDir is
-// empty, the file declares no sources, or the name is absent.
-func resolveProjectSource(sparkwingDir, name string) (sources.Source, bool, error) {
-	if sparkwingDir == "" {
-		return sources.Source{}, false, nil
-	}
-	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
-	if err != nil {
-		return sources.Source{}, false, err
-	}
-	if cfg == nil || cfg.Sources == nil {
-		return sources.Source{}, false, nil
-	}
-	if name == "" {
-		name = cfg.Sources.Default
-		if name == "" {
-			return sources.Source{}, false, nil
-		}
-	}
-	s, ok := cfg.Sources.Sources[name]
-	return s, ok, nil
-}
-
-// selectSecretResolver picks the secrets.Source for this run based on
-// the pipelines.yaml target's source binding (when available),
-// falling back to the sources.yaml default, and ultimately leaving
-// the existing Options.SecretSource path untouched. Returns
-// (resolver, nil) when a source binding produced one, (nil, nil)
-// when nothing in sources.yaml applies, and (_, err) when a binding
-// was attempted but failed (unknown source name, profile lookup
-// failure, type-required-field missing, etc.).
+// selectSecretResolver picks the secrets.Source for this run.
+// Precedence: profile.SourceOverride wins outright; otherwise the
+// pipeline's inline dispatch.source is used. Returns (nil, nil) when
+// neither path produces a source binding (the caller leaves any
+// existing Options.SecretSource path untouched).
+//
+// For type=controller sources, the source's URL must match the
+// active profile's controller URL; on a mismatch this returns a
+// clear error so the run fails before any pod spins up. The
+// profile's controller token is passed through.
 //
 // The returned source is uncached; the caller wraps it in
 // secrets.NewCached + masker before installing on ctx.
 func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, error) {
-	if opts.SparkwingDir == "" {
+	src := pickActiveSource(opts.Profile, opts.PipelineYAML)
+	if src == nil {
 		return nil, nil
 	}
-	srcName := ""
-	if opts.PipelineYAML != nil && opts.PipelineYAML.Dispatch != nil {
-		srcName = opts.PipelineYAML.Dispatch.Source
-	}
-	src, ok, err := resolveProjectSource(opts.SparkwingDir, srcName)
+	token, err := controllerTokenFor(*src, opts.Profile)
 	if err != nil {
-		return nil, fmt.Errorf("source binding: %w", err)
+		return nil, err
 	}
-	if !ok {
-		return nil, nil
-	}
-	resolver, err := sparkwing.NewSecretResolverFromSource(ctx, src, profileLookupCallback())
+	resolver, err := sparkwing.NewSecretResolverFromSource(ctx, *src, token)
 	if err != nil {
-		return nil, fmt.Errorf("source %q: %w", src.Name, err)
+		return nil, fmt.Errorf("source %s: %w", src.Describe(), err)
 	}
 	return resolverAsSource(ctx, resolver), nil
+}
+
+// pickActiveSource applies the SourceOverride-wins-over-pipeline
+// precedence. Returns nil when neither layer declares one.
+func pickActiveSource(p *profile.Profile, py *pipelines.Pipeline) *sources.Source {
+	if p != nil && p.SourceOverride != nil {
+		return p.SourceOverride
+	}
+	if py == nil || py.Dispatch == nil {
+		return nil
+	}
+	return py.Dispatch.Source
+}
+
+// controllerTokenFor enforces the URL-match policy for
+// type=controller sources and returns the profile's controller token.
+// For other source types it returns "" -- file/env don't use it.
+func controllerTokenFor(src sources.Source, p *profile.Profile) (string, error) {
+	if src.Type != sources.TypeController {
+		return "", nil
+	}
+	if p == nil || p.ControllerURL() == "" {
+		return "", fmt.Errorf("source %s: type=%s requires an active profile with a controller; none is configured",
+			src.Describe(), src.Type)
+	}
+	if src.URL != p.ControllerURL() {
+		return "", fmt.Errorf("source %s: pipeline expects controller %s but active profile %q points at %s",
+			src.Describe(), src.URL, p.Name, p.ControllerURL())
+	}
+	return p.ControllerToken(), nil
 }
 
 // resolverAsSource adapts a sparkwing.SecretResolver to the
@@ -76,29 +76,4 @@ func resolverAsSource(ctx context.Context, r sparkwing.SecretResolver) secrets.S
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
 		return r.Resolve(ctx, name)
 	})
-}
-
-// profileLookupCallback returns the closure the SDK factory calls
-// for type=profile sources. The orchestrator already imports
-// the profile package, so the lookup goes through profile.Load +
-// profile.Resolve directly.
-func profileLookupCallback() sparkwing.ProfileLookup {
-	return func(name string) (string, string, error) {
-		path, err := profile.DefaultPath()
-		if err != nil {
-			return "", "", err
-		}
-		cfg, err := profile.Load(path)
-		if err != nil {
-			return "", "", err
-		}
-		p, _, err := profile.Resolve(name, "", cfg)
-		if err != nil {
-			return "", "", err
-		}
-		if p.ControllerURL() == "" {
-			return "", "", fmt.Errorf("profile %q has no controller URL", p.Name)
-		}
-		return p.ControllerURL(), p.ControllerToken(), nil
-	}
 }

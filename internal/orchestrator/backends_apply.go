@@ -5,23 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-// storeurlProfileLookup adapts the orchestrator's profile-lookup
-// callback (which the SDK also consumes for type=profile secret
-// sources) to the storeurl factory's named type. Returns nil when the
-// caller didn't install one; the factory then errors loudly the
-// moment a controller-typed spec arrives.
-func storeurlProfileLookup(lookup sparkwing.ProfileLookup) storeurl.ProfileLookup {
-	if lookup == nil {
-		return nil
-	}
-	return func(name string) (string, string, error) {
-		return lookup(name)
-	}
-}
 
 // decodeDispatchBackend converts the pipeline's per-surface
 // map[string]any blobs into typed backends.Surfaces by yaml

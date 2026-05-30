@@ -96,11 +96,8 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	// install for a remote-controller source binding. The SDK
 	// factory handles the http wiring; we just supply the URL+token
 	// via the profile-lookup callback.
-	src := sources.Source{
-		Name: "pod-controller", Type: sources.TypeProfile, Profile: "pod-profile",
-	}
-	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
-		func(_ string) (string, string, error) { return srv.URL, wantToken, nil })
+	src := sources.Source{Type: sources.TypeController, URL: srv.URL}
+	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src, wantToken)
 	if err != nil {
 		t.Fatalf("build resolver: %v", err)
 	}
@@ -170,11 +167,8 @@ func TestClusterPodRoundTrip_AuthFailureSurfacesAsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := sources.Source{
-		Name: "pod-controller", Type: sources.TypeProfile, Profile: "pod-profile",
-	}
-	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
-		func(_ string) (string, string, error) { return srv.URL, "bad-token", nil })
+	src := sources.Source{Type: sources.TypeController, URL: srv.URL}
+	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src, "bad-token")
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}

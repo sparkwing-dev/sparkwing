@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -141,12 +142,9 @@ type Options struct {
 	Target string
 
 	// SparkwingDir, when non-empty, is the resolved .sparkwing/
-	// directory the orchestrator consults for sources.yaml. When the
-	// chosen target binds to a named source (Target.Source) or the
-	// sources.yaml default applies, the orchestrator constructs the
-	// appropriate SecretResolver via sparkwing.NewSecretResolverFromSource
-	// and installs it. Empty leaves the existing SecretSource path
-	// untouched.
+	// directory. Used today for working-directory context; secret
+	// source binding now reads the inline spec on
+	// PipelineYAML.Dispatch.Source rather than a registry file.
 	SparkwingDir string
 
 	// MaxParallel caps concurrent node execution. Zero = unbounded
@@ -189,13 +187,12 @@ type Options struct {
 	DefaultStateDB string
 
 	// ProfileLookup resolves a profile name to (controller URL, token)
-	// for type=controller cache/logs specs. RunLocal installs the
-	// default profile.Load + profile.Resolve callback when this is
-	// nil. Tests inject a synthetic lookup pointing at an httptest
-	// server. Cluster boot paths leave it nil; controller-typed specs
-	// would error there, which is the right signal since those paths
-	// declare URL + token via CLI flags rather than profile names.
-	ProfileLookup sparkwing.ProfileLookup
+	// for type=controller cache/logs/state backend specs. RunLocal
+	// installs the active profile's controller as the default when
+	// this is nil; tests inject a synthetic lookup pointing at an
+	// httptest server. Cluster boot paths leave it nil and declare
+	// URL + token via CLI flags rather than profile names.
+	ProfileLookup storeurl.ProfileLookup
 
 	// Profile is the resolved storage profile RunLocal routes
 	// state/logs/cache through via ApplyProfileBackendsWithMirror. The
@@ -509,13 +506,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// available. Masker is also stashed on ctx so loggers can pull
 	// it without a signature change.
 	ctx = secrets.WithMasker(ctx, masker)
-	// Pick the SecretResolver for this run. The per-target source
-	// binding (Target.Source -> sources.yaml entry) wins when both
-	// SparkwingDir and a target-source name are available; otherwise
-	// fall back to Options.SecretSource (the pre-step-8 path).
+	// Pick the SecretResolver for this run. The inline
+	// dispatch.source spec wins when present; otherwise fall back
+	// to Options.SecretSource.
 	//
-	// Cross-source-type guard: a laptop-only source bound to a
-	// target dispatched on a non-local runner is rejected loudly
+	// Cross-source-type guard: a laptop-only source bound on a
+	// pipeline dispatched to a non-local runner is rejected loudly
 	// here so the run fails before any pod spins up.
 	if err := validateSourceRunnerPortability(opts, r); err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
@@ -625,9 +621,6 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	}
 	if opts.DefaultStateDB == "" {
 		opts.DefaultStateDB = paths.StateDB()
-	}
-	if opts.ProfileLookup == nil {
-		opts.ProfileLookup = profileLookupCallback()
 	}
 	ownsState := opts.State == nil
 	// Local execution always resolves through a storage profile (the

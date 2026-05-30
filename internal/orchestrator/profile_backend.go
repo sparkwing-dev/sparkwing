@@ -58,8 +58,8 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 	state, logs, cache = eff.State, eff.Logs, eff.Cache
 
 	lookup := profileControllerLookup(p)
-	if l := storeurlProfileLookup(opts.ProfileLookup); l != nil {
-		lookup = l
+	if opts.ProfileLookup != nil {
+		lookup = opts.ProfileLookup
 	}
 
 	if opts.ArtifactStore == nil && cache != nil {

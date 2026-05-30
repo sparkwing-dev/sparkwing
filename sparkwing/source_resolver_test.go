@@ -19,8 +19,7 @@ func TestFactory_EnvSource_HitAndMiss(t *testing.T) {
 	t.Setenv("SW_DEPLOY_TOKEN", "swu_real")
 	t.Setenv("SW_EMPTY", "")
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "shell", Type: sources.TypeEnv, Prefix: "SW_"},
-		nil)
+		sources.Source{Type: sources.TypeEnv, Prefix: "SW_"}, "")
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -42,7 +41,7 @@ func TestFactory_EnvSource_HitAndMiss(t *testing.T) {
 func TestFactory_EnvSource_NoPrefix(t *testing.T) {
 	t.Setenv("ABSOLUTE_NAME", "val")
 	r, _ := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "shell", Type: sources.TypeEnv}, nil)
+		sources.Source{Type: sources.TypeEnv}, "")
 	v, _, err := r.Resolve(context.Background(), "ABSOLUTE_NAME")
 	if err != nil || v != "val" {
 		t.Errorf("Resolve = %q err=%v", v, err)
@@ -56,7 +55,7 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "dot", Type: sources.TypeFile, Path: path}, nil)
+		sources.Source{Type: sources.TypeFile, Path: path}, "")
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -77,7 +76,7 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 
 func TestFactory_FileSource_MissingFileTreatedAsEmpty(t *testing.T) {
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "dot", Type: sources.TypeFile, Path: filepath.Join(t.TempDir(), "absent.env")}, nil)
+		sources.Source{Type: sources.TypeFile, Path: filepath.Join(t.TempDir(), "absent.env")}, "")
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -88,12 +87,12 @@ func TestFactory_FileSource_MissingFileTreatedAsEmpty(t *testing.T) {
 
 func TestFactory_FileSource_RequiresPath(t *testing.T) {
 	if _, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "dot", Type: sources.TypeFile}, nil); err == nil {
+		sources.Source{Type: sources.TypeFile}, ""); err == nil {
 		t.Fatal("expected path-required error")
 	}
 }
 
-func TestFactory_RemoteControllerSource(t *testing.T) {
+func TestFactory_ControllerSource(t *testing.T) {
 	called := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called++
@@ -113,22 +112,10 @@ func TestFactory_RemoteControllerSource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	lookups := 0
-	lookup := sparkwing.ProfileLookup(func(name string) (string, string, error) {
-		lookups++
-		if name != "shared" {
-			t.Errorf("lookup called for %q, want shared", name)
-		}
-		return srv.URL, "testtoken", nil
-	})
 	r, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "team-vault", Type: sources.TypeProfile, Profile: "shared"},
-		lookup)
+		sources.Source{Type: sources.TypeController, URL: srv.URL}, "testtoken")
 	if err != nil {
 		t.Fatalf("factory: %v", err)
-	}
-	if lookups != 1 {
-		t.Errorf("profile lookup called %d times, want 1", lookups)
 	}
 	v, masked, err := r.Resolve(context.Background(), "DEPLOY_TOKEN")
 	if err != nil {
@@ -145,27 +132,17 @@ func TestFactory_RemoteControllerSource(t *testing.T) {
 	}
 }
 
-func TestFactory_RemoteController_RequiresProfileLookup(t *testing.T) {
+func TestFactory_ControllerSource_RequiresURL(t *testing.T) {
 	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "x", Type: sources.TypeProfile, Profile: "shared"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "profile lookup") {
-		t.Fatalf("expected profile-lookup-required error, got %v", err)
-	}
-}
-
-func TestFactory_RemoteController_PropagatesLookupError(t *testing.T) {
-	bumpy := errors.New("profiles.yaml missing")
-	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "x", Type: sources.TypeProfile, Profile: "shared"},
-		sparkwing.ProfileLookup(func(string) (string, string, error) { return "", "", bumpy }))
-	if err == nil || !errors.Is(err, bumpy) {
-		t.Fatalf("expected lookup error to propagate, got %v", err)
+		sources.Source{Type: sources.TypeController}, "tok")
+	if err == nil || !strings.Contains(err.Error(), "url is empty") {
+		t.Fatalf("expected url-required error, got %v", err)
 	}
 }
 
 func TestFactory_UnknownTypeRejected(t *testing.T) {
 	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "x", Type: "vault-pro"}, nil)
+		sources.Source{Type: "vault-pro"}, "")
 	if err == nil || !strings.Contains(err.Error(), "unknown type") {
 		t.Fatalf("expected unknown-type error, got %v", err)
 	}
@@ -173,7 +150,7 @@ func TestFactory_UnknownTypeRejected(t *testing.T) {
 
 func TestFactory_EmptyTypeRejected(t *testing.T) {
 	_, err := sparkwing.NewSecretResolverFromSource(context.Background(),
-		sources.Source{Name: "x", Type: ""}, nil)
+		sources.Source{Type: ""}, "")
 	if err == nil || !strings.Contains(err.Error(), "type is required") {
 		t.Fatalf("expected type-required error, got %v", err)
 	}

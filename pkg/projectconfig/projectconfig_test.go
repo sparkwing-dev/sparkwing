@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/runners"
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
 func writeYAML(t *testing.T, dir, name, contents string) string {
@@ -43,26 +41,9 @@ pipelines:
     secrets:
       - {name: DEPLOY_TOKEN, required: true}
     dispatch:
-      source: prod-secrets
-
-runners:
-  local:
-    type: local
-    labels: [local, "os=darwin"]
-  cloud-linux:
-    type: kubernetes
-    profile: shared
-    labels: [cloud-linux, "os=linux"]
-
-sources:
-  default: prod-secrets
-  entries:
-    prod-secrets:
-      type: profile
-      profile: prod
-    laptop-dotenv:
-      type: file
-      path: .env
+      source:
+        type: controller
+        url: https://controller.prod.example.com
 
 sparks:
   - name: sparks-core
@@ -100,11 +81,8 @@ func TestLoad_RoundTrip(t *testing.T) {
 	if len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "release" {
 		t.Errorf("pipelines = %#v", cfg.Pipelines)
 	}
-	if cfg.Runners["local"].Name != "local" {
-		t.Errorf("runner Name not stamped: %#v", cfg.Runners["local"])
-	}
-	if cfg.Sources == nil || cfg.Sources.Sources["prod-secrets"].Name != "prod-secrets" {
-		t.Errorf("source Name not stamped: %#v", cfg.Sources)
+	if p := cfg.Pipelines[0]; p.Dispatch == nil || p.Dispatch.Source == nil || p.Dispatch.Source.URL != "https://controller.prod.example.com" {
+		t.Errorf("inline dispatch.source not parsed: %#v", p.Dispatch)
 	}
 	if len(cfg.Sparks) != 1 || cfg.Sparks[0].Source != "github.com/sparkwing-dev/sparks-core" {
 		t.Errorf("sparks = %#v", cfg.Sparks)
@@ -133,18 +111,6 @@ func TestLoad_UnknownTopLevelFieldFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("error should include the file path: %v", err)
-	}
-}
-
-func TestLoad_UnknownNestedFieldFails(t *testing.T) {
-	dir := t.TempDir()
-	path := writeYAML(t, dir, projectconfig.Filename, "runners:\n  local:\n    type: local\n    bogus: true\n")
-	_, err := projectconfig.Load(path)
-	if err == nil {
-		t.Fatal("expected error on unknown nested field")
-	}
-	if !strings.Contains(err.Error(), "bogus") {
-		t.Errorf("KnownFields should recurse into nested structs: %v", err)
 	}
 }
 
@@ -183,75 +149,6 @@ func TestLoad_PipelinesMatchesParse(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg.Pipelines, want.Pipelines) {
 		t.Fatalf("pipelines mismatch:\n got %#v\nwant %#v", cfg.Pipelines, want.Pipelines)
-	}
-}
-
-func TestLoad_RunnersNormalized(t *testing.T) {
-	const bare = `runners:
-  local:
-    type: local
-    labels: [local, "os=darwin"]
-  cloud-linux:
-    type: kubernetes
-    profile: shared
-    labels: [cloud-linux, "os=linux"]
-    spec:
-      resources:
-        requests:
-          cpu: "2"
-`
-	want := map[string]runners.Runner{
-		"local": {Name: "local", Type: "local", Labels: []string{"local", "os=darwin"}},
-		"cloud-linux": {
-			Name:    "cloud-linux",
-			Type:    "kubernetes",
-			Profile: "shared",
-			Labels:  []string{"cloud-linux", "os=linux"},
-			Spec:    runners.Spec{Resources: runners.Resources{Requests: map[string]string{"cpu": "2"}}},
-		},
-	}
-	path := writeYAML(t, t.TempDir(), projectconfig.Filename, bare)
-	cfg, err := projectconfig.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if !reflect.DeepEqual(cfg.Runners, want) {
-		t.Fatalf("runners mismatch:\n got %#v\nwant %#v", cfg.Runners, want)
-	}
-}
-
-func TestLoad_SourcesNormalized(t *testing.T) {
-	const bare = `sources:
-  default: team-vault
-  entries:
-    team-vault:
-      type: profile
-      profile: prod
-    dotenv:
-      type: file
-      path: .env
-    shell:
-      type: env
-      prefix: SW_
-`
-	want := sources.File{
-		Default: "team-vault",
-		Sources: map[string]sources.Source{
-			"team-vault": {Name: "team-vault", Type: sources.TypeProfile, Profile: "prod"},
-			"dotenv":     {Name: "dotenv", Type: sources.TypeFile, Path: ".env"},
-			"shell":      {Name: "shell", Type: sources.TypeEnv, Prefix: "SW_"},
-		},
-	}
-	path := writeYAML(t, t.TempDir(), projectconfig.Filename, bare)
-	cfg, err := projectconfig.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Sources == nil {
-		t.Fatal("sources section missing")
-	}
-	if !reflect.DeepEqual(*cfg.Sources, want) {
-		t.Fatalf("sources mismatch:\n got %#v\nwant %#v", *cfg.Sources, want)
 	}
 }
 

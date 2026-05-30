@@ -30,17 +30,10 @@ var laptopOnlySourceTypes = map[string]bool{
 // pool / k8s / static runners report any non-nil, non-InProcess
 // type and trigger the guard.
 func validateSourceRunnerPortability(opts Options, active runner.Runner) error {
-	if opts.PipelineYAML == nil || opts.PipelineYAML.Dispatch == nil {
+	if opts.PipelineYAML == nil || opts.PipelineYAML.Dispatch == nil || opts.PipelineYAML.Dispatch.Source == nil {
 		return nil
 	}
-	sourceName := opts.PipelineYAML.Dispatch.Source
-	if sourceName == "" {
-		return nil
-	}
-	src, ok, err := resolveProjectSource(opts.SparkwingDir, sourceName)
-	if err != nil || !ok {
-		return nil
-	}
+	src := opts.PipelineYAML.Dispatch.Source
 	if !laptopOnlySourceTypes[src.Type] {
 		return nil
 	}
@@ -48,10 +41,10 @@ func validateSourceRunnerPortability(opts Options, active runner.Runner) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"pipeline %q binds to source %q (type: %s), which is laptop-only; "+
+		"pipeline %q binds to source %s (type: %s), which is laptop-only; "+
 			"this run dispatches to a non-local runner that can't reach it. "+
 			"Choose a type=profile source for cluster targets, or run on a local runner",
-		opts.Pipeline, src.Name, src.Type,
+		opts.Pipeline, src.Describe(), src.Type,
 	)
 }
 

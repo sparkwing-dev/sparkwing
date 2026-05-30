@@ -16,16 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/sources"
 )
 
-// ProfileLookup fetches the controller URL and bearer token for a
-// named profile (matching profiles.yaml). The SDK consumes it
-// through a callback so the sparkwing package doesn't have to
-// import the profile package directly.
-//
-// The lookup is called exactly once per NewSecretResolverFromSource
-// for type=profile sources; the returned resolver caches
-// the result internally and reuses it for every Resolve call.
-type ProfileLookup func(name string) (controller, token string, err error)
-
 // NewSecretResolverFromSource builds a SecretResolver tailored to
 // the given source spec. The returned resolver is uncached and
 // unmasked; callers wrap with secrets.NewCached + masker (the
@@ -34,37 +24,35 @@ type ProfileLookup func(name string) (controller, token string, err error)
 //
 // Supported source types:
 //
-//   - profile: HTTPS GET against the profile's
-//     /api/v1/secrets/<name> endpoint with the profile's token in
-//     the Authorization header. The profileLookup callback resolves
-//     the named profile to (controller, token).
+//   - controller: HTTPS GET against src.URL + /api/v1/secrets/<name>
+//     with controllerToken in the Authorization header. The caller is
+//     responsible for any URL-match policy against the active profile
+//     before passing the token through.
 //   - file: reads a dotenv file at Path. Keys without values resolve
 //     to ErrSecretMissing rather than the empty string.
 //   - env: looks up os.Getenv(Prefix + name). An unset env var
 //     resolves to ErrSecretMissing.
 //
+// controllerToken is consumed only for type=controller; file and env
+// ignore it.
+//
 // ctx is currently retained only for parity with future backends
-// that may need it during construction (HTTP transport tuning, OIDC
-// token refresh). The current backends construct synchronously.
-func NewSecretResolverFromSource(_ context.Context, src sources.Source, profileLookup ProfileLookup) (SecretResolver, error) {
+// that may need it during construction.
+func NewSecretResolverFromSource(_ context.Context, src sources.Source, controllerToken string) (SecretResolver, error) {
 	switch src.Type {
-	case sources.TypeProfile:
-		if profileLookup == nil {
-			return nil, fmt.Errorf("source %q: type=%s requires a profile lookup", src.Name, src.Type)
+	case sources.TypeController:
+		if src.URL == "" {
+			return nil, fmt.Errorf("source %s: url is empty", src.Describe())
 		}
-		controller, token, err := profileLookup(src.Profile)
-		if err != nil {
-			return nil, fmt.Errorf("source %q: profile lookup for %q: %w", src.Name, src.Profile, err)
-		}
-		return newRemoteControllerResolver(src, controller, token), nil
+		return newRemoteControllerResolver(src, controllerToken), nil
 	case sources.TypeFile:
 		return newFileResolver(src)
 	case sources.TypeEnv:
 		return newEnvResolver(src), nil
 	case "":
-		return nil, fmt.Errorf("source %q: type is required", src.Name)
+		return nil, fmt.Errorf("source: type is required")
 	default:
-		return nil, fmt.Errorf("source %q: unknown type %q", src.Name, src.Type)
+		return nil, fmt.Errorf("source %s: unknown type %q", src.Describe(), src.Type)
 	}
 }
 
@@ -73,29 +61,28 @@ func NewSecretResolverFromSource(_ context.Context, src sources.Source, profileL
 // Secret/Config strict-classification check at the SDK call site
 // stays honest.
 type remoteControllerResolver struct {
-	src        sources.Source
-	controller string
-	token      string
-	client     *http.Client
+	src    sources.Source
+	token  string
+	client *http.Client
 }
 
-func newRemoteControllerResolver(src sources.Source, controller, token string) *remoteControllerResolver {
+func newRemoteControllerResolver(src sources.Source, token string) *remoteControllerResolver {
 	return &remoteControllerResolver{
-		src:        src,
-		controller: strings.TrimRight(controller, "/"),
-		token:      token,
-		client:     http.DefaultClient,
+		src:    src,
+		token:  token,
+		client: http.DefaultClient,
 	}
 }
 
 func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error) {
-	if r.controller == "" {
-		return "", false, fmt.Errorf("source %q: controller URL is empty", r.src.Name)
+	base := strings.TrimRight(r.src.URL, "/")
+	if base == "" {
+		return "", false, fmt.Errorf("source %s: url is empty", r.src.Describe())
 	}
-	endpoint := r.controller + "/api/v1/secrets/" + url.PathEscape(name)
+	endpoint := base + "/api/v1/secrets/" + url.PathEscape(name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("source %q: build request: %w", r.src.Name, err)
+		return "", false, fmt.Errorf("source %s: build request: %w", r.src.Describe(), err)
 	}
 	if r.token != "" {
 		req.Header.Set("Authorization", "Bearer "+r.token)
@@ -103,7 +90,7 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", false, fmt.Errorf("source %q: %w", r.src.Name, err)
+		return "", false, fmt.Errorf("source %s: %w", r.src.Describe(), err)
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
@@ -112,17 +99,17 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	case http.StatusNotFound:
 		return "", false, ErrSecretMissing
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return "", false, fmt.Errorf("source %q: %d %s", r.src.Name, resp.StatusCode, http.StatusText(resp.StatusCode))
+		return "", false, fmt.Errorf("source %s: %d %s", r.src.Describe(), resp.StatusCode, http.StatusText(resp.StatusCode))
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", false, fmt.Errorf("source %q: %d %s: %s", r.src.Name, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
+		return "", false, fmt.Errorf("source %s: %d %s: %s", r.src.Describe(), resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
 	}
 	var body struct {
 		Value  string `json:"value"`
 		Masked bool   `json:"masked"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", false, fmt.Errorf("source %q: decode response: %w", r.src.Name, err)
+		return "", false, fmt.Errorf("source %s: decode response: %w", r.src.Describe(), err)
 	}
 	return body.Value, body.Masked, nil
 }
@@ -141,7 +128,7 @@ type fileResolver struct {
 
 func newFileResolver(src sources.Source) (*fileResolver, error) {
 	if src.Path == "" {
-		return nil, fmt.Errorf("source %q: path is empty", src.Name)
+		return nil, fmt.Errorf("source %s: path is empty", src.Describe())
 	}
 	return &fileResolver{src: src}, nil
 }
@@ -168,7 +155,7 @@ func (f *fileResolver) load() {
 			f.cache = map[string]string{}
 			return
 		}
-		f.err = fmt.Errorf("source %q: read %s: %w", f.src.Name, f.src.Path, err)
+		f.err = fmt.Errorf("source %s: read %s: %w", f.src.Describe(), f.src.Path, err)
 		return
 	}
 	defer raw.Close()
@@ -185,7 +172,6 @@ func (f *fileResolver) load() {
 		}
 		key := strings.TrimSpace(line[:eq])
 		val := strings.TrimSpace(line[eq+1:])
-		// Strip surrounding quotes if present.
 		if n := len(val); n >= 2 {
 			if (val[0] == '"' && val[n-1] == '"') || (val[0] == '\'' && val[n-1] == '\'') {
 				val = val[1 : n-1]
@@ -194,7 +180,7 @@ func (f *fileResolver) load() {
 		out[key] = val
 	}
 	if err := sc.Err(); err != nil {
-		f.err = fmt.Errorf("source %q: scan %s: %w", f.src.Name, f.src.Path, err)
+		f.err = fmt.Errorf("source %s: scan %s: %w", f.src.Describe(), f.src.Path, err)
 		return
 	}
 	f.cache = out

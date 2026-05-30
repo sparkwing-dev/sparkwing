@@ -10,8 +10,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -43,31 +41,13 @@ func runInternalCompleteTargets(args []string) error {
 	return nil
 }
 
-// runInternalCompleteRunners emits runner names from the project's
-// sparkwing.yaml runners section, including the implicit "local" entry.
+// runInternalCompleteRunners is retained as a no-op so any stale
+// shell completion script referencing the verb stays callable. The
+// pre-v0.6 runners: registry in sparkwing.yaml was dropped; runner
+// selection now happens via job-level Requires() labels and there's
+// nothing to enumerate from the repo's YAML.
 func runInternalCompleteRunners(_ []string) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	sparkwingDir, ok := walkUpForSparkwing(cwd)
-	if !ok {
-		return nil
-	}
-	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
-	if err != nil || cfg == nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	names := []string{"local"}
-	for n := range cfg.Runners {
-		if n != "local" {
-			names = append(names, n)
-		}
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		fmt.Println(n)
-	}
+	fmt.Println("local")
 	return nil
 }
 

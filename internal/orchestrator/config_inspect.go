@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -52,41 +50,28 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	if !ok {
 		return unknownPipelineErr(pipeline)
 	}
-	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
-	sourceName := pickSourceName(pipelineYAML, sparkwingDir)
+	pipelineYAML, _ := loadPipelineYAML(pipeline)
+	sourceLabel := pipelineSourceLabel(pipelineYAML)
 
-	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML, sourceName)
+	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML, sourceLabel)
 	if err != nil {
 		return err
 	}
 
 	if format == "json" {
-		return printConfigInspectJSON(pipeline, sourceName, secFields)
+		return printConfigInspectJSON(pipeline, sourceLabel, secFields)
 	}
-	printConfigInspectPretty(os.Stdout, pipeline, sourceName, secFields)
+	printConfigInspectPretty(os.Stdout, pipeline, sourceLabel, secFields)
 	return nil
 }
 
-// pickSourceName returns the sources.yaml entry name that backs the
-// pipeline run, preferring the pipeline's Dispatch.Source and
-// falling back to the sources.yaml default. Empty when nothing
-// applies.
-func pickSourceName(p *pipelines.Pipeline, sparkwingDir string) string {
-	if p != nil && p.Dispatch != nil && p.Dispatch.Source != "" {
-		return p.Dispatch.Source
-	}
-	return defaultSourceName(sparkwingDir)
-}
-
-func defaultSourceName(sparkwingDir string) string {
-	if sparkwingDir == "" {
+// pipelineSourceLabel returns the inline source spec's Describe()
+// output for display. Empty when the pipeline declares no source.
+func pipelineSourceLabel(p *pipelines.Pipeline) string {
+	if p == nil || p.Dispatch == nil || p.Dispatch.Source == nil {
 		return ""
 	}
-	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
-	if err != nil || cfg == nil || cfg.Sources == nil {
-		return ""
-	}
-	return cfg.Sources.Default
+	return p.Dispatch.Source.Describe()
 }
 
 func printConfigInspectPretty(w io.Writer, pipeline, source string, secFields []sparkwing.SecretField) {

@@ -1,51 +1,40 @@
-// Package sources defines the secret-source schema carried under the
-// sources: section of .sparkwing/sparkwing.yaml. It owns the types and
-// their validation; the file is read by pkg/projectconfig, which
-// normalizes and validates each section.
+// Package sources defines the secret-source schema carried inline
+// under pipelines[].dispatch.source in .sparkwing/sparkwing.yaml.
+// Each pipeline declares its own source spec; there is no shared
+// registry. A profile may carry a SourceOverride that wholesale
+// replaces every pipeline's source at run time (the dev/test escape
+// hatch).
 package sources
 
 import (
 	"fmt"
 )
 
-// File is the shape of the sources: section: an optional default plus
-// the named entries.
-type File struct {
-	// Default names the source used when a target doesn't bind one
-	// explicitly. Empty means "no implicit default" -- callers that
-	// reach for it should fail with a clear message.
-	Default string `yaml:"default,omitempty"`
-	// Sources is the map of named entries. It is keyed `entries:` under
-	// the sparkwing.yaml sources: section (so the section reads
-	// `sources: { default:, entries: {...} }`).
-	Sources map[string]Source `yaml:"entries,omitempty"`
-}
-
 // SourceType discriminator values.
 const (
-	// TypeProfile resolves secrets via an HTTPS GET against the named
-	// profile's controller.
-	TypeProfile = "profile"
+	// TypeController resolves secrets via an HTTPS GET against URL.
+	// Auth is the active profile's controller token; the orchestrator
+	// requires the source URL to match the active profile's
+	// controller URL before passing the token through.
+	TypeController = "controller"
 	// TypeFile reads secrets from a dotenv file at the given path.
 	TypeFile = "file"
 	// TypeEnv reads secrets from process env vars, optionally prefixed.
 	TypeEnv = "env"
 )
 
-// Source is one named entry under sources:. Name is populated from
-// the map key during load.
+// Source is one inline source spec.
 type Source struct {
-	Name string `yaml:"-"`
-
 	// Type is the backend kind. Valid values:
-	//   "profile" -- HTTPS GET against the named profile's controller
-	//   "file"    -- dotenv file at Path
-	//   "env"     -- os.Getenv with optional Prefix
+	//   "controller" -- HTTPS GET against URL
+	//   "file"       -- dotenv file at Path
+	//   "env"        -- os.Getenv with optional Prefix
 	Type string `yaml:"type"`
 
-	// Profile is the profile name (from profiles.yaml) hosting the
-	// vault for type=profile. Required for that type.
-	Profile string `yaml:"profile,omitempty"`
+	// URL is the controller's base URL for type=controller. Required
+	// for that type. The orchestrator enforces that this matches the
+	// active profile's controller URL before authenticating.
+	URL string `yaml:"url,omitempty"`
 
 	// Path is the dotenv file location for type=file. Required for
 	// that type.
@@ -57,32 +46,47 @@ type Source struct {
 	Prefix string `yaml:"prefix,omitempty"`
 }
 
-// Validate checks each source's structural invariants.
-func (f *File) Validate() error {
-	for name, s := range f.Sources {
-		switch s.Type {
-		case TypeProfile:
-			if s.Profile == "" {
-				return fmt.Errorf("source %q: type=%s requires a profile field", name, s.Type)
-			}
-		case TypeFile:
-			if s.Path == "" {
-				return fmt.Errorf("source %q: type=%s requires a path field", name, s.Type)
-			}
-		case TypeEnv:
-			// prefix is optional
-		case "":
-			return fmt.Errorf("source %q: type is required (one of: %s, %s, %s)",
-				name, TypeProfile, TypeFile, TypeEnv)
-		default:
-			return fmt.Errorf("source %q: unknown type %q (valid: %s, %s, %s)",
-				name, s.Type, TypeProfile, TypeFile, TypeEnv)
+// Describe returns a short human-readable label for this source,
+// suitable for CLI / log output. For type=controller it's
+// "controller:URL"; type=file is "file:PATH"; type=env is "env:PREFIX"
+// (or just "env").
+func (s Source) Describe() string {
+	switch s.Type {
+	case TypeController:
+		return TypeController + ":" + s.URL
+	case TypeFile:
+		return TypeFile + ":" + s.Path
+	case TypeEnv:
+		if s.Prefix != "" {
+			return TypeEnv + ":" + s.Prefix
 		}
+		return TypeEnv
+	case "":
+		return ""
+	default:
+		return s.Type
 	}
-	if f.Default != "" {
-		if _, ok := f.Sources[f.Default]; !ok {
-			return fmt.Errorf("default source %q is not declared in sources", f.Default)
+}
+
+// Validate checks structural invariants for a single source.
+func (s Source) Validate() error {
+	switch s.Type {
+	case TypeController:
+		if s.URL == "" {
+			return fmt.Errorf("source type=%s requires a url field", s.Type)
 		}
+	case TypeFile:
+		if s.Path == "" {
+			return fmt.Errorf("source type=%s requires a path field", s.Type)
+		}
+	case TypeEnv:
+		// prefix is optional
+	case "":
+		return fmt.Errorf("source type is required (one of: %s, %s, %s)",
+			TypeController, TypeFile, TypeEnv)
+	default:
+		return fmt.Errorf("source unknown type %q (valid: %s, %s, %s)",
+			s.Type, TypeController, TypeFile, TypeEnv)
 	}
 	return nil
 }

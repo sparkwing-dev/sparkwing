@@ -8,52 +8,60 @@ import (
 )
 
 func TestValidate_AcceptsEverySourceType(t *testing.T) {
-	f := sources.File{
-		Default: "team",
-		Sources: map[string]sources.Source{
-			"team":  {Type: sources.TypeProfile, Profile: "shared"},
-			"dot":   {Type: sources.TypeFile, Path: ".env"},
-			"shell": {Type: sources.TypeEnv, Prefix: "SW_"},
-		},
+	cases := []sources.Source{
+		{Type: sources.TypeController, URL: "https://controller.shared.example.com"},
+		{Type: sources.TypeFile, Path: ".env"},
+		{Type: sources.TypeEnv, Prefix: "SW_"},
+		{Type: sources.TypeEnv},
 	}
-	if err := f.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-}
-
-func TestValidate_ProfileTypeRequiresProfileField(t *testing.T) {
-	f := sources.File{Sources: map[string]sources.Source{
-		"team": {Type: sources.TypeProfile},
-	}}
-	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "profile") {
-		t.Fatalf("Validate: want profile-required error, got %v", err)
+	for _, s := range cases {
+		if err := s.Validate(); err != nil {
+			t.Errorf("Validate(%+v): %v", s, err)
+		}
 	}
 }
 
-func TestValidate_RejectsUnknownType(t *testing.T) {
-	f := sources.File{Sources: map[string]sources.Source{
-		"x": {Type: "vault-pro"},
-	}}
-	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "unknown type") {
-		t.Fatalf("Validate: want unknown-type error, got %v", err)
+func TestValidate_ControllerTypeRequiresURL(t *testing.T) {
+	s := sources.Source{Type: sources.TypeController}
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "url") {
+		t.Fatalf("Validate: want url-required error, got %v", err)
 	}
 }
 
 func TestValidate_FileTypeRequiresPath(t *testing.T) {
-	f := sources.File{Sources: map[string]sources.Source{
-		"dot": {Type: sources.TypeFile},
-	}}
-	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "path") {
+	s := sources.Source{Type: sources.TypeFile}
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "path") {
 		t.Fatalf("Validate: want path-required error, got %v", err)
 	}
 }
 
-func TestValidate_DefaultMustBeDeclared(t *testing.T) {
-	f := sources.File{
-		Default: "ghost",
-		Sources: map[string]sources.Source{"dot": {Type: sources.TypeFile, Path: ".env"}},
+func TestValidate_RejectsUnknownType(t *testing.T) {
+	s := sources.Source{Type: "vault-pro"}
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "unknown type") {
+		t.Fatalf("Validate: want unknown-type error, got %v", err)
 	}
-	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "default") {
-		t.Fatalf("Validate: want default-not-declared error, got %v", err)
+}
+
+func TestValidate_RejectsEmptyType(t *testing.T) {
+	if err := (sources.Source{}).Validate(); err == nil || !strings.Contains(err.Error(), "type is required") {
+		t.Fatalf("Validate: want type-required error, got %v", err)
+	}
+}
+
+func TestDescribe(t *testing.T) {
+	cases := []struct {
+		s    sources.Source
+		want string
+	}{
+		{sources.Source{Type: sources.TypeController, URL: "https://controller.prod.example.com"}, "controller:https://controller.prod.example.com"},
+		{sources.Source{Type: sources.TypeFile, Path: ".env"}, "file:.env"},
+		{sources.Source{Type: sources.TypeEnv, Prefix: "SW_"}, "env:SW_"},
+		{sources.Source{Type: sources.TypeEnv}, "env"},
+		{sources.Source{}, ""},
+	}
+	for _, tc := range cases {
+		if got := tc.s.Describe(); got != tc.want {
+			t.Errorf("Describe(%+v) = %q, want %q", tc.s, got, tc.want)
+		}
 	}
 }
