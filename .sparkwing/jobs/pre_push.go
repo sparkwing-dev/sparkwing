@@ -103,7 +103,17 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "pre-v1 policy: clean")
 	}
 
-	// 3. Full golangci-lint sweep on .sparkwing/ (if a config is
+	// 3. Repo-wide gofmt sweep. golangci-lint runs in .sparkwing/ only,
+	// so a struct-alignment fix at the top of the tree never lands here.
+	// `gofmt -l` lists every unformatted file; non-empty output = fail.
+	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
+		MustBeEmpty("gofmt reported unformatted files"); err != nil {
+		failures = append(failures, fmt.Sprintf("gofmt: %v", err))
+	} else {
+		sparkwing.Info(ctx, "gofmt: clean")
+	}
+
+	// 4. Full golangci-lint sweep on .sparkwing/ (if a config is
 	// present there; falls back to a no-op message otherwise).
 	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && golangci-lint run ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("golangci-lint: %v", err))
