@@ -169,6 +169,7 @@ func runDashboardStart(args []string) error {
 		"--addr", addr,
 		"--home", dp.home,
 		"--pid", dp.pid,
+		"--version", installedVersion(),
 	}
 	if logStore != "" {
 		superviseArgs = append(superviseArgs, "--log-store", logStore)
@@ -313,6 +314,7 @@ func runDashboardSupervise(args []string) error {
 	artifactStoreURL := fs.String("artifact-store", "", "")
 	readOnly := fs.Bool("read-only", false, "")
 	noLocalStore := fs.Bool("no-local-store", false, "")
+	version := fs.String("version", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -333,6 +335,7 @@ func runDashboardSupervise(args []string) error {
 		Home:         *home,
 		ReadOnly:     *readOnly,
 		NoLocalStore: *noLocalStore,
+		Version:      *version,
 	}
 	if *logStoreURL != "" {
 		ls, err := storeurl.OpenLogStore(ctx, *logStoreURL)

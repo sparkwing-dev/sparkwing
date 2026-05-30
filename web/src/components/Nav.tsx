@@ -41,10 +41,11 @@ export default function Nav() {
 
   return (
     <div className="flex items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
-      <Link href="/" className="text-lg font-bold mr-4 py-2">
+      <Link href="/" className="text-lg font-bold py-2">
         sparkwing
       </Link>
-      <div className="flex items-center gap-1 flex-1">
+      <VersionPill />
+      <div className="flex items-center gap-1 flex-1 ml-4">
         {tabs.map((tab) => {
           const active = tab.external
             ? false
@@ -97,6 +98,30 @@ export default function Nav() {
         onClose={() => setOpen(false)}
       />
     </div>
+  );
+}
+
+// VersionPill surfaces the CLI version the serving binary reports
+// (injected by internal/web via __SPARKWING_VERSION_MARKER__). Hidden
+// when the server doesn't inject a value -- typically a non-cluster
+// dev build with no -ldflags="-X main.Version=..." set.
+function VersionPill() {
+  const [version, setVersion] = useState<string>("");
+  useEffect(() => {
+    const v = (window as unknown as { __SPARKWING_VERSION__?: string })
+      .__SPARKWING_VERSION__;
+    if (v && v !== "__SPARKWING_VERSION_MARKER__") {
+      setVersion(v);
+    }
+  }, []);
+  if (!version) return null;
+  return (
+    <span
+      className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded-sm border border-[var(--border)] text-[var(--muted)]"
+      title="sparkwing CLI version"
+    >
+      {version}
+    </span>
   );
 }
 

@@ -21,12 +21,13 @@ export const metadata: Metadata = {
   description: "CI/CD pipelines in Go",
 };
 
-// Runtime config (token + API URL) is injected by the Go server at
-// serve time via HTML templating. The markers below are substituted
-// by `pkg/orchestrator/web` before the HTML reaches the browser:
+// Runtime config (token + API URL + CLI version) is injected by the
+// Go server at serve time via HTML templating. The markers below are
+// substituted by `internal/web` before the HTML reaches the browser:
 //
 //   __SPARKWING_TOKEN_MARKER__   ->  controller bearer token
 //   __SPARKWING_API_URL_MARKER__ ->  controller URL (empty = same origin)
+//   __SPARKWING_VERSION_MARKER__ ->  serving binary's version (e.g. "v0.6.2")
 //
 // Static export means no server lifecycle at request time; per-
 // deployment values must come from the serving layer, not from
@@ -47,7 +48,8 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html:
               'window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";' +
-              'window.__SPARKWING_API_URL__="__SPARKWING_API_URL_MARKER__";',
+              'window.__SPARKWING_API_URL__="__SPARKWING_API_URL_MARKER__";' +
+              'window.__SPARKWING_VERSION__="__SPARKWING_VERSION_MARKER__";',
           }}
           // Ad-blocker extensions sometimes rewrite scripts in the
           // head before React hydrates; suppress the hydration warning

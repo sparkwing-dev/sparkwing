@@ -82,7 +82,11 @@ type HandlerOptions struct {
 	Token         string // controller bearer token (cluster mode)
 	// APIURL is injected into the SPA HTML as window.__SPARKWING_API_URL__.
 	// Empty means same-origin.
-	APIURL        string
+	APIURL string
+	// Version is injected into the SPA HTML as window.__SPARKWING_VERSION__
+	// and rendered as a small pill in the nav. Operators use it to
+	// confirm which CLI build they're connected to. Empty renders no pill.
+	Version       string
 	ExtraServices []HealthService
 	// RequireLogin gates the browser-facing surface behind the
 	// session-cookie flow. Disabled in laptop-local dev where an empty
@@ -270,6 +274,9 @@ func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, 
 	body = bytes.ReplaceAll(body,
 		[]byte("__SPARKWING_API_URL_MARKER__"),
 		[]byte(jsStringEscape(opts.APIURL)))
+	body = bytes.ReplaceAll(body,
+		[]byte("__SPARKWING_VERSION_MARKER__"),
+		[]byte(jsStringEscape(opts.Version)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)

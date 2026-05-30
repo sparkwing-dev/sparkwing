@@ -60,6 +60,11 @@ type Options struct {
 	// read-only experience: the controller is not mounted, so write
 	// endpoints are absent rather than 405.
 	NoLocalStore bool
+
+	// Version is rendered as a small pill in the dashboard nav. The
+	// caller passes the running CLI's version (typically the value
+	// of cmd/sparkwing.installedVersion()). Empty hides the pill.
+	Version string
 }
 
 // Run starts the local dev server and blocks until ctx is cancelled
@@ -158,6 +163,7 @@ func Run(ctx context.Context, opts Options) error {
 	webOpts := web.HandlerOptions{
 		Backend: dashBackend,
 		Paths:   paths,
+		Version: opts.Version,
 	}
 	webHandler := web.HandlerFromOptions(webOpts)
 
