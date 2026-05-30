@@ -48,6 +48,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **dashboard:** `sparkwing dashboard start` now fails fast with a clear
+  error when the bind address is already in use, naming the holding
+  process (e.g. `address 127.0.0.1:4343 already in use by
+  sparkwing-local-ws (pid 37326)`). Previously the supervisor would
+  silently crash, the PID file never got written, and `sparkwing
+  dashboard kill` would then report "not running" even though something
+  was visibly serving the port. `start` also now treats listener-not-
+  ready and missing-PID-file as hard errors, surfacing the tail of
+  `dashboard.log` instead of printing a success banner with a dead PID.
+
 ## [v0.6.2] - 2026-05-30
 
 ### Fixed

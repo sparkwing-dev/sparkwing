@@ -141,6 +141,18 @@ func runDashboardStart(args []string) error {
 		return nil
 	}
 
+	// Pre-check the bind address. If something else is already on it
+	// (a stale sparkwing-local-ws, another dashboard supervisor we
+	// don't track, a port-clash with a dev server), the supervisor
+	// would crash silently into dashboard.log and `kill` would then
+	// report "not running" -- because we never got to write the PID
+	// file. Surface the clash here instead.
+	if holder, err := portHolder(addr); err != nil {
+		return err
+	} else if holder != "" {
+		return fmt.Errorf("address %s already in use by %s; free it or pass --addr to bind elsewhere", addr, holder)
+	}
+
 	logF, err := os.OpenFile(dp.log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open log %s: %w", dp.log, err)
@@ -189,8 +201,18 @@ func runDashboardStart(args []string) error {
 
 	baseURL := "http://" + addr
 	if err := waitForListener(addr, 3*time.Second); err != nil {
-		fmt.Fprintf(os.Stderr,
-			"warn: dashboard didn't accept connections within 3s; check %s\n", dp.log)
+		_ = signalTerminate(pid)
+		tail := tailFile(dp.log, 40)
+		if tail == "" {
+			tail = "(empty)"
+		}
+		return fmt.Errorf("dashboard supervisor (pid %d) failed to accept connections within 3s; tail of %s:\n%s", pid, dp.log, tail)
+	}
+	// Confirm the supervisor wrote its PID file -- otherwise `kill`
+	// later will say "not running" even though the listener is up.
+	if _, alive := readLivePID(dp.pid); !alive {
+		_ = signalTerminate(pid)
+		return fmt.Errorf("dashboard supervisor came up but never wrote %s; check %s", dp.pid, dp.log)
 	}
 	fmt.Fprintln(os.Stdout, bannerLine())
 	fmt.Fprintf(os.Stdout, "  dashboard:  %s\n", baseURL)
@@ -349,6 +371,68 @@ func readBaseURL(home string) string {
 		}
 	}
 	return ""
+}
+
+// portHolder returns a human-readable description of the process bound
+// to addr ("<command> pid <pid>"), or empty string if the port is free.
+// Returns a non-nil error only on unexpected listener-creation failures
+// -- "address in use" is conveyed via the holder string, not an error.
+func portHolder(addr string) (string, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err == nil {
+		_ = ln.Close()
+		return "", nil
+	}
+	// errno EADDRINUSE on POSIX, WSAEADDRINUSE on Windows. We don't
+	// match on the errno value (cross-platform pain); the substring
+	// "in use" is in both standard messages.
+	if !strings.Contains(strings.ToLower(err.Error()), "in use") {
+		return "", fmt.Errorf("probe %s: %w", addr, err)
+	}
+	// Best-effort identification. lsof is on macOS + most Linux
+	// distros; fall back to "another process" if it's missing.
+	port := addr
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		port = addr[i+1:]
+	}
+	out, lerr := exec.Command("lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN", "-Fcp").Output()
+	if lerr != nil || len(out) == 0 {
+		return "another process", nil
+	}
+	var cmdName, pidStr string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		switch line[0] {
+		case 'p':
+			pidStr = line[1:]
+		case 'c':
+			cmdName = line[1:]
+		}
+	}
+	switch {
+	case cmdName != "" && pidStr != "":
+		return fmt.Sprintf("%s (pid %s)", cmdName, pidStr), nil
+	case pidStr != "":
+		return fmt.Sprintf("pid %s", pidStr), nil
+	default:
+		return "another process", nil
+	}
+}
+
+// tailFile returns the last n lines of path, or empty string on any
+// error. Used to surface supervisor crash output to the foreground.
+func tailFile(path string, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // waitForListener polls the bind address until a TCP connect succeeds
