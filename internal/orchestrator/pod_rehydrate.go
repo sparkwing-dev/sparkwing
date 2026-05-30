@@ -2,11 +2,8 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -22,18 +19,13 @@ import (
 // pod runs this, the orchestrator-side fail-fast already passed, so
 // a pod-side miss signals an environment drift between controller
 // and runner that's worth failing loudly.
-func rehydratePipelineSecrets(ctx context.Context, snapshot []byte, reg *sparkwing.Registration) (any, error) {
+func rehydratePipelineSecrets(ctx context.Context, _ []byte, reg *sparkwing.Registration) (any, error) {
 	if reg == nil {
 		return nil, nil
 	}
-	var meta struct {
-		Secrets pipelines.SecretsField `json:"secrets"`
-	}
-	if len(snapshot) > 0 {
-		if err := json.Unmarshal(snapshot, &meta); err != nil {
-			return nil, fmt.Errorf("decode snapshot: %w", err)
-		}
-	}
-	stub := &pipelines.Pipeline{Secrets: meta.Secrets}
-	return sparkwingruntime.ResolvePipelineSecrets(ctx, reg, stub)
+	// Pod has the pipeline registered (same binary on both sides),
+	// so secret declarations come straight from the Go provider on
+	// reg. The snapshot is no longer consulted -- kept in the
+	// signature so existing callers don't churn.
+	return sparkwingruntime.ResolvePipelineSecrets(ctx, reg, nil)
 }

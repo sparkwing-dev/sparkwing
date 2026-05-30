@@ -33,53 +33,19 @@ pipelines:
 	}
 }
 
-func TestParse_BareStringSecrets_Rejected(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    secrets:
-      - DEPLOY_TOKEN
-`
-	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "bare string") {
-		t.Fatalf("expected bare-string rejection; got %v", err)
-	}
-}
-
-func TestParse_TypedSecretEntries(t *testing.T) {
+func TestParse_RejectsSecretsBlock(t *testing.T) {
+	// secrets: is no longer a YAML field; declarations live on the
+	// pipeline's Secrets() provider in Go.
 	yaml := `
 pipelines:
   - name: deploy
     entrypoint: Deploy
     secrets:
       - {name: DEPLOY_TOKEN, required: true}
-      - {name: SLACK_HOOK, optional: true}
-`
-	cfg, err := pipelines.Parse(strings.NewReader(yaml))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	p := cfg.Find("deploy")
-	if p == nil || len(p.Secrets) != 2 {
-		t.Fatalf("secrets parse: %+v", p)
-	}
-	if !p.Secrets[0].Required || p.Secrets[1].Required {
-		t.Errorf("required flags off: %+v", p.Secrets)
-	}
-}
-
-func TestParse_SecretsRequiredAndOptionalRejected(t *testing.T) {
-	yaml := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    secrets:
-      - {name: X, required: true, optional: true}
 `
 	_, err := pipelines.Parse(strings.NewReader(yaml))
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("expected mutual-exclusion error; got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown-field rejection for secrets; got %v", err)
 	}
 }
 

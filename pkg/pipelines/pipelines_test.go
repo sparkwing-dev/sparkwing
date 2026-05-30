@@ -36,9 +36,6 @@ pipelines:
       schedule: "0 */6 * * *"
       webhook:
         path: /hooks/btd
-    secrets:
-      - {name: SPARKWING_ARGOCD_SERVER, required: true}
-      - {name: SPARKWING_ARGOCD_TOKEN, required: true}
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -56,18 +53,6 @@ pipelines:
 	}
 	if p.On.Webhook == nil || p.On.Webhook.Path != "/hooks/btd" {
 		t.Fatalf("webhook mis-parsed: %+v", p.On.Webhook)
-	}
-	if len(p.Secrets) != 2 {
-		t.Fatalf("secrets count = %d", len(p.Secrets))
-	}
-	// Legacy bare-string form maps to typed entries with Required=true.
-	for _, e := range p.Secrets {
-		if e.Name == "" {
-			t.Fatalf("legacy bare-string secret produced empty Name: %+v", e)
-		}
-		if !e.Required {
-			t.Fatalf("legacy bare-string secret should be Required, got %+v", e)
-		}
 	}
 }
 

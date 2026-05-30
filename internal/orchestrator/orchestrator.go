@@ -411,11 +411,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	// Pre-build the per-run snapshot metadata (SecretsField) so the
-	// cluster pod can re-resolve PipelineSecrets without re-reading
-	// pipelines.yaml on its end.
-	snapMeta := planSnapshotMeta{}
+	// cluster pod can re-resolve PipelineSecrets against its own
+	// backend. Derived from the pipeline's Secrets() provider via
+	// reflection -- the YAML pipelines[].secrets: block is gone.
+	snapMeta := planSnapshotMeta{
+		Secrets: sparkwingruntime.ReflectSecretsField(reg),
+	}
 	if opts.PipelineYAML != nil {
-		snapMeta.Secrets = opts.PipelineYAML.Secrets
 		snapMeta.PipelineRequires = opts.PipelineYAML.Requires
 	}
 

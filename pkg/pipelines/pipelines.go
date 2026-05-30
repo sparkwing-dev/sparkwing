@@ -19,11 +19,10 @@ type Config struct {
 // secrets surface. One Go entrypoint can back many pipelines, each
 // with its own policy.
 type Pipeline struct {
-	Name        string       `yaml:"name"`
-	Entrypoint  string       `yaml:"entrypoint"`
-	Description string       `yaml:"description,omitempty"`
-	On          Triggers     `yaml:"on,omitempty"`
-	Secrets     SecretsField `yaml:"secrets,omitempty"`
+	Name        string   `yaml:"name"`
+	Entrypoint  string   `yaml:"entrypoint"`
+	Description string   `yaml:"description,omitempty"`
+	On          Triggers `yaml:"on,omitempty"`
 
 	// Guards gate dispatch on the resolved profile + args. Reject
 	// fires before any step runs when any token matches; Require
@@ -65,79 +64,20 @@ type Guards struct {
 	Reject  []string `yaml:"reject,omitempty"`
 }
 
-// SecretEntry is one typed secret declaration. Name names the secret
-// in the pipeline's Secrets struct (and in the source backing it).
-// Required and Optional are mutually exclusive; the validator
-// enforces that. Neither set defaults to Required=true at parse time
-// to match the bare-string legacy semantics.
+// SecretEntry is one secret declaration. Required/Optional are
+// mutually exclusive; when neither is set the entry is treated as
+// required (see IsRequired).
 type SecretEntry struct {
-	Name     string `yaml:"name" json:"name"`
-	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
-	Optional bool   `yaml:"optional,omitempty" json:"optional,omitempty"`
+	Name     string `json:"name"`
+	Required bool   `json:"required,omitempty"`
+	Optional bool   `json:"optional,omitempty"`
 }
 
-// SecretsField is the typed list of secret declarations on a
-// pipeline. Each entry is a mapping with name + required/optional:
-//
-//	secrets:
-//	  - {name: DEPLOY_TOKEN, required: true}
-//	  - {name: SLACK_HOOK,   optional: true}
+// SecretsField is the orchestrator's snapshot/wire format for a
+// run's declared secret needs. Populated from a pipeline's
+// Secrets() provider via reflection; shipped to cluster pods in the
+// plan snapshot so they can re-resolve against their own backend.
 type SecretsField []SecretEntry
-
-// UnmarshalYAML implements yaml.Unmarshaler. The list must be a
-// sequence of mapping nodes; scalar nodes (the legacy bare-string
-// form) produce a clear migration error pointing at the typed
-// shape.
-func (s *SecretsField) UnmarshalYAML(node *yaml.Node) error {
-	if node == nil {
-		return nil
-	}
-	switch node.Kind {
-	case yaml.AliasNode:
-		if node.Alias != nil {
-			return s.UnmarshalYAML(node.Alias)
-		}
-		return nil
-	case yaml.SequenceNode:
-		// proceed
-	case 0:
-		return nil
-	default:
-		return fmt.Errorf("secrets: expected a sequence, got %s", nodeKindName(node.Kind))
-	}
-	out := make(SecretsField, 0, len(node.Content))
-	for i, elem := range node.Content {
-		switch elem.Kind {
-		case yaml.MappingNode:
-			var entry SecretEntry
-			if err := elem.Decode(&entry); err != nil {
-				return fmt.Errorf("secrets[%d]: %w", i, err)
-			}
-			out = append(out, entry)
-		case yaml.ScalarNode:
-			var name string
-			if err := elem.Decode(&name); err != nil {
-				return fmt.Errorf("secrets[%d]: %w", i, err)
-			}
-			return fmt.Errorf("secrets[%d]: bare string %q is not allowed; use the typed form `- {name: %s, required: true}`",
-				i, name, name)
-		default:
-			return fmt.Errorf("secrets[%d]: expected a mapping, got %s", i, nodeKindName(elem.Kind))
-		}
-	}
-	*s = out
-	return nil
-}
-
-// MarshalYAML emits the typed form.
-func (s SecretsField) MarshalYAML() (any, error) {
-	if len(s) == 0 {
-		return nil, nil
-	}
-	out := make([]SecretEntry, len(s))
-	copy(out, s)
-	return out, nil
-}
 
 // UnmarshalYAML decodes a Pipeline mapping and rejects any field not
 // in pipelineKnownYAMLFields(). The strict check protects against
@@ -187,7 +127,7 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
-		"on": {}, "secrets": {},
+		"on":     {},
 		"guards": {}, "args": {}, "profile": {}, "requires": {},
 	}
 }
@@ -275,24 +215,8 @@ func (c *Config) Validate() error {
 		}
 		seen[p.Name] = struct{}{}
 
-		if err := p.Secrets.Validate(p.Name); err != nil {
-			return err
-		}
 		if err := p.Guards.Validate(p.Name); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// Validate checks every secret entry under one pipeline.
-func (s SecretsField) Validate(pipeline string) error {
-	for i, e := range s {
-		if e.Name == "" {
-			return fmt.Errorf("pipeline %q secrets[%d]: name is required", pipeline, i)
-		}
-		if e.Required && e.Optional {
-			return fmt.Errorf("pipeline %q secret %q: required and optional are mutually exclusive", pipeline, e.Name)
 		}
 	}
 	return nil

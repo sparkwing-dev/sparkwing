@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -132,56 +131,9 @@ func TestResolvePipelineSecrets_TransportErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestResolvePipelineSecrets_UnionWithYAMLEntries(t *testing.T) {
-	reg := registerSecretsOnlyPipe(t)
-	r := &fakeResolver{values: map[string]string{
-		"DEPLOY_TOKEN": "swu_x",
-		"DATABASE_URL": "postgres://prod",
-	}}
-	ctx := sparkwing.WithSecretResolver(context.Background(), r)
-
-	yamlEntry := &pipelines.Pipeline{
-		Secrets: pipelines.SecretsField{
-			{Name: "DATABASE_URL", Required: true}, // declared in yaml only
-			{Name: "DEPLOY_TOKEN", Required: true}, // also declared in struct
-		},
-	}
-	out, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, yamlEntry)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	sec := out.(*releaseSec)
-	if sec.DeployToken != "swu_x" {
-		t.Errorf("DeployToken = %q", sec.DeployToken)
-	}
-	seen := map[string]bool{}
-	for _, n := range r.calls {
-		seen[n] = true
-	}
-	if !seen["DEPLOY_TOKEN"] || !seen["DATABASE_URL"] {
-		t.Errorf("expected both names resolved, calls=%v", r.calls)
-	}
-}
-
-func TestResolvePipelineSecrets_YamlOnlyRequiredMissingFails(t *testing.T) {
-	reg := registerConfigOnlyPipe(t) // no SecretsProvider
-	r := &fakeResolver{values: map[string]string{}}
-	ctx := sparkwing.WithSecretResolver(context.Background(), r)
-
-	yamlEntry := &pipelines.Pipeline{
-		Secrets: pipelines.SecretsField{
-			{Name: "DATABASE_URL", Required: true},
-		},
-	}
-	_, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, yamlEntry)
-	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
-		t.Fatalf("expected DATABASE_URL error, got %v", err)
-	}
-}
-
-func TestResolvePipelineSecrets_NoProviderNoYamlReturnsNil(t *testing.T) {
+func TestResolvePipelineSecrets_NoProviderReturnsNil(t *testing.T) {
 	reg := registerPlainPipe(t)
-	out, err := sparkwingruntime.ResolvePipelineSecrets(context.Background(), reg, &pipelines.Pipeline{})
+	out, err := sparkwingruntime.ResolvePipelineSecrets(context.Background(), reg, nil)
 	if err != nil || out != nil {
 		t.Fatalf("expected nil/nil, got %v/%v", out, err)
 	}

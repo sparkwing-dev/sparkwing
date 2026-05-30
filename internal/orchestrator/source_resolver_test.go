@@ -87,7 +87,6 @@ func TestRun_PlanSnapshotCarriesPipelineYAML(t *testing.T) {
 		PipelineYAML: &pipelines.Pipeline{
 			Name:       "env-reading-pipe",
 			Entrypoint: "EnvReading",
-			Secrets:    pipelines.SecretsField{{Name: "TOKEN", Required: true}},
 		},
 		Profile: &profile.Profile{
 			Name:    "test",

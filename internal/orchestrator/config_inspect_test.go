@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -30,23 +29,15 @@ func ensureInspectPipe(t *testing.T) *sparkwing.Registration {
 	return reg
 }
 
-func TestInspectPipelineSecrets_UnionsYAMLAndStruct(t *testing.T) {
+func TestInspectPipelineSecrets_StructProvider(t *testing.T) {
 	reg := ensureInspectPipe(t)
-	yamlEntry := &pipelines.Pipeline{
-		Secrets: pipelines.SecretsField{
-			{Name: "AUDIT_API_KEY", Required: true},
-		},
-	}
-	fields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, yamlEntry)
+	fields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, nil)
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
 	byName := map[string]sparkwing.SecretField{}
 	for _, f := range fields {
 		byName[f.Name] = f
-	}
-	if !byName["AUDIT_API_KEY"].Required || byName["AUDIT_API_KEY"].DeclaredIn != "pipelines.yaml secrets:" {
-		t.Errorf("AUDIT_API_KEY = %+v", byName["AUDIT_API_KEY"])
 	}
 	if !byName["DEPLOY_TOKEN"].Required || byName["DEPLOY_TOKEN"].DeclaredIn != "Secrets() struct" {
 		t.Errorf("DEPLOY_TOKEN = %+v", byName["DEPLOY_TOKEN"])

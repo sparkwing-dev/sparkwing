@@ -17,9 +17,8 @@ func WithPipelineSecrets(ctx context.Context, v any) context.Context {
 }
 
 // ResolvePipelineSecrets resolves every required secret declared by
-// the pipeline -- both via the SecretsProvider's struct fields and
-// via the SecretsField list on the yaml entry -- against the
-// SecretResolver installed on ctx, before the pipeline's Plan runs.
+// the pipeline's SecretsProvider against the SecretResolver
+// installed on ctx, before the pipeline's Plan runs.
 //
 // Required fail-fast: a missing required secret produces a clear
 // error naming the pipeline and the secret. Optional entries whose
@@ -30,11 +29,9 @@ func WithPipelineSecrets(ctx context.Context, v any) context.Context {
 // so step bodies can read sec.DeployToken directly via
 // PipelineSecrets[T](ctx) without re-fetching.
 //
-// Returns nil, nil when the pipeline value does not implement
-// SecretsProvider and the yaml entry declares no required secrets --
-// nothing to install. Returns the populated struct (or a synthesized
-// zero struct when only the yaml side declares secrets) otherwise.
-func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, yamlEntry *pipelines.Pipeline) (any, error) {
+// Returns (nil, nil) when the pipeline value does not implement
+// SecretsProvider -- nothing to install.
+func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ *pipelines.Pipeline) (any, error) {
 	if reg == nil {
 		return nil, nil
 	}
@@ -44,64 +41,37 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, ya
 	}
 	resolver, _ := ctx.Value(sparkwing.RuntimePlumbing.Keys.SecretResolver).(sparkwing.SecretResolver)
 
-	// SecretsField from yaml: union with the struct-declared required set.
-	var yamlRequired []string
-	var yamlOptional []string
-	if yamlEntry != nil {
-		for _, e := range yamlEntry.Secrets {
-			if e.IsRequired() {
-				yamlRequired = append(yamlRequired, e.Name)
-			} else {
-				yamlOptional = append(yamlOptional, e.Name)
-			}
-		}
-	}
-
 	sp, hasProvider := p.(sparkwing.SecretsProvider)
-	if !hasProvider && len(yamlRequired) == 0 && len(yamlOptional) == 0 {
+	if !hasProvider {
 		return nil, nil
 	}
 
 	var sec any
 	var specs []swtags.FieldSpec
 	var elem reflect.Value
-	if hasProvider {
-		sec = sp.Secrets()
-		if sec != nil {
-			rv := reflect.ValueOf(sec)
-			if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
-				return nil, fmt.Errorf("pipeline %q secrets: Secrets() must return a non-nil pointer to a struct, got %T", reg.Name, sec)
-			}
-			ss, err := swtags.Parse(rv.Type())
-			if err != nil {
-				return nil, fmt.Errorf("pipeline %q secrets: %w", reg.Name, err)
-			}
-			specs = ss
-			elem = rv.Elem()
-			for i := range specs {
-				// Secrets default to required when neither flag is set,
-				// matching the bare-string SecretsField rule.
-				if !specs[i].Required && !specs[i].Optional {
-					specs[i].Required = true
-				}
+	sec = sp.Secrets()
+	if sec != nil {
+		rv := reflect.ValueOf(sec)
+		if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+			return nil, fmt.Errorf("pipeline %q secrets: Secrets() must return a non-nil pointer to a struct, got %T", reg.Name, sec)
+		}
+		ss, err := swtags.Parse(rv.Type())
+		if err != nil {
+			return nil, fmt.Errorf("pipeline %q secrets: %w", reg.Name, err)
+		}
+		specs = ss
+		elem = rv.Elem()
+		for i := range specs {
+			// Secrets default to required when neither flag is set.
+			if !specs[i].Required && !specs[i].Optional {
+				specs[i].Required = true
 			}
 		}
 	}
 
-	// Build the union of names to resolve, tracking required-ness per
-	// name. Struct entries win on conflict because they carry the
-	// destination field.
+	// Track required-ness per name.
 	requiredNames := map[string]struct{}{}
 	optionalNames := map[string]struct{}{}
-	for _, n := range yamlRequired {
-		requiredNames[n] = struct{}{}
-	}
-	for _, n := range yamlOptional {
-		if _, alreadyReq := requiredNames[n]; alreadyReq {
-			continue
-		}
-		optionalNames[n] = struct{}{}
-	}
 	for _, s := range specs {
 		if s.Required {
 			requiredNames[s.Name] = struct{}{}

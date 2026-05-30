@@ -47,8 +47,6 @@ pipelines:
       push:
         branches: [main]
         paths: ["cmd/**"]
-    secrets:
-      - {name: DEPLOY_TOKEN, required: true}
 
 sparks:
   - name: sparks-core
@@ -126,23 +124,6 @@ func TestLoad_UnknownTopLevelFieldFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("error should include the file path: %v", err)
-	}
-}
-
-func TestLoad_SecretsBareStringRejected(t *testing.T) {
-	dir := t.TempDir()
-	path := writeYAML(t, dir, projectconfig.Filename, `
-pipelines:
-  - name: release
-    entrypoint: Release
-    secrets: [DEPLOY_TOKEN]
-`)
-	_, err := projectconfig.Load(path)
-	if err == nil {
-		t.Fatal("expected the SecretsField migration error from inside the merged file")
-	}
-	if !strings.Contains(err.Error(), "bare string") {
-		t.Errorf("want bare-string migration error, got: %v", err)
 	}
 }
 

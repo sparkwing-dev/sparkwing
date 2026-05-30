@@ -54,22 +54,9 @@ func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *p
 		required   bool
 		declaredIn string
 	}
+	_ = yamlEntry // YAML-side secrets declarations are gone; provider is the source of truth.
 	var entries []entry
 	seen := map[string]int{}
-
-	if yamlEntry != nil {
-		for _, s := range yamlEntry.Secrets {
-			if s.Name == "" {
-				continue
-			}
-			entries = append(entries, entry{
-				name:       s.Name,
-				required:   s.Required || (!s.Required && !s.Optional),
-				declaredIn: "pipelines.yaml secrets:",
-			})
-			seen[s.Name] = len(entries) - 1
-		}
-	}
 
 	p := reg.instance()
 	if sp, ok := p.(SecretsProvider); ok {

@@ -56,9 +56,6 @@ func TestOrchestratorRun_InstallsPipelineSecretsOnCtx(t *testing.T) {
 		PipelineYAML: &pipelines.Pipeline{
 			Name:       "orch-sec-reader",
 			Entrypoint: "SecReader",
-			Secrets: pipelines.SecretsField{
-				{Name: "DEPLOY_TOKEN", Required: true},
-			},
 		},
 	})
 	if err != nil {

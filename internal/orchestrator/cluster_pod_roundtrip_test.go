@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -78,19 +77,9 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 2. Build the snapshot the orchestrator would persist. The pod
-	// receives only secret declarations -- never values.
-	snap, err := json.Marshal(planSnapshot{
-		Pipeline: "pod-rt-pipe",
-		RunID:    "run-pod-rt",
-		Secrets: pipelines.SecretsField{
-			{Name: "DEPLOY_TOKEN", Required: true},
-			{Name: "SLACK_HOOK", Optional: true},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal snapshot: %v", err)
-	}
+	// Pod-side rehydrate reads secret declarations from the registered
+	// pipeline's Secrets() provider (same binary on both sides); the
+	// snapshot no longer carries them.
 
 	// 3. Pod-side: build the resolver the cluster worker would
 	// install for a remote-controller source binding. The SDK
@@ -106,7 +95,7 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	// 4. Re-resolve secrets against the controller-backed resolver.
 	// DEPLOY_TOKEN must come back with the value the fake server
 	// served; SLACK_HOOK is optional so a 404 doesn't fail the run.
-	gotSec, err := rehydratePipelineSecrets(ctx, snap, reg)
+	gotSec, err := rehydratePipelineSecrets(ctx, nil, reg)
 	if err != nil {
 		t.Fatalf("rehydrate secrets: %v", err)
 	}
@@ -173,10 +162,7 @@ func TestClusterPodRoundTrip_AuthFailureSurfacesAsError(t *testing.T) {
 		t.Fatalf("resolver: %v", err)
 	}
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
-	snap, _ := json.Marshal(planSnapshot{
-		Secrets: pipelines.SecretsField{{Name: "DEPLOY_TOKEN", Required: true}},
-	})
-	_, err = rehydratePipelineSecrets(ctx, snap, reg)
+	_, err = rehydratePipelineSecrets(ctx, nil, reg)
 	if err == nil {
 		t.Fatal("expected auth-error to propagate")
 	}

@@ -2,11 +2,9 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -40,10 +38,7 @@ func TestRehydratePipelineSecrets_ResolvesAgainstCtxResolver(t *testing.T) {
 		return "", false, sparkwing.ErrSecretMissing
 	})
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
-	snap, _ := json.Marshal(planSnapshot{
-		Secrets: pipelines.SecretsField{{Name: "DEPLOY_TOKEN", Required: true}},
-	})
-	got, err := rehydratePipelineSecrets(ctx, snap, reg)
+	got, err := rehydratePipelineSecrets(ctx, nil, reg)
 	if err != nil {
 		t.Fatalf("rehydrate: %v", err)
 	}
@@ -59,10 +54,7 @@ func TestRehydratePipelineSecrets_MissingRequiredFails(t *testing.T) {
 		return "", false, sparkwing.ErrSecretMissing
 	})
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
-	snap, _ := json.Marshal(planSnapshot{
-		Secrets: pipelines.SecretsField{{Name: "DEPLOY_TOKEN", Required: true}},
-	})
-	_, err := rehydratePipelineSecrets(ctx, snap, reg)
+	_, err := rehydratePipelineSecrets(ctx, nil, reg)
 	if err == nil || !errors.Is(err, sparkwing.ErrSecretMissing) {
 		t.Fatalf("expected ErrSecretMissing, got %v", err)
 	}
