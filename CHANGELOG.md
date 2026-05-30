@@ -54,153 +54,133 @@ code change to unlock.
   unit by its entrypoint type name. Combined with the new
   `BindPipelinesFromYAML(cfg)` bootstrap, one entrypoint can back
   many pipelines -- each pipeline in YAML names the entrypoint and
-  supplies its own policy. The legacy `Register` API stays as a
-  deprecation-marked wrapper.
-- **config:** Pipeline-level `dispatch:` block (runners, source,
-  secrets, protected, approvals, backend). Same field set as the
-  v0.5 `targets[name]:` value, lifted to the pipeline level since
-  one pipeline now binds one deployment shape.
-- **config:** Pipeline-level `guards:` block evaluates predicate
-  tokens against the resolved profile + args at dispatch. Token
-  vocabulary: `profile-local`, `profile-controller`,
-  `profile-name:<name>`, `arg:<flag>=<value>`. `require:` is
-  AND-composed; `reject:` is OR-composed; `reject:` fires first so
-  "you can't dispatch this" beats "missing prereq" when both apply.
-- **config:** Pipeline-level `defaults:` map supplies per-arg
-  fallback values. Resolution priority for any one arg, low to high:
-  schema `Default()` -> schema `Computed()` -> YAML `defaults:` ->
-  operator CLI flag. Explicit values (operator CLI > deployer YAML)
-  always beat SDK-author fallback rules (Computed > Default). To
-  declare a value the operator cannot override, use `values:` +
-  `PipelineConfig` -- that's the typed pipeline-binding-only
-  surface; args are by definition operator-controllable.
-- **sdk:** Typed-args system for jobs via `sparkwing.WithArgs[T]` +
-  optional `Schema()` method (`Required` / `RequiredWhen(predicate)`
-  / `Default` / `Computed(fn)` / `OneOf` / `Min` / `Max` / `Range` /
+  supplies its own policy.
+- **sdk:** Typed-args system via `sparkwing.WithArgs[T]` + optional
+  `Schema()` method (`Required` / `RequiredWhen(predicate)` /
+  `Default` / `Computed(fn)` / `OneOf` / `Min` / `Max` / `Range` /
   `Positive` / `Custom(fn)` / group rules). Predicate vocab:
-  `ArgEq`/`ArgNeq`/`ArgIn`/`ArgSet`/`ArgUnset` plus combinators
-  `And`/`Or`/`Not` and context predicates `Local`/`Remote`/
-  `Profile(name)`/`Always`. `sparkwing.Arg[T](ctx, name)` accessor
-  reads any resolved arg by CLI flag name.
+  `ArgEq`/`ArgNeq`/`ArgIn`/`ArgSet`/`ArgUnset` plus `And`/`Or`/`Not`
+  and `Local`/`Remote`/`Profile(name)`/`Always`. `sparkwing.Arg[T]`
+  reads a resolved arg by CLI flag name.
 - **cli:** `sparkwing run <pipeline> --help` lists every transitive
   `WithArgs[T]` flag declared by jobs the pipeline registers,
   annotated with `[from job <id>]` so authors can trace each flag
   back to its owning job.
+- **config:** Top-level `defaults:` block (`profile`, `args`,
+  `guards`, `requires`) supplies per-pipeline fallbacks. `profile`,
+  `guards`, `requires` replace wholesale at pipeline level when
+  declared; `args` merges per-key (pipeline wins per-key).
+- **config:** Project YAML grows a `profiles:` map (same shape as
+  `~/.config/sparkwing/profiles.yaml`). A pipeline references one
+  via `pipeline.profile: NAME`; `defaults.profile: NAME` provides
+  the project-wide default.
+- **config:** Pipeline `guards:` block. Token vocabulary normalized
+  to `namespace:rest`: `profile:local`, `profile:controller`,
+  `profile:name=NAME`, `git:branch=NAME`, `git:branch=default`,
+  `arg:FLAG=VALUE`. `require:` is AND-composed; `reject:` is
+  OR-composed and fires first.
+- **config:** Pipeline `requires: [labels]` lists runner labels
+  every job in the pipeline must satisfy (unioned with each job's
+  own `Job.Requires(...)` declarations). The reserved `local` label
+  pins execution to in-process (same effect as `--sw-local-only`).
+- **config:** Backend specs gained `token_env: VAR` for sourcing
+  the controller token from an env var instead of inlining it --
+  intended for checked-in project YAML where inline tokens are a
+  non-starter.
+- **config:** Backend spec gained `type: none` (valid only on the
+  `secrets` surface). Profile validator requires every profile to
+  declare all four surfaces (`secrets`, `state`, `cache`, `logs`);
+  pipelines with no secrets-resolving jobs use `type: none` to
+  satisfy the requirement explicitly.
+- **config:** Per-surface controller fields (`url`/`token`/
+  `token_env`) inherit from the profile's top-level `controller:`
+  block when omitted. A profile that routes every surface through
+  the same controller writes the URL/token once instead of five
+  times.
+- **sdk:** `Git.DefaultBranch` populated from origin's HEAD
+  symref. Feeds `git:branch=default` guard evaluation.
 
 ### Changed (Breaking)
 
-- **config:** Trimmed pipelines.yaml + profile YAML surface:
-  - Dropped `pipelines[].tags` (display-only, no filter behavior).
-    The `--tag` flag on `runs list` is gone with it.
-  - Dropped `pipelines[].hidden` (no-shows in tab-completion menus
-    were a footgun; delete pipelines that shouldn't be dispatchable).
-  - Dropped `pipelines[].on.manual` (pipelines are manual-by-default
-    when no other trigger is declared; the explicit tag was noise).
-  - Dropped `pipelines[].on.deploy` (unused placeholder type).
-  - Renamed `pipelines[].dispatch.approvals: "required"` to
-    `pipelines[].dispatch.requires_approval: true` -- collapses
-    a single-value enum to a bool.
-  - Dropped `runners[].type: static` (no actual static-runner
-    registration flow today; `local` and `kubernetes` remain).
-  - Dropped `sources[].type: macos-keychain` (darwin-only, niche;
-    the `profile` / `file` / `env` types cover everything in use).
-- **config:** Profile `controller:` is now a nested block with
-  `url:` + `token:` fields (was two flat fields, `controller:` and
-  `token:`, alongside the rest of the profile). Makes the binding
-  unambiguous and leaves room for the controller block to grow.
-- **config:** Profile `gitcache:` field removed. The CLI now
-  discovers the sparkwing-cache pod's URL via the controller's new
-  `GET /api/v1/services` endpoint, then talks to the cache pod
-  directly for `sparkwing push` and the eager-refresh on dispatch.
-  Operators with a controller-bound profile don't need to set the
-  gitcache URL anywhere; operators without a controller (no remote
-  dispatch) lose the gitcache-backed flows, which they wouldn't be
-  using anyway.
-- **controller:** New `--cache-pod-url` flag (or `CACHE_POD_URL` env
-  var) on `sparkwing-controller`. When set, the controller announces
-  the URL via `GET /api/v1/services` so operator CLIs can discover
-  it. Empty disables the announcement; clients get a 404 and fall
-  back to "no cache pod" (the few flows that need one fail loud).
-- **config:** Profile fields removed: `cost_per_runner_hour` (was
-  decorative receipt cost; receipts now show compute_seconds only),
-  `auto_allow` (was a footgun -- pre-authorizing risk labels per
-  profile undermines the gate; pass `--sw-allow` explicitly or use
-  pipeline-level `guards:`), `default_runner` (only fed tab
-  completion; completion now shows the unfiltered profile list),
-  `log_store` / `artifact_store` (overlapped with the typed
-  `logs:`/`cache:` Spec blocks; the dashboard and local-ws now take
-  explicit `--log-store` / `--artifact-store` URL flags), `detect:`
-  (built-in `gha` / `kubernetes` auto-selection gone -- operators
-  always pick `--profile` explicitly).
-- **cli:** Loader migration hints removed. `pipelines.yaml` rejects
-  unknown fields with a plain "unknown field X" error; no
-  per-removed-field migration nudges.
-- **sdk:** `PipelineConfig[T]` accessor, `ConfigProvider` interface,
+- **config:** Source/backend specs unified. The standalone `sources`
+  registry and `sources.Source` type are gone; secrets are a fourth
+  `backends.Surfaces` field alongside `state`/`cache`/`logs`. Valid
+  secrets `type:` values: `controller`, `filesystem`, `env`, `none`.
+- **config:** Pipeline `defaults:` field renamed to `args:`. Same
+  semantics, clearer name.
+- **config:** Pipeline `dispatch:` block removed wholesale. Its
+  former contents (`source`, `requires_approval`, `protected`,
+  `backend`, `runners`) are gone or relocated: source resolution
+  now flows through the active profile's `secrets:` surface;
+  approval is a job-level concern (declare an approval job); the
+  "protected" gate is expressed via `guards.require: [git:branch=default]`;
+  per-pipeline backend overrides are gone (use `--profile` to swap
+  the bundle); runner allowlists moved to job-level
+  `Job.Requires(...)` labels + pipeline-level `requires:`.
+- **config:** Project YAML's `runners:` and `sources:` registries
+  removed. Job-level `Job.Requires(...)` labels replace runner
+  registration; inline `secrets:` surface on the active profile
+  replaces named source registries.
+- **profile:** Profile resolution is `--profile NAME` only -- no
+  laptop fallback, no `default:` field in profiles.yaml, no
+  `sparkwing.yaml profile:` hint, no env-detect rules. When no
+  profile is selected, the orchestrator runs against a sqlite-only
+  test/dev shape; remote-controller verbs (`pipeline trigger`,
+  `users`, `gc`, `approvals`, `debug replay`) refuse to run without
+  a profile that has a `controller:` block.
+- **profile:** `--profile X` wins wholesale -- the named profile's
+  full backend bundle applies; per-pipeline `profile:` selections
+  are discarded. Keeps state/cache/logs/secrets coherent so a run
+  can't have its logs in one place and its state in another.
+- **config:** Guard token grammar rewritten to `namespace:rest`.
+  `profile-local` -> `profile:local`, `profile-controller` ->
+  `profile:controller`, `profile-name:NAME` -> `profile:name=NAME`,
+  `git-branch:NAME` -> `git:branch=NAME`, `git-branch:default` ->
+  `git:branch=default`. Old syntax errors at parse time.
+- **config:** Pipeline-level trims: `tags`, `hidden`, `on.manual`,
+  `on.deploy`, `description` rationalized; `dispatch.runners`
+  allowlist gone (use `requires:`); `dispatch.approvals` enum gone
+  (approval is a job).
+- **config:** Profile `controller:` is a nested block with `url:` +
+  `token:` (was two flat fields).
+- **config:** Profile fields removed: `gitcache`, `cost_per_runner_hour`,
+  `auto_allow`, `default_runner`, `log_store`, `artifact_store`,
+  `detect`. The CLI discovers the cache pod via the controller's
+  `GET /api/v1/services` endpoint; the other fields were unused or
+  footguns.
+- **sdk:** `PipelineConfig[T]`, `ConfigProvider`,
   `ResolvePipelineConfig`, `InspectPipelineConfig`, `ConfigField`,
-  `WithPipelineConfig` all removed. (Breaking) The typed-Config
-  surface is gone; use `WithArgs[T]` with YAML `defaults:` for
-  values that vary per deployment binding (operator can override),
-  or hardcode constants in Go. `SecretsProvider` and
-  `PipelineSecrets[T]` stay since secrets are a distinct concern
-  (resolver chain, masking, source binding).
-- **config:** `pipelines[].values:` block removed. (Breaking) Was
-  the YAML side of `PipelineConfig`; now rejected at parse time
-  with an unknown-field error.
-- **config:** `pipelines[].on.push.values:` removed. (Breaking)
-  Same reason -- it fed the dropped `PipelineConfig` layering.
-- **config:** `pipelines[].targets:` block removed. (Breaking) One
-  pipeline now binds one deployment shape; split multi-target
-  pipelines into N pipelines, each with its own `dispatch:` block.
-  Legacy YAML errors at parse time with a pointer to the migration
-  guide. See [migration guide](docs/migrations/v0.6.0.md).
-- **cli:** `--target` removed as a framework-defined flag. (Breaking)
-  The pipeline name is now the deployment selector. A pipeline can
-  still declare a `target` arg via `WithArgs[T]` if it wants the
-  value; `--target` passes through to the pipeline binary as a
-  regular arg in that case.
-- **sdk:** `sparkwing.Target(ctx)` removed. (Breaking) Use a regular
-  pipeline arg (`sparkwing.Arg[string](ctx, "target")`) if you need
-  the value, but most call sites should drop the read entirely --
-  the pipeline name itself is the selector now.
-- **config:** Profile `default-args:` block removed. (Breaking)
-  Defaults are deployment-binding policy, not dispatch-destination
-  policy; move them to the pipeline YAML `defaults:` map.
-- **sdk:** `OnTarget(...)` on Job / WorkStep / JobGroup is now inert.
-  (Breaking, soft) The API still compiles but the filter never fires
-  (no active target exists). Migrate by splitting into one pipeline
-  per target shape. Full removal targeted for v0.7.
-- **config:** `Push.target:` / `Webhook.target:` trigger fields
-  removed. (Breaking) Put the trigger directly on the pipeline you
-  want it to fire (`deploy-prod.on.push:` instead of
-  `deploy.on.push.target: prod`).
+  `WithPipelineConfig` removed. Use `WithArgs[T]` with YAML `args:`
+  for per-deployment overrides, or hardcode constants in Go.
+- **sdk:** `OnTarget(...)` on Job/WorkStep/JobGroup removed.
+  `sparkwing.Target(ctx)` removed. Split multi-target pipelines into
+  one pipeline per target shape.
+- **cli:** `--target` removed. Pipeline name is the deployment
+  selector.
+- **controller:** New `--cache-pod-url` flag (or `CACHE_POD_URL`
+  env var) on `sparkwing-controller`. When set, the controller
+  announces the URL via `GET /api/v1/services` so operator CLIs
+  can discover it.
 
 ### Fixed
 
 - **release:** `prepare-changelog` and `bump-self-replace` no longer
   race on `git commit`. They previously ran in parallel and both did
   `git add <file>` + `git commit -m ...` without path scoping, so
-  whichever committed second found "nothing to commit" because the
-  first commit swept up both staged files. Now `bump-self-replace`
-  is serialized after `prepare-changelog`. Observed on the v0.5.0
-  and v0.5.1 cuts; both needed manual finishing.
+  whichever committed second found "nothing to commit." Now
+  `bump-self-replace` is serialized after `prepare-changelog`.
 - **sparks:** The resolver no longer errors when a `go.work` is in
   scope. The overlay's `.resolved.sum` write is skipped (with a
   single-line warning) instead of failing, matching the existing
-  workspace-mode tolerance in `internal/bincache`. Operators
-  iterating against a local dogfood workspace can run
-  `sparkwing run <pipeline>` without setting `GOWORK=off` first.
+  workspace-mode tolerance in `internal/bincache`.
 
 ### Docs
 
-- **docs:** New v0.6.0 migration guide at
-  `docs/migrations/v0.6.0.md` walks the entrypoint-vs-pipeline
-  split: how to rewrite a multi-target `targets:` block into N
-  pipelines, the new `dispatch:` / `guards:` / `defaults:` /
-  `locked:` vocabulary, the `RegisterEntrypoint` API, the inert
-  `OnTarget`, and the dropped profile `default-args:`.
-- **docs:** Design proposal `docs/proposals/v0.6-pipeline-redesign.md`
-  documents the decisions behind the redesign for the design-log
-  archive.
+- **docs:** v0.6.0 migration guide at `docs/migrations/v0.6.0.md`
+  walks the entrypoint-vs-pipeline split, the unified backend
+  model, the new `defaults:` and `profiles:` blocks, the
+  `namespace:rest` guard grammar, and the `--profile`-wholesale
+  resolution.
 
 ## [v0.5.1] - 2026-05-28
 ### Changed

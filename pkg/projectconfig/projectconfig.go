@@ -287,6 +287,7 @@ func (c *Config) normalize() error {
 			return fmt.Errorf("profile %q: empty body", name)
 		}
 		p.Name = name
+		p.InheritControllerDefaults()
 		if err := p.Surfaces().Validate(name); err != nil {
 			return err
 		}

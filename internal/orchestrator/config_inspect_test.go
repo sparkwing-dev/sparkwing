@@ -37,7 +37,7 @@ func TestInspectPipelineSecrets_UnionsYAMLAndStruct(t *testing.T) {
 			{Name: "AUDIT_API_KEY", Required: true},
 		},
 	}
-	fields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, yamlEntry, "team-vault")
+	fields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, yamlEntry)
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -50,9 +50,6 @@ func TestInspectPipelineSecrets_UnionsYAMLAndStruct(t *testing.T) {
 	}
 	if !byName["DEPLOY_TOKEN"].Required || byName["DEPLOY_TOKEN"].DeclaredIn != "Secrets() struct" {
 		t.Errorf("DEPLOY_TOKEN = %+v", byName["DEPLOY_TOKEN"])
-	}
-	if byName["DEPLOY_TOKEN"].SourceName != "team-vault" {
-		t.Errorf("SourceName not threaded: %+v", byName["DEPLOY_TOKEN"])
 	}
 	if byName["DEPLOY_TOKEN"].Note != "not resolved yet" {
 		t.Errorf("DEPLOY_TOKEN.Note = %q (expected 'not resolved yet')", byName["DEPLOY_TOKEN"].Note)
@@ -68,7 +65,7 @@ func TestInspectPipelineSecrets_ResolverHits(t *testing.T) {
 		return "", false, sparkwing.ErrSecretMissing
 	})
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
-	fields, err := sparkwing.InspectPipelineSecrets(ctx, reg, nil, "team-vault")
+	fields, err := sparkwing.InspectPipelineSecrets(ctx, reg, nil)
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}

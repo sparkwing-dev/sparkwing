@@ -99,6 +99,29 @@ func (p *Profile) HasController() bool {
 	return p.ControllerURL() != ""
 }
 
+// InheritControllerDefaults fills empty URL/Token/TokenEnv fields on
+// any controller-typed surface from the profile's top-level
+// Controller block. A surface that's explicitly set keeps its own
+// values; this only fills gaps. Cuts boilerplate for the common case
+// where every surface routes through the same controller as the CLI
+// client connection.
+func (p *Profile) InheritControllerDefaults() {
+	if p == nil || p.Controller == nil {
+		return
+	}
+	for _, spec := range []*backends.Spec{p.Secrets, p.State, p.Cache, p.Logs} {
+		if spec == nil || spec.Type != backends.TypeController {
+			continue
+		}
+		if spec.URL == "" {
+			spec.URL = p.Controller.URL
+		}
+		if spec.Token == "" && spec.TokenEnv == "" {
+			spec.Token = p.Controller.Token
+		}
+	}
+}
+
 // Surfaces returns the profile's per-surface backends as a
 // backends.Surfaces. A nil profile yields a zero-valued Surfaces.
 func (p *Profile) Surfaces() backends.Surfaces {
@@ -171,12 +194,15 @@ func Load(path string) (*Config, error) {
 		cfg.Profiles = map[string]*Profile{}
 	}
 	// Stamp .Name from the map key so Resolve returns a fully-formed
-	// Profile without a separate lookup.
+	// Profile without a separate lookup. Inherit URL/Token defaults
+	// from the controller block onto any controller-typed surface
+	// that left them empty.
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			cfg.Profiles[name] = &Profile{Name: name}
 		} else {
 			p.Name = name
+			p.InheritControllerDefaults()
 		}
 	}
 	return &cfg, nil

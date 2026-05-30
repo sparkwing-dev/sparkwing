@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -51,39 +50,25 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 		return unknownPipelineErr(pipeline)
 	}
 	pipelineYAML, _ := loadPipelineYAML(pipeline)
-	sourceLabel := pipelineSourceLabel(pipelineYAML)
 
-	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML, sourceLabel)
+	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML)
 	if err != nil {
 		return err
 	}
 
 	if format == "json" {
-		return printConfigInspectJSON(pipeline, sourceLabel, secFields)
+		return printConfigInspectJSON(pipeline, secFields)
 	}
-	printConfigInspectPretty(os.Stdout, pipeline, sourceLabel, secFields)
+	printConfigInspectPretty(os.Stdout, pipeline, secFields)
 	return nil
 }
 
-// pipelineSourceLabel returns a short label for the effective
-// secrets backend for a pipeline run. Empty when no secrets backend
-// applies. Pipeline-scoped overrides were dropped in v0.6, so this
-// is always empty today; kept as a seam for the inspect verb to keep
-// rendering a "source:" line when project defaults or profiles
-// declare one.
-func pipelineSourceLabel(_ *pipelines.Pipeline) string {
-	return ""
-}
-
-func printConfigInspectPretty(w io.Writer, pipeline, source string, secFields []sparkwing.SecretField) {
+func printConfigInspectPretty(w io.Writer, pipeline string, secFields []sparkwing.SecretField) {
 	fmt.Fprintln(w, pipeline+" secrets")
 	fmt.Fprintln(w)
 	if len(secFields) == 0 {
 		fmt.Fprintln(w, "  (none declared)")
 		return
-	}
-	if source != "" {
-		fmt.Fprintf(w, "source: %s\n\n", source)
 	}
 	nameWidth := 4
 	for _, s := range secFields {
@@ -111,10 +96,9 @@ func printConfigInspectPretty(w io.Writer, pipeline, source string, secFields []
 	}
 }
 
-func printConfigInspectJSON(pipeline, source string, secFields []sparkwing.SecretField) error {
+func printConfigInspectJSON(pipeline string, secFields []sparkwing.SecretField) error {
 	out := map[string]any{
 		"pipeline": pipeline,
-		"source":   source,
 		"secrets":  secFields,
 	}
 	enc := json.NewEncoder(os.Stdout)

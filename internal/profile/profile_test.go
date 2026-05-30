@@ -9,6 +9,30 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
+func TestInheritControllerDefaults(t *testing.T) {
+	prefilledTokenEnv := "PREFILLED"
+	p := &profile.Profile{
+		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
+		Secrets:    &backends.Spec{Type: backends.TypeController},
+		State:      &backends.Spec{Type: backends.TypeController, URL: "https://state.override", Token: "tok-state"},
+		Cache:      &backends.Spec{Type: backends.TypeController, TokenEnv: prefilledTokenEnv},
+		Logs:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/sw.db"},
+	}
+	p.InheritControllerDefaults()
+	if p.Secrets.URL != "https://ctrl.example" || p.Secrets.Token != "tok-from-ctrl" {
+		t.Errorf("Secrets not filled from controller: %+v", p.Secrets)
+	}
+	if p.State.URL != "https://state.override" || p.State.Token != "tok-state" {
+		t.Errorf("State (explicit) was overwritten: %+v", p.State)
+	}
+	if p.Cache.URL != "https://ctrl.example" || p.Cache.TokenEnv != prefilledTokenEnv || p.Cache.Token != "" {
+		t.Errorf("Cache: URL should fill but Token must stay empty when TokenEnv is set: %+v", p.Cache)
+	}
+	if p.Logs.URL != "/var/sw.db"[:0]+"" || p.Logs.Path != "/var/sw.db" {
+		t.Errorf("Logs (non-controller type) must not be touched: %+v", p.Logs)
+	}
+}
+
 func TestLoad_MissingFile(t *testing.T) {
 	cfg, err := profile.Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
