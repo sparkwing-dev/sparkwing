@@ -48,6 +48,16 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Removed
+
+- **`cmd/sparkwing-local-ws/`** is gone. Its job (long-lived local
+  dashboard server) is fully owned by `sparkwing dashboard start`,
+  which spawns a detached supervisor under the same `pkg/localws`
+  code path. The dev scripts (`bin/dev-start.sh` /
+  `bin/dev-stop.sh` / `bin/dev-restart.sh`) now drive the supervisor
+  via `sparkwing dashboard {start,kill}` instead of forking the
+  retired binary directly.
+
 ### Added
 
 - **`pre-push` now runs a repo-wide gofmt check.** The existing

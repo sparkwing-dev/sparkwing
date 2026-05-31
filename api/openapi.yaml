@@ -5,9 +5,10 @@ info:
   version: "0.1"
   description: |
     HTTP API served by `sparkwing-controller` (cluster mode) and embedded
-    in `sparkwing-local-ws` (laptop mode). Same route table, same wire
-    shapes; the mode is determined by which functional options the
-    process wires into the [pkg/controller.Server][1] instance.
+    in the `sparkwing` CLI's `dashboard start` supervisor (laptop mode).
+    Same route table, same wire shapes; the mode is determined by which
+    functional options the process wires into the
+    [pkg/controller.Server][1] instance.
 
     Mode-conditional routes are marked in each operation's `description`:
 
@@ -34,7 +35,7 @@ servers:
   - url: http://localhost:4344
     description: Default cluster-mode `sparkwing-controller` bind address.
   - url: http://127.0.0.1:4343
-    description: Default laptop-mode `sparkwing-local-ws` bind address.
+    description: Default laptop-mode `sparkwing dashboard start` bind address.
 
 tags:
   - name: runs

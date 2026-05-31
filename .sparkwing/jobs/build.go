@@ -13,7 +13,6 @@ import (
 // when adding/removing a cmd entry.
 var publicBinaries = []string{
 	"sparkwing",
-	"sparkwing-local-ws",
 	"sparkwing-cache",
 	"sparkwing-controller",
 	"sparkwing-runner",
