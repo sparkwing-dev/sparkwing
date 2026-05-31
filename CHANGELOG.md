@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.6.3] - 2026-05-31
 ### Fixed
 
 - **`sparkwing pipeline new` scaffold now produces a working project
