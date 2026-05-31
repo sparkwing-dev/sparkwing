@@ -151,6 +151,22 @@ func RemoteBackends(c *client.Client, logs LogBackend, lease time.Duration) Back
 // one place.
 func defaultHTTPClient() *http.Client { return nil }
 
+// canonicalLocalStore returns the *store.Store underneath a StateBackend
+// when one is reachable -- either a bare localState, or one nested inside
+// a mirrorStateBackend's canonical slot. Cluster-backed (controller / S3)
+// state returns nil. The local-trigger dispatcher uses this to find the
+// store whose triggers table it should poll, regardless of whether the
+// caller is sqlite, postgres, or postgres+mirror.
+func canonicalLocalStore(b StateBackend) *store.Store {
+	switch s := b.(type) {
+	case localState:
+		return s.st
+	case *mirrorStateBackend:
+		return canonicalLocalStore(s.canonical)
+	}
+	return nil
+}
+
 // --- local implementations ---
 
 type localState struct {

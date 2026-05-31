@@ -99,12 +99,15 @@ func (p *Profile) HasController() bool {
 	return p.ControllerURL() != ""
 }
 
-// InheritControllerDefaults fills empty URL/Token/TokenEnv fields on
-// any controller-typed surface from the profile's top-level
+// InheritControllerDefaults fills empty URL/Token/TokenEnv/Controller
+// fields on any controller-typed surface from the profile's top-level
 // Controller block. A surface that's explicitly set keeps its own
 // values; this only fills gaps. Cuts boilerplate for the common case
 // where every surface routes through the same controller as the CLI
-// client connection.
+// client connection -- a profiles.yaml that just declares
+// `controller: { url, token }` plus `state/cache/logs/secrets:
+// { type: controller }` becomes the complete spec, and surface specs
+// don't have to repeat `controller: <this-profile-name>` themselves.
 func (p *Profile) InheritControllerDefaults() {
 	if p == nil || p.Controller == nil {
 		return
@@ -118,6 +121,9 @@ func (p *Profile) InheritControllerDefaults() {
 		}
 		if spec.Token == "" && spec.TokenEnv == "" {
 			spec.Token = p.Controller.Token
+		}
+		if spec.Controller == "" && p.Name != "" {
+			spec.Controller = p.Name
 		}
 	}
 }

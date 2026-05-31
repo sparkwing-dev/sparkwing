@@ -529,11 +529,18 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
 	// Local-only RunAndAwait trigger consumer; cluster mode
-	// delegates this to the warm-runner pool.
-	if ls, ok := backends.State.(localState); ok {
+	// delegates this to the warm-runner pool. The dispatcher walks
+	// through any mirror wrapper so postgres / non-sqlite state with
+	// mirror_local:true still gets a local trigger pump -- the
+	// canonical *store.Store is what holds the trigger rows.
+	if st := canonicalLocalStore(backends.State); st != nil {
+		profileName := ""
+		if opts.Profile != nil {
+			profileName = opts.Profile.Name
+		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, ls.st, runID, nil)
+		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, nil)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout

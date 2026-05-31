@@ -62,17 +62,22 @@ code change to unlock.
   Source builds without an `-ldflags` version stamp fall back to the
   Go build-info pseudo-version so the pill is still informative.
 
-### Known issues
+### Fixed
 
-- **Postgres state from a laptop + `RunAndAwait` does not work.** The
-  parent run enqueues the child trigger into postgres, but the laptop
-  trigger dispatcher reaches `handle-trigger --local` which always
-  opens the local SQLite store -- so the child can't find its own
-  trigger row and exits. Fixed paths: (a) use `sqlite` state locally;
-  (b) use postgres with a controller in the loop (cluster mode);
-  (c) avoid `RunAndAwait` in a pipeline running on a postgres-state
-  laptop profile. A proper fix requires propagating the active
-  profile to the child handler and will land in a follow-up.
+- **Postgres state from a laptop + `RunAndAwait` now works
+  end-to-end.** The parent's local trigger dispatcher forwards its
+  active profile (`--profile <name>`) to the child `handle-trigger
+  --local`, which resolves the same profile and opens the same state
+  backend the parent used. Previously the child defaulted to local
+  sqlite and could not find the trigger row the parent had enqueued
+  in postgres, producing a 30s timeout with a misleading error.
+- **Controller profiles no longer need `controller: <self>` on every
+  surface.** When `InheritControllerDefaults` fills URL+Token onto a
+  surface from the profile's top-level `controller:` block, it now
+  also fills the surface's `controller:` (profile-name reference) so
+  the lookup callback can resolve it. A profile that just declares
+  `controller: { url, token }` + `state/cache/logs/secrets: { type:
+  controller }` is now a complete, working spec.
 
 ### Changed
 

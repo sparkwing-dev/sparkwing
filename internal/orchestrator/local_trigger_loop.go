@@ -21,7 +21,11 @@ import (
 
 // runLocalTriggerLoop polls for pending child triggers and dispatches
 // each. Compile cache is shared across triggers in the loop lifetime.
-func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, logger *slog.Logger) {
+// profileName, when non-empty, is forwarded to each child as
+// --profile <name> so the child opens the same backends as the parent
+// -- critical when the parent is on postgres or another non-local
+// state, since the child handler defaults to sqlite otherwise.
+func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName string, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -55,7 +59,7 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, log
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, profileName, cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				// Mark run failed so the parent's awaiter stops polling.
@@ -114,7 +118,7 @@ func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, "", cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				_ = st.CreateRun(ctx, store.Run{
@@ -153,9 +157,11 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 }
 
 // dispatchLocalTrigger compiles and execs a claimed trigger. The
-// child handles FinishTrigger/FinishRun.
+// child handles FinishTrigger/FinishRun. profileName, when non-empty,
+// is forwarded as --profile <name> so the child opens the same
+// backends as the parent (matters for postgres/non-local state).
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
-	cache *localCompileCache, logger *slog.Logger,
+	profileName string, cache *localCompileCache, logger *slog.Logger,
 ) error {
 	// Repo resolution: registry by pipeline name first, then slug
 	// fallback via LocalRepoDir.
@@ -194,8 +200,15 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 
 	// --local MUST precede the positional trigger ID -- Go's flag
 	// package stops parsing at the first non-flag, so the reverse
-	// order silently falls back to cluster mode.
-	cmd := exec.CommandContext(ctx, binPath, "handle-trigger", "--local", trig.ID)
+	// order silently falls back to cluster mode. --profile, if set,
+	// rides alongside --local so the child opens the same backends
+	// (e.g. postgres) the parent did.
+	args := []string{"handle-trigger", "--local"}
+	if profileName != "" {
+		args = append(args, "--profile", profileName)
+	}
+	args = append(args, trig.ID)
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	// cwd drives the SDK's walk-up to .sparkwing/; do NOT pass
 	// SPARKWING_WORK_DIR -- it leaks parent-repo paths into children.
 	cmd.Dir = repoDir
