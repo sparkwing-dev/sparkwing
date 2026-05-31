@@ -48,6 +48,22 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`sparkwing pipeline new` scaffold now produces a working project
+  out of the box.** Three bugs converged to break the first-run
+  experience: (a) the scaffold wrote `.sparkwing/pipelines.yaml`
+  while every other CLI command reads `.sparkwing/sparkwing.yaml`,
+  so `pipeline list`, `pipeline describe`, and `pipeline hooks
+  install` all reported "no .sparkwing/sparkwing.yaml found"; (b)
+  the generated `go.mod` pinned a non-existent fallback SDK version,
+  so `go mod tidy` failed and the compile cycle never recovered;
+  (c) the generated `jobs/*.go` mixed `sw.` and `sparkwing.` aliases
+  in the same file, so the file didn't compile. All three are fixed
+  and a fresh `sparkwing pipeline new --name X` → `git commit` (with
+  a pre_commit trigger and `sparkwing pipeline hooks install`)
+  now scaffolds + builds + dispatches end-to-end.
+
 ### Removed
 
 - **`cmd/sparkwing-local-ws/`** is gone. Its job (long-lived local

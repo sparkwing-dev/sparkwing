@@ -274,7 +274,7 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 type {{STRUCT}}Job struct{ sw.Base }
 
 func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -337,7 +337,7 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 type {{STRUCT}}Build struct{ sw.Base }
 
 func (j *{{STRUCT}}Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -351,7 +351,7 @@ func ({{STRUCT}}Build) run(ctx context.Context) error {
 type {{STRUCT}}Test struct{ sw.Base }
 
 func (j *{{STRUCT}}Test) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -363,7 +363,7 @@ func ({{STRUCT}}Test) run(ctx context.Context) error {
 type {{STRUCT}}Deploy struct{ sw.Base }
 
 func (j *{{STRUCT}}Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
@@ -384,7 +384,7 @@ func init() {
 // exotic yaml that we don't preserve; mitigated by the simplicity of
 // the append (we only add, never modify).
 func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool) error {
-	path := filepath.Join(sparkwingDir, "pipelines.yaml")
+	path := filepath.Join(sparkwingDir, projectconfig.Filename)
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		return err
