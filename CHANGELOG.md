@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-05-31
 ### Fixed
 
 - **docs:** `_sidebar.json` now excludes `proposals/` and `migrations/`
