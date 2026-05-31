@@ -48,6 +48,19 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`pipeline trigger` now requires a GitHub repository.** When the
+  CLI was invoked from a non-git cwd, it silently sent an empty
+  `GITHUB_REPOSITORY` to the controller. The warm-runner then fell
+  into its baked-binary fallback (`$SPARKWING_BAKED_BINARY`), which
+  in production pointed at a binary that doesn't ship in the runner
+  image, producing a confusing `fork/exec /usr/local/bin/sparkwing:
+  no such file` failure 80ms in. `pipeline trigger` now errors
+  before sending if cwd has no github remote, with an actionable
+  message ("Run from inside a checkout of a github repo, or pass
+  --repo OWNER/NAME explicitly").
+
 ## [v0.7.1] - 2026-05-31
 ### Fixed
 

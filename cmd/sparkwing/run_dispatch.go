@@ -375,9 +375,13 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	// Plumb repo via both env (warm-runner reads for clone+compile) and
 	// Git meta (dashboard reads for the repo pill).
 	branch, sha, repoSlug, repoURL := detectRemoteGit()
-	envMap := map[string]string{}
-	if repoSlug != "" {
-		envMap["GITHUB_REPOSITORY"] = repoSlug
+	if repoSlug == "" {
+		return nil, fmt.Errorf("pipeline trigger %q: no github repository detected from cwd. "+
+			"The cluster runner needs GITHUB_REPOSITORY to clone the pipeline source. "+
+			"Run from inside a checkout of a github repo, or pass --repo OWNER/NAME explicitly.", pipelineName)
+	}
+	envMap := map[string]string{
+		"GITHUB_REPOSITORY": repoSlug,
 	}
 	// --start-at / --stop-at are sparkwing-level on the local CLI; the
 	// remote runner reads them as SPARKWING_START_AT /
