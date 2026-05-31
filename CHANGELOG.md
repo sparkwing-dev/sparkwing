@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-05-31
 ### Changed
 
 - **box-slot semaphore is now opt-in.** Default `SPARKWING_BOX_SLOTS`
