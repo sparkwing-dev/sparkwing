@@ -48,6 +48,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **docs:** `_sidebar.json` now excludes `proposals/` and `migrations/`
+  alongside the existing `design/` exclusion. Downstream sites that
+  walk a release tag's docs (e.g. sparkwing.dev) failed prerendering
+  when a new proposal landed without being categorized; both
+  directories carry per-document content that doesn't belong in the
+  user-docs sidebar, so they're flat-excluded instead.
+
 ## [v0.7.0] - 2026-05-31
 ### Changed
 
