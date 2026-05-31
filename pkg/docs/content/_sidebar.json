@@ -39,5 +39,5 @@
       "slugs": ["observability", "security", "auth", "hooks", "api", "mcp"]
     }
   ],
-  "excluded": ["design/", "changelog-style"]
+  "excluded": ["design/", "proposals/", "migrations/", "changelog-style"]
 }
