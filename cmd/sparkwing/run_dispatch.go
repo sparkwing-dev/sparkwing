@@ -92,8 +92,9 @@ type runFlags struct {
 	localOnly bool
 	// boxSlots overrides the host-local concurrency semaphore's cap.
 	// String (not int) so empty means "fall back to the heuristic"
-	// and explicit "off" / "0" can disable the gate. Forwarded to the
-	// inner pipeline binary as SPARKWING_BOX_SLOTS.
+	// (which defaults to 0 / disabled). Explicit values (1, 2, ...)
+	// enable the semaphore with that cap. Forwarded to the inner
+	// pipeline binary as SPARKWING_BOX_SLOTS.
 	boxSlots string
 	// boxNoWait flips the box-slot semaphore from queueing to
 	// fail-fast. CI runners that would rather decline overlap than

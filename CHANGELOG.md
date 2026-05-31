@@ -48,6 +48,19 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **box-slot semaphore is now opt-in.** Default `SPARKWING_BOX_SLOTS`
+  changed from `max(1, NumCPU/workersPerRun)` (resolving to 1) to
+  `0` (disabled). Most pipelines aren't CPU-pegged -- they're I/O on
+  Docker pulls, network, registry pushes -- so the conservative
+  default surprised users with "waiting for box slot (1 active, max
+  1)" whenever any other sparkwing process was running. Users on
+  small boxes who launch concurrent CPU-saturating pipelines can
+  re-enable explicitly: `export SPARKWING_BOX_SLOTS=2` (or any N).
+  The primitive remains the right answer for explicit host
+  throttling -- it's just no longer always-on.
+
 ## [v0.6.3] - 2026-05-31
 ### Fixed
 

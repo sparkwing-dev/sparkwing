@@ -244,30 +244,17 @@ func TestAcquire_ConcurrentRaceNeverExceedsMax(t *testing.T) {
 }
 
 func TestDefaultMaxSlots(t *testing.T) {
-	cases := []struct {
-		name    string
-		workers int
-		want    int // expected = max(1, NumCPU / max(1, workers))
-	}{
-		{"zero workers treated as one", 0, max1(boxslot.DefaultMaxSlots(1))},
-		{"workers above NumCPU clamps to 1", 1 << 20, 1},
+	// Default is "disabled" (0) -- box-slot is opt-in via
+	// SPARKWING_BOX_SLOTS / --sw-box-slots. Most pipelines aren't
+	// CPU-pegged and the agent-feedback shape (host throttle separate
+	// from coordination) is served by the knob existing, not by an
+	// always-on default. The arg is retained for caller compat;
+	// the function ignores it.
+	for _, workers := range []int{0, 1, 4, 1 << 20} {
+		if got := boxslot.DefaultMaxSlots(workers); got != 0 {
+			t.Errorf("DefaultMaxSlots(%d) = %d, want 0 (disabled)", workers, got)
+		}
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := boxslot.DefaultMaxSlots(c.workers)
-			if got != c.want {
-				t.Errorf("DefaultMaxSlots(%d) = %d, want %d",
-					c.workers, got, c.want)
-			}
-		})
-	}
-}
-
-func max1(n int) int {
-	if n < 1 {
-		return 1
-	}
-	return n
 }
 
 // TestAcquire_RejectsMissingLockDir asserts the precondition guard

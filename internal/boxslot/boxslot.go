@@ -45,7 +45,6 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -80,25 +79,18 @@ type Options struct {
 	PollMax      time.Duration
 }
 
-// DefaultMaxSlots returns the conservative heuristic the CLI applies
-// when the user has set neither --sw-box-slots nor SPARKWING_BOX_SLOTS:
-//
-//	max(1, NumCPU / max(1, workersPerRun))
-//
-// With the dispatcher's default workersPerRun = runtime.NumCPU(),
-// this resolves to 1 (matching Mode 1's incidental SQLite
-// serialization). Users who pin a tighter per-run worker cap
-// proportionally gain box slots so admitted runs still sum to
-// roughly NumCPU worker goroutines.
-func DefaultMaxSlots(workersPerRun int) int {
-	if workersPerRun <= 0 {
-		workersPerRun = 1
-	}
-	n := runtime.NumCPU() / workersPerRun
-	if n < 1 {
-		return 1
-	}
-	return n
+// DefaultMaxSlots returns 0 -- the box-slot semaphore is disabled by
+// default and opt-in via --sw-box-slots or SPARKWING_BOX_SLOTS. Most
+// runs aren't CPU-pegged (Docker pulls, network I/O dominate) and the
+// old SQLite-serialization rationale for a default cap is gone in S3
+// state mode. Users on a small box who launch concurrent
+// CPU-saturating pipelines should set SPARKWING_BOX_SLOTS=N
+// explicitly; e.g. `export SPARKWING_BOX_SLOTS=$(( $(sysctl -n hw.ncpu) / 4 ))`
+// matches the old conservative heuristic. workersPerRun is retained
+// in the signature so callers don't need to change; it's ignored.
+func DefaultMaxSlots(workersPerRun int) int { //nolint:revive // arg retained for caller compat
+	_ = workersPerRun
+	return 0
 }
 
 // Acquire blocks until a box slot is available, then returns a
