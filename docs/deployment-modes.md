@@ -170,6 +170,17 @@ Tradeoff: you have to host the controller. The `self-hosting`
 section covers a small VPS + docker-compose setup that fits most
 teams.
 
+The "owns Postgres" framing above describes the multi-tenant case;
+the controller's state backend is pluggable. A single-instance
+controller on one box can back its state with SQLite
+(`~/.sparkwing/state.db`) and keep caches and logs on local disk --
+the same storage layout as Mode 1, but fronted by the HTTP controller
+so untrusted clients still never touch the store directly. Solo
+operators and small teams don't need to stand up Postgres to run this
+mode. Reach for Postgres + object storage when you outgrow a single
+box -- more than one controller instance, or state and caches that
+must survive that box.
+
 ```yaml
 # ~/.config/sparkwing/profiles.yaml
 profiles:
