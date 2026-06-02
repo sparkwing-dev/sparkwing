@@ -203,6 +203,9 @@ type stateWaiterResp struct {
 	LeaderRunID   string    `json:"leader_run_id,omitempty"`
 	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
 	CancelTimeout string    `json:"cancel_timeout,omitempty"`
+	// Position is the queue-policy waiter's 0-based rank in arrival
+	// order (0 == next in line).
+	Position int `json:"position"`
 }
 
 // handleConcurrencyState returns the current capacity + holders +
@@ -235,7 +238,7 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 			RunID: wt.RunID, NodeID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
 			Policy: wt.Policy, CacheKeyHash: wt.CacheKeyHash,
 			LeaderRunID: wt.LeaderRunID, LeaderNodeID: wt.LeaderNodeID,
-			CancelTimeout: ct,
+			CancelTimeout: ct, Position: wt.Position,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

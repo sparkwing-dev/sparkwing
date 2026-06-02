@@ -250,9 +250,16 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID 
 func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, opts sparkwing.CacheOptions, cacheHash string, initial store.AcquireSlotResponse) runner.Result {
 	leaderRun, leaderNode := initial.LeaderRunID, initial.LeaderNodeID
 
+	holders := make([]map[string]string, 0, len(initial.Holders))
+	for _, h := range initial.Holders {
+		holders = append(holders, map[string]string{"run_id": h.RunID, "node_id": h.NodeID})
+	}
 	payload, _ := json.Marshal(map[string]any{
 		"key":            opts.Namespace,
 		"kind":           string(initial.Kind),
+		"position":       initial.Position,
+		"queue_length":   initial.QueueLength,
+		"holders":        holders,
 		"leader_run_id":  leaderRun,
 		"leader_node_id": leaderNode,
 	})

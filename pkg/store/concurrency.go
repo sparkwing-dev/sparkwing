@@ -81,6 +81,15 @@ type AcquireSlotResponse struct {
 	SupersededIDs    []string
 	PreviousCapacity int
 	DriftNote        string
+
+	// Observability for a queued arrival (Kind == AcquireQueued):
+	// Position is the number of queue-policy waiters that arrived
+	// earlier (0 == next in line), QueueLength is the total queued for
+	// the key, and Holders are the slots currently held. Zero/empty for
+	// other kinds.
+	Position    int
+	QueueLength int
+	Holders     []ConcurrencyHolder
 }
 
 // ConcurrencyHolder mirrors the concurrency_holders row.
@@ -106,6 +115,11 @@ type ConcurrencyWaiter struct {
 	LeaderRunID   string
 	LeaderNodeID  string
 	CancelTimeout time.Duration
+
+	// Position is the waiter's 0-based rank among queue-policy waiters
+	// for the key, in arrival order, as derived by GetConcurrencyState.
+	// Zero for non-queue waiters.
+	Position int
 }
 
 // ConcurrencyState: capacity is current Max; rows are oldest-first.
@@ -458,11 +472,72 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
+		// Observability: this arrival's rank among queue waiters, the
+		// total queued, and who holds the slots -- computed in the same
+		// transaction so they're consistent with the queue this wait
+		// joined. arrived_at < nowNS excludes the just-inserted self.
+		var position, queueLen int
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy = ? AND arrived_at < ?`,
+			req.Key, OnLimitQueue, nowNS,
+		).Scan(&position); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy = ?`,
+			req.Key, OnLimitQueue,
+		).Scan(&queueLen); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		holders, err := txActiveHolders(ctx, tx, req.Key, nowNS)
+		if err != nil {
+			return AcquireSlotResponse{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		return AcquireSlotResponse{Kind: AcquireQueued, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
+		return AcquireSlotResponse{
+			Kind:             AcquireQueued,
+			PreviousCapacity: prevCap,
+			DriftNote:        driftNote,
+			Position:         position,
+			QueueLength:      queueLen,
+			Holders:          holders,
+		}, nil
 	}
+}
+
+// txActiveHolders reads the current non-superseded, unexpired holders
+// for a key within an open transaction, oldest claim first.
+func txActiveHolders(ctx context.Context, tx *storeTx, key string, nowNS int64) ([]ConcurrencyHolder, error) {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		   FROM concurrency_holders
+		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?
+		  ORDER BY claimed_at ASC`,
+		key, nowNS,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ConcurrencyHolder
+	for rows.Next() {
+		var h ConcurrencyHolder
+		var claimedNS, expiresNS int64
+		var superInt int
+		if err := rows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
+			return nil, err
+		}
+		h.ClaimedAt = time.Unix(0, claimedNS)
+		h.LeaseExpiresAt = time.Unix(0, expiresNS)
+		h.Superseded = superInt == 1
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }
 
 // HeartbeatConcurrencySlot extends the lease and reports the
@@ -1091,6 +1166,15 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	_ = wrows.Close()
 	if err := wrows.Err(); err != nil {
 		return nil, err
+	}
+	// Derive each queue-policy waiter's rank in arrival order. Waiters
+	// are already ordered by arrived_at ASC.
+	qrank := 0
+	for i := range state.Waiters {
+		if state.Waiters[i].Policy == OnLimitQueue {
+			state.Waiters[i].Position = qrank
+			qrank++
+		}
 	}
 	return state, nil
 }

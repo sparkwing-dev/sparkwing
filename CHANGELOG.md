@@ -63,6 +63,14 @@ code change to unlock.
   error, so recovery can branch: converge forward on an action failure,
   roll back on a verify failure. The verify stage is recorded on the
   node's failure reason for the run ledger.
+- **controller:** concurrency gate waits are now observable. A node
+  queued behind a full `OnLimit: Queue` namespace previously blocked
+  with no external signal. The `concurrency_wait` event now carries the
+  waiter's `position` (0 == next in line), the `queue_length`, and the
+  current `holders`; `GET /api/v1/concurrency/{key}/state` now reports
+  each waiter's `position`. Position and holders are computed in the
+  acquire transaction, so they're consistent with the queue the wait
+  joined. No schema change.
 
 ### Fixed
 
