@@ -1,6 +1,7 @@
 # Post-action verification: a `Verify` lifecycle gate (proposal)
 
-**Status:** queued. Not implemented. Feedback wanted before any code lands.
+**Status:** design settled after field review. Decisions resolved
+below. Not yet implemented.
 
 ## The gap
 
@@ -94,12 +95,11 @@ deploy whose `up` died in an unknown state.
 The proposal exposes the distinction and lets the DAG author decide
 (the *decision* -- is the prior artifact compatible, is a half-apply
 safe to revert -- is necessarily app-specific and stays downstream).
-Two ways to surface it, and we want feedback on which:
 
-**Option A -- a verify-specific recovery hook.** The safe default falls
-out for free: you opt in to auto-recovery only for the known-safe
-verify case; an action failure with no `OnFailure` attached just
-surfaces loudly.
+**Decided: a verify-specific recovery hook, `OnVerifyFailure`.** The
+safe default falls out for free: wire only `OnVerifyFailure` and an
+action failure has no recovery path, so it fails loudly. Auto-recovery
+requires a separate, explicit opt-in.
 
 ```go
 sw.Job(plan, "deploy", action).
@@ -112,25 +112,36 @@ sw.Job(plan, "deploy", action).
 Add `OnFailure` too only when a given deploy genuinely has a safe
 action-failure recovery, and now both routes are explicit.
 
-**Option B -- one hook with failure context.** `OnFailure`'s callback
-receives which stage failed and branches:
+The rejected alternative was one `OnFailure` callback receiving
+`f.Stage` and branching internally. It collapses both failures into a
+single path where the unsafe one is a forgotten `if f.Stage == ` away.
+For a primitive whose headline use is deploy rollback, the surface that
+makes auto-rollback require explicit effort is the right one.
 
-```go
-deploy.OnFailure("recover", func(ctx context.Context, f sw.Failure) error {
-    if f.Stage == sw.StageVerify { return rollback(ctx) }
-    return escalate(ctx, f.Err)   // action failed: don't auto-rollback
-})
-```
-
-Option A reads better for the common case and makes the safe behavior
-the default; Option B is better when one recovery routine wants to
-branch. They share the same idea: **the framework's job is to expose
-which stage failed; the recovery decision stays in app code.**
+**Why the distinction is load-bearing: the deploy action is not
+transactional.** `docker compose up -d` recreates services
+sequentially; die partway and you get a mix -- web on the new image,
+worker on the old, or the old container gone and the new one not
+started. At the instant a recovery hook fires you do not know how far
+`up` got, so the safer recovery is usually "re-run `up`" (converge
+forward), not auto-rollback to a prior tag. When `Verify` fails, by
+contrast, `up` ran to completion: the world is in a known state and the
+prior artifact is a clean rollback target. The "did the action
+complete?" line is exactly what the fork captures, and keeping the
+compatibility decision in the author's recovery node is the right
+boundary.
 
 This fork is not deploy-specific. "Did the command crash, or did it run
 clean and produce something that fails verification?" is a meaningful
 distinction for a data job (re-run vs quarantine the bad output) or a
 build (rebuild vs the toolchain is lying about success).
+
+**Emit the failure stage regardless of routing.** Routing through
+`OnVerifyFailure` and recording the stage are not mutually exclusive:
+the run ledger and the recovery node both want action-vs-verify for
+provenance, so `sw.Failure` carries a `Stage` discriminator
+(`StageAction` / `StageVerify`) and the underlying error even under the
+`OnVerifyFailure` routing.
 
 ## Where it lives: SDK vs spark library
 
@@ -159,11 +170,22 @@ suitable for handing to `Verify`:
 ```go
 // in a spark library, not the SDK
 probe.HTTP(url).
+    Method("GET").                       // POST + Body() also supported
+    Header("X-Service-Token", token).    // arbitrary request headers
     ExpectStatus(200).
     ExpectJSON("status", "ok").
     Retry(30).Interval(2 * time.Second).Timeout(5 * time.Second).
     Check   // a func(ctx context.Context) error
 ```
+
+The builder must support custom request headers (and method + body),
+not just a bare GET. A health check worth gating a rollback on often
+hits an *authenticated* endpoint behind an access proxy that requires a
+signed service-token header, returning real data from the backing
+datastore. A bare 200 from a public liveness path is not enough to
+confirm the deploy is actually serving. The builder's assertion surface
+(`ExpectStatus`, `ExpectJSON`) is only useful if it can first construct
+the real request.
 
 ## Worked example: deploy with verified health and safe rollback
 
@@ -206,54 +228,70 @@ rollback), so no extra dependency edge is needed.
   gating partner; `AfterRun` remains for logging and side effects that
   must not change the outcome.
 
-## Open questions
+## Resolved decisions
 
-1. **Option A or Option B for the failure fork?** A dedicated
-   `OnVerifyFailure` hook (safe default, declarative) vs an enriched
-   `OnFailure` callback that receives the failure stage (one hook,
-   branches in app code). Leaning A for the common case.
-2. **Interaction with `.Cache()`.** `Verify` is an assertion about the
-   *world*, not the *computation*, so the natural rule is "it runs
-   regardless of cache hit or miss" -- skip the expensive redeploy on a
-   hit, but still confirm health. The wrinkle: if `Verify` runs on a
-   cache hit and fails, an `OnVerifyFailure` rollback would fire even
-   though this run deployed nothing, which is surprising. Proposed
-   resolution: ship `Verify` on the normal (non-cached) path first and
-   treat the cache interaction as a separate decision rather than
-   guessing now.
-3. **Per-attempt timing.** `Verify` should run inside the `Retry` loop
-   (each attempt = action + verify). Note this differs from `BeforeRun`,
-   which fires once before the first attempt -- so `Verify` mirrors
-   `BeforeRun`'s gating semantics but not its timing.
-4. **Failure-stage representation.** If Option B, `sw.Failure` needs a
-   `Stage` discriminator (`StageAction` / `StageVerify`) and the
-   parent's error. This is also the structured signal a recovery node
-   would want regardless, so it is worth defining cleanly.
+1. **Failure fork: `OnVerifyFailure`, and emit `Stage` regardless.**
+   Routing makes auto-rollback an explicit opt-in (the safe default by
+   construction); the structured failure record still carries
+   `StageAction` / `StageVerify` for provenance and for recovery nodes
+   that want it. The two are not mutually exclusive.
+2. **`Verify` + `.Cache()` on the same node is a loud refusal, for
+   now.** `Verify` is an assertion about the *world*, not the
+   *computation*, so the eventual rule is "it runs regardless of cache
+   hit or miss." But until that interaction is designed, a `Verify` on a
+   `.Cache()` node would arm an `OnVerifyFailure` rollback on a cache hit
+   that deployed nothing this run. Rather than ship that footgun
+   silently, combining the two on one node is a documented error until
+   the cache interaction is designed deliberately.
+3. **Per-attempt timing, with a documented two-layer model and a
+   ceiling.** `Verify` runs inside the `Retry` loop (each attempt =
+   action + verify); this differs from `BeforeRun`, which fires once
+   before the first attempt, so `Verify` mirrors `BeforeRun`'s gating
+   semantics but not its timing. Two retry layers then compose: the
+   probe's internal readiness wait (`Retry(30).Interval(2s)` is about
+   60s) and the node's `Retry` (redeploy + re-verify). Worst case
+   multiplies: `Retry(3)` over a probe `Retry(30)` at 2s is roughly six
+   minutes of probing on a wedged deploy before recovery fires. The
+   two-layer model is documented and the compounded probe time gets a
+   ceiling so a wedged deploy cannot probe unbounded.
+4. **`sw.Failure` shape.** `Stage` (`StageAction` / `StageVerify`) plus
+   the underlying error, defined as part of this work (see decision 1).
 
 ## What "ship it" looks like
 
 - `Verify(fn)` modifier on `JobNode` in `sparkwing/plan.go`, plus the
   per-attempt evaluation in the in-process runner (run after the action
   returns nil, map a non-nil verify error to `Failed`).
-- The chosen failure-fork surface (`OnVerifyFailure`, or `sw.Failure`
-  with a `Stage` field).
+- `OnVerifyFailure(id, x)` recovery hook, and `sw.Failure` carrying a
+  `Stage` (`StageAction` / `StageVerify`) emitted into the failure
+  record regardless of routing.
+- `Verify` + `.Cache()` on the same node rejected at plan-build time
+  with a clear error.
+- A documented ceiling on compounded probe time so a wedged deploy
+  cannot probe unbounded.
 - Tests: action succeeds + verify fails -> node Failed, recovery fires;
-  action fails -> verify never runs, action-recovery path; `Retry`
-  re-runs action + verify; verify success is a no-op.
-- Docs: an SDK-reference entry for `Verify` and a short section in the
-  pipelines guide on the postcondition gate and the two-failure fork.
+  action fails -> verify never runs and `OnVerifyFailure` does not fire;
+  `Retry` re-runs action + verify; verify success is a no-op; `Verify` +
+  `.Cache()` rejected at build time; the failure record carries the
+  right `Stage`.
+- Docs: an SDK-reference entry for `Verify` / `OnVerifyFailure`, and a
+  short pipelines-guide section on the postcondition gate, the
+  two-failure fork, and the two-layer retry model.
 - A `probe` package in a spark library (not the SDK) with the HTTP
-  builder, mirroring the existing internal health-response shape.
+  builder -- custom method, headers, and body, not just a bare GET --
+  mirroring the existing internal health-response shape.
 - CHANGELOG entry under `### Added`.
 
-## Decisions wanted before implementation
+## Decisions (resolved after field review)
 
-- Q1: Option A (`OnVerifyFailure`) or Option B (enriched `OnFailure`)?
-- Q2: confirm "Verify runs regardless of cache; cache interaction is a
-  later decision."
-- Q3: confirm per-attempt timing.
-- Q4: if Option B, agree the `sw.Failure` shape.
+- Q1: `OnVerifyFailure`. Auto-rollback is an explicit opt-in; an
+  unhandled action failure fails loudly.
+- Q2: `Verify` + `.Cache()` on one node is a documented error until the
+  cache interaction is designed; ship the non-cached path first.
+- Q3: per-attempt timing confirmed; document the two-layer retry model
+  and cap the compounded probe time.
+- Q4: define `sw.Failure.Stage` (`StageAction` / `StageVerify`)
+  regardless of routing.
 
-If those land roughly right, the SDK `Verify` gate is a small, focused
-change; the probe helper is independent and can land in a spark library
-on its own timeline.
+The SDK `Verify` gate is a small, focused change; the probe helper is
+independent and can land in a spark library on its own timeline.
