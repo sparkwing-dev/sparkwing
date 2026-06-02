@@ -1,44 +1,64 @@
 # Post-action verification: a `Verify` lifecycle gate (proposal)
 
-**Status:** design settled after field review, with two amendments to
-that review (see Decisions). Not yet implemented.
+**Status:** design settled after three independent reviews. Not yet
+implemented. Part of the "make hidden runtime state explicit" release
+theme, alongside observable concurrency gates (separate proposal).
 
-## The gap
+## What this is, and what it is not
 
-A node's command can exit 0 without the thing it was supposed to do
-having actually happened. `docker compose up` returns success, but the
-service comes up unhealthy. A migration runs clean, but the schema
-didn't advance. An ETL step finishes, but the output table is empty.
-`terraform apply` succeeds, but a follow-up `plan` still shows drift.
+You can already verify a step's result today: hand-roll a check as
+another work step, or a downstream node that reads the step's output.
+So the selling point is **not** "you can now check health." It is:
 
-In every one of these, **exit 0 is necessary but not sufficient.** The
-tool succeeded mechanically; the real-world postcondition it was meant
-to establish did not hold.
+> sparkwing can distinguish *the mutation failed* from *the mutation
+> completed but its postcondition failed.*
 
-Sparkwing has no way to express that. The node lifecycle has a
-*precondition* gate but no *postcondition* gate:
+That distinction is the whole feature. A deploy command can exit 0 while
+the service comes up unhealthy; a migration can run clean while the
+schema didn't advance. "Exit 0" is necessary but not sufficient, and
+today sparkwing cannot tell "the command broke" apart from "the command
+worked but the result is bad."
+
+### Is `Verify` just another work step?
+
+Almost -- and that "almost" is the justification. **A work step that
+fails is indistinguishable from the action failing.** Put a health check
+as the last step inside the deploy node and have it error on unhealthy:
+the node fails, but sparkwing cannot tell you whether the *deploy* step
+or the *check* step failed. Both collapse to "the node failed."
+
+`Verify` is a distinct, labeled lifecycle phase, so that "action failed"
+and "action succeeded, postcondition failed" become *forkable*. That
+fork is the only thing `Verify` fundamentally buys:
+
+- **If you do not need the fork** (you just want "fail if unhealthy"),
+  a work step is genuinely equivalent -- use one. No feature needed.
+- **If you need the fork** (the right recovery differs by which failed),
+  a work step cannot express it, because it cannot distinguish itself
+  from the action.
+
+The output-based alternative (`Result{Healthy bool}` plus a downstream
+`SkipIf`) works but costs three things: an unhealthy deploy shows as a
+*successful* node, you still need a second mechanism for the crash case,
+and you hand-roll the wiring on every DAG. `Verify` is the same fork in
+one labeled place with honest node status.
+
+## The gap in the lifecycle
+
+The node lifecycle has a *precondition* gate but no *postcondition* gate:
 
 | Hook | Position | Gates the outcome? |
 |---|---|---|
 | `BeforeRun` (`plan.go:908`) | before the action | **yes** -- non-nil error fails the node without running it |
 | `Retry` / `Timeout` | around the action | -- |
 | `AfterRun` (`plan.go:922`) | after the action | **no** -- "its own failure is logged but does not change the node's outcome" |
-| *(missing)* | after a successful action | -- |
+| `Verify` *(proposed)* | after a successful action | **yes** -- non-nil error fails the node, with stage provenance |
 
-`AfterRun` looks like the symmetric partner to `BeforeRun`, but it is an
-*observer*: it can watch the result, not veto it. So there is a
-precondition gate and no postcondition gate. The symmetry is half
-implemented.
+`AfterRun` looks like the partner to `BeforeRun` but is an *observer*:
+it can watch the result, not veto it. `Verify` is the missing gating
+partner.
 
-The most common place this bites is deploy health. The `OnFailure` hook
-fires only when a node's own command exits non-zero (`orchestrator.go`
-dispatches the recovery node only when `parentOutcome == Failed`); it
-has no concept of "the command succeeded but the deployed service is
-unhealthy." Every deploy DAG that wants post-deploy verification
-hand-rolls a readiness-probe loop (curl + retry + JSON assert) in a node
-body and wires the recovery by hand.
-
-Prior art separates the two cleanly:
+Prior art separates verification from recovery cleanly:
 
 | System | Post-action verification | Recovery on failure |
 |---|---|---|
@@ -47,37 +67,20 @@ Prior art separates the two cleanly:
 | systemd | `ExecStartPost=` + readiness notify | `Restart=`, `OnFailure=` |
 | sparkwing | -- (hand-rolled per DAG) | `OnFailure` (action-failure only) |
 
-## Proposed shape
+## Proposed SDK surface
 
-Three additions to the SDK: the `Verify` gate, a `Failure` value that
-recovery callbacks can branch on, and `OnVerifyFailure` sugar over the
-common case.
-
-### `Verify`
+Core gets phase semantics only. Nothing in this surface knows about
+HTTP, auth, probes, or what "unhealthy" means.
 
 ```go
 // Verify registers a postcondition checked after the node's action
-// succeeds. The action exited 0, but if fn returns a non-nil error the
-// node's outcome is Failed -- eligible for Retry and triggering the
-// recovery hook, exactly as an action failure would. Verify runs per
-// attempt: a retried action is re-verified.
+// succeeds. If fn returns a non-nil error the node's outcome is Failed
+// (stage StageVerify) -- eligible for Retry and triggering OnFailure,
+// exactly as an action failure would. Verify runs per attempt.
 func (n *JobNode) Verify(fn func(ctx context.Context) error) *JobNode
-```
 
-That is the whole gate. A failed `Verify` reuses the machinery that
-already exists: `Retry` re-runs action + verification together (the
-right shape for "deploy, then wait for healthy, redeploy if it never
-comes up"), the recovery hook fires, and downstream `Needs` is correctly
-blocked because the node itself is `Failed`. No new outcome type.
-
-### `Failure` and the recovery foundation
-
-Recovery callbacks can see *why* the node failed:
-
-```go
 // Failure describes why a node terminated unsuccessfully. It is passed
-// to a recovery callback so recovery logic can branch on the stage at
-// which the node failed.
+// to an OnFailure recovery callback so recovery can branch on stage.
 type Failure struct {
 	Stage FailureStage // which lifecycle stage produced the failure
 	Err   error        // the action error (StageAction) or verify error (StageVerify)
@@ -89,16 +92,10 @@ const (
 	StageAction FailureStage = iota // action exited non-zero or timed out
 	StageVerify                     // action completed; the Verify postcondition failed
 )
-```
 
-The existing `OnFailure(id, x)` already accepts a `Workable` or a
-`func(ctx) error`. It gains one more accepted shape -- a
-failure-aware closure -- so a single recovery node can branch on stage:
-
-```go
-// OnFailure registers a recovery node that runs when this node's
-// outcome is Failed. The recovery inherits no dependencies from the
-// parent. The argument may be:
+// OnFailure registers a recovery node that runs when this node's outcome
+// is Failed. The recovery inherits no dependencies from the parent. The
+// argument may be:
 //   - a Workable, or a func(ctx) error
 //         -- recovery with no failure context
 //   - a func(ctx context.Context, f Failure) error
@@ -106,32 +103,12 @@ failure-aware closure -- so a single recovery node can branch on stage:
 func (n *JobNode) OnFailure(id string, x any) *JobNode
 ```
 
-This is the **foundation**: one hook, one recovery slot, full failure
-context. It is deliberately the general shape -- `Stage` is one
-discriminator today, and a `Failure` value extends to others (timeout
-vs error, future stages) without a new hook per failure kind. (Note this
-diverges from `Job`, which does not accept the failure-aware closure:
-there is no failure at Job-construction time, only at recovery time.)
-
-### `OnVerifyFailure` (sugar)
-
-The common, safe case gets a dedicated spelling:
-
-```go
-// OnVerifyFailure registers recovery that runs only when the node failed
-// at the Verify stage. An action-stage failure does not trigger it.
-// Exactly equivalent to an OnFailure callback that no-ops for
-// StageAction -- but it makes the safe default explicit: wire only
-// OnVerifyFailure and an action failure has no recovery path, so it
-// fails loudly. Auto-recovery becomes an opt-in you cannot reach by
-// accident.
-func (n *JobNode) OnVerifyFailure(id string, x any) *JobNode
-```
-
-`OnFailure` and `OnVerifyFailure` fill the same single recovery slot and
-are mutually exclusive on a node. To take *different* actions per stage,
-use the `func(ctx, Failure)` form of `OnFailure` and branch on
-`f.Stage`.
+That is the entire core change. There is deliberately **no**
+`OnVerifyFailure` sugar (see Decisions): a shortcut spelled
+"on verify failure, do X" nudges authors toward "verify failed ->
+rollback," which is unsafe -- a verify can fail because the check could
+not run, not because the deploy is bad. The single stage-aware
+`OnFailure` makes the branch explicit, which is the point.
 
 ### Evaluation order (per attempt)
 
@@ -143,63 +120,56 @@ use the `func(ctx, Failure)` form of `OnFailure` and branch on
 4. Both succeed -> attempt success.
 5. `Retry` re-runs steps 2--3.
 6. On final failure, build `Failure{Stage, Err}` and dispatch the
-   recovery hook (if outcome is `Failed`). The recovery node stays
-   independent of the parent's outcome -- it performs side effects
-   (rollback, alert); it does not un-fail the parent.
+   recovery node (if outcome is `Failed`). The recovery node performs
+   side effects (rollback, alert); it does not un-fail the parent.
 
-## Why the two-failure fork is load-bearing
+## Why the fork is load-bearing: two failures, three outcomes
 
-A node with a `Verify` gate fails in two distinct ways, and they are
-**not** the same situation:
+The two failure stages are not the same situation:
 
-- **Action failed** (`StageAction`). The command itself died, possibly
-  partway, leaving an *unknown* state. The deploy action is **not
-  transactional**: `docker compose up -d` recreates services
-  sequentially, so dying partway leaves a mix -- web on the new image,
-  worker on the old, or the old container gone and the new one not
-  started. At the instant recovery fires you do not know how far `up`
-  got, so the safer recovery is usually "re-run `up`" (converge
-  forward), not auto-rollback to a prior tag.
-- **Verify failed** (`StageVerify`). The command *ran to completion*;
-  the postcondition is what failed. The world is in a known state and
-  the prior artifact is a clean rollback target.
+- **Action failed** (`StageAction`). The command died, possibly partway.
+  The deploy action is **not transactional**: `docker compose up -d`
+  recreates services sequentially, so dying partway leaves a mix -- web
+  on the new image, worker on the old, or the old container gone and the
+  new one not started. You do not know how far it got, so the safer
+  recovery is usually "re-run `up`" (converge forward), not rollback.
+- **Verify failed** (`StageVerify`). The command ran to completion; the
+  postcondition is what failed.
 
-A single recovery path that fires on both collapses these. That is why
-`OnVerifyFailure` exists and is the recommended spelling: it makes
-rollback reachable only for the known-safe case, while keeping the
-compatibility decision (is the prior artifact safe to restore?) in the
-author's recovery node, where it belongs.
+But "verify failed" itself splits into **two outcomes**, and conflating
+them is dangerous:
 
-The fork is not deploy-specific. "Did the command crash, or did it run
-clean and produce something that fails verification?" is a meaningful
-distinction for a data job (re-run vs quarantine the bad output) or a
-build (rebuild vs the toolchain is lying about success).
+- **Definitively unhealthy** -- the check ran and the service answered
+  "bad." The deploy is the problem. Roll back.
+- **Indeterminate** -- the check could not run: auth token expired,
+  endpoint unreachable, DNS failed. You *cannot tell* if the deploy is
+  healthy. Rolling back here is a self-inflicted outage -- you would
+  revert a healthy deploy because your monitoring broke. The rule is:
+  do not take destructive action on broken telemetry. Escalate to a
+  human instead.
+
+Core does not (and must not) know this distinction -- "auth token
+expired" is an HTTP-probe concept. The split lives in the **error
+value**: `Verify`'s `func(ctx) error` returns an error the recovery
+callback inspects, with classification helpers supplied by the probe
+library. The taxonomy divides cleanly across the boundary: core supplies
+`Failure.Stage`; the probe library classifies its own `Failure.Err`.
 
 ## Where it lives: SDK vs spark library
 
-The probe in the examples is **not** part of this proposal's core
-change, and that split is deliberate:
+- **`Verify`, `Failure`, `FailureStage`, `OnFailure` (new shape) belong
+  in the sparkwing SDK.** General lifecycle surface, zero deploy/HTTP
+  knowledge.
+- **The HTTP health probe belongs in `sparks-core/probe`**, a new
+  package in the existing optional spark library, sitting next to its
+  `deploy`, `kube`, and `gitops` neighbors. The base SDK stays lean;
+  teams that do not deploy over HTTP never pull it.
 
-- **`Verify`, `Failure`, `OnVerifyFailure` belong in the sparkwing SDK.**
-  They are general lifecycle surface with zero knowledge of HTTP,
-  health, or deploys -- they earn a place next to `BeforeRun` and
-  `OnFailure` because they touch the node lifecycle and the
-  orchestrator's outcome evaluation.
-- **The HTTP health probe belongs in a spark library** (e.g.
-  `sparks-core/probe`), not the SDK. It is generic `net/http` + retry +
-  JSON-assert with nothing sparkwing-specific in it. Putting it in the
-  package every author imports would tax everyone for a helper most
-  pipelines never call, and lock a generic utility into the SDK's
-  supported surface forever. As a spark library it ships, is supported,
-  matches sparkwing's own `{"status":"ok","problems":[...]}` health
-  shape, and is pulled only by the DAGs that want it.
-
-So `HealthProbe` is not a primitive at all -- it is the composition
-`Verify(probe.HTTP(...).Check)`. The probe builder produces a
-`func(ctx) error` suitable for handing to `Verify`:
+The probe builder produces a `func(ctx) error` for `Verify` and carries
+the two field requirements:
 
 ```go
-// in a spark library, not the SDK
+// in sparks-core/probe, not the SDK
 probe.HTTP(url).
     Method("GET").                              // POST + Body() also supported
     HeaderFunc("X-Service-Token", signToken).   // per-attempt credential provider
@@ -209,152 +179,142 @@ probe.HTTP(url).
     Check   // a func(ctx context.Context) error
 ```
 
-Two requirements on the builder, both from the field:
+- **Custom method, headers, and body, not just a bare GET.** A
+  rollback-worthy check often hits an *authenticated* endpoint behind an
+  access proxy and returns real datastore data; a public-liveness 200 is
+  not enough.
+- **Per-attempt credentials.** `HeaderFunc(name, func(ctx) (string,
+  error))` is evaluated on each request. A `Retry(30).Interval(2s)` loop
+  runs ~60s; a signed token captured once can expire mid-loop, making the
+  probe fail on *auth* and triggering a rollback for the wrong reason.
+- **Error classification.** The probe returns an error the recovery code
+  can classify -- a definitive "unhealthy" response versus an
+  indeterminate transport/auth failure (e.g. `probe.Indeterminate(err)
+  bool`). This is what lets recovery roll back on the former and
+  escalate on the latter.
 
-- **Custom method, headers, and body, not just a bare GET.** A health
-  check worth gating a rollback on often hits an *authenticated*
-  endpoint behind an access proxy that requires a signed service-token
-  header and returns real datastore data. A bare 200 from a public
-  liveness path is not enough to confirm the deploy is actually serving.
-- **Credentials are per-attempt, not captured once.** `Header(name,
-  value)` takes a constant; `HeaderFunc(name, func(ctx) (string,
-  error))` is evaluated on *each* request. This matters because a
-  `Retry(30).Interval(2s)` loop runs ~60s (longer with node-level
-  retries), and a signed token captured at builder-construction can
-  **expire mid-loop**. A static header would then make the probe fail on
-  *auth*, not health -- triggering a rollback for the wrong reason. A
-  per-attempt provider re-signs each request and keeps the gate honest.
+## Worked example
 
-## Worked example: deploy with verified health and safe rollback
-
-Common case -- rollback only on the known-safe verify failure:
+Minimal -- fork on stage; rollback on a completed-but-unhealthy deploy,
+converge forward on a crash:
 
 ```go
-// capture is a typed job exposing the currently-deployed tag.
-capture := /* Produces[string]: docker inspect the running image */
+capture := /* Produces[string]: the currently-deployed tag */
 prevTag := sw.RefTo[string](capture)
 
-sw.Job(plan, "deploy", func(ctx context.Context) error {
+deploy := sw.Job(plan, "deploy", func(ctx context.Context) error {
         return sw.Bash(ctx, "docker compose pull && docker compose up -d").Run()
     }).
     Needs(capture).
     Verify(probe.HTTP("http://localhost:8080/healthz").
-        ExpectJSON("status", "ok").Retry(30).Interval(2 * time.Second).Check).
-    OnVerifyFailure("rollback", func(ctx context.Context) error {
-        return sw.Bash(ctx, fmt.Sprintf(
-            "docker tag %s regent:current && docker compose up -d",
-            prevTag.Get(ctx))).Run()
-    })
-    // no OnFailure: a failed `up` fails the run; an operator investigates
-```
+        ExpectJSON("status", "ok").Retry(30).Interval(2 * time.Second).Check)
 
-Handling both stages differently -- one recovery node, branch on stage:
-
-```go
 deploy.OnFailure("recover", func(ctx context.Context, f sw.Failure) error {
-    switch f.Stage {
-    case sw.StageVerify:
-        return rollbackToPrior(ctx, prevTag.Get(ctx)) // known state, safe
-    default: // StageAction
-        return convergeForward(ctx)                   // unknown state, re-run up
+    if f.Stage != sw.StageVerify {
+        return convergeForward(ctx)              // crash: unknown state, re-run up
     }
+    return rollback(ctx, prevTag.Get(ctx))       // completed but unhealthy: safe
 })
 ```
 
-The rollback node reads the pre-deploy tag via `Ref.Get`, which already
-works from a recovery node: the typed-output store is run-scoped and
-readable from any node, and because `capture` is upstream of the failing
-`deploy`, ordering is guaranteed (`capture` -> `deploy` -> failure ->
-recovery), so no extra dependency edge is needed.
+Robust -- also distinguish "unhealthy" from "could not verify":
+
+```go
+deploy.OnFailure("recover", func(ctx context.Context, f sw.Failure) error {
+    if f.Stage != sw.StageVerify        { return convergeForward(ctx) }   // crash
+    if probe.Indeterminate(f.Err)       { return escalate(ctx, f.Err) }   // couldn't tell -> human
+    return rollback(ctx, prevTag.Get(ctx))                                // definitively unhealthy
+})
+```
+
+The rollback reads the pre-deploy tag via `Ref.Get`, which works from a
+recovery node: the typed-output store is run-scoped, and because
+`capture` is upstream of the failing `deploy`, ordering is guaranteed
+(`capture` -> `deploy` -> failure -> recovery), so no extra edge is
+needed.
+
+## Caching: cache means cache, always
+
+A cached node skips its action **and** its `Verify` -- there are no side
+effects on a cache hit, by definition. Want a fresh check on every run?
+Model it as its own, uncached node. This needs no special-case rule and
+no build-time refusal: it falls out of "cache means cache," and it kills
+the footgun by construction (a cache hit cannot fire a rollback, because
+nothing -- including the verify -- runs).
+
+The tradeoff is honest and correct: a cached deploy carries the *past*
+verify's blessing, not a fresh one. If you want a live recheck, the rule
+forces you to say so by splitting it out -- which is the right way to
+model a world-state assertion that must run regardless of caching.
 
 ## Non-goals (explicit)
 
-- **No deploy / health / probe logic in the SDK.** `Verify` is generic;
-  the probe is a spark library.
+- **No deploy / health / HTTP / auth knowledge in the SDK.** `Verify` is
+  generic phase provenance; everything HTTP is `sparks-core/probe`.
+- **No `OnVerifyFailure` (or any per-failure-kind hook).** One
+  stage-aware `OnFailure`. Sugar can be added later if the explicit
+  branch proves painful; it is far easier to add API than remove it.
+- **No core classification of verify errors.** Unhealthy-vs-indeterminate
+  lives in the probe library's error values, not in `Failure`.
 - **No safe-rollback compatibility logic.** Whether the prior artifact
-  is compatible with the current schema or state (rolling an image back
-  across a forward-only migration is data loss) is app-specific and
-  stays in the author's recovery node. The primitive supplies the gate
-  and the failure-stage signal, not the compatibility decision.
-- **No canary / traffic-split.** That needs a traffic-split substrate a
-  single-instance topology does not have. Out of scope.
-- **No change to `AfterRun`.** It stays an observer. `Verify` is the
-  gating partner; `AfterRun` remains for logging and side effects that
-  must not change the outcome.
+  is compatible with current schema/state stays in the author's recovery
+  node.
+- **No canary / traffic-split.** Needs a substrate a single-instance
+  topology lacks. Out of scope.
+- **No change to `AfterRun`.** It stays an observer.
 
 ## Decisions
 
-The fork (`Verify` + failure-stage routing), per-attempt timing, and the
-SDK-vs-library split are settled. Two points **amend** the field review
-and need sign-off, because each refines an earlier call:
+Settled across all three reviews:
 
-1. **Recovery API: failure-context `OnFailure` is the foundation,
-   `OnVerifyFailure` is sugar over it** -- *amends the field review*,
-   which picked the dedicated hook as the primary (and only) surface.
-   Reasoning: the field review separately decided to record
-   `Failure.Stage` regardless of routing, which means the structured
-   failure value is built either way. Once it exists, a single
-   stage-aware `OnFailure` callback is nearly free, and it is the
-   *extensible* shape -- a dedicated hook per failure kind
-   (`OnVerifyFailure`, then `OnTimeout`, ...) does not scale. Keeping
-   `OnVerifyFailure` as sugar preserves the safe-default ergonomic (it
-   stays the recommended spelling) without making the primitive a
-   per-kind hook. Net surface is the same; the layering is inverted so
-   the general path stays open.
-
-2. **`Verify` + `.Cache()` on the same node is a build-time error in
-   v1; the *eventual* rule is narrower** -- *refines the field review*,
-   which proposed the blunt refusal as the resolution. The blunt refusal
-   is correct for v1: allowing `Verify` to run on a cache *hit* means a
-   hit no longer means "skip execution entirely" (the orchestrator must
-   invoke verification even on a hit), which is exactly the undesigned
-   cache-fast-path interaction being deferred. The intended end state is
-   to forbid only `.Cache()` + auto-recovery (the actual footgun:
-   rolling back a deploy a cache-hit run never performed) and let a
-   recovery-free `Verify` run on a hit. That end state is documented as
-   direction, not shipped, until the cache-hit-verify semantics are
-   designed.
-
-Settled (from the field review, unchanged):
-
+- **`Verify` is justified by phase provenance only** -- distinguishing
+  action-failed from postcondition-failed. Not "you can check health."
+- **One recovery shape: `OnFailure(ctx, Failure)`.** No
+  `OnVerifyFailure`. *(This overrides the earlier field-review call that
+  made the dedicated hook primary.* Reason: a verify failure is not
+  reliably "deploy is bad" -- the indeterminate case proves it -- and the
+  unhealthy-vs-indeterminate line is not universal, so no shortcut can
+  encode a safe default. The reversal is the safe direction: add sugar
+  later if warranted.)
+- **Core knows only `Stage`.** HTTP, auth, retry policy, and
+  unhealthy-vs-indeterminate never enter the SDK.
+- **Cache means cache, always.** Cached node skips action + verify; live
+  checks are separate nodes. *(Simplifies the earlier "build-time
+  refusal" call to a rule with no special case.)*
+- **Probe + error classification live in `sparks-core/probe`**, with
+  per-attempt credentials and custom method/headers/body.
 - **Per-attempt timing, two-layer model documented, compounded probe
-  time capped.** `Verify` runs inside the `Retry` loop. Two retry layers
-  compose: the probe's internal readiness wait
-  (`Retry(30).Interval(2s)` is ~60s) and the node's `Retry` (redeploy +
-  re-verify). Worst case multiplies -- `Retry(3)` over a probe
-  `Retry(30)` at 2s is roughly six minutes of probing on a wedged deploy
-  before recovery fires. Document the model; cap the compounded probe
-  time so a wedged deploy cannot probe unbounded.
-- **`Failure.Stage` is recorded into the structured failure record
-  regardless of which recovery spelling is used** -- the run ledger and
-  recovery nodes both want action-vs-verify for provenance.
+  time capped.** `Verify` runs inside the `Retry` loop. The probe's
+  internal readiness wait (`Retry(30).Interval(2s)` is ~60s) and the
+  node's `Retry` compose; worst case multiplies (`Retry(3)` over a probe
+  `Retry(30)` at 2s is roughly six minutes), so cap the compounded probe
+  time.
+- **`Failure.Stage` recorded into the failure record** regardless, for
+  the run ledger and recovery nodes.
 
 ## What "ship it" looks like
 
-- `Verify(fn)` modifier on `JobNode` in `sparkwing/plan.go`, plus the
-  per-attempt evaluation in the in-process runner (after the action
-  returns nil, map a non-nil verify error to `Failed` with
-  `StageVerify`).
+- `Verify(fn)` on `JobNode` in `sparkwing/plan.go`, plus per-attempt
+  evaluation in the in-process runner (after the action returns nil, map
+  a non-nil verify error to `Failed` with `StageVerify`).
 - `Failure` / `FailureStage` types; `OnFailure` extended to accept
-  `func(ctx, Failure) error`; `OnVerifyFailure(id, x)` sugar. `Stage`
-  emitted into the failure record regardless of spelling.
-- `Verify` + `.Cache()` on the same node rejected at plan-build time
-  with a clear error.
+  `func(ctx, Failure) error`; `Stage` emitted into the failure record.
+- A cached node skips action + verify (no new refusal logic; verify is
+  inside the cached unit).
 - A documented ceiling on compounded probe time.
-- Tests: action succeeds + verify fails -> node Failed with
-  `StageVerify`, recovery fires; action fails -> verify never runs and
-  `OnVerifyFailure` does not fire; stage-aware `OnFailure` branches
-  correctly on both stages; `Retry` re-runs action + verify; verify
-  success is a no-op; `Verify` + `.Cache()` rejected at build time; the
-  failure record carries the right `Stage`.
-- Docs: SDK-reference entries for `Verify` / `OnFailure` (new shape) /
-  `OnVerifyFailure`, and a pipelines-guide section on the postcondition
-  gate, the two-failure fork, and the two-layer retry model.
-- A `probe` package in a spark library (not the SDK): HTTP builder with
-  custom method, static and per-attempt (`HeaderFunc`) headers, body,
-  and `ExpectStatus` / `ExpectJSON` assertions, mirroring the existing
-  internal health-response shape.
+- Tests: action succeeds + verify fails -> Failed with `StageVerify`,
+  recovery fires; action fails -> verify never runs; stage-aware
+  `OnFailure` branches on both stages; `Retry` re-runs action + verify;
+  verify success is a no-op; a cache hit runs neither action nor verify;
+  the failure record carries the right `Stage`.
+- Docs: SDK-reference entries for `Verify` and the new `OnFailure` shape,
+  and a pipelines-guide section on the postcondition gate, the
+  action-vs-verify fork, the unhealthy-vs-indeterminate distinction, and
+  the two-layer retry model.
+- `sparks-core/probe`: HTTP builder with custom method, static and
+  per-attempt headers, body, `ExpectStatus` / `ExpectJSON`, and error
+  classification (`Indeterminate`).
 - CHANGELOG entry under `### Added`.
 
 The SDK `Verify` gate is a small, focused change; the probe helper is
-independent and can land in a spark library on its own timeline.
+independent and lands in `sparks-core` on its own timeline.
