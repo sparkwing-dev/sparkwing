@@ -1274,10 +1274,11 @@ type dispatchState struct {
 	outputs   map[string]any           // per-node typed output (in-process runner)
 	outputsJS map[string][]byte        // per-node raw JSON output (cluster runner)
 	outcomes  map[string]sparkwing.Outcome
-	errors    map[string]string        // per-node error message, set when runner.Result.Err is non-nil
-	starts    map[string]time.Time     // per-node wall-clock start, stamped at runOneNode entry
-	durations map[string]time.Duration // per-node wall-clock duration, computed when outcome is recorded
-	claimedBy map[string]string        // recoveryID -> parentID (OnFailure)
+	errors    map[string]string            // per-node error message, set when runner.Result.Err is non-nil
+	failures  map[string]sparkwing.Failure // per-node failure (stage + err), set when a node fails
+	starts    map[string]time.Time         // per-node wall-clock start, stamped at runOneNode entry
+	durations map[string]time.Duration     // per-node wall-clock duration, computed when outcome is recorded
+	claimedBy map[string]string            // recoveryID -> parentID (OnFailure)
 
 	// inlineRunner routes Node.IsInline nodes regardless of the
 	// configured Options.Runner so glue work skips pod spin-up.
@@ -1332,6 +1333,7 @@ func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, r
 		outputsJS: map[string][]byte{},
 		outcomes:  map[string]sparkwing.Outcome{},
 		errors:    map[string]string{},
+		failures:  map[string]sparkwing.Failure{},
 		starts:    map[string]time.Time{},
 		durations: map[string]time.Duration{},
 		claimedBy: map[string]string{},
@@ -1604,6 +1606,34 @@ func (s *dispatchState) setError(id, msg string) {
 	s.mu.Unlock()
 }
 
+// setFailure records a node's structured failure (stage + error), read
+// back when dispatching the node's OnFailure recovery.
+func (s *dispatchState) setFailure(id string, f sparkwing.Failure) {
+	s.mu.Lock()
+	s.failures[id] = f
+	s.mu.Unlock()
+}
+
+// getFailure returns the recorded failure for a node, or the zero
+// Failure if none was recorded.
+func (s *dispatchState) getFailure(id string) sparkwing.Failure {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failures[id]
+}
+
+// failureFrom attributes an error to its lifecycle stage. A
+// *sparkwing.VerifyError (set by the runner when a Verify check fails)
+// maps to StageVerify with the check's underlying error; anything else
+// is an action-stage failure.
+func failureFrom(err error) sparkwing.Failure {
+	var ve *sparkwing.VerifyError
+	if errors.As(err, &ve) {
+		return sparkwing.Failure{Stage: sparkwing.StageVerify, Err: ve.Err}
+	}
+	return sparkwing.Failure{Stage: sparkwing.StageAction, Err: err}
+}
+
 // markStarted stamps the wall-clock time runOneNode begins real work.
 func (s *dispatchState) markStarted(id string) {
 	s.mu.Lock()
@@ -1782,7 +1812,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		// Recovery node about to invoke its runner -- this is the
 		// real "started doing work" point.
 		s.markStarted(node.ID())
-		res := s.invokeRecoveryRunner(node)
+		res := s.invokeRecoveryRunner(node, s.getFailure(parentID))
 		s.applyResult(node.ID(), res)
 		return
 	}
@@ -2038,6 +2068,7 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 	}
 	if res.Err != nil {
 		s.setError(nodeID, res.Err.Error())
+		s.setFailure(nodeID, failureFrom(res.Err))
 	}
 	s.setOutcome(nodeID, res.Outcome)
 }
@@ -2275,16 +2306,19 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 
 // invokeRecoveryRunner runs a recovery node via the in-process
 // job-only path; cluster runners fall back to full RunNode.
-func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode) runner.Result {
+func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
+	// Carry the parent's failure (stage + err) so a failure-aware
+	// recovery callback can branch on it.
+	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
-		out, err := ipr.executeNode(s.resolverCtx, s.runID, node, s.delegate)
+		out, err := ipr.executeNode(ctx, s.runID, node, s.delegate)
 		if err != nil {
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
 		return runner.Result{Outcome: sparkwing.Success, Output: out}
 	}
 	return s.runWithCap(node, func() runner.Result {
-		return s.runner.RunNode(s.resolverCtx, runner.Request{
+		return s.runner.RunNode(ctx, runner.Request{
 			RunID:    s.runID,
 			NodeID:   node.ID(),
 			Node:     node,

@@ -48,6 +48,22 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** `Job.Verify(fn)` -- a postcondition checked after a node's
+  action succeeds. The command exited 0, but if the check returns an
+  error the node fails at the verify stage (eligible for `Retry`, routed
+  to `OnFailure`), so "the command succeeded but the result is bad" is a
+  first-class node outcome rather than a hidden state. Runs once per
+  attempt; a cache hit skips the action and the check together. Also on
+  `JobGroup` (applied to every member).
+- **sdk:** `OnFailure` now also accepts a failure-aware recovery,
+  `func(ctx context.Context, f sparkwing.Failure) error`. `Failure`
+  carries `Stage` (`StageAction` / `StageVerify`) and the underlying
+  error, so recovery can branch: converge forward on an action failure,
+  roll back on a verify failure. The verify stage is recorded on the
+  node's failure reason for the run ledger.
+
 ### Fixed
 
 - **`pipeline trigger` now requires a GitHub repository.** When the

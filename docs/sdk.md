@@ -360,7 +360,8 @@ Common Plan-layer modifiers (chainable on `*Job`):
 ```
 .Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
 .Timeout(d)                        // hard kill after d
-.OnFailure(id, job)                // run a recovery node if this node fails
+.Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
+.OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
 .Requires(labels...)                 // require runner labels (AND semantics)
 .Cache(CacheOptions{...})          // coordination + memoization

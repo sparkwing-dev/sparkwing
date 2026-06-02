@@ -266,6 +266,14 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 			attemptCtx, cancel = context.WithTimeout(nodeCtx, timeout)
 		}
 		out, aerr := runJobBody(attemptCtx, node)
+		if aerr == nil {
+			if vfn := node.Verifier(); vfn != nil {
+				if verr := runVerify(attemptCtx, vfn); verr != nil {
+					aerr = &sparkwing.VerifyError{Err: verr}
+					nlog.Log("error", aerr.Error())
+				}
+			}
+		}
 		if cancel != nil {
 			cancel()
 		}
@@ -312,7 +320,11 @@ done:
 
 	if lastErr != nil {
 		reason := store.FailureUnknown
-		if lastTimeout {
+		var ve *sparkwing.VerifyError
+		switch {
+		case errors.As(lastErr, &ve):
+			reason = store.FailureVerify
+		case lastTimeout:
 			reason = store.FailureTimeout
 		}
 		emitNodeEnd(sparkwing.Failed, lastErr.Error())
@@ -361,6 +373,17 @@ func nodeLogDrops(nlog NodeLog) (int, string) {
 		return d.Drops()
 	}
 	return 0, ""
+}
+
+// runVerify runs a node's Verify postcondition with panic recovery. A
+// panic is reported as a verify failure, not a runner crash.
+func runVerify(ctx context.Context, fn sparkwing.VerifyFn) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return fn(ctx)
 }
 
 func (r *InProcessRunner) markSkipped(ctx context.Context, runID, nodeID, reason string) {

@@ -20,10 +20,14 @@ import (
 
 // Failure reason codes; empty = no structured reason.
 const (
-	FailureUnknown            = ""
-	FailureOOMKilled          = "oom_killed"
-	FailureAgentLost          = "agent_lost"
-	FailureTimeout            = "timeout"
+	FailureUnknown   = ""
+	FailureOOMKilled = "oom_killed"
+	FailureAgentLost = "agent_lost"
+	FailureTimeout   = "timeout"
+	// FailureVerify: the node's action completed but its Verify
+	// postcondition returned an error. The failure is at the verify
+	// stage, not the action.
+	FailureVerify             = "verify"
 	FailureQueueTimeout       = "queue_timeout"
 	FailureRunnerLeaseExpired = "runner_lease_expired"
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403

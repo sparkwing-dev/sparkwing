@@ -343,6 +343,20 @@ func coerceJobArg(caller, id string, x any) Workable {
 	}
 }
 
+// coerceRecoveryArg accepts everything coerceJobArg does, plus a
+// failure-aware FailureRecoveryFn (func(ctx, Failure) error) that
+// receives the parent's Failure at run time. Used by OnFailure.
+func coerceRecoveryArg(caller, id string, x any) Workable {
+	switch v := x.(type) {
+	case FailureRecoveryFn:
+		return &recoveryFn{fn: v}
+	case func(ctx context.Context, f Failure) error:
+		return &recoveryFn{fn: v}
+	default:
+		return coerceJobArg(caller, id, x)
+	}
+}
+
 // LintWarnings returns the non-fatal Plan-time advisories accumulated
 // while building this Plan. Surfaced by the orchestrator at dispatch
 // and by `sparkwing pipeline explain --all`.
@@ -406,6 +420,10 @@ type JobNode struct {
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
+
+	// verify is the postcondition checked after the action succeeds; a
+	// non-nil return fails the node at StageVerify. Nil = no check.
+	verify VerifyFn
 
 	// requires restricts the job to runners advertising every listed
 	// term (AND across terms, OR within a term -- see MatchLabels).
@@ -826,9 +844,20 @@ func (n *JobNode) Timeout(d time.Duration) *JobNode {
 // rollback, alerting, and cleanup hooks.
 //
 // Accepts the same argument shapes as sparkwing.Job (a Workable struct
-// or a bare func(ctx) error closure).
+// or a bare func(ctx) error closure), plus a failure-aware
+// [FailureRecoveryFn] -- func(ctx context.Context, f sparkwing.Failure)
+// error -- which receives the [Failure] describing how this node
+// terminated. Branch on f.Stage to recover differently for an action
+// failure versus a [Verify] failure:
+//
+//	deploy.OnFailure("recover", func(ctx context.Context, f sparkwing.Failure) error {
+//	    if f.Stage != sparkwing.StageVerify {
+//	        return convergeForward(ctx) // action failed: state unknown
+//	    }
+//	    return rollback(ctx)            // verify failed: prior artifact is safe
+//	})
 func (n *JobNode) OnFailure(id string, x any) *JobNode {
-	job := coerceJobArg("OnFailure", id, x)
+	job := coerceRecoveryArg("OnFailure", id, x)
 	n.onFailure = newNode("OnFailure", id, job)
 	return n
 }
@@ -925,6 +954,33 @@ func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 	}
 	return n
 }
+
+// Verify registers a postcondition checked after the node's action
+// succeeds. The action exited 0, but if fn returns a non-nil error the
+// node fails at [StageVerify] -- eligible for Retry (the action and the
+// check re-run together) and routed to OnFailure, exactly as an action
+// failure would be. Verify runs once per attempt.
+//
+// A failed Verify makes the node's own outcome Failed, so downstream
+// Needs() is correctly blocked and the dashboard shows the node red:
+// "the command succeeded but the result is bad" is a first-class outcome
+// on the node, not a hidden state encoded elsewhere.
+//
+//	sw.Job(plan, "deploy", &Deploy{}).
+//	    Verify(probe.HTTP(url).ExpectJSON("status", "ok").Check).
+//	    OnFailure("recover", recoverFn)
+//
+// On a node that also declares .Cache(): a cache hit skips the action,
+// and the Verify with it -- the check is part of the cached unit. For a
+// health check that must run on every invocation, model it as its own
+// uncached node.
+func (n *JobNode) Verify(fn VerifyFn) *JobNode {
+	n.verify = fn
+	return n
+}
+
+// Verifier returns the node's Verify postcondition, or nil if none.
+func (n *JobNode) Verifier() VerifyFn { return n.verify }
 
 // BeforeRunHooks returns the node's registered pre-run hooks.
 func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }

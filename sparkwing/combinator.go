@@ -232,6 +232,16 @@ func (g *JobGroup) Timeout(d time.Duration) *JobGroup {
 	return g
 }
 
+// Verify registers the same postcondition check on every member. Each
+// member runs the check after its action succeeds and fails at
+// StageVerify if the check returns an error. See Job.Verify.
+func (g *JobGroup) Verify(fn VerifyFn) *JobGroup {
+	for _, m := range g.Members() {
+		m.Verify(fn)
+	}
+	return g
+}
+
 // Requires restricts every member to runners advertising the given labels.
 // See Job.Requires.
 func (g *JobGroup) Requires(labels ...string) *JobGroup {
