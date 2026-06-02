@@ -247,6 +247,52 @@ verify's blessing, not a fresh one. If you want a live recheck, the rule
 forces you to say so by splitting it out -- which is the right way to
 model a world-state assertion that must run regardless of caching.
 
+## Rejected alternative: verify-as-node + a conditional-execution engine
+
+An alternative models verification as a plain downstream node and the
+recovery branches as separate nodes, gated by a new conditional-edge
+family -- `RunIf`, `Failed(node)`, `Succeeded(node)`, `FailureOf(node)`,
+`Output(node)`:
+
+```go
+verify   := sw.Job(plan, p+"verify", c.Verify).Needs(deploy)
+rollback := sw.Job(plan, p+"rollback", c.Rollback).
+    Needs(verify).
+    RunIf(sw.Failed(verify).And(probe.NotIndeterminate(verify)))
+```
+
+It is rejected for this release, for four reasons:
+
+1. **It grows core surface, not shrinks it.** It swaps a small lifecycle
+   addition (`Verify` + a `Stage` field on the existing recovery hook)
+   for a general conditional-execution engine -- and most of that engine
+   duplicates primitives sparkwing already has: `RunIf(Failed(x))` is
+   `OnFailure`, `RunIf(!pred)` is `SkipIf`, `Output(x)` is `Ref`. Two
+   parallel ways to express the same conditionals.
+2. **It fights the established model.** `Retry`, `Timeout`, `OnFailure`,
+   `SkipIf`, `BeforeRun`, `AfterRun` are all node-attached lifecycle
+   modifiers, not separate nodes. `Verify` joins that family. A
+   `RunIf`-everything model is a different (trigger-rule) execution
+   philosophy that would sit awkwardly beside -- and partly obsolete --
+   the existing modifiers.
+3. **It reintroduces dishonest node status.** Verify-as-a-separate-node
+   leaves the deploy node showing `Success` while the service is
+   unhealthy; downstream `Needs(deploy)` proceeds past a broken deploy
+   and the dashboard shows green. Keeping `Verify` on the node means the
+   deploy node itself goes `Failed(StageVerify)` -- the whole point.
+4. **It loses unit retry.** `deploy.Verify(...).Retry(3)` re-runs action
+   + verify together ("redeploy if it comes up unhealthy"); re-running a
+   separate verify node cannot re-run the deploy.
+
+The valid kernel in the alternative is *recovery-branch visibility* --
+seeing which of rollback / escalate / converge fired. But the recovery
+is already a dispatched node with its own logs and status; only the
+branch decision is in a closure. Making each branch its own node is a
+possible later enhancement that does not require the conditional engine
+and is weighed separately. Unifying the dependency model
+(`Needs`/`OnFailure`/`SkipIf` into one `RunIf` family) may be worth its
+own proposal someday; it is out of scope here.
+
 ## Non-goals (explicit)
 
 - **No deploy / health / HTTP / auth knowledge in the SDK.** `Verify` is
