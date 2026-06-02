@@ -415,6 +415,8 @@ func runCluster(args []string) error {
 		return runImage(args[1:])
 	case "webhooks":
 		return runWebhooks(args[1:])
+	case "concurrency":
+		return runConcurrency(args[1:])
 	default:
 		PrintHelp(cmdCluster, os.Stderr)
 		return fmt.Errorf("cluster: unknown subcommand %q", args[0])

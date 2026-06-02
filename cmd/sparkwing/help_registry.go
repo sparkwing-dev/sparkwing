@@ -128,6 +128,7 @@ address; set them up with 'sparkwing configure profiles'.`,
 		{"tokens", "Create / list / revoke / rotate controller API tokens"},
 		{"image", "Image rollout helpers for gitops-managed deployments"},
 		{"webhooks", "Inspect / replay GitHub webhooks (wraps gh api)"},
+		{"concurrency", "Inspect a concurrency namespace: holders + queue"},
 	},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
@@ -2714,6 +2715,27 @@ Use -q to print just names, one per line, for shell piping
 	Examples: []Example{
 		{"List agents on prod", "sparkwing cluster agents list --profile prod"},
 		{"Just agent names for piping", "sparkwing cluster agents list --profile prod -q"},
+	},
+}
+
+var cmdClusterConcurrency = Command{
+	Path:     "sparkwing cluster concurrency",
+	Synopsis: "Inspect a concurrency namespace: holders + queue",
+	Description: `Shows who currently holds a concurrency namespace's slots
+and the queue of waiters behind it, each with its position
+(0 == next in line). Use it to tell whether a node is wedged
+or simply waiting its turn for a full OnLimit:Queue slot.
+
+Hits GET /api/v1/concurrency/{namespace}/state on the
+selected profile's controller.`,
+	Flags: []FlagSpec{
+		{Name: "namespace", Argument: "NAME", Desc: "Concurrency namespace to inspect", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format (json|table)", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Who holds and who's queued", "sparkwing cluster concurrency --namespace deploy-prod --profile prod"},
 	},
 }
 

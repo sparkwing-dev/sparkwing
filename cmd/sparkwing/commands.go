@@ -51,7 +51,7 @@ var allCommands = []*Command{
 	&cmdImage, &cmdImageRollout,
 	&cmdHealth,
 	&cmdWebhooks, &cmdWebhooksList, &cmdWebhooksDeliveries, &cmdWebhooksReplay,
-	&cmdAgents, &cmdAgentsList,
+	&cmdAgents, &cmdAgentsList, &cmdClusterConcurrency,
 	&cmdSparks, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup,
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
