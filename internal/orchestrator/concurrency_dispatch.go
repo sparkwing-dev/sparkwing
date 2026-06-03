@@ -16,6 +16,36 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+// concWaitDetail renders a short status_detail string describing why a
+// node is waiting on a concurrency namespace, for the dashboard. Empty
+// for kinds that don't represent a wait.
+func concWaitDetail(namespace string, r store.AcquireSlotResponse, leaderRun, leaderNode string) string {
+	switch r.Kind {
+	case store.AcquireQueued:
+		held := "unknown"
+		if len(r.Holders) > 0 {
+			held = holderLabel(r.Holders[0].RunID, r.Holders[0].NodeID)
+			if extra := len(r.Holders) - 1; extra > 0 {
+				held = fmt.Sprintf("%s +%d", held, extra)
+			}
+		}
+		return fmt.Sprintf("queued in %s: %d ahead, held by %s", namespace, r.Position, held)
+	case store.AcquireCoalesced:
+		return fmt.Sprintf("coalescing in %s behind %s", namespace, holderLabel(leaderRun, leaderNode))
+	case store.AcquireCancellingOthers:
+		return fmt.Sprintf("waiting in %s (evicting prior holders)", namespace)
+	default:
+		return ""
+	}
+}
+
+func holderLabel(runID, nodeID string) string {
+	if nodeID == "" {
+		return runID
+	}
+	return runID + "/" + nodeID
+}
+
 // runNodeWithCache owns the full .Cache() lifecycle: acquire, policy
 // branching, coalesce/queue wait, execute, release.
 func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
@@ -265,6 +295,13 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload)
 
+	// Surface the wait on the node so the dashboard shows "queued ... N
+	// ahead, held by X" instead of an indistinguishable spinner. Cleared
+	// on promotion (below).
+	if detail := concWaitDetail(opts.Namespace, initial, leaderRun, leaderNode); detail != "" {
+		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), detail)
+	}
+
 	// Back-stop: force-release evicted holders after CancelTimeout so
 	// forward progress is bounded.
 	if initial.Kind == store.AcquireCancellingOthers && opts.CancelTimeout > 0 {
@@ -325,6 +362,8 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 			continue
 		case store.WaiterPromoted:
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
+			// Clear the "queued ..." detail now that the node holds a slot.
+			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
 			return r.runHeldSlot(ctx, req, opts, res.HolderID, cacheHash)
 		case store.WaiterCached:
 			return r.applyCacheHit(ctx, req, opts, cacheHash, res.OutputRef, res.OriginRunID, res.OriginNodeID)
