@@ -22,20 +22,36 @@ import (
 func concWaitDetail(namespace string, r store.AcquireSlotResponse, leaderRun, leaderNode string) string {
 	switch r.Kind {
 	case store.AcquireQueued:
-		held := "unknown"
-		if len(r.Holders) > 0 {
-			held = holderLabel(r.Holders[0].RunID, r.Holders[0].NodeID)
-			if extra := len(r.Holders) - 1; extra > 0 {
-				held = fmt.Sprintf("%s +%d", held, extra)
-			}
-		}
-		return fmt.Sprintf("queued in %s: %d ahead, held by %s", namespace, r.Position, held)
+		return concQueuedDetail(namespace, r.Position, r.Holders)
 	case store.AcquireCoalesced:
 		return fmt.Sprintf("coalescing in %s behind %s", namespace, holderLabel(leaderRun, leaderNode))
 	case store.AcquireCancellingOthers:
 		return fmt.Sprintf("waiting in %s (evicting prior holders)", namespace)
 	default:
 		return ""
+	}
+}
+
+// concQueuedDetail renders the "queued in <ns>: N ahead, held by X"
+// summary for a queue-policy waiter.
+func concQueuedDetail(namespace string, position int, holders []store.ConcurrencyHolder) string {
+	held := "unknown"
+	if len(holders) > 0 {
+		held = holderLabel(holders[0].RunID, holders[0].NodeID)
+		if extra := len(holders) - 1; extra > 0 {
+			held = fmt.Sprintf("%s +%d", held, extra)
+		}
+	}
+	return fmt.Sprintf("queued in %s: %d ahead, held by %s", namespace, position, held)
+}
+
+// emitConcWaitLog mirrors a concurrency-wait line into the node log and,
+// via the run delegate, the live stream. The node log is append-mode, so
+// executeNode's later open on promotion appends cleanly.
+func (r *InProcessRunner) emitConcWaitLog(ctx context.Context, req runner.Request, detail string) {
+	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
+		nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
+		_ = nlog.Close()
 	}
 }
 
@@ -296,20 +312,18 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload)
 
 	// Surface the wait on the node so the dashboard shows "queued ... N
-	// ahead, held by X" instead of an indistinguishable spinner. Cleared
-	// on promotion (below).
-	if detail := concWaitDetail(opts.Namespace, initial, leaderRun, leaderNode); detail != "" {
-		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), detail)
-		// Also emit it into the log stream. The node hasn't started its
-		// runner yet, so this line comes from the dispatcher; opening the
-		// node log with the run delegate mirrors it to the live stream
-		// (and `runs logs`). Append-mode, so executeNode's later open on
-		// promotion appends cleanly.
-		if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
-			nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
-			_ = nlog.Close()
-		}
+	// ahead, held by X" instead of an indistinguishable spinner, and emit
+	// it into the log stream (from the dispatcher -- the node hasn't
+	// started its runner yet). Refreshed below as the queue advances;
+	// cleared on promotion.
+	lastDetail := concWaitDetail(opts.Namespace, initial, leaderRun, leaderNode)
+	if lastDetail != "" {
+		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), lastDetail)
+		r.emitConcWaitLog(ctx, req, lastDetail)
 	}
+	// Only queue waiters have an advancing position worth refreshing;
+	// coalesce/cancel-others keep their initial detail.
+	queueRefresh := initial.Kind == store.AcquireQueued
 
 	// Back-stop: force-release evicted holders after CancelTimeout so
 	// forward progress is bounded.
@@ -367,6 +381,17 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 		case store.WaiterStillWaiting:
 			if !queueDeadline.IsZero() && time.Now().After(queueDeadline) {
 				return r.failQueueTimeout(ctx, req, opts)
+			}
+			// Refresh the wait display as the queue advances. ResolveWaiter
+			// recomputes position against the fully-committed queue, so this
+			// self-corrects any stale insert-time value. Only writes when the
+			// summary actually changes.
+			if queueRefresh {
+				if d := concQueuedDetail(opts.Namespace, res.Position, res.Holders); d != lastDetail {
+					lastDetail = d
+					_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), d)
+					r.emitConcWaitLog(ctx, req, d)
+				}
 			}
 			continue
 		case store.WaiterPromoted:

@@ -981,6 +981,13 @@ type WaiterResolution struct {
 	OriginNodeID       string
 	LeaderRunID        string
 	LeaderNodeID       string
+
+	// Position and Holders are populated on WaiterStillWaiting (queue
+	// policy) so a poller can refresh its "N ahead, held by X" display
+	// against the fully-committed queue -- self-correcting any stale
+	// value computed at insert time under simultaneous arrival.
+	Position int
+	Holders  []ConcurrencyHolder
 }
 
 // ResolveWaiter is the read-side for polling; never inserts waiter
@@ -1063,10 +1070,24 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		key, runID, nodeID,
 	).Scan(&waiterArrivedNS)
 	if err == nil {
+		// Recompute position against the now-fully-committed queue, plus
+		// the current holders, for the poller's live display.
+		var position int
+		if e := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy = ? AND arrived_at < ?`,
+			key, OnLimitQueue, waiterArrivedNS,
+		).Scan(&position); e != nil {
+			return WaiterResolution{}, e
+		}
+		holders, e := txActiveHolders(ctx, tx, key, nowNS)
+		if e != nil {
+			return WaiterResolution{}, e
+		}
 		if err := tx.Commit(); err != nil {
 			return WaiterResolution{}, err
 		}
-		return WaiterResolution{Status: WaiterStillWaiting}, nil
+		return WaiterResolution{Status: WaiterStillWaiting, Position: position, Holders: holders}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return WaiterResolution{}, err
