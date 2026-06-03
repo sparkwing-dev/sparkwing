@@ -31,6 +31,12 @@ pipelines:
   - name: static-analysis
     entrypoint: StaticAnalysis
 
+  # integration: spins up Postgres + MinIO in Docker, waits for them to
+  # be ready (Verify gate), runs the env-gated integration suite against
+  # them, and tears the containers down. Requires Docker + go.
+  - name: integration
+    entrypoint: Integration
+
   - name: build
     entrypoint: Build
 
