@@ -427,7 +427,6 @@ func NewSchemaFromType(t reflect.Type) (*Schema, error) {
 		fields: make(map[string]*fieldMeta),
 	}
 	structFields := reflectStructFields(t)
-	names := make([]string, 0, len(structFields))
 	for name, sf := range structFields {
 		m := &fieldMeta{Name: name, GoType: sf.Type}
 		if flag := sf.Tag.Get("flag"); flag != "" {
@@ -437,7 +436,6 @@ func NewSchemaFromType(t reflect.Type) (*Schema, error) {
 		}
 		m.Desc = sf.Tag.Get("desc")
 		s.fields[name] = m
-		names = append(names, name)
 	}
 	order, err := topoSortDependencies(s.fields)
 	if err != nil {

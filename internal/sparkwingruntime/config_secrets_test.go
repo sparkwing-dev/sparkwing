@@ -42,24 +42,6 @@ func registerSecretsOnlyPipe(t *testing.T) *sparkwing.Registration {
 	})
 }
 
-type releaseCfg struct {
-	ImageRepo string `sw:"image_repo,required"`
-	Replicas  int    `sw:"replicas" default:"2"`
-}
-
-type releasePipe struct{ sparkwing.Base }
-
-func (releasePipe) Plan(_ context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	return nil
-}
-func (releasePipe) Config() any { return &releaseCfg{} }
-
-func registerConfigOnlyPipe(t *testing.T) *sparkwing.Registration {
-	return ensureRegistered(t, "config-only-pipe-rt", func() sparkwing.Pipeline[sparkwing.NoInputs] {
-		return &releasePipe{}
-	})
-}
-
 type plainPipe struct{ sparkwing.Base }
 
 func (plainPipe) Plan(_ context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {

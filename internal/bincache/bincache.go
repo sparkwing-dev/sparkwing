@@ -404,9 +404,9 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	// Bare exec.Command("go", ...) with no Go on PATH surfaces a
 	// confusing message; preempt with a clearer one.
 	if _, err := exec.LookPath("go"); err != nil {
-		return fmt.Errorf( //nolint:staticcheck // user-facing multi-line install instructions, not a wrap target
+		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
-				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.",
+				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
 		)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {

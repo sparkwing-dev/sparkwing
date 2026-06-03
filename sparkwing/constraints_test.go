@@ -245,6 +245,7 @@ func TestCustom_RejectsWrongSignature(t *testing.T) {
 	}{
 		{"no-input", func() error { return nil }},
 		{"two-inputs", func(a, b struct{}) error { return nil }},
+		//lint:ignore ST1008 deliberately-wrong (error, int) signature this test asserts Custom rejects
 		{"two-outputs", func(args struct{}) (error, int) { return nil, 0 }},
 		{"wrong-output-type", func(args struct{}) int { return 0 }},
 	}

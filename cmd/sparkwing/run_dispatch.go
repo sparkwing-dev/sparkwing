@@ -378,7 +378,7 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	if repoSlug == "" {
 		return nil, fmt.Errorf("pipeline trigger %q: no github repository detected from cwd. "+
 			"The cluster runner needs GITHUB_REPOSITORY to clone the pipeline source. "+
-			"Run from inside a checkout of a github repo, or pass --repo OWNER/NAME explicitly.", pipelineName)
+			"Run from inside a checkout of a github repo, or pass --repo OWNER/NAME explicitly", pipelineName)
 	}
 	envMap := map[string]string{
 		"GITHUB_REPOSITORY": repoSlug,

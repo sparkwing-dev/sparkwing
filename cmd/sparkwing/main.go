@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -792,15 +791,6 @@ func localStatusExitCheck(ctx context.Context, paths orchestrator.Paths, runID s
 	}
 	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return statusExitCode(run.Status)
-}
-
-func remoteStatusExitCheck(ctx context.Context, controllerURL, token, runID string) error {
-	c := client.NewWithToken(controllerURL, nil, token)
-	run, err := c.GetRun(ctx, runID)
 	if err != nil {
 		return err
 	}

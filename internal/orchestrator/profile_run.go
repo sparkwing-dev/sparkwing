@@ -56,11 +56,11 @@ func resolveUserProfile(name string) (*profile.Profile, *profile.Chain, error) {
 
 func resolveProjectProfile(name string, cfg *projectconfig.Config, origin string) (*profile.Profile, *profile.Chain, error) {
 	if cfg == nil || cfg.Profiles == nil {
-		return nil, nil, fmt.Errorf("%s names profile %q but sparkwing.yaml declares no profiles:", origin, name)
+		return nil, nil, fmt.Errorf("%s names profile %q but sparkwing.yaml declares no profiles", origin, name)
 	}
 	p, ok := cfg.Profiles[name]
 	if !ok || p == nil {
-		return nil, nil, fmt.Errorf("%s names profile %q which is not declared in sparkwing.yaml profiles:", origin, name)
+		return nil, nil, fmt.Errorf("%s names profile %q which is not declared in sparkwing.yaml profiles", origin, name)
 	}
 	return p, &profile.Chain{Selected: name, Source: profile.ChainSourceFlag}, nil
 }

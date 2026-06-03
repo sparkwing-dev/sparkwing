@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -94,8 +93,6 @@ type Command struct {
 	// HideFromComplete = visible in --help, suppressed from tab-complete.
 	HideFromComplete bool
 }
-
-var defaultGroupOrder = []string{"Input", "Filter", "Output", "System", "Other"}
 
 var helpFlag = FlagSpec{
 	Name:  "help",
@@ -306,52 +303,6 @@ func formatFlagTags(f FlagSpec) string {
 		parts = append(parts, "(default: "+f.Default+")")
 	}
 	return strings.Join(parts, " ")
-}
-
-type flagGroup struct {
-	name  string
-	flags []FlagSpec
-}
-
-// groupFlagsForHelp buckets flags by Group; unknown groups land at the
-// end alphabetically so new groupings surface rather than vanish.
-func groupFlagsForHelp(flags []FlagSpec, order []string) []flagGroup {
-	if len(order) == 0 {
-		order = defaultGroupOrder
-	}
-
-	byName := map[string][]FlagSpec{}
-	var seenOrder []string
-	for _, f := range flags {
-		g := f.Group
-		if g == "" {
-			g = "Other"
-		}
-		if _, ok := byName[g]; !ok {
-			seenOrder = append(seenOrder, g)
-		}
-		byName[g] = append(byName[g], f)
-	}
-
-	used := map[string]bool{}
-	var out []flagGroup
-	for _, name := range order {
-		if flags, ok := byName[name]; ok {
-			out = append(out, flagGroup{name: name, flags: flags})
-			used[name] = true
-		}
-	}
-	var leftovers []string
-	for _, name := range seenOrder {
-		if !used[name] {
-			leftovers = append(leftovers, name)
-		}
-	}
-	sort.Strings(leftovers)
-	for _, name := range leftovers {
-		out = append(out, flagGroup{name: name, flags: byName[name]})
-	}
-	return out
 }
 
 func visibleSubcommands(parent Command) []SubcommandRef {

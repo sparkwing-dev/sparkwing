@@ -295,7 +295,7 @@ func (c *Config) normalize() error {
 
 	if c.Defaults.Profile != "" {
 		if _, ok := c.Profiles[c.Defaults.Profile]; !ok {
-			return fmt.Errorf("defaults.profile %q is not declared in profiles:", c.Defaults.Profile)
+			return fmt.Errorf("defaults.profile %q is not declared in profiles", c.Defaults.Profile)
 		}
 	}
 	if err := c.Defaults.Guards.Validate("defaults"); err != nil {
@@ -305,7 +305,7 @@ func (c *Config) normalize() error {
 	for _, p := range c.Pipelines {
 		if p.Profile != "" {
 			if _, ok := c.Profiles[p.Profile]; !ok {
-				return fmt.Errorf("pipeline %q: profile %q is not declared in project profiles:", p.Name, p.Profile)
+				return fmt.Errorf("pipeline %q: profile %q is not declared in project profiles", p.Name, p.Profile)
 			}
 		}
 	}

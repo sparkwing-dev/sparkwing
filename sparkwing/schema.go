@@ -43,10 +43,6 @@ func (s *Schema) Fields() []string {
 // tests, not the public surface.
 func (s *Schema) field(name string) *fieldMeta { return s.fields[name] }
 
-// Groups returns the group metadata bundles. Internal accessor for
-// the resolution chain.
-func (s *Schema) groupMetas() []*groupMeta { return s.groups }
-
 // DescribeArgs projects the schema's fields into the wire-format
 // [DescribeArg] shape so the describe-cache / --help renderer / tab-
 // completion all see a job's WithArgs[T] fields in the same envelope
