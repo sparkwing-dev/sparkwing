@@ -16,5 +16,7 @@ type Options struct {
 	ReadOnly bool
 
 	NoLocalStore bool
+
+	Version string
 }
 func Run(ctx context.Context, opts Options) error

@@ -10,29 +10,16 @@ func (c *Config) Find(name string) *Pipeline
 func (c *Config) Names() []string
 func (c *Config) PipelinesByEntrypoint() map[string][]*Pipeline
 func (c *Config) Validate() error
-type Dispatch struct {
-	Runners []string
-
-	Source string
-
-	RequiresApproval bool
-
-	Protected bool
-
-	Backend *DispatchBackend
-}
-func (d *Dispatch) Validate(_ string) error
-type DispatchBackend struct {
-	Cache map[string]any
-	Logs  map[string]any
-	State map[string]any
-}
 type GuardContext struct {
 	ProfileName string
 
 	ProfileIsLocal bool
 
 	Args map[string]string
+
+	GitBranch string
+
+	GitDefaultBranch string
 }
 type GuardKind int
 type GuardToken struct {
@@ -47,8 +34,11 @@ type Guards struct {
 	Reject  []string
 }
 func (g Guards) Evaluate(pipeline string, ctx GuardContext) error
+func (g Guards) IsEmpty() bool
 func (g Guards) Validate(pipeline string) error
 const KindArg
+const KindGitBranch
+const KindGitBranchOnDef
 const KindProfileController
 const KindProfileLocal
 const KindProfileName
@@ -60,13 +50,14 @@ type Pipeline struct {
 	Entrypoint  string
 	Description string
 	On          Triggers
-	Secrets     SecretsField
 
 	Guards Guards
 
-	Defaults map[string]string
+	Args map[string]string
 
-	Dispatch *Dispatch
+	Profile string
+
+	Requires []string
 }
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
 type PostHookTrigger struct{}
@@ -82,9 +73,6 @@ type SecretEntry struct {
 }
 func (e SecretEntry) IsRequired() bool
 type SecretsField []SecretEntry
-func (s SecretsField) MarshalYAML() (any, error)
-func (s *SecretsField) UnmarshalYAML(node *yaml.Node) error
-func (s SecretsField) Validate(pipeline string) error
 type Triggers struct {
 	Push     *PushTrigger
 	Schedule string

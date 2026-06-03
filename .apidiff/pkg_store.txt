@@ -33,6 +33,10 @@ type AcquireSlotResponse struct {
 	SupersededIDs    []string
 	PreviousCapacity int
 	DriftNote        string
+
+	Position    int
+	QueueLength int
+	Holders     []ConcurrencyHolder
 }
 type Approval struct {
 	RunID       string
@@ -78,6 +82,8 @@ type ConcurrencyWaiter struct {
 	LeaderRunID   string
 	LeaderNodeID  string
 	CancelTimeout time.Duration
+
+	Position int
 }
 type DebugPause struct {
 	RunID       string
@@ -118,6 +124,7 @@ const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
+const FailureVerify = "verify"
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
 	ReapStalePendingRuns:         (*Store).reapStalePendingRuns,
@@ -466,6 +473,9 @@ type WaiterResolution struct {
 	OriginNodeID       string
 	LeaderRunID        string
 	LeaderNodeID       string
+
+	Position int
+	Holders  []ConcurrencyHolder
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"

@@ -185,6 +185,15 @@ type Expansion struct {
 }
 const Fail OnLimitPolicy = "fail"
 const Failed Outcome = "failed"
+type Failure struct {
+	Stage FailureStage
+
+	Err error
+}
+func FailureFromContext(ctx context.Context) Failure
+type FailureRecoveryFn func(ctx context.Context, f Failure) error
+type FailureStage int
+func (s FailureStage) String() string
 type FieldBuilder[T any] struct {
 }
 func (fb *FieldBuilder[T]) Bind(argName string) *FieldBuilder[T]
@@ -200,10 +209,11 @@ func (fb *FieldBuilder[T]) Range(min, max any) *FieldBuilder[T]
 func (fb *FieldBuilder[T]) Required() *FieldBuilder[T]
 func (fb *FieldBuilder[T]) RequiredWhen(p Predicate) *FieldBuilder[T]
 type Git struct {
-	SHA     string
-	Branch  string
-	Repo    string
-	RepoURL string
+	SHA           string
+	Branch        string
+	DefaultBranch string
+	Repo          string
+	RepoURL       string
 }
 func (g *Git) ChangedFiles(ctx context.Context, since string) ([]string, error)
 func (g *Git) FilesetHash(ctx context.Context) (string, error)
@@ -247,7 +257,7 @@ type InputSchema struct {
 	Extra  bool
 }
 func Inputs[T any](ctx context.Context) T
-func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline, sourceName string) ([]SecretField, error)
+func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline) ([]SecretField, error)
 func IsDryRun(ctx context.Context) bool
 func Job(p *Plan, id string, x any) *JobNode
 func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate
@@ -267,7 +277,6 @@ func (g *JobGroup) Members() []*JobNode
 func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
-func (g *JobGroup) OnTarget(targets ...string) *JobGroup
 func (g *JobGroup) Optional() *JobGroup
 func (g *JobGroup) Prefers(labels ...string) *JobGroup
 func (g *JobGroup) Ready() <-chan struct{}
@@ -275,6 +284,7 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup
 func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup
 func (g *JobGroup) Timeout(d time.Duration) *JobGroup
+func (g *JobGroup) Verify(fn VerifyFn) *JobGroup
 func (g *JobGroup) WhenRunner(labels ...string) *JobGroup
 type JobNode struct {
 }
@@ -301,8 +311,6 @@ func (n *JobNode) NeedsGroups() []*JobGroup
 func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode
 func (n *JobNode) OnFailure(id string, x any) *JobNode
 func (n *JobNode) OnFailureNode() *JobNode
-func (n *JobNode) OnTarget(targets ...string) *JobNode
-func (n *JobNode) OnTargets() []string
 func (n *JobNode) Optional() *JobNode
 func (n *JobNode) OptionalDepIDs() []string
 func (n *JobNode) OutputType() reflect.Type
@@ -318,6 +326,8 @@ func (n *JobNode) SkipIfBudget() time.Duration
 func (n *JobNode) SkipPredicates() []SkipPredicate
 func (n *JobNode) Timeout(d time.Duration) *JobNode
 func (n *JobNode) TimeoutDuration() time.Duration
+func (n *JobNode) Verifier() VerifyFn
+func (n *JobNode) Verify(fn VerifyFn) *JobNode
 func (n *JobNode) WhenRunner(labels ...string) *JobNode
 func (n *JobNode) WhenRunnerLabels() []string
 func (n *JobNode) Work() *Work
@@ -353,12 +363,12 @@ func Min(v any) Constraint
 func MustConfig(ctx context.Context, name string) string
 func MustSecret(ctx context.Context, name string) string
 func NewDetachedNode(id string, job Workable) *JobNode
-func NewGit(workDir, sha, branch, repo, repoURL string) *Git
+func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git
 func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
 func NewPlan() *Plan
 func NewSchema[T any]() *SchemaBuilder[T]
 func NewSchemaFromType(t reflect.Type) (*Schema, error)
-func NewSecretResolverFromSource(_ context.Context, src sources.Source, profileLookup ProfileLookup) (SecretResolver, error)
+func NewSecretResolverFromSpec(_ context.Context, spec backends.Spec) (SecretResolver, error)
 func NewWork() *Work
 const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
@@ -421,7 +431,6 @@ type PrefersProvider interface {
 }
 type Produces[T any] struct{}
 func Profile(name string) Predicate
-type ProfileLookup func(name string) (controller, token string, err error)
 type ProfileResolutionContext struct {
 	Name string
 
@@ -527,7 +536,6 @@ var RuntimePlumbing = struct {
 		Runner:            runnerCtxKey{},
 		SpawnHandler:      keySpawnHandler,
 		StepRange:         stepRangeKey{},
-		Target:            targetKey{},
 		RefResolver:       keyRefResolver,
 		JSONRefResolver:   keyJSONRefResolver,
 		PipelineResolver:  keyPipelineResolver,
@@ -574,8 +582,6 @@ type SecretField struct {
 	Required bool
 
 	DeclaredIn string
-
-	SourceName string
 
 	Resolved bool
 
@@ -636,6 +642,8 @@ func (s *SpawnSpec) Needs(deps ...WorkDep) *SpawnSpec
 func (s *SpawnSpec) ResolvedID() string
 func (s *SpawnSpec) SkipIf(fn SkipPredicate) *SpawnSpec
 func (s *SpawnSpec) SkipPredicates() []SkipPredicate
+const StageAction FailureStage = iota
+const StageVerify
 type State = storage.StateStore
 func Step(w *Work, id string, fn any) *WorkStep
 type StepError struct {
@@ -651,12 +659,10 @@ type StepGroup struct {
 func (g *StepGroup) Members() []*WorkStep
 func (g *StepGroup) Name() string
 func (g *StepGroup) Needs(deps ...WorkDep) *StepGroup
-func (g *StepGroup) OnTarget(targets ...string) *StepGroup
 func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
-func Target(ctx context.Context) string
 type TransitiveArg struct {
 	Flag      string
 	JobID     string
@@ -669,6 +675,10 @@ type TriggerInfo struct {
 	User   string
 }
 func TypeName(p any) string
+type VerifyError struct{ Err error }
+func (e *VerifyError) Error() string
+func (e *VerifyError) Unwrap() error
+type VerifyFn func(ctx context.Context) error
 func Warn(ctx context.Context, format string, args ...any)
 type WhenRunnerProvider interface {
 	WhenRunner() []string
@@ -678,6 +688,7 @@ type WithArgs[T any] struct {
 func (w *WithArgs[T]) Args(ctx context.Context) T
 func (w *WithArgs[T]) ArgsType() reflect.Type
 func (w *WithArgs[T]) BindFromAny(val any) error
+func WithFailure(ctx context.Context, f Failure) context.Context
 func WithFreshArgs(args map[string]string) AwaitOption
 func WithFreshBranch(branch string) AwaitOption
 func WithFreshInputs[T any](in T) AwaitOption
@@ -710,8 +721,6 @@ func (s *WorkStep) IsContinueOnError() bool
 func (s *WorkStep) IsOptional() bool
 func (s *WorkStep) IsSafeWithoutDryRun() bool
 func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep
-func (s *WorkStep) OnTarget(targets ...string) *WorkStep
-func (s *WorkStep) OnTargets() []string
 func (s *WorkStep) Optional() *WorkStep
 func (s *WorkStep) Output() any
 func (s *WorkStep) OutputType() reflect.Type
@@ -747,6 +756,7 @@ func (k groupKind) String() string
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
 func (localPredicate) Eval(ctx PredicateContext) bool
 func (localPredicate) String() string
+func (noneResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
 func (p notPredicate) Eval(ctx PredicateContext) bool
@@ -755,6 +765,7 @@ func (p orPredicate) Eval(ctx PredicateContext) bool
 func (p orPredicate) String() string
 func (p profilePredicate) Eval(ctx PredicateContext) bool
 func (p profilePredicate) String() string
+func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
 func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error)
 func (remotePredicate) Eval(ctx PredicateContext) bool
 func (remotePredicate) String() string

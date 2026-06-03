@@ -17,20 +17,28 @@ type Spec struct {
 	URLSource string
 	Token     string
 
+	TokenEnv string
+
 	Controller string
 
 	Binaries *Spec
 }
+func (s *Spec) ResolvedToken() string
+func (s *Spec) ValidateSecrets() error
 type Surfaces struct {
-	Cache *Spec
-	Logs  *Spec
-	State *Spec
+	Secrets *Spec
+	Cache   *Spec
+	Logs    *Spec
+	State   *Spec
 }
+func (s Surfaces) Validate(name string) error
 const TypeAzureBlob = "azure-blob"
 const TypeController = "controller"
+const TypeEnv = "env"
 const TypeFilesystem = "filesystem"
 const TypeGCS = "gcs"
 const TypeMySQL = "mysql"
+const TypeNone = "none"
 const TypePostgres = "postgres"
 const TypeS3 = "s3"
 const TypeSQLite = "sqlite"
