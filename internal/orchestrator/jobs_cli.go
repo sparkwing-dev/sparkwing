@@ -376,11 +376,17 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
 		// Skip detail block for vanilla success nodes unless forced.
-		shouldRender := force || len(annotations) > 0 || n.Summary != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
+		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
 		fmt.Fprintf(out, "    %s\n", color.Bold(n.NodeID+":"))
+		// A live phase string (e.g. "queued in <ns>: N ahead, held by
+		// X" while blocked on a concurrency slot) explains why an
+		// otherwise-idle node hasn't progressed.
+		if n.StatusDetail != "" {
+			fmt.Fprintf(out, "      %s %s\n", color.Dim("↳"), n.StatusDetail)
+		}
 		for _, a := range annotations {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("@"), a)
 		}
