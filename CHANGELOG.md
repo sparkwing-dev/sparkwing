@@ -124,31 +124,6 @@ code change to unlock.
   throttling -- it's just no longer always-on.
 
 ## [v0.6.3] - 2026-05-31
-### Fixed
-
-- **`sparkwing pipeline new` scaffold now produces a working project
-  out of the box.** Three bugs converged to break the first-run
-  experience: (a) the scaffold wrote `.sparkwing/pipelines.yaml`
-  while every other CLI command reads `.sparkwing/sparkwing.yaml`,
-  so `pipeline list`, `pipeline describe`, and `pipeline hooks
-  install` all reported "no .sparkwing/sparkwing.yaml found"; (b)
-  the generated `go.mod` pinned a non-existent fallback SDK version,
-  so `go mod tidy` failed and the compile cycle never recovered;
-  (c) the generated `jobs/*.go` mixed `sw.` and `sparkwing.` aliases
-  in the same file, so the file didn't compile. All three are fixed
-  and a fresh `sparkwing pipeline new --name X` → `git commit` (with
-  a pre_commit trigger and `sparkwing pipeline hooks install`)
-  now scaffolds + builds + dispatches end-to-end.
-
-### Removed
-
-- **`cmd/sparkwing-local-ws/`** is gone. Its job (long-lived local
-  dashboard server) is fully owned by `sparkwing dashboard start`,
-  which spawns a detached supervisor under the same `pkg/localws`
-  code path. The dev scripts (`bin/dev-start.sh` /
-  `bin/dev-stop.sh` / `bin/dev-restart.sh`) now drive the supervisor
-  via `sparkwing dashboard {start,kill}` instead of forking the
-  retired binary directly.
 
 ### Added
 
@@ -164,8 +139,44 @@ code change to unlock.
   Source builds without an `-ldflags` version stamp fall back to the
   Go build-info pseudo-version so the pill is still informative.
 
+### Changed
+
+- **install.sh installs only `sparkwing`.** Previous revisions also
+  dropped `sparkwing-local-ws` and `sparkwing-web` into `~/.local/bin`;
+  both are now removed on next install (sweep is silent if absent).
+  Cluster-side binaries (`sparkwing-cache`, `-controller`, `-logs`,
+  `-runner`, `-web`) run only as pods and are published as Docker
+  images; install.sh sweeps them from `$DEST` and from `$GOPATH/bin`
+  on every run so a stale `go install ./cmd/sparkwing-<x>` artifact
+  cannot keep shadowing the laptop CLI on PATH. `sparkwing-local-ws`
+  is superseded by `sparkwing dashboard start` and is no longer
+  published as a release binary.
+
+### Removed
+
+- **`cmd/sparkwing-local-ws/`** is gone. Its job (long-lived local
+  dashboard server) is fully owned by `sparkwing dashboard start`,
+  which spawns a detached supervisor under the same `pkg/localws`
+  code path. The dev scripts (`bin/dev-start.sh` /
+  `bin/dev-stop.sh` / `bin/dev-restart.sh`) now drive the supervisor
+  via `sparkwing dashboard {start,kill}` instead of forking the
+  retired binary directly.
+
 ### Fixed
 
+- **`sparkwing pipeline new` scaffold now produces a working project
+  out of the box.** Three bugs converged to break the first-run
+  experience: (a) the scaffold wrote `.sparkwing/pipelines.yaml`
+  while every other CLI command reads `.sparkwing/sparkwing.yaml`,
+  so `pipeline list`, `pipeline describe`, and `pipeline hooks
+  install` all reported "no .sparkwing/sparkwing.yaml found"; (b)
+  the generated `go.mod` pinned a non-existent fallback SDK version,
+  so `go mod tidy` failed and the compile cycle never recovered;
+  (c) the generated `jobs/*.go` mixed `sw.` and `sparkwing.` aliases
+  in the same file, so the file didn't compile. All three are fixed
+  and a fresh `sparkwing pipeline new --name X` → `git commit` (with
+  a pre_commit trigger and `sparkwing pipeline hooks install`)
+  now scaffolds + builds + dispatches end-to-end.
 - **Postgres state from a laptop + `RunAndAwait` now works
   end-to-end.** The parent's local trigger dispatcher forwards its
   active profile (`--profile <name>`) to the child `handle-trigger
@@ -180,22 +191,6 @@ code change to unlock.
   the lookup callback can resolve it. A profile that just declares
   `controller: { url, token }` + `state/cache/logs/secrets: { type:
   controller }` is now a complete, working spec.
-
-### Changed
-
-- **install.sh installs only `sparkwing`.** Previous revisions also
-  dropped `sparkwing-local-ws` and `sparkwing-web` into `~/.local/bin`;
-  both are now removed on next install (sweep is silent if absent).
-  Cluster-side binaries (`sparkwing-cache`, `-controller`, `-logs`,
-  `-runner`, `-web`) run only as pods and are published as Docker
-  images; install.sh sweeps them from `$DEST` and from `$GOPATH/bin`
-  on every run so a stale `go install ./cmd/sparkwing-<x>` artifact
-  cannot keep shadowing the laptop CLI on PATH. `sparkwing-local-ws`
-  is superseded by `sparkwing dashboard start` and is no longer
-  published as a release binary.
-
-### Fixed
-
 - **dashboard:** `sparkwing dashboard start` now fails fast with a clear
   error when the bind address is already in use, naming the holding
   process (e.g. `address 127.0.0.1:4343 already in use by
