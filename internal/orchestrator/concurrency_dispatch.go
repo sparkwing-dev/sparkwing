@@ -300,6 +300,15 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, o
 	// on promotion (below).
 	if detail := concWaitDetail(opts.Namespace, initial, leaderRun, leaderNode); detail != "" {
 		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), detail)
+		// Also emit it into the log stream. The node hasn't started its
+		// runner yet, so this line comes from the dispatcher; opening the
+		// node log with the run delegate mirrors it to the live stream
+		// (and `runs logs`). Append-mode, so executeNode's later open on
+		// promotion appends cleanly.
+		if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
+			nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
+			_ = nlog.Close()
+		}
 	}
 
 	// Back-stop: force-release evicted holders after CancelTimeout so

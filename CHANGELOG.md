@@ -73,7 +73,10 @@ code change to unlock.
   joined. A queued node's `status_detail` is set to a summary
   ("queued in <ns>: N ahead, held by <run>/<node>") so the dashboard
   and `sparkwing runs status` show the wait inline instead of a
-  featureless spinner, and is cleared on promotion. No schema change.
+  featureless spinner, and is cleared on promotion. The same summary is
+  emitted as a `concurrency_wait` line into the run log stream (from the
+  dispatcher, since the node hasn't started its runner yet), so it's
+  visible while following live logs and in `runs logs`. No schema change.
 - **cli:** `sparkwing cluster concurrency --namespace <ns> --profile <p>`
   renders a namespace's current holders and its queue (each waiter with
   its position), so an operator can tell a wedged node from one waiting
