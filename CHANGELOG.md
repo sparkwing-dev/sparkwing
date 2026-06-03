@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-06-03
 ### Added
 
 - **sdk:** `Job.Verify(fn)` -- a postcondition checked after a node's
