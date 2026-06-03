@@ -82,15 +82,15 @@ func (n *JobNode) Verify(fn func(ctx context.Context) error) *JobNode
 // Failure describes why a node terminated unsuccessfully. It is passed
 // to an OnFailure recovery callback so recovery can branch on stage.
 type Failure struct {
-	Stage FailureStage // which lifecycle stage produced the failure
-	Err   error        // the action error (StageAction) or verify error (StageVerify)
+    Stage FailureStage // which lifecycle stage produced the failure
+    Err   error        // the action error (StageAction) or verify error (StageVerify)
 }
 
 type FailureStage int
 
 const (
-	StageAction FailureStage = iota // action exited non-zero or timed out
-	StageVerify                     // action completed; the Verify postcondition failed
+    StageAction FailureStage = iota // action exited non-zero or timed out
+    StageVerify                     // action completed; the Verify postcondition failed
 )
 
 // OnFailure registers a recovery node that runs when this node's outcome
@@ -280,9 +280,9 @@ It is rejected for this release, for four reasons:
    unhealthy; downstream `Needs(deploy)` proceeds past a broken deploy
    and the dashboard shows green. Keeping `Verify` on the node means the
    deploy node itself goes `Failed(StageVerify)` -- the whole point.
-4. **It loses unit retry.** `deploy.Verify(...).Retry(3)` re-runs action
-   + verify together ("redeploy if it comes up unhealthy"); re-running a
-   separate verify node cannot re-run the deploy.
+4. **It loses unit retry.** `deploy.Verify(...).Retry(3)` re-runs the
+   action and verify together ("redeploy if it comes up unhealthy");
+   re-running a separate verify node cannot re-run the deploy.
 
 The valid kernel in the alternative is *recovery-branch visibility* --
 seeing which of rollback / escalate / converge fired. But the recovery
