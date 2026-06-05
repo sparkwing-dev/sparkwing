@@ -16,14 +16,17 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+
+	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func runPipelineNew(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
 	pipelineName := fs.String("name", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
-	template := fs.String("template", "minimal", "template: minimal (default) | build-test-deploy")
+	template := fs.String("template", "minimal", "template: minimal | build-test-deploy | any name from `sparkwing pipeline templates`")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
+	params := fs.StringArray("param", nil, "registry template parameter, k=v (repeatable)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -77,8 +80,67 @@ func runPipelineNew(args []string) error {
 	case "build-test-deploy":
 		return scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
 	default:
-		return fmt.Errorf("new: unknown template %q (valid: minimal, build-test-deploy)", *template)
+		return scaffoldFromRegistry(sparkwingDir, name, *template, *params, *hidden, bootstrapped)
 	}
+}
+
+// scaffoldFromRegistry renders a sparks-core registry template (anything
+// `sparkwing pipeline templates` lists) into jobs/<name>.go and wires the
+// pipelines.yaml entry. The pipeline's registered name is the --name
+// flag: when the template declares a `pipeline-name` param it's set from
+// --name, so the rendered Register() call and the yaml entry agree.
+func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
+	tmpl, err := templates.Get(templateName)
+	if err != nil {
+		return fmt.Errorf("new: unknown template %q -- run `sparkwing pipeline templates` to list available templates", templateName)
+	}
+	pm, err := parseTemplateParams(params)
+	if err != nil {
+		return err
+	}
+	if manifestDeclaresParam(tmpl.Manifest, "pipeline-name") {
+		pm["pipeline-name"] = name
+	}
+	rendered, err := templates.Render(templateName, pm)
+	if err != nil {
+		// Render reports missing-required and unknown params with
+		// actionable messages; surface them as-is.
+		return fmt.Errorf("new: %w", err)
+	}
+
+	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
+	if _, err := os.Stat(file); err == nil {
+		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
+	}
+	if err := os.WriteFile(file, []byte(rendered), 0o644); err != nil {
+		return err
+	}
+	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden); err != nil {
+		return err
+	}
+	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+}
+
+// parseTemplateParams turns repeated --param k=v flags into a map.
+func parseTemplateParams(params []string) (map[string]string, error) {
+	out := make(map[string]string, len(params))
+	for _, p := range params {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("new: --param %q must be k=v", p)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func manifestDeclaresParam(m templates.Manifest, name string) bool {
+	for _, p := range m.Parameters {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // validatePipelineName enforces kebab-case so the name round-trips
@@ -203,6 +265,12 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden); err != nil {
 		return err
 	}
+	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+}
+
+// finishScaffold is the shared post-write reporting + tidy step for both
+// the built-in string templates and the rendered registry templates.
+func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
 		rel = file

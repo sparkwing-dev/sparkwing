@@ -862,6 +862,7 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 		{"describe", "Print one pipeline's full metadata"},
 		{"discover", "Fuzzy search over names, descriptions, tags"},
 		{"new", "Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)"},
+		{"templates", "List the sparks-core template registry (starters for `new --template`)"},
 		{"explain", "Render the pipeline's Plan DAG without running"},
 		{"plan", "Render the runtime-resolved DAG (would-run/would-skip) without running"},
 		{"run", "Invoke a pipeline (canonical form of `sparkwing run <name>`)"},
@@ -1050,15 +1051,42 @@ See also:
   better fit -- it skips the compile cycle.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
-		{Name: "template", Argument: "KIND", Desc: "minimal (one node, default) | build-test-deploy (three-node build->test->deploy DAG)", Default: "minimal", Group: "Scaffold"},
+		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | any registry name from `sparkwing pipeline templates`", Default: "minimal", Group: "Scaffold"},
+		{Name: "param", Argument: "K=V", Desc: "Registry template parameter (repeatable); see `sparkwing pipeline templates`", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
-		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line", Group: "Scaffold"},
+		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line (built-in templates only)", Group: "Scaffold"},
 	},
 	GroupOrder: []string{"Target", "Scaffold", "Other"},
 	Examples: []Example{
 		{"Single-node pipeline (default template)", "sparkwing pipeline new --name release"},
 		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name release-all --template build-test-deploy"},
-		{"Pre-fill the ShortHelp", `sparkwing pipeline new --name release --short "Cut a release"`},
+		{"From a registry template", `sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp --param namespace=myapp --param app-name=myapp --param health-url=http://myapp.myapp.svc:8080/health`},
+	},
+}
+
+var cmdPipelineTemplates = Command{
+	Path:     "sparkwing pipeline templates",
+	Synopsis: "List the sparks-core template registry",
+	Description: `Lists the curated, parameterized pipeline starters in the
+sparks-core/templates registry -- the values usable as
+'sparkwing pipeline new --template <name>'. Each entry shows a
+"when to use" signal and its required / optional parameters.
+
+These are distinct from the two built-in stubs (minimal,
+build-test-deploy) that ship in the CLI itself: the registry
+templates are richer, real-world shapes (build-test-deploy to
+k8s, static-site, migrate+deploy, ...).
+
+-o json emits the manifests (name, description, whenToUse,
+parameters, applicability) -- prefer it for agent consumption.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Browse the registry", "sparkwing pipeline templates"},
+		{"Agent-readable manifests", "sparkwing pipeline templates -o json"},
+		{"Scaffold from one", "sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp"},
 	},
 }
 
