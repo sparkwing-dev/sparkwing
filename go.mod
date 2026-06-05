@@ -2,13 +2,16 @@ module github.com/sparkwing-dev/sparkwing
 
 go 1.26.0
 
-// Pre-launch artifacts. The project hadn't shipped publicly when
-// these were tagged; the v1 line in particular was a misstep that
-// committed us to v1+ semver before we wanted that promise. The
-// project is rebaselining on the v0.x.y line. None of these are
-// supported; do not pin to them.
+// Pre-launch artifacts. The project hadn't shipped publicly when the
+// v1 line was tagged; it was a misstep that committed us to v1+ semver
+// before we wanted that promise, so we rebaselined on the v0.x.y line.
+// The module proxy caches those tags permanently and honors retractions
+// only from the highest version's go.mod, so v1.6.1 is a tombstone
+// release that carries this block and retracts itself -- that pushes
+// @latest back to the v0.x line. None of these are supported; do not
+// pin to them.
 retract (
-	[v1.0.0, v1.6.0]
+	[v1.0.0, v1.6.1]
 	v0.0.1
 )
 
