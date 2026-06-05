@@ -19,8 +19,10 @@ import (
 // fallbackSDKVersion is pinned into a fresh .sparkwing/go.mod when the
 // running CLI's version can't be detected (source build, missing
 // ldflag stamp). **Bump on each release.** Must match an actual
-// published tag on github.com/sparkwing-dev/sparkwing.
-const fallbackSDKVersion = "v0.6.2"
+// published tag on github.com/sparkwing-dev/sparkwing, and be recent
+// enough that the registry templates `pipeline new --template` renders
+// (which use Job.Verify, Failure, ...) compile against it.
+const fallbackSDKVersion = "v0.8.0"
 
 // bootstrapDotSparkwingOpts writes the .sparkwing/ skeleton. `go mod
 // tidy` is deferred to the caller because tidy fails on the empty
