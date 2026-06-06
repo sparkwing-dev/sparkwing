@@ -342,11 +342,13 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 			}
 		}
 	}
-	_ = includeHidden
 	var out []Pipeline
 	seen := map[string]struct{}{}
 	if cfg != nil {
 		for _, p := range cfg.Pipelines {
+			if p.Hidden && !includeHidden {
+				continue
+			}
 			a := Pipeline{
 				Name:       p.Name,
 				Entrypoint: p.Entrypoint,
