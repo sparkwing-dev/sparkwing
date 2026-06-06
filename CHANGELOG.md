@@ -61,6 +61,12 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** a node's Verify-stage failure is attributed
+  correctly when the node runs on a remote/cluster runner. The failing
+  stage is recovered from the persisted failure reason instead of the
+  in-process error type, so a failure-aware `OnFailure(ctx, Failure)`
+  branches on `StageVerify` vs `StageAction` identically in-process and
+  on the controller.
 - **cli:** `sparkwing runs approvals` is usable again. The bare verb
   and its flags (`--run`, `-o json`) were parsed as unknown
   subcommands, so the documented ways to find a pending gate all
