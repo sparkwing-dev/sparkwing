@@ -96,9 +96,6 @@ code change to unlock.
   integration-test containers are reachable from the host test process
   on Docker Desktop (macOS/Windows), not only on Linux. A `Service`
   with `Port` unset still uses host networking.
-
-### Docs
-
 - **docs:** the SDK reference and getting-started guide were refreshed
   to match the shipped API. Removed the deleted `JobFn`; corrected the
   Workable shape to `Work(w *Work) (*WorkStep, error)` with
