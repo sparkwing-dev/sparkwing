@@ -19,7 +19,7 @@ import (
 // Push-to-main means this pipeline is the last gate before code is
 // shared, so it's stricter than a typical PR-time check.
 //
-// Wire it to git: declare `pre_push:` in pipelines.yaml and run
+// Wire it to git: declare `pre_push:` in sparkwing.yaml and run
 // `sparkwing pipeline hooks install`. Tooling assumed on PATH:
 // golangci-lint, staticcheck (called by golangci-lint), govulncheck.
 type PrePush struct{ sparkwing.Base }
@@ -159,13 +159,16 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "markdownlint: clean")
 	}
 
-	// 8. Doc-example SDK-API gate. Every ```go block under
-	// pkg/docs/content must reference real sparkwing/sw symbols and
-	// signatures -- this catches the "the docs lie" class (a removed
-	// helper, a method that no longer exists on *Plan/*Work, a wrong
-	// call signature) before it misleads a reader or an agent.
-	// migrations/ and proposals/ are excluded (design history). See
-	// internal/doccheck.
+	// 8. Docs-vs-reality gate (internal/doccheck), three checks over
+	// pkg/docs/content + the CLI help registry:
+	//   - go blocks compile against the in-repo SDK (catches removed
+	//     helpers, wrong signatures, methods gone from *Plan/*Work);
+	//   - sparkwing.yaml blocks decode through the real strict
+	//     projectconfig parser (catches renamed/removed config keys and
+	//     triggers that would hard-error on load);
+	//   - a denylist of dead tokens (renamed flags, old file/path names)
+	//     that must never reappear in docs or help text.
+	// migrations/ and proposals/ are excluded (design history).
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/pkg/docs/content" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
