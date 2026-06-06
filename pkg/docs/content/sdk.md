@@ -316,17 +316,10 @@ empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
 30s. `ReadyCmd` runs inside the container via `docker exec` (e.g.
 `redis-cli ping`, `pg_isready`), so it needs no host-side client.
 
-**Networking caveat (read this):** the released SDK starts containers
-with `--network host`. On **Linux** the service is reachable from your
-test at `localhost:<Port>`. On **Docker Desktop (macOS/Windows)**,
-host-network ports are NOT reachable from the host process, so a test
-dialing `localhost:<Port>` gets "connection refused" even though the
-in-container `ReadyCmd` reports ready. Until the port-publishing fix
-ships, run the test step itself inside a host-network container, e.g.:
-
-```go
-sw.Bash(ctx, `docker run --rm --network host -v "$PWD":/w -w /w golang:1.26 go test ./integration/...`).Run()
-```
+Set `Port` and the service is published to `127.0.0.1:<Port>`, so your
+test reaches it at `localhost:<Port>` on every platform, including
+Docker Desktop on macOS/Windows. (Leave `Port` unset and the container
+uses host networking, which is reachable from the host on Linux only.)
 
 ## Plan - the outer DAG
 
