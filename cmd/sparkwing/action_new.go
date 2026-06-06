@@ -16,14 +16,18 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+
+	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func runPipelineNew(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
 	pipelineName := fs.String("name", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
-	template := fs.String("template", "minimal", "template: minimal (default) | build-test-deploy")
+	template := fs.String("template", "minimal", "template: minimal | build-test-deploy | any name from `sparkwing pipeline templates`")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
+	params := fs.StringArray("param", nil, "registry template parameter, k=v (repeatable)")
+	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -43,6 +47,12 @@ func runPipelineNew(args []string) error {
 		return err
 	}
 
+	if *changeDir != "" {
+		if err := os.Chdir(*changeDir); err != nil {
+			return fmt.Errorf("new: --sw-cd %q: %w", *changeDir, err)
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -60,7 +70,7 @@ func runPipelineNew(args []string) error {
 	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			if p.Name == name {
-				return fmt.Errorf("pipeline %q already exists in pipelines.yaml (entrypoint %q)", name, p.Entrypoint)
+				return fmt.Errorf("pipeline %q already exists in sparkwing.yaml (entrypoint %q)", name, p.Entrypoint)
 			}
 		}
 	}
@@ -77,8 +87,67 @@ func runPipelineNew(args []string) error {
 	case "build-test-deploy":
 		return scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
 	default:
-		return fmt.Errorf("new: unknown template %q (valid: minimal, build-test-deploy)", *template)
+		return scaffoldFromRegistry(sparkwingDir, name, *template, *params, *hidden, bootstrapped)
 	}
+}
+
+// scaffoldFromRegistry renders a sparks-core registry template (anything
+// `sparkwing pipeline templates` lists) into jobs/<name>.go and wires the
+// sparkwing.yaml entry. The pipeline's registered name is the --name
+// flag: when the template declares a `pipeline-name` param it's set from
+// --name, so the rendered Register() call and the yaml entry agree.
+func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
+	tmpl, err := templates.Get(templateName)
+	if err != nil {
+		return fmt.Errorf("new: unknown template %q -- run `sparkwing pipeline templates` to list available templates", templateName)
+	}
+	pm, err := parseTemplateParams(params)
+	if err != nil {
+		return err
+	}
+	if manifestDeclaresParam(tmpl.Manifest, "pipeline-name") {
+		pm["pipeline-name"] = name
+	}
+	rendered, err := templates.Render(templateName, pm)
+	if err != nil {
+		// Render reports missing-required and unknown params with
+		// actionable messages; surface them as-is.
+		return fmt.Errorf("new: %w", err)
+	}
+
+	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
+	if _, err := os.Stat(file); err == nil {
+		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
+	}
+	if err := os.WriteFile(file, []byte(rendered), 0o644); err != nil {
+		return err
+	}
+	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden); err != nil {
+		return err
+	}
+	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+}
+
+// parseTemplateParams turns repeated --param k=v flags into a map.
+func parseTemplateParams(params []string) (map[string]string, error) {
+	out := make(map[string]string, len(params))
+	for _, p := range params {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("new: --param %q must be k=v", p)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func manifestDeclaresParam(m templates.Manifest, name string) bool {
+	for _, p := range m.Parameters {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // validatePipelineName enforces kebab-case so the name round-trips
@@ -153,7 +222,7 @@ var goReservedTrailingTokens = map[string]bool{
 // goJobFilename produces a .go filename that Go won't silently exclude
 // (leading _/., trailing _test/_<goos>/_<goarch>).
 // All transforms preserve the user-chosen pipeline name in
-// pipelines.yaml; only the on-disk filename is adjusted.
+// sparkwing.yaml; only the on-disk filename is adjusted.
 func goJobFilename(name string) string {
 	snake := kebabToSnake(name)
 	if strings.HasPrefix(snake, "_") || strings.HasPrefix(snake, ".") {
@@ -190,7 +259,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
 	}
 	if short == "" {
-		short = "TODO: one-line description of " + name
+		short = "one-line description of " + name
 	}
 	body := strings.NewReplacer(
 		"{{STRUCT}}", struct_,
@@ -203,6 +272,12 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden); err != nil {
 		return err
 	}
+	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+}
+
+// finishScaffold is the shared post-write reporting + tidy step for both
+// the built-in string templates and the rendered registry templates.
+func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
 		rel = file
@@ -212,7 +287,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	}
 	fmt.Printf("%s Creating new pipeline\n", color.Cyan("==>"))
 	fmt.Printf("  %s %s\n", color.Green("+"), rel)
-	fmt.Printf("  %s added %q entry to .sparkwing/pipelines.yaml\n", color.Green("+"), name)
+	fmt.Printf("  %s added %q entry to .sparkwing/sparkwing.yaml\n", color.Green("+"), name)
 	tidy := tidySkeleton(sparkwingDir, true)
 	switch {
 	case tidy.Skipped:
@@ -232,7 +307,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
-		{Command: "sparkwing docs read --topic pipelines", Purpose: "pipelines.yaml + DAG concepts"},
+		{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
 		{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
 		{Command: "sparkwing info", Purpose: "find out more about sparkwing"},
 	}
@@ -281,7 +356,7 @@ func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
 // Paths in ExecIn / BashIn / ReadFile are relative to the repo root,
 // not .sparkwing/. See WorkDir().
 func ({{STRUCT}}Job) run(ctx context.Context) error {
-	sw.Info(ctx, "TODO: replace with your logic")
+	sw.Info(ctx, "replace this stub with your logic")
 	return nil
 }
 
@@ -344,7 +419,7 @@ func (j *{{STRUCT}}Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 // Paths in .Dir() / ReadFile are relative to the repo root, not
 // .sparkwing/. See WorkDir().
 func ({{STRUCT}}Build) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: build\"`" + `).Run()
+	_, err := sw.Bash(ctx, ` + "`echo \"build step - replace with real logic\"`" + `).Run()
 	return err
 }
 
@@ -356,7 +431,7 @@ func (j *{{STRUCT}}Test) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func ({{STRUCT}}Test) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: test\"`" + `).Run()
+	_, err := sw.Bash(ctx, ` + "`echo \"test step - replace with real logic\"`" + `).Run()
 	return err
 }
 
@@ -368,7 +443,7 @@ func (j *{{STRUCT}}Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func ({{STRUCT}}Deploy) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: deploy\"`" + `).Run()
+	_, err := sw.Bash(ctx, ` + "`echo \"deploy step - replace with real logic\"`" + `).Run()
 	return err
 }
 
@@ -377,7 +452,7 @@ func init() {
 }
 `
 
-// appendPipelinesYAML tacks a new entry onto .sparkwing/pipelines.yaml
+// appendPipelinesYAML tacks a new entry onto .sparkwing/sparkwing.yaml
 // in the same shape the existing entries use. Plain text append keeps
 // the author's formatting (leading comments, spacing) intact -- a yaml
 // round-trip would reflow everything. Risk: the user's file could have

@@ -24,6 +24,10 @@ type Pipeline struct {
 	Description string   `yaml:"description,omitempty"`
 	On          Triggers `yaml:"on,omitempty"`
 
+	// Hidden omits the entry from default `pipeline list` output; it
+	// stays invocable by exact name and shows under `list --all`.
+	Hidden bool `yaml:"hidden,omitempty"`
+
 	// Guards gate dispatch on the resolved profile + args. Reject
 	// fires before any step runs when any token matches; Require
 	// fires when not every token matches. Token vocabulary:
@@ -127,7 +131,7 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
-		"on":     {},
+		"on": {}, "hidden": {},
 		"guards": {}, "args": {}, "profile": {}, "requires": {},
 	}
 }

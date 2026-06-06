@@ -19,8 +19,10 @@ import (
 // fallbackSDKVersion is pinned into a fresh .sparkwing/go.mod when the
 // running CLI's version can't be detected (source build, missing
 // ldflag stamp). **Bump on each release.** Must match an actual
-// published tag on github.com/sparkwing-dev/sparkwing.
-const fallbackSDKVersion = "v0.6.2"
+// published tag on github.com/sparkwing-dev/sparkwing, and be recent
+// enough that the registry templates `pipeline new --template` renders
+// (which use Job.Verify, Failure, ...) compile against it.
+const fallbackSDKVersion = "v0.8.0"
 
 // bootstrapDotSparkwingOpts writes the .sparkwing/ skeleton. `go mod
 // tidy` is deferred to the caller because tidy fails on the empty
@@ -124,7 +126,10 @@ func sdkRequirementVersion() string {
 //
 // The +dirty suffix tacks onto any of these for a worktree with uncommitted
 // changes. Either form is unresolvable from a fresh `go mod` install.
-var pseudoVersionRE = regexp.MustCompile(`-\d{14}-[0-9a-f]{12}(\+dirty)?$`)
+// The timestamp+hash is preceded by `-` (form vX.0.0-<ts>-<hash>) or by
+// `.` (forms vX.Y.Z-0.<ts>-<hash> and vX.Y.Z-pre.0.<ts>-<hash>, used for
+// a commit after a released tag), so the leading separator is [-.].
+var pseudoVersionRE = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+dirty)?$`)
 
 // isResolvableModuleVersion reports whether v looks like a published
 // semver tag (e.g. "v0.6.2") that `go mod` can resolve from a fresh
@@ -349,7 +354,7 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	fmt.Println()
 	fmt.Println("next steps:")
 	fmt.Printf("  1. sparkwing pipeline new --name release   %s\n", color.Dim("# scaffold a single-node pipeline (default --template minimal)"))
-	fmt.Printf("  2. sparkwing run release                   %s\n", color.Dim("# run it; replace the Log(\"TODO\") with real logic"))
+	fmt.Printf("  2. sparkwing run release                   %s\n", color.Dim("# run it; replace the placeholder step with real logic"))
 	fmt.Printf("  %s\n", color.Dim("for a build/test/deploy DAG: sparkwing pipeline new --name release --template build-test-deploy"))
 	fmt.Println()
 	fmt.Printf("  %s\n", color.Dim("dashboard:    sparkwing dashboard start"))

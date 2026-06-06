@@ -245,7 +245,7 @@ type allExplainResult struct {
 }
 
 // runPipelineExplainAll iterates every pipeline in the local
-// .sparkwing/pipelines.yaml catalog, runs `pipeline explain` against
+// .sparkwing/sparkwing.yaml catalog, runs `pipeline explain` against
 // each with zero arguments, and aggregates pass/fail. Non-zero exit on
 // any failure makes this a CI gate: a Plan-time mismatch (e.g. a stale
 // sparkwing.RefTo[T] call against a renamed output type) blocks merges.
@@ -255,7 +255,7 @@ func runPipelineExplainAll(format string) error {
 		return fmt.Errorf("explain --all: catalog: %w", err)
 	}
 	if len(catalog) == 0 {
-		return errors.New("explain --all: no pipelines found in .sparkwing/pipelines.yaml")
+		return errors.New("explain --all: no pipelines found in .sparkwing/sparkwing.yaml")
 	}
 	binary, err := os.Executable()
 	if err != nil {

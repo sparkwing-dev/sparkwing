@@ -47,6 +47,69 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing pipeline new` gained `-C` / `--sw-cd <dir>` to
+  scaffold into a repo other than the current directory (matching
+  `sparkwing run`), and its `--help` now leads with a pointer to
+  `sparkwing pipeline templates` so the registry starters are
+  discoverable from where you scaffold.
+- **config:** pipeline entries in `.sparkwing/sparkwing.yaml` accept
+  `hidden: true` to omit a pipeline from default `pipeline list`
+  output; it stays invocable by exact name and appears under
+  `pipeline list --all`.
+
+### Fixed
+
+- **cli:** `sparkwing runs approvals` is usable again. The bare verb
+  and its flags (`--run`, `-o json`) were parsed as unknown
+  subcommands, so the documented ways to find a pending gate all
+  errored; `approve` / `deny` were missing from `--help`; and the
+  shipped examples referenced a non-existent `sparkwing approve`. The
+  verb now defaults to `list`, dispatches `approve` / `deny` directly,
+  lists them in help, and the examples use the real
+  `sparkwing runs approvals approve|deny` path.
+- **cli:** `sparkwing pipeline new --hidden` wrote a `hidden:` key the
+  config parser rejected, leaving an unparseable `sparkwing.yaml`.
+  `hidden` is now a recognized field and `pipeline list` / `--all`
+  honor it.
+- **cli:** a `sparkwing` binary built from a clean local checkout at a
+  commit after the last release stamped its own pseudo-version
+  (`vX.Y.Z-0.<ts>-<hash>`) into freshly-scaffolded `.sparkwing/go.mod`,
+  so `go mod tidy` failed with "unknown revision". Pseudo-version
+  detection now recognizes that form and falls back to the latest
+  released SDK version, so dev-built CLIs produce resolvable scaffolds.
+- **cli/docs:** the project registry file was referred to as
+  `pipelines.yaml` in scaffolder output, `pipeline new --help`,
+  `pipeline explain`, and several docs; the actual file is
+  `sparkwing.yaml` (the legacy name is a hard error). All current
+  references now name it correctly.
+- **cli:** `sparkwing info` now notes when it resolved a `.sparkwing/`
+  by walking up from the current directory (rather than finding one in
+  it) and points at `-C`, so running in a fresh directory no longer
+  silently reports an ancestor repo's pipelines as your own.
+- **cli:** the `minimal` scaffold no longer emits literal `TODO:`
+  placeholders (they tripped repos' own no-TODO lints); it uses neutral
+  "replace this" wording.
+- **sdk:** `services.WithServices` publishes a service's `Port` to
+  `127.0.0.1:<Port>` instead of relying on `--network host`, so
+  integration-test containers are reachable from the host test process
+  on Docker Desktop (macOS/Windows), not only on Linux. A `Service`
+  with `Port` unset still uses host networking.
+- **docs:** the SDK reference and getting-started guide were refreshed
+  to match the shipped API. Removed the deleted `JobFn`; corrected the
+  Workable shape to `Work(w *Work) (*WorkStep, error)` with
+  `sparkwing.Step(...)`; fixed the `JobFanOut` callback signature to
+  `func(T) (string, any)`; replaced the bogus pipeline-entry fields
+  (`tags`/`env`/`secrets`/`runs_on`) with the real schema
+  (`entrypoint`/`guards`/`args`/`profile`/`requires`); documented the
+  `Git` struct fields, `Retry`/`RetryBackoff`/`RetryAuto` semantics,
+  `ExecResult` fields, `WithServices`, the `ContinueOnError` vs
+  `Optional` distinction and the `Failure` struct; clarified that the
+  file helpers (`WorkDir`/`Path`/`WriteFile`) are package-level
+  functions taking no `ctx`; noted that `Bash` runs with no implicit
+  `set -euo pipefail`; and marked the `Verify` postcondition proposal
+  implemented.
 
 ## [v0.8.0] - 2026-06-03
 ### Added

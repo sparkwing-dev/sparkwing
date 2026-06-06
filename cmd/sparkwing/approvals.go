@@ -17,13 +17,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runApprove handles `sparkwing approve --run <id> --node <id>`.
+// runApprove handles `sparkwing runs approvals approve --run <id> --node <id>`.
 func runApprove(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	return resolveApprovalVerb(ctx, paths, args, cmdApprove,
 		store.ApprovalResolutionApproved, "approved")
 }
 
-// runDeny handles `sparkwing deny <run>/<node>`.
+// runDeny handles `sparkwing runs approvals deny --run <id> --node <id>`.
 func runDeny(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	return resolveApprovalVerb(ctx, paths, args, cmdDeny,
 		store.ApprovalResolutionDenied, "denied")
@@ -185,28 +185,4 @@ func orDashApproval(s string) string {
 		return "-"
 	}
 	return s
-}
-
-// runApprovals routes the top-level `sparkwing approvals` verb to
-// its subcommands. Parallels runJobs / runTokens / etc.
-func runApprovals(args []string) error {
-	if handleParentHelp(cmdApprovals, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdApprovals, os.Stderr)
-		return errors.New("approvals: subcommand required")
-	}
-	paths, err := orchestrator.DefaultPaths()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	switch args[0] {
-	case "list":
-		return runApprovalsList(ctx, paths, args[1:])
-	default:
-		PrintHelp(cmdApprovals, os.Stderr)
-		return fmt.Errorf("approvals: unknown command %q", args[0])
-	}
 }
