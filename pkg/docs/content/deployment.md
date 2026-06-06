@@ -12,8 +12,9 @@ to a cluster via a profile's controller:
 | Source | Target | Command |
 |--------|--------|---------|
 | Local code | Local machine | `sparkwing run build` |
+| Local working tree at a git ref | Local machine | `sparkwing run build --sw-ref main` |
 | Local code | Any cluster | `sparkwing pipeline trigger build --profile dev` |
-| Remote (git ref) | Any cluster | `sparkwing pipeline trigger build --from main --profile prod` |
+| Controller-registered source | Any cluster | `sparkwing pipeline trigger build --profile prod` |
 
 The `--profile` flag resolves a **profile** - a named cluster endpoint.
 Every profile with a controller follows the same dispatch flow:
