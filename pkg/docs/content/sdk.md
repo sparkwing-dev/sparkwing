@@ -231,7 +231,14 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 
 ## Files
 
+These are **package-level functions** — call them as `sparkwing.Path(...)`,
+`sparkwing.WorkDir()`, etc. (NOT methods on `rc`/`RunContext`, NOT `*Cmd`
+terminators). `WorkDir()` takes no arguments. They resolve relative
+paths against the auto-discovered project root and work anywhere inside
+a Job/Step body.
+
 ```
+WorkDir() string                            // repo root (parent of .sparkwing/); no args
 Path(parts...) string                       // join onto WorkDir(); abs first part wins
 ReadFile(path) ([]byte, error)              // os.ReadFile, relative -> WorkDir()
 WriteFile(path, data) error                 // os.WriteFile, perm 0o644
@@ -306,11 +313,20 @@ func (Test) runIntegration(ctx context.Context) error {
 `func WithServices(ctx, []Service, fn func(ctx) error) error`.
 `Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` —
 empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
-30s. Set `Port` and the service is published to `127.0.0.1:<Port>`, so
-your test reaches it at `localhost:<Port>` on every platform (incl.
-Docker Desktop on macOS/Windows). `ReadyCmd` runs inside the container
-via `docker exec` (e.g. `redis-cli ping`, `pg_isready`), so it needs no
-host-side client.
+30s. `ReadyCmd` runs inside the container via `docker exec` (e.g.
+`redis-cli ping`, `pg_isready`), so it needs no host-side client.
+
+**Networking caveat (read this):** the released SDK starts containers
+with `--network host`. On **Linux** the service is reachable from your
+test at `localhost:<Port>`. On **Docker Desktop (macOS/Windows)**,
+host-network ports are NOT reachable from the host process, so a test
+dialing `localhost:<Port>` gets "connection refused" even though the
+in-container `ReadyCmd` reports ready. Until the port-publishing fix
+ships, run the test step itself inside a host-network container, e.g.:
+
+```go
+sw.Bash(ctx, `docker run --rm --network host -v "$PWD":/w -w /w golang:1.26 go test ./integration/...`).Run()
+```
 
 ## Plan - the outer DAG
 

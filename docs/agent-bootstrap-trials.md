@@ -134,7 +134,54 @@ Validation: rebuilt/reinstalled; `runs approvals` (bare / `-o json` /
 WithServices port fix verified by build — behavioral re-test queued for
 round 5 (postgres/redis shape).
 
+### Round 5 — 6 agents (redis-cache-test, gated-prod-deploy, docker-image-build, scheduled-report, diamond-dag, env-promote)
+
+Result: 6/6 ran, avg ease 3.83/5 (↑ from 3.67). **Confirmed win:**
+`gated-prod-deploy` used `runs approvals approve` smoothly end-to-end —
+the round-4 CLI repair landed. **Key negative result:** the round-4
+`WithServices` port fix did NOT reach the agent — redis-cache-test still
+hit `--network host` / connection-refused and had to hand-roll a
+host-network test container.
+
+### Critical insight: what reaches agents without a release
+
+A scaffolded pipeline is a Go program that **links the released
+`sparkwing` SDK** (pinned in its `.sparkwing/go.mod`, currently v0.8.0).
+So:
+
+- **Reaches agents via `bin/install.sh` rebuild (no release):** CLI
+  behavior (`info`, `pipeline new`, `runs approvals`, flags, breadcrumb),
+  the **embedded docs** (`pkg/docs/content/*`), and **template content**
+  (rendered by the binary). Validated working: approvals, Git docs,
+  breadcrumb, JobFn template fix, naming.
+- **Does NOT reach agents without a sparkwing release:** anything in the
+  `sparkwing/...` **SDK packages** a pipeline imports — `services`
+  (the WithServices networking fix), the orchestrator `Failure`
+  serialization, the `kube`/`gitops` APIs the two rollback templates
+  need. These are correct in the working tree but stranded at v0.8.0
+  for agents.
+
+Consequence: the WithServices doc was corrected to describe the
+**released** behavior + the macOS host-network workaround (the code fix
+stays staged). The reachable, no-release work below is where ongoing
+effort goes.
+
+Round-5 doc fixes (reachable, shipped): honest WithServices networking
+caveat; file helpers (`WorkDir()`/`Path()`/`WriteFile`) clarified as
+package-level funcs taking no `ctx` (two agents hit `RunContext has no
+method WorkDir` / `WorkDir(ctx) too many args`); marked the `Verify`
+proposal doc IMPLEMENTED (it contradicted the SDK reference).
+
 ## Deferred / larger asks (current)
+
+**Release-gated** (need a sparkwing SDK release to reach agents; on hold
+per "don't push releases yet"):
+
+- `WithServices` port-publishing fix (staged in `sparkwing/services/services.go`).
+- Controller verify-recovery `Failure` serialization (repro test on branch `test/controller-verify-recovery-repro`).
+- `go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` (need post-v0.24.0 `kube`/`gitops` released).
+
+**Reachable now (no release) — next builds, in priority order:**
 
 Top of the list — these are now the dominant remaining feedback, cited
 across multiple rounds:
