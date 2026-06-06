@@ -203,3 +203,47 @@ Smaller / specific:
 - **Scaffolder `.gitignore` omits `dist/`** so first run dirties the tree. (trivial)
 - **Run-level "recovered" status** when an `OnFailure` node succeeds (today still exit 1). Design question. (medium)
 - **`WithServices` ReadyCmd lifecycle logging** -- log the probe + exit code; don't print "ready" unless it passed. (small)
+
+## Phase 2 (post-v0.8.1): structural quality work
+
+After 5 exploratory rounds converged the feedback, the work shifted from
+reactive whack-a-mole to durable mechanisms + filling the template gap.
+
+**Done:**
+
+- **Doc-example compile gate** (`internal/doccheck`, wired into the
+  `pre_push` pipeline as `doc-examples`). Compiles every ` ```go ` block
+  in `pkg/docs/content` against the local SDK and fails on **SDK-API
+  drift** (a removed symbol, a method gone from `*Plan`/`*Work`, a wrong
+  signature) -- the exact "the docs lie" class that bit agents.
+  `migrations/` + `proposals/` excluded (design history). It enforces
+  API correctness, not full snippet compilation (most snippets reference
+  undeclared business identifiers -> reported "partial", not failed).
+- **Doc sweep** (driven by the gate's first run): fixed 5 real
+  current-doc bugs -- `caching.md` (`plan.Add`->`sparkwing.Job`,
+  `sparkwing.HashFile`->`ReadFile`+`Key`), `deployment.md`
+  (`Work() *Work`+`w.Step` -> current `Work(w) (*WorkStep,error)`+`sw.Step`),
+  `pipelines.md` (`.Group(...)` -> `sw.GroupJobs(...)`). Gate now green.
+- **Local-runnable template suite** (sparks-core): `test-shards`,
+  `docker-build-smoketest`, `integration-test-with-service` (uses the
+  0.8.1 `WithServices` port fix), `scheduled-cleanup`,
+  `approval-gated-deploy` -- plus the earlier `build-publish-binary`.
+  12/14 templates compile via `build-all-templates.sh` (the 2 failures
+  are the release-gated rollback templates). NOTE: the 5 new templates
+  are local-only until a `sparks-core/templates` release.
+
+**A/B harness (frozen):** replaces open-ended rounds with a fixed
+shape set re-run after each change for a clean before/after. Local-only
+(controller variance would pollute the signal). The 8 frozen shapes
+(7 map to a local template, 1 hand-rolled):
+
+`ci-lint-test` (lint-test-go), `test-shards` (test-shards),
+`build-binary` (build-publish-binary), `docker-smoketest`
+(docker-build-smoketest), `service-integration`
+(integration-test-with-service), `scheduled-cleanup` (scheduled-cleanup),
+`approval-deploy` (approval-gated-deploy), `branch-conditional`
+(hand-rolled; exercises `rc.Git.Branch`).
+
+Key tracked metric per run: `ran_ok`, `avg_ease`, and **`used_a_template`**
+(did the agent discover + use the matching template). Re-run via the
+Workflow tool with the persisted `agent-ab-harness` script.
