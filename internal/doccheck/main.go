@@ -128,7 +128,7 @@ func main() {
 
 var (
 	sdkRefRE     = regexp.MustCompile(`\b(sparkwing|sw)\.[A-Z]\w*`)
-	sdkProblemRE = regexp.MustCompile(`undefined|has no field or method|arguments in call|cannot use|mismatched types|not enough arguments|too many`)
+	sdkProblemRE = regexp.MustCompile(`undefined|has no field or method|unknown field|arguments in call|cannot use|mismatched types|not enough arguments|too many`)
 )
 
 // sdkDriftLines keeps only compiler error lines that indicate the doc
