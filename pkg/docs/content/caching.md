@@ -134,21 +134,4 @@ paths.
   not have a first-class SDK replacement. Today: use the dependency
   proxy (gitcache `/proxy/...`) or a warm PVC. This is a known gap;
   open an issue if it blocks you.
-- **Build-layer caching is unchanged.** See
-  [build-caching.md](build-caching.md).
-
-## Historical reference
-
-The pre-rewrite imperative API lived in `pkg/step` and `pkg/cache` with
-these entry points (all removed):
-
-```
-step.SaveCache(key, paths...)
-step.RestoreCache(key)
-step.CacheKey(prefix, lockfile)
-step.CacheKeyFromWorkDir(prefix, lockfile, workDir)
-cache.NewClient(baseURL); client.Save/Restore/Has
-```
-
-Those tarballs-on-gitcache are reachable via git log before commit
-`18e1dec` if you need to resurrect anything.
+- **Build-layer caching.** See [build-caching.md](build-caching.md).
