@@ -271,3 +271,54 @@ prerequisite note). All logged; none block a 1-shot.
 `sparks-core/templates` release (the A/B agents see it via the rebuilt
 binary; real users do not). A `kube`/`gitops` release additionally
 unstrands the two rollback templates.
+
+## Evidence-backed docs audit (manual, post-A/B)
+
+The blind-agent docs audits proved unreliable as a fixing tool: the
+first batch hallucinated divergences (e.g. flagged real `CacheOptions`
+fields as wrong), and a strict "prove every claim with command output"
+re-run failed at the tool-call layer (all agents returned prose, zero
+structured results). Rather than burn a third agent batch, the audit
+was done by hand against the installed binary + SDK source -- every
+claim verified before any edit.
+
+### Method
+
+For each suspect topic: run the actual CLI (`--help`, error probes),
+read the parsing source (the `sparkwing.yaml` entry struct, flag
+dispatch, path helpers, the `CacheOptions` struct), then fix only what
+the binary/source contradicted. The doc-compile gate (`internal/doccheck`)
+ran after every batch -- it independently caught a real `CacheOptions`
+drift in `pipelines.md` that prose review had missed.
+
+### Confirmed divergences fixed
+
+| Area | Doc said | Reality | Severity |
+|------|----------|---------|----------|
+| run flag (help + sdk + gitcache) | `--from <ref>` | `--sw-ref` (renamed) | high -- in the binary's own `run --help` examples |
+| config filename (help ×10, 3 docs) | `pipelines.yaml` | `sparkwing.yaml` (legacy name hard-errors) | high |
+| `sdk.md` reserved flags | `ReservedFlagNames()` + unprefixed `--from/--mode/...` collision panic | function doesn't exist; `sw-*` prefix means pipelines own the full unprefixed namespace, no collision check | high -- whole section was fiction |
+| `scheduling.md` | `runs_on:` block (require/prefer/tolerate/queue_timeout), taints, scoring, pseudo-labels | `runs_on` is rejected by the strict `sparkwing.yaml` parser; real model is pipeline `requires: []` + node `.Requires()/.Prefers()/.WhenRunner()` + `sparkwing-runner --label` | high -- an agent's config would hard-error on load |
+| `CacheOptions` (pipelines.md, sdk.md) | `Key:` / `CacheKey:` | `Namespace:` / `ContentHash:` | high -- gate-caught |
+| ci-embedded | `--mode` / `--workers` | `--sw-mode` / `--sw-workers` (renamed) | med |
+| sparks offline | `--no-update` | `--sw-no-update` (renamed) | med |
+| native-mode / deployment-modes / architecture | `~/.sparkwing/sparkwing.db`, `~/.sparkwing/logs/`, `/data/sparkwing.db` | `state.db`, `~/.sparkwing/runs/<id>/`, `/data/state.db` | med |
+| hooks triggers | `pull_request` trigger | no such key; real HTTP trigger is `webhook` | med |
+| auth token verbs | `tokens revoke <prefix>` / `lookup <prefix>` (positional); `rotate` "phase 2 work" | all take `--prefix` (flag-only); `rotate` is shipped | med |
+
+### False suspects (verified correct, left untouched)
+
+- `CacheOptions.Namespace/ContentHash/OnLimit/QueueTimeout` -- all real
+  (the first audit's "caching" findings were hallucinations).
+- `backends.md` storage shape (`type`/`bucket`/`prefix`/`path`) -- matches
+  the `backends.Spec` struct and valid type set exactly.
+- `sparkwing-web --state-spec` -- the binary and flag both exist.
+- `runs status` etc. -- already flag-based in docs; no positional drift.
+
+### Takeaway
+
+Blind agents are good at *surfacing* candidate divergences but unsafe as
+*fixers* -- their false-positive rate is high enough to corrupt correct
+docs. The durable mechanism is the compile gate plus manual verification
+against the binary; the agent batches are best used only to nominate
+suspects for that verification.
