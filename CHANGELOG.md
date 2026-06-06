@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.8.1] - 2026-06-06
 ### Added
 
 - **cli:** `sparkwing pipeline new` gained `-C` / `--sw-cd <dir>` to
