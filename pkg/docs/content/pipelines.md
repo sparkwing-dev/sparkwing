@@ -292,7 +292,7 @@ and a single `Needs(group)` target downstream.
 already known when `Plan()` runs:
 
 ```go
-images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, sw.Workable) {
+images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, any) {
     return "build-" + img.Name, &BuildImage{Image: img}
 }).Needs(webBuild, discover).Retry(2)
 
@@ -324,7 +324,7 @@ func (j *ListShards) run(ctx context.Context) ([]string, error) {
 
 shards := sw.Job(plan, "list-shards", &ListShards{})
 
-sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, sw.Workable) {
+sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, any) {
     return "process-" + shard, &ProcessShard{Shard: shard}
 })
 ```
@@ -369,7 +369,7 @@ pair becomes a fresh Plan node. The spawning runner stays suspended
 across the entire fan-out:
 
 ```go
-sw.JobSpawnEach(w, targets, func(target string) (string, sw.Workable) {
+sw.JobSpawnEach(w, targets, func(target string) (string, any) {
     return "deploy-" + target, &Deploy{Target: target}
 }).Needs(buildStep)
 ```

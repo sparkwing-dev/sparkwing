@@ -61,10 +61,38 @@ read errors) still confuses.
 
 ## Change log
 
-| Round | Shape | Feedback theme | Change | File(s) | Effort |
-|------:|-------|----------------|--------|---------|--------|
-| _baseline captured; round 1 pending_ | | | | | |
+### Round 1 — 6 agents (ci-go, parallel-checks, verify-rollback, build-artifact, migrate-db, matrix-test)
+
+Result: 6/6 ran successfully locally, avg bootstrap ease 4.0/5. Discovery
+path was consistent and healthy — every agent went
+`sparkwing --help` → `info` → `pipeline templates` / `docs read --topic sdk`
+unprompted, which validates the top-level affordances. Friction was
+concentrated in stale generated code/docs and a few CLI gaps.
+
+Fixes implemented (cheap, high-frequency, clearly correct):
+
+| Theme (agents) | Change | File(s) | Effort |
+|----------------|--------|---------|--------|
+| Scaffolds don't compile: removed `sparkwing.JobFn` still emitted (critical) | drop the `JobFn(...)` wrapper; pass the closure directly to `Job` | sparks-core `templates/{lint-test-go,docker-deploy-gar-gke,static-deploy-gcs-cloudcdn,next-build-and-push}/pipeline.go.tmpl` | small |
+| `pipelines.yaml` vs `sparkwing.yaml` naming (5/6) | rename all current-context refs to `sparkwing.yaml` | `cmd/sparkwing/action_new.go`, `help_registry.go`, `docs/getting-started.md`, `docs/sdk.md` | trivial |
+| No `-C`/`--sw-cd` on `pipeline new` (6/6) | add `-C/--sw-cd` flag + chdir; document it | `cmd/sparkwing/action_new.go`, `help_registry.go` | small |
+| Stale SDK in `getting-started` doc (`JobFn`, `Work() *sw.Work`, `w.Step`) | rewrite to current API (`Work(w) (*WorkStep,error)`, `sw.Step`, closure `Job`) | `docs/getting-started.md` | small |
+| `JobFanOut` doc example doesn't compile (`(string, sw.Workable)`) | fix to `(string, any)` | `docs/pipelines.md` | trivial |
+| `minimal` stub ships `Log("TODO")` (trips no-TODO lint) | placeholder `Info("replace this stub…")` + help text | `cmd/sparkwing/action_new.go`, `help_registry.go` | trivial |
+| `--json` advertised "every verb" but errors on `new` | soften claim to discovery verbs only | `help_registry.go` | trivial |
+| (tooling) no scaffold-and-build regression guard | `build-all-templates.sh`: scaffold every registry template + `go build` | `.claude-scratch/` (sparks-core) | small |
+
+Validation: rebuilt + reinstalled the binary (go.work pulls local
+templates); `build-all-templates.sh` confirms 6/8 templates compile and
+`-C` works for all scaffolds.
 
 ## Deferred / larger asks
 
-_(logged here when an agent requests something beyond the cheap-fix bar)_
+- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — they (and the `rollback` module) call `kube.Apply/SetImage/RolloutUndo` and `gitops.Revert`, which exist on sparks-core HEAD but are post-`v0.24.0` and unreleased. Fixing this needs a sparks-core module release (deferred: releases are on hold). Until then these two flagship rollback templates can't be 1-shot by agents against the proxy.
+- **Positive log signal for a passing `.Verify`** (verify-rollback): a successful health check is invisible in run output. Needs a `verify_start`/`verify_pass` event in the runner. (small–medium)
+- **`unknown pipeline` should hint** "compiled but no `Register(\"X\")` found" when the name isn't registered (parallel-checks). (small)
+- **Missing local-runnable templates** for very common shapes with no on-ramp: test-matrix (fan-out), build-and-publish-binary (generic/local), local Postgres migration (non-ArgoCD), and a cluster-free `.Verify`+`.OnFailure` rollback demo. (medium each)
+- **Human run output** (`--sw-pretty`/TTY autodetect) — JSONL is agent-friendly but hostile to humans. (medium)
+- **Scaffold-time compile check** — run `go build` at `pipeline new` time so broken scaffolds surface immediately, not on first `sparkwing run`. (small)
+- **Docs**: state the 3-way name binding (`name:` == `Register("name")`, `entrypoint:` == struct type) and that a failed `.Verify` reaches `.OnFailure` with `Stage == StageVerify`. (trivial)
+- **Run-level "recovered" signal** when an `OnFailure` node succeeds (today a successful rollback still exits non-zero / status=failed). Legit design question. (medium)

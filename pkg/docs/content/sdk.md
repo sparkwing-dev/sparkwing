@@ -6,7 +6,7 @@ signatures and one-line summaries - designed to be loaded once at the
 start of a pipeline-authoring task.
 
 For the conceptual tour (Plan, Job, Job, Work, modifiers,
-`pipelines.yaml` shape), read [pipelines](pipelines.md). This page is
+`sparkwing.yaml` shape), read [pipelines](pipelines.md). This page is
 the authoritative SDK reference for the `sparkwing` Go package.
 
 The convention is to import the SDK under the alias `sw`:

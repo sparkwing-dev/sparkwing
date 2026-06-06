@@ -27,6 +27,7 @@ func runPipelineNew(args []string) error {
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
 	params := fs.StringArray("param", nil, "registry template parameter, k=v (repeatable)")
+	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -46,6 +47,12 @@ func runPipelineNew(args []string) error {
 		return err
 	}
 
+	if *changeDir != "" {
+		if err := os.Chdir(*changeDir); err != nil {
+			return fmt.Errorf("new: --sw-cd %q: %w", *changeDir, err)
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -63,7 +70,7 @@ func runPipelineNew(args []string) error {
 	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			if p.Name == name {
-				return fmt.Errorf("pipeline %q already exists in pipelines.yaml (entrypoint %q)", name, p.Entrypoint)
+				return fmt.Errorf("pipeline %q already exists in sparkwing.yaml (entrypoint %q)", name, p.Entrypoint)
 			}
 		}
 	}
@@ -86,7 +93,7 @@ func runPipelineNew(args []string) error {
 
 // scaffoldFromRegistry renders a sparks-core registry template (anything
 // `sparkwing pipeline templates` lists) into jobs/<name>.go and wires the
-// pipelines.yaml entry. The pipeline's registered name is the --name
+// sparkwing.yaml entry. The pipeline's registered name is the --name
 // flag: when the template declares a `pipeline-name` param it's set from
 // --name, so the rendered Register() call and the yaml entry agree.
 func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
@@ -215,7 +222,7 @@ var goReservedTrailingTokens = map[string]bool{
 // goJobFilename produces a .go filename that Go won't silently exclude
 // (leading _/., trailing _test/_<goos>/_<goarch>).
 // All transforms preserve the user-chosen pipeline name in
-// pipelines.yaml; only the on-disk filename is adjusted.
+// sparkwing.yaml; only the on-disk filename is adjusted.
 func goJobFilename(name string) string {
 	snake := kebabToSnake(name)
 	if strings.HasPrefix(snake, "_") || strings.HasPrefix(snake, ".") {
@@ -280,7 +287,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	}
 	fmt.Printf("%s Creating new pipeline\n", color.Cyan("==>"))
 	fmt.Printf("  %s %s\n", color.Green("+"), rel)
-	fmt.Printf("  %s added %q entry to .sparkwing/pipelines.yaml\n", color.Green("+"), name)
+	fmt.Printf("  %s added %q entry to .sparkwing/sparkwing.yaml\n", color.Green("+"), name)
 	tidy := tidySkeleton(sparkwingDir, true)
 	switch {
 	case tidy.Skipped:
@@ -300,7 +307,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
-		{Command: "sparkwing docs read --topic pipelines", Purpose: "pipelines.yaml + DAG concepts"},
+		{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
 		{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
 		{Command: "sparkwing info", Purpose: "find out more about sparkwing"},
 	}
@@ -349,7 +356,7 @@ func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
 // Paths in ExecIn / BashIn / ReadFile are relative to the repo root,
 // not .sparkwing/. See WorkDir().
 func ({{STRUCT}}Job) run(ctx context.Context) error {
-	sw.Info(ctx, "TODO: replace with your logic")
+	sw.Info(ctx, "replace this stub with your logic")
 	return nil
 }
 
@@ -445,7 +452,7 @@ func init() {
 }
 `
 
-// appendPipelinesYAML tacks a new entry onto .sparkwing/pipelines.yaml
+// appendPipelinesYAML tacks a new entry onto .sparkwing/sparkwing.yaml
 // in the same shape the existing entries use. Plain text append keeps
 // the author's formatting (leading comments, spacing) intact -- a yaml
 // round-trip would reflow everything. Risk: the user's file could have

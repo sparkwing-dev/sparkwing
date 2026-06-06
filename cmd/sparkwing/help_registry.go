@@ -851,8 +851,9 @@ pipelines to git pre-commit / pre-push.
 'sparks' manages reusable spark libraries declared in
 .sparkwing/sparks.yaml.
 
-Every verb supports -o json so an agent can parse output
-directly rather than scraping tab-complete.
+The discovery verbs (list / describe / discover / templates)
+support -o json so an agent can parse output directly rather
+than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
 'sparkwing version update --sdk'. To see the current pin, run
@@ -1023,22 +1024,25 @@ var cmdPipelineNew = Command{
 	Path:     "sparkwing pipeline new",
 	Synopsis: "Scaffold a new Go pipeline",
 	Description: `Creates a stub pipeline in the nearest .sparkwing/:
-jobs/<snake>.go plus a pipelines.yaml entry. Auto-bootstraps
+jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
 .sparkwing/ on first use, so a fresh repo's first scaffold sets
 up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
+Pass --sw-cd/-C to scaffold into a repo other than the current
+directory (the .sparkwing search re-anchors there).
+
 Templates:
   - minimal (default): single-node Plan with a stubbed Run.
     Smallest viable shape; the editor's first move is replacing
-    the Log("TODO") with real logic.
+    the placeholder Info() line with real logic.
   - build-test-deploy: three-node Plan (build -> test -> deploy)
-    with echo Run bodies that print a TODO line on each step.
+    with echo Run bodies that print a placeholder line on each step.
     The canonical CI shape; first 'sparkwing run <name>' surfaces three
     exec banners + three echoed lines so the structure is
     visible end-to-end.
 
-Refuses to clobber: if the name already exists in pipelines.yaml
+Refuses to clobber: if the name already exists in sparkwing.yaml
 the command fails before writing anything.
 
 Supply --hidden to hide from default listings; --short to pre-fill
@@ -1051,6 +1055,7 @@ See also:
   better fit -- it skips the compile cycle.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
 		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | any registry name from `sparkwing pipeline templates`", Default: "minimal", Group: "Scaffold"},
 		{Name: "param", Argument: "K=V", Desc: "Registry template parameter (repeatable); see `sparkwing pipeline templates`", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
