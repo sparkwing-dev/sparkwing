@@ -1029,10 +1029,15 @@ jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
 up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
+Before building by hand, browse the ready-made starters:
+'sparkwing pipeline templates' lists task-shaped registry templates
+(Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
+scaffold one with --template <name> [--param k=v ...].
+
 Pass --sw-cd/-C to scaffold into a repo other than the current
 directory (the .sparkwing search re-anchors there).
 
-Templates:
+Built-in templates (registry templates are listed by 'pipeline templates'):
   - minimal (default): single-node Plan with a stubbed Run.
     Smallest viable shape; the editor's first move is replacing
     the placeholder Info() line with real logic.

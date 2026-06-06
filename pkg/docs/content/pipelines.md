@@ -23,28 +23,29 @@ kinds. Each entry is a list item with a `name:`.
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
+    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
-    tags: [ci, deploy]
 
   - name: release
+    entrypoint: Release
     description: Cut a release
     # no on: -> command, manual-only
 ```
 
-Each entry has:
+Each entry has (these are the only valid keys; an unknown field is a
+hard parse error):
 
-- **name** - the pipeline name (`sparkwing run build-deploy`)
+- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", …)` string
+- **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block. Absent means "manual only" (a command).
-- **tags** - labels for filtering and grouping
-- **env** - environment variables passed to the pipeline
-- **secrets** - cluster-stored secrets to surface
-- **runs_on** - scheduling constraints for runner selection
-  (see [scheduling](scheduling.md))
-- **hidden** - omit from `pipelines list` (still invocable by exact name)
+- **on** - declarative trigger block: `push` (branches/paths), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`. Absent means "manual only" (a command).
+- **guards** - gate dispatch on profile + args (`reject` / `require` token lists)
+- **args** - per-arg default values, keyed by CLI flag name
+- **profile** - the project profile this pipeline uses (from the `profiles:` map)
+- **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
 
 ## Triggers
 

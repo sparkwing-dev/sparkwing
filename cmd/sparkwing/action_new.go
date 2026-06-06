@@ -259,7 +259,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
 	}
 	if short == "" {
-		short = "TODO: one-line description of " + name
+		short = "one-line description of " + name
 	}
 	body := strings.NewReplacer(
 		"{{STRUCT}}", struct_,
@@ -419,7 +419,7 @@ func (j *{{STRUCT}}Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 // Paths in .Dir() / ReadFile are relative to the repo root, not
 // .sparkwing/. See WorkDir().
 func ({{STRUCT}}Build) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: build\"`" + `).Run()
+	_, err := sw.Bash(ctx, ` + "`echo \"build step - replace with real logic\"`" + `).Run()
 	return err
 }
 
@@ -431,7 +431,7 @@ func (j *{{STRUCT}}Test) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func ({{STRUCT}}Test) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: test\"`" + `).Run()
+	_, err := sw.Bash(ctx, ` + "`echo \"test step - replace with real logic\"`" + `).Run()
 	return err
 }
 
@@ -443,7 +443,7 @@ func (j *{{STRUCT}}Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func ({{STRUCT}}Deploy) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: deploy\"`" + `).Run()
+	_, err := sw.Bash(ctx, ` + "`echo \"deploy step - replace with real logic\"`" + `).Run()
 	return err
 }
 

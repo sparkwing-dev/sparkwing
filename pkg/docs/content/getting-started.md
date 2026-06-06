@@ -159,11 +159,11 @@ and returns a DAG of nodes. One-node pipelines return a Plan with a single
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
+    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
-    tags: [ci, deploy]
 ```
 
 ```go

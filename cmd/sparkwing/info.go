@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	flag "github.com/spf13/pflag"
@@ -62,6 +63,7 @@ type InfoDocs struct {
 type InfoProject struct {
 	Found         bool             `json:"found"`
 	SparkwingDir  string           `json:"sparkwing_dir,omitempty"`
+	FoundAbove    bool             `json:"found_above_cwd,omitempty"`
 	Pipelines     InfoPipelinesSum `json:"pipelines,omitempty"`
 	HowToScaffold string           `json:"how_to_scaffold,omitempty"`
 }
@@ -354,6 +356,7 @@ func gatherInfo(agentMode bool) Info {
 		if sparkwingDir, ok := walkUpForSparkwing(cwd); ok {
 			info.Project.Found = true
 			info.Project.SparkwingDir = sparkwingDir
+			info.Project.FoundAbove = filepath.Dir(sparkwingDir) != cwd
 			if pipelineList, perr := gatherPipelinesCatalog(false); perr == nil {
 				info.Project.Pipelines = summarizePipelines(pipelineList)
 			}
@@ -633,6 +636,9 @@ func printInfoTable(info Info) {
 			noun = "pipeline"
 		}
 		row("project", ".sparkwing/ at "+info.Project.SparkwingDir, fmt.Sprintf("(%d %s: %d triggered, %d manual)", p.Total, noun, p.Triggered, p.Manual))
+		if info.Project.FoundAbove {
+			row("", color.Cyan("note: found by walking up from the current directory, not in it -- pass -C <dir> (or cd) to target a different repo"), "")
+		}
 	} else {
 		row("project", color.Dim("no .sparkwing/ in this directory or any parent"), "")
 	}

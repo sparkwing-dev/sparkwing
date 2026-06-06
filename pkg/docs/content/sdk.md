@@ -199,6 +199,13 @@ work):
 .MustBeEmpty(reason) error          // non-empty stdout becomes "<reason>:\n<stdout>"
 ```
 
+`ExecResult` carries the captured outcome; `ExecError` (the error type
+on a non-zero exit) carries the same plus the wrapped `Cause`:
+
+```go
+type ExecResult struct { Command, Stdout, Stderr string; ExitCode int }
+```
+
 Common shapes:
 
 ```go
@@ -263,6 +270,37 @@ interface is pluggable: install your own backend (slog, zerolog,
 zap, OTel) via `sparkwing.WithLogger(ctx, impl)` and the call sites
 stay the same.
 
+## Service containers (integration tests)
+
+For tests that need a throwaway dependency (Postgres, Redis, …), the
+`sparkwing/services` package starts containers, waits for readiness,
+runs your function, and tears them down — even on failure or panic.
+This is the blessed setup/teardown idiom; do NOT use `AfterRun` for
+cleanup (it's an observer that can't change outcome and isn't
+guaranteed on failure), and don't put teardown in a downstream `Needs`
+node (it's skipped when the upstream fails).
+
+```go
+import "github.com/sparkwing-dev/sparkwing/sparkwing/services"
+
+func (Test) runIntegration(ctx context.Context) error {
+    return services.WithServices(ctx, []services.Service{{
+        Image:    "redis:7-alpine",
+        Port:     6379,
+        ReadyCmd: "redis-cli ping",          // ready when this exits 0
+        Env:      map[string]string{},
+    }}, func(ctx context.Context) error {
+        _, err := sw.Exec(ctx, "go", "test", "./integration/...").Run()
+        return err
+    })
+}
+```
+
+`func WithServices(ctx, []Service, fn func(ctx) error) error`.
+`Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` —
+empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
+30s. Containers run on the host network, so reach them on localhost.
+
 ## Plan - the outer DAG
 
 Every pipeline implements
@@ -281,6 +319,23 @@ rc.Pipeline string         // registered pipeline name
 rc.Git      *Git           // repo state at the trigger SHA
 rc.Trigger  TriggerInfo    // {Source: "push|manual|schedule|webhook", User, Env}
 ```
+
+`*Git` is the resolved repo state — branch-conditional logic reads it
+directly rather than shelling out to `git`:
+
+```go
+type Git struct {
+    SHA           string // full 40-char commit
+    Branch        string // "main"; "" when detached HEAD
+    DefaultBranch string // origin/HEAD target; "" when no remote
+    Repo          string // "owner/name"
+    RepoURL       string // "git@github.com:owner/name.git"
+}
+```
+
+`Plan()` is pure, so branch decisions that must shell out belong in a
+node `SkipIf` predicate (runs at dispatch), but `rc.Git.Branch` is
+already populated at Plan time — prefer it: `deploy.SkipIf(func(context.Context) bool { return rc.Git.Branch != "main" })`.
 
 Most one-step Plans don't need `rc` at all - the parameter is named
 for the moment a Plan starts branching on trigger source / SHA.
@@ -358,7 +413,7 @@ steps...)`.
 Common Plan-layer modifiers (chainable on `*Job`):
 
 ```
-.Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
+.Retry(attempts, opts...)          // re-run up to `attempts` ADDITIONAL times on failure (attempts+1 total runs); re-runs the whole Work() body each retry. Opts: RetryBackoff(d time.Duration) (fixed delay), RetryAuto() (exponential w/ jitter)
 .Timeout(d)                        // hard kill after d
 .Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage

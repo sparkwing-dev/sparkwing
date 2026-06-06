@@ -86,7 +86,41 @@ Validation: rebuilt + reinstalled the binary (go.work pulls local
 templates); `build-all-templates.sh` confirms 6/8 templates compile and
 `-C` works for all scaffolds.
 
+### Round 2 — 6 agents (ci-hygiene-go, lint-many-dirs, scheduled-cleanup, retry-flaky-fetch, branch-conditional, redis-integration)
+
+Result: 6/6 ran, avg bootstrap ease 4.17/5 (↑ from 4.0). Round-1 fixes
+confirmed landed — `lint-test-go` was scaffolded and rated 5/5 with zero
+`JobFn`/`sparkwing.yaml`/`-C` complaints. New friction was docs/schema
+lies and undocumented APIs.
+
+Fixes implemented:
+
+| Theme (agents) | Change | File(s) | Effort |
+|----------------|--------|---------|--------|
+| `info`/`run` silently attach to an ancestor `.sparkwing` (5/6) | `info` now prints a breadcrumb + `-C` hint when the project was found by walking up | `cmd/sparkwing/info.go` | small |
+| `tags:` (and `env`/`secrets`/`runs_on`/`hidden`) documented but rejected by the parser (trust) | rewrote the pipeline-entry field list to the real schema (name/entrypoint/description/on/guards/args/profile/requires); added required `entrypoint` to examples | `docs/pipelines.md`, `docs/getting-started.md` | small |
+| `Git.Branch` undocumented → branch-conditional shelled out to git | documented the `Git` struct fields + the `SkipIf`-vs-`Plan`-purity guidance | `docs/sdk.md` | trivial |
+| `WithServices` mentioned once, no signature → redis agent hand-rolled docker | new "Service containers" section: signature, `Service` struct, Redis example, teardown guarantee; called out why `AfterRun`/`Needs`-teardown leak | `docs/sdk.md` | small |
+| `Retry` semantics ambiguous (n vs total, opt signatures) | clarified "additional attempts (n+1 total), re-runs whole Work()", documented `RetryBackoff`/`RetryAuto` | `docs/sdk.md` | trivial |
+| `ExecResult` fields undocumented | documented `Command/Stdout/Stderr/ExitCode` | `docs/sdk.md` | trivial |
+| stub still ships `TODO:` (ShortHelp + build-test-deploy echoes) | replaced all scaffold `TODO`s with neutral placeholders | `cmd/sparkwing/action_new.go`, `init.go` | trivial |
+| `pipeline new --help` doesn't surface registry templates (5/5 agent almost missed `lint-test-go`) | help now leads with a `pipeline templates` pointer | `cmd/sparkwing/help_registry.go` | small |
+
+Validation: rebuilt/reinstalled; breadcrumb fires from a repo subdir; the
+new `docs read --topic sdk` sections render; `pipeline new --help` shows
+the templates pointer.
+
 ## Deferred / larger asks
+
+- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — they (and the `rollback` module) call `kube.Apply/SetImage/RolloutUndo` and `gitops.Revert`, which exist on sparks-core HEAD but are post-`v0.24.0` and unreleased. Fixing this needs a sparks-core module release (deferred: releases are on hold). Until then these two flagship rollback templates can't be 1-shot by agents against the proxy.
+- **`sparkwing run` has no human-readable summary** — JSONL-only, no final PASSED/FAILED line (cited rounds 1 & 2). Add `--sw-pretty`/TTY autodetect. (medium) — rising priority.
+- **`pipeline new --hidden` writes a `hidden:` key the parser rejects** — latent bug found while auditing the schema (`hidden` isn't a valid field). Either add the field or have `--hidden` record it elsewhere. (small)
+- **Positive log signal for a passing `.Verify`** (verify-rollback): a successful health check is invisible in run output. Needs a `verify_start`/`verify_pass` event in the runner. (small–medium)
+- **`unknown pipeline` should hint** "compiled but no `Register(\"X\")` found" when the name isn't registered (parallel-checks). (small)
+- **Missing local-runnable templates** for very common shapes with no on-ramp: test-matrix (fan-out), build-and-publish-binary (generic/local), local Postgres migration (non-ArgoCD), per-directory lint fan-out, http-fetch-retry, integration-test-with-service. (medium each)
+- **Scaffold-time compile check** — run `go build` at `pipeline new` time so broken scaffolds surface immediately, not on first `sparkwing run`. (small)
+- **Run-level "recovered" signal** when an `OnFailure` node succeeds (today a successful rollback still exits non-zero / status=failed). Legit design question. (medium)
+- **`sw.Bash`/`sw.Exec` run from repo root (WorkDir), but `run_start` logs `cwd=.sparkwing/`** — misleading; clarify the log field. (medium)
 
 - **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — they (and the `rollback` module) call `kube.Apply/SetImage/RolloutUndo` and `gitops.Revert`, which exist on sparks-core HEAD but are post-`v0.24.0` and unreleased. Fixing this needs a sparks-core module release (deferred: releases are on hold). Until then these two flagship rollback templates can't be 1-shot by agents against the proxy.
 - **Positive log signal for a passing `.Verify`** (verify-rollback): a successful health check is invisible in run output. Needs a `verify_start`/`verify_pass` event in the runner. (small–medium)
