@@ -20,7 +20,7 @@ This doc is about (1).
 ## The model
 
 ```go
-build := plan.Add("build", &Build{}).Cache(sparkwing.CacheOptions{
+build := sparkwing.Job(plan, "build", &Build{}).Cache(sparkwing.CacheOptions{
     Namespace: "build",
     ContentHash: func(ctx context.Context) sparkwing.CacheKey {
         return sparkwing.Key("build", target, sourceDigest.Get(ctx))
@@ -52,8 +52,8 @@ img := build.Output()              // Ref[BuildOutput]
 sparkwing.Key("deploy", target, img.Get(ctx).Digest)
 
 // Content of a file on disk (if it's a build input)
-sum, _ := sparkwing.HashFile("go.sum")
-sparkwing.Key("go-test", sum)
+gosum, _ := sparkwing.ReadFile("go.sum")
+sparkwing.Key("go-test", string(gosum))
 ```
 
 Determinism caveats (from `sparkwing/cachekey.go`):
@@ -86,7 +86,7 @@ The one thing a queue needs that a naive mutex doesn't is a way out. Set
 rather than blocking forever behind a wedged holder:
 
 ```go
-gate := plan.Add("deploy", &Deploy{}).Cache(sparkwing.CacheOptions{
+gate := sparkwing.Job(plan, "deploy", &Deploy{}).Cache(sparkwing.CacheOptions{
     Namespace:    "deploy-prod",
     OnLimit:      sparkwing.Queue,
     QueueTimeout: 30 * time.Second,

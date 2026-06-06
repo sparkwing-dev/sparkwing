@@ -438,8 +438,10 @@ one collapsible header; the scheduler, cache, retry, and dependency
 semantics are unchanged.
 
 ```go
-sw.Job(plan, "schema-check",  &SchemaCheckJob{}).Group("safety")
-sw.Job(plan, "security-scan", &SecurityScanJob{}).Group("safety")
+sw.GroupJobs(plan, "safety",
+    sw.Job(plan, "schema-check", &SchemaCheckJob{}),
+    sw.Job(plan, "security-scan", &SecurityScanJob{}),
+)
 ```
 
 ## Eager Plan-time materialization

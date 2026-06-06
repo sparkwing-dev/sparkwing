@@ -159,6 +159,21 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "markdownlint: clean")
 	}
 
+	// 8. Doc-example SDK-API gate. Every ```go block under
+	// pkg/docs/content must reference real sparkwing/sw symbols and
+	// signatures -- this catches the "the docs lie" class (a removed
+	// helper, a method that no longer exists on *Plan/*Work, a wrong
+	// call signature) before it misleads a reader or an agent.
+	// migrations/ and proposals/ are excluded (design history). See
+	// internal/doccheck.
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/pkg/docs/content" "$ROOT"`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("doc-examples: %v", err))
+	} else {
+		sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
