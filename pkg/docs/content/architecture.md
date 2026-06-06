@@ -258,7 +258,7 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
 git push origin main
   1. GitHub sends webhook to sparkwing-controller (external)
   2. Controller verifies HMAC signature
-  3. Controller matches push against pipelines.yaml triggers
+  3. Controller matches push against sparkwing.yaml triggers
   4. Controller enqueues matching runs
   5. Same dispatch flow as steps 5-11 above
 ```

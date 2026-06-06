@@ -227,7 +227,7 @@ Auth: Accepts `?token=` query param (EventSource can't set headers).
 
 Receives GitHub webhook payloads. The controller verifies HMAC signatures directly using `GITHUB_WEBHOOK_SECRET`.
 
-Handles GitHub `push`, `pull_request`, and `ping` events. Matches against `pipelines.yaml` trigger rules. Supports concurrency groups and cancel-in-progress.
+Handles GitHub `push`, `pull_request`, and `ping` events. Matches against `sparkwing.yaml` trigger rules. Supports concurrency groups and cancel-in-progress.
 
 Response: `{"job_ids": ["id1", "id2"], "status": "triggered"}`
 

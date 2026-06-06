@@ -479,22 +479,23 @@ success.
 ```go
 build := sw.Job[BuildOut](plan, "build", &Build{}).
     Cache(sparkwing.CacheOptions{
-        Key:     "build",
-        OnLimit: sparkwing.Coalesce,
-        CacheKey: func(ctx context.Context) sparkwing.CacheKey {
+        Namespace: "build",
+        OnLimit:   sparkwing.Coalesce,
+        ContentHash: func(ctx context.Context) sparkwing.CacheKey {
             return sparkwing.Key("build", run.Git.SHA)
         },
         CacheTTL: 24 * time.Hour,
     })
 ```
 
-`sparkwing.Key(parts...)` hashes arbitrary parts into a stable string
+`sparkwing.Key(parts...)` hashes arbitrary parts into a stable
+`CacheKey`
 
-- use it rather than hand-concatenating. Return the empty string from
-`CacheKey` to opt out for a particular invocation - useful when inputs
-are non-deterministic.
+- use it rather than hand-concatenating. Return `sparkwing.NoCache`
+from `ContentHash` to opt out for a particular invocation - useful when
+inputs are non-deterministic.
 
-`Cache` is also the coordination primitive: omit `CacheKey` and you
+`Cache` is also the coordination primitive: omit `ContentHash` and you
 get mutex (`Max=0|1`) or semaphore (`Max>1`) gating without the
 memoization. See [scheduling](scheduling.md) for the full coordination
 model.
