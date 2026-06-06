@@ -126,7 +126,10 @@ func sdkRequirementVersion() string {
 //
 // The +dirty suffix tacks onto any of these for a worktree with uncommitted
 // changes. Either form is unresolvable from a fresh `go mod` install.
-var pseudoVersionRE = regexp.MustCompile(`-\d{14}-[0-9a-f]{12}(\+dirty)?$`)
+// The timestamp+hash is preceded by `-` (form vX.0.0-<ts>-<hash>) or by
+// `.` (forms vX.Y.Z-0.<ts>-<hash> and vX.Y.Z-pre.0.<ts>-<hash>, used for
+// a commit after a released tag), so the leading separator is [-.].
+var pseudoVersionRE = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+dirty)?$`)
 
 // isResolvableModuleVersion reports whether v looks like a published
 // semver tag (e.g. "v0.6.2") that `go mod` can resolve from a fresh
