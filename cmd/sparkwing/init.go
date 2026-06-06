@@ -22,7 +22,7 @@ import (
 // published tag on github.com/sparkwing-dev/sparkwing, and be recent
 // enough that the registry templates `pipeline new --template` renders
 // (which use Job.Verify, Failure, ...) compile against it.
-const fallbackSDKVersion = "v0.8.0"
+const fallbackSDKVersion = "v0.8.1"
 
 // bootstrapDotSparkwingOpts writes the .sparkwing/ skeleton. `go mod
 // tidy` is deferred to the caller because tidy fails on the empty
