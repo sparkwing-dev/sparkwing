@@ -164,6 +164,13 @@ Exec(ctx, name, args...)      *Cmd  // no shell; arg-vector form
 WorkDir() string                    // pipeline working directory (repo root)
 ```
 
+`Bash` runs the line verbatim with NO implicit `set -euo pipefail`: a
+mid-line failure in a multi-line body is silently swallowed and the
+step reports success. Prefix multi-line bodies with `set -euo pipefail`
+(or use `Exec` for single commands). Relative paths in `Bash`/`Exec`
+and `Path`/`ReadFile` resolve against `WorkDir()` = the repo root (the
+parent of `.sparkwing/`), not `.sparkwing/` itself.
+
 `Bash` shells out to the host's `bash`. macOS and Linux have it by
 default. **On Windows, install [Git for Windows](https://git-scm.com/download/win)
 and run `sparkwing` from the Git Bash terminal it ships** -- the same dep
@@ -299,7 +306,11 @@ func (Test) runIntegration(ctx context.Context) error {
 `func WithServices(ctx, []Service, fn func(ctx) error) error`.
 `Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` —
 empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
-30s. Containers run on the host network, so reach them on localhost.
+30s. Set `Port` and the service is published to `127.0.0.1:<Port>`, so
+your test reaches it at `localhost:<Port>` on every platform (incl.
+Docker Desktop on macOS/Windows). `ReadyCmd` runs inside the container
+via `docker exec` (e.g. `redis-cli ping`, `pg_isready`), so it needs no
+host-side client.
 
 ## Plan - the outer DAG
 
@@ -336,6 +347,10 @@ type Git struct {
 `Plan()` is pure, so branch decisions that must shell out belong in a
 node `SkipIf` predicate (runs at dispatch), but `rc.Git.Branch` is
 already populated at Plan time — prefer it: `deploy.SkipIf(func(context.Context) bool { return rc.Git.Branch != "main" })`.
+Note: in a repo with no commits yet (unborn HEAD), `Branch` is `""`,
+not `"main"` — commit once before relying on branch-conditional logic,
+or your gate silently takes the off-main path while the run still
+exits 0.
 
 Most one-step Plans don't need `rc` at all - the parameter is named
 for the moment a Plan starts branching on trigger source / SHA.
@@ -415,7 +430,7 @@ Common Plan-layer modifiers (chainable on `*Job`):
 ```
 .Retry(attempts, opts...)          // re-run up to `attempts` ADDITIONAL times on failure (attempts+1 total runs); re-runs the whole Work() body each retry. Opts: RetryBackoff(d time.Duration) (fixed delay), RetryAuto() (exponential w/ jitter)
 .Timeout(d)                        // hard kill after d
-.Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
+.Verify(func(ctx context.Context) error)  // postcondition checked after the action succeeds; non-nil fails the node at StageVerify
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
 .Requires(labels...)                 // require runner labels (AND semantics)
@@ -423,9 +438,34 @@ Common Plan-layer modifiers (chainable on `*Job`):
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
 .Dynamic()                         // mark runtime-variable downstream shape
-.ContinueOnError() / .Optional()   // failure-propagation knobs
+.ContinueOnError() / .Optional()   // failure-propagation knobs (differ! see below)
 .NeedsOptional(deps...)            // soft upstream dep
 ```
+
+`ContinueOnError` vs `Optional` — they are NOT the same:
+
+| modifier | downstream dependents | overall run status / exit code |
+|----------|-----------------------|--------------------------------|
+| `ContinueOnError()` | still run (failure doesn't cancel them) | **run still FAILS** (exit 1) |
+| `Optional()` | still run | run **SUCCEEDS** (exit 0) — the node's failure is absorbed |
+
+So for "a check may fail but shouldn't fail the run" (e.g. a
+notify-on-failure recovery), use `Optional()`. `OnFailure` alone does
+NOT make the run pass — the originating node is still counted failed;
+combine `OnFailure` (run the recovery) with `Optional` (absorb the
+failure) if you want a green run.
+
+The `Failure` passed to a failure-aware `OnFailure` recovery:
+
+```go
+type Failure struct {
+    Stage FailureStage // StageAction (the Run failed) or StageVerify (the Verify check failed)
+    Err   error        // the underlying error (probe error, exec error, ...)
+}
+```
+
+Branch on `f.Stage` to recover differently for an action failure vs a
+verify (post-deploy health-check) failure.
 
 ## Workable - the Work-bearing interface
 

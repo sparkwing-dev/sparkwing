@@ -2964,8 +2964,8 @@ or was already resolved (409).`,
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
-		{"Approve a local gate", "sparkwing approve --run run-20260423-143012-abcd --node approve-prod"},
-		{"Approve a prod gate with a comment", `sparkwing approve --run run-... --node approve-prod --profile prod --comment "release notes ok"`},
+		{"Approve a local gate", "sparkwing runs approvals approve --run run-20260423-143012-abcd --node approve-prod"},
+		{"Approve a prod gate with a comment", `sparkwing runs approvals approve --run run-... --node approve-prod --profile prod --comment "release notes ok"`},
 	},
 }
 
@@ -2983,8 +2983,8 @@ their ContinueOnError / Optional settings.`,
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
-		{"Deny a local gate", "sparkwing deny --run run-20260423-143012-abcd --node approve-prod"},
-		{"Deny a prod gate with a reason", `sparkwing deny --run run-... --node approve-prod --profile prod --comment "tests still red"`},
+		{"Deny a local gate", "sparkwing runs approvals deny --run run-20260423-143012-abcd --node approve-prod"},
+		{"Deny a prod gate with a reason", `sparkwing runs approvals deny --run run-... --node approve-prod --profile prod --comment "tests still red"`},
 	},
 }
 
@@ -2995,7 +2995,9 @@ var cmdApprovals = Command{
 gate across all runs; with --run returns one run's full history
 (pending + resolved).`,
 	Subcommands: []SubcommandRef{
-		{"list", "List pending approvals, or one run's history with --run"},
+		{"list", "List pending approvals, or one run's history with --run (the default verb)"},
+		{"approve", "Approve a pending gate: --run <id> --node <id> [--comment ...]"},
+		{"deny", "Deny a pending gate: --run <id> --node <id> [--comment ...]"},
 	},
 }
 

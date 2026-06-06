@@ -370,13 +370,15 @@ func runRunsApprovals(ctx context.Context, paths orchestrator.Paths, args []stri
 	if handleParentHelp(cmdApprovals, args) {
 		return nil
 	}
-	if len(args) == 0 {
-		PrintHelp(cmdApprovals, os.Stdout)
-		return nil
+	// Default to `list` when no subcommand is given or the first token
+	// is a flag, so `runs approvals`, `runs approvals --run <id>`, and
+	// `runs approvals -o json` all list (the verb is its own default).
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runApprovalsList(ctx, paths, args)
 	}
 	switch args[0] {
 	case "list":
-		return runApprovals(args[1:])
+		return runApprovalsList(ctx, paths, args[1:])
 	case "approve":
 		return runApprove(ctx, paths, args[1:])
 	case "deny":

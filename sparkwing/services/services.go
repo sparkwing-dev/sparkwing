@@ -61,8 +61,10 @@ type Service struct {
 	// collisions when the same pipeline runs concurrently.
 	Name string
 
-	// Port is the container port the service listens on. Informational
-	// only -- with --network=host we don't publish ports explicitly.
+	// Port is the container port the service listens on. When set, it is
+	// published to 127.0.0.1:<Port> so a host process (the test) reaches
+	// it at localhost:<Port> on every platform incl. Docker Desktop.
+	// When zero, the container uses host networking (Linux only).
 	Port int
 
 	// Env is the set of environment variables to pass to the container.
@@ -127,7 +129,17 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 
 	for i := range resolved {
 		svc := &resolved[i]
-		args := []string{"run", "-d", "--network=host", "--name", svc.Name}
+		args := []string{"run", "-d", "--name", svc.Name}
+		if svc.Port > 0 {
+			// Publish to localhost so a host process (the test) can reach
+			// the service at 127.0.0.1:<port>. This works on Docker
+			// Desktop (macOS/Windows), where --network=host containers
+			// live in the VM and are NOT reachable from the host.
+			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", svc.Port, svc.Port))
+		} else {
+			// No port declared: fall back to host networking (Linux only).
+			args = append(args, "--network=host")
+		}
 		for k, v := range svc.Env {
 			args = append(args, "-e", k+"="+v)
 		}

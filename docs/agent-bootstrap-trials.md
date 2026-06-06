@@ -110,23 +110,49 @@ Validation: rebuilt/reinstalled; breadcrumb fires from a repo subdir; the
 new `docs read --topic sdk` sections render; `pipeline new --help` shows
 the templates pointer.
 
-## Deferred / larger asks
+### Round 3 — 6 agents (postgres-integration, release-on-main, backup-pipeline, test-shards, approval-deploy, notify-on-failure)
 
-- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — they (and the `rollback` module) call `kube.Apply/SetImage/RolloutUndo` and `gitops.Revert`, which exist on sparks-core HEAD but are post-`v0.24.0` and unreleased. Fixing this needs a sparks-core module release (deferred: releases are on hold). Until then these two flagship rollback templates can't be 1-shot by agents against the proxy.
-- **`sparkwing run` has no human-readable summary** — JSONL-only, no final PASSED/FAILED line (cited rounds 1 & 2). Add `--sw-pretty`/TTY autodetect. (medium) — rising priority.
-- **`pipeline new --hidden` writes a `hidden:` key the parser rejects** — latent bug found while auditing the schema (`hidden` isn't a valid field). Either add the field or have `--hidden` record it elsewhere. (small)
-- **Positive log signal for a passing `.Verify`** (verify-rollback): a successful health check is invisible in run output. Needs a `verify_start`/`verify_pass` event in the runner. (small–medium)
-- **`unknown pipeline` should hint** "compiled but no `Register(\"X\")` found" when the name isn't registered (parallel-checks). (small)
-- **Missing local-runnable templates** for very common shapes with no on-ramp: test-matrix (fan-out), build-and-publish-binary (generic/local), local Postgres migration (non-ArgoCD), per-directory lint fan-out, http-fetch-retry, integration-test-with-service. (medium each)
-- **Scaffold-time compile check** — run `go build` at `pipeline new` time so broken scaffolds surface immediately, not on first `sparkwing run`. (small)
-- **Run-level "recovered" signal** when an `OnFailure` node succeeds (today a successful rollback still exits non-zero / status=failed). Legit design question. (medium)
-- **`sw.Bash`/`sw.Exec` run from repo root (WorkDir), but `run_start` logs `cwd=.sparkwing/`** — misleading; clarify the log field. (medium)
+Result: 6/6 ran, avg ease 3.67/5 (↓ from 4.17) — not a regression: the
+harder shapes (service containers, approval, sharding, recovery) exposed
+deeper *functional* bugs, not just docs. Confirmed win: `release-on-main`
+used `SkipIf(run.Git.Branch != "main")` "exactly as the SDK doc
+recommends" — the round-2 Git-fields doc worked.
 
-- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — they (and the `rollback` module) call `kube.Apply/SetImage/RolloutUndo` and `gitops.Revert`, which exist on sparks-core HEAD but are post-`v0.24.0` and unreleased. Fixing this needs a sparks-core module release (deferred: releases are on hold). Until then these two flagship rollback templates can't be 1-shot by agents against the proxy.
-- **Positive log signal for a passing `.Verify`** (verify-rollback): a successful health check is invisible in run output. Needs a `verify_start`/`verify_pass` event in the runner. (small–medium)
-- **`unknown pipeline` should hint** "compiled but no `Register(\"X\")` found" when the name isn't registered (parallel-checks). (small)
-- **Missing local-runnable templates** for very common shapes with no on-ramp: test-matrix (fan-out), build-and-publish-binary (generic/local), local Postgres migration (non-ArgoCD), and a cluster-free `.Verify`+`.OnFailure` rollback demo. (medium each)
-- **Human run output** (`--sw-pretty`/TTY autodetect) — JSONL is agent-friendly but hostile to humans. (medium)
-- **Scaffold-time compile check** — run `go build` at `pipeline new` time so broken scaffolds surface immediately, not on first `sparkwing run`. (small)
-- **Docs**: state the 3-way name binding (`name:` == `Register("name")`, `entrypoint:` == struct type) and that a failed `.Verify` reaches `.OnFailure` with `Stage == StageVerify`. (trivial)
-- **Run-level "recovered" signal** when an `OnFailure` node succeeds (today a successful rollback still exits non-zero / status=failed). Legit design question. (medium)
+### Round 4 — fixes for round-3 findings
+
+| Theme (agents) | Change | File(s) | Effort |
+|----------------|--------|---------|--------|
+| `WithServices` uses `--network host`, no published ports → unreachable on macOS/Windows Docker Desktop (postgres-integration; I documented it round 2) | publish `127.0.0.1:<Port>:<Port>` when `Port` set; host-net only as Linux fallback; fixed `Port` doc + sdk section | `sparkwing/services/services.go`, `docs/sdk.md` | small |
+| `runs approvals list` 100% broken (flags parsed as subcommands); `approve`/`deny` hidden from `--help`; `sparkwing approve` example doesn't exist (approval-deploy) | router defaults to `list` + dispatches approve/deny directly (no double-dispatch); removed dead `runApprovals`; help lists approve/deny; fixed examples + comments | `cmd/sparkwing/main.go`, `approvals.go`, `help_registry.go` | small |
+| `ContinueOnError` vs `Optional` undocumented — the distinction *is* the recovery task; `ContinueOnError` misleadingly doesn't flip run status (notify-on-failure) | added a comparison table + the `OnFailure`+`Optional` combo note + documented the `Failure` struct/`Stage` | `docs/sdk.md` | small |
+| `.Verify(fn)` signature, `Bash` has no implicit `set -e`, WorkDir=repo-root, `Git.Branch` empty on unborn HEAD (backup-pipeline, release-on-main) | documented all four | `docs/sdk.md` | trivial |
+| `pipeline new --hidden` wrote a `hidden:` key the parser rejected | added `Hidden` field + known-field + wired `--all` filtering (was `_ = includeHidden`) | `pkg/pipelines/pipelines.go`, `cmd/sparkwing/action.go` | small |
+| stale `pipelines.yaml` in explain | → `sparkwing.yaml` | `cmd/sparkwing/action_explain.go` | trivial |
+
+Validation: rebuilt/reinstalled; `runs approvals` (bare / `-o json` /
+`--help`) all work; `--hidden` parses + filters; build+vet clean.
+WithServices port fix verified by build — behavioral re-test queued for
+round 5 (postgres/redis shape).
+
+## Deferred / larger asks (current)
+
+Top of the list — these are now the dominant remaining feedback, cited
+across multiple rounds:
+
+- **`sparkwing run` has no human-readable summary** — JSONL-only, no final PASSED/FAILED line; an exit-0-with-skipped-node reads as success. Cited rounds 1, 2 & 3. Add `--sw-pretty`/TTY autodetect with a per-node outcome table. (medium) **← next up**
+- **No local-runnable templates** — every registry template targets cloud infra; common local shapes (test-matrix/shards, build-and-publish-binary, local Postgres/Redis integration via `WithServices`, branch-conditional, check-with-recovery, approval-gated deploy, generic archive+checksum) have no starter, so agents hand-roll every time. Cited every round. (medium each) **← next up**
+
+Smaller / specific:
+
+- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — call `kube.Apply/SetImage/RolloutUndo` + `gitops.Revert`, post-`v0.24.0` and unreleased. Needs a sparks-core release (on hold).
+- **Positive `verify_start`/`verify_pass` log** — a passing `.Verify` is invisible in run output (verify-rollback, backup-pipeline). (small–medium)
+- **`unknown pipeline` should hint** "compiled but no `Register(\"X\")` found". (small)
+- **Scaffold-time compile check** — `go build` at `pipeline new` time. (small)
+- **`-C/--sw-cd` is inconsistent** — works on `run`/`new`/`explain`, not `list`/`describe`/`runs *`. Make it uniform. (small)
+- **`run_start` logs `cwd=.sparkwing/`** but steps run from repo root — clarify the log field. (small)
+- **Local-run heartbeat/orphan ~60s timeout is undocumented** and orphans a foreground `run` blocked on an approval gate. (medium)
+- **Failure error payload inlines the whole bash script 3×** — buries the real `FAIL` line. (medium)
+- **Scaffold pins SDK `v0.8.0`** regardless of the installed binary version; sync it. (small)
+- **Scaffolder `.gitignore` omits `dist/`** so first run dirties the tree. (trivial)
+- **Run-level "recovered" status** when an `OnFailure` node succeeds (today still exit 1). Design question. (medium)
+- **`WithServices` ReadyCmd lifecycle logging** — log the probe + exit code; don't print "ready" unless it passed. (small)
