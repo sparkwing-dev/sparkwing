@@ -170,7 +170,7 @@ func renderInitReadme() string {
 	return "# .sparkwing/\n" +
 		"\n" +
 		"This directory holds this repo's [sparkwing](https://sparkwing.dev) pipeline\n" +
-		"definitions. Pipelines are Go programs registered in `pipelines.yaml` and run\n" +
+		"definitions. Pipelines are Go programs registered in `sparkwing.yaml` and run\n" +
 		"via `sparkwing run <name>`.\n" +
 		"\n" +
 		"Add a pipeline:\n" +
@@ -183,7 +183,7 @@ func renderInitReadme() string {
 		"\n" +
 		"```\n" +
 		".sparkwing/\n" +
-		"  pipelines.yaml      registry of every pipeline (name -> entrypoint)\n" +
+		"  sparkwing.yaml      registry of every pipeline (name -> entrypoint)\n" +
 		"  jobs/               Go package holding pipeline definitions; scaffold lands one .go file per pipeline\n" +
 		"  main.go             thin entrypoint; delegates to runner.Main\n" +
 		"  go.mod / go.sum     module + pinned SDK version\n" +

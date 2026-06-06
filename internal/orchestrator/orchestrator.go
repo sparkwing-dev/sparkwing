@@ -893,7 +893,14 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
 		inv["binary_source"] = src
 	}
-	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+	// Report the directory steps actually run from -- the repo root
+	// (parent of .sparkwing/), which is what WorkDir() returns and where
+	// relative paths and `go ./...` resolve. The pipeline binary's own
+	// os.Getwd() is .sparkwing/, which misleads readers about where their
+	// commands execute; fall back to it only if WorkDir can't resolve.
+	if wd := sparkwing.WorkDir(); wd != "" {
+		inv["cwd"] = wd
+	} else if cwd, err := os.Getwd(); err == nil && cwd != "" {
 		inv["cwd"] = cwd
 	}
 	if len(opts.Args) > 0 {
