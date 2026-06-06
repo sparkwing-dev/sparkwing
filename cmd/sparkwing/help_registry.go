@@ -1233,9 +1233,14 @@ pipeline binary, e.g. 'sparkwing run release --version
 v1.2.3' passes --version through to the pipeline's Args.
 
 For remote execution on a profile's controller, use
-'sparkwing pipeline trigger <name> --profile PROF'.`,
+'sparkwing pipeline trigger <name> --profile PROF'.
+
+Output: a human-readable per-node summary when stdout is a
+terminal, line-delimited JSON otherwise (so piped/agent/CI
+consumers get a stable JSONL stream). Force either with
+SPARKWING_LOG_FORMAT=pretty|json.`,
 	PosArgs: []PosArg{
-		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
+		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
 	Flags:       runFlagSpecs,
 	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
