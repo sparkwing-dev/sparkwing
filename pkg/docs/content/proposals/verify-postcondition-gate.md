@@ -1,6 +1,6 @@
 # Post-action verification: a `Verify` lifecycle gate (proposal)
 
-**Status:** IMPLEMENTED and shipped — `.Verify(func(ctx) error)` is a
+**Status:** IMPLEMENTED and shipped -- `.Verify(func(ctx) error)` is a
 live Job modifier (see the SDK reference). This proposal is retained for
 design history only; treat the SDK reference as authoritative.
 

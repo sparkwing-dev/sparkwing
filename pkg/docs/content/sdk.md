@@ -231,7 +231,7 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 
 ## Files
 
-These are **package-level functions** — call them as `sparkwing.Path(...)`,
+These are **package-level functions** -- call them as `sparkwing.Path(...)`,
 `sparkwing.WorkDir()`, etc. (NOT methods on `rc`/`RunContext`, NOT `*Cmd`
 terminators). `WorkDir()` takes no arguments. They resolve relative
 paths against the auto-discovered project root and work anywhere inside
@@ -288,7 +288,7 @@ stay the same.
 
 For tests that need a throwaway dependency (Postgres, Redis, …), the
 `sparkwing/services` package starts containers, waits for readiness,
-runs your function, and tears them down — even on failure or panic.
+runs your function, and tears them down -- even on failure or panic.
 This is the blessed setup/teardown idiom; do NOT use `AfterRun` for
 cleanup (it's an observer that can't change outcome and isn't
 guaranteed on failure), and don't put teardown in a downstream `Needs`
@@ -311,7 +311,7 @@ func (Test) runIntegration(ctx context.Context) error {
 ```
 
 `func WithServices(ctx, []Service, fn func(ctx) error) error`.
-`Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` —
+`Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` --
 empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
 30s. `ReadyCmd` runs inside the container via `docker exec` (e.g.
 `redis-cli ping`, `pg_isready`), so it needs no host-side client.
@@ -340,7 +340,7 @@ rc.Git      *Git           // repo state at the trigger SHA
 rc.Trigger  TriggerInfo    // {Source: "push|manual|schedule|webhook", User, Env}
 ```
 
-`*Git` is the resolved repo state — branch-conditional logic reads it
+`*Git` is the resolved repo state -- branch-conditional logic reads it
 directly rather than shelling out to `git`:
 
 ```go
@@ -355,9 +355,9 @@ type Git struct {
 
 `Plan()` is pure, so branch decisions that must shell out belong in a
 node `SkipIf` predicate (runs at dispatch), but `rc.Git.Branch` is
-already populated at Plan time — prefer it: `deploy.SkipIf(func(context.Context) bool { return rc.Git.Branch != "main" })`.
+already populated at Plan time -- prefer it: `deploy.SkipIf(func(context.Context) bool { return rc.Git.Branch != "main" })`.
 Note: in a repo with no commits yet (unborn HEAD), `Branch` is `""`,
-not `"main"` — commit once before relying on branch-conditional logic,
+not `"main"` -- commit once before relying on branch-conditional logic,
 or your gate silently takes the off-main path while the run still
 exits 0.
 
@@ -451,16 +451,16 @@ Common Plan-layer modifiers (chainable on `*Job`):
 .NeedsOptional(deps...)            // soft upstream dep
 ```
 
-`ContinueOnError` vs `Optional` — they are NOT the same:
+`ContinueOnError` vs `Optional` -- they are NOT the same:
 
 | modifier | downstream dependents | overall run status / exit code |
 |----------|-----------------------|--------------------------------|
 | `ContinueOnError()` | still run (failure doesn't cancel them) | **run still FAILS** (exit 1) |
-| `Optional()` | still run | run **SUCCEEDS** (exit 0) — the node's failure is absorbed |
+| `Optional()` | still run | run **SUCCEEDS** (exit 0) -- the node's failure is absorbed |
 
 So for "a check may fail but shouldn't fail the run" (e.g. a
 notify-on-failure recovery), use `Optional()`. `OnFailure` alone does
-NOT make the run pass — the originating node is still counted failed;
+NOT make the run pass -- the originating node is still counted failed;
 combine `OnFailure` (run the recovery) with `Optional` (absorb the
 failure) if you want a green run.
 

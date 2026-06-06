@@ -14,7 +14,7 @@ zero across a variety of pipeline shapes.
   In `<dir>`, build a pipeline that does `<X>`. Make it run
   successfully (`<locally | on the controller>`). Then report how easy
   it was to bootstrap, where you got stuck, footguns, and changes
-  you'd want. Use only the binary's own help/docs — don't ask."
+  you'd want. Use only the binary's own help/docs -- don't ask."
 - **Sandboxing**: each agent works in its own throwaway dir so runs
   don't collide and the real repos stay clean.
 - **Feedback schema**: ran_ok, bootstrap_ease (1-5), commands_used,
@@ -39,7 +39,7 @@ later rounds with sandboxed (echo/no-op or kind-scoped) deploys.
 
 ## Baseline discoverability (CLI `v0.8.1-dev`, before round 1)
 
-Already in good shape — the cold-start path mostly exists:
+Already in good shape -- the cold-start path mostly exists:
 
 - `sparkwing --help` lists `info`, `commands` (full surface as JSON for
   agent self-discovery), `docs` (offline), and `pipeline`
@@ -61,10 +61,10 @@ read errors) still confuses.
 
 ## Change log
 
-### Round 1 — 6 agents (ci-go, parallel-checks, verify-rollback, build-artifact, migrate-db, matrix-test)
+### Round 1 -- 6 agents (ci-go, parallel-checks, verify-rollback, build-artifact, migrate-db, matrix-test)
 
 Result: 6/6 ran successfully locally, avg bootstrap ease 4.0/5. Discovery
-path was consistent and healthy — every agent went
+path was consistent and healthy -- every agent went
 `sparkwing --help` → `info` → `pipeline templates` / `docs read --topic sdk`
 unprompted, which validates the top-level affordances. Friction was
 concentrated in stale generated code/docs and a few CLI gaps.
@@ -86,10 +86,10 @@ Validation: rebuilt + reinstalled the binary (go.work pulls local
 templates); `build-all-templates.sh` confirms 6/8 templates compile and
 `-C` works for all scaffolds.
 
-### Round 2 — 6 agents (ci-hygiene-go, lint-many-dirs, scheduled-cleanup, retry-flaky-fetch, branch-conditional, redis-integration)
+### Round 2 -- 6 agents (ci-hygiene-go, lint-many-dirs, scheduled-cleanup, retry-flaky-fetch, branch-conditional, redis-integration)
 
 Result: 6/6 ran, avg bootstrap ease 4.17/5 (↑ from 4.0). Round-1 fixes
-confirmed landed — `lint-test-go` was scaffolded and rated 5/5 with zero
+confirmed landed -- `lint-test-go` was scaffolded and rated 5/5 with zero
 `JobFn`/`sparkwing.yaml`/`-C` complaints. New friction was docs/schema
 lies and undocumented APIs.
 
@@ -110,36 +110,36 @@ Validation: rebuilt/reinstalled; breadcrumb fires from a repo subdir; the
 new `docs read --topic sdk` sections render; `pipeline new --help` shows
 the templates pointer.
 
-### Round 3 — 6 agents (postgres-integration, release-on-main, backup-pipeline, test-shards, approval-deploy, notify-on-failure)
+### Round 3 -- 6 agents (postgres-integration, release-on-main, backup-pipeline, test-shards, approval-deploy, notify-on-failure)
 
-Result: 6/6 ran, avg ease 3.67/5 (↓ from 4.17) — not a regression: the
+Result: 6/6 ran, avg ease 3.67/5 (↓ from 4.17) -- not a regression: the
 harder shapes (service containers, approval, sharding, recovery) exposed
 deeper *functional* bugs, not just docs. Confirmed win: `release-on-main`
 used `SkipIf(run.Git.Branch != "main")` "exactly as the SDK doc
-recommends" — the round-2 Git-fields doc worked.
+recommends" -- the round-2 Git-fields doc worked.
 
-### Round 4 — fixes for round-3 findings
+### Round 4 -- fixes for round-3 findings
 
 | Theme (agents) | Change | File(s) | Effort |
 |----------------|--------|---------|--------|
 | `WithServices` uses `--network host`, no published ports → unreachable on macOS/Windows Docker Desktop (postgres-integration; I documented it round 2) | publish `127.0.0.1:<Port>:<Port>` when `Port` set; host-net only as Linux fallback; fixed `Port` doc + sdk section | `sparkwing/services/services.go`, `docs/sdk.md` | small |
 | `runs approvals list` 100% broken (flags parsed as subcommands); `approve`/`deny` hidden from `--help`; `sparkwing approve` example doesn't exist (approval-deploy) | router defaults to `list` + dispatches approve/deny directly (no double-dispatch); removed dead `runApprovals`; help lists approve/deny; fixed examples + comments | `cmd/sparkwing/main.go`, `approvals.go`, `help_registry.go` | small |
-| `ContinueOnError` vs `Optional` undocumented — the distinction *is* the recovery task; `ContinueOnError` misleadingly doesn't flip run status (notify-on-failure) | added a comparison table + the `OnFailure`+`Optional` combo note + documented the `Failure` struct/`Stage` | `docs/sdk.md` | small |
+| `ContinueOnError` vs `Optional` undocumented -- the distinction *is* the recovery task; `ContinueOnError` misleadingly doesn't flip run status (notify-on-failure) | added a comparison table + the `OnFailure`+`Optional` combo note + documented the `Failure` struct/`Stage` | `docs/sdk.md` | small |
 | `.Verify(fn)` signature, `Bash` has no implicit `set -e`, WorkDir=repo-root, `Git.Branch` empty on unborn HEAD (backup-pipeline, release-on-main) | documented all four | `docs/sdk.md` | trivial |
 | `pipeline new --hidden` wrote a `hidden:` key the parser rejected | added `Hidden` field + known-field + wired `--all` filtering (was `_ = includeHidden`) | `pkg/pipelines/pipelines.go`, `cmd/sparkwing/action.go` | small |
 | stale `pipelines.yaml` in explain | → `sparkwing.yaml` | `cmd/sparkwing/action_explain.go` | trivial |
 
 Validation: rebuilt/reinstalled; `runs approvals` (bare / `-o json` /
 `--help`) all work; `--hidden` parses + filters; build+vet clean.
-WithServices port fix verified by build — behavioral re-test queued for
+WithServices port fix verified by build -- behavioral re-test queued for
 round 5 (postgres/redis shape).
 
-### Round 5 — 6 agents (redis-cache-test, gated-prod-deploy, docker-image-build, scheduled-report, diamond-dag, env-promote)
+### Round 5 -- 6 agents (redis-cache-test, gated-prod-deploy, docker-image-build, scheduled-report, diamond-dag, env-promote)
 
 Result: 6/6 ran, avg ease 3.83/5 (↑ from 3.67). **Confirmed win:**
-`gated-prod-deploy` used `runs approvals approve` smoothly end-to-end —
+`gated-prod-deploy` used `runs approvals approve` smoothly end-to-end --
 the round-4 CLI repair landed. **Key negative result:** the round-4
-`WithServices` port fix did NOT reach the agent — redis-cache-test still
+`WithServices` port fix did NOT reach the agent -- redis-cache-test still
 hit `--network host` / connection-refused and had to hand-roll a
 host-network test container.
 
@@ -155,7 +155,7 @@ So:
   (rendered by the binary). Validated working: approvals, Git docs,
   breadcrumb, JobFn template fix, naming.
 - **Does NOT reach agents without a sparkwing release:** anything in the
-  `sparkwing/...` **SDK packages** a pipeline imports — `services`
+  `sparkwing/...` **SDK packages** a pipeline imports -- `services`
   (the WithServices networking fix), the orchestrator `Failure`
   serialization, the `kube`/`gitops` APIs the two rollback templates
   need. These are correct in the working tree but stranded at v0.8.0
@@ -181,25 +181,25 @@ per "don't push releases yet"):
 - Controller verify-recovery `Failure` serialization (repro test on branch `test/controller-verify-recovery-repro`).
 - `go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` (need post-v0.24.0 `kube`/`gitops` released).
 
-**Reachable now (no release) — next builds, in priority order:**
+**Reachable now (no release) -- next builds, in priority order:**
 
-Top of the list — these are now the dominant remaining feedback, cited
+Top of the list -- these are now the dominant remaining feedback, cited
 across multiple rounds:
 
-- **`sparkwing run` has no human-readable summary** — JSONL-only, no final PASSED/FAILED line; an exit-0-with-skipped-node reads as success. Cited rounds 1, 2 & 3. Add `--sw-pretty`/TTY autodetect with a per-node outcome table. (medium) **← next up**
-- **No local-runnable templates** — every registry template targets cloud infra; common local shapes (test-matrix/shards, build-and-publish-binary, local Postgres/Redis integration via `WithServices`, branch-conditional, check-with-recovery, approval-gated deploy, generic archive+checksum) have no starter, so agents hand-roll every time. Cited every round. (medium each) **← next up**
+- **`sparkwing run` has no human-readable summary** -- JSONL-only, no final PASSED/FAILED line; an exit-0-with-skipped-node reads as success. Cited rounds 1, 2 & 3. Add `--sw-pretty`/TTY autodetect with a per-node outcome table. (medium) **← next up**
+- **No local-runnable templates** -- every registry template targets cloud infra; common local shapes (test-matrix/shards, build-and-publish-binary, local Postgres/Redis integration via `WithServices`, branch-conditional, check-with-recovery, approval-gated deploy, generic archive+checksum) have no starter, so agents hand-roll every time. Cited every round. (medium each) **← next up**
 
 Smaller / specific:
 
-- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** — call `kube.Apply/SetImage/RolloutUndo` + `gitops.Revert`, post-`v0.24.0` and unreleased. Needs a sparks-core release (on hold).
-- **Positive `verify_start`/`verify_pass` log** — a passing `.Verify` is invisible in run output (verify-rollback, backup-pipeline). (small–medium)
+- **`go-test-build-deploy-k8s` + `go-test-migrate-deploy-argo` don't compile against released deps** -- call `kube.Apply/SetImage/RolloutUndo` + `gitops.Revert`, post-`v0.24.0` and unreleased. Needs a sparks-core release (on hold).
+- **Positive `verify_start`/`verify_pass` log** -- a passing `.Verify` is invisible in run output (verify-rollback, backup-pipeline). (small–medium)
 - **`unknown pipeline` should hint** "compiled but no `Register(\"X\")` found". (small)
-- **Scaffold-time compile check** — `go build` at `pipeline new` time. (small)
-- **`-C/--sw-cd` is inconsistent** — works on `run`/`new`/`explain`, not `list`/`describe`/`runs *`. Make it uniform. (small)
-- **`run_start` logs `cwd=.sparkwing/`** but steps run from repo root — clarify the log field. (small)
+- **Scaffold-time compile check** -- `go build` at `pipeline new` time. (small)
+- **`-C/--sw-cd` is inconsistent** -- works on `run`/`new`/`explain`, not `list`/`describe`/`runs *`. Make it uniform. (small)
+- **`run_start` logs `cwd=.sparkwing/`** but steps run from repo root -- clarify the log field. (small)
 - **Local-run heartbeat/orphan ~60s timeout is undocumented** and orphans a foreground `run` blocked on an approval gate. (medium)
-- **Failure error payload inlines the whole bash script 3×** — buries the real `FAIL` line. (medium)
+- **Failure error payload inlines the whole bash script 3×** -- buries the real `FAIL` line. (medium)
 - **Scaffold pins SDK `v0.8.0`** regardless of the installed binary version; sync it. (small)
 - **Scaffolder `.gitignore` omits `dist/`** so first run dirties the tree. (trivial)
 - **Run-level "recovered" status** when an `OnFailure` node succeeds (today still exit 1). Design question. (medium)
-- **`WithServices` ReadyCmd lifecycle logging** — log the probe + exit code; don't print "ready" unless it passed. (small)
+- **`WithServices` ReadyCmd lifecycle logging** -- log the probe + exit code; don't print "ready" unless it passed. (small)
