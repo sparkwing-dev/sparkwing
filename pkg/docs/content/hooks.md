@@ -19,12 +19,12 @@ Pipelines fire from three places:
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
+    entrypoint: BuildDeploy
     description: Build and deploy on push to main
     on:
       push:
         branches: [main]
         paths: ["*.go", "go.mod"]      # optional path filter
-    tags: [ci, deploy]
 ```
 
 | Trigger | When |
