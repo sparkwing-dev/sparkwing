@@ -56,24 +56,22 @@ Trigger types live under `on:`:
 pipelines:
   # Run on git push to main
   - name: build
+    entrypoint: Build
     on:
       push:
         branches: [main]
-        branches_ignore: [dependabot/*]  # optional exclusion
         paths: ["*.go", "go.mod"]        # optional path filter
-        paths_ignore: ["docs/*"]         # optional path exclusion
 
-  # Run on pull requests
+  # Custom HTTP trigger (controller exposes this path)
   - name: review
+    entrypoint: Review
     on:
-      pull_request:
-        branches: [main]
-        types: [opened, synchronize]
-        labels: [deploy]                 # optional label filter
-        paths_ignore: ["*.md"]
+      webhook:
+        path: /review
 
   # Scheduled (cron)
   - name: nightly
+    entrypoint: Nightly
     on:
       schedule: "0 2 * * *"
 ```
