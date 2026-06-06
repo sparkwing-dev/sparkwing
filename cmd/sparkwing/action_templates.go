@@ -23,6 +23,7 @@ func runPipelineTemplates(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineTemplates.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
+	_ = chdirFlag(fs) // accepted for consistency; the registry is embedded, no cwd needed
 	if err := parseAndCheck(cmdPipelineTemplates, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -73,6 +74,9 @@ func runPipelineTemplates(args []string) error {
 			}
 			if len(opt) > 0 {
 				fmt.Printf("  %s %s\n", color.Dim("optional:"), color.Dim(strings.Join(opt, ", ")))
+			}
+			if pre := strings.TrimSpace(m.Prerequisite); pre != "" {
+				fmt.Printf("  %s %s\n", color.Bold("prerequisite:"), pre)
 			}
 			fmt.Println()
 		}

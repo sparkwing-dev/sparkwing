@@ -125,7 +125,15 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden); err != nil {
 		return err
 	}
-	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+	if err := finishScaffold(sparkwingDir, file, name, bootstrapped); err != nil {
+		return err
+	}
+	// Surface what the repo must already have for the first `sparkwing
+	// run` to succeed, so a scaffold into an empty repo isn't a surprise.
+	if pre := strings.TrimSpace(tmpl.Manifest.Prerequisite); pre != "" {
+		fmt.Printf("\n%s %s\n", color.Bold("prerequisite:"), pre)
+	}
+	return nil
 }
 
 // parseTemplateParams turns repeated --param k=v flags into a map.
