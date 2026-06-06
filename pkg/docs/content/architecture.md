@@ -65,7 +65,7 @@ dispatches runners.
 - **API server** (port 8080): HTTP endpoints for triggers, run status,
   agent polling, secrets, and authorization
 - **Job queue**: in-memory queue with SQLite persistence
-  (`/data/sparkwing.db`) for run state, metadata, secrets, and tokens
+  (`/data/state.db`) for run state, metadata, secrets, and tokens
 - **Webhooks**: receives GitHub webhook payloads, verifies HMAC
   signatures, and triggers matching pipelines
 - **Pool management**: maintains a pool of PVCs pre-loaded with Docker
@@ -267,7 +267,7 @@ git push origin main
 
 | Component | Storage | Contents |
 |-----------|---------|----------|
-| Controller | SQLite at `/data/sparkwing.db` | Run state, metadata, secrets, tokens, audit log |
+| Controller | SQLite at `/data/state.db` | Run state, metadata, secrets, tokens, audit log |
 | Cache | PVC at `/data/` | Bare repos, uploads, artifacts, binary cache, dependency cache, package proxy |
 | DinD | PVC | Docker layers and build cache |
 | Logs | PVC at `/data/` | Append-only log files per run |
