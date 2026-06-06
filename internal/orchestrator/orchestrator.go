@@ -1622,16 +1622,24 @@ func (s *dispatchState) getFailure(id string) sparkwing.Failure {
 	return s.failures[id]
 }
 
-// failureFrom attributes an error to its lifecycle stage. A
-// *sparkwing.VerifyError (set by the runner when a Verify check fails)
-// maps to StageVerify with the check's underlying error; anything else
-// is an action-stage failure.
-func failureFrom(err error) sparkwing.Failure {
+// failureFrom attributes a node failure to its lifecycle stage using the
+// store's serializable failure reason rather than the Go error type. The
+// reason ([store.FailureVerify] etc.) is written by whichever runner ran
+// the node and survives a remote runner's process boundary, where the
+// typed *sparkwing.VerifyError does not. store.FailureVerify maps to
+// StageVerify; anything else is an action-stage failure. When the
+// in-process VerifyError wrapper is present it is unwrapped so recovery
+// sees the check's own error rather than the envelope.
+func failureFrom(reason string, err error) sparkwing.Failure {
+	stage := sparkwing.StageAction
+	if reason == store.FailureVerify {
+		stage = sparkwing.StageVerify
+	}
 	var ve *sparkwing.VerifyError
 	if errors.As(err, &ve) {
-		return sparkwing.Failure{Stage: sparkwing.StageVerify, Err: ve.Err}
+		err = ve.Err
 	}
-	return sparkwing.Failure{Stage: sparkwing.StageAction, Err: err}
+	return sparkwing.Failure{Stage: stage, Err: err}
 }
 
 // markStarted stamps the wall-clock time runOneNode begins real work.
@@ -2068,7 +2076,14 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 	}
 	if res.Err != nil {
 		s.setError(nodeID, res.Err.Error())
-		s.setFailure(nodeID, failureFrom(res.Err))
+		// The store's failure_reason is the cross-process source of truth
+		// for which stage failed; the typed VerifyError doesn't survive a
+		// remote runner boundary, so attribute from the persisted reason.
+		reason := store.FailureUnknown
+		if n, gerr := s.backends.State.GetNode(s.ctx, s.runID, nodeID); gerr == nil && n != nil {
+			reason = n.FailureReason
+		}
+		s.setFailure(nodeID, failureFrom(reason, res.Err))
 	}
 	s.setOutcome(nodeID, res.Outcome)
 }
