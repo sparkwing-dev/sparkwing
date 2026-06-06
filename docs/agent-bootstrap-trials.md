@@ -247,3 +247,27 @@ shape set re-run after each change for a clean before/after. Local-only
 Key tracked metric per run: `ran_ok`, `avg_ease`, and **`used_a_template`**
 (did the agent discover + use the matching template). Re-run via the
 Workflow tool with the persisted `agent-ab-harness` script.
+
+### A/B results
+
+| run | ran_ok | used_a_template | avg_ease | notes |
+|-----|--------|-----------------|----------|-------|
+| baseline | 8/8 | 8/8 | 4.50 | after the local-template suite + early fixes |
+| after | 8/8 | 8/8 | **5.00** | after the `prerequisite` field, `cwd`=repo-root log fix, `-C` on discovery verbs, run-output hint, postgres-default fix |
+
+Every shape reached ease 5/5 and every shape was 1-shot via a template.
+The movers were `ci-lint-test` (4->5, the prerequisite text made the
+repo-root-module requirement a "30-second realization, not a blocker")
+and `service-integration` (3->5, the postgres default starts now).
+
+Remaining feedback is refinement-only (agents reported "never genuinely
+stuck"): runtime-vs-scaffold-time params (a deliberate template choice),
+a stderr human-summary line on local `run` (the pretty renderer already
+exists on a TTY), and scaffolding a runnable example test/module so
+`pipeline new` -> `run` succeeds with zero edits (the deeper form of the
+prerequisite note). All logged; none block a 1-shot.
+
+**Reach caveat:** all Phase-2 template/CLI work is local-only until a
+`sparks-core/templates` release (the A/B agents see it via the rebuilt
+binary; real users do not). A `kube`/`gitops` release additionally
+unstrands the two rollback templates.
