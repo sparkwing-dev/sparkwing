@@ -20,8 +20,8 @@ triple (see [Storage backends](backends.md)) -- and applies uniformly to
 
 ## Mode 1: Local
 
-SQLite under `~/.sparkwing/state.db`, on-disk caches and logs under
-`~/.sparkwing/cache` and `~/.sparkwing/logs`. Zero shared
+SQLite under `~/.sparkwing/state.db`, with per-run logs under
+`~/.sparkwing/runs/<runID>/`. Zero shared
 infrastructure. This is the default behavior -- the built-in `laptop`
 profile -- when no `--profile` is given and no profile auto-detects.
 

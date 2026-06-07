@@ -30,7 +30,7 @@ pipelines:
 | Trigger | When |
 |---------|------|
 | `push` | After push to remote (webhook -> controller) |
-| `pull_request` | On PR events |
+| `webhook` | Custom HTTP path that fires the pipeline |
 | `schedule` | Cron schedule |
 | `pre_commit` | Local git pre-commit hook (after `hooks install`) |
 | `pre_push` | Local git pre-push hook (after `hooks install`) |
