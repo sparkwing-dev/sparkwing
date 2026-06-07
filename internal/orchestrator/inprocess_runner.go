@@ -125,7 +125,7 @@ func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runne
 		}
 	}
 
-	// .Cache() delegates the full acquire/run/release cycle.
+	// Cache()/Concurrency() delegate the full acquire/run/release cycle.
 	if result, handled := r.runNodeWithCache(ctx, req); handled {
 		return result
 	}

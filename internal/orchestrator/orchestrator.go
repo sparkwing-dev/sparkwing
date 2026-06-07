@@ -734,7 +734,7 @@ func DumpRunState(ctx context.Context, st *store.Store, runID string, art storag
 func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta, onlySkip map[string]string, dispatchWaitTimeout time.Duration) error {
 	runStart := time.Now()
 
-	// Plan-level .Cache() gates the whole run before any dispatch.
+	// Plan-level Concurrency() gates the whole run before any dispatch.
 	planRelease, planOutcome, perr := acquirePlanSlot(ctx, backends, runID, plan)
 	if perr != nil {
 		return perr
@@ -743,9 +743,9 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	case planCacheSkipped:
 		return nil // run-level success; no nodes ran
 	case planCacheFailed:
-		return fmt.Errorf("plan concurrency namespace %q: slot full under OnLimit:Fail", plan.CacheOpts().Namespace)
+		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", planConcurrencyName(plan))
 	case planCacheEvicted:
-		return fmt.Errorf("plan concurrency namespace %q: evicted before dispatch", plan.CacheOpts().Namespace)
+		return fmt.Errorf("plan concurrency group %q: evicted before dispatch", planConcurrencyName(plan))
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
@@ -2776,10 +2776,11 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
 	}
-	if c := n.CacheOpts(); c.HasNamespace() {
-		m.CacheKey = c.Namespace
-		m.CacheMax = c.Max
-		m.CacheOnLimit = string(c.OnLimit)
+	if g := n.ConcurrencyGroupRef(); g != nil {
+		limit := g.Limit()
+		m.CacheKey = g.Name()
+		m.CacheMax = limit.Capacity
+		m.CacheOnLimit = string(limit.OnLimit)
 	}
 	if isZeroModifiers(m) {
 		return nil

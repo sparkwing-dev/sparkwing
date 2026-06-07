@@ -56,7 +56,7 @@ type NodeLog interface {
 	Close() error
 }
 
-// ConcurrencyBackend mediates the unified .Cache() DSL: atomic
+// ConcurrencyBackend mediates the Cache()/Concurrency() DSL: atomic
 // acquire (granted/skipped/failed/cached/queued/coalesced), waiter
 // resolution, memoizing release (which also promotes waiters), and
 // heartbeats that surface the supersede signal.

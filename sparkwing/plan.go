@@ -24,7 +24,10 @@ type Plan struct {
 	// no name to membership output.
 	groups []*JobGroup
 
-	cache CacheOptions
+	// concurrency is the whole-run coordination group set via
+	// Plan.Concurrency, or nil. Plans never memoize, so there is no
+	// plan-level content cache.
+	concurrency *ConcurrencyGroup
 
 	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
@@ -416,7 +419,11 @@ type JobNode struct {
 	skipIf        []SkipPredicate
 	skipIfTimeout time.Duration
 
-	cache CacheOptions
+	// contentCache memoizes the node's result on content (JobNode.Cache);
+	// concurrency enrolls it in a shared budget (JobNode.Concurrency).
+	// The two are independent: a node may set either, both, or neither.
+	contentCache *CacheConfig
+	concurrency  *concurrencyMembership
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
