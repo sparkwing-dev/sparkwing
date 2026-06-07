@@ -51,6 +51,8 @@ type Pipeline struct {
 	Description string
 	On          Triggers
 
+	Hidden bool
+
 	Guards Guards
 
 	Args map[string]string
