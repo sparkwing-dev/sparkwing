@@ -47,6 +47,36 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `-C` / `--sw-cd <dir>` now works on the discovery verbs
+  (`sparkwing pipeline list` / `describe` / `discover`), matching
+  `run` and `pipeline new`, so you can inspect another repo's
+  pipelines without changing directory. `pipeline new` and
+  `pipeline templates` also print a template's prerequisite (e.g. a
+  "run from the repo root" note) after scaffolding, so setup
+  requirements are visible where you scaffold.
+
+### Fixed
+
+- **cli:** the `run_start` event reported its working directory as
+  `.sparkwing/` (the pipeline binary's own cwd) instead of the repo
+  root that steps actually execute from. It now reports the repo root,
+  so the dashboard and run metadata point at the directory where
+  relative paths and `go ./...` resolve.
+- **docs:** a broad accuracy pass over the bundled docs and CLI help,
+  correcting divergences verified against the binary and SDK source:
+  run flags (`--from` → `--sw-ref`; `--mode` / `--workers` /
+  `--no-update` → `--sw-*`); the project config filename
+  (`pipelines.yaml` → `sparkwing.yaml`); removal of documented-but-
+  nonexistent config keys that hard-errored on load (`runs_on`,
+  `dispatch`, `pull_request`, `branches_ignore` / `paths_ignore`);
+  `CacheOptions` fields (`Key` / `CacheKey` → `Namespace` /
+  `ContentHash`); the local store path (`state.db`) and per-run log
+  location (`~/.sparkwing/runs/`); flag-only `cluster tokens` verbs
+  (`--prefix`); and a rewrite of `scheduling.md` to the shipped label
+  model (`requires:` plus `.Requires()` / `.Prefers()` /
+  `.WhenRunner()`).
 
 ## [v0.8.1] - 2026-06-06
 ### Added
