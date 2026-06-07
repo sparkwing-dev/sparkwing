@@ -61,10 +61,8 @@ Every Job's `Work()` runs at Plan-time, so renderers
 nested DAG before any dispatch.
 
 The non-typed step type is named **`WorkStep`** (rather than `Step`)
-because the historical `sparkwing.Step` package-level call was a log
-breadcrumb that has been replaced with structured `step_start` /
-`step_end` events. The inner-DAG entity carries the suffix to keep
-the rename auditable.
+to keep it distinct from the package-level `sparkwing.Step` builder
+that adds steps inside a `Work()` body.
 
 ### Cost grid
 
@@ -273,9 +271,7 @@ is stamped with the current Job and Job-stack envelope.
 
 Step boundaries are emitted automatically by `RunWork` as structured
 `step_start` / `step_end` events; the renderer surfaces them as a
-collapsible bucket in the CLI and dashboard. The pre-rewrite
-package-level `sparkwing.Step` / `sparkwing.StepErr` log breadcrumbs
-are gone.
+collapsible bucket in the CLI and dashboard.
 
 These four helpers are sparkwing's pipeline-observability channel,
 not a general-purpose logger -- they exist so node output, run

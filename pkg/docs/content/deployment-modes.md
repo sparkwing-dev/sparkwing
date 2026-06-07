@@ -84,9 +84,9 @@ sparkwing-web --state-spec=s3://my-org-sparkwing/state \
 See [local-execution.md](local-execution.md#per-host-concurrency)
 for the host-local concurrency gate that caps how many `sparkwing run`
 processes a single machine admits at once. The gate is mode-agnostic
-but matters most in Mode 2, where the state backend no longer
-incidentally serializes overlapping invocations the way SQLite does in
-Mode 1.
+but matters most in Mode 2, where the state backend doesn't
+incidentally serialize overlapping invocations the way Mode 1's SQLite
+does.
 
 ## Mode 3: Postgres + object storage
 

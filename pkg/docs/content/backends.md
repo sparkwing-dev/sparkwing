@@ -1,6 +1,7 @@
 # Storage backends
 
-There is no longer a `backends.yaml`. The three persistence surfaces --
+Backends are configured per profile, not in a separate file. The three
+persistence surfaces --
 
 - **state** -- run records, plan snapshots, status
 - **cache** -- content-addressed artifacts and compiled pipeline binaries
