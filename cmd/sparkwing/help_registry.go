@@ -902,7 +902,7 @@ pipeline binary, e.g. 'sparkwing pipeline run release
 --version v1.2.3' passes --version through to the pipeline's
 Args.`,
 	PosArgs: []PosArg{
-		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
+		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
 	Flags:       runFlagSpecs,
 	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
@@ -910,7 +910,7 @@ Args.`,
 	Examples: []Example{
 		{"Run with no flags", "sparkwing pipeline run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing pipeline run release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing pipeline run build-test-deploy --from feature/xyz"},
+		{"Run from a different git ref", "sparkwing pipeline run build-test-deploy --sw-ref feature/xyz"},
 		{"Dispatch remotely", "sparkwing pipeline trigger deploy --profile prod"},
 	},
 }
@@ -959,7 +959,7 @@ var cmdPipelineList = Command{
 	Path:     "sparkwing pipeline list",
 	Synopsis: "Enumerate every pipeline with metadata",
 	Description: `Walks up from the current directory to locate .sparkwing/,
-merges pipelines.yaml entries with the describe cache's typed
+merges sparkwing.yaml entries with the describe cache's typed
 metadata, and prints a grouped aligned table.
 
 -o json emits structured records instead; agents should prefer
@@ -1114,7 +1114,7 @@ forwarded to the pipeline so Plans that branch on --env / --version
 args are non-fatal here -- explain renders a best-effort plan so
 the shape is visible before every flag is provided.
 
---all sweeps every pipeline in .sparkwing/pipelines.yaml, runs
+--all sweeps every pipeline in .sparkwing/sparkwing.yaml, runs
 Plan() on each with no extra args, and exits non-zero if any
 pipeline fails. Designed as a CI gate: a Plan-time validation
 mismatch (sparkwing.RefTo[T] type drift, Produces[T] / SetResult
@@ -1122,7 +1122,7 @@ asymmetry, duplicate node ID, etc.) blocks merges before the
 pipeline ever runs.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to explain (one of --name or --all required)", Group: "Target"},
-		{Name: "all", Desc: "Validate every pipeline in this repo's pipelines.yaml; non-zero exit on any failure", Group: "Target"},
+		{Name: "all", Desc: "Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Output", "Other"},
@@ -1191,7 +1191,7 @@ var cmdRunConfig = Command{
 	Synopsis: "Print the resolved Config struct + declared Secrets for a pipeline + target",
 	Description: `Pure inspection: resolves the pipeline's typed Config
 struct through the same layering ` + "`sparkwing run`" + ` uses
-(struct defaults < pipelines.yaml values.base < per-target values)
+(struct defaults < sparkwing.yaml values.base < per-target values)
 and prints each field's resolved value alongside which layer
 contributed it. Also lists every declared Secret with its source
 binding -- useful before driving destructive ` + "`--for prod`" + `
@@ -1248,7 +1248,7 @@ SPARKWING_LOG_FORMAT=pretty|json.`,
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing run build-test-deploy --from feature/xyz"},
+		{"Run from a different git ref", "sparkwing run build-test-deploy --sw-ref feature/xyz"},
 		{"Retry a failed run", "sparkwing runs retry RUN_ID --failed"},
 		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
 	},
@@ -1809,7 +1809,7 @@ shell piping:
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "status", Argument: "STATUS", Desc: "Filter by status: running|success|failed|cancelled (repeatable; prefix `!` to exclude)", Group: "Filter"},
-		{Name: "tag", Argument: "TAG", Desc: "Filter by pipelines.yaml tag (repeatable)", Group: "Filter"},
+		{Name: "tag", Argument: "TAG", Desc: "Filter by sparkwing.yaml tag (repeatable)", Group: "Filter"},
 		{Name: "branch", Argument: "BRANCH", Desc: "Filter by git branch (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "sha", Argument: "PREFIX", Desc: "Filter by git sha prefix (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "error", Argument: "SUBSTR", Desc: "Substring match against the persisted failure reason", Group: "Filter"},
@@ -2269,7 +2269,7 @@ var cmdPush = Command{
 	Synopsis: "Publish the current repo's HEAD to gitcache",
 	Description: `Pushes the current git HEAD to the selected profile's gitcache
 as a timestamped ref (local-YYYY-MM-DDTHH-MM-SSZ). Use the ref
-it prints with 'sparkwing run --profile <profile> --from <ref>' to
+it prints with 'sparkwing run --profile <profile> --sw-ref <ref>' to
 run a pipeline against uncommitted-to-upstream code without
 waiting for GitHub to have it.
 
@@ -2294,7 +2294,7 @@ var cmdHooks = Command{
 	Synopsis: "Install / uninstall git pre-commit + pre-push hooks",
 	Description: `Writes small git hook scripts into the repo's .git/hooks/
 directory that call 'sparkwing run <pipeline>' for every pipeline that
-declares pre_commit: or pre_push: in its .sparkwing/pipelines.yaml
+declares pre_commit: or pre_push: in its .sparkwing/sparkwing.yaml
 triggers block.
 
 Managed hooks carry a "Installed by sparkwing" marker so
@@ -2310,8 +2310,8 @@ them with a warning.`,
 
 var cmdHooksInstall = Command{
 	Path:     "sparkwing pipeline hooks install",
-	Synopsis: "Install pre-commit / pre-push git hooks from pipelines.yaml triggers",
-	Description: `Discovers the enclosing .sparkwing/pipelines.yaml, reads
+	Synopsis: "Install pre-commit / pre-push git hooks from sparkwing.yaml triggers",
+	Description: `Discovers the enclosing .sparkwing/sparkwing.yaml, reads
 pre_commit / pre_push triggers, and writes one hook file per
 hook name that fans out to the matching pipelines. Existing
 non-sparkwing hooks are skipped so hand-written ones survive.`,
@@ -2361,7 +2361,7 @@ through 'sparkwing run <pipeline>' locally.
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
 time. Pipelines pull a secret by listing it in the
-pipelines.yaml 'secrets:' block. Raw values never transit the
+sparkwing.yaml 'secrets:' block. Raw values never transit the
 CLI except via 'secrets get'.`,
 	Subcommands: []SubcommandRef{
 		{"set", "Store (or replace) a secret value"},

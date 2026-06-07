@@ -12,7 +12,7 @@ logs to figure out *why* a build died.
 | Reason | What happened | What to do |
 |---|---|---|
 | `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Increase the runner memory limit or optimize the pipeline's memory usage. Check the resource chart. |
-| `timeout` | Job exceeded its configured execution timeout. | Increase the timeout in `pipelines.yaml` or optimize the pipeline. |
+| `timeout` | Job exceeded its configured execution timeout. | Increase the timeout in `sparkwing.yaml` or optimize the pipeline. |
 | `agent_lost` | Runner stopped heartbeating (crashed, evicted, or lost network). | Check pod events with `kubectl describe pod`. May indicate node pressure or a bug in the pipeline. |
 | `queue_timeout` | No agent claimed the job within the queue timeout (default 10m). | Ensure agents are running and their labels/tolerations match the pipeline's `runs_on`. |
 | `pod_error` | Runner container exited with a non-zero code or k8s couldn't create the pod. | Check the exit code and logs. Common causes: image pull errors, missing secrets, OOM in init containers. |

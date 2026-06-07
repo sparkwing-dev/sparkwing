@@ -872,64 +872,62 @@ type WrapperInputs struct {
 }
 ```
 
-### Reserved flag names
+### Flag namespace: `--sw-*` vs your flags
 
-`sparkwing run` consumes a set of sparkwing-owned long flags before
-the pipeline binary parses anything.
-A pipeline Args struct that declares one of these as a `flag:"..."`
-tag would silently lose the value, so `sparkwing.Register` panics
-at registration time with the colliding flag, the offending Go
-field, and the full reserved list.
-
-Current reserved set, from `sparkwing.ReservedFlagNames()`:
+`sparkwing run` keeps its own control flags out of your way by
+prefixing every one of them with `sw-`:
 
 ```
-allow               --allow              // risk-label gate
-C, change-directory --change-directory   // re-anchor .sparkwing/ discovery
-config              --config             // named preset from config.yaml
-dry-run             --dry-run            // dry-run dispatch
-from                --from               // compile pipeline from a git ref
-mode                --mode               // run mode override
-no-update           --no-update          // skip auto-update on invocation
-profile             --profile            // storage / dispatch profile
-secrets             --secrets            // ad-hoc secret injection
-start-at            --start-at           // skip nodes before this step
-stop-at             --stop-at            // skip nodes after this step
-v, verbose          --verbose            // SPARKWING_LOG_LEVEL=debug
-workers             --workers            // local-execution parallelism
+-C, --sw-cd PATH          // re-anchor .sparkwing/ discovery
+    --sw-ref REF          // compile the pipeline at a git ref
+-v, --sw-verbose          // debug logging
+    --sw-start-at STEP    // start the run at STEP
+    --sw-stop-at STEP     // stop the run after STEP
+    --sw-only GLOB        // run only matching jobs (+ their Needs)
+    --sw-no-cache         // ignore cached per-node results
+    --sw-local-only       // force local state/cache/logs
+    --sw-dry-run          // run each step's dry-run probe
+    --sw-allow LABEL,...  // authorize risk-labeled steps
+    --sw-box-slots N      // max concurrent run processes on this host
+    --sw-no-wait          // fail instead of queueing when slots are full
 ```
 
-Code surface:
+Because the runner owns the `sw-*` prefix, your pipeline `flag:"..."`
+tags have the entire unprefixed namespace to themselves -- there is no
+reserved-name collision check, and a field named `flag:"ref"` or
+`flag:"verbose"` resolves to *your* flag, not the runner's. Any flag
+`run` doesn't recognize is forwarded to the pipeline binary as a typed
+Arg.
 
-```
-sparkwing.ReservedFlagNames() []string   // sorted copy, safe to mutate
-```
+The only non-`sw-` flags `run` consumes itself are `--profile` and
+`--target` (storage / deployment-target selection); avoid those two
+names and the `sw-` prefix for pipeline inputs.
 
-If you need a flag with one of these names, rename it on the
-pipeline side (e.g. `--plan-only` for `dry-run`, `--my-from` for
-`from`). For `--dry-run` specifically: declare
-`step.DryRun(fn)` on each mutating step (see *Work - the inner
-DAG > Dry-run contract*) rather than rolling a `flag:"dry-run"`
-input; the sparkwing-level `--dry-run` then dispatches your DryRun
-bodies for free.
+For a `--dry-run`-style flag, prefer `step.DryRun(fn)` on each mutating
+step (see *Work - the inner DAG > Dry-run contract*) over a
+`flag:"dry-run"` input; the runner-level `--sw-dry-run` then dispatches
+your DryRun bodies for free.
 
 ## Cache
 
 ```
 sw.Key("go-mod", goVersion, fileHash)             // CacheKey from any parts
 node.Cache(sw.CacheOptions{
-    Key:      "build",                                // required: coordination key
-    Max:      3,                                      // optional: semaphore (default 1 = mutex)
-    OnLimit:  sw.Queue,                               // Queue (default), Coalesce (node-only), CancelOthers
-    CacheKey: func(ctx) sw.CacheKey { return ... },   // optional: result memoization
-    CacheTTL: 24*time.Hour,                           // optional: cache lifetime
+    Namespace:   "build",                             // required: coordination key
+    Max:         3,                                   // optional: semaphore (default 1 = mutex)
+    OnLimit:     sw.Queue,                            // Queue (default), Coalesce, CancelOthers, Skip, Fail
+    ContentHash: func(ctx) sw.CacheKey { return ... },// optional: result memoization
+    CacheTTL:    24*time.Hour,                         // optional: cache lifetime (default 7d when set)
     CancelTimeout: 60*time.Second,                    // CancelOthers wait budget
+    QueueTimeout:  5*time.Minute,                      // Queue: give up waiting (default: wait forever)
 })
 ```
 
-`.Cache()` is the unified coordination + memoization primitive (it
-replaces the pre-rewrite `.Exclusive(group)` and `.CacheKey(fn)`).
-Empty `Key` is a no-op.
+`.Cache()` is the unified coordination + memoization primitive. Empty
+`Namespace` is a no-op. Omit `ContentHash` for pure coordination (mutex
+when `Max<=1`, semaphore when `Max>1`); set it to memoize and replay the
+node's output on a matching key. Return `sw.NoCache` from `ContentHash`
+to opt a single invocation out of memoization.
 
 ## Discovery
 
