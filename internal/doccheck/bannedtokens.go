@@ -43,6 +43,18 @@ var banned = []struct {
 		"the skip-resolve flag is --sw-no-update, not --no-update"},
 	{regexp.MustCompile(`tokens (?:revoke|lookup|rotate) [^-\s]`),
 		"token verbs are flag-only: pass --prefix <prefix>, not a positional argument"},
+
+	// History narrative. Docs describe what IS, not what changed; the
+	// change/rewrite/rename story belongs in pkg/docs/content/migrations/
+	// (gate-excluded), not the current pages. Only high-precision phrasings
+	// are listed -- words like "no longer"/"replaced"/"previously" have
+	// legitimate present-tense uses and are left to review.
+	{regexp.MustCompile(`(?i)(?:pre|post)-rewrite`),
+		"don't narrate the rewrite; describe current behavior directly (history goes in migrations/)"},
+	{regexp.MustCompile(`(?i)\bformerly\b`),
+		"don't narrate renames; describe the current name directly (history goes in migrations/)"},
+	{regexp.MustCompile(`(?i)^#+\s+historical`),
+		"remove historical sections; change history belongs in pkg/docs/content/migrations/"},
 }
 
 // checkBannedTokens scans the bundled docs and the CLI help registry for
