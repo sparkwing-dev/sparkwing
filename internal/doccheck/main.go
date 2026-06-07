@@ -35,7 +35,6 @@ type block struct {
 }
 
 var (
-	fenceOpen = regexp.MustCompile("^```go(\\s|$)")
 	skipRE    = regexp.MustCompile(`<!--\s*doccheck:skip\s+(.*?)\s*-->`)
 	topDeclRE = regexp.MustCompile(`^(func|type|const|var|import)\b`)
 )
@@ -47,7 +46,21 @@ func main() {
 	}
 	contentDir, repoRoot := os.Args[1], os.Args[2]
 
-	blocks, err := extract(contentDir)
+	ok := checkGoBlocks(contentDir, repoRoot)
+	fmt.Println()
+	ok = checkYAMLConfigs(contentDir) && ok
+	fmt.Println()
+	ok = checkBannedTokens(repoRoot) && ok
+	if !ok {
+		os.Exit(1)
+	}
+}
+
+// checkGoBlocks compiles every ```go fenced block under contentDir
+// against the in-repo SDK and reports SDK-API drift. Returns false on
+// any drift.
+func checkGoBlocks(contentDir, repoRoot string) bool {
+	blocks, err := extract(contentDir, "go")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "extract:", err)
 		os.Exit(2)
@@ -121,9 +134,10 @@ func main() {
 		for _, f := range failures {
 			fmt.Println(f)
 		}
-		os.Exit(1)
+		return false
 	}
 	fmt.Println("\nNO SDK-API DRIFT IN DOC EXAMPLES")
+	return true
 }
 
 var (
@@ -150,7 +164,8 @@ func sdkDriftLines(out string) []string {
 	return keep
 }
 
-func extract(dir string) ([]block, error) {
+func extract(dir, lang string) ([]block, error) {
+	fenceOpen := regexp.MustCompile("^```" + lang + `(\s|$)`)
 	var out []block
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
