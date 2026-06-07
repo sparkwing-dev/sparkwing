@@ -67,9 +67,25 @@ Determinism caveats (from `sparkwing/cachekey.go`):
 
 ## What a cache hit skips
 
-The entire node body. No `Run` invocation, no step logs, no exec. The
-cached output is materialized into the downstream `Ref[T]` as if the
-node had just completed. Downstream nodes observe no difference.
+A hit replays the node's recorded **typed output** and skips everything
+else: no `Run`, no step logs, no exec, and **no `Verify`** -- the
+postcondition gate does not re-run, since the output it would guard is
+taken as already valid. The cached output is materialized into the
+node's row and into any downstream `Ref[T]` as if the node had just
+completed.
+
+Because a hit restores the *output* and nothing else, it does **not**
+reproduce filesystem side-effects. A node whose real product is files it
+wrote to disk (or any out-of-band state) will hit, return its typed
+output, and leave the run green -- with those files absent. Only put
+`ContentHash` on a node whose value is fully captured by its returned
+output; a node that exists to write files should return what downstream
+needs as typed output, or not memoize at all.
+
+The restore is cross-run, not just in-flight: a `ContentHash` hit from a
+*previous* run writes the output onto the current run's node row, so a
+downstream `RefTo[T]` resolves it -- the same as an in-flight `Coalesce`
+follower would.
 
 ## Gate-shaped pipelines: queue, don't fail
 

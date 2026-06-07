@@ -92,6 +92,17 @@ type CacheOptions struct {
 	// prevent thundering herd on the initial miss. Only meaningful
 	// when Namespace is set.
 	//
+	// A hit replays the typed output and nothing else: the action,
+	// steps, and the node's Verify postcondition are all skipped, and
+	// filesystem side-effects are NOT reproduced. A node whose real
+	// product is files it wrote to disk will hit, return its output,
+	// and leave the run green with those files absent -- only memoize
+	// nodes whose value is fully captured by their returned output.
+	//
+	// The restore is cross-run: a hit from a previous run writes the
+	// output onto the current run's node row, so a downstream RefTo[T]
+	// resolves it, not only in-flight Coalesce followers.
+	//
 	// Return [NoCache] to explicitly opt this invocation out of
 	// memoization (distinct from returning the zero CacheKey, which
 	// is treated as a missing-key warning).
