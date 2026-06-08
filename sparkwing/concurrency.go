@@ -1,5 +1,7 @@
 package sparkwing
 
+import "time"
+
 // Scope selects how far a [ConcurrencyGroup]'s budget reaches: only the
 // nodes of one run, every run on one machine, or the whole fleet
 // coordinating through a shared backend.
@@ -43,6 +45,12 @@ type ConcurrencyLimit struct {
 	// Capacity is the total budget in author-defined units. With the
 	// default member cost of 1 it reads as "max members running at
 	// once". Values <= 0 are treated as 1 by the coordination backend.
+	//
+	// When two live participants declare different capacities for the
+	// same group (a version skew across runs), the effective capacity
+	// is the minimum -- a cap is a safety constraint, so lowering takes
+	// effect immediately and raising waits for the lower declaration to
+	// drain.
 	Capacity int
 	// Scope is how far the budget reaches (see [Scope]). The zero value
 	// is [ScopeGlobal].
@@ -50,6 +58,15 @@ type ConcurrencyLimit struct {
 	// OnLimit is what a member does when the group is full. The zero
 	// value is [Queue].
 	OnLimit OnLimit
+	// QueueTimeout bounds how long a [Queue] member waits for room
+	// before failing with failure_reason "queue_timeout". Zero waits
+	// indefinitely. Only meaningful with OnLimit [Queue].
+	QueueTimeout time.Duration
+	// CancelTimeout bounds how long a [CancelOthers] member waits for
+	// evicted holders to release before the slot is force-freed. Zero
+	// uses the backend default. Only meaningful with OnLimit
+	// [CancelOthers].
+	CancelTimeout time.Duration
 }
 
 // ConcurrencyGroup is a named budget that member nodes share. Define it
@@ -130,10 +147,9 @@ func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup {
 }
 
 // ConcurrencyCost returns the admission cost declared via
-// [JobNode.Concurrency], or 0 when the node has no membership.
-//
-// chunk 2: cost is recorded but admission still counts a single slot
-// per member rather than summing declared weights against capacity.
+// [JobNode.Concurrency], or 0 when the node has no membership. The
+// coordination backend admits a member only when the summed cost of
+// live members in the same scope plus this cost fits the capacity.
 func (n *JobNode) ConcurrencyCost() int {
 	if n.concurrency == nil {
 		return 0
