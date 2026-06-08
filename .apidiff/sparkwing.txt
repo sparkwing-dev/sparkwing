@@ -53,27 +53,17 @@ func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
 })
 type Cache = storage.ArtifactStore
+type CacheConfig struct {
+	Key CacheKeyFn
+
+	TTL time.Duration
+}
 type CacheKey string
 func (k CacheKey) IsNoCache() bool
 type CacheKeyFn func(ctx context.Context) CacheKey
-type CacheOptions struct {
-	Namespace string
-
-	Max int
-
-	OnLimit OnLimitPolicy
-
-	ContentHash CacheKeyFn
-
-	CacheTTL time.Duration
-
-	CancelTimeout time.Duration
-
-	QueueTimeout time.Duration
-}
-func (o CacheOptions) HasNamespace() bool
+type CacheOption func(*CacheConfig)
 const Cached Outcome = "cached"
-const CancelOthers OnLimitPolicy = "cancel_others"
+const CancelOthers OnLimit = "cancel_others"
 const Cancelled Outcome = "cancelled"
 type Cmd struct {
 }
@@ -86,9 +76,19 @@ func (c *Cmd) Lines() ([]string, error)
 func (c *Cmd) MustBeEmpty(reason string) error
 func (c *Cmd) Run() (ExecResult, error)
 func (c *Cmd) String() (string, error)
-const Coalesce OnLimitPolicy = "coalesce"
 func CoerceSpawnEachJob(v any) (Workable, error)
 func Computed(fn any) Constraint
+type ConcurrencyGroup struct {
+}
+func (g *ConcurrencyGroup) Limit() ConcurrencyLimit
+func (g *ConcurrencyGroup) Name() string
+type ConcurrencyLimit struct {
+	Capacity int
+
+	Scope Scope
+
+	OnLimit OnLimit
+}
 func Config(ctx context.Context, name string) (string, error)
 type Constraint interface {
 	applyTo(*fieldMeta) error
@@ -183,7 +183,7 @@ type Expansion struct {
 	Group  *JobGroup
 	Gen    ExpandGenerator
 }
-const Fail OnLimitPolicy = "fail"
+const Fail OnLimit = "fail"
 const Failed Outcome = "failed"
 type Failure struct {
 	Stage FailureStage
@@ -267,7 +267,8 @@ type JobGroup struct {
 }
 func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup
-func (g *JobGroup) Cache(opts CacheOptions) *JobGroup
+func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup
+func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup
 func (g *JobGroup) ContinueOnError() *JobGroup
 func (g *JobGroup) Dynamic() bool
 func (g *JobGroup) Env(key, value string) *JobGroup
@@ -293,8 +294,11 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn
 func (n *JobNode) ApprovalConfig() *ApprovalConfig
 func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode
 func (n *JobNode) BeforeRunHooks() []BeforeRunFn
-func (n *JobNode) Cache(opts CacheOptions) *JobNode
-func (n *JobNode) CacheOpts() CacheOptions
+func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode
+func (n *JobNode) CacheConfig() *CacheConfig
+func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode
+func (n *JobNode) ConcurrencyCost() int
+func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup
 func (n *JobNode) ContinueOnError() *JobNode
 func (n *JobNode) DepIDs() []string
 func (n *JobNode) Env(key, value string) *JobNode
@@ -362,6 +366,7 @@ const MaxCacheTTL = 35 * 24 * time.Hour
 func Min(v any) Constraint
 func MustConfig(ctx context.Context, name string) string
 func MustSecret(ctx context.Context, name string) string
+func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup
 func NewDetachedNode(id string, job Workable) *JobNode
 func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git
 func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
@@ -374,7 +379,7 @@ const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
 func Not(p Predicate) Predicate
-type OnLimitPolicy string
+type OnLimit string
 func OneOf(values ...any) Constraint
 func Or(preds ...Predicate) Predicate
 type Outcome string
@@ -397,8 +402,8 @@ type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, max
 func PipelineSecrets[T any](ctx context.Context) *T
 type Plan struct {
 }
-func (p *Plan) Cache(opts CacheOptions) *Plan
-func (p *Plan) CacheOpts() CacheOptions
+func (p *Plan) Concurrency(g *ConcurrencyGroup) *Plan
+func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup
 func (p *Plan) Expansions() []Expansion
 func (p *Plan) GroupSourceIDs(id string) []string
 func (p *Plan) Inputs() any
@@ -436,7 +441,7 @@ type ProfileResolutionContext struct {
 
 	IsLocal bool
 }
-const Queue OnLimitPolicy = "queue"
+const Queue OnLimit = "queue"
 func Range(min, max any) Constraint
 func ReadFile(path string) ([]byte, error)
 type Ref[T any] struct {
@@ -573,6 +578,10 @@ func (sb *SchemaBuilder[T]) Group(names ...string) *GroupBuilder
 type SchemaProvider interface {
 	Schema() (*Schema, error)
 }
+type Scope string
+const ScopeBox Scope = "box"
+const ScopeGlobal Scope = "global"
+const ScopeRun Scope = "run"
 func Secret(ctx context.Context, name string) (string, error)
 type SecretField struct {
 	Name string
@@ -600,7 +609,7 @@ func SetWorkDir(dir string)
 type ShortHelpProvider interface {
 	ShortHelp() string
 }
-const Skip OnLimitPolicy = "skip"
+const Skip OnLimit = "skip"
 func SkipArgResolve(ctx context.Context) context.Context
 func SkipBudget(d time.Duration) SkipOption
 type SkipOption func(*JobNode)
@@ -663,6 +672,7 @@ func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
+func TTL(d time.Duration) CacheOption
 type TransitiveArg struct {
 	Flag      string
 	JobID     string

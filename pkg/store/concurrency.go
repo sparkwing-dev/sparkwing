@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-// OnLimit policies; mirror sparkwing.OnLimitPolicy.
+// OnLimit policies the coordination layer understands. Queue, Skip,
+// Fail, and CancelOthers map to the SDK's sparkwing.OnLimit values;
+// Coalesce is an internal leader/follower policy the store still
+// supports but no SDK surface currently emits.
 const (
 	OnLimitQueue        = "queue"
 	OnLimitCoalesce     = "coalesce"
