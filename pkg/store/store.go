@@ -298,13 +298,15 @@ CREATE TABLE IF NOT EXISTS concurrency_entries (
 );
 
 CREATE TABLE IF NOT EXISTS concurrency_holders (
-    key              TEXT NOT NULL,
-    holder_id        TEXT NOT NULL,
-    run_id           TEXT NOT NULL,
-    node_id          TEXT NOT NULL DEFAULT '',
-    claimed_at       INTEGER NOT NULL,
-    lease_expires_at INTEGER NOT NULL,
-    superseded       INTEGER NOT NULL DEFAULT 0,
+    key               TEXT NOT NULL,
+    holder_id         TEXT NOT NULL,
+    run_id            TEXT NOT NULL,
+    node_id           TEXT NOT NULL DEFAULT '',
+    claimed_at        INTEGER NOT NULL,
+    lease_expires_at  INTEGER NOT NULL,
+    superseded        INTEGER NOT NULL DEFAULT 0,
+    cost              INTEGER NOT NULL DEFAULT 1,
+    declared_capacity INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key, holder_id)
 );
 CREATE INDEX IF NOT EXISTS idx_concurrency_holders_key_claimed
@@ -323,6 +325,8 @@ CREATE TABLE IF NOT EXISTS concurrency_waiters (
     leader_run_id      TEXT NOT NULL DEFAULT '',
     leader_node_id     TEXT NOT NULL DEFAULT '',
     cancel_timeout_ns  INTEGER NOT NULL DEFAULT 0,
+    cost               INTEGER NOT NULL DEFAULT 1,
+    declared_capacity  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key, run_id, node_id)
 );
 CREATE INDEX IF NOT EXISTS idx_concurrency_waiters_arrived
@@ -500,7 +504,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 2
+const expectedSchemaVersion = 3
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -662,7 +666,7 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 			return err
 		}
 		return s.backfillRunAnnotationRollup()
-	case 2:
+	case 2, 3:
 		return s.ensureColumnsAll()
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -680,7 +684,7 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return s.ensureColumnsAllTx(ctx, tx)
-	case 2:
+	case 2, 3:
 		return s.ensureColumnsAllTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -752,7 +756,13 @@ var columnMigrations = []columnSpec{
 		"full":           "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"concurrency_waiters", map[string]string{
-		"holder_id": "TEXT NOT NULL DEFAULT ''",
+		"holder_id":         "TEXT NOT NULL DEFAULT ''",
+		"cost":              "INTEGER NOT NULL DEFAULT 1",
+		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
+	}},
+	{"concurrency_holders", map[string]string{
+		"cost":              "INTEGER NOT NULL DEFAULT 1",
+		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",
