@@ -6,7 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -17,20 +16,12 @@ import (
 // Mode 3 (direct-DB Postgres) integration tests. Two RunLocal
 // invocations against the same Postgres schema and the same S3
 // bucket; the second hits a coordinated cache reservation written by
-// the first. The .Cache() DSL routes through pg's concurrency_cache
-// + concurrency_holders tables, so cross-runner coalescing falls out
-// for free.
+// the first. Cache() routes through pg's concurrency_cache table, so
+// cross-runner reuse falls out for free.
 
 var pgIntegRegisterOnce sync.Once
 
-// Two separate invocation counters per pipeline so the two
-// scenarios (cache-replay, coalesce) don't interfere. atomic.Int32
-// is package-level state; the tests reset to 0 at start.
-
-var (
-	pgCacheReplayInvocations atomic.Int32
-	pgCoalesceInvocations    atomic.Int32
-)
+var pgCacheReplayInvocations atomic.Int32
 
 type pgCacheReplayOut struct {
 	Tag string `json:"tag"`
@@ -54,42 +45,7 @@ type pgCacheReplayPipe struct{ sparkwing.Base }
 
 func (pgCacheReplayPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	node := sparkwing.Job(plan, "build", &pgCacheReplayJob{})
-	node.Cache(sparkwing.CacheOptions{
-		Namespace:   "pg-integ-replay",
-		OnLimit:     sparkwing.Coalesce,
-		ContentHash: func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("pg-integ", "replay-v1") },
-	})
-	return nil
-}
-
-type pgCoalesceJob struct {
-	sparkwing.Base
-	sparkwing.Produces[pgCacheReplayOut]
-}
-
-func (j *pgCoalesceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", j.run), nil
-}
-
-func (pgCoalesceJob) run(ctx context.Context) (pgCacheReplayOut, error) {
-	// A short delay widens the window for concurrent acquirers to
-	// pile up behind the leader; without it, the leader might finish
-	// before the followers even open their tx and the test reduces
-	// to a sequential cache hit.
-	time.Sleep(150 * time.Millisecond)
-	pgCoalesceInvocations.Add(1)
-	return pgCacheReplayOut{Tag: "pg-coalesced-v1"}, nil
-}
-
-type pgCoalescePipe struct{ sparkwing.Base }
-
-func (pgCoalescePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	node := sparkwing.Job(plan, "build", &pgCoalesceJob{})
-	node.Cache(sparkwing.CacheOptions{
-		Namespace:   "pg-integ-coalesce",
-		OnLimit:     sparkwing.Coalesce,
-		ContentHash: func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("pg-integ", "coalesce-v1") },
-	})
+	node.Cache(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("pg-integ", "replay-v1") })
 	return nil
 }
 
@@ -98,8 +54,6 @@ func registerPgIntegPipelines(t *testing.T) {
 	pgIntegRegisterOnce.Do(func() {
 		sparkwing.Register[sparkwing.NoInputs]("pg-integ-replay",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &pgCacheReplayPipe{} })
-		sparkwing.Register[sparkwing.NoInputs]("pg-integ-coalesce",
-			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &pgCoalescePipe{} })
 	})
 }
 
@@ -175,102 +129,6 @@ func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
 	}
 	if build.Outcome != string(sparkwing.Cached) {
 		t.Errorf("Run B build outcome = %q, want %q (cached)", build.Outcome, sparkwing.Cached)
-	}
-}
-
-// TestPgSharing_ConcurrentRunsCoalesce is the contention test for the
-// .Cache().OnLimit=Coalesce path: two RunLocal calls in parallel
-// against the same uncached key. Exactly one runs the step; the
-// other coalesces and inherits the output. Both runs reach success.
-func TestPgSharing_ConcurrentRunsCoalesce(t *testing.T) {
-	registerPgIntegPipelines(t)
-	stA := openIntegrationPostgres(t)
-	stB := openIntegrationPostgresAt(t, stA)
-
-	art, logs := openIntegrationS3(t)
-	paths := newPaths(t)
-	pgCoalesceInvocations.Store(0)
-
-	type result struct {
-		res *orchestrator.Result
-		err error
-	}
-	results := make([]result, 2)
-	stores := []*store.Store{stA, stB}
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for i, st := range stores {
-		wg.Add(1)
-		go func(i int, state *store.Store) {
-			defer wg.Done()
-			<-start
-			res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
-				Pipeline:      "pg-integ-coalesce",
-				State:         state,
-				LogStore:      logs,
-				ArtifactStore: art,
-			})
-			results[i] = result{res: res, err: err}
-		}(i, st)
-	}
-	close(start)
-	wg.Wait()
-
-	for i, r := range results {
-		if r.err != nil {
-			t.Errorf("Run %d err: %v", i, r.err)
-			continue
-		}
-		if r.res.Status != "success" {
-			t.Errorf("Run %d status = %q (err=%v)", i, r.res.Status, r.res.Error)
-		}
-	}
-
-	got := pgCoalesceInvocations.Load()
-	if got != 1 {
-		t.Errorf("step invocations across two concurrent runs = %d, want 1 (the other should have coalesced)", got)
-	}
-
-	// Cross-check: exactly one cache row, populated by the leader.
-	cacheRows, err := stA.CountConcurrencyCache(context.Background())
-	if err != nil {
-		t.Fatalf("CountConcurrencyCache: %v", err)
-	}
-	if cacheRows != 1 {
-		t.Errorf("concurrency_cache rows = %d, want 1", cacheRows)
-	}
-
-	// One of the two runs' build node must be Cached (the coalesced
-	// follower); the other must be Success (the leader).
-	var leaderSeen, cachedSeen bool
-	for i, r := range results {
-		if r.res == nil {
-			continue
-		}
-		var st *store.Store
-		if i == 0 {
-			st = stA
-		} else {
-			st = stB
-		}
-		nodes, _ := st.ListNodes(context.Background(), r.res.RunID)
-		for _, n := range nodes {
-			if n.NodeID != "build" {
-				continue
-			}
-			switch n.Outcome {
-			case "success":
-				leaderSeen = true
-			case string(sparkwing.Cached):
-				cachedSeen = true
-			}
-		}
-	}
-	if !leaderSeen {
-		t.Error("no leader run found; expected one Run's build node to have outcome=success")
-	}
-	if !cachedSeen {
-		t.Error("no coalesced run found; expected the other Run's build node to have outcome=cached")
 	}
 }
 

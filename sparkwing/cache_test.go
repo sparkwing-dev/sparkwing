@@ -2,193 +2,86 @@ package sparkwing_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestCacheOptions_EmptyIsNoop(t *testing.T) {
+func TestCache_NotCalledLeavesNilConfig(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{})
-	if n.CacheOpts().HasNamespace() {
-		t.Fatalf("empty Cache options should not register coordination")
+	n := sparkwing.Job(plan, "x", &buildJob{})
+	if n.CacheConfig() != nil {
+		t.Fatalf("a node without Cache() should have a nil CacheConfig")
 	}
 }
 
-// A CacheOptions with Max / OnLimit / ContentHash / CacheTTL /
-// CancelTimeout set but Namespace empty is almost certainly a typo
-// (the author meant to enable coordination but forgot the namespace).
-// Reject at Plan time so the silent-no-op footgun fails loud.
-func TestCacheOptions_NodeRejectsTypoShape_MaxWithoutNamespace(t *testing.T) {
+func TestCache_NilKeyClears(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic on Max without Namespace")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "Max") || !strings.Contains(msg, "Namespace") {
-			t.Fatalf("panic should name Max and Namespace, got %q", msg)
-		}
-	}()
-	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Max: 3})
-}
-
-func TestCacheOptions_PlanRejectsTypoShape_CacheTTLWithoutNamespace(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic on CacheTTL without Namespace")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "CacheTTL") || !strings.Contains(msg, "Namespace") {
-			t.Fatalf("panic should name CacheTTL and Namespace, got %q", msg)
-		}
-	}()
-	plan.Cache(sparkwing.CacheOptions{CacheTTL: time.Hour})
-}
-
-func TestCacheOptions_NamespaceOnlyApplyDefaults(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Namespace: "foo"})
-	got := n.CacheOpts()
-	if got.Namespace != "foo" {
-		t.Fatalf("Namespace = %q, want foo", got.Namespace)
+	key := func(_ context.Context) sparkwing.CacheKey { return "k" }
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(key)
+	if n.CacheConfig() == nil {
+		t.Fatalf("Cache(key) should register a config")
 	}
-	if got.Max != 1 {
-		t.Fatalf("Max = %d, want 1", got.Max)
-	}
-	if got.OnLimit != sparkwing.Queue {
-		t.Fatalf("OnLimit = %q, want %q", got.OnLimit, sparkwing.Queue)
-	}
-	if got.CacheTTL != 0 {
-		t.Fatalf("CacheTTL = %s, want 0 (no memoization without ContentHash)", got.CacheTTL)
+	n.Cache(nil)
+	if n.CacheConfig() != nil {
+		t.Fatalf("Cache(nil) should clear the config")
 	}
 }
 
-func TestCacheOptions_ContentHashDefaultsTTL(t *testing.T) {
+func TestCache_DefaultsTTL(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{
-		Namespace:   "foo",
-		ContentHash: func(_ context.Context) sparkwing.CacheKey { return "k" },
-	})
-	if got := n.CacheOpts().CacheTTL; got != sparkwing.DefaultCacheTTL {
-		t.Fatalf("CacheTTL = %s, want DefaultCacheTTL", got)
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(
+		func(_ context.Context) sparkwing.CacheKey { return "k" })
+	cfg := n.CacheConfig()
+	if cfg == nil {
+		t.Fatal("expected a cache config")
+	}
+	if cfg.TTL != sparkwing.DefaultCacheTTL {
+		t.Fatalf("TTL = %s, want DefaultCacheTTL", cfg.TTL)
 	}
 }
 
-func TestCacheOptions_ClampsLongTTL(t *testing.T) {
+func TestCache_TTLOptionApplied(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{
-		Namespace:   "foo",
-		ContentHash: func(_ context.Context) sparkwing.CacheKey { return "k" },
-		CacheTTL:    365 * 24 * time.Hour,
-	})
-	if got := n.CacheOpts().CacheTTL; got != sparkwing.MaxCacheTTL {
-		t.Fatalf("CacheTTL = %s, want MaxCacheTTL", got)
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(
+		func(_ context.Context) sparkwing.CacheKey { return "k" },
+		sparkwing.TTL(2*time.Hour))
+	if got := n.CacheConfig().TTL; got != 2*time.Hour {
+		t.Fatalf("TTL = %s, want 2h", got)
 	}
 }
 
-func TestCacheOptions_PanicsOnNegativeMax(t *testing.T) {
+func TestCache_ClampsLongTTL(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic on Max<0")
-		}
-	}()
-	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Namespace: "k", Max: -1})
-}
-
-func TestCacheOptions_PanicsOnNegativeTTL(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic on CacheTTL<0")
-		}
-	}()
-	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Namespace: "k", CacheTTL: -time.Second})
-}
-
-func TestCacheOptions_QueueTimeoutPreserved(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "gate", &buildJob{}).Cache(sparkwing.CacheOptions{
-		Namespace:    "deploy-prod",
-		OnLimit:      sparkwing.Queue,
-		QueueTimeout: 30 * time.Second,
-	})
-	if got := n.CacheOpts().QueueTimeout; got != 30*time.Second {
-		t.Fatalf("QueueTimeout = %s, want 30s", got)
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(
+		func(_ context.Context) sparkwing.CacheKey { return "k" },
+		sparkwing.TTL(365*24*time.Hour))
+	if got := n.CacheConfig().TTL; got != sparkwing.MaxCacheTTL {
+		t.Fatalf("TTL = %s, want MaxCacheTTL", got)
 	}
 }
 
-func TestCacheOptions_PanicsOnNegativeQueueTimeout(t *testing.T) {
+func TestCache_NonPositiveTTLFallsBackToDefault(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic on QueueTimeout<0")
-		}
-	}()
-	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{Namespace: "k", QueueTimeout: -time.Second})
-}
-
-func TestCacheOptions_NodeRejectsTypoShape_QueueTimeoutWithoutNamespace(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic on QueueTimeout without Namespace")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "QueueTimeout") || !strings.Contains(msg, "Namespace") {
-			t.Fatalf("panic should name QueueTimeout and Namespace, got %q", msg)
-		}
-	}()
-	sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{QueueTimeout: time.Second})
-}
-
-func TestCacheOptions_PlanLevelRejectsCoalesce(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic on plan-level Coalesce")
-		}
-	}()
-	plan.Cache(sparkwing.CacheOptions{Namespace: "k", OnLimit: sparkwing.Coalesce})
-}
-
-func TestCacheOptions_PlanLevelRejectsContentHash(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic on plan-level ContentHash")
-		}
-	}()
-	plan.Cache(sparkwing.CacheOptions{
-		Namespace:   "k",
-		ContentHash: func(_ context.Context) sparkwing.CacheKey { return "v" },
-	})
-}
-
-func TestCacheOptions_NodeLevelCoalesceOK(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(sparkwing.CacheOptions{
-		Namespace: "k",
-		OnLimit:   sparkwing.Coalesce,
-	})
-	if n.CacheOpts().OnLimit != sparkwing.Coalesce {
-		t.Fatalf("node-level Coalesce should be allowed")
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(
+		func(_ context.Context) sparkwing.CacheKey { return "k" },
+		sparkwing.TTL(-time.Second))
+	if got := n.CacheConfig().TTL; got != sparkwing.DefaultCacheTTL {
+		t.Fatalf("TTL = %s, want DefaultCacheTTL", got)
 	}
 }
 
-func TestCacheOptions_PlanLevelQueueOK(t *testing.T) {
+func TestCache_KeyFnRetained(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	plan.Cache(sparkwing.CacheOptions{Namespace: "prod-deploys", Max: 3})
-	got := plan.CacheOpts()
-	if got.Namespace != "prod-deploys" || got.Max != 3 {
-		t.Fatalf("plan-level cache = %+v", got)
+	n := sparkwing.Job(plan, "x", &buildJob{}).Cache(
+		func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key("coverage", "shard-1") })
+	cfg := n.CacheConfig()
+	if cfg == nil || cfg.Key == nil {
+		t.Fatal("expected a retained key function")
+	}
+	if got := cfg.Key(context.Background()); got != sparkwing.Key("coverage", "shard-1") {
+		t.Fatalf("key fn returned %q", got)
 	}
 }
 
