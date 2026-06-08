@@ -88,6 +88,10 @@ type ConcurrencyLimit struct {
 	Scope Scope
 
 	OnLimit OnLimit
+
+	QueueTimeout time.Duration
+
+	CancelTimeout time.Duration
 }
 func Config(ctx context.Context, name string) (string, error)
 type Constraint interface {

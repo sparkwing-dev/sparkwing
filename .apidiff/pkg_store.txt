@@ -20,6 +20,8 @@ type AcquireSlotRequest struct {
 	CancelTimeout time.Duration
 	Lease         time.Duration
 	BypassRead    bool
+
+	Cost int
 }
 type AcquireSlotResponse struct {
 	Kind             AcquireKind
@@ -82,6 +84,9 @@ type ConcurrencyWaiter struct {
 	LeaderRunID   string
 	LeaderNodeID  string
 	CancelTimeout time.Duration
+
+	Cost             int
+	DeclaredCapacity int
 
 	Position int
 }
