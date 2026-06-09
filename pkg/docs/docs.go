@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed all:content
+//go:embed all:mirror
 var allDocs embed.FS
 
 // Entry describes one doc topic. Slug is what the CLI takes via
@@ -30,7 +30,7 @@ type Entry struct {
 // List returns every embedded doc in alphabetical slug order.
 func List() []Entry {
 	var entries []Entry
-	_ = fs.WalkDir(allDocs, "content", func(p string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(allDocs, "mirror", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -41,7 +41,7 @@ func List() []Entry {
 		if rerr != nil {
 			return nil
 		}
-		rel := strings.TrimPrefix(p, "content/")
+		rel := strings.TrimPrefix(p, "mirror/")
 		slug := strings.TrimSuffix(rel, ".md")
 		title, summary := extractTitleSummary(body)
 		entries = append(entries, Entry{
@@ -61,7 +61,7 @@ func List() []Entry {
 // rewriteCLILinks). Returns ErrNotFound when the slug is unknown.
 func Read(slug string) (string, error) {
 	slug = strings.TrimSuffix(slug, ".md")
-	p := path.Join("content", slug+".md")
+	p := path.Join("mirror", slug+".md")
 	body, err := fs.ReadFile(allDocs, p)
 	if err != nil {
 		return "", fmt.Errorf("docs: %q: %w", slug, ErrNotFound)

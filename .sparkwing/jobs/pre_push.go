@@ -160,7 +160,8 @@ func (p *PrePush) run(ctx context.Context) error {
 	}
 
 	// 8. Docs-vs-reality gate (internal/doccheck), three checks over
-	// pkg/docs/content + the CLI help registry:
+	// docs/ (the canonical source -- not the pkg/docs/mirror copy, so
+	// authors are caught where they edit) + the CLI help registry:
 	//   - go blocks compile against the in-repo SDK (catches removed
 	//     helpers, wrong signatures, methods gone from *Plan/*Work);
 	//   - sparkwing.yaml blocks decode through the real strict
@@ -170,7 +171,7 @@ func (p *PrePush) run(ctx context.Context) error {
 	//     that must never reappear in docs or help text.
 	// migrations/ and proposals/ are excluded (design history).
 	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/pkg/docs/content" "$ROOT"`,
+		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("doc-examples: %v", err))
 	} else {

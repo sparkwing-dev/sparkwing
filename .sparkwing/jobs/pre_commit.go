@@ -15,18 +15,21 @@ import (
 // PreCommit gates local commits with fast deterministic checks. The
 // gofmt + go vet pair covers the .sparkwing/ Go module; the two regex
 // sweeps cover the whole tracked tree for em dashes and internal
-// tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-, REG-, TOD-).
+// tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-, REG-, TOD-); the
+// docs-mirror check fails when docs/ (the source) and pkg/docs/mirror/
+// (the embedded copy) have drifted, so an edit to docs/ can't be
+// committed without re-running bin/sync-docs.sh.
 //
-// Wire it to git: declare the `pre_commit:` trigger in pipelines.yaml
+// Wire it to git: declare the `pre_commit:` trigger in sparkwing.yaml
 // and run `sparkwing pipeline hooks install`.
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Fast pre-commit gate: format, vet, em-dash + tracker-ID sweeps"
+	return "Fast pre-commit gate: format, vet, em-dash + tracker-ID sweeps, docs-mirror sync"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt and go vet on the .sparkwing/ module, plus two repo-wide regex checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-)."
+	return "Runs gofmt and go vet on the .sparkwing/ module, plus repo-wide checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), and that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted)."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -50,11 +53,23 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "vet", runVet)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
+	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	return nil, nil
 }
 
 func runGofmt(ctx context.Context) error {
 	return sparkwing.Bash(ctx, `gofmt -l .sparkwing/`).MustBeEmpty("files need formatting")
+}
+
+// checkDocsMirror fails when the embedded pkg/docs/mirror/ has drifted
+// from the canonical docs/ source. Read-only (a recursive diff, no
+// mutation) so it's safe to run alongside the other parallel steps. The
+// fix is `bash bin/sync-docs.sh && git add pkg/docs/mirror`.
+func checkDocsMirror(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "diff -rq docs pkg/docs/mirror").Run(); err != nil {
+		return fmt.Errorf("docs/ and pkg/docs/mirror/ are out of sync; run `bash bin/sync-docs.sh && git add pkg/docs/mirror` (edit docs/, never the mirror)")
+	}
+	return nil
 }
 
 func runVet(ctx context.Context) error {
