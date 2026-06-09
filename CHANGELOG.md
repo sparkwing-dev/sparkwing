@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.9.0] - 2026-06-09
 ### Added
 
 - **cli:** `-C` / `--sw-cd <dir>` now works on the discovery verbs
