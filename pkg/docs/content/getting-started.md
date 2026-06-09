@@ -128,7 +128,7 @@ PVC declares a class and no default exists on the cluster.
 
 ```
 .sparkwing/
-  pipelines.yaml    # registry of every pipeline this repo defines
+  sparkwing.yaml    # registry of every pipeline this repo defines
   main.go           # registers Go jobs
   go.mod            # Go module for pipeline code
   go.sum            # dependency checksums
@@ -159,11 +159,11 @@ and returns a DAG of nodes. One-node pipelines return a Plan with a single
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
+    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
-    tags: [ci, deploy]
 ```
 
 ```go
@@ -180,46 +180,44 @@ func (p *BuildDeploy) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, ru
 
 type Test struct{ sw.Base }
 
-func (j *Test) Work() *sw.Work {
-    w := sw.NewWork()
-    w.Step("run", func(ctx context.Context) error {
+func (j *Test) Work(w *sw.Work) (*sw.WorkStep, error) {
+    sw.Step(w, "run", func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "go test ./...").Run()
         return err
     })
-    return w
+    return nil, nil
 }
 
 type Build struct{ sw.Base }
 
-func (j *Build) Work() *sw.Work {
-    w := sw.NewWork()
-    w.Step("run", func(ctx context.Context) error {
+func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
+    sw.Step(w, "run", func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "docker build -t myapp .").Run()
         return err
     })
-    return w
+    return nil, nil
 }
 
 // In .sparkwing/main.go:
 //     sw.Register[sw.NoInputs]("build-deploy", func() sw.Pipeline[sw.NoInputs] { return &BuildDeploy{} })
 ```
 
-Trivial single-step pipelines just register one Job via `sw.JobFn`:
+Trivial single-step pipelines pass a `func(ctx) error` straight to `sw.Job`:
 
 ```go
 type Lint struct{ sw.Base }
 
 func (p *Lint) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
-    sw.Job(plan, rc.Pipeline, sw.JobFn(func(ctx context.Context) error {
+    sw.Job(plan, rc.Pipeline, func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "go vet ./...").Run()
         return err
-    }))
+    })
     return nil
 }
 ```
 
 Step boundaries inside a `Work()` are emitted automatically by each
-`w.Step` as structured `step_start` / `step_end` events; the
+`sw.Step` as structured `step_start` / `step_end` events; the
 dashboard surfaces them as a collapsible bucket. For DAG-level
 composition (parallel, sequence, needs, modifiers), use the `Plan`.
 
@@ -253,15 +251,16 @@ silent releases possible.
 
 `sparkwing run` executes locally; `sparkwing pipeline trigger` hands
 execution to a profile's controller. Both take `--profile` to pick where
-state lives and which controller to talk to, and `--from` to compile a git
-ref instead of the working tree:
+state lives and which controller to talk to. `sparkwing run` also takes
+`--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
+tree (trigger runs the source registered with the controller):
 
 ```bash
-sparkwing run build                                    # run locally with local code
-sparkwing run build --profile dev                      # local code, state via "dev"
-sparkwing pipeline trigger build --profile dev         # run on the "dev" cluster
-sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
-sparkwing pipeline trigger build --from main --profile prod  # main branch code on "prod"
+sparkwing run build                              # run locally with local code
+sparkwing run build --profile dev               # local code, state via "dev"
+sparkwing run build --sw-ref main               # build the main ref locally
+sparkwing pipeline trigger build --profile dev  # run on the "dev" cluster
+sparkwing pipeline trigger build --profile prod # run on the "prod" cluster
 ```
 
 Cluster names are profiles you configure with `sparkwing configure profiles

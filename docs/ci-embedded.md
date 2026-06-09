@@ -38,7 +38,7 @@ jobs:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION:            us-west-2
-        run: sparkwing run release-prod --mode=ci-embedded --workers=4
+        run: sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
 ```
 
 State, cache, and logs destinations come from the resolved profile in
@@ -50,7 +50,7 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 
 ## How it works
 
-1. `--mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
+1. `--sw-mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
    via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
 2. The orchestrator resolves state, cache, and logs from the active
    profile. In GHA the built-in `gha` profile auto-detects and selects
@@ -68,8 +68,8 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--mode=ci-embedded` | (off) | Enables this mode. |
-| `--workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. GHA hosted runners are 2-CPU; setting `--workers=4` on small VMs over-subscribes -- pick deliberately. |
+| `--sw-mode=ci-embedded` | (off) | Enables this mode. |
+| `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. GHA hosted runners are 2-CPU; setting `--sw-workers=4` on small VMs over-subscribes -- pick deliberately. |
 | `--profile PROFILE` | (auto) | Selects a profile from `~/.config/sparkwing/profiles.yaml`. Absent, the auto-detected (`gha`) or default profile applies. |
 
 State, cache, and logs come from the resolved profile; see
@@ -114,7 +114,7 @@ profiles:
 Then:
 
 ```sh
-sparkwing run release-prod --mode=ci-embedded --profile ci-team
+sparkwing run release-prod --sw-mode=ci-embedded --profile ci-team
 ```
 
 ## Watching from a laptop dashboard
@@ -189,7 +189,7 @@ node fails the CI step.
   output (sha256 over source + go toolchain). Same source tree on the
   same Go version = warm cache.
 - **Worker count vs CPU**. GHA hosted runners default to 2 CPUs.
-  `--workers=NumCPU` (the default) usually fits fine; larger numbers
+  `--sw-workers=NumCPU` (the default) usually fits fine; larger numbers
   trade memory pressure for less queueing.
 
 ## Buildkite
@@ -198,7 +198,7 @@ node fails the CI step.
 steps:
   - label: "release"
     command: |
-      sparkwing run release-prod --mode=ci-embedded --workers=4
+      sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
     plugins:
       - aws-credentials#v1.0:
           role: arn:aws:iam::1234:role/buildkite-sparkwing
@@ -227,7 +227,7 @@ release:
     - apk add --no-cache curl
     - curl -fsSL https://sparkwing.dev/install.sh | sh
   script:
-    - sparkwing run release-prod --mode=ci-embedded --workers=4
+    - sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
 ```
 
 Declare a `gitlab` profile with `detect: { env_var: GITLAB_CI, equals:

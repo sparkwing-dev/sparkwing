@@ -98,10 +98,13 @@ sparkwing cluster tokens list
 sparkwing cluster tokens list --include-revoked
 
 # Revoke a token by its non-secret prefix.
-sparkwing cluster tokens revoke swu_6cF9r
+sparkwing cluster tokens revoke --prefix swu_6cF9r
 
 # Look up metadata for a prefix.
-sparkwing cluster tokens lookup swu_6cF9r
+sparkwing cluster tokens lookup --prefix swu_6cF9r
+
+# Rotate: mint a replacement, with a grace window before the old one 401s.
+sparkwing cluster tokens rotate --prefix swu_6cF9r --grace 48h
 ```
 
 `sparkwing configure profiles` is the only place connection config lives.
@@ -129,9 +132,6 @@ here once the cutover happens.
   shape-compatible; an OIDC callback can populate sessions directly.
 - **Audit trail**: structured HTTP logs include the principal +
   prefix. A dedicated audit DB is a later session.
-- **Rotation**: `sparkwing cluster tokens rotate <prefix>` is phase 2 work;
-  issues a replacement token with a grace window before the old one
-  401s.
 - **Per-user multi-tenancy**: principals are a free-form label today.
   Adding a `users` table with roles is orthogonal and doesn't require
   a wire-shape change.

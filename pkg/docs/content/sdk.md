@@ -6,7 +6,7 @@ signatures and one-line summaries - designed to be loaded once at the
 start of a pipeline-authoring task.
 
 For the conceptual tour (Plan, Job, Job, Work, modifiers,
-`pipelines.yaml` shape), read [pipelines](pipelines.md). This page is
+`sparkwing.yaml` shape), read [pipelines](pipelines.md). This page is
 the authoritative SDK reference for the `sparkwing` Go package.
 
 The convention is to import the SDK under the alias `sw`:
@@ -252,9 +252,7 @@ is stamped with the current Job and Job-stack envelope.
 
 Step boundaries are emitted automatically by `RunWork` as structured
 `step_start` / `step_end` events; the renderer surfaces them as a
-collapsible bucket in the CLI and dashboard. The pre-rewrite
-package-level `sparkwing.Step` / `sparkwing.StepErr` log breadcrumbs
-are gone.
+collapsible bucket in the CLI and dashboard.
 
 These four helpers are sparkwing's pipeline-observability channel,
 not a general-purpose logger -- they exist so node output, run
@@ -483,11 +481,9 @@ under `--dry-run`: `would_dry_run` (DryRunFn defined),
 and preview always agree.
 
 Do NOT add a `flag:"dry-run"` field to your pipeline's typed
-Inputs as a roll-your-own preview mode. `--dry-run` is a reserved
-sparkwing-level flag (see *Typed Inputs > Reserved flag names* below)
-and `Register` panics on the collision. Declare `step.DryRun(fn)`
-on the steps that mutate, and the sparkwing-level `--dry-run` does
-the right thing for free.
+Inputs as a roll-your-own preview mode. Declare `step.DryRun(fn)`
+on the steps that mutate, and the runner-level `--sw-dry-run`
+dispatches your DryRun bodies for free (see *Flag namespace* below).
 
 `*StepGroup` (returned by `sw.GroupSteps`) is both a `Needs` target
 (a downstream `step.Needs(group)` depends on every member) and a
@@ -769,46 +765,42 @@ type WrapperInputs struct {
 }
 ```
 
-### Reserved flag names
+### Flag namespace: `--sw-*` vs your flags
 
-`sparkwing run` consumes a set of sparkwing-owned long flags before
-the pipeline binary parses anything.
-A pipeline Args struct that declares one of these as a `flag:"..."`
-tag would silently lose the value, so `sparkwing.Register` panics
-at registration time with the colliding flag, the offending Go
-field, and the full reserved list.
-
-Current reserved set, from `sparkwing.ReservedFlagNames()`:
+`sparkwing run` keeps its own control flags out of your way by
+prefixing every one of them with `sw-`:
 
 ```
-allow               --allow              // risk-label gate
-C, change-directory --change-directory   // re-anchor .sparkwing/ discovery
-config              --config             // named preset from config.yaml
-dry-run             --dry-run            // dry-run dispatch
-from                --from               // compile pipeline from a git ref
-mode                --mode               // run mode override
-no-update           --no-update          // skip auto-update on invocation
-profile             --profile            // storage / dispatch profile
-secrets             --secrets            // ad-hoc secret injection
-start-at            --start-at           // skip nodes before this step
-stop-at             --stop-at            // skip nodes after this step
-v, verbose          --verbose            // SPARKWING_LOG_LEVEL=debug
-workers             --workers            // local-execution parallelism
+-C, --sw-cd PATH          // re-anchor .sparkwing/ discovery
+    --sw-ref REF          // compile the pipeline at a git ref
+-v, --sw-verbose          // debug logging
+    --sw-start-at STEP    // start the run at STEP
+    --sw-stop-at STEP     // stop the run after STEP
+    --sw-only GLOB        // run only matching jobs (+ their Needs)
+    --sw-no-cache         // ignore cached per-node results
+    --sw-local-only       // force local state/cache/logs
+    --sw-dry-run          // run each step's dry-run probe
+    --sw-allow LABEL,...  // authorize risk-labeled steps
+    --sw-box-slots N      // max concurrent run processes on this host
+    --sw-no-wait          // fail instead of queueing when slots are full
+    --sw-no-update        // skip the sparks auto-resolve step
 ```
 
-Code surface:
+Because the runner owns the `sw-` prefix, your pipeline `flag:"..."`
+tags have the entire unprefixed namespace to themselves -- there is no
+reserved-name collision check, and a field named `flag:"ref"` or
+`flag:"verbose"` resolves to *your* flag, not the runner's. Any flag
+`run` doesn't recognize is forwarded to the pipeline binary as a typed
+Arg.
 
-```
-sparkwing.ReservedFlagNames() []string   // sorted copy, safe to mutate
-```
+The only non-`sw-` flags `run` consumes itself are `--profile` and
+`--target` (storage / deployment-target selection); avoid those two
+names and the `sw-` prefix for pipeline inputs.
 
-If you need a flag with one of these names, rename it on the
-pipeline side (e.g. `--plan-only` for `dry-run`, `--my-from` for
-`from`). For `--dry-run` specifically: declare
-`step.DryRun(fn)` on each mutating step (see *Work - the inner
-DAG > Dry-run contract*) rather than rolling a `flag:"dry-run"`
-input; the sparkwing-level `--dry-run` then dispatches your DryRun
-bodies for free.
+For a `--dry-run`-style flag, prefer `step.DryRun(fn)` on each mutating
+step (see *Work - the inner DAG > Dry-run contract*) over a
+`flag:"dry-run"` input; the runner-level `--sw-dry-run` then dispatches
+your DryRun bodies for free.
 
 ## Cache
 

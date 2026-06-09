@@ -181,11 +181,11 @@ Pipelines themselves only declare *triggers*:
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-test-deploy
+    entrypoint: BuildTestDeploy
     description: Build, test, and deploy
     on:
       push:
         branches: [main]
-    tags: [ci, deploy]
 ```
 
 If a pipeline is locally-runnable (most are), `sparkwing run build-test-deploy`

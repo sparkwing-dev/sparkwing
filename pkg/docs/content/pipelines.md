@@ -23,28 +23,30 @@ kinds. Each entry is a list item with a `name:`.
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
+    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
-    tags: [ci, deploy]
 
   - name: release
+    entrypoint: Release
     description: Cut a release
     # no on: -> command, manual-only
 ```
 
-Each entry has:
+Each entry has (these are the only valid keys; an unknown field is a
+hard parse error):
 
-- **name** - the pipeline name (`sparkwing run build-deploy`)
+- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string
+- **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block. Absent means "manual only" (a command).
-- **tags** - labels for filtering and grouping
-- **env** - environment variables passed to the pipeline
-- **secrets** - cluster-stored secrets to surface
-- **runs_on** - scheduling constraints for runner selection
-  (see [scheduling](scheduling.md))
-- **hidden** - omit from `pipelines list` (still invocable by exact name)
+- **on** - declarative trigger block: `push` (branches/paths), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`. Absent means "manual only" (a command).
+- **guards** - gate dispatch on profile + args (`reject` / `require` token lists)
+- **args** - per-arg default values, keyed by CLI flag name
+- **profile** - the project profile this pipeline uses (from the `profiles:` map)
+- **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
+- **hidden** - omit from `pipeline list` (still invocable by exact name)
 
 ## Triggers
 
@@ -55,24 +57,22 @@ Trigger types live under `on:`:
 pipelines:
   # Run on git push to main
   - name: build
+    entrypoint: Build
     on:
       push:
         branches: [main]
-        branches_ignore: [dependabot/*]  # optional exclusion
         paths: ["*.go", "go.mod"]        # optional path filter
-        paths_ignore: ["docs/*"]         # optional path exclusion
 
-  # Run on pull requests
+  # Custom HTTP trigger (controller exposes this path)
   - name: review
+    entrypoint: Review
     on:
-      pull_request:
-        branches: [main]
-        types: [opened, synchronize]
-        labels: [deploy]                 # optional label filter
-        paths_ignore: ["*.md"]
+      webhook:
+        path: /review
 
   # Scheduled (cron)
   - name: nightly
+    entrypoint: Nightly
     on:
       schedule: "0 2 * * *"
 ```
@@ -292,7 +292,7 @@ and a single `Needs(group)` target downstream.
 already known when `Plan()` runs:
 
 ```go
-images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, sw.Workable) {
+images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, any) {
     return "build-" + img.Name, &BuildImage{Image: img}
 }).Needs(webBuild, discover).Retry(2)
 
@@ -324,7 +324,7 @@ func (j *ListShards) run(ctx context.Context) ([]string, error) {
 
 shards := sw.Job(plan, "list-shards", &ListShards{})
 
-sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, sw.Workable) {
+sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, any) {
     return "process-" + shard, &ProcessShard{Shard: shard}
 })
 ```
@@ -369,7 +369,7 @@ pair becomes a fresh Plan node. The spawning runner stays suspended
 across the entire fan-out:
 
 ```go
-sw.JobSpawnEach(w, targets, func(target string) (string, sw.Workable) {
+sw.JobSpawnEach(w, targets, func(target string) (string, any) {
     return "deploy-" + target, &Deploy{Target: target}
 }).Needs(buildStep)
 ```
@@ -430,15 +430,17 @@ know to inspect the run for the actual child nodes. `JobFanOutDynamic`
 source nodes are auto-marked dynamic at plan finalization, so you only
 need `.Dynamic()` for the non-fan-out case.
 
-### `.Group("name")`
+### `GroupJobs(plan, "name", ...)`
 
 Pure UI annotation. The dashboard folds nodes that share a group under
 one collapsible header; the scheduler, cache, retry, and dependency
 semantics are unchanged.
 
 ```go
-sw.Job(plan, "schema-check",  &SchemaCheckJob{}).Group("safety")
-sw.Job(plan, "security-scan", &SecurityScanJob{}).Group("safety")
+sw.GroupJobs(plan, "safety",
+    sw.Job(plan, "schema-check", &SchemaCheckJob{}),
+    sw.Job(plan, "security-scan", &SecurityScanJob{}),
+)
 ```
 
 ## Eager Plan-time materialization
