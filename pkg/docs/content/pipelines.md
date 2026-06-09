@@ -23,29 +23,28 @@ kinds. Each entry is a list item with a `name:`.
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
-    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
+    tags: [ci, deploy]
 
   - name: release
-    entrypoint: Release
     description: Cut a release
     # no on: -> command, manual-only
 ```
 
-Each entry has (these are the only valid keys; an unknown field is a
-hard parse error):
+Each entry has:
 
-- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", …)` string
-- **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
+- **name** - the pipeline name (`sparkwing run build-deploy`)
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on profile + args (`reject` / `require` token lists)
-- **args** - per-arg default values, keyed by CLI flag name
-- **profile** - the project profile this pipeline uses (from the `profiles:` map)
-- **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
+- **on** - declarative trigger block. Absent means "manual only" (a command).
+- **tags** - labels for filtering and grouping
+- **env** - environment variables passed to the pipeline
+- **secrets** - cluster-stored secrets to surface
+- **runs_on** - scheduling constraints for runner selection
+  (see [scheduling](scheduling.md))
+- **hidden** - omit from `pipelines list` (still invocable by exact name)
 
 ## Triggers
 
@@ -293,7 +292,7 @@ and a single `Needs(group)` target downstream.
 already known when `Plan()` runs:
 
 ```go
-images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, any) {
+images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, sw.Workable) {
     return "build-" + img.Name, &BuildImage{Image: img}
 }).Needs(webBuild, discover).Retry(2)
 
@@ -325,7 +324,7 @@ func (j *ListShards) run(ctx context.Context) ([]string, error) {
 
 shards := sw.Job(plan, "list-shards", &ListShards{})
 
-sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, any) {
+sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, sw.Workable) {
     return "process-" + shard, &ProcessShard{Shard: shard}
 })
 ```
@@ -370,7 +369,7 @@ pair becomes a fresh Plan node. The spawning runner stays suspended
 across the entire fan-out:
 
 ```go
-sw.JobSpawnEach(w, targets, func(target string) (string, any) {
+sw.JobSpawnEach(w, targets, func(target string) (string, sw.Workable) {
     return "deploy-" + target, &Deploy{Target: target}
 }).Needs(buildStep)
 ```

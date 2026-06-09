@@ -6,7 +6,7 @@ signatures and one-line summaries - designed to be loaded once at the
 start of a pipeline-authoring task.
 
 For the conceptual tour (Plan, Job, Job, Work, modifiers,
-`sparkwing.yaml` shape), read [pipelines](pipelines.md). This page is
+`pipelines.yaml` shape), read [pipelines](pipelines.md). This page is
 the authoritative SDK reference for the `sparkwing` Go package.
 
 The convention is to import the SDK under the alias `sw`:
@@ -164,13 +164,6 @@ Exec(ctx, name, args...)      *Cmd  // no shell; arg-vector form
 WorkDir() string                    // pipeline working directory (repo root)
 ```
 
-`Bash` runs the line verbatim with NO implicit `set -euo pipefail`: a
-mid-line failure in a multi-line body is silently swallowed and the
-step reports success. Prefix multi-line bodies with `set -euo pipefail`
-(or use `Exec` for single commands). Relative paths in `Bash`/`Exec`
-and `Path`/`ReadFile` resolve against `WorkDir()` = the repo root (the
-parent of `.sparkwing/`), not `.sparkwing/` itself.
-
 `Bash` shells out to the host's `bash`. macOS and Linux have it by
 default. **On Windows, install [Git for Windows](https://git-scm.com/download/win)
 and run `sparkwing` from the Git Bash terminal it ships** -- the same dep
@@ -206,13 +199,6 @@ work):
 .MustBeEmpty(reason) error          // non-empty stdout becomes "<reason>:\n<stdout>"
 ```
 
-`ExecResult` carries the captured outcome; `ExecError` (the error type
-on a non-zero exit) carries the same plus the wrapped `Cause`:
-
-```go
-type ExecResult struct { Command, Stdout, Stderr string; ExitCode int }
-```
-
 Common shapes:
 
 ```go
@@ -231,14 +217,7 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 
 ## Files
 
-These are **package-level functions** -- call them as `sparkwing.Path(...)`,
-`sparkwing.WorkDir()`, etc. (NOT methods on `rc`/`RunContext`, NOT `*Cmd`
-terminators). `WorkDir()` takes no arguments. They resolve relative
-paths against the auto-discovered project root and work anywhere inside
-a Job/Step body.
-
 ```
-WorkDir() string                            // repo root (parent of .sparkwing/); no args
 Path(parts...) string                       // join onto WorkDir(); abs first part wins
 ReadFile(path) ([]byte, error)              // os.ReadFile, relative -> WorkDir()
 WriteFile(path, data) error                 // os.WriteFile, perm 0o644
@@ -284,43 +263,6 @@ interface is pluggable: install your own backend (slog, zerolog,
 zap, OTel) via `sparkwing.WithLogger(ctx, impl)` and the call sites
 stay the same.
 
-## Service containers (integration tests)
-
-For tests that need a throwaway dependency (Postgres, Redis, …), the
-`sparkwing/services` package starts containers, waits for readiness,
-runs your function, and tears them down -- even on failure or panic.
-This is the blessed setup/teardown idiom; do NOT use `AfterRun` for
-cleanup (it's an observer that can't change outcome and isn't
-guaranteed on failure), and don't put teardown in a downstream `Needs`
-node (it's skipped when the upstream fails).
-
-```go
-import "github.com/sparkwing-dev/sparkwing/sparkwing/services"
-
-func (Test) runIntegration(ctx context.Context) error {
-    return services.WithServices(ctx, []services.Service{{
-        Image:    "redis:7-alpine",
-        Port:     6379,
-        ReadyCmd: "redis-cli ping",          // ready when this exits 0
-        Env:      map[string]string{},
-    }}, func(ctx context.Context) error {
-        _, err := sw.Exec(ctx, "go", "test", "./integration/...").Run()
-        return err
-    })
-}
-```
-
-`func WithServices(ctx, []Service, fn func(ctx) error) error`.
-`Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` --
-empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
-30s. `ReadyCmd` runs inside the container via `docker exec` (e.g.
-`redis-cli ping`, `pg_isready`), so it needs no host-side client.
-
-Set `Port` and the service is published to `127.0.0.1:<Port>`, so your
-test reaches it at `localhost:<Port>` on every platform, including
-Docker Desktop on macOS/Windows. (Leave `Port` unset and the container
-uses host networking, which is reachable from the host on Linux only.)
-
 ## Plan - the outer DAG
 
 Every pipeline implements
@@ -339,27 +281,6 @@ rc.Pipeline string         // registered pipeline name
 rc.Git      *Git           // repo state at the trigger SHA
 rc.Trigger  TriggerInfo    // {Source: "push|manual|schedule|webhook", User, Env}
 ```
-
-`*Git` is the resolved repo state -- branch-conditional logic reads it
-directly rather than shelling out to `git`:
-
-```go
-type Git struct {
-    SHA           string // full 40-char commit
-    Branch        string // "main"; "" when detached HEAD
-    DefaultBranch string // origin/HEAD target; "" when no remote
-    Repo          string // "owner/name"
-    RepoURL       string // "git@github.com:owner/name.git"
-}
-```
-
-`Plan()` is pure, so branch decisions that must shell out belong in a
-node `SkipIf` predicate (runs at dispatch), but `rc.Git.Branch` is
-already populated at Plan time -- prefer it: `deploy.SkipIf(func(context.Context) bool { return rc.Git.Branch != "main" })`.
-Note: in a repo with no commits yet (unborn HEAD), `Branch` is `""`,
-not `"main"` -- commit once before relying on branch-conditional logic,
-or your gate silently takes the off-main path while the run still
-exits 0.
 
 Most one-step Plans don't need `rc` at all - the parameter is named
 for the moment a Plan starts branching on trigger source / SHA.
@@ -437,9 +358,9 @@ steps...)`.
 Common Plan-layer modifiers (chainable on `*Job`):
 
 ```
-.Retry(attempts, opts...)          // re-run up to `attempts` ADDITIONAL times on failure (attempts+1 total runs); re-runs the whole Work() body each retry. Opts: RetryBackoff(d time.Duration) (fixed delay), RetryAuto() (exponential w/ jitter)
+.Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
 .Timeout(d)                        // hard kill after d
-.Verify(func(ctx context.Context) error)  // postcondition checked after the action succeeds; non-nil fails the node at StageVerify
+.Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
 .Requires(labels...)                 // require runner labels (AND semantics)
@@ -447,34 +368,9 @@ Common Plan-layer modifiers (chainable on `*Job`):
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
 .Dynamic()                         // mark runtime-variable downstream shape
-.ContinueOnError() / .Optional()   // failure-propagation knobs (differ! see below)
+.ContinueOnError() / .Optional()   // failure-propagation knobs
 .NeedsOptional(deps...)            // soft upstream dep
 ```
-
-`ContinueOnError` vs `Optional` -- they are NOT the same:
-
-| modifier | downstream dependents | overall run status / exit code |
-|----------|-----------------------|--------------------------------|
-| `ContinueOnError()` | still run (failure doesn't cancel them) | **run still FAILS** (exit 1) |
-| `Optional()` | still run | run **SUCCEEDS** (exit 0) -- the node's failure is absorbed |
-
-So for "a check may fail but shouldn't fail the run" (e.g. a
-notify-on-failure recovery), use `Optional()`. `OnFailure` alone does
-NOT make the run pass -- the originating node is still counted failed;
-combine `OnFailure` (run the recovery) with `Optional` (absorb the
-failure) if you want a green run.
-
-The `Failure` passed to a failure-aware `OnFailure` recovery:
-
-```go
-type Failure struct {
-    Stage FailureStage // StageAction (the Run failed) or StageVerify (the Verify check failed)
-    Err   error        // the underlying error (probe error, exec error, ...)
-}
-```
-
-Branch on `f.Stage` to recover differently for an action failure vs a
-verify (post-deploy health-check) failure.
 
 ## Workable - the Work-bearing interface
 

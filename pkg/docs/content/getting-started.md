@@ -128,7 +128,7 @@ PVC declares a class and no default exists on the cluster.
 
 ```
 .sparkwing/
-  sparkwing.yaml    # registry of every pipeline this repo defines
+  pipelines.yaml    # registry of every pipeline this repo defines
   main.go           # registers Go jobs
   go.mod            # Go module for pipeline code
   go.sum            # dependency checksums
@@ -159,11 +159,11 @@ and returns a DAG of nodes. One-node pipelines return a Plan with a single
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
-    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
+    tags: [ci, deploy]
 ```
 
 ```go
@@ -180,44 +180,46 @@ func (p *BuildDeploy) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, ru
 
 type Test struct{ sw.Base }
 
-func (j *Test) Work(w *sw.Work) (*sw.WorkStep, error) {
-    sw.Step(w, "run", func(ctx context.Context) error {
+func (j *Test) Work() *sw.Work {
+    w := sw.NewWork()
+    w.Step("run", func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "go test ./...").Run()
         return err
     })
-    return nil, nil
+    return w
 }
 
 type Build struct{ sw.Base }
 
-func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    sw.Step(w, "run", func(ctx context.Context) error {
+func (j *Build) Work() *sw.Work {
+    w := sw.NewWork()
+    w.Step("run", func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "docker build -t myapp .").Run()
         return err
     })
-    return nil, nil
+    return w
 }
 
 // In .sparkwing/main.go:
 //     sw.Register[sw.NoInputs]("build-deploy", func() sw.Pipeline[sw.NoInputs] { return &BuildDeploy{} })
 ```
 
-Trivial single-step pipelines pass a `func(ctx) error` straight to `sw.Job`:
+Trivial single-step pipelines just register one Job via `sw.JobFn`:
 
 ```go
 type Lint struct{ sw.Base }
 
 func (p *Lint) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
-    sw.Job(plan, rc.Pipeline, func(ctx context.Context) error {
+    sw.Job(plan, rc.Pipeline, sw.JobFn(func(ctx context.Context) error {
         _, err := sw.Bash(ctx, "go vet ./...").Run()
         return err
-    })
+    }))
     return nil
 }
 ```
 
 Step boundaries inside a `Work()` are emitted automatically by each
-`sw.Step` as structured `step_start` / `step_end` events; the
+`w.Step` as structured `step_start` / `step_end` events; the
 dashboard surfaces them as a collapsible bucket. For DAG-level
 composition (parallel, sequence, needs, modifiers), use the `Plan`.
 
