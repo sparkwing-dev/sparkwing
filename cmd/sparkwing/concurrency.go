@@ -17,6 +17,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	flag "github.com/spf13/pflag"
 )
 
@@ -173,18 +174,11 @@ func renderConcurrencyState(w io.Writer, st *concState) {
 	_ = tw.Flush()
 }
 
-// scopeFromKey reports the scope a concurrency key encodes. The
-// orchestrator qualifies Run/Box-scoped group keys with an "@<id>"
-// suffix; a bare name is fleet-global. A "memo:" key is the
-// content-addressed memoization slot, not a group.
+// scopeFromKey reports the scope a concurrency key encodes. The key
+// scheme (scope-tag prefix) is owned by the orchestrator; this defers
+// to its parser so the CLI label can't drift from the producer.
 func scopeFromKey(key string) string {
-	if strings.HasPrefix(key, "memo:") {
-		return "content-cache"
-	}
-	if i := strings.LastIndex(key, "@"); i >= 0 {
-		return "run-or-box (" + key[i+1:] + ")"
-	}
-	return "global"
+	return orchestrator.ScopeLabelFromKey(key)
 }
 
 func runNode(runID, nodeID string) string {
