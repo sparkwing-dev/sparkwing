@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -38,6 +37,7 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		RunID:         req.RunID,
 		NodeID:        req.NodeID,
 		Max:           req.Capacity,
+		Cost:          req.Cost,
 		Policy:        req.Policy,
 		CacheKeyHash:  req.CacheKeyHash,
 		CacheTTL:      req.CacheTTL,
@@ -77,34 +77,54 @@ func (h *HTTPConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 	return h.client.ReleaseSlot(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 }
 
-// ResolveWaiter has no HTTP endpoint yet; in-pod orchestrators
-// dispatch through the controller and don't wait locally.
+// ResolveWaiter polls the controller's resolve endpoint so an in-pod
+// orchestrator can wait on a queued/coalesced group slot and observe
+// promotion, a cache hit, leader completion, or cancellation -- the
+// same resolutions the in-process backend serves from the store.
 func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
-	_ = ctx
-	_ = runID
-	_ = nodeID
-	_ = cacheKeyHash
-	_ = leaderRunID
-	_ = leaderNodeID
-	return store.WaiterResolution{Status: store.WaiterStillWaiting}, fmt.Errorf("HTTPConcurrency.ResolveWaiter: not yet implemented on the wire; in-pod orchestrators should not wait locally (key=%s)", key)
+	resp, err := h.client.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID)
+	if err != nil {
+		return store.WaiterResolution{}, err
+	}
+	res := store.WaiterResolution{
+		Status:             store.WaiterStatus(resp.Status),
+		HolderID:           resp.HolderID,
+		HolderLeaseExpires: resp.HolderLeaseExpires,
+		OutputRef:          resp.OutputRef,
+		OriginRunID:        resp.OriginRunID,
+		OriginNodeID:       resp.OriginNodeID,
+		LeaderRunID:        resp.LeaderRunID,
+		LeaderNodeID:       resp.LeaderNodeID,
+		Position:           resp.Position,
+	}
+	for _, hd := range resp.Holders {
+		res.Holders = append(res.Holders, store.ConcurrencyHolder{
+			Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
+			ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt, Superseded: hd.Superseded,
+		})
+	}
+	return res, nil
 }
 
-// ForceReleaseSuperseded has no HTTP wire today; the controller's
-// reaper sweeps superseded holders on lease expiry.
+// ForceReleaseSuperseded drops superseded holders via the controller so
+// a stuck CancelOthers eviction can't block forward progress.
 func (h *HTTPConcurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
-	_ = ctx
-	_ = key
-	return nil, nil
+	dropped, err := h.client.ForceReleaseSuperseded(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.ConcurrencyHolder, 0, len(dropped))
+	for _, hd := range dropped {
+		out = append(out, store.ConcurrencyHolder{
+			Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
+			ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt, Superseded: hd.Superseded,
+		})
+	}
+	return out, nil
 }
 
-// CancelWaiter has no HTTP wire today: in-pod orchestrators don't wait
-// locally (ResolveWaiter is stubbed), so the QueueTimeout path that
-// cancels a waiter never runs against this backend. The controller's
-// reaper sweeps stale waiters on age.
+// CancelWaiter drops a parked waiter row via the controller so a
+// QueueTimeout'd waiter won't later be promoted to a holder.
 func (h *HTTPConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	_ = ctx
-	_ = key
-	_ = runID
-	_ = nodeID
-	return false, nil
+	return h.client.CancelWaiter(ctx, key, runID, nodeID)
 }

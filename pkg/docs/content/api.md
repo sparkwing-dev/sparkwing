@@ -70,8 +70,8 @@ Enqueue a new pipeline job.
 | `sparkwing_hash` | query | `.sparkwing/` content hash (for verified mode) |
 | `environment` | query | Environment scope (enforced by scoped tokens) |
 | `direct` | query | `true` for direct CLI invocation (bypasses taints) |
-| `prefer` | query | Agent preference selector (soft label match) |
-| `require` | query | Agent requirement selector (hard label match) |
+| `prefer` | query | Legacy agent preference selector |
+| `require` | query | Legacy agent requirement selector |
 | `concurrency_group` | query | Deduplication group name |
 | `concurrency_limit` | query | Max concurrent jobs in group |
 | `capture` | query | `true` to sync files back after execution |
@@ -227,7 +227,7 @@ Auth: Accepts `?token=` query param (EventSource can't set headers).
 
 Receives GitHub webhook payloads. The controller verifies HMAC signatures directly using `GITHUB_WEBHOOK_SECRET`.
 
-Handles GitHub `push`, `pull_request`, and `ping` events. Matches against `sparkwing.yaml` trigger rules. Supports concurrency groups and cancel-in-progress.
+Handles GitHub `push`, `pull_request`, and `ping` events. Matches against `pipelines.yaml` trigger rules. Supports concurrency groups and cancel-in-progress.
 
 Response: `{"job_ids": ["id1", "id2"], "status": "triggered"}`
 

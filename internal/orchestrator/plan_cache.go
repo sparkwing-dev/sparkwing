@@ -24,40 +24,50 @@ const (
 	planCacheEvicted planCacheOutcome = "evicted" // superseded mid-run
 )
 
-// acquirePlanSlot handles plan-level .Cache() coordination. Caller
+// planConcurrencyName returns the plan's whole-run concurrency group
+// name, or "" when none was declared. Used for operator-facing errors.
+func planConcurrencyName(plan *sparkwing.Plan) string {
+	if g := plan.ConcurrencyGroupRef(); g != nil {
+		return g.Name()
+	}
+	return ""
+}
+
+// acquirePlanSlot handles plan-level Concurrency() coordination. Caller
 // invokes release() at plan terminal. release uses a fresh context so
 // it survives a cancelled run.
 func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan *sparkwing.Plan) (release func(outcome string), outcome planCacheOutcome, err error) {
-	opts := plan.CacheOpts()
-	if !opts.HasNamespace() {
+	group := plan.ConcurrencyGroupRef()
+	if group == nil {
 		return func(string) {}, planCacheProceed, nil
 	}
+	key := group.Name()
+	limit := group.Limit()
 	if backends.Concurrency == nil {
-		return nil, "", fmt.Errorf("plan Cache(%q) declared but Backends.Concurrency is nil", opts.Namespace)
+		return nil, "", fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", key)
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
 	req := store.AcquireSlotRequest{
-		Key:           opts.Namespace,
-		HolderID:      holderID,
-		RunID:         runID,
-		NodeID:        "",
-		Capacity:      opts.Max,
-		Policy:        string(opts.OnLimit),
-		CancelTimeout: opts.CancelTimeout,
+		Key:      key,
+		HolderID: holderID,
+		RunID:    runID,
+		NodeID:   "",
+		Capacity: limit.Capacity,
+		Policy:   string(limit.OnLimit),
 	}
 
 	resp, err := backends.Concurrency.AcquireSlot(ctx, req)
 	if err != nil {
-		return nil, "", fmt.Errorf("plan Cache acquire(%q): %w", opts.Namespace, err)
+		return nil, "", fmt.Errorf("plan Concurrency acquire(%q): %w", key, err)
 	}
 
 	if resp.DriftNote != "" {
 		payload, _ := json.Marshal(map[string]any{
 			"scope":             "plan",
-			"key":               opts.Namespace,
+			"key":               key,
 			"previous_capacity": resp.PreviousCapacity,
-			"new_capacity":      opts.Max,
+			"new_capacity":      limit.Capacity,
 			"note":              resp.DriftNote,
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_drift", payload)
@@ -65,7 +75,7 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, opts.Namespace, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, key, holderID), planCacheProceed, nil
 
 	case store.AcquireSkipped:
 		_ = backends.State.AppendEvent(ctx, runID, "", "plan_skipped_concurrent", nil)
@@ -78,41 +88,30 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 	case store.AcquireQueued, store.AcquireCancellingOthers:
 		payload, _ := json.Marshal(map[string]any{
 			"scope": "plan",
-			"key":   opts.Namespace,
+			"key":   key,
 			"kind":  string(resp.Kind),
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait", payload)
 
-		// Back-stop: if evicted holders refuse to terminate within
-		// CancelTimeout, force-release so progress is bounded.
-		if resp.Kind == store.AcquireCancellingOthers && opts.CancelTimeout > 0 {
-			timer := time.AfterFunc(opts.CancelTimeout, func() {
-				bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_, _ = backends.Concurrency.ForceReleaseSuperseded(bg, opts.Namespace)
-			})
-			defer timer.Stop()
-		}
-
-		queueTimeout := time.Duration(0)
-		if resp.Kind == store.AcquireQueued {
-			queueTimeout = opts.QueueTimeout
-		}
-		promoted, err := waitForPlanSlot(ctx, backends, opts.Namespace, runID, holderID, queueTimeout)
+		// queueTimeout is zero in chunk 1 (the new API drops the knob),
+		// so a queued plan waits indefinitely and CancelOthers eviction
+		// relies on the store's default rather than an orchestrator-side
+		// force-release back-stop.
+		promoted, err := waitForPlanSlot(ctx, backends, key, runID, holderID, 0)
 		if err != nil {
 			return nil, "", err
 		}
 		if !promoted {
 			return nil, planCacheEvicted, nil
 		}
-		return makePlanSlotRelease(backends, opts.Namespace, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, key, holderID), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
-		// Coalesce + ContentHash are rejected at plan build.
-		return nil, "", fmt.Errorf("plan Cache(%q) unexpectedly got %q from acquire; this should have been rejected at build", opts.Namespace, resp.Kind)
+		// A plan never memoizes, so these are unreachable at plan scope.
+		return nil, "", fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
 	}
 
-	return nil, "", fmt.Errorf("plan Cache acquire returned unknown kind %q", resp.Kind)
+	return nil, "", fmt.Errorf("plan Concurrency acquire returned unknown kind %q", resp.Kind)
 }
 
 // waitForPlanSlot polls until promoted or cancelled. Plans never

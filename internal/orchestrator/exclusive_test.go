@@ -42,10 +42,11 @@ type exclusivePipe struct{ sparkwing.Base }
 
 var exclusiveState = &exclusiveCounter{}
 
-func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Two peer nodes, both exclusive on the same key, both try to
-	// run concurrently. The lock should serialize them.
-	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Namespace: "shared-resource"})
-	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Namespace: "shared-resource"})
+func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Two peer nodes, both in the same capacity-1 group, both try to
+	// run concurrently. The shared budget should serialize them.
+	g := sparkwing.NewConcurrencyGroup("shared-resource", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Concurrency(g)
 	return nil
 }
 

@@ -296,7 +296,7 @@ deploy.Run(deploy.Config{
 })
 ```
 
-This removes the need to manually check `kube.IsRunningInK8s()` and branch between gitops and kubectl.
+This replaces the common pattern of manually checking `kube.IsRunningInK8s()` and branching between gitops and kubectl.
 
 ---
 

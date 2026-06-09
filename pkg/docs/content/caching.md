@@ -1,59 +1,69 @@
 # Caching
 
-The current cache model is content-addressed **node** caching via the
-`.Cache(CacheOptions{...})` modifier plus a top-level `sparkwing.Key(...)`
-builder. See [sdk.md](sdk.md) for the modifier reference and
-[pipelines.md](pipelines.md) for usage in the Plan/Work model.
+Job-level caching is content-addressed result memoization via the
+`.Cache(key, opts...)` node modifier plus the top-level
+`sparkwing.Key(...)` builder. See [sdk.md](sdk.md) for the full modifier
+reference and [pipelines.md](pipelines.md) for usage in the Plan/Work
+model.
 
 Sparkwing caches at two levels:
 
-1. **Job-level content-addressed caching.** Each node in a Plan can
-   declare a `CacheKey`. The orchestrator substitutes the first
-   completed node with the same key -- same code, same inputs, same
-   output, zero re-execution.
+1. **Job-level content-addressed caching.** A node declares a content
+   key; when a later node computes the same key, the orchestrator
+   replays the first completion's output instead of re-running -- same
+   code, same inputs, same output, zero re-execution.
 2. **Build-layer caching.** Docker layer cache, BuildKit cache mounts,
    warm PVC pool, and the dependency proxy. See
    [build-caching.md](build-caching.md) for that layer.
 
 This doc is about (1).
 
+Caching is keyed on **content alone**. It carries no scope and no group:
+it answers "is this the *same work*, so reuse the answer?" Bounding how
+many distinct nodes run at once is a separate concern --
+[`Concurrency`](sdk.md#concurrency), a named budget. The two are
+independent; a node may declare either, both, or neither.
+
 ## The model
 
 ```go
-build := sparkwing.Job(plan, "build", &Build{}).Cache(sparkwing.CacheOptions{
-    Namespace: "build",
-    ContentHash: func(ctx context.Context) sparkwing.CacheKey {
-        return sparkwing.Key("build", target, sourceDigest.Get(ctx))
-    },
+shard := sparkwing.Job(plan, "coverage-shard-1", func(ctx context.Context) error {
+    return nil
 })
+shard.Cache(func(ctx context.Context) sparkwing.CacheKey {
+    return sparkwing.Key("coverage", "shard-1", "v1")
+}, sparkwing.TTL(7*24*time.Hour))
 ```
 
-When the orchestrator evaluates `build`, it:
+When the orchestrator evaluates `shard`, it:
 
 1. Runs upstream dependencies so `Ref[T]` values are resolved.
 2. Invokes the `CacheKeyFn` with the resolved context.
-3. Looks up the key in the runs store. If a prior completion exists,
-   substitutes that completion's output and records a cache-hit event.
-4. Otherwise runs the node and persists its output under the key.
+3. Looks up the content hash. If a live entry exists, it replays that
+   output and records a cache-hit event.
+4. Otherwise it runs the node and persists the output under the hash.
 
-`CacheKey` is a node modifier, not a step. You cannot conditionally
-save or restore inside a job body -- the decision is made declaratively
-by the Plan and evaluated once per node.
+`.Cache()` is a node modifier, not a step. You cannot conditionally save
+or restore inside a job body -- the decision is declarative and
+evaluated once per node.
+
+`TTL(d)` bounds how long a stored result stays reusable. Omit it for the
+default (`sparkwing.DefaultCacheTTL`, 7 days); values above
+`sparkwing.MaxCacheTTL` (35 days) are clamped with a plan-time warning.
 
 ## Building keys
 
 ```go
-// Primitive parts
-sparkwing.Key("deploy", target, "v1.2.3")
+sparkwing.Key("deploy", "prod", "v1.2.3")
 
-// Upstream output (resolve the Ref -- do NOT pass the Ref directly,
-// which would hash to the node ID)
-img := build.Output()              // Ref[BuildOutput]
-sparkwing.Key("deploy", target, img.Get(ctx).Digest)
-
-// Content of a file on disk (if it's a build input)
-gosum, _ := sparkwing.ReadFile("go.sum")
-sparkwing.Key("go-test", string(gosum))
+build := sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil })
+buildOut := sparkwing.RefTo[string](build)
+deploy := sparkwing.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Needs(build)
+deploy.Cache(func(ctx context.Context) sparkwing.CacheKey {
+    // resolve the Ref to put the upstream's OUTPUT in the key; passing
+    // the Ref directly would hash to the node ID
+    return sparkwing.Key("deploy", "prod", buildOut.Get(ctx))
+})
 ```
 
 Determinism caveats (from `sparkwing/cachekey.go`):
@@ -87,51 +97,61 @@ The restore is cross-run, not just in-flight: a `ContentHash` hit from a
 downstream `RefTo[T]` resolves it -- the same as an in-flight `Coalesce`
 follower would.
 
-## Gate-shaped pipelines: queue, don't fail
+## In-flight dedupe
 
-When several processes contend for one shared resource -- a deploy slot,
-a migration lock, a single-writer index -- the instinct is to reach for
-`OnLimit: Fail` and have callers retry. Don't. `OnLimit: Fail` pushes the
-poll-and-retry loop onto every caller, and a CI gate run that loses the
-race aborts with `slot full under OnLimit:Fail` instead of waiting its
-turn. The gate-shaped pattern is `OnLimit: Queue`: arrivals line up FIFO
-on the namespace and run one at a time, no caller-side retry loop.
+The same content can be cache-missing and computing *right now* in two
+places at once -- a burst of identical triggers, or two nodes with the
+same key in one plan. Cache collapses that to a single execution: the
+first arrival computes, the rest wait on the content hash and replay its
+result the moment it lands. It is the same rule as a hit, one tick
+earlier, so it needs no separate policy or flag -- declaring `.Cache()`
+is enough.
 
-The one thing a queue needs that a naive mutex doesn't is a way out. Set
-`QueueTimeout` so a contending run waits a bounded time for the slot
-rather than blocking forever behind a wedged holder:
+Because dedupe keys on content, it spans groups and runs: two nodes with
+the same key dedupe even when they sit in different concurrency groups
+or different runs against a shared controller.
+
+## Opting out per invocation
+
+A `CacheKeyFn` may return `sparkwing.NoCache` to run uncached for that
+invocation -- distinct from the zero `CacheKey`, which logs a
+missing-key warning:
 
 ```go
-gate := sparkwing.Job(plan, "deploy", &Deploy{}).Cache(sparkwing.CacheOptions{
-    Namespace:    "deploy-prod",
-    OnLimit:      sparkwing.Queue,
-    QueueTimeout: 30 * time.Second,
-})
+skipCache := false
+sparkwing.Job(plan, "maybe", func(ctx context.Context) error { return nil }).
+    Cache(func(ctx context.Context) sparkwing.CacheKey {
+        if skipCache {
+            return sparkwing.NoCache
+        }
+        return sparkwing.Key("maybe", "v1")
+    })
 ```
 
-On timeout the node fails with `failure_reason: queue_timeout` (distinct
-from a generic failure, so dashboards and `sparkwing runs` can tell "lost
-the race for too long" apart from "the work itself broke"). The waiter is
-removed from the queue, so a later release won't hand the slot to a run
-that already gave up. The calling layer can then retry the trigger once
-or surface a clean "gate busy" failure -- its choice, not the SDK's.
+`sparkwing run --sw-no-cache` disables cache *reads* for a whole run
+while still writing results on success, so the next run hits a freshly
+populated cache.
 
-`QueueTimeout` is zero by default, which preserves the historical
-"wait indefinitely" behavior. It only applies to `OnLimit: Queue`;
-`Coalesce` and `CancelOthers` resolve on their own leader / eviction
-paths.
+## Limitation: caching a node that is also in a Skip or Fail group
+
+When a node declares both `.Cache()` and `.Concurrency()` on a group
+whose `OnLimit` is `Skip` or `Fail`, and the cached content is being
+computed in flight, the leader may resolve to the group's skip/fail
+outcome rather than a successful result. Its in-flight-dedupe followers
+then inherit that non-success outcome rather than a replayed value.
+This is a rare pairing; avoid combining `.Cache()` with a `Skip` or
+`Fail` concurrency group on the same node. `Queue` and `CancelOthers`
+groups do not have this interaction.
 
 ## Limitations
 
-- **No partial-node caching.** The old `step.SaveCache` lets you skip
-  one step inside a job. That is not expressible today; split the
-  cachable work into its own node.
-- **Cache retention.** Job outputs are persisted in the runs store
-  under the key's row; the runs store does not GC automatically. There
-  is no TTL knob yet.
-- **No dependency caching helper.** The old `step.SaveCache("ruby-gems", ...)`
-  / `step.RestoreCache(...)` pattern for gems / node_modules / pip does
-  not have a first-class SDK replacement. Today: use the dependency
-  proxy (gitcache `/proxy/...`) or a warm PVC. This is a known gap;
-  open an issue if it blocks you.
-- **Build-layer caching.** See [build-caching.md](build-caching.md).
+- **No partial-node caching.** Caching is per node; you cannot skip one
+  step inside a job. Split the cachable work into its own node.
+- **No GC.** Stored outputs live in the runs store under the content
+  hash; retention is bounded by `TTL` but the store does not compact
+  expired rows automatically.
+- **No dependency-cache helper.** There is no first-class save/restore
+  for gems / node_modules / pip tarballs. Use the dependency proxy
+  (gitcache `/proxy/...`) or a warm PVC.
+- **Build-layer caching is separate.** See
+  [build-caching.md](build-caching.md).

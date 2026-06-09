@@ -16,9 +16,8 @@ import (
 // `sparkwing run` orchestrator processes on this machine so two
 // overlapping invocations don't oversubscribe the box's CPU. It is
 // independent of the state backend (Mode 1 through 4 all use it
-// uniformly) and independent of any `.Cache(...)` per-pipeline
-// concurrency declarations, which are a separate logical-reservation
-// concern.
+// uniformly) and independent of any `.Concurrency(...)` per-pipeline
+// declarations, which are a separate logical-reservation concern.
 //
 // Reads:
 //

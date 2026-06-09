@@ -38,6 +38,15 @@ type Request struct {
 
 	// Delegate mirrors log lines; in-process only.
 	Delegate sparkwing.Logger
+
+	// ReleaseWorkerSlot and ReacquireWorkerSlot let a node that blocks
+	// on concurrency admission give back its MaxParallel worker slot for
+	// the duration of the wait, so a queue of waiters can't starve other
+	// ready nodes. ReacquireWorkerSlot reports false if the run was
+	// cancelled while re-acquiring. Both are nil for cluster runners and
+	// when no worker cap is configured; callers must nil-check.
+	ReleaseWorkerSlot   func()
+	ReacquireWorkerSlot func() bool
 }
 
 // Result is the terminal outcome. Err is non-nil only when Outcome

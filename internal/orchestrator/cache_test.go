@@ -352,11 +352,7 @@ func (w *planWrapper) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwi
 		return err
 	}
 	if node := plan.Job("build"); node != nil {
-		node.Cache(sparkwing.CacheOptions{
-			Namespace:   "cache-test-build",
-			OnLimit:     sparkwing.Coalesce,
-			ContentHash: w.keyFn,
-		})
+		node.Cache(w.keyFn)
 	}
 	return nil
 }

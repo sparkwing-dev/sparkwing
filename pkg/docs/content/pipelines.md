@@ -23,29 +23,28 @@ kinds. Each entry is a list item with a `name:`.
 # .sparkwing/sparkwing.yaml
 pipelines:
   - name: build-deploy
-    entrypoint: BuildDeploy
     description: Build and deploy the app
     on:
       push:
         branches: [main]
+    tags: [ci, deploy]
 
   - name: release
-    entrypoint: Release
     description: Cut a release
     # no on: -> command, manual-only
 ```
 
-Each entry has (these are the only valid keys; an unknown field is a
-hard parse error):
+Each entry has:
 
-- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", …)` string
-- **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
+- **name** - the pipeline name (`sparkwing run build-deploy`)
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on profile + args (`reject` / `require` token lists)
-- **args** - per-arg default values, keyed by CLI flag name
-- **profile** - the project profile this pipeline uses (from the `profiles:` map)
-- **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
+- **on** - declarative trigger block. Absent means "manual only" (a command).
+- **tags** - labels for filtering and grouping
+- **env** - environment variables passed to the pipeline
+- **secrets** - cluster-stored secrets to surface
+- **runs_on** - scheduling constraints for runner selection
+  (see [scheduling](scheduling.md))
+- **hidden** - omit from `pipelines list` (still invocable by exact name)
 
 ## Triggers
 
@@ -56,22 +55,24 @@ Trigger types live under `on:`:
 pipelines:
   # Run on git push to main
   - name: build
-    entrypoint: Build
     on:
       push:
         branches: [main]
+        branches_ignore: [dependabot/*]  # optional exclusion
         paths: ["*.go", "go.mod"]        # optional path filter
+        paths_ignore: ["docs/*"]         # optional path exclusion
 
-  # Custom HTTP trigger (controller exposes this path)
+  # Run on pull requests
   - name: review
-    entrypoint: Review
     on:
-      webhook:
-        path: /review
+      pull_request:
+        branches: [main]
+        types: [opened, synchronize]
+        labels: [deploy]                 # optional label filter
+        paths_ignore: ["*.md"]
 
   # Scheduled (cron)
   - name: nightly
-    entrypoint: Nightly
     on:
       schedule: "0 2 * * *"
 ```
@@ -291,7 +292,7 @@ and a single `Needs(group)` target downstream.
 already known when `Plan()` runs:
 
 ```go
-images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, any) {
+images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, sw.Workable) {
     return "build-" + img.Name, &BuildImage{Image: img}
 }).Needs(webBuild, discover).Retry(2)
 
@@ -323,7 +324,7 @@ func (j *ListShards) run(ctx context.Context) ([]string, error) {
 
 shards := sw.Job(plan, "list-shards", &ListShards{})
 
-sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, any) {
+sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, sw.Workable) {
     return "process-" + shard, &ProcessShard{Shard: shard}
 })
 ```
@@ -368,7 +369,7 @@ pair becomes a fresh Plan node. The spawning runner stays suspended
 across the entire fan-out:
 
 ```go
-sw.JobSpawnEach(w, targets, func(target string) (string, any) {
+sw.JobSpawnEach(w, targets, func(target string) (string, sw.Workable) {
     return "deploy-" + target, &Deploy{Target: target}
 }).Needs(buildStep)
 ```
@@ -436,10 +437,8 @@ one collapsible header; the scheduler, cache, retry, and dependency
 semantics are unchanged.
 
 ```go
-sw.GroupJobs(plan, "safety",
-    sw.Job(plan, "schema-check", &SchemaCheckJob{}),
-    sw.Job(plan, "security-scan", &SecurityScanJob{}),
-)
+sw.Job(plan, "schema-check",  &SchemaCheckJob{}).Group("safety")
+sw.Job(plan, "security-scan", &SecurityScanJob{}).Group("safety")
 ```
 
 ## Eager Plan-time materialization
@@ -467,36 +466,30 @@ reader - load it before designing a multi-Job pipeline.
 
 ## Cache
 
-`.Cache(CacheOptions{...})` turns a Job into a content-addressed
-cache entry plus a coordination primitive. The orchestrator computes
-the key after upstream deps complete, looks it up across runs, and
-short-circuits the job on a hit, replaying the cached output without
-running. Misses execute normally and record `(key -> output)` on
-success.
+`.Cache(key, TTL(...))` turns a Job into a content-addressed cache
+entry. The orchestrator computes the key after upstream deps complete,
+looks it up across runs, and short-circuits the job on a hit, replaying
+the cached output without running. Misses execute normally and record
+`(key -> output)` on success. Identical content computing at the same
+time dedupes automatically.
 
 ```go
-build := sw.Job[BuildOut](plan, "build", &Build{}).
-    Cache(sparkwing.CacheOptions{
-        Namespace: "build",
-        OnLimit:   sparkwing.Coalesce,
-        ContentHash: func(ctx context.Context) sparkwing.CacheKey {
-            return sparkwing.Key("build", run.Git.SHA)
-        },
-        CacheTTL: 24 * time.Hour,
-    })
+sw.Job(plan, "build", &Build{}).Cache(
+    func(ctx context.Context) sparkwing.CacheKey {
+        return sparkwing.Key("build", "v1")
+    },
+    sparkwing.TTL(24*time.Hour),
+)
 ```
 
-`sparkwing.Key(parts...)` hashes arbitrary parts into a stable
-`CacheKey`
+`sparkwing.Key(parts...)` hashes arbitrary parts into a stable string --
+use it rather than hand-concatenating. Return `sparkwing.NoCache` from
+the key fn to opt out for a particular invocation, useful when inputs
+are non-deterministic. See [caching.md](caching.md) for the full model.
 
-- use it rather than hand-concatenating. Return `sparkwing.NoCache`
-from `ContentHash` to opt out for a particular invocation - useful when
-inputs are non-deterministic.
-
-`Cache` is also the coordination primitive: omit `ContentHash` and you
-get mutex (`Max=0|1`) or semaphore (`Max>1`) gating without the
-memoization. See [scheduling](scheduling.md) for the full coordination
-model.
+Caching is content only. To bound how many nodes run at once -- a mutex,
+a semaphore, a deploy gate -- use `.Concurrency(group)`; see
+[sdk.md](sdk.md#concurrency) and [scheduling](scheduling.md).
 
 Do not cache nodes whose effect is the side effect itself (deploys,
 notifications, gitops commits). Caching replays the return value, not

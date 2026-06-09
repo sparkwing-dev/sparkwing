@@ -23,8 +23,8 @@ Wing-owned flags (consumed before the pipeline sees them):
 | Flag | Description |
 |---|---|
 | `--profile <name>` | Resolve state/cache/logs (and any controller auth) from the named profile; execution still happens locally |
-| `--sw-ref <ref>` | Compile from a git ref (branch/tag/SHA) instead of the working tree |
-| `--sw-verbose`, `-v` | Enable debug logging on the pipeline binary |
+| `--from <ref>` | Compile from a git ref (branch/tag/SHA) instead of the working tree |
+| `--verbose`, `-v` | Set `SPARKWING_LOG_LEVEL=debug` on the pipeline binary |
 
 `--profile` picks the storage and dispatch addressing. The pipeline
 itself is the deployment shape -- different shapes (dev, prod, etc.)

@@ -6,7 +6,7 @@ signatures and one-line summaries - designed to be loaded once at the
 start of a pipeline-authoring task.
 
 For the conceptual tour (Plan, Job, Job, Work, modifiers,
-`sparkwing.yaml` shape), read [pipelines](pipelines.md). This page is
+`pipelines.yaml` shape), read [pipelines](pipelines.md). This page is
 the authoritative SDK reference for the `sparkwing` Go package.
 
 The convention is to import the SDK under the alias `sw`:
@@ -61,8 +61,10 @@ Every Job's `Work()` runs at Plan-time, so renderers
 nested DAG before any dispatch.
 
 The non-typed step type is named **`WorkStep`** (rather than `Step`)
-to keep it distinct from the package-level `sparkwing.Step` builder
-that adds steps inside a `Work()` body.
+because the historical `sparkwing.Step` package-level call was a log
+breadcrumb that has been replaced with structured `step_start` /
+`step_end` events. The inner-DAG entity carries the suffix to keep
+the rename auditable.
 
 ### Cost grid
 
@@ -162,13 +164,6 @@ Exec(ctx, name, args...)      *Cmd  // no shell; arg-vector form
 WorkDir() string                    // pipeline working directory (repo root)
 ```
 
-`Bash` runs the line verbatim with NO implicit `set -euo pipefail`: a
-mid-line failure in a multi-line body is silently swallowed and the
-step reports success. Prefix multi-line bodies with `set -euo pipefail`
-(or use `Exec` for single commands). Relative paths in `Bash`/`Exec`
-and `Path`/`ReadFile` resolve against `WorkDir()` = the repo root (the
-parent of `.sparkwing/`), not `.sparkwing/` itself.
-
 `Bash` shells out to the host's `bash`. macOS and Linux have it by
 default. **On Windows, install [Git for Windows](https://git-scm.com/download/win)
 and run `sparkwing` from the Git Bash terminal it ships** -- the same dep
@@ -204,13 +199,6 @@ work):
 .MustBeEmpty(reason) error          // non-empty stdout becomes "<reason>:\n<stdout>"
 ```
 
-`ExecResult` carries the captured outcome; `ExecError` (the error type
-on a non-zero exit) carries the same plus the wrapped `Cause`:
-
-```go
-type ExecResult struct { Command, Stdout, Stderr string; ExitCode int }
-```
-
 Common shapes:
 
 ```go
@@ -229,14 +217,7 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 
 ## Files
 
-These are **package-level functions** -- call them as `sparkwing.Path(...)`,
-`sparkwing.WorkDir()`, etc. (NOT methods on `rc`/`RunContext`, NOT `*Cmd`
-terminators). `WorkDir()` takes no arguments. They resolve relative
-paths against the auto-discovered project root and work anywhere inside
-a Job/Step body.
-
 ```
-WorkDir() string                            // repo root (parent of .sparkwing/); no args
 Path(parts...) string                       // join onto WorkDir(); abs first part wins
 ReadFile(path) ([]byte, error)              // os.ReadFile, relative -> WorkDir()
 WriteFile(path, data) error                 // os.WriteFile, perm 0o644
@@ -271,7 +252,9 @@ is stamped with the current Job and Job-stack envelope.
 
 Step boundaries are emitted automatically by `RunWork` as structured
 `step_start` / `step_end` events; the renderer surfaces them as a
-collapsible bucket in the CLI and dashboard.
+collapsible bucket in the CLI and dashboard. The pre-rewrite
+package-level `sparkwing.Step` / `sparkwing.StepErr` log breadcrumbs
+are gone.
 
 These four helpers are sparkwing's pipeline-observability channel,
 not a general-purpose logger -- they exist so node output, run
@@ -279,43 +262,6 @@ records, and the dashboard see the same stream. The `Logger`
 interface is pluggable: install your own backend (slog, zerolog,
 zap, OTel) via `sparkwing.WithLogger(ctx, impl)` and the call sites
 stay the same.
-
-## Service containers (integration tests)
-
-For tests that need a throwaway dependency (Postgres, Redis, …), the
-`sparkwing/services` package starts containers, waits for readiness,
-runs your function, and tears them down -- even on failure or panic.
-This is the blessed setup/teardown idiom; do NOT use `AfterRun` for
-cleanup (it's an observer that can't change outcome and isn't
-guaranteed on failure), and don't put teardown in a downstream `Needs`
-node (it's skipped when the upstream fails).
-
-```go
-import "github.com/sparkwing-dev/sparkwing/sparkwing/services"
-
-func (Test) runIntegration(ctx context.Context) error {
-    return services.WithServices(ctx, []services.Service{{
-        Image:    "redis:7-alpine",
-        Port:     6379,
-        ReadyCmd: "redis-cli ping",          // ready when this exits 0
-        Env:      map[string]string{},
-    }}, func(ctx context.Context) error {
-        _, err := sw.Exec(ctx, "go", "test", "./integration/...").Run()
-        return err
-    })
-}
-```
-
-`func WithServices(ctx, []Service, fn func(ctx) error) error`.
-`Service{Image (required), Name, Port, Env, ReadyCmd, ReadyTimeout}` --
-empty `ReadyCmd` falls back to a 2s sleep; zero `ReadyTimeout` means
-30s. `ReadyCmd` runs inside the container via `docker exec` (e.g.
-`redis-cli ping`, `pg_isready`), so it needs no host-side client.
-
-Set `Port` and the service is published to `127.0.0.1:<Port>`, so your
-test reaches it at `localhost:<Port>` on every platform, including
-Docker Desktop on macOS/Windows. (Leave `Port` unset and the container
-uses host networking, which is reachable from the host on Linux only.)
 
 ## Plan - the outer DAG
 
@@ -335,27 +281,6 @@ rc.Pipeline string         // registered pipeline name
 rc.Git      *Git           // repo state at the trigger SHA
 rc.Trigger  TriggerInfo    // {Source: "push|manual|schedule|webhook", User, Env}
 ```
-
-`*Git` is the resolved repo state -- branch-conditional logic reads it
-directly rather than shelling out to `git`:
-
-```go
-type Git struct {
-    SHA           string // full 40-char commit
-    Branch        string // "main"; "" when detached HEAD
-    DefaultBranch string // origin/HEAD target; "" when no remote
-    Repo          string // "owner/name"
-    RepoURL       string // "git@github.com:owner/name.git"
-}
-```
-
-`Plan()` is pure, so branch decisions that must shell out belong in a
-node `SkipIf` predicate (runs at dispatch), but `rc.Git.Branch` is
-already populated at Plan time -- prefer it: `deploy.SkipIf(func(context.Context) bool { return rc.Git.Branch != "main" })`.
-Note: in a repo with no commits yet (unborn HEAD), `Branch` is `""`,
-not `"main"` -- commit once before relying on branch-conditional logic,
-or your gate silently takes the off-main path while the run still
-exits 0.
 
 Most one-step Plans don't need `rc` at all - the parameter is named
 for the moment a Plan starts branching on trigger source / SHA.
@@ -433,44 +358,20 @@ steps...)`.
 Common Plan-layer modifiers (chainable on `*Job`):
 
 ```
-.Retry(attempts, opts...)          // re-run up to `attempts` ADDITIONAL times on failure (attempts+1 total runs); re-runs the whole Work() body each retry. Opts: RetryBackoff(d time.Duration) (fixed delay), RetryAuto() (exponential w/ jitter)
+.Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
 .Timeout(d)                        // hard kill after d
-.Verify(func(ctx context.Context) error)  // postcondition checked after the action succeeds; non-nil fails the node at StageVerify
+.Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
 .Requires(labels...)                 // require runner labels (AND semantics)
-.Cache(CacheOptions{...})          // coordination + memoization
+.Cache(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
+.Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
 .Dynamic()                         // mark runtime-variable downstream shape
-.ContinueOnError() / .Optional()   // failure-propagation knobs (differ! see below)
+.ContinueOnError() / .Optional()   // failure-propagation knobs
 .NeedsOptional(deps...)            // soft upstream dep
 ```
-
-`ContinueOnError` vs `Optional` -- they are NOT the same:
-
-| modifier | downstream dependents | overall run status / exit code |
-|----------|-----------------------|--------------------------------|
-| `ContinueOnError()` | still run (failure doesn't cancel them) | **run still FAILS** (exit 1) |
-| `Optional()` | still run | run **SUCCEEDS** (exit 0) -- the node's failure is absorbed |
-
-So for "a check may fail but shouldn't fail the run" (e.g. a
-notify-on-failure recovery), use `Optional()`. `OnFailure` alone does
-NOT make the run pass -- the originating node is still counted failed;
-combine `OnFailure` (run the recovery) with `Optional` (absorb the
-failure) if you want a green run.
-
-The `Failure` passed to a failure-aware `OnFailure` recovery:
-
-```go
-type Failure struct {
-    Stage FailureStage // StageAction (the Run failed) or StageVerify (the Verify check failed)
-    Err   error        // the underlying error (probe error, exec error, ...)
-}
-```
-
-Branch on `f.Stage` to recover differently for an action failure vs a
-verify (post-deploy health-check) failure.
 
 ## Workable - the Work-bearing interface
 
@@ -868,62 +769,180 @@ type WrapperInputs struct {
 }
 ```
 
-### Flag namespace: `--sw-*` vs your flags
+### Reserved flag names
 
-`sparkwing run` keeps its own control flags out of your way by
-prefixing every one of them with `sw-`:
+`sparkwing run` consumes a set of sparkwing-owned long flags before
+the pipeline binary parses anything.
+A pipeline Args struct that declares one of these as a `flag:"..."`
+tag would silently lose the value, so `sparkwing.Register` panics
+at registration time with the colliding flag, the offending Go
+field, and the full reserved list.
+
+Current reserved set, from `sparkwing.ReservedFlagNames()`:
 
 ```
--C, --sw-cd PATH          // re-anchor .sparkwing/ discovery
-    --sw-ref REF          // compile the pipeline at a git ref
--v, --sw-verbose          // debug logging
-    --sw-start-at STEP    // start the run at STEP
-    --sw-stop-at STEP     // stop the run after STEP
-    --sw-only GLOB        // run only matching jobs (+ their Needs)
-    --sw-no-cache         // ignore cached per-node results
-    --sw-local-only       // force local state/cache/logs
-    --sw-dry-run          // run each step's dry-run probe
-    --sw-allow LABEL,...  // authorize risk-labeled steps
-    --sw-box-slots N      // max concurrent run processes on this host
-    --sw-no-wait          // fail instead of queueing when slots are full
+allow               --allow              // risk-label gate
+C, change-directory --change-directory   // re-anchor .sparkwing/ discovery
+config              --config             // named preset from config.yaml
+dry-run             --dry-run            // dry-run dispatch
+from                --from               // compile pipeline from a git ref
+mode                --mode               // run mode override
+no-update           --no-update          // skip auto-update on invocation
+profile             --profile            // storage / dispatch profile
+secrets             --secrets            // ad-hoc secret injection
+start-at            --start-at           // skip nodes before this step
+stop-at             --stop-at            // skip nodes after this step
+v, verbose          --verbose            // SPARKWING_LOG_LEVEL=debug
+workers             --workers            // local-execution parallelism
 ```
 
-Because the runner owns the `sw-*` prefix, your pipeline `flag:"..."`
-tags have the entire unprefixed namespace to themselves -- there is no
-reserved-name collision check, and a field named `flag:"ref"` or
-`flag:"verbose"` resolves to *your* flag, not the runner's. Any flag
-`run` doesn't recognize is forwarded to the pipeline binary as a typed
-Arg.
+Code surface:
 
-The only non-`sw-` flags `run` consumes itself are `--profile` and
-`--target` (storage / deployment-target selection); avoid those two
-names and the `sw-` prefix for pipeline inputs.
+```
+sparkwing.ReservedFlagNames() []string   // sorted copy, safe to mutate
+```
 
-For a `--dry-run`-style flag, prefer `step.DryRun(fn)` on each mutating
-step (see *Work - the inner DAG > Dry-run contract*) over a
-`flag:"dry-run"` input; the runner-level `--sw-dry-run` then dispatches
-your DryRun bodies for free.
+If you need a flag with one of these names, rename it on the
+pipeline side (e.g. `--plan-only` for `dry-run`, `--my-from` for
+`from`). For `--dry-run` specifically: declare
+`step.DryRun(fn)` on each mutating step (see *Work - the inner
+DAG > Dry-run contract*) rather than rolling a `flag:"dry-run"`
+input; the sparkwing-level `--dry-run` then dispatches your DryRun
+bodies for free.
 
 ## Cache
 
-```
-sw.Key("go-mod", goVersion, fileHash)             // CacheKey from any parts
-node.Cache(sw.CacheOptions{
-    Namespace:   "build",                             // required: coordination key
-    Max:         3,                                   // optional: semaphore (default 1 = mutex)
-    OnLimit:     sw.Queue,                            // Queue (default), Coalesce, CancelOthers, Skip, Fail
-    ContentHash: func(ctx) sw.CacheKey { return ... },// optional: result memoization
-    CacheTTL:    24*time.Hour,                         // optional: cache lifetime (default 7d when set)
-    CancelTimeout: 60*time.Second,                    // CancelOthers wait budget
-    QueueTimeout:  5*time.Minute,                      // Queue: give up waiting (default: wait forever)
-})
+`.Cache(key, opts...)` is content-addressed result memoization: same
+content, compute once, reuse the result. It carries no scope and no
+group -- that is [Concurrency](#concurrency)'s job.
+
+```go
+sw.Key("go-mod", "1.26", "abc123") // a CacheKey from any parts
+
+node := sw.Job(plan, "build", func(ctx context.Context) error { return nil })
+node.Cache(func(ctx context.Context) sw.CacheKey {
+    return sw.Key("build", "linux", "amd64")
+}, sw.TTL(24*time.Hour))
 ```
 
-`.Cache()` is the unified coordination + memoization primitive. Empty
-`Namespace` is a no-op. Omit `ContentHash` for pure coordination (mutex
-when `Max<=1`, semaphore when `Max>1`); set it to memoize and replay the
-node's output on a matching key. Return `sw.NoCache` from `ContentHash`
-to opt a single invocation out of memoization.
+- `key` is a `CacheKeyFn` -- `func(ctx) CacheKey`. It runs at dispatch
+  time, after upstream deps resolve, so it can read `Ref[T]` output.
+- `TTL(d)` bounds retention; omit for `DefaultCacheTTL` (7d), capped at
+  `MaxCacheTTL` (35d).
+- Return `sw.NoCache` from the key fn to run uncached for that
+  invocation.
+- Identical content that is in flight dedupes automatically: one
+  computes, the rest wait and replay. No policy needed.
+
+See [caching.md](caching.md) for the full model. The `JobGroup` mirror
+is `group.Cache(key, opts...)`.
+
+## Concurrency
+
+`.Concurrency(group, cost...)` enrolls a node in a named budget shared
+by its members: different work taking turns under a cap. Define the
+group once and pass the handle to each member.
+
+```go
+dbGroup := sw.NewConcurrencyGroup("db", sw.ConcurrencyLimit{
+    Capacity:     8,
+    Scope:        sw.ScopeBox,
+    OnLimit:      sw.Queue,
+    QueueTimeout: 30 * time.Second,
+})
+sw.Job(plan, "shard-1", func(ctx context.Context) error { return nil }).Concurrency(dbGroup, 4)
+sw.Job(plan, "shard-2", func(ctx context.Context) error { return nil }).Concurrency(dbGroup, 4)
+```
+
+`Capacity` and `cost` are integers in author-defined units (a slot, a
+gigabyte, a database container). Admission compares the summed `cost` of
+live members in the scope plus this member's cost against `Capacity`.
+Count-limiting ("at most N at once") is the degenerate case: capacity
+`N`, every member the default `cost` of 1.
+
+```go
+deployGate := sw.NewConcurrencyGroup("deploy-prod", sw.ConcurrencyLimit{
+    Capacity: 1,
+    OnLimit:  sw.Queue,
+})
+sw.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Concurrency(deployGate)
+```
+
+### OnLimit
+
+What a member does when its group is at capacity:
+
+- `Queue` (default) -- wait FIFO for room, then run.
+- `Fail` -- error immediately.
+- `Skip` -- resolve as a no-op without running.
+- `CancelOthers` -- evict running members oldest-first until this one
+  fits (best-effort; side effects already committed are not rolled
+  back).
+
+Sharing another member's result is not an option here -- a group is
+different work taking turns, never the same work. Result reuse is
+[Cache](#cache).
+
+### Scope
+
+`Scope` selects how far the budget reaches; it folds into the
+coordination key as `name@<id>`:
+
+- `ScopeRun` -- key `name@<runID>`: only this run's nodes share the
+  budget.
+- `ScopeBox` -- key `name@<hostID>`: every run on one machine shares it,
+  even under a controller.
+- `ScopeGlobal` (the zero value) -- key `name`: the whole fleet shares
+  it through the coordination backend.
+
+`hostID` for `ScopeBox` is `os.Hostname()`, overridable via
+`SPARKWING_BOX_ID`. Inside a container the hostname is per-container, so
+two containers on one physical host would each get their own box budget;
+set `SPARKWING_BOX_ID` to the physical host identity when you want
+per-machine budgeting across containers.
+
+### Capacity skew: most-restrictive wins
+
+Two pipeline versions running against one controller can declare the
+same group with different `Capacity`. The store enforces the **minimum**
+over live participants, not the last writer -- a cap is a safety
+constraint, so the only value that honors every live participant is the
+smallest. Lowering takes effect immediately; raising waits for the
+last participant declaring the lower value to drain. A drift warning
+fires so the skew is visible.
+
+### Timeouts
+
+- `QueueTimeout` (with `Queue`) bounds the wait; on expiry the node
+  fails with `failure_reason: queue_timeout` and the waiter leaves the
+  queue, so a later release won't hand the slot to a run that gave up.
+  Zero waits indefinitely.
+- `CancelTimeout` (with `CancelOthers`) bounds how long the arrival
+  waits for evicted holders to release before the slot is force-freed.
+
+### Gate-shaped pipelines: queue, don't fail
+
+When several runs contend for one shared resource -- a deploy slot, a
+migration lock, a single-writer index -- reach for a capacity-1 group
+with `OnLimit: Queue`, not `Fail`. `Fail` pushes a poll-and-retry loop
+onto every caller and aborts the loser with "slot full". `Queue` lines
+arrivals up FIFO and runs them one at a time, with `QueueTimeout` as the
+bounded way out.
+
+### Whole-run coordination
+
+A plan can take one unit of a group before any node dispatches and
+release it when the run reaches a terminal status. A plan never
+memoizes, so this is concurrency only:
+
+```go
+plan.Concurrency(sw.NewConcurrencyGroup("whole-run-prod", sw.ConcurrencyLimit{
+    Capacity: 1,
+    OnLimit:  sw.Fail,
+}))
+```
+
+The `JobGroup` mirror is `group.Concurrency(handle, cost...)`.
 
 ## Discovery
 

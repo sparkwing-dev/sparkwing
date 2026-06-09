@@ -76,8 +76,15 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 // the lock up front turns that race into an ordinary busy-wait the
 // timeout absorbs. Single-statement reads outside a transaction are
 // unaffected, so read-only queries don't pay for the write lock.
+//
+// busy_timeout is listed FIRST so it is in force before journal_mode is
+// applied: switching a brand-new database to WAL needs a momentary
+// exclusive lock, and two processes cold-starting the same state.db at
+// once would otherwise have one fail the WAL switch with SQLITE_BUSY
+// before any timeout was active. With the timeout set first, that race
+// becomes a bounded wait.
 func Open(path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(30000)", path)
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)", path)
 	return openSQL("sqlite", dsn, DialectSQLite)
 }
 
@@ -298,13 +305,15 @@ CREATE TABLE IF NOT EXISTS concurrency_entries (
 );
 
 CREATE TABLE IF NOT EXISTS concurrency_holders (
-    key              TEXT NOT NULL,
-    holder_id        TEXT NOT NULL,
-    run_id           TEXT NOT NULL,
-    node_id          TEXT NOT NULL DEFAULT '',
-    claimed_at       INTEGER NOT NULL,
-    lease_expires_at INTEGER NOT NULL,
-    superseded       INTEGER NOT NULL DEFAULT 0,
+    key               TEXT NOT NULL,
+    holder_id         TEXT NOT NULL,
+    run_id            TEXT NOT NULL,
+    node_id           TEXT NOT NULL DEFAULT '',
+    claimed_at        INTEGER NOT NULL,
+    lease_expires_at  INTEGER NOT NULL,
+    superseded        INTEGER NOT NULL DEFAULT 0,
+    cost              INTEGER NOT NULL DEFAULT 1,
+    declared_capacity INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key, holder_id)
 );
 CREATE INDEX IF NOT EXISTS idx_concurrency_holders_key_claimed
@@ -323,6 +332,8 @@ CREATE TABLE IF NOT EXISTS concurrency_waiters (
     leader_run_id      TEXT NOT NULL DEFAULT '',
     leader_node_id     TEXT NOT NULL DEFAULT '',
     cancel_timeout_ns  INTEGER NOT NULL DEFAULT 0,
+    cost               INTEGER NOT NULL DEFAULT 1,
+    declared_capacity  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key, run_id, node_id)
 );
 CREATE INDEX IF NOT EXISTS idx_concurrency_waiters_arrived
@@ -500,7 +511,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 2
+const expectedSchemaVersion = 3
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -565,13 +576,50 @@ func (s *Store) migrate() error {
 		// the advisory-lock-guarded transaction so it serializes too.
 		return s.migratePostgres(ctx)
 	}
-	// SQLite serializes writers at the database level, so an unlocked
-	// CREATE TABLE IF NOT EXISTS is safe even across processes that
-	// open the same file simultaneously.
-	if _, err := s.exec(ctx, schemaVersionTable); err != nil {
-		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
+	// SQLite serializes writers at the database level. busy_timeout
+	// absorbs most cold-start overlap, but the brief exclusive windows
+	// during initial table creation can still surface SQLITE_BUSY when
+	// several processes open a fresh state.db at once -- a real path now
+	// that Box-scoped budgeting encourages concurrent runs on one host.
+	// Retry the whole setup a few times so a cold start converges
+	// instead of aborting the run.
+	return retryOnBusy(func() error {
+		if _, err := s.exec(ctx, schemaVersionTable); err != nil {
+			return fmt.Errorf("create sparkwing_schema_version table: %w", err)
+		}
+		return s.migrateSQLite(ctx)
+	})
+}
+
+// retryOnBusy runs fn, retrying with a short backoff while it returns a
+// SQLite busy/locked error. The DSN's busy_timeout handles in-flight
+// contention; this covers the residual cold-start windows where the
+// lock is held across separate statements. Returns the last error if
+// every attempt is busy, or fn's first non-busy result.
+func retryOnBusy(fn func() error) error {
+	const attempts = 10
+	var err error
+	for i := range attempts {
+		err = fn()
+		if err == nil || !isBusyErr(err) {
+			return err
+		}
+		time.Sleep(time.Duration(i+1) * 50 * time.Millisecond)
 	}
-	return s.migrateSQLite(ctx)
+	return err
+}
+
+// isBusyErr reports whether err is a SQLite "database is locked" /
+// SQLITE_BUSY condition. modernc.org/sqlite surfaces these as a message
+// string rather than a typed sentinel, so match on the stable text.
+func isBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "sqlite_busy") ||
+		strings.Contains(msg, "database table is locked")
 }
 
 func (s *Store) migrateSQLite(ctx context.Context) error {
@@ -662,7 +710,7 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 			return err
 		}
 		return s.backfillRunAnnotationRollup()
-	case 2:
+	case 2, 3:
 		return s.ensureColumnsAll()
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -680,7 +728,7 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return s.ensureColumnsAllTx(ctx, tx)
-	case 2:
+	case 2, 3:
 		return s.ensureColumnsAllTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -752,7 +800,13 @@ var columnMigrations = []columnSpec{
 		"full":           "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"concurrency_waiters", map[string]string{
-		"holder_id": "TEXT NOT NULL DEFAULT ''",
+		"holder_id":         "TEXT NOT NULL DEFAULT ''",
+		"cost":              "INTEGER NOT NULL DEFAULT 1",
+		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
+	}},
+	{"concurrency_holders", map[string]string{
+		"cost":              "INTEGER NOT NULL DEFAULT 1",
+		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",
@@ -913,10 +967,24 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		}
 		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, name, typ)
 		if _, err := s.execNoCtx(stmt); err != nil {
+			// A concurrent cold-start migrator may have added the column
+			// between our table_info read and this ALTER; SQLite has no
+			// ADD COLUMN IF NOT EXISTS, so treat "duplicate column" as
+			// already-applied rather than a failure.
+			if isDuplicateColumnErr(err) {
+				continue
+			}
 			return fmt.Errorf("add column %s.%s: %w", table, name, err)
 		}
 	}
 	return nil
+}
+
+// isDuplicateColumnErr reports whether err is SQLite's "duplicate
+// column name" -- the benign outcome of two migrators racing the same
+// additive ALTER on a fresh database.
+func isDuplicateColumnErr(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
 }
 
 // --- Runs ---

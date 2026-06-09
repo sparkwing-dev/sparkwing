@@ -9,7 +9,13 @@ import (
 	"time"
 )
 
-// OnLimit policies; mirror sparkwing.OnLimitPolicy.
+// OnLimit policies the coordination layer understands. Queue, Skip,
+// Fail, and CancelOthers map to the SDK's sparkwing.OnLimit values for
+// concurrency groups. Coalesce is the leader/follower policy that backs
+// content-keyed memoization: the orchestrator acquires a capacity-1
+// Coalesce slot keyed on a node's content hash, so identical work
+// dedupes in flight and shares one cache entry. No concurrency group
+// emits Coalesce.
 const (
 	OnLimitQueue        = "queue"
 	OnLimitCoalesce     = "coalesce"
@@ -66,6 +72,12 @@ type AcquireSlotRequest struct {
 	CancelTimeout time.Duration
 	Lease         time.Duration
 	BypassRead    bool
+
+	// Cost is the admission weight this arrival draws from the key's
+	// capacity (author-defined units). Zero or negative is treated as
+	// 1. Admission compares the summed cost of live holders plus this
+	// cost against the effective capacity, not a slot count.
+	Cost int
 }
 
 // AcquireSlotResponse: fields are populated per Kind.
@@ -101,6 +113,13 @@ type ConcurrencyHolder struct {
 	ClaimedAt      time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
+
+	// Cost is the admission weight this holder draws from the key's
+	// budget; DeclaredCapacity is the capacity it declared. Populated by
+	// GetConcurrencyState for the operator budget view; zero on the hot
+	// acquire/promote paths that don't need them.
+	Cost             int
+	DeclaredCapacity int
 }
 
 // ConcurrencyWaiter mirrors the concurrency_waiters row.
@@ -116,18 +135,30 @@ type ConcurrencyWaiter struct {
 	LeaderNodeID  string
 	CancelTimeout time.Duration
 
+	// Cost is the admission weight this waiter will draw once promoted;
+	// DeclaredCapacity is the capacity this waiter declared, a
+	// participant in the most-restrictive-wins minimum.
+	Cost             int
+	DeclaredCapacity int
+
 	// Position is the waiter's 0-based rank among queue-policy waiters
 	// for the key, in arrival order, as derived by GetConcurrencyState.
 	// Zero for non-queue waiters.
 	Position int
 }
 
-// ConcurrencyState: capacity is current Max; rows are oldest-first.
+// ConcurrencyState: Capacity is the last-declared capacity;
+// EffectiveCapacity is the most-restrictive minimum actually enforced
+// over live participants; UsedCost is the summed cost of active
+// (non-superseded, unexpired) holders. Available budget is
+// EffectiveCapacity - UsedCost. Rows are oldest-first.
 type ConcurrencyState struct {
-	Key      string
-	Capacity int
-	Holders  []ConcurrencyHolder
-	Waiters  []ConcurrencyWaiter
+	Key               string
+	Capacity          int
+	EffectiveCapacity int
+	UsedCost          int
+	Holders           []ConcurrencyHolder
+	Waiters           []ConcurrencyWaiter
 }
 
 // AcquireConcurrencySlot atomically performs cache-lookup, capacity
@@ -145,6 +176,9 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 	if req.Capacity <= 0 {
 		req.Capacity = 1
+	}
+	if req.Cost <= 0 {
+		req.Cost = 1
 	}
 	if req.Lease <= 0 {
 		req.Lease = DefaultConcurrencyLease
@@ -302,26 +336,27 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{}, err
 	}
 
-	// 3. Count active, non-superseded holders.
-	var activeCount int
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*) FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
-		req.Key, nowNS,
-	).Scan(&activeCount); err != nil {
+	// 3. Sum active (non-superseded, unexpired) holder cost and resolve
+	// the effective capacity (most-restrictive over live participants
+	// plus this arrival's declaration).
+	activeCost, err := txSumActiveCost(ctx, tx, req.Key, nowNS)
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	effCap, err := txEffectiveCapacity(ctx, tx, req.Key, nowNS, req.Capacity)
+	if err != nil {
 		return AcquireSlotResponse{}, err
 	}
 
-	// 4. Slot available -> grant immediately.
-	if activeCount < req.Capacity {
+	// 4. Budget available -> grant immediately.
+	if activeCost+req.Cost <= effCap {
 		expiresNS := now.Add(req.Lease).UnixNano()
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_holders
-			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded)
-			 VALUES (?, ?, ?, ?, ?, ?, 0)`,
-			req.Key, req.HolderID, req.RunID, req.NodeID, nowNS, expiresNS,
+			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+			req.Key, req.HolderID, req.RunID, req.NodeID, nowNS, expiresNS, req.Cost, req.Capacity,
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -366,8 +401,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_waiters
-			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
 			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
 			   holder_id         = excluded.holder_id,
 			   arrived_at        = excluded.arrived_at,
@@ -375,8 +410,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			   cache_key_hash    = excluded.cache_key_hash,
 			   leader_run_id     = excluded.leader_run_id,
 			   leader_node_id    = excluded.leader_node_id,
-			   cancel_timeout_ns = excluded.cancel_timeout_ns`,
-			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCoalesce, req.CacheKeyHash, leaderRun, leaderNode,
+			   cancel_timeout_ns = excluded.cancel_timeout_ns,
+			   cost              = excluded.cost,
+			   declared_capacity = excluded.declared_capacity`,
+			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCoalesce, req.CacheKeyHash, leaderRun, leaderNode, req.Cost, req.Capacity,
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -392,29 +429,44 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nil
 
 	case OnLimitCancelOthers:
-		toSupersede := max(activeCount+1-req.Capacity, 1)
+		// Evict oldest holders first until freeing their cost would let
+		// this arrival's cost fit the effective capacity. Always evict
+		// at least one so a single over-capacity arrival still proceeds.
 		rows, err := tx.QueryContext(
 			ctx,
-			`SELECT holder_id FROM concurrency_holders
-			  WHERE key = ? AND superseded = 0
-			  ORDER BY claimed_at ASC LIMIT ?`,
-			req.Key, toSupersede,
+			`SELECT holder_id, cost FROM concurrency_holders
+			  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?
+			  ORDER BY claimed_at ASC`,
+			req.Key, nowNS,
 		)
 		if err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		var supersededIDs []string
+		type heldCost struct {
+			id   string
+			cost int
+		}
+		var held []heldCost
 		for rows.Next() {
-			var hid string
-			if err := rows.Scan(&hid); err != nil {
+			var hc heldCost
+			if err := rows.Scan(&hc.id, &hc.cost); err != nil {
 				_ = rows.Close()
 				return AcquireSlotResponse{}, err
 			}
-			supersededIDs = append(supersededIDs, hid)
+			held = append(held, hc)
 		}
 		_ = rows.Close()
 		if err := rows.Err(); err != nil {
 			return AcquireSlotResponse{}, err
+		}
+		var supersededIDs []string
+		freed := 0
+		for _, hc := range held {
+			if activeCost-freed+req.Cost <= effCap && len(supersededIDs) > 0 {
+				break
+			}
+			supersededIDs = append(supersededIDs, hc.id)
+			freed += hc.cost
 		}
 		for _, hid := range supersededIDs {
 			if _, err := tx.ExecContext(
@@ -428,8 +480,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_waiters
-			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?)
+			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
 			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
 			   holder_id         = excluded.holder_id,
 			   arrived_at        = excluded.arrived_at,
@@ -437,8 +489,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			   cache_key_hash    = excluded.cache_key_hash,
 			   leader_run_id     = excluded.leader_run_id,
 			   leader_node_id    = excluded.leader_node_id,
-			   cancel_timeout_ns = excluded.cancel_timeout_ns`,
-			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCancelOthers, req.CacheKeyHash, int64(req.CancelTimeout),
+			   cancel_timeout_ns = excluded.cancel_timeout_ns,
+			   cost              = excluded.cost,
+			   declared_capacity = excluded.declared_capacity`,
+			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCancelOthers, req.CacheKeyHash, int64(req.CancelTimeout), req.Cost, req.Capacity,
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -458,8 +512,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_waiters
-			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0)
+			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0, ?, ?)
 			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
 			   holder_id         = excluded.holder_id,
 			   arrived_at        = excluded.arrived_at,
@@ -467,8 +521,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			   cache_key_hash    = excluded.cache_key_hash,
 			   leader_run_id     = excluded.leader_run_id,
 			   leader_node_id    = excluded.leader_node_id,
-			   cancel_timeout_ns = excluded.cancel_timeout_ns`,
-			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitQueue, req.CacheKeyHash,
+			   cancel_timeout_ns = excluded.cancel_timeout_ns,
+			   cost              = excluded.cost,
+			   declared_capacity = excluded.declared_capacity`,
+			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitQueue, req.CacheKeyHash, req.Cost, req.Capacity,
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -538,6 +594,159 @@ func txActiveHolders(ctx context.Context, tx *storeTx, key string, nowNS int64) 
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+// txSumActiveCost returns the summed admission cost of the key's
+// active (non-superseded, unexpired) holders.
+func txSumActiveCost(ctx context.Context, tx *storeTx, key string, nowNS int64) (int, error) {
+	var sum sql.NullInt64
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(SUM(cost), 0) FROM concurrency_holders
+		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
+		key, nowNS,
+	).Scan(&sum); err != nil {
+		return 0, err
+	}
+	return int(sum.Int64), nil
+}
+
+// txEffectiveCapacity resolves the most-restrictive-wins capacity for a
+// key: the minimum declared_capacity over the currently-live
+// participants (active holders and parked waiters), combined with the
+// incoming arrival's declared capacity. A non-positive incoming is
+// ignored (release / promote paths have no arrival). When no live
+// participant has recorded a positive declared_capacity, it falls back
+// to the entries row, then to 1.
+func txEffectiveCapacity(ctx context.Context, tx *storeTx, key string, nowNS int64, incoming int) (int, error) {
+	var minDeclared sql.NullInt64
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT MIN(declared_capacity) FROM (
+		     SELECT declared_capacity FROM concurrency_holders
+		      WHERE key = ? AND superseded = 0 AND lease_expires_at > ? AND declared_capacity > 0
+		     UNION ALL
+		     SELECT declared_capacity FROM concurrency_waiters
+		      WHERE key = ? AND declared_capacity > 0
+		 ) AS live`,
+		key, nowNS, key,
+	).Scan(&minDeclared); err != nil {
+		return 0, err
+	}
+
+	eff := 0
+	if minDeclared.Valid && minDeclared.Int64 > 0 {
+		eff = int(minDeclared.Int64)
+	}
+	if incoming > 0 && (eff == 0 || incoming < eff) {
+		eff = incoming
+	}
+	if eff > 0 {
+		return eff, nil
+	}
+
+	var entryCap int
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
+	).Scan(&entryCap)
+	if errors.Is(err, sql.ErrNoRows) || entryCap <= 0 {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return entryCap, nil
+}
+
+// txPromoteWaiters grants holder rows to FIFO queue / cancel_others
+// waiters, summing each waiter's declared cost against the open budget
+// (effective capacity minus live holder cost). A heavy waiter at the
+// head of the queue is not skipped by a cheaper one behind it: when the
+// head no longer fits, promotion stops. Coalesce waiters resolve via
+// the leader path, not here. Returns the promoted waiters with their
+// assigned HolderID set.
+func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+	effCap, err := txEffectiveCapacity(ctx, tx, key, nowNS, 0)
+	if err != nil {
+		return nil, err
+	}
+	activeCost, err := txSumActiveCost(ctx, tx, key, nowNS)
+	if err != nil {
+		return nil, err
+	}
+	openCost := effCap - activeCost
+	if openCost <= 0 {
+		return nil, nil
+	}
+
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT `+waiterColumns+`
+		   FROM concurrency_waiters
+		  WHERE key = ? AND policy IN (?, ?)
+		  ORDER BY arrived_at ASC`,
+		key, OnLimitQueue, OnLimitCancelOthers,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []ConcurrencyWaiter
+	for rows.Next() {
+		w, serr := scanWaiter(rows)
+		if serr != nil {
+			_ = rows.Close()
+			return nil, serr
+		}
+		candidates = append(candidates, w)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var promoted []ConcurrencyWaiter
+	used := 0
+	for _, w := range candidates {
+		c := w.Cost
+		if c <= 0 {
+			c = 1
+		}
+		if used+c > openCost {
+			break // FIFO: don't let a cheaper waiter jump a heavy one.
+		}
+		used += c
+		promoted = append(promoted, w)
+	}
+
+	for i, w := range promoted {
+		newHolder := w.HolderID
+		if newHolder == "" {
+			newHolder = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+			w.Key, w.RunID, w.NodeID,
+		); err != nil {
+			return nil, err
+		}
+		c := w.Cost
+		if c <= 0 {
+			c = 1
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO concurrency_holders
+			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+			w.Key, newHolder, w.RunID, w.NodeID, nowNS, expiresNS, c, w.DeclaredCapacity,
+		); err != nil {
+			return nil, err
+		}
+		promoted[i].HolderID = newHolder
+	}
+	return promoted, nil
 }
 
 // HeartbeatConcurrencySlot extends the lease and reports the
@@ -696,7 +905,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		// 2. Resolve coalesce followers in the same tx.
 		frows, err := tx.QueryContext(
 			ctx,
-			`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
+			`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
 			   FROM concurrency_waiters
 			  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
 			  ORDER BY arrived_at ASC`,
@@ -728,12 +937,14 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		}
 	}
 
-	// 3. Promote queue / cancel_others waiters up to capacity.
-	var capacity int
+	// 3. Promote queue / cancel_others waiters against the open budget.
+	// If the key was never declared (no entries row) and nothing is
+	// live, there is nothing to promote.
+	var hasEntry int
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
-	).Scan(&capacity)
+		`SELECT 1 FROM concurrency_entries WHERE key = ?`, key,
+	).Scan(&hasEntry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return released, followers, nil, tx.Commit()
 	}
@@ -742,64 +953,10 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	}
 	now := time.Now()
 	nowNS := now.UnixNano()
-	var activeCount int
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*) FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
-		key, nowNS,
-	).Scan(&activeCount); err != nil {
+	expiresNS := now.Add(promoteLease).UnixNano()
+	promoted, err = txPromoteWaiters(ctx, tx, key, nowNS, expiresNS)
+	if err != nil {
 		return false, nil, nil, err
-	}
-	openSlots := capacity - activeCount
-	if openSlots > 0 {
-		prows, err := tx.QueryContext(
-			ctx,
-			`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
-			   FROM concurrency_waiters
-			  WHERE key = ? AND policy IN (?, ?)
-			  ORDER BY arrived_at ASC LIMIT ?`,
-			key, OnLimitQueue, OnLimitCancelOthers, openSlots,
-		)
-		if err != nil {
-			return false, nil, nil, err
-		}
-		for prows.Next() {
-			w, serr := scanWaiter(prows)
-			if serr != nil {
-				_ = prows.Close()
-				return false, nil, nil, serr
-			}
-			promoted = append(promoted, w)
-		}
-		_ = prows.Close()
-		if err := prows.Err(); err != nil {
-			return false, nil, nil, err
-		}
-		expiresNS := now.Add(promoteLease).UnixNano()
-		for i, w := range promoted {
-			newHolder := w.HolderID
-			if newHolder == "" {
-				newHolder = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
-			}
-			if _, err := tx.ExecContext(
-				ctx,
-				`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-				w.Key, w.RunID, w.NodeID,
-			); err != nil {
-				return false, nil, nil, err
-			}
-			if _, err := tx.ExecContext(
-				ctx,
-				`INSERT INTO concurrency_holders
-				   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded)
-				 VALUES (?, ?, ?, ?, ?, ?, 0)`,
-				w.Key, newHolder, w.RunID, w.NodeID, nowNS, expiresNS,
-			); err != nil {
-				return false, nil, nil, err
-			}
-			promoted[i].HolderID = newHolder
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -819,7 +976,7 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 
 	rows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
+		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
 		   FROM concurrency_waiters
 		  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
 		  ORDER BY arrived_at ASC`,
@@ -868,11 +1025,11 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var capacity int
+	var hasEntry int
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
-	).Scan(&capacity)
+		`SELECT 1 FROM concurrency_entries WHERE key = ?`, key,
+	).Scan(&hasEntry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
@@ -882,71 +1039,10 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 
 	now := time.Now()
 	nowNS := now.UnixNano()
-
-	var activeCount int
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT COUNT(*) FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
-		key, nowNS,
-	).Scan(&activeCount); err != nil {
-		return nil, err
-	}
-
-	openSlots := capacity - activeCount
-	if openSlots <= 0 {
-		return nil, tx.Commit()
-	}
-
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
-		   FROM concurrency_waiters
-		  WHERE key = ? AND policy IN (?, ?)
-		  ORDER BY arrived_at ASC LIMIT ?`,
-		key, OnLimitQueue, OnLimitCancelOthers, openSlots,
-	)
+	expiresNS := now.Add(lease).UnixNano()
+	promote, err := txPromoteWaiters(ctx, tx, key, nowNS, expiresNS)
 	if err != nil {
 		return nil, err
-	}
-	var promote []ConcurrencyWaiter
-	for rows.Next() {
-		w, err := scanWaiter(rows)
-		if err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		promote = append(promote, w)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	expiresNS := now.Add(lease).UnixNano()
-	for i, w := range promote {
-		holderID := w.HolderID
-		if holderID == "" {
-			// Pre-fix waiter row; fall back to "runID/nodeID".
-			holderID = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
-		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-			w.Key, w.RunID, w.NodeID,
-		); err != nil {
-			return nil, err
-		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_holders
-			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded)
-			 VALUES (?, ?, ?, ?, ?, ?, 0)`,
-			w.Key, holderID, w.RunID, w.NodeID, nowNS, expiresNS,
-		); err != nil {
-			return nil, err
-		}
-		promote[i].HolderID = holderID
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1140,27 +1236,41 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		return nil, err
 	}
 
-	state := &ConcurrencyState{Key: key, Capacity: capacity}
+	state := &ConcurrencyState{Key: key, Capacity: capacity, EffectiveCapacity: capacity}
 
+	nowNS := time.Now().UnixNano()
 	hrows, err := s.query(
 		ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity
 		   FROM concurrency_holders WHERE key = ? ORDER BY claimed_at ASC`, key,
 	)
 	if err != nil {
 		return nil, err
 	}
+	// minDeclared tracks the most-restrictive declared capacity over
+	// live participants (holders + waiters), mirroring the admission
+	// path's effective-capacity rule for the operator budget view.
+	minDeclared := 0
+	noteDeclared := func(c int) {
+		if c > 0 && (minDeclared == 0 || c < minDeclared) {
+			minDeclared = c
+		}
+	}
 	for hrows.Next() {
 		var h ConcurrencyHolder
 		var claimedNS, expiresNS int64
 		var superInt int
-		if err := hrows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
+		if err := hrows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt, &h.Cost, &h.DeclaredCapacity); err != nil {
 			_ = hrows.Close()
 			return nil, err
 		}
 		h.ClaimedAt = time.Unix(0, claimedNS)
 		h.LeaseExpiresAt = time.Unix(0, expiresNS)
 		h.Superseded = superInt == 1
+		if !h.Superseded && expiresNS > nowNS {
+			state.UsedCost += h.Cost
+			noteDeclared(h.DeclaredCapacity)
+		}
 		state.Holders = append(state.Holders, h)
 	}
 	_ = hrows.Close()
@@ -1170,7 +1280,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 
 	wrows, err := s.query(
 		ctx,
-		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
+		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
 		   FROM concurrency_waiters WHERE key = ? ORDER BY arrived_at ASC`, key,
 	)
 	if err != nil {
@@ -1196,6 +1306,10 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 			state.Waiters[i].Position = qrank
 			qrank++
 		}
+		noteDeclared(state.Waiters[i].DeclaredCapacity)
+	}
+	if minDeclared > 0 {
+		state.EffectiveCapacity = minDeclared
 	}
 	return state, nil
 }
@@ -1321,7 +1435,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	orphanRows, err := tx.QueryContext(
 		ctx,
 		`SELECT w.key, w.run_id, w.node_id, w.holder_id, w.arrived_at, w.policy,
-		        w.cache_key_hash, w.leader_run_id, w.leader_node_id, w.cancel_timeout_ns
+		        w.cache_key_hash, w.leader_run_id, w.leader_node_id, w.cancel_timeout_ns, w.cost, w.declared_capacity
 		   FROM concurrency_waiters w
 		  WHERE w.policy = ?
 		    AND w.leader_run_id <> ''
@@ -1356,7 +1470,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	ageRows, err := tx.QueryContext(
 		ctx,
 		`SELECT key, run_id, node_id, holder_id, arrived_at, policy,
-		        cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns
+		        cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
 		   FROM concurrency_waiters WHERE arrived_at < ?`+s.forUpdateSkipLocked(),
 		cutoff,
 	)
@@ -1493,13 +1607,18 @@ func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
 	var w ConcurrencyWaiter
 	var arrivedNS, cancelNS int64
 	if err := rs.Scan(&w.Key, &w.RunID, &w.NodeID, &w.HolderID, &arrivedNS, &w.Policy,
-		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &cancelNS); err != nil {
+		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &cancelNS, &w.Cost, &w.DeclaredCapacity); err != nil {
 		return ConcurrencyWaiter{}, err
 	}
 	w.ArrivedAt = time.Unix(0, arrivedNS)
 	w.CancelTimeout = time.Duration(cancelNS)
 	return w, nil
 }
+
+// waiterColumns is the canonical SELECT column list for scanWaiter, in
+// the exact order it scans. Centralized so the cost / declared_capacity
+// tail can't drift between call sites.
+const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity`
 
 func nodeIDOrDash(nodeID string) string {
 	if strings.TrimSpace(nodeID) == "" {

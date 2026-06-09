@@ -24,10 +24,12 @@ import (
 // response. Kept local so the CLI binary doesn't import the controller's
 // storage deps (same convention as agentView).
 type concState struct {
-	Key      string       `json:"key"`
-	Capacity int          `json:"capacity"`
-	Holders  []concHolder `json:"holders"`
-	Waiters  []concWaiter `json:"waiters"`
+	Key               string       `json:"key"`
+	Capacity          int          `json:"capacity"`
+	EffectiveCapacity int          `json:"effective_capacity"`
+	UsedCost          int          `json:"used_cost"`
+	Holders           []concHolder `json:"holders"`
+	Waiters           []concWaiter `json:"waiters"`
 }
 
 type concHolder struct {
@@ -37,6 +39,7 @@ type concHolder struct {
 	ClaimedAt      time.Time `json:"claimed_at"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 	Superseded     bool      `json:"superseded"`
+	Cost           int       `json:"cost"`
 }
 
 type concWaiter struct {
@@ -44,6 +47,7 @@ type concWaiter struct {
 	NodeID    string    `json:"node_id"`
 	ArrivedAt time.Time `json:"arrived_at"`
 	Policy    string    `json:"policy"`
+	Cost      int       `json:"cost"`
 	Position  int       `json:"position"`
 }
 
@@ -127,34 +131,60 @@ func renderConcurrencyState(w io.Writer, st *concState) {
 			active++
 		}
 	}
-	fmt.Fprintf(w, "namespace: %s   capacity: %d   held: %d   queued: %d\n\n",
-		st.Key, st.Capacity, active, len(st.Waiters))
+	// Budget is cost-summed: a member draws its declared cost, not one
+	// slot. EffectiveCapacity is the most-restrictive minimum enforced
+	// when versions disagree; available is what's left for new arrivals.
+	eff := st.EffectiveCapacity
+	if eff == 0 {
+		eff = st.Capacity
+	}
+	available := eff - st.UsedCost
+	if available < 0 {
+		available = 0
+	}
+	fmt.Fprintf(w, "namespace: %s   capacity: %d   effective: %d   budget used: %d   available: %d   held: %d   queued: %d\n",
+		st.Key, st.Capacity, eff, st.UsedCost, available, active, len(st.Waiters))
+	fmt.Fprintf(w, "scope: %s\n\n", scopeFromKey(st.Key))
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "HOLDER\tRUN/NODE\tCLAIMED\tLEASE_EXPIRES")
+	fmt.Fprintln(tw, "HOLDER\tRUN/NODE\tCOST\tCLAIMED\tLEASE_EXPIRES")
 	if len(st.Holders) == 0 {
-		fmt.Fprintln(tw, "(none)\t\t\t")
+		fmt.Fprintln(tw, "(none)\t\t\t\t")
 	}
 	for _, h := range st.Holders {
 		marker := ""
 		if h.Superseded {
 			marker = " (superseded)"
 		}
-		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n", h.HolderID, marker, runNode(h.RunID, h.NodeID),
-			fmtConcTime(h.ClaimedAt), fmtConcTime(h.LeaseExpiresAt))
+		fmt.Fprintf(tw, "%s%s\t%s\t%d\t%s\t%s\n", h.HolderID, marker, runNode(h.RunID, h.NodeID),
+			h.Cost, fmtConcTime(h.ClaimedAt), fmtConcTime(h.LeaseExpiresAt))
 	}
 	_ = tw.Flush()
 
 	fmt.Fprintln(w)
 	tw = tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN/NODE\tPOLICY\tARRIVED")
+	fmt.Fprintln(tw, "POS\tRUN/NODE\tPOLICY\tCOST\tARRIVED")
 	if len(st.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t")
+		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t")
 	}
 	for _, q := range st.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", q.Position, runNode(q.RunID, q.NodeID), q.Policy, fmtConcTime(q.ArrivedAt))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\n", q.Position, runNode(q.RunID, q.NodeID), q.Policy, q.Cost, fmtConcTime(q.ArrivedAt))
 	}
 	_ = tw.Flush()
+}
+
+// scopeFromKey reports the scope a concurrency key encodes. The
+// orchestrator qualifies Run/Box-scoped group keys with an "@<id>"
+// suffix; a bare name is fleet-global. A "memo:" key is the
+// content-addressed memoization slot, not a group.
+func scopeFromKey(key string) string {
+	if strings.HasPrefix(key, "memo:") {
+		return "content-cache"
+	}
+	if i := strings.LastIndex(key, "@"); i >= 0 {
+		return "run-or-box (" + key[i+1:] + ")"
+	}
+	return "global"
 }
 
 func runNode(runID, nodeID string) string {

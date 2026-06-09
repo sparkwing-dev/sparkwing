@@ -1,168 +1,262 @@
 # Scheduling
 
-How sparkwing decides which runner executes a job. The model is simple:
-**runners advertise labels, jobs declare the labels they need, and the
-controller hands each job to a runner whose labels satisfy it.**
+How sparkwing decides which agent runs a job. The model is **deliberately
+Kubernetes-shaped** so anyone who's seen `nodeSelector` /
+`tolerations` / `nodeAffinity` will recognize it -- but the YAML is
+flatter and the controller fills in sane defaults.
 
 ## The model in one paragraph
 
-Each cluster runner advertises a set of **labels** (opaque equality
-strings like `arm64`, `os=linux`, `gpu`). A job declares the labels it
-needs -- per node via the Go SDK (`.Requires(...)`) or for the whole
-pipeline via `requires:` in `sparkwing.yaml`. The controller's claim
-query matches a job to a runner when the runner's advertised labels
-satisfy the job's needed labels. A node that no runner can satisfy
-fails the run at validation (the hard rail).
+Agents have **labels** (what they are) and **taints** (what they refuse
+to run by default). Pipelines declare scheduling intent via a
+**`runs_on`** block in `pipelines.yaml`. The controller's matcher
+filters out agents the job is incompatible with, then picks the
+best-scoring match. If nothing matches in time the job fails with a
+queue-timeout error.
 
-## Label-match semantics
+## Per-node `.Requires()` (Go SDK)
 
-Labels are compared as **literal equality strings** -- the matcher does
-no parsing of `key=value`, so `os=linux` is one opaque token that must
-appear verbatim in the runner's advertised set. Within a single term,
-commas are **alternatives (OR)**; across separate terms, matches compose
-with **AND**:
-
-```
-needs ["linux"]            have ["linux"]          -> match
-needs ["linux"]            have ["macos"]          -> no match
-needs ["linux,macos"]      have ["macos"]          -> match   (OR within a term)
-needs ["linux","amd64"]    have ["linux"]          -> no match (AND across terms)
-needs ["linux,macos","amd64"] have ["macos","amd64"] -> match
-```
-
-Empty / no needed labels match any runner.
-
-## Per-node modifiers (Go SDK)
-
-Three chainable modifiers on `*sparkwing.JobNode` (and the same names on
-`*sparkwing.JobGroup`) control placement. All take the comma-OR / AND
-term syntax above.
+Alongside the pipeline-level `runs_on` block (below), individual nodes
+can declare runner labels from Go code via the `.Requires()` modifier on
+`*sparkwing.JobNode`:
 
 ```go
-// Hard filter: the run fails at validation if no runner can satisfy.
 sw.Job(plan, "train", &Train{}).Requires("gpu")
-sw.Job(plan, "package", &Package{}).Requires("arch=arm64", "trusted")
-sw.Job(plan, "build", &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
-
-// Soft bias: never fails on its own. When more than one runner can
-// satisfy Requires, pick the first matching a preference term (in order).
-sw.Job(plan, "integration", &Integration{}).
-    Requires("os=linux").
-    Prefers("cloud-linux")
-
-// Conditional: silently skip the node when the dispatching runner does
-// not advertise the labels (downstream Needs treats it as satisfied).
-preflight := sw.Job(plan, "preflight-sso", &CheckSSO{}).WhenRunner("local")
-sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
+sw.Job(plan, "package-arm", &Package{}).Requires("arch=arm64", "trusted")
 ```
 
-- **`Requires`** -- hard constraint. A job no runner can satisfy fails
-  the run at validation.
-- **`Prefers`** -- soft ordering. Never fails; if nothing matches, the
-  job dispatches via the default selection. Meaningful once more than one
-  runner can claim the job.
-- **`WhenRunner`** -- conditional execution. Skipped at dispatch when the
-  active runner can't satisfy the terms; a runner that advertises no
-  labels matches anything, so pipelines stay portable.
+**AND semantics.** A node declaring `.Requires("arm64", "laptop")` is
+claimable only by a warm runner whose `--label` set contains BOTH
+`arm64` and `laptop`. A runner advertising a superset (e.g. also
+`trusted`) still matches. To express OR, author separate nodes. There
+is no selector / expression syntax in v1 -- labels are compared as
+literal equality strings.
 
-## Pipeline-level `requires` (`sparkwing.yaml`)
+**No matching runner.** If no connected runner advertises the required
+labels, the node blocks indefinitely. The orchestrator logs a warning
+once per minute naming the unclaimed label set. The escape hatch is
+either: start a runner with `--label` matching, or remove the
+`.Requires()` modifier and retry the run.
 
-A pipeline entry can require labels of **every** job it contains, on top
-of each node's own `.Requires()`:
+**Where labels come from.** Runners advertise labels at claim time via
+the `sparkwing cluster worker --label` flag (repeatable), or the pod spec argv in
+`k8s/sparkwing/pool/deployment.yaml`. The controller's claim SQL
+filters candidate nodes whose `needs_labels` is a subset of the
+runner's advertised set.
+
+**Relationship to `pipelines.yaml` `runs_on`.** The YAML block is the
+legacy trigger-level selector (see below); `.Requires()` is a node-level
+modifier that writes `needs_labels` directly on the node row. Both can
+coexist -- the YAML filters which agent picks up the TRIGGER, while
+`.Requires()` filters which warm runner claims each NODE inside the run.
+
+## Pipeline `runs_on`
 
 ```yaml
-pipelines:
-  - name: deploy-prod
-    entrypoint: DeployProd
-    requires: [warm-runner]
+my-build:
+  on:
+    push:
+      branches: [main]
+  runs_on:
+    require:                  # hard filter -- must all match
+      os: linux
+      arch: amd64
+    prefer:                   # soft preference -- extra points per match
+      zone: us-east
+    tolerate:                 # which agent taints this job accepts
+      - agent=local
+      - gpu:NoSchedule
+    queue_timeout: 15m        # default 10m; "forever" disables
 ```
 
-`requires` is a flat list of label terms. When set it wholesale replaces
-the project `defaults.requires`. The reserved label **`local`** pins
-execution to the in-process runner -- the same effect as the
-`--sw-local-only` flag:
+| Field | Maps to k8s | Meaning |
+|---|---|---|
+| `require` | `nodeSelector` / required nodeAffinity | Every key/value must match the agent's labels (or `name`/`type` pseudo-labels). If any miss, the job is **not eligible** for that agent. |
+| `prefer` | preferred nodeAffinity | Soft scoring -- each matching key adds +10 to that (job, agent) pair. Doesn't filter, just sorts. |
+| `tolerate` | `tolerations` | List of tolerations. Every `NoSchedule` taint on the agent must be tolerated, or the job is rejected. `PreferNoSchedule` taints lower the score by 1 instead of blocking. |
+| `queue_timeout` | (no k8s analog) | How long the job may sit pending before the controller fails it. Empty → 10m default. `forever` or `never` disables. |
+
+### Toleration shorthand
+
+Tolerations accept four forms -- pick whichever reads cleanest:
 
 ```yaml
-pipelines:
-  - name: seed-local-db
-    entrypoint: SeedLocalDB
-    requires: [local]
+tolerate:
+  - agent=local                                # Equal, NoSchedule (most common)
+  - agent=local:PreferNoSchedule               # Equal, explicit effect
+  - gpu                                        # Exists, NoSchedule
+  - { key: zone, value: us-east, operator: Equal, effect: NoSchedule }
 ```
 
-## How runners advertise labels
+The first three are sugar for the long form. `Operator: Exists` matches
+any value with the named key -- useful when a taint exists for *any*
+value of, say, `gpu`.
 
-Cluster-mode runners (`sparkwing-runner`) advertise labels with the
-repeatable `--label` flag:
+## Agent labels and taints
+
+Agents register themselves with the controller on every poll, sending
+their labels and taints in the URL.
+
+### From `~/.config/sparkwing/profiles.yaml`
+
+```yaml
+default_profile: local
+agent_name: dev-laptop
+profiles:
+  local:
+    controller: http://localhost:9001
+    agent_type: local
+    agent_labels:
+      os: darwin
+      arch: arm64
+      zone: home
+    agent_taints: agent=local:NoSchedule    # optional override
+```
+
+### From environment variables (typical for k8s deployments + laptop workers)
 
 ```bash
-sparkwing-runner --label arm64 --label os=linux --label gpu
+SPARKWING_AGENT_TYPE=warm-runner
+SPARKWING_AGENT_LABELS=cluster=prod,arch=arm64
+SPARKWING_AGENT_TAINTS=spot:PreferNoSchedule
 ```
 
-The controller's claim query keeps only runners whose advertised set
-satisfies a job's needed labels. When no connected runner advertises the
-required labels, the warm pool logs a hint once and the node waits:
+These are read by both `sparkwing-runner` (the cluster-mode daemon
+running inside the warm pool) and `sparkwing cluster worker` (the
+laptop-side queue drainer).
 
+### Running a laptop worker
+
+```bash
+SPARKWING_AGENT_TAINTS=agent=local:NoSchedule \
+  sparkwing cluster worker --profile prod
 ```
-no warm runner advertises these labels; start a runner with
---label matching or remove .Requires()
-```
 
-The laptop-side drainer `sparkwing cluster worker` runs claimed jobs
-in-process and is the local counterpart to the cluster runner.
+(`--profile prod` pulls controller URL + token from the prod profile;
+see `docs/auth.md` on registering profiles.)
 
-## Direct (`sparkwing run`) vs dispatched (`trigger`)
+### Pseudo-labels: `name` and `type`
 
-`sparkwing run <pipeline>` executes the pipeline **locally, in this
-process, on this machine** -- there is no controller and no claim step,
-so label matching against remote runners does not apply (a node's
-`.Requires()` is still validated, and `WhenRunner` evaluates against the
-local runner). Use `requires: [local]` or `--sw-local-only` to force
-in-process execution explicitly.
+`require: { type: warm-runner }` and `require: { name: lap-7 }` work
+even though the agent didn't explicitly declare `type` and `name` as
+labels. The matcher resolves them from the agent identity.
 
-`sparkwing pipeline trigger <pipeline> --profile prod` hands the run to a
-controller, which schedules each node onto a runner whose labels satisfy
-its needed labels.
+## The `local` taint (laptop default)
 
-## Schedule triggers (cron)
-
-A pipeline fires on a cron schedule via the `schedule` trigger in
-`sparkwing.yaml`:
+When you run `sparkwing cluster worker` with `agent_type: local` (the
+default), the agent **automatically advertises a `local:NoSchedule`
+taint**. This means a stray webhook push doesn't end up running on
+someone's laptop -- pipelines must explicitly opt in:
 
 ```yaml
-pipelines:
-  - name: nightly-rebuild
-    entrypoint: NightlyRebuild
-    on:
-      schedule: "0 3 * * *"   # 03:00 daily
+my-laptop-pipeline:
+  runs_on:
+    tolerate: [local]
 ```
 
-The controller evaluates schedules and enqueues a run when the cron
-expression fires; the run then schedules onto a runner by the same label
-rules as any other dispatched run.
+You can override the default by setting `SPARKWING_AGENT_TAINTS` in the
+worker's environment (or `agent_taints` in the profile). Set it to an
+empty string to advertise no taints at all (and accept any job).
+
+## Direct invocations (`sparkwing`) bypass taints
+
+When you run a pipeline directly with `sparkwing run` (rather than
+`sparkwing pipeline trigger`), sparkwing marks the job as **`Direct`**.
+Direct jobs:
+
+- Skip the taint check entirely -- you've already chosen the agent (your
+  laptop, this terminal), so untolerated `NoSchedule` taints don't repel.
+- Skip the queue-timeout sweeper -- you'll cancel manually if needed.
+
+This is the key distinction the user cares about: **webhook → controller
+→ scheduling matters; `sparkwing run build-deploy` → just run it here**.
+
+`sparkwing pipeline trigger build-deploy --profile prod` is *not* direct:
+you've explicitly chosen to dispatch to a remote controller, which then
+schedules normally.
+
+`require` and `prefer` are still respected for `sparkwing` invocations --
+nothing forces a `linux` pipeline to compile on a Mac.
+
+## Scoring (how ties are broken)
+
+Each (job, agent) pair earns a score:
+
+| Rule | Delta |
+|---|---|
+| Each matching `runs_on.prefer` key | **+10** |
+| Legacy `prefer` selector match | **+10** |
+| Legacy `prefer` selector mismatch (anti-affinity) | **−1** |
+| Each untolerated `PreferNoSchedule` taint | **−1** |
+
+The matcher picks the highest-scoring eligible job. Ties are broken by
+**FIFO** (oldest `created_at` wins) so nothing starves indefinitely.
+
+## Queue timeout
+
+Pending jobs that no agent will claim are eventually failed. Defaults
+and overrides:
+
+| `queue_timeout` value | Effect |
+|---|---|
+| (unset) | 10 minutes (`DefaultQueueTimeout`) |
+| `30s`, `5m`, `1h30m` | parsed via `time.ParseDuration` |
+| `forever` / `never` | Never expires -- job sits pending until claimed or cancelled |
+
+The controller's cleanup loop runs once a minute. When a queue-timeout
+fires, the job's logs explain *why* nothing claimed it (no matching
+labels, no toleration for taint X, etc.).
+
+Direct (`sparkwing`) jobs are exempt -- see above.
 
 ## Worked examples
 
-### Run only on the warm-runner pool
+### Run only on the warm runner pool
 
-```go
-sw.Job(plan, "deploy", &Deploy{}).Requires("warm-runner")
+```yaml
+deploy-prod:
+  runs_on:
+    require:
+      type: warm-runner       # k8s warm pool only
 ```
 
 ### Prefer ARM but accept anything
 
-```go
-sw.Job(plan, "build-image", &BuildImage{}).Prefers("arch=arm64")
+```yaml
+build-image:
+  runs_on:
+    prefer:
+      arch: arm64
 ```
 
-If an ARM and an AMD runner are both idle, ARM wins by preference. If
-only AMD is idle, the job runs there.
+If two ARM warm runners and one AMD warm runner are all idle, ARM wins
+by score. If only AMD is idle, the job runs there.
 
-### A local-only preflight before a remote build
+### A laptop-specific pipeline
 
-```go
-preflight := sw.Job(plan, "check-sso", &CheckSSO{}).WhenRunner("local")
-sw.Job(plan, "build", &Build{}).Needs(preflight)
+```yaml
+seed-local-db:
+  runs_on:
+    require:
+      type: local             # only laptops
+    tolerate:
+      - agent=local           # accept the default local taint
+    queue_timeout: forever    # might be offline overnight
 ```
 
-The preflight runs when you `sparkwing run` locally and is skipped when
-the same pipeline is dispatched to a cluster runner.
+### Spot-aware build with degraded preference
+
+```yaml
+nightly-rebuild:
+  runs_on:
+    tolerate:
+      - spot:PreferNoSchedule
+    prefer:
+      zone: us-east
+```
+
+`spot:PreferNoSchedule` tolerated → spot agents are eligible. The
+`-1` penalty per untolerated `PreferNoSchedule` doesn't apply because
+it *is* tolerated. Among eligible agents, `us-east` ones score
+higher.
+

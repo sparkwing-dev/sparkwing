@@ -56,6 +56,44 @@ code change to unlock.
   `pipeline templates` also print a template's prerequisite (e.g. a
   "run from the repo root" note) after scaffolding, so setup
   requirements are visible where you scaffold.
+- **cli:** `sparkwing cluster concurrency` shows cost-summed budget
+  (used / available / effective capacity), the group scope, and
+  per-holder / per-waiter cost. `sparkwing pipeline explain` renders the
+  split `Cache(ttl=...)` and `Concurrency(group=... cap=... cost=...
+  scope=...)` facts.
+- **controller:** the concurrency HTTP backend reaches parity with the
+  in-process engine -- `cost` on acquire plus `resolve`,
+  `cancel-waiter`, and `force-release` endpoints -- so cost-weighted
+  admission, scope, and most-restrictive capacity hold under a hosted
+  controller, not only in-process or Postgres-direct.
+
+### Changed
+
+- **sdk (Breaking):** `Cache` is now content-addressed memoization only:
+  `Cache(key CacheKeyFn, opts ...CacheOption)` with `TTL(d)`, replacing
+  `Cache(CacheOptions{Namespace, ContentHash, CacheTTL, ...})`. It is
+  keyed on content alone, so two nodes with the same key share a result
+  regardless of group or run, and in-flight dedupe of identical content
+  is automatic (no policy to set). `DefaultCacheTTL` 7d, `MaxCacheTTL`
+  35d. See
+  [migration](docs/migrations/v0.9.0.md#cache-content-key-plus-options-no-more-cacheoptions).
+- **sdk (Breaking):** Concurrency is a new, independent primitive:
+  `NewConcurrencyGroup(name, ConcurrencyLimit{Capacity, Scope, OnLimit,
+  QueueTimeout, CancelTimeout})` plus `(*JobNode).Concurrency(group,
+  cost...)`. The scheduling fields that overloaded `CacheOptions`
+  (`Max`, `OnLimit`, the timeouts) move here. Admission is cost-weighted
+  and summed across the group's `Scope` (`ScopeRun`/`ScopeBox`/
+  `ScopeGlobal`); capacity skew across pipeline versions resolves
+  most-restrictive-wins. See
+  [migration](docs/migrations/v0.9.0.md#concurrency-a-named-group-not-a-cache-namespace).
+- **sdk (Breaking):** `OnLimit: Coalesce` and the `OnLimitPolicy` type
+  are removed. In-flight dedupe is folded into `Cache` and keyed on
+  content rather than a group. See
+  [migration](docs/migrations/v0.9.0.md#onlimit-coalesce-is-gone).
+- **sdk (Breaking):** `Plan.Cache(CacheOptions{...})` is replaced by
+  `Plan.Concurrency(group)` for whole-run coordination; a plan never
+  memoizes. See
+  [migration](docs/migrations/v0.9.0.md#plancache-becomes-planconcurrency).
 
 ### Fixed
 
@@ -71,8 +109,7 @@ code change to unlock.
   (`pipelines.yaml` → `sparkwing.yaml`); removal of documented-but-
   nonexistent config keys that hard-errored on load (`runs_on`,
   `dispatch`, `pull_request`, `branches_ignore` / `paths_ignore`);
-  `CacheOptions` fields (`Key` / `CacheKey` → `Namespace` /
-  `ContentHash`); the local store path (`state.db`) and per-run log
+  the local store path (`state.db`) and per-run log
   location (`~/.sparkwing/runs/`); flag-only `cluster tokens` verbs
   (`--prefix`); and a rewrite of `scheduling.md` to the shipped label
   model (`requires:` plus `.Requires()` / `.Prefers()` /

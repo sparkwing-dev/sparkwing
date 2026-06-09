@@ -1,7 +1,6 @@
 # Storage backends
 
-Backends are configured per profile, not in a separate file. The three
-persistence surfaces --
+There is no longer a `backends.yaml`. The three persistence surfaces --
 
 - **state** -- run records, plan snapshots, status
 - **cache** -- content-addressed artifacts and compiled pipeline binaries
@@ -92,26 +91,25 @@ profiles:
 respective env vars; declaring a profile of the same name overrides it
 per-field while keeping the built-in detect predicate.
 
-## Per-pipeline backend selection
+## Per-target backend overrides
 
-A pipeline pins its backends by pointing at a profile that declares
-them. Put the surface override in a `profiles:` entry and set `profile:`
-on the pipeline; that profile's `state` / `cache` / `logs` then apply to
-its runs (typically for an audit requirement):
+A pipeline target can still pin one surface, typically for an audit
+requirement. The override lives under the pipeline definition in
+`.sparkwing/sparkwing.yaml`:
 
 ```yaml
 # .sparkwing/sparkwing.yaml
-profiles:
-  prod-audit:
-    logs: { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
 pipelines:
   - name: release-prod
     entrypoint: Release
-    profile: prod-audit
+    dispatch:
+      runners: [prod-builders]
+      backend:
+        logs: { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
 ```
 
-Selection precedence per surface: the pipeline's profile first, then the
-resolved default profile's `state` / `cache` / `logs`.
+Selection precedence per surface: the pipeline's `dispatch.backend`
+overlay first, then the resolved profile's `state` / `cache` / `logs`.
 
 ## Pipeline binary distribution
 

@@ -105,9 +105,9 @@ This keeps repos fresh so that:
 
 ## Code Uploads
 
-When you `sparkwing pipeline trigger <pipeline> --profile prod` with a dirty
-or unpushed working tree, the sparkwing CLI uploads a code tarball directly to
-the cache (not through the controller); a clean tree triggers by SHA instead:
+When running `sparkwing pipeline trigger <pipeline> --profile prod --from local`,
+the sparkwing CLI uploads a code tarball directly to the cache (not through the
+controller):
 
 ```
 sparkwing CLI -> cache /upload (stores tarball, returns ref ID)

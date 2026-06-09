@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// NoCache is the typed sentinel returned from a [CacheKeyFn] /
-// [CacheOptions.ContentHash] to explicitly opt this invocation out of
-// memoization. It is distinct from the zero CacheKey: returning
+// NoCache is the typed sentinel returned from a [CacheKeyFn] to
+// explicitly opt this invocation out of memoization. It is distinct
+// from the zero CacheKey: returning
 // NoCache surfaces "explicit opt-out" in operator logs (cache row
 // "skipped: explicit opt-out"), while returning the zero value
 // surfaces a "missing key" warning. Both bypass memoization for the

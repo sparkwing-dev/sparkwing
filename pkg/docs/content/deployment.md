@@ -12,9 +12,8 @@ to a cluster via a profile's controller:
 | Source | Target | Command |
 |--------|--------|---------|
 | Local code | Local machine | `sparkwing run build` |
-| Local working tree at a git ref | Local machine | `sparkwing run build --sw-ref main` |
 | Local code | Any cluster | `sparkwing pipeline trigger build --profile dev` |
-| Controller-registered source | Any cluster | `sparkwing pipeline trigger build --profile prod` |
+| Remote (git ref) | Any cluster | `sparkwing pipeline trigger build --from main --profile prod` |
 
 The `--profile` flag resolves a **profile** - a named cluster endpoint.
 Every profile with a controller follows the same dispatch flow:
@@ -67,17 +66,18 @@ func (j *Deploy) Run(ctx context.Context) error {
 Push updated image tags to a gitops repo, let ArgoCD sync:
 
 ```go
-func (j *Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
-    update := sw.Step(w, "update-gitops", func(ctx context.Context) error {
+func (j *Deploy) Work() *sw.Work {
+    w := sw.NewWork()
+    update := w.Step("update-gitops", func(ctx context.Context) error {
         return patchKustomization(ctx)
     })
-    sw.Step(w, "sync-argocd", func(ctx context.Context) error {
+    w.Step("sync-argocd", func(ctx context.Context) error {
         _, err := sw.Bash(ctx,
             "kubectl annotate application.argoproj.io/myapp -n argocd "+
                 "argocd.argoproj.io/refresh=hard --overwrite").Run()
         return err
     }).Needs(update)
-    return nil, nil
+    return w
 }
 ```
 

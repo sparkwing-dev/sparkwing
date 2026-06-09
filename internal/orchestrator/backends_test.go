@@ -64,7 +64,7 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("OpenNodeLog called %d times; want 2", fakes.logs.opened)
 	}
 
-	// The .Cache()-declared node -- exactly one -- acquires a slot.
+	// The .Concurrency()-declared node -- exactly one -- acquires a slot.
 	if fakes.concurrency.acquires != 1 {
 		t.Errorf("Concurrency.AcquireSlot called %d times; want 1", fakes.concurrency.acquires)
 	}
@@ -96,7 +96,7 @@ type seamOK struct{ sparkwing.Base }
 func (seamOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
 	sparkwing.Job(plan, "b", func(ctx context.Context) error { return nil }).
-		Needs(a).Cache(sparkwing.CacheOptions{Namespace: "seam-lock"})
+		Needs(a).Concurrency(sparkwing.NewConcurrencyGroup("seam-lock", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	return nil
 }
 

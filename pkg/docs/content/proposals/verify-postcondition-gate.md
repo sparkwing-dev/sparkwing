@@ -1,8 +1,8 @@
 # Post-action verification: a `Verify` lifecycle gate (proposal)
 
-**Status:** IMPLEMENTED and shipped -- `.Verify(func(ctx) error)` is a
-live Job modifier (see the SDK reference). This proposal is retained for
-design history only; treat the SDK reference as authoritative.
+**Status:** design settled after three independent reviews. Not yet
+implemented. Part of the "make hidden runtime state explicit" release
+theme, alongside observable concurrency gates (separate proposal).
 
 ## What this is, and what it is not
 

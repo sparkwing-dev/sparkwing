@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -27,6 +28,74 @@ func (snapshotParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	analyze := sparkwing.Step(w, "analyze", func(ctx context.Context) error { return nil })
 	sparkwing.JobSpawn(w, "scan-child", snapshotChildJob{}).Needs(analyze)
 	return nil, nil
+}
+
+// A node that declares both Cache and Concurrency must carry the two
+// concerns independently in the snapshot: the content-cache fact (with
+// TTL) and the concurrency facts (group, capacity, cost, scope,
+// policy, timeouts). No Coalesce, no shared "cache_*" field.
+func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{
+		Capacity:      8,
+		Scope:         sparkwing.ScopeBox,
+		OnLimit:       sparkwing.Queue,
+		QueueTimeout:  30 * time.Second,
+		CancelTimeout: 10 * time.Second,
+	})
+	sparkwing.Job(plan, "shard", func(ctx context.Context) error { return nil }).
+		Concurrency(g, 4).
+		Cache(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("coverage", "shard") },
+			sparkwing.TTL(48*time.Hour))
+
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatalf("marshalPlanSnapshot: %v", err)
+	}
+	var snap planSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(snap.Nodes) != 1 || snap.Nodes[0].Modifiers == nil {
+		t.Fatalf("expected one node with modifiers, got %+v", snap.Nodes)
+	}
+	m := snap.Nodes[0].Modifiers
+
+	// Content cache: independent of the group.
+	if !m.Cache {
+		t.Errorf("Cache flag not set")
+	}
+	if m.CacheTTLMS != (48 * time.Hour).Milliseconds() {
+		t.Errorf("CacheTTLMS = %d, want %d", m.CacheTTLMS, (48 * time.Hour).Milliseconds())
+	}
+
+	// Concurrency facts.
+	if m.ConcGroup != "db" {
+		t.Errorf("ConcGroup = %q, want db", m.ConcGroup)
+	}
+	if m.ConcCapacity != 8 {
+		t.Errorf("ConcCapacity = %d, want 8", m.ConcCapacity)
+	}
+	if m.ConcCost != 4 {
+		t.Errorf("ConcCost = %d, want 4", m.ConcCost)
+	}
+	if m.ConcScope != string(sparkwing.ScopeBox) {
+		t.Errorf("ConcScope = %q, want %q", m.ConcScope, sparkwing.ScopeBox)
+	}
+	if m.ConcQueueTimeoutMS != (30 * time.Second).Milliseconds() {
+		t.Errorf("ConcQueueTimeoutMS = %d, want %d", m.ConcQueueTimeoutMS, (30 * time.Second).Milliseconds())
+	}
+	if m.ConcCancelTimeoutMS != (10 * time.Second).Milliseconds() {
+		t.Errorf("ConcCancelTimeoutMS = %d, want %d", m.ConcCancelTimeoutMS, (10 * time.Second).Milliseconds())
+	}
+
+	// The snapshot JSON must not carry any legacy "cache_max" /
+	// "cache_on_limit" / Coalesce remnants.
+	for _, banned := range []string{"cache_max", "cache_on_limit", "coalesce"} {
+		if strings.Contains(string(raw), banned) {
+			t.Errorf("snapshot JSON still contains %q", banned)
+		}
+	}
 }
 
 func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {

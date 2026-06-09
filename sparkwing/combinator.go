@@ -325,14 +325,6 @@ func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup {
 	return g
 }
 
-// Cache applies the given cache options to every member. See Job.Cache.
-func (g *JobGroup) Cache(opts CacheOptions) *JobGroup {
-	for _, m := range g.Members() {
-		m.Cache(opts)
-	}
-	return g
-}
-
 // NeedsOptional declares optional upstream dependencies on every
 // member; unknown IDs are silently dropped at finalize. See
 // [JobNode.NeedsOptional].

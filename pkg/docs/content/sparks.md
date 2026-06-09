@@ -150,7 +150,7 @@ sparks:
 
 Opt-in live tracking: every `sparkwing run <pipeline>` hits the module proxy to
 discover the newest non-prerelease tag. Acceptable cost (~100ms per run) given
-the user opted in. Use `--sw-no-update` to bypass when offline.
+the user opted in. Use `--no-update` to bypass when offline.
 
 ### Example: semver ranges
 
@@ -231,9 +231,9 @@ auth. Set `GOPROXY=direct` to force direct resolution for everything. No
 separate sparkwing auth flow exists - if `go get` works, sparks resolution
 works.
 
-### Offline work: `--sw-no-update`
+### Offline work: `--no-update`
 
-`sparkwing run <pipeline> --sw-no-update` skips the resolution step entirely. If a
+`sparkwing run <pipeline> --no-update` skips the resolution step entirely. If a
 previous overlay exists at `.sparkwing/.resolved.mod`, it is reused; otherwise
 compile uses the git-tracked `go.mod`. Useful on flights, in offline CI, or
 while debugging a stale pin without touching the network.

@@ -33,10 +33,11 @@ func NoopConcurrency() ConcurrencyBackend { return &noopConcurrency{} }
 
 func (n *noopConcurrency) AcquireSlot(_ context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	// Surface the silent-no-op once per (key, policy) so authors who
-	// declared .Cache(OnLimit:Fail|Queue|Skip|CancelOthers) realize the
-	// coordination guarantee they wrote is unenforced in this mode.
-	// Without the warning, a deploy gate built on Max=1+Fail looks
-	// like it's working when in fact both candidates are running.
+	// declared .Concurrency() with OnLimit Fail/Queue/Skip/CancelOthers
+	// realize the coordination guarantee they wrote is unenforced in
+	// this mode. Without the warning, a deploy gate built on Capacity 1
+	// + OnLimit:Fail looks like it's working when in fact both
+	// candidates are running.
 	if isCoordinatingPolicy(req.Policy) {
 		warnKey := req.Key + "|" + req.Policy
 		if _, loaded := n.warnedKeys.LoadOrStore(warnKey, struct{}{}); !loaded {

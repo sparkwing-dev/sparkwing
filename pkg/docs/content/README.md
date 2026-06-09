@@ -12,7 +12,7 @@ these pages; the CLI ships them embedded too (`sparkwing docs read
 - **Writing pipelines?** [`sdk.md`](sdk.md) and
   [`pipelines.md`](pipelines.md) cover the Go DSL.
 - **Running in CI?** [`ci-embedded.md`](ci-embedded.md) -- `sparkwing
-  run --sw-mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
+  run --mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
 - **Self-hosting the dashboard?** [`architecture.md`](architecture.md)
   - [`deployment.md`](deployment.md).
 - **Self-hosting without Kubernetes?** [`self-hosting.md`](self-hosting.md)
@@ -34,9 +34,9 @@ docs/
   local-execution.md     how local vs remote execution interact
   native-mode.md         the laptop model (detached dashboard)
   hooks.md               triggers (webhooks + opt-in pipeline hooks)
-  scheduling.md          runner labels, .Requires/.Prefers/.WhenRunner
+  scheduling.md          runner labels, taints, tolerations, runs_on
   warm-pool.md           warm PVC pool
-  caching.md             node-level Cache modifier (CacheOptions)
+  caching.md             node-level CacheKey modifier
   backends.md            per-profile state / cache / logs destinations
   build-caching.md       Docker / BuildKit / proxy caching layers
   fast-builds.md         performance best practices

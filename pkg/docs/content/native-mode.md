@@ -18,9 +18,9 @@ No daemon. No controller pod. No queue. No cluster lifecycle commands.
 
 ## What gets written per run
 
-Run state lives in the local SQLite store at `~/.sparkwing/state.db`
-plus per-run log files under `~/.sparkwing/runs/<runID>/`. The dashboard
-reads both. Run IDs sort chronologically.
+Run state lives in the local SQLite store at `~/.sparkwing/sparkwing.db`
+plus per-run log files under `~/.sparkwing/logs/`. The dashboard reads
+both. Run IDs sort chronologically.
 
 ## Running the dashboard
 
