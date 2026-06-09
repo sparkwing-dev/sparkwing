@@ -2593,23 +2593,35 @@ type snapshotApproval struct {
 
 // snapshotModifiers is the wire shape of a Node's Plan-layer modifiers.
 type snapshotModifiers struct {
-	Retry           int      `json:"retry,omitempty"`
-	RetryBackoffMS  int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto       bool     `json:"retry_auto,omitempty"`
-	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
-	RunsOn          []string `json:"runs_on,omitempty"`
-	Prefers         []string `json:"prefers,omitempty"`
-	WhenRunner      []string `json:"when_runner,omitempty"`
-	CacheKey        string   `json:"cache_key,omitempty"`
-	CacheMax        int      `json:"cache_max,omitempty"`
-	CacheOnLimit    string   `json:"cache_on_limit,omitempty"`
-	Inline          bool     `json:"inline,omitempty"`
-	Optional        bool     `json:"optional,omitempty"`
-	ContinueOnError bool     `json:"continue_on_error,omitempty"`
-	OnFailure       string   `json:"on_failure,omitempty"`
-	HasBeforeRun    bool     `json:"has_before_run,omitempty"`
-	HasAfterRun     bool     `json:"has_after_run,omitempty"`
-	HasSkipIf       bool     `json:"has_skip_if,omitempty"`
+	Retry          int      `json:"retry,omitempty"`
+	RetryBackoffMS int64    `json:"retry_backoff_ms,omitempty"`
+	RetryAuto      bool     `json:"retry_auto,omitempty"`
+	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	RunsOn         []string `json:"runs_on,omitempty"`
+	Prefers        []string `json:"prefers,omitempty"`
+	WhenRunner     []string `json:"when_runner,omitempty"`
+	// Content cache (JobNode.Cache): independent of any concurrency
+	// group. Cache marks that the node memoizes on content; CacheTTLMS
+	// is the retention window.
+	Cache      bool  `json:"cache,omitempty"`
+	CacheTTLMS int64 `json:"cache_ttl_ms,omitempty"`
+	// Concurrency group membership (JobNode.Concurrency): name, the
+	// declared budget + this member's cost, scope, the at-limit policy,
+	// and the optional timeouts. All independent of the content cache.
+	ConcGroup           string `json:"conc_group,omitempty"`
+	ConcCapacity        int    `json:"conc_capacity,omitempty"`
+	ConcCost            int    `json:"conc_cost,omitempty"`
+	ConcScope           string `json:"conc_scope,omitempty"`
+	ConcOnLimit         string `json:"conc_on_limit,omitempty"`
+	ConcQueueTimeoutMS  int64  `json:"conc_queue_timeout_ms,omitempty"`
+	ConcCancelTimeoutMS int64  `json:"conc_cancel_timeout_ms,omitempty"`
+	Inline              bool   `json:"inline,omitempty"`
+	Optional            bool   `json:"optional,omitempty"`
+	ContinueOnError     bool   `json:"continue_on_error,omitempty"`
+	OnFailure           string `json:"on_failure,omitempty"`
+	HasBeforeRun        bool   `json:"has_before_run,omitempty"`
+	HasAfterRun         bool   `json:"has_after_run,omitempty"`
+	HasSkipIf           bool   `json:"has_skip_if,omitempty"`
 }
 
 // snapshotWork is the wire shape of a Job's inner DAG.
@@ -2822,11 +2834,19 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
 	}
+	if cc := n.CacheConfig(); cc != nil {
+		m.Cache = true
+		m.CacheTTLMS = cc.TTL.Milliseconds()
+	}
 	if g := n.ConcurrencyGroupRef(); g != nil {
 		limit := g.Limit()
-		m.CacheKey = g.Name()
-		m.CacheMax = limit.Capacity
-		m.CacheOnLimit = string(limit.OnLimit)
+		m.ConcGroup = g.Name()
+		m.ConcCapacity = limit.Capacity
+		m.ConcCost = n.ConcurrencyCost()
+		m.ConcScope = string(limit.Scope)
+		m.ConcOnLimit = string(limit.OnLimit)
+		m.ConcQueueTimeoutMS = limit.QueueTimeout.Milliseconds()
+		m.ConcCancelTimeoutMS = limit.CancelTimeout.Milliseconds()
 	}
 	if isZeroModifiers(m) {
 		return nil
@@ -2843,9 +2863,15 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		len(m.RunsOn) == 0 &&
 		len(m.Prefers) == 0 &&
 		len(m.WhenRunner) == 0 &&
-		m.CacheKey == "" &&
-		m.CacheMax == 0 &&
-		m.CacheOnLimit == "" &&
+		!m.Cache &&
+		m.CacheTTLMS == 0 &&
+		m.ConcGroup == "" &&
+		m.ConcCapacity == 0 &&
+		m.ConcCost == 0 &&
+		m.ConcScope == "" &&
+		m.ConcOnLimit == "" &&
+		m.ConcQueueTimeoutMS == 0 &&
+		m.ConcCancelTimeoutMS == 0 &&
 		!m.Inline &&
 		!m.Optional &&
 		!m.ContinueOnError &&

@@ -48,21 +48,27 @@ type planSnapshotApprove struct {
 }
 
 type planSnapshotModifiers struct {
-	Retry           int      `json:"retry,omitempty"`
-	RetryBackoffMS  int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto       bool     `json:"retry_auto,omitempty"`
-	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
-	RunsOn          []string `json:"runs_on,omitempty"`
-	CacheKey        string   `json:"cache_key,omitempty"`
-	CacheMax        int      `json:"cache_max,omitempty"`
-	CacheOnLimit    string   `json:"cache_on_limit,omitempty"`
-	Inline          bool     `json:"inline,omitempty"`
-	Optional        bool     `json:"optional,omitempty"`
-	ContinueOnError bool     `json:"continue_on_error,omitempty"`
-	OnFailure       string   `json:"on_failure,omitempty"`
-	HasBeforeRun    bool     `json:"has_before_run,omitempty"`
-	HasAfterRun     bool     `json:"has_after_run,omitempty"`
-	HasSkipIf       bool     `json:"has_skip_if,omitempty"`
+	Retry               int      `json:"retry,omitempty"`
+	RetryBackoffMS      int64    `json:"retry_backoff_ms,omitempty"`
+	RetryAuto           bool     `json:"retry_auto,omitempty"`
+	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
+	RunsOn              []string `json:"runs_on,omitempty"`
+	Cache               bool     `json:"cache,omitempty"`
+	CacheTTLMS          int64    `json:"cache_ttl_ms,omitempty"`
+	ConcGroup           string   `json:"conc_group,omitempty"`
+	ConcCapacity        int      `json:"conc_capacity,omitempty"`
+	ConcCost            int      `json:"conc_cost,omitempty"`
+	ConcScope           string   `json:"conc_scope,omitempty"`
+	ConcOnLimit         string   `json:"conc_on_limit,omitempty"`
+	ConcQueueTimeoutMS  int64    `json:"conc_queue_timeout_ms,omitempty"`
+	ConcCancelTimeoutMS int64    `json:"conc_cancel_timeout_ms,omitempty"`
+	Inline              bool     `json:"inline,omitempty"`
+	Optional            bool     `json:"optional,omitempty"`
+	ContinueOnError     bool     `json:"continue_on_error,omitempty"`
+	OnFailure           string   `json:"on_failure,omitempty"`
+	HasBeforeRun        bool     `json:"has_before_run,omitempty"`
+	HasAfterRun         bool     `json:"has_after_run,omitempty"`
+	HasSkipIf           bool     `json:"has_skip_if,omitempty"`
 }
 
 type planSnapshotWork struct {
@@ -430,15 +436,34 @@ func nodeModifiersSuffix(n *planSnapshotNode) string {
 		if len(m.RunsOn) > 0 {
 			bits = append(bits, "Requires="+strings.Join(m.RunsOn, ","))
 		}
-		if m.CacheKey != "" {
-			s := "Cache=" + m.CacheKey
-			if m.CacheMax > 1 {
-				s += fmt.Sprintf("(max=%d)", m.CacheMax)
-			}
-			if m.CacheOnLimit != "" && m.CacheOnLimit != "queue" {
-				s += "(" + m.CacheOnLimit + ")"
+		if m.Cache {
+			s := "Cache"
+			if m.CacheTTLMS > 0 {
+				s += "(ttl=" + (time.Duration(m.CacheTTLMS) * time.Millisecond).String() + ")"
 			}
 			bits = append(bits, s)
+		}
+		if m.ConcGroup != "" {
+			parts := []string{"group=" + m.ConcGroup}
+			if m.ConcCapacity > 0 {
+				parts = append(parts, fmt.Sprintf("cap=%d", m.ConcCapacity))
+			}
+			if m.ConcCost > 1 {
+				parts = append(parts, fmt.Sprintf("cost=%d", m.ConcCost))
+			}
+			if m.ConcScope != "" && m.ConcScope != "global" {
+				parts = append(parts, "scope="+m.ConcScope)
+			}
+			if m.ConcOnLimit != "" && m.ConcOnLimit != "queue" {
+				parts = append(parts, m.ConcOnLimit)
+			}
+			if m.ConcQueueTimeoutMS > 0 {
+				parts = append(parts, "queue_timeout="+(time.Duration(m.ConcQueueTimeoutMS)*time.Millisecond).String())
+			}
+			if m.ConcCancelTimeoutMS > 0 {
+				parts = append(parts, "cancel_timeout="+(time.Duration(m.ConcCancelTimeoutMS)*time.Millisecond).String())
+			}
+			bits = append(bits, "Concurrency("+strings.Join(parts, " ")+")")
 		}
 		if m.Inline {
 			bits = append(bits, "Inline")

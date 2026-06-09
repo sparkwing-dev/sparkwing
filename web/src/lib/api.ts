@@ -283,9 +283,19 @@ export interface NodeModifiers {
   retry_auto?: boolean;
   timeout_ms?: number;
   runs_on?: string[];
-  cache_key?: string;
-  cache_max?: number;
-  cache_on_limit?: string;
+  // Content cache (JobNode.Cache): content-keyed memoization,
+  // independent of any concurrency group.
+  cache?: boolean;
+  cache_ttl_ms?: number;
+  // Concurrency group (JobNode.Concurrency): shared budget, this
+  // member's cost, scope, at-limit policy, and timeouts.
+  conc_group?: string;
+  conc_capacity?: number;
+  conc_cost?: number;
+  conc_scope?: string;
+  conc_on_limit?: string;
+  conc_queue_timeout_ms?: number;
+  conc_cancel_timeout_ms?: number;
   inline?: boolean;
   optional?: boolean;
   continue_on_error?: boolean;

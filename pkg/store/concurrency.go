@@ -113,6 +113,13 @@ type ConcurrencyHolder struct {
 	ClaimedAt      time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
+
+	// Cost is the admission weight this holder draws from the key's
+	// budget; DeclaredCapacity is the capacity it declared. Populated by
+	// GetConcurrencyState for the operator budget view; zero on the hot
+	// acquire/promote paths that don't need them.
+	Cost             int
+	DeclaredCapacity int
 }
 
 // ConcurrencyWaiter mirrors the concurrency_waiters row.
@@ -140,12 +147,18 @@ type ConcurrencyWaiter struct {
 	Position int
 }
 
-// ConcurrencyState: capacity is current Max; rows are oldest-first.
+// ConcurrencyState: Capacity is the last-declared capacity;
+// EffectiveCapacity is the most-restrictive minimum actually enforced
+// over live participants; UsedCost is the summed cost of active
+// (non-superseded, unexpired) holders. Available budget is
+// EffectiveCapacity - UsedCost. Rows are oldest-first.
 type ConcurrencyState struct {
-	Key      string
-	Capacity int
-	Holders  []ConcurrencyHolder
-	Waiters  []ConcurrencyWaiter
+	Key               string
+	Capacity          int
+	EffectiveCapacity int
+	UsedCost          int
+	Holders           []ConcurrencyHolder
+	Waiters           []ConcurrencyWaiter
 }
 
 // AcquireConcurrencySlot atomically performs cache-lookup, capacity
@@ -1223,27 +1236,41 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		return nil, err
 	}
 
-	state := &ConcurrencyState{Key: key, Capacity: capacity}
+	state := &ConcurrencyState{Key: key, Capacity: capacity, EffectiveCapacity: capacity}
 
+	nowNS := time.Now().UnixNano()
 	hrows, err := s.query(
 		ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity
 		   FROM concurrency_holders WHERE key = ? ORDER BY claimed_at ASC`, key,
 	)
 	if err != nil {
 		return nil, err
 	}
+	// minDeclared tracks the most-restrictive declared capacity over
+	// live participants (holders + waiters), mirroring the admission
+	// path's effective-capacity rule for the operator budget view.
+	minDeclared := 0
+	noteDeclared := func(c int) {
+		if c > 0 && (minDeclared == 0 || c < minDeclared) {
+			minDeclared = c
+		}
+	}
 	for hrows.Next() {
 		var h ConcurrencyHolder
 		var claimedNS, expiresNS int64
 		var superInt int
-		if err := hrows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
+		if err := hrows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt, &h.Cost, &h.DeclaredCapacity); err != nil {
 			_ = hrows.Close()
 			return nil, err
 		}
 		h.ClaimedAt = time.Unix(0, claimedNS)
 		h.LeaseExpiresAt = time.Unix(0, expiresNS)
 		h.Superseded = superInt == 1
+		if !h.Superseded && expiresNS > nowNS {
+			state.UsedCost += h.Cost
+			noteDeclared(h.DeclaredCapacity)
+		}
 		state.Holders = append(state.Holders, h)
 	}
 	_ = hrows.Close()
@@ -1279,6 +1306,10 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 			state.Waiters[i].Position = qrank
 			qrank++
 		}
+		noteDeclared(state.Waiters[i].DeclaredCapacity)
+	}
+	if minDeclared > 0 {
+		state.EffectiveCapacity = minDeclared
 	}
 	return state, nil
 }
