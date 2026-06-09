@@ -364,7 +364,8 @@ Common Plan-layer modifiers (chainable on `*Job`):
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
 .Requires(labels...)                 // require runner labels (AND semantics)
-.Cache(CacheOptions{...})          // coordination + memoization
+.Cache(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
+.Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
 .Dynamic()                         // mark runtime-variable downstream shape
@@ -811,21 +812,137 @@ bodies for free.
 
 ## Cache
 
-```
-sw.Key("go-mod", goVersion, fileHash)             // CacheKey from any parts
-node.Cache(sw.CacheOptions{
-    Key:      "build",                                // required: coordination key
-    Max:      3,                                      // optional: semaphore (default 1 = mutex)
-    OnLimit:  sw.Queue,                               // Queue (default), Coalesce (node-only), CancelOthers
-    CacheKey: func(ctx) sw.CacheKey { return ... },   // optional: result memoization
-    CacheTTL: 24*time.Hour,                           // optional: cache lifetime
-    CancelTimeout: 60*time.Second,                    // CancelOthers wait budget
-})
+`.Cache(key, opts...)` is content-addressed result memoization: same
+content, compute once, reuse the result. It carries no scope and no
+group -- that is [Concurrency](#concurrency)'s job.
+
+```go
+sw.Key("go-mod", "1.26", "abc123") // a CacheKey from any parts
+
+node := sw.Job(plan, "build", func(ctx context.Context) error { return nil })
+node.Cache(func(ctx context.Context) sw.CacheKey {
+    return sw.Key("build", "linux", "amd64")
+}, sw.TTL(24*time.Hour))
 ```
 
-`.Cache()` is the unified coordination + memoization primitive (it
-replaces the pre-rewrite `.Exclusive(group)` and `.CacheKey(fn)`).
-Empty `Key` is a no-op.
+- `key` is a `CacheKeyFn` -- `func(ctx) CacheKey`. It runs at dispatch
+  time, after upstream deps resolve, so it can read `Ref[T]` output.
+- `TTL(d)` bounds retention; omit for `DefaultCacheTTL` (7d), capped at
+  `MaxCacheTTL` (35d).
+- Return `sw.NoCache` from the key fn to run uncached for that
+  invocation.
+- Identical content that is in flight dedupes automatically: one
+  computes, the rest wait and replay. No policy needed.
+
+See [caching.md](caching.md) for the full model. The `JobGroup` mirror
+is `group.Cache(key, opts...)`.
+
+## Concurrency
+
+`.Concurrency(group, cost...)` enrolls a node in a named budget shared
+by its members: different work taking turns under a cap. Define the
+group once and pass the handle to each member.
+
+```go
+dbGroup := sw.NewConcurrencyGroup("db", sw.ConcurrencyLimit{
+    Capacity:     8,
+    Scope:        sw.ScopeBox,
+    OnLimit:      sw.Queue,
+    QueueTimeout: 30 * time.Second,
+})
+sw.Job(plan, "shard-1", func(ctx context.Context) error { return nil }).Concurrency(dbGroup, 4)
+sw.Job(plan, "shard-2", func(ctx context.Context) error { return nil }).Concurrency(dbGroup, 4)
+```
+
+`Capacity` and `cost` are integers in author-defined units (a slot, a
+gigabyte, a database container). Admission compares the summed `cost` of
+live members in the scope plus this member's cost against `Capacity`.
+Count-limiting ("at most N at once") is the degenerate case: capacity
+`N`, every member the default `cost` of 1.
+
+```go
+deployGate := sw.NewConcurrencyGroup("deploy-prod", sw.ConcurrencyLimit{
+    Capacity: 1,
+    OnLimit:  sw.Queue,
+})
+sw.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Concurrency(deployGate)
+```
+
+### OnLimit
+
+What a member does when its group is at capacity:
+
+- `Queue` (default) -- wait FIFO for room, then run.
+- `Fail` -- error immediately.
+- `Skip` -- resolve as a no-op without running.
+- `CancelOthers` -- evict running members oldest-first until this one
+  fits (best-effort; side effects already committed are not rolled
+  back).
+
+Sharing another member's result is not an option here -- a group is
+different work taking turns, never the same work. Result reuse is
+[Cache](#cache).
+
+### Scope
+
+`Scope` selects how far the budget reaches; it folds into the
+coordination key as `name@<id>`:
+
+- `ScopeRun` -- key `name@<runID>`: only this run's nodes share the
+  budget.
+- `ScopeBox` -- key `name@<hostID>`: every run on one machine shares it,
+  even under a controller.
+- `ScopeGlobal` (the zero value) -- key `name`: the whole fleet shares
+  it through the coordination backend.
+
+`hostID` for `ScopeBox` is `os.Hostname()`, overridable via
+`SPARKWING_BOX_ID`. Inside a container the hostname is per-container, so
+two containers on one physical host would each get their own box budget;
+set `SPARKWING_BOX_ID` to the physical host identity when you want
+per-machine budgeting across containers.
+
+### Capacity skew: most-restrictive wins
+
+Two pipeline versions running against one controller can declare the
+same group with different `Capacity`. The store enforces the **minimum**
+over live participants, not the last writer -- a cap is a safety
+constraint, so the only value that honors every live participant is the
+smallest. Lowering takes effect immediately; raising waits for the
+last participant declaring the lower value to drain. A drift warning
+fires so the skew is visible.
+
+### Timeouts
+
+- `QueueTimeout` (with `Queue`) bounds the wait; on expiry the node
+  fails with `failure_reason: queue_timeout` and the waiter leaves the
+  queue, so a later release won't hand the slot to a run that gave up.
+  Zero waits indefinitely.
+- `CancelTimeout` (with `CancelOthers`) bounds how long the arrival
+  waits for evicted holders to release before the slot is force-freed.
+
+### Gate-shaped pipelines: queue, don't fail
+
+When several runs contend for one shared resource -- a deploy slot, a
+migration lock, a single-writer index -- reach for a capacity-1 group
+with `OnLimit: Queue`, not `Fail`. `Fail` pushes a poll-and-retry loop
+onto every caller and aborts the loser with "slot full". `Queue` lines
+arrivals up FIFO and runs them one at a time, with `QueueTimeout` as the
+bounded way out.
+
+### Whole-run coordination
+
+A plan can take one unit of a group before any node dispatches and
+release it when the run reaches a terminal status. A plan never
+memoizes, so this is concurrency only:
+
+```go
+plan.Concurrency(sw.NewConcurrencyGroup("whole-run-prod", sw.ConcurrencyLimit{
+    Capacity: 1,
+    OnLimit:  sw.Fail,
+}))
+```
+
+The `JobGroup` mirror is `group.Concurrency(handle, cost...)`.
 
 ## Discovery
 

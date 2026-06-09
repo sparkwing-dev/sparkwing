@@ -466,35 +466,30 @@ reader - load it before designing a multi-Job pipeline.
 
 ## Cache
 
-`.Cache(CacheOptions{...})` turns a Job into a content-addressed
-cache entry plus a coordination primitive. The orchestrator computes
-the key after upstream deps complete, looks it up across runs, and
-short-circuits the job on a hit, replaying the cached output without
-running. Misses execute normally and record `(key -> output)` on
-success.
+`.Cache(key, TTL(...))` turns a Job into a content-addressed cache
+entry. The orchestrator computes the key after upstream deps complete,
+looks it up across runs, and short-circuits the job on a hit, replaying
+the cached output without running. Misses execute normally and record
+`(key -> output)` on success. Identical content computing at the same
+time dedupes automatically.
 
 ```go
-build := sw.Job[BuildOut](plan, "build", &Build{}).
-    Cache(sparkwing.CacheOptions{
-        Key:     "build",
-        OnLimit: sparkwing.Coalesce,
-        CacheKey: func(ctx context.Context) sparkwing.CacheKey {
-            return sparkwing.Key("build", run.Git.SHA)
-        },
-        CacheTTL: 24 * time.Hour,
-    })
+sw.Job(plan, "build", &Build{}).Cache(
+    func(ctx context.Context) sparkwing.CacheKey {
+        return sparkwing.Key("build", "v1")
+    },
+    sparkwing.TTL(24*time.Hour),
+)
 ```
 
-`sparkwing.Key(parts...)` hashes arbitrary parts into a stable string
+`sparkwing.Key(parts...)` hashes arbitrary parts into a stable string --
+use it rather than hand-concatenating. Return `sparkwing.NoCache` from
+the key fn to opt out for a particular invocation, useful when inputs
+are non-deterministic. See [caching.md](caching.md) for the full model.
 
-- use it rather than hand-concatenating. Return the empty string from
-`CacheKey` to opt out for a particular invocation - useful when inputs
-are non-deterministic.
-
-`Cache` is also the coordination primitive: omit `CacheKey` and you
-get mutex (`Max=0|1`) or semaphore (`Max>1`) gating without the
-memoization. See [scheduling](scheduling.md) for the full coordination
-model.
+Caching is content only. To bound how many nodes run at once -- a mutex,
+a semaphore, a deploy gate -- use `.Concurrency(group)`; see
+[sdk.md](sdk.md#concurrency) and [scheduling](scheduling.md).
 
 Do not cache nodes whose effect is the side effect itself (deploys,
 notifications, gitops commits). Caching replays the return value, not
