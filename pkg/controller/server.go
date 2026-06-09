@@ -346,6 +346,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReleaseSlot)))
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState)))
 	mux.Handle("GET /api/v1/concurrency/{key}/notify", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify)))
+	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResolveWaiter)))
+	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
+	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
 	// Node claim surface.
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))

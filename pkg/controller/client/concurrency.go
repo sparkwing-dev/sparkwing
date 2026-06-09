@@ -17,6 +17,7 @@ type AcquireSlotRequest struct {
 	RunID         string
 	NodeID        string
 	Max           int
+	Cost          int
 	Policy        string
 	CacheKeyHash  string
 	CacheTTL      time.Duration
@@ -55,6 +56,9 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 	}
 	if req.Max > 0 {
 		body["max"] = req.Max
+	}
+	if req.Cost > 0 {
+		body["cost"] = req.Cost
 	}
 	if req.Policy != "" {
 		body["policy"] = req.Policy
@@ -131,6 +135,123 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 		return nil, err
 	}
 	return &out, nil
+}
+
+// WaiterHolder is the minimal holder shape a resolved waiter needs to
+// refresh its "N ahead, held by X" display.
+type WaiterHolder struct {
+	HolderID       string    `json:"holder_id"`
+	RunID          string    `json:"run_id"`
+	NodeID         string    `json:"node_id,omitempty"`
+	ClaimedAt      time.Time `json:"claimed_at"`
+	LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	Superseded     bool      `json:"superseded"`
+}
+
+// WaiterResolution mirrors the controller's resolveWaiterResp.
+type WaiterResolution struct {
+	Status             string         `json:"status"`
+	HolderID           string         `json:"holder_id,omitempty"`
+	HolderLeaseExpires time.Time      `json:"holder_lease_expires,omitempty"`
+	OutputRef          string         `json:"output_ref,omitempty"`
+	OriginRunID        string         `json:"origin_run_id,omitempty"`
+	OriginNodeID       string         `json:"origin_node_id,omitempty"`
+	LeaderRunID        string         `json:"leader_run_id,omitempty"`
+	LeaderNodeID       string         `json:"leader_node_id,omitempty"`
+	Position           int            `json:"position,omitempty"`
+	Holders            []WaiterHolder `json:"holders,omitempty"`
+}
+
+// ResolveWaiter polls the controller for a parked waiter's resolution
+// (promoted / cached / leader-finished / cancelled / still-waiting).
+func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (*WaiterResolution, error) {
+	q := url.Values{}
+	q.Set("run_id", runID)
+	if nodeID != "" {
+		q.Set("node_id", nodeID)
+	}
+	if cacheKeyHash != "" {
+		q.Set("cache_key_hash", cacheKeyHash)
+	}
+	if leaderRunID != "" {
+		q.Set("leader_run_id", leaderRunID)
+	}
+	if leaderNodeID != "" {
+		q.Set("leader_node_id", leaderNodeID)
+	}
+	u := fmt.Sprintf("%s/api/v1/concurrency/%s/resolve?%s", c.baseURL, url.PathEscape(key), q.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readHTTPError(resp)
+	}
+	var out WaiterResolution
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CancelWaiter drops a parked waiter row; reports whether one matched.
+func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	body := map[string]any{"run_id": runID}
+	if nodeID != "" {
+		body["node_id"] = nodeID
+	}
+	buf, _ := json.Marshal(body)
+	u := fmt.Sprintf("%s/api/v1/concurrency/%s/cancel-waiter", c.baseURL, url.PathEscape(key))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, readHTTPError(resp)
+	}
+	var out struct {
+		Cancelled bool `json:"cancelled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, err
+	}
+	return out.Cancelled, nil
+}
+
+// ForceReleaseSuperseded drops superseded holders and promotes the next
+// waiters. Returns the dropped holders.
+func (c *Client) ForceReleaseSuperseded(ctx context.Context, key string) ([]WaiterHolder, error) {
+	u := fmt.Sprintf("%s/api/v1/concurrency/%s/force-release", c.baseURL, url.PathEscape(key))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readHTTPError(resp)
+	}
+	var out struct {
+		Dropped []WaiterHolder `json:"dropped"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Dropped, nil
 }
 
 // ReleaseSlot drops the holder row and optionally stores a cache
