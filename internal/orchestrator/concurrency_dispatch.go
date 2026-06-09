@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,25 +64,51 @@ func holderLabel(runID, nodeID string) string {
 	return runID + "/" + nodeID
 }
 
-// contentCacheKey is the synthetic coordination namespace a node uses
-// when it declares Cache() but no Concurrency() group. Capacity is
-// effectively unbounded, so admission always grants and cache entries
-// key purely on the content hash.
-//
-// chunk 2: pure-content caching gets its own store path; until then a
-// cache-only node rides the concurrency slot machinery under this
-// shared key, and a node that declares both Cache and Concurrency keys
-// its memo on the group name rather than on content alone.
-const contentCacheKey = "sparkwing/content-cache"
+// memoKeyPrefix namespaces content-addressed memoization slots so they
+// can never collide with an author-named concurrency group. A cached
+// node coordinates on memoKeyPrefix+contentHash: identical content
+// shares one leader (in-flight dedupe) and one cache row regardless of
+// which concurrency group -- if any -- the node also belongs to. Memo
+// and concurrency are independent store interactions on a node that
+// declares both.
+const memoKeyPrefix = "memo:"
 
-const contentCacheCapacity = 1 << 30
+func memoKeyFor(contentHash string) string { return memoKeyPrefix + contentHash }
 
-// coordParams is the resolved coordination input for one node, built
-// from its Concurrency group and/or Cache config. It replaces the old
-// CacheOptions the dispatch path used to read.
+// boxHostID is the stable host identity used to qualify ScopeBox keys.
+// It defaults to os.Hostname() and is overridable via SPARKWING_BOX_ID
+// for environments where the hostname is unstable or shared.
+func boxHostID() string {
+	if v := strings.TrimSpace(os.Getenv("SPARKWING_BOX_ID")); v != "" {
+		return v
+	}
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return "localhost"
+}
+
+// scopedGroupKey folds a group's Scope into its coordination key:
+// ScopeRun isolates per run, ScopeBox pools per machine, ScopeGlobal
+// (the zero value) pools across the fleet by bare name.
+func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
+	name := g.Name()
+	switch g.Limit().Scope {
+	case sparkwing.ScopeRun:
+		return name + "@" + runID
+	case sparkwing.ScopeBox:
+		return name + "@" + boxHostID()
+	default:
+		return name
+	}
+}
+
+// coordParams is the resolved coordination input for one store acquire
+// (a concurrency group slot or a content-memo slot).
 type coordParams struct {
 	key           string
 	capacity      int
+	cost          int
 	policy        string
 	cacheHash     string
 	cacheTTL      time.Duration
@@ -88,8 +116,26 @@ type coordParams struct {
 	queueTimeout  time.Duration
 }
 
-// runNodeWithCache owns the full Cache()/Concurrency() lifecycle:
-// acquire, policy branching, queue wait, execute, release.
+// concParamsFor builds the coordParams for a node's concurrency group:
+// scope-qualified key, capacity, policy, cost, and timeout knobs. No
+// cache hash -- memoization is a separate acquire.
+func concParamsFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID string) coordParams {
+	lim := g.Limit()
+	return coordParams{
+		key:           scopedGroupKey(g, runID),
+		capacity:      lim.Capacity,
+		cost:          node.ConcurrencyCost(),
+		policy:        string(lim.OnLimit),
+		cancelTimeout: lim.CancelTimeout,
+		queueTimeout:  lim.QueueTimeout,
+	}
+}
+
+// runNodeWithCache owns the full Cache()/Concurrency() lifecycle.
+// Memoization (content-keyed) and concurrency admission (group-keyed)
+// are independent: a node may have either, both, or neither. Returns
+// handled=false when the node needs no coordination so the caller runs
+// it on the normal path.
 func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
 	node := req.Node
 	group := node.ConcurrencyGroupRef()
@@ -98,50 +144,75 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 		return runner.Result{}, false
 	}
 
-	logger := slog.Default()
-	cp := coordParams{
-		key:      contentCacheKey,
-		capacity: contentCacheCapacity,
-		policy:   string(sparkwing.Queue),
-	}
-	if group != nil {
-		cp.key = group.Name()
-		cp.capacity = group.Limit().Capacity
-		cp.policy = string(group.Limit().OnLimit)
-	}
-	if cacheCfg != nil {
-		cp.cacheTTL = cacheCfg.TTL
-		k := safeCacheKey(ctx, cacheCfg.Key, node.ID())
-		switch {
-		case k == sparkwing.NoCache:
-			sparkwing.LoggerFromContext(ctx).Log("info",
-				fmt.Sprintf("Cache(%s) returned NoCache; memoization explicitly skipped", node.ID()))
-		case k == "":
-			sparkwing.LoggerFromContext(ctx).Log("warn",
-				fmt.Sprintf("Cache(%s) returned empty CacheKey; memoization skipped (treating as missing key -- return sparkwing.NoCache to opt out explicitly)", node.ID()))
-		default:
-			cp.cacheHash = string(k)
-		}
-	}
+	cacheHash, cacheTTL := r.resolveCacheHash(ctx, node, cacheCfg)
+	hasMemo := cacheHash != ""
 
+	switch {
+	case hasMemo && group != nil:
+		return r.runMemoizedUnderConcurrency(ctx, req, group, cacheHash, cacheTTL), true
+	case hasMemo:
+		memoCP := coordParams{
+			key:       memoKeyFor(cacheHash),
+			capacity:  1,
+			cost:      1,
+			policy:    store.OnLimitCoalesce,
+			cacheHash: cacheHash,
+			cacheTTL:  cacheTTL,
+		}
+		return r.acquireAndRun(ctx, req, memoCP), true
+	case group != nil:
+		return r.acquireAndRun(ctx, req, concParamsFor(node, group, req.RunID)), true
+	default:
+		// Cache() was declared but produced no usable key (NoCache or
+		// empty) and there is no group: run uncached on the normal path.
+		return runner.Result{}, false
+	}
+}
+
+// resolveCacheHash evaluates the node's content key, returning the hash
+// (or "" when there is no Cache config, the key opted out via NoCache,
+// or the key was empty) and the configured TTL.
+func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.CacheConfig) (string, time.Duration) {
+	if cacheCfg == nil {
+		return "", 0
+	}
+	k := safeCacheKey(ctx, cacheCfg.Key, node.ID())
+	switch {
+	case k == sparkwing.NoCache:
+		sparkwing.LoggerFromContext(ctx).Log("info",
+			fmt.Sprintf("Cache(%s) returned NoCache; memoization explicitly skipped", node.ID()))
+		return "", cacheCfg.TTL
+	case k == "":
+		sparkwing.LoggerFromContext(ctx).Log("warn",
+			fmt.Sprintf("Cache(%s) returned empty CacheKey; memoization skipped (treating as missing key -- return sparkwing.NoCache to opt out explicitly)", node.ID()))
+		return "", cacheCfg.TTL
+	default:
+		return string(k), cacheCfg.TTL
+	}
+}
+
+// acquireAndRun performs one store acquire for cp and dispatches on the
+// outcome: replay a hit, skip/fail under a full group, run a granted
+// slot, or wait then run a queued/coalesced/evicting arrival.
+func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
+	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
-	acquireReq := store.AcquireSlotRequest{
+	resp, err := r.backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
 		Key:           cp.key,
 		HolderID:      holderID,
 		RunID:         req.RunID,
 		NodeID:        node.ID(),
 		Capacity:      cp.capacity,
+		Cost:          cp.cost,
 		Policy:        cp.policy,
 		CacheKeyHash:  cp.cacheHash,
 		CacheTTL:      cp.cacheTTL,
 		CancelTimeout: cp.cancelTimeout,
 		BypassRead:    noCacheFromContext(ctx),
-	}
-
-	resp, err := r.backends.Concurrency.AcquireSlot(ctx, acquireReq)
+	})
 	if err != nil {
 		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("concurrency acquire(%q): %w", cp.key, err))
-		return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 
 	if resp.DriftNote != "" {
@@ -152,31 +223,110 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 			"note":              resp.DriftNote,
 		})
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_drift", payload)
-		logger.Warn("concurrency drift", "key", cp.key, "prev", resp.PreviousCapacity, "new", cp.capacity)
+		slog.Default().Warn("concurrency drift", "key", cp.key, "prev", resp.PreviousCapacity, "new", cp.capacity)
 	}
 
 	switch resp.Kind {
 	case store.AcquireCached:
-		return r.applyCacheHit(ctx, req, cp, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID), true
-
+		return r.applyCacheHit(ctx, req, cp, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireSkipped:
-		return r.applySkippedConcurrent(ctx, req), true
-
+		return r.applySkippedConcurrent(ctx, req)
 	case store.AcquireFailed:
 		err := fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", cp.key)
 		r.markFailed(ctx, req.RunID, node.ID(), err)
-		return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
-
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	case store.AcquireGranted:
-		return r.runHeldSlot(ctx, req, cp, holderID), true
-
+		return r.runHeldSlot(ctx, req, cp, holderID)
 	case store.AcquireQueued, store.AcquireCoalesced, store.AcquireCancellingOthers:
-		return r.waitThenRun(ctx, req, cp, resp), true
+		return r.waitThenRun(ctx, req, cp, resp)
 	}
 
 	err = fmt.Errorf("concurrency acquire returned unknown kind %q", resp.Kind)
 	r.markFailed(ctx, req.RunID, node.ID(), err)
-	return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
+	return runner.Result{Outcome: sparkwing.Failed, Err: err}
+}
+
+// runMemoizedUnderConcurrency handles a node that declares both Cache
+// and Concurrency. It first acquires the content-memo slot; a hit or an
+// in-flight leader resolves without ever touching the group budget (so
+// identical work draws one budget unit, not one per duplicate). The
+// memo leader then competes for the group budget, runs, and on release
+// writes the shared cache entry.
+func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
+	node := req.Node
+	memoCP := coordParams{
+		key:       memoKeyFor(cacheHash),
+		capacity:  1,
+		cost:      1,
+		policy:    store.OnLimitCoalesce,
+		cacheHash: cacheHash,
+		cacheTTL:  cacheTTL,
+	}
+	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
+	resp, err := r.backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
+		Key:          memoCP.key,
+		HolderID:     memoHolderID,
+		RunID:        req.RunID,
+		NodeID:       node.ID(),
+		Capacity:     1,
+		Cost:         1,
+		Policy:       store.OnLimitCoalesce,
+		CacheKeyHash: cacheHash,
+		CacheTTL:     cacheTTL,
+		BypassRead:   noCacheFromContext(ctx),
+	})
+	if err != nil {
+		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("memo acquire(%q): %w", memoCP.key, err))
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}
+	}
+
+	switch resp.Kind {
+	case store.AcquireCached:
+		return r.applyCacheHit(ctx, req, memoCP, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
+	case store.AcquireCoalesced:
+		// A leader with identical content is already in flight; wait for
+		// its result rather than competing for the group budget.
+		return r.waitThenRun(ctx, req, memoCP, resp)
+	case store.AcquireGranted:
+		// Memo leader: keep the memo lease alive (so followers keep
+		// waiting through our group wait + execution), run under the
+		// group budget, then release the memo slot -- writing the shared
+		// cache entry on success.
+		execCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		var lost atomic.Bool
+		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, &lost, cancel)
+
+		result := r.acquireAndRun(execCtx, req, concParamsFor(node, group, req.RunID))
+
+		stopHB()
+		bg, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer bgCancel()
+		if err := r.backends.Concurrency.ReleaseSlot(bg, memoCP.key, memoHolderID,
+			storeOutcome(result), fmt.Sprintf("%s/%s", req.RunID, node.ID()), cacheHash, cacheTTL); err != nil {
+			slog.Warn("memo release failed; relying on reaper", "key", memoCP.key, "err", err)
+		}
+		return result
+	default:
+		err := fmt.Errorf("memo acquire(%q) returned unexpected kind %q", memoCP.key, resp.Kind)
+		r.markFailed(ctx, req.RunID, node.ID(), err)
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}
+	}
+}
+
+// storeOutcome maps a runner Result to the store's release-outcome
+// string. Only "success" writes a cache entry on release.
+func storeOutcome(res runner.Result) string {
+	switch res.Outcome {
+	case sparkwing.Success, sparkwing.Cached:
+		return "success"
+	case sparkwing.Skipped, sparkwing.SkippedConcurrent:
+		return "skipped"
+	case sparkwing.Superseded:
+		return "superseded"
+	default:
+		return "failed"
+	}
 }
 
 // applyCacheHit stamps a cache-hit outcome and replays the origin's
@@ -363,9 +513,9 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 	queueRefresh := initial.Kind == store.AcquireQueued
 
 	// Back-stop: force-release evicted holders after the cancel timeout
-	// so forward progress is bounded. cancelTimeout is zero in chunk 1
-	// (the new API drops the knob), so this relies on the store's
-	// default eviction; the timer below only arms if a timeout is set.
+	// so forward progress is bounded. A zero cancelTimeout relies on the
+	// store's default eviction; the timer below only arms when the group
+	// declared an explicit CancelTimeout.
 	if initial.Kind == store.AcquireCancellingOthers && cp.cancelTimeout > 0 {
 		timer := time.AfterFunc(cp.cancelTimeout, func() {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -388,12 +538,20 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		defer timer.Stop()
 	}
 
-	// queueTimeout bounds a queued waiter's wait. Zero = wait forever
-	// (historical behavior, and the chunk-1 default since the new API
-	// drops the knob). Only the Queue policy honors it.
+	// queueTimeout bounds a queued waiter's wait. Zero = wait forever.
+	// Only the Queue policy honors it.
 	var queueDeadline time.Time
 	if cp.queueTimeout > 0 && initial.Kind == store.AcquireQueued {
 		queueDeadline = time.Now().Add(cp.queueTimeout)
+	}
+
+	// Give back the worker slot for the duration of the wait so a queue
+	// of waiters can't starve other ready nodes. It is re-acquired
+	// before execution on promotion; the paths that resolve without
+	// executing (cache hit, leader-finished, cancel, timeout) leave it
+	// released and runWithCap's deferred release no-ops.
+	if req.ReleaseWorkerSlot != nil {
+		req.ReleaseWorkerSlot()
 	}
 
 	// In-process only (cluster's HTTPConcurrency stubs ResolveWaiter).
@@ -434,6 +592,12 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			}
 			continue
 		case store.WaiterPromoted:
+			// Re-take the worker slot before executing so the MaxParallel
+			// cap is honored during the run, not just during the wait.
+			if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
+				r.markFailed(ctx, req.RunID, req.Node.ID(), context.Canceled)
+				return runner.Result{Outcome: sparkwing.Cancelled}
+			}
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
 			// Clear the "queued ..." detail now that the node holds a slot.
 			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")

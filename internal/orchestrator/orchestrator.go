@@ -1964,12 +1964,14 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			}
 		}
 
-		res = s.runWithCap(node, func() runner.Result {
+		res = s.runWithCap(node, func(slot *workerSlot) runner.Result {
 			return activeRunner.RunNode(runnerCtx, runner.Request{
-				RunID:    s.runID,
-				NodeID:   node.ID(),
-				Node:     node,
-				Delegate: s.delegate,
+				RunID:               s.runID,
+				NodeID:              node.ID(),
+				Node:                node,
+				Delegate:            s.delegate,
+				ReleaseWorkerSlot:   slot.release,
+				ReacquireWorkerSlot: slot.reacquire,
 			})
 		})
 
@@ -2332,29 +2334,73 @@ func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFail
 		}
 		return runner.Result{Outcome: sparkwing.Success, Output: out}
 	}
-	return s.runWithCap(node, func() runner.Result {
+	return s.runWithCap(node, func(slot *workerSlot) runner.Result {
 		return s.runner.RunNode(ctx, runner.Request{
-			RunID:    s.runID,
-			NodeID:   node.ID(),
-			Node:     node,
-			Delegate: s.delegate,
+			RunID:               s.runID,
+			NodeID:              node.ID(),
+			Node:                node,
+			Delegate:            s.delegate,
+			ReleaseWorkerSlot:   slot.release,
+			ReacquireWorkerSlot: slot.reacquire,
 		})
 	})
 }
 
+// workerSlot is the MaxParallel reservation held while a node runs. It
+// can be released and re-acquired so a node blocked on concurrency
+// admission gives the slot back for the duration of the wait. The zero
+// value (sem nil) is a no-op slot used when no cap is configured.
+type workerSlot struct {
+	sem  chan struct{}
+	ctx  context.Context
+	mu   sync.Mutex
+	held bool
+}
+
+// release gives the worker slot back if currently held. Safe to call
+// repeatedly.
+func (w *workerSlot) release() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sem != nil && w.held {
+		<-w.sem
+		w.held = false
+	}
+}
+
+// reacquire takes the worker slot again, blocking until one is free.
+// Returns false if the run was cancelled first. A no-op slot (no cap)
+// always reports true.
+func (w *workerSlot) reacquire() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sem == nil || w.held {
+		return true
+	}
+	select {
+	case w.sem <- struct{}{}:
+		w.held = true
+		return true
+	case <-w.ctx.Done():
+		return false
+	}
+}
+
 // runWithCap gates non-inline RunNode against the MaxParallel sem.
-// Nil sem or inline node = no cap.
-func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func() runner.Result) runner.Result {
+// Nil sem or inline node = no cap. The closure receives the held
+// workerSlot so the concurrency-wait path can release it while blocked.
+func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func(slot *workerSlot) runner.Result) runner.Result {
 	if s.sem == nil || node.IsInline() {
-		return fn()
+		return fn(&workerSlot{})
 	}
 	select {
 	case s.sem <- struct{}{}:
 	case <-s.resolverCtx.Done():
 		return runner.Result{Outcome: sparkwing.Cancelled}
 	}
-	defer func() { <-s.sem }()
-	return fn()
+	slot := &workerSlot{sem: s.sem, ctx: s.resolverCtx, held: true}
+	defer slot.release()
+	return fn(slot)
 }
 
 // safeCacheKey invokes the CacheKeyFn under the same budget rules as
