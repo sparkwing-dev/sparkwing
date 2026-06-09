@@ -23,6 +23,7 @@ type AcquireSlotRequest struct {
 	CacheTTL      time.Duration
 	CancelTimeout time.Duration
 	Lease         time.Duration
+	BypassRead    bool
 }
 
 // AcquireSlotResponse surfaces the controller response so the caller
@@ -41,6 +42,10 @@ type AcquireSlotResponse struct {
 	SupersededIDs    []string  `json:"superseded_ids,omitempty"`
 	PreviousCapacity int       `json:"previous_capacity,omitempty"`
 	DriftNote        string    `json:"drift_note,omitempty"`
+	// Queue observability for a queued arrival, mirroring the store.
+	Position    int            `json:"position,omitempty"`
+	QueueLength int            `json:"queue_length,omitempty"`
+	Holders     []WaiterHolder `json:"holders,omitempty"`
 }
 
 // AcquireSlot requests a concurrency slot. The server performs the
@@ -74,6 +79,9 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 	}
 	if req.Lease > 0 {
 		body["lease_secs"] = int(req.Lease.Seconds())
+	}
+	if req.BypassRead {
+		body["bypass_read"] = true
 	}
 	buf, _ := json.Marshal(body)
 
@@ -158,6 +166,7 @@ type WaiterResolution struct {
 	OriginNodeID       string         `json:"origin_node_id,omitempty"`
 	LeaderRunID        string         `json:"leader_run_id,omitempty"`
 	LeaderNodeID       string         `json:"leader_node_id,omitempty"`
+	LeaderOutcome      string         `json:"leader_outcome,omitempty"`
 	Position           int            `json:"position,omitempty"`
 	Holders            []WaiterHolder `json:"holders,omitempty"`
 }

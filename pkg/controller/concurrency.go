@@ -25,6 +25,7 @@ type acquireSlotReq struct {
 	CacheTTLNS      int64  `json:"cache_ttl_ns,omitempty"`
 	CancelTimeoutNS int64  `json:"cancel_timeout_ns,omitempty"`
 	LeaseSecs       int    `json:"lease_secs,omitempty"`
+	BypassRead      bool   `json:"bypass_read,omitempty"`
 }
 
 type acquireSlotResp struct {
@@ -40,6 +41,10 @@ type acquireSlotResp struct {
 	SupersededIDs    []string  `json:"superseded_ids,omitempty"`
 	PreviousCapacity int       `json:"previous_capacity,omitempty"`
 	DriftNote        string    `json:"drift_note,omitempty"`
+	// Queue observability for AcquireQueued, mirroring the store.
+	Position    int               `json:"position,omitempty"`
+	QueueLength int               `json:"queue_length,omitempty"`
+	Holders     []stateHolderResp `json:"holders,omitempty"`
 }
 
 // handleAcquireSlot resolves a single arrival. Status codes
@@ -71,6 +76,7 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		CacheTTL:      time.Duration(body.CacheTTLNS),
 		CancelTimeout: time.Duration(body.CancelTimeoutNS),
 		Lease:         time.Duration(body.LeaseSecs) * time.Second,
+		BypassRead:    body.BypassRead,
 	}
 	resp, err := s.store.AcquireConcurrencySlot(r.Context(), req)
 	if err != nil {
@@ -89,6 +95,15 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		SupersededIDs:    resp.SupersededIDs,
 		PreviousCapacity: resp.PreviousCapacity,
 		DriftNote:        resp.DriftNote,
+		Position:         resp.Position,
+		QueueLength:      resp.QueueLength,
+	}
+	for _, h := range resp.Holders {
+		bodyOut.Holders = append(bodyOut.Holders, stateHolderResp{
+			HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
+			ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
+			Superseded: h.Superseded, Cost: h.Cost,
+		})
 	}
 	switch resp.Kind {
 	case store.AcquireGranted, store.AcquireCached:
@@ -265,6 +280,7 @@ type resolveWaiterResp struct {
 	OriginNodeID       string            `json:"origin_node_id,omitempty"`
 	LeaderRunID        string            `json:"leader_run_id,omitempty"`
 	LeaderNodeID       string            `json:"leader_node_id,omitempty"`
+	LeaderOutcome      string            `json:"leader_outcome,omitempty"`
 	Position           int               `json:"position,omitempty"`
 	Holders            []stateHolderResp `json:"holders,omitempty"`
 }
@@ -299,6 +315,7 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 		OriginNodeID:       res.OriginNodeID,
 		LeaderRunID:        res.LeaderRunID,
 		LeaderNodeID:       res.LeaderNodeID,
+		LeaderOutcome:      res.LeaderOutcome,
 		Position:           res.Position,
 	}
 	for _, h := range res.Holders {
