@@ -187,6 +187,20 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		req.CancelTimeout = DefaultCancelTimeout
 	}
 
+	// An arrival whose cost exceeds the key's capacity can never be
+	// admitted -- the open budget never reaches its cost even when the
+	// key is idle. Queuing it would strand it forever (default
+	// QueueTimeout is "wait indefinitely"), so reject up front: Skip
+	// resolves it as a no-op, every other policy fails it. The SDK has a
+	// plan-time guard for the common case; this is the backstop for
+	// version skew (another writer lowered capacity below this cost).
+	if req.Cost > req.Capacity {
+		if req.Policy == OnLimitSkip {
+			return AcquireSlotResponse{Kind: AcquireSkipped}, nil
+		}
+		return AcquireSlotResponse{Kind: AcquireFailed}, nil
+	}
+
 	now := time.Now()
 	nowNS := now.UnixNano()
 
@@ -351,11 +365,27 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	// 4. Budget available -> grant immediately.
 	if activeCost+req.Cost <= effCap {
 		expiresNS := now.Add(req.Lease).UnixNano()
+		// ON CONFLICT takes the slot cleanly when a row with this
+		// holder_id already exists but is superseded (a CancelOthers
+		// eviction not yet reaped). A same-holder_id re-acquire --
+		// deterministic runID/nodeID, reachable on crash/redeliver --
+		// would otherwise hit a UNIQUE violation. The non-superseded
+		// live holder is handled earlier by the idempotent re-acquire
+		// branch, so reaching here means the existing row is superseded
+		// or expired; reclaim it (fresh lease, cleared supersede).
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_holders
 			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+			 ON CONFLICT (key, holder_id) DO UPDATE SET
+			   run_id            = excluded.run_id,
+			   node_id           = excluded.node_id,
+			   claimed_at        = excluded.claimed_at,
+			   lease_expires_at  = excluded.lease_expires_at,
+			   superseded        = 0,
+			   cost              = excluded.cost,
+			   declared_capacity = excluded.declared_capacity`,
 			req.Key, req.HolderID, req.RunID, req.NodeID, nowNS, expiresNS, req.Cost, req.Capacity,
 		); err != nil {
 			return AcquireSlotResponse{}, err
@@ -612,24 +642,22 @@ func txSumActiveCost(ctx context.Context, tx *storeTx, key string, nowNS int64) 
 }
 
 // txEffectiveCapacity resolves the most-restrictive-wins capacity for a
-// key: the minimum declared_capacity over the currently-live
-// participants (active holders and parked waiters), combined with the
-// incoming arrival's declared capacity. A non-positive incoming is
-// ignored (release / promote paths have no arrival). When no live
-// participant has recorded a positive declared_capacity, it falls back
-// to the entries row, then to 1.
+// key: the minimum declared_capacity over the **admitted holders** plus
+// the incoming arrival's declared capacity. Parked waiters are NOT
+// folded in -- a non-admitted waiter holds no budget, so letting its
+// declaration drag the effective capacity below the already-admitted
+// holders would invert priority and starve a FIFO head that fits under
+// its own capacity. A non-positive incoming is ignored (the release
+// path has no arrival; the promote path folds each candidate's own
+// capacity itself). When no admitted holder has a positive
+// declared_capacity, it falls back to the entries row, then to 1.
 func txEffectiveCapacity(ctx context.Context, tx *storeTx, key string, nowNS int64, incoming int) (int, error) {
 	var minDeclared sql.NullInt64
 	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT MIN(declared_capacity) FROM (
-		     SELECT declared_capacity FROM concurrency_holders
-		      WHERE key = ? AND superseded = 0 AND lease_expires_at > ? AND declared_capacity > 0
-		     UNION ALL
-		     SELECT declared_capacity FROM concurrency_waiters
-		      WHERE key = ? AND declared_capacity > 0
-		 ) AS live`,
-		key, nowNS, key,
+		`SELECT MIN(declared_capacity) FROM concurrency_holders
+		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ? AND declared_capacity > 0`,
+		key, nowNS,
 	).Scan(&minDeclared); err != nil {
 		return 0, err
 	}
@@ -667,17 +695,37 @@ func txEffectiveCapacity(ctx context.Context, tx *storeTx, key string, nowNS int
 // the leader path, not here. Returns the promoted waiters with their
 // assigned HolderID set.
 func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
-	effCap, err := txEffectiveCapacity(ctx, tx, key, nowNS, 0)
-	if err != nil {
+	// holderMin is the most-restrictive declared capacity over the
+	// currently-admitted holders (0 == no admitted holder constrains
+	// the budget). entryCap is the declared default used for legacy
+	// waiter rows that carry no declared_capacity. Parked waiters are
+	// deliberately NOT folded in here -- each candidate's own declared
+	// capacity is the ceiling that gates its own promotion.
+	var holderMinNull sql.NullInt64
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT MIN(declared_capacity) FROM concurrency_holders
+		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ? AND declared_capacity > 0`,
+		key, nowNS,
+	).Scan(&holderMinNull); err != nil {
 		return nil, err
 	}
-	activeCost, err := txSumActiveCost(ctx, tx, key, nowNS)
-	if err != nil {
+	holderMin := 0
+	if holderMinNull.Valid && holderMinNull.Int64 > 0 {
+		holderMin = int(holderMinNull.Int64)
+	}
+	var entryCap int
+	if err := tx.QueryRowContext(
+		ctx, `SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
+	).Scan(&entryCap); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	openCost := effCap - activeCost
-	if openCost <= 0 {
-		return nil, nil
+	if entryCap <= 0 {
+		entryCap = 1
+	}
+	used, err := txSumActiveCost(ctx, tx, key, nowNS)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := tx.QueryContext(
@@ -705,17 +753,32 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		return nil, err
 	}
 
+	// Promote FIFO. Each candidate's ceiling is the minimum of the
+	// already-admitted holder caps (holderMin) and its own declared
+	// capacity -- most-restrictive-wins over admitted participants only.
+	// As a candidate is admitted, its own cap joins holderMin so it
+	// constrains the rest of the pass. A head that doesn't fit stops the
+	// pass; a cheaper waiter behind it never jumps ahead.
 	var promoted []ConcurrencyWaiter
-	used := 0
 	for _, w := range candidates {
 		c := w.Cost
 		if c <= 0 {
 			c = 1
 		}
-		if used+c > openCost {
-			break // FIFO: don't let a cheaper waiter jump a heavy one.
+		candCap := w.DeclaredCapacity
+		if candCap <= 0 {
+			candCap = entryCap
+		}
+		if holderMin > 0 && holderMin < candCap {
+			candCap = holderMin
+		}
+		if used+c > candCap {
+			break // FIFO head doesn't fit; don't let a cheaper waiter jump it.
 		}
 		used += c
+		if holderMin == 0 || candCap < holderMin {
+			holderMin = candCap
+		}
 		promoted = append(promoted, w)
 	}
 
@@ -765,16 +828,25 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	defer func() { _ = tx.Rollback() }()
 
 	var superInt int
+	var leaseNS int64
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT superseded FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		`SELECT superseded, lease_expires_at FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
-	).Scan(&superInt)
+	).Scan(&superInt, &leaseNS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, ErrLockHeld
 	}
 	if err != nil {
 		return time.Time{}, false, err
+	}
+	// A heartbeat that lands after the lease already expired must NOT
+	// revive the holder: admission may have freed and reassigned that
+	// budget once the lease lapsed, so reviving would put two live
+	// holders on the same key. The reaper deletes expired rows; until it
+	// does, treat the lease as lost.
+	if leaseNS <= now.UnixNano() {
+		return time.Time{}, false, ErrLockHeld
 	}
 	if _, err := tx.ExecContext(
 		ctx,
@@ -1077,6 +1149,11 @@ type WaiterResolution struct {
 	OriginNodeID       string
 	LeaderRunID        string
 	LeaderNodeID       string
+	// LeaderOutcome is the leader node's terminal outcome, populated on
+	// WaiterLeaderFinished so a coalesced follower inherits the leader's
+	// actual node result (a Skipped/Failed leader must not stamp the
+	// follower Success). Empty when the leader row is gone.
+	LeaderOutcome string
 
 	// Position and Holders are populated on WaiterStillWaiting (queue
 	// policy) so a poller can refresh its "N ahead, held by X" display
@@ -1189,15 +1266,28 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		return WaiterResolution{}, err
 	}
 
-	// 4. Leader released, no cache entry; follower inherits outcome.
+	// 4. Leader released, no cache entry; follower inherits the leader's
+	// node outcome. The leader wrote no cache row, so it did not succeed
+	// (only a successful release caches); carry its terminal outcome so
+	// the follower doesn't go green for work that was skipped or failed.
 	if leaderRunID != "" {
+		var leaderOutcome string
+		err := tx.QueryRowContext(
+			ctx,
+			`SELECT outcome FROM nodes WHERE run_id = ? AND node_id = ?`,
+			leaderRunID, leaderNodeID,
+		).Scan(&leaderOutcome)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return WaiterResolution{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
-			Status:       WaiterLeaderFinished,
-			LeaderRunID:  leaderRunID,
-			LeaderNodeID: leaderNodeID,
+			Status:        WaiterLeaderFinished,
+			LeaderRunID:   leaderRunID,
+			LeaderNodeID:  leaderNodeID,
+			LeaderOutcome: leaderOutcome,
 		}, nil
 	}
 
@@ -1247,9 +1337,12 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	if err != nil {
 		return nil, err
 	}
-	// minDeclared tracks the most-restrictive declared capacity over
-	// live participants (holders + waiters), mirroring the admission
-	// path's effective-capacity rule for the operator budget view.
+	// minDeclared tracks the most-restrictive declared capacity over the
+	// admitted holders only, mirroring the admission path's
+	// effective-capacity rule. Parked waiters are excluded: a
+	// non-admitted waiter holds no budget, so folding its declaration
+	// would report a capacity below what the live holders actually
+	// enforce (and a negative Available).
 	minDeclared := 0
 	noteDeclared := func(c int) {
 		if c > 0 && (minDeclared == 0 || c < minDeclared) {
@@ -1306,7 +1399,6 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 			state.Waiters[i].Position = qrank
 			qrank++
 		}
-		noteDeclared(state.Waiters[i].DeclaredCapacity)
 	}
 	if minDeclared > 0 {
 		state.EffectiveCapacity = minDeclared
