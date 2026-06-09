@@ -219,18 +219,6 @@ func init() {
 	register("qt-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &queueTimeoutFollowerPipe{} })
 }
 
-// warmSchema opens and closes the run store once so its migrations are
-// applied before concurrent RunLocal calls race to open the same fresh
-// SQLite file (two simultaneous migrations would hit SQLITE_BUSY).
-func warmSchema(t *testing.T, p orchestrator.Paths) {
-	t.Helper()
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		t.Fatalf("warm schema: %v", err)
-	}
-	_ = st.Close()
-}
-
 func nodeByID(t *testing.T, p orchestrator.Paths, runID, nodeID string) *store.Node {
 	t.Helper()
 	st, _ := store.Open(p.StateDB())
@@ -290,7 +278,6 @@ func TestMemo_InFlightDedupeOnContent(t *testing.T) {
 func TestScope_BoxSerializesAcrossRunsOnSameHost(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
-	warmSchema(t, p)
 	var wg sync.WaitGroup
 	for i := range 2 {
 		wg.Add(1)
@@ -310,7 +297,6 @@ func TestScope_BoxSerializesAcrossRunsOnSameHost(t *testing.T) {
 func TestScope_RunIsolatesPerRun(t *testing.T) {
 	scopeRunBarrier.Store(newRunBarrier())
 	p := newPaths(t)
-	warmSchema(t, p)
 	type outcome struct {
 		status string
 		runErr error
@@ -343,7 +329,6 @@ func TestScope_RunIsolatesPerRun(t *testing.T) {
 func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
-	warmSchema(t, p)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -385,7 +370,6 @@ func TestConcurrency_WaitDoesNotHoldWorkerSlot(t *testing.T) {
 func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
-	warmSchema(t, p)
 	leaderDone := make(chan struct{})
 	go func() {
 		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "qt-leader", RunID: "qt-leader"})
