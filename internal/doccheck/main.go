@@ -50,7 +50,7 @@ func main() {
 	fmt.Println()
 	ok = checkYAMLConfigs(contentDir) && ok
 	fmt.Println()
-	ok = checkBannedTokens(repoRoot) && ok
+	ok = checkBannedTokens(contentDir, repoRoot) && ok
 	if !ok {
 		os.Exit(1)
 	}

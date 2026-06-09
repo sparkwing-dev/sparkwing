@@ -774,7 +774,7 @@ for each; document `--sw-local-only`.
 **Files**:
 
 - `docs/backends.md` (or extend existing backend docs).
-- `pkg/docs/content/...` if there's a generated docs flow.
+- `pkg/docs/mirror/...` is regenerated from `docs/` via `bin/sync-docs.sh`.
 - Update `README.md` if it overviews deployment modes.
 
 **Dependencies**: Units A, B, C complete enough that examples are

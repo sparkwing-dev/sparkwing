@@ -1,8 +1,8 @@
 package docs_test
 
-// Guardrail: pkg/docs/content/ must match /docs/ byte-for-byte so
-// the embedded CLI docs don't drift from the canonical /docs/ tree.
-// To unblock: bash bin/sync-docs.sh && git add pkg/docs/content/.
+// Guardrail: pkg/docs/mirror/ must match docs/ byte-for-byte so the
+// embedded CLI docs don't drift from the canonical docs/ source tree.
+// To unblock: bash bin/sync-docs.sh && git add pkg/docs/mirror/.
 
 import (
 	"crypto/sha256"
@@ -17,7 +17,7 @@ import (
 func TestPkgDocsContentMatchesDocsRoot(t *testing.T) {
 	root := repoRoot(t)
 	src := filepath.Join(root, "docs")
-	dst := filepath.Join(root, "pkg", "docs", "content")
+	dst := filepath.Join(root, "pkg", "docs", "mirror")
 
 	srcMap, err := hashTree(src)
 	if err != nil {
@@ -34,7 +34,7 @@ func TestPkgDocsContentMatchesDocsRoot(t *testing.T) {
 		seen[p] = true
 		dh, ok := dstMap[p]
 		if !ok {
-			diffs = append(diffs, "missing in pkg/docs/content/: "+p)
+			diffs = append(diffs, "missing in pkg/docs/mirror/: "+p)
 			continue
 		}
 		if dh != sh {
@@ -43,13 +43,13 @@ func TestPkgDocsContentMatchesDocsRoot(t *testing.T) {
 	}
 	for p := range dstMap {
 		if !seen[p] {
-			diffs = append(diffs, "stale in pkg/docs/content/ (not in docs/): "+p)
+			diffs = append(diffs, "stale in pkg/docs/mirror/ (not in docs/): "+p)
 		}
 	}
 	if len(diffs) > 0 {
 		sort.Strings(diffs)
-		t.Fatalf("pkg/docs/content/ is out of sync with docs/:\n  %s\n\n"+
-			"Fix: bash bin/sync-docs.sh && git add pkg/docs/content/",
+		t.Fatalf("pkg/docs/mirror/ is out of sync with docs/:\n  %s\n\n"+
+			"Fix: bash bin/sync-docs.sh && git add pkg/docs/mirror/",
 			strings.Join(diffs, "\n  "))
 	}
 }

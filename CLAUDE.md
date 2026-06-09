@@ -33,7 +33,8 @@ Plain English. No internal jargon, no ticket IDs, no version-marker noise. CLI h
 
 ## Docs
 
-- `docs/`, `pkg/docs/content/`, `README.md`, CHANGELOG entries: same rules. Self-contained prose, no internal pointers, no "this will be tightened in <ticket>" future-promises.
+- `docs/`, `README.md`, CHANGELOG entries: same rules. Self-contained prose, no internal pointers, no "this will be tightened in <ticket>" future-promises.
+- **Edit `docs/` -- it's the canonical source.** `pkg/docs/mirror/` is a generated copy of `docs/` (the CLI embeds it via `//go:embed`; the sparkwing-product website also builds from `docs/`). After editing `docs/`, run `bash bin/sync-docs.sh` to regenerate the mirror and commit both. NEVER hand-edit `pkg/docs/mirror/` -- the pre-commit gate and a guard test reject drift.
 
 ## Commit messages
 

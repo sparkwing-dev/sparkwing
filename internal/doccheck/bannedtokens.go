@@ -55,9 +55,9 @@ const narrativeExempt = "changelog-style.md"
 
 // bannedNarrative lists history- and deprecation-narrative phrasings.
 // Docs describe what IS, not what changed or what is going away; that
-// story belongs in pkg/docs/content/migrations/ (gate-excluded) or the
-// CHANGELOG, not the reference pages. These are scanned everywhere
-// except narrativeExempt. Kept high-precision on purpose -- fuzzy words
+// story belongs in docs/migrations/ (gate-excluded) or the CHANGELOG,
+// not the reference pages. These are scanned everywhere except
+// narrativeExempt. Kept high-precision on purpose -- fuzzy words
 // ("no longer"/"replaced"/"previously") have legitimate present-tense
 // uses and are left to review.
 var bannedNarrative = []bannedPattern{
@@ -66,18 +66,17 @@ var bannedNarrative = []bannedPattern{
 	{regexp.MustCompile(`(?i)\bformerly\b`),
 		"don't narrate renames; describe the current name directly (history goes in migrations/)"},
 	{regexp.MustCompile(`(?i)^#+\s+historical`),
-		"remove historical sections; change history belongs in pkg/docs/content/migrations/"},
+		"remove historical sections; change history belongs in docs/migrations/"},
 	{regexp.MustCompile(`(?i)\bdeprecat(?:e|ed|es|ing|ion)\b`),
 		"don't mark things deprecated in the reference docs; remove the feature or document its replacement as current (deprecation notices go in the CHANGELOG / migrations/)"},
 	{regexp.MustCompile(`(?i)\bobsolete\b`),
 		"don't flag things obsolete in the reference docs; describe the current way directly (history goes in migrations/)"},
 }
 
-// checkBannedTokens scans the bundled docs and the CLI help registry for
-// any dead token in `banned`. Returns false on any hit.
-func checkBannedTokens(repoRoot string) bool {
+// checkBannedTokens scans the docs (contentDir) and the CLI help
+// registry for any dead token in `banned`. Returns false on any hit.
+func checkBannedTokens(contentDir, repoRoot string) bool {
 	targets := []string{filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go")}
-	contentDir := filepath.Join(repoRoot, "pkg", "docs", "content")
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
