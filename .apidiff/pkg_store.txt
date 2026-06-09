@@ -66,12 +66,17 @@ type ConcurrencyHolder struct {
 	ClaimedAt      time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
+
+	Cost             int
+	DeclaredCapacity int
 }
 type ConcurrencyState struct {
-	Key      string
-	Capacity int
-	Holders  []ConcurrencyHolder
-	Waiters  []ConcurrencyWaiter
+	Key               string
+	Capacity          int
+	EffectiveCapacity int
+	UsedCost          int
+	Holders           []ConcurrencyHolder
+	Waiters           []ConcurrencyWaiter
 }
 type ConcurrencyWaiter struct {
 	Key           string

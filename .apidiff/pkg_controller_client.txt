@@ -5,6 +5,7 @@ type AcquireSlotRequest struct {
 	RunID         string
 	NodeID        string
 	Max           int
+	Cost          int
 	Policy        string
 	CacheKeyHash  string
 	CacheTTL      time.Duration
@@ -34,6 +35,7 @@ func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg st
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
+func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
@@ -53,6 +55,7 @@ func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, stat
 func (c *Client) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (c *Client) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (c *Client) FinishTrigger(ctx context.Context, triggerID string) error
+func (c *Client) ForceReleaseSuperseded(ctx context.Context, key string) ([]WaiterHolder, error)
 func (c *Client) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error)
 func (c *Client) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
 func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
@@ -80,6 +83,7 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
+func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (*WaiterResolution, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
@@ -140,6 +144,26 @@ type TriggerRequest struct {
 type TriggerResponse struct {
 	RunID  string
 	Status string
+}
+type WaiterHolder struct {
+	HolderID       string
+	RunID          string
+	NodeID         string
+	ClaimedAt      time.Time
+	LeaseExpiresAt time.Time
+	Superseded     bool
+}
+type WaiterResolution struct {
+	Status             string
+	HolderID           string
+	HolderLeaseExpires time.Time
+	OutputRef          string
+	OriginRunID        string
+	OriginNodeID       string
+	LeaderRunID        string
+	LeaderNodeID       string
+	Position           int
+	Holders            []WaiterHolder
 }
 
 # methods on un-declared receiver types (likely a bug)
