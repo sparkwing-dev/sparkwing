@@ -47,6 +47,41 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **sdk (Breaking):** `Cache` is now content-addressed memoization only:
+  `Cache(key CacheKeyFn, opts ...CacheOption)` with `TTL(d)`, replacing
+  `Cache(CacheOptions{Namespace, ContentHash, CacheTTL, ...})`. It is
+  keyed on content alone, so two nodes with the same key share a result
+  regardless of group or run, and in-flight dedupe of identical content
+  is automatic (no policy to set). `DefaultCacheTTL` 7d, `MaxCacheTTL`
+  35d. See
+  [migration](docs/migrations/v0.9.0.md#cache-content-key-plus-options-no-more-cacheoptions).
+- **sdk (Breaking):** Concurrency is a new, independent primitive:
+  `NewConcurrencyGroup(name, ConcurrencyLimit{Capacity, Scope, OnLimit,
+  QueueTimeout, CancelTimeout})` plus `(*JobNode).Concurrency(group,
+  cost...)`. The scheduling fields that overloaded `CacheOptions`
+  (`Max`, `OnLimit`, the timeouts) move here. Admission is cost-weighted
+  and summed across the group's `Scope` (`ScopeRun`/`ScopeBox`/
+  `ScopeGlobal`); capacity skew across pipeline versions resolves
+  most-restrictive-wins. See
+  [migration](docs/migrations/v0.9.0.md#concurrency-a-named-group-not-a-cache-namespace).
+- **sdk (Breaking):** `OnLimit: Coalesce` and the `OnLimitPolicy` type
+  are removed. In-flight dedupe is folded into `Cache` and keyed on
+  content rather than a group. See
+  [migration](docs/migrations/v0.9.0.md#onlimit-coalesce-is-gone).
+- **sdk (Breaking):** `Plan.Cache(CacheOptions{...})` is replaced by
+  `Plan.Concurrency(group)` for whole-run coordination; a plan never
+  memoizes. See
+  [migration](docs/migrations/v0.9.0.md#plancache-becomes-planconcurrency).
+- **controller:** the concurrency HTTP backend reaches parity with the
+  in-process engine -- `cost` on acquire plus `resolve`,
+  `cancel-waiter`, and `force-release` endpoints -- so cost-weighted
+  admission, scope, and most-restrictive capacity hold under a hosted
+  controller, not only in-process or Postgres-direct.
+- **cli:** `sparkwing cluster concurrency` shows cost-summed budget
+  (used / available / effective capacity), the group scope, and
+  per-holder / per-waiter cost. `sparkwing pipeline explain` renders the
+  split `Cache(ttl=...)` and `Concurrency(group=... cap=... cost=...
+  scope=...)` facts.
 
 ## [v0.8.1] - 2026-06-06
 ### Added
