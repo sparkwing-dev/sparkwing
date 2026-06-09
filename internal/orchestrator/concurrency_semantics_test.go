@@ -387,3 +387,114 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 	}
 	<-leaderDone
 }
+
+// --- Defect 3: skipped memo leader must not stamp coalesced followers Success ---
+
+type memoLeaderSkipPipe struct{ sparkwing.Base }
+
+func (memoLeaderSkipPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	// Two peers, same content key, both skipped. The memo leader holds
+	// the content slot through a slow SkipIf so the other coalesces;
+	// then the leader skips (writing no cache), and the follower must
+	// inherit a non-Success outcome rather than going green empty.
+	slowSkip := func(ctx context.Context) bool {
+		time.Sleep(250 * time.Millisecond)
+		return true
+	}
+	sparkwing.Job(plan, "a", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(slowSkip)
+	sparkwing.Job(plan, "b", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(slowSkip)
+	return nil
+}
+
+// --- Defect 5: cancelling a queued grouped node must not leak a phantom holder ---
+
+type phantomHolderPipe struct{ sparkwing.Base }
+
+func (phantomHolderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("phantom", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeGlobal})
+	sparkwing.Job(plan, "hold", semStep(1200*time.Millisecond)).Concurrency(g)
+	return nil
+}
+
+type phantomWaiterPipe struct{ sparkwing.Base }
+
+func (phantomWaiterPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("phantom", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeGlobal})
+	sparkwing.Job(plan, "wait", semStep(50*time.Millisecond)).Concurrency(g)
+	return nil
+}
+
+func init() {
+	register("memo-leader-skip", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &memoLeaderSkipPipe{} })
+	register("phantom-holder", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &phantomHolderPipe{} })
+	register("phantom-waiter", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &phantomWaiterPipe{} })
+}
+
+func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
+	resetSem()
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-leader-skip"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := sem.runs.Load(); got != 0 {
+		t.Fatalf("body ran %d times, want 0 (both nodes skipped)", got)
+	}
+	// Neither node may be Success: the leader skipped, so the coalesced
+	// follower must inherit a non-success outcome, not a bogus green.
+	st, _ := store.Open(p.StateDB())
+	defer func() { _ = st.Close() }()
+	nodes, _ := st.ListNodes(context.Background(), res.RunID)
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+	for _, n := range nodes {
+		if n.Outcome == string(sparkwing.Success) {
+			t.Fatalf("node %q is Success after a skipped memo leader; follower inherited a bogus success", n.NodeID)
+		}
+	}
+}
+
+func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T) {
+	resetSem()
+	p := newPaths(t)
+
+	// Holder run takes the only slot for ~1.2s.
+	holderDone := make(chan struct{})
+	go func() {
+		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "phantom-holder", RunID: "phantom-holder"})
+		close(holderDone)
+	}()
+	time.Sleep(250 * time.Millisecond) // holder acquires
+
+	// Waiter run queues on the same group, then is cancelled while queued.
+	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
+	waiterDone := make(chan struct{})
+	go func() {
+		_, _ = orchestrator.RunLocal(waiterCtx, p, orchestrator.Options{Pipeline: "phantom-waiter", RunID: "phantom-waiter"})
+		close(waiterDone)
+	}()
+	time.Sleep(300 * time.Millisecond) // waiter parks in the queue
+	cancelWaiter()
+	<-waiterDone
+	<-holderDone // holder releases and promotes the next waiter (if any)
+
+	// The cancelled waiter must not have been promoted into a real
+	// holder. Inspect the group's coordination key.
+	st, _ := store.Open(p.StateDB())
+	defer func() { _ = st.Close() }()
+	state, err := st.GetConcurrencyState(context.Background(), "g:phantom")
+	if err != nil {
+		return // key reaped entirely is also fine -- no phantom holder
+	}
+	now := time.Now()
+	for _, h := range state.Holders {
+		if h.Superseded || !h.LeaseExpiresAt.After(now) {
+			continue
+		}
+		if h.RunID == "phantom-waiter" {
+			t.Fatalf("cancelled queued waiter was promoted into a phantom holder: %+v", h)
+		}
+		t.Fatalf("unexpected live holder after holder release + waiter cancel: %+v", h)
+	}
+}

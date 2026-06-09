@@ -43,11 +43,12 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		CacheTTL:      req.CacheTTL,
 		CancelTimeout: req.CancelTimeout,
 		Lease:         req.Lease,
+		BypassRead:    req.BypassRead,
 	})
 	if err != nil {
 		return store.AcquireSlotResponse{}, err
 	}
-	return store.AcquireSlotResponse{
+	out := store.AcquireSlotResponse{
 		Kind:             store.AcquireKind(resp.Kind),
 		HolderID:         resp.HolderID,
 		LeaseExpiresAt:   resp.LeaseExpiresAt,
@@ -59,7 +60,16 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		SupersededIDs:    resp.SupersededIDs,
 		PreviousCapacity: resp.PreviousCapacity,
 		DriftNote:        resp.DriftNote,
-	}, nil
+		Position:         resp.Position,
+		QueueLength:      resp.QueueLength,
+	}
+	for _, hd := range resp.Holders {
+		out.Holders = append(out.Holders, store.ConcurrencyHolder{
+			Key: req.Key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
+			ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt, Superseded: hd.Superseded,
+		})
+	}
+	return out, nil
 }
 
 func (h *HTTPConcurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
@@ -95,6 +105,7 @@ func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID,
 		OriginNodeID:       resp.OriginNodeID,
 		LeaderRunID:        resp.LeaderRunID,
 		LeaderNodeID:       resp.LeaderNodeID,
+		LeaderOutcome:      resp.LeaderOutcome,
 		Position:           resp.Position,
 	}
 	for _, hd := range resp.Holders {

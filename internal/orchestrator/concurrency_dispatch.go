@@ -75,6 +75,21 @@ const memoKeyPrefix = "memo:"
 
 func memoKeyFor(contentHash string) string { return memoKeyPrefix + contentHash }
 
+// Scope-qualified coordination-key scheme. Each scope gets a distinct
+// leading tag so the key is unambiguous: a Global group whose name
+// happens to contain the qualifier separator can no longer collide with
+// a Box or Run key (the old bare "name@host" form let
+// Global "x@host" and Box "x" on "host" fold to the same key). The tag
+// also lets the CLI label a key's scope precisely. Group names are
+// author-chosen and may contain any of these characters; only the
+// leading tag is load-bearing for scope disambiguation.
+const (
+	scopeKeyGlobalPrefix = "g:"
+	scopeKeyRunPrefix    = "r:"
+	scopeKeyBoxPrefix    = "b:"
+	scopeKeyQualifierSep = "@" // separates the run/box qualifier from the name
+)
+
 // boxHostID is the stable host identity used to qualify ScopeBox keys.
 // It defaults to os.Hostname() and is overridable via SPARKWING_BOX_ID
 // for environments where the hostname is unstable or shared.
@@ -95,11 +110,33 @@ func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
 	name := g.Name()
 	switch g.Limit().Scope {
 	case sparkwing.ScopeRun:
-		return name + "@" + runID
+		return scopeKeyRunPrefix + runID + scopeKeyQualifierSep + name
 	case sparkwing.ScopeBox:
-		return name + "@" + boxHostID()
+		return scopeKeyBoxPrefix + boxHostID() + scopeKeyQualifierSep + name
 	default:
-		return name
+		return scopeKeyGlobalPrefix + name
+	}
+}
+
+// ScopeLabelFromKey reports a human label for the scope a coordination
+// key encodes, for the CLI / dashboard. The leading scheme tag is
+// authoritative; the qualifier (run id or host) is surfaced when
+// present. A "memo:" key is the content-addressed memoization slot, not
+// a group.
+func ScopeLabelFromKey(key string) string {
+	switch {
+	case strings.HasPrefix(key, memoKeyPrefix):
+		return "content-cache"
+	case strings.HasPrefix(key, scopeKeyGlobalPrefix):
+		return "global"
+	case strings.HasPrefix(key, scopeKeyRunPrefix):
+		qual, _, _ := strings.Cut(key[len(scopeKeyRunPrefix):], scopeKeyQualifierSep)
+		return "run (" + qual + ")"
+	case strings.HasPrefix(key, scopeKeyBoxPrefix):
+		qual, _, _ := strings.Cut(key[len(scopeKeyBoxPrefix):], scopeKeyQualifierSep)
+		return "box (" + qual + ")"
+	default:
+		return "global"
 	}
 }
 
@@ -562,7 +599,16 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 	for {
 		select {
 		case <-ctx.Done():
-			_, _ = r.backends.Concurrency.AcquireSlot(context.Background(), store.AcquireSlotRequest{})
+			// Drop the parked waiter row so a later release can't promote
+			// this cancelled node into a real holder (a phantom slot that
+			// pins the budget until reaping). ctx is done, so cancel on a
+			// fresh background context.
+			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if _, err := r.backends.Concurrency.CancelWaiter(bg, cp.key, req.RunID, req.Node.ID()); err != nil {
+				slog.Warn("cancel waiter on context cancellation failed; reaper will sweep it",
+					"key", cp.key, "run", req.RunID, "node", req.Node.ID(), "err", err)
+			}
+			cancel()
 			r.markFailed(ctx, req.RunID, req.Node.ID(), ctx.Err())
 			return runner.Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 		case <-ticker.C:
@@ -605,7 +651,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		case store.WaiterCached:
 			return r.applyCacheHit(ctx, req, cp, res.OutputRef, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:
-			return r.inheritLeaderOutcome(ctx, req, cp, res.LeaderRunID, res.LeaderNodeID)
+			return r.inheritLeaderOutcome(ctx, req, cp, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome)
 		case store.WaiterCancelled:
 			err := fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", cp.key)
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_cancelled", nil)
@@ -635,10 +681,33 @@ func (r *InProcessRunner) failQueueTimeout(ctx context.Context, req runner.Reque
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
-// inheritLeaderOutcome adopts the leader's terminal outcome + output
-// when it finished without writing a cache entry. Failed leaders
-// produce failed followers.
-func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID string) runner.Result {
+// followerOutcomeFromLeader maps a coalesce leader's terminal node
+// outcome to the outcome its dedupe followers inherit. A successful (or
+// cached) leader lets followers replay Success; any non-success leader
+// outcome is carried through so followers never go green for work that
+// did not actually succeed. Unknown / empty outcomes fail safe.
+func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
+	switch leaderOutcome {
+	case string(sparkwing.Success), string(sparkwing.Cached):
+		return sparkwing.Success
+	case string(sparkwing.Skipped), string(sparkwing.SkippedConcurrent):
+		return sparkwing.Skipped
+	case string(sparkwing.Superseded):
+		return sparkwing.Superseded
+	case string(sparkwing.Cancelled):
+		return sparkwing.Cancelled
+	default:
+		return sparkwing.Failed
+	}
+}
+
+// inheritLeaderOutcome adopts the leader's terminal node outcome +
+// output when it finished without writing a cache entry. A leader that
+// wrote no cache row did not succeed (only a successful release
+// caches), so the follower must inherit the leader's actual node
+// outcome -- a Skipped or Failed leader must not stamp the follower
+// Success with empty output.
+func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome string) runner.Result {
 	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
@@ -650,13 +719,11 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 		"key":            cp.key,
 		"leader_run_id":  leaderRunID,
 		"leader_node_id": leaderNodeID,
+		"leader_outcome": leaderOutcome,
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "coalesced", payload)
 
-	outcome := sparkwing.Success
-	if leader, err := r.backends.State.GetRun(ctx, leaderRunID); err == nil && leader != nil && leader.Status == "failed" {
-		outcome = sparkwing.Failed
-	}
+	outcome := followerOutcomeFromLeader(leaderOutcome)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output)
 
 	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {

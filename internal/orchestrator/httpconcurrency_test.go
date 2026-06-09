@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -157,5 +158,60 @@ func TestHTTPConcurrency_CancelWaiterAndForceRelease(t *testing.T) {
 	// must round-trip without error over the wire.
 	if _, err := b.ForceReleaseSuperseded(context.Background(), "k"); err != nil {
 		t.Fatalf("force release: %v", err)
+	}
+}
+
+// Defect 4: --no-cache (BypassRead) must reach the store over the HTTP
+// wire. After a cache entry exists, a BypassRead acquire must skip the
+// cache read and run fresh (Granted), not replay the stale entry.
+func TestParity_BypassRead_NoCache(t *testing.T) {
+	b, _ := newHTTPConcurrency(t)
+	ctx := context.Background()
+	// Leader runs and writes a cache entry on release.
+	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		Key: "memo:h", HolderID: "r1/n", RunID: "r1", NodeID: "n",
+		Capacity: 1, Cost: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "h", CacheTTL: time.Hour,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("leader: want Granted got %s", r.Kind)
+	}
+	if err := b.ReleaseSlot(ctx, "memo:h", "r1/n", "success", "r1/n", "h", time.Hour); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	// Without bypass, a fresh arrival hits the cache.
+	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		Key: "memo:h", HolderID: "r2/n", RunID: "r2", NodeID: "n",
+		Capacity: 1, Cost: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "h",
+	}); r.Kind != store.AcquireCached {
+		t.Fatalf("sanity: want Cached got %s", r.Kind)
+	}
+	// With BypassRead, the cache read is skipped and the node runs fresh.
+	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		Key: "memo:h", HolderID: "r3/n", RunID: "r3", NodeID: "n",
+		Capacity: 1, Cost: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "h", BypassRead: true,
+	}); r.Kind == store.AcquireCached {
+		t.Fatalf("BypassRead acquire returned Cached; --no-cache was dropped on the wire")
+	}
+}
+
+// Defect 8: a queued acquire's Position/QueueLength/Holders must cross
+// the HTTP wire so the dashboard renders the real queue depth.
+func TestParity_QueuedAcquire_Position_QueueLength_Holders(t *testing.T) {
+	b, _ := newHTTPConcurrency(t)
+	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("A: want Granted got %s", r.Kind)
+	}
+	r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r.Kind != store.AcquireQueued {
+		t.Fatalf("B: want Queued got %s", r.Kind)
+	}
+	if r.QueueLength != 1 {
+		t.Fatalf("queued acquire QueueLength = %d, want 1 (dropped on the wire)", r.QueueLength)
+	}
+	if len(r.Holders) != 1 || r.Holders[0].RunID != "rA" {
+		t.Fatalf("queued acquire Holders = %+v, want the rA holder (dropped on the wire)", r.Holders)
 	}
 }
