@@ -61,6 +61,33 @@ func TestConcurrency_PanicsOnMultipleCosts(t *testing.T) {
 	sparkwing.Job(plan, "x", &buildJob{}).Concurrency(g, 1, 2)
 }
 
+// Defect 7 (plan-time guard): a cost above the group's capacity can
+// never be admitted, so the SDK rejects it at Plan time rather than
+// letting the node strand in the queue forever.
+func TestConcurrency_PanicsWhenCostExceedsCapacity(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{Capacity: 4})
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on cost > capacity")
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Concurrency(g, 5)
+}
+
+// An unset capacity defaults to 1 at the backend, so any cost above 1
+// against an unset-capacity group is also unadmittable.
+func TestConcurrency_PanicsWhenCostExceedsDefaultCapacity(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{})
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on cost > default capacity 1")
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Concurrency(g, 2)
+}
+
 func TestConcurrency_NilGroupClears(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	g := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{Capacity: 2})
