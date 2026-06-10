@@ -96,3 +96,44 @@ func TestConcurrency_ZeroDeclaredCapacityHolderConstrainsFloor(t *testing.T) {
 		t.Fatalf("active holders on cap-1 key = %d, want 1", got)
 	}
 }
+
+// D4: a waiter that abandons (timeout/cancel) just after being promoted
+// into a holder must have that holder reclaimed by CancelWaiter, not
+// left orphaned to pin the slot until the lease reaps.
+func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
+	s := newStoreT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("B: want Queued, got %s", r.Kind)
+	}
+	// A releases; B is promoted into a holder.
+	releaseAndPromoteT(t, s, "k", "rA/n")
+	if got := activeHolders(t, s, "k"); got != 1 {
+		t.Fatalf("after A release: active holders = %d, want 1 (B promoted)", got)
+	}
+	// B gave up waiting and cancels, unaware it was promoted. The orphaned
+	// holder must be reclaimed.
+	matched, err := s.CancelWaiter(ctxT(t), "k", "rB", "n")
+	if err != nil {
+		t.Fatalf("CancelWaiter: %v", err)
+	}
+	if !matched {
+		t.Fatalf("CancelWaiter matched nothing; the promoted holder was left orphaned")
+	}
+	if got := activeHolders(t, s, "k"); got != 0 {
+		t.Fatalf("active holders after cancel = %d, want 0 (orphan reclaimed)", got)
+	}
+	// The freed slot is available to a fresh arrival, not pinned.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rC/n", RunID: "rC", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("C: want Granted (slot freed), got %s", r.Kind)
+	}
+}

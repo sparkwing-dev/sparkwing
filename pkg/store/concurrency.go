@@ -1346,7 +1346,13 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 
 // CancelWaiter removes one waiter row; returns whether one matched.
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	res, err := s.exec(
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	wres, err := tx.ExecContext(
 		ctx,
 		`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 		key, runID, nodeID,
@@ -1354,8 +1360,37 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	wn, err := wres.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	// The waiter may have been promoted into a holder in the race window
+	// between giving up and this call. Reclaim that orphaned holder --
+	// otherwise it pins budget with no dispatcher until the lease reaps --
+	// and promote the next waiters into the freed budget.
+	hres, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM concurrency_holders WHERE key = ? AND run_id = ? AND node_id = ?`,
+		key, runID, nodeID,
+	)
+	if err != nil {
+		return false, err
+	}
+	hn, err := hres.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if hn > 0 {
+		now := time.Now()
+		if _, err := txPromoteWaiters(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano()); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return wn > 0 || hn > 0, nil
 }
 
 // GetConcurrencyState returns capacity + holders + waiters; ErrNotFound when undeclared.
