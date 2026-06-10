@@ -72,23 +72,24 @@ dispatches runners.
   build cache; handles checkout and return for runner jobs
 - **Dispatcher**: background goroutine that claims pending jobs and
   creates Kubernetes Jobs to run them
-- **Heartbeat monitor**: fails running jobs if no heartbeat is received
-  within 40 seconds (60-second startup grace period)
-- **Queue timeout**: fails pending jobs that exceed their `queue_timeout`
-  (default 10 minutes)
-- **Metrics collector**: samples CPU and memory from the Kubernetes
-  metrics API every 10 seconds for running jobs
+- **Heartbeat monitor**: reclaims a node whose runner stops renewing its
+  lease (default 5-minute timeout, 2-minute startup grace)
+- **Queue timeout**: fails pending nodes that exceed their `queue_timeout`
+  (default 15 minutes)
+- **Metrics collector**: stores the per-node CPU/memory samples runners
+  push as they execute (no cluster metrics-server involved)
 
 ### Runner
 
 Executes pipeline binaries. The dispatcher creates a Kubernetes Job
-running the unified `sparkwing-runner` binary in `runner` (warm pool) or
-`worker` (single-claim) mode. The runner downloads code from the cache,
-compiles and runs the pipeline, reports results, exits.
+running the unified `sparkwing-runner` binary (its `runner`, `worker`,
+and `agent` subcommands cover the warm pool, single-claim, and
+off-cluster cases). The runner downloads code from the cache, compiles
+and runs the pipeline, reports results, exits.
 
-Off-cluster runners (laptops, bare-metal workers) connect as agents via
-`sparkwing cluster worker` and claim jobs through the same `/jobs/next`
-claim protocol the in-cluster warm pool uses.
+Off-cluster runners (laptops, bare-metal) connect to the controller and
+claim nodes through its claim API; the route set and scopes are in
+[api-reference.md](api-reference.md).
 
 ### Cache
 
@@ -136,25 +137,16 @@ component talks over HTTP - there are no custom protocols.
 ### Who talks to whom
 
 ```
-sparkwing CLI ──────► Controller        POST /trigger, /upload (via controller proxy)
-                                   GET  /jobs/{id} (poll for completion)
-
-GitHub ────────► Controller        POST /webhooks/github (HMAC verified)
-
-Controller ────► k8s API           Create / watch Jobs, read metrics
-
-Runner ────────► Controller        POST /jobs/{id}/heartbeat, /jobs/{id}/complete
-                                   POST /jobs/{id}/steps (live step progress)
-                                   GET  /jobs/{id} (fetch job details)
-                                   GET  /jobs/{id}/tree (parent, siblings, children)
-Runner ────────► Cache             GET  /uploads/{ref}, /git/<repo>/... (clone, download code)
-Runner ────────► Logs              POST /logs/{jobId} (stream step output)
-Runner ────────► DinD              tcp://localhost:2375 or tcp://dind:2375 (Docker builds)
-Runner ────────► Registry          Docker push (localhost:30500)
-Runner ────────► Cache             HTTP proxy for package downloads (/proxy/...)
-
-Dashboard ─────► Controller        GET  /jobs, /agents, /pipelines (API)
-Dashboard ─────► Logs              GET  /logs/{jobId} (SSE live stream)
+sparkwing CLI ──────► Controller   trigger a run; poll until terminal
+GitHub ────────► Controller        push webhook (HMAC verified)
+Controller ────► k8s API           create / watch Jobs
+Runner ────────► Controller        claim node; heartbeat; report finish; fetch details
+Runner ────────► Cache             clone repo, download code + packages
+Runner ────────► Logs              stream step output
+Runner ────────► DinD              Docker builds (tcp://localhost:2375)
+Runner ────────► Registry          docker push (localhost:30500)
+Dashboard ─────► Controller        read runs / agents / pipelines
+Dashboard ─────► Logs              live log stream (SSE)
 
 Cache ─────────► GitHub            git fetch (background, every 30s)
 
@@ -195,34 +187,17 @@ The dispatcher injects these into every runner pod:
 
 | Variable | Purpose |
 |----------|---------|
-| `SPARKWING_CONTROLLER` | Controller URL for heartbeats and completion |
-| `SPARKWING_GITCACHE` | Cache URL for code download |
-| `SPARKWING_LOGS` | Logs service URL for step output streaming |
-| `SPARKWING_REGISTRY` | Container registry address |
-| `SPARKWING_COMMIT` | Git commit SHA for deterministic builds |
-| `DOCKER_HOST` | DinD address (shared or sidecar) |
-| `GITHUB_TOKEN` | GitHub PAT for gitops pushes (if configured) |
+| `SPARKWING_CONTROLLER_URL` | Controller base URL |
+| `SPARKWING_LOGS_URL` | Logs service URL |
+| `SPARKWING_RUN_ID` | The run this node belongs to |
+| `SPARKWING_NODE_ID` | The node being executed |
+| `SPARKWING_HOME` | State / cache / logs root |
+| `SPARKWING_AGENT_TOKEN` | Bearer token for controller + logs calls |
 
 ### Controller API endpoints
 
-A condensed list - see `docs/api.md` for the full reference.
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/trigger` | Create a new run |
-| GET | `/jobs` | List runs (supports `?limit=&offset=&paginated=true`) |
-| GET | `/jobs/{id}` | Run details |
-| POST | `/jobs/{id}/status` | Update run status / detail |
-| GET | `/jobs/{id}/tree` | Parent, siblings, children |
-| GET | `/jobs/{id}/steps` | Live step progress |
-| POST | `/jobs/{id}/heartbeat` | Agent heartbeat (bidirectional sync) |
-| POST | `/jobs/{id}/complete` | Report run completion |
-| POST | `/jobs/{id}/retry` | Retry a failed run |
-| POST | `/jobs/{id}/cancel` | Cancel a running run |
-| GET | `/jobs/{id}/metrics` | CPU / memory usage over time |
-| GET | `/agents` | List connected agents |
-| GET | `/pipelines` | List pipeline metadata |
-| POST | `/authorize` | Authorize a deploy via the audit trail |
+The controller's full route set, methods, and required scopes are in
+[api-reference.md](api-reference.md).
 
 ## Data Flow
 
@@ -249,7 +224,7 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
   8. runner streams logs to logs service
   9. runner sends heartbeats every 5s to controller
   10. runner reports completion to controller
-  11. sparkwing run polls /jobs/{id} and displays result
+  11. sparkwing run polls the controller for run state and displays result
 ```
 
 ### Git Push Trigger
