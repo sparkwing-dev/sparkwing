@@ -374,8 +374,24 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{}, err
 	}
 
-	// 4. Budget available -> grant immediately.
-	if fitsBudget(activeCost, req.Cost, effCap) {
+	// 4. Budget available -> grant immediately, unless a Queue arrival
+	// would barge a waiter already parked on this key. Budget can free
+	// outside the atomic release+promote (e.g. a holder's lease lapses
+	// before the reaper runs); strict FIFO reserves it for the head.
+	fifoBlocked := false
+	if req.Policy == OnLimitQueue {
+		var earlier int
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters
+			  WHERE key = ? AND policy = ? AND (run_id != ? OR node_id != ?)`,
+			req.Key, OnLimitQueue, req.RunID, req.NodeID,
+		).Scan(&earlier); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		fifoBlocked = earlier > 0
+	}
+	if !fifoBlocked && fitsBudget(activeCost, req.Cost, effCap) {
 		expiresNS := now.Add(req.Lease).UnixNano()
 		// ON CONFLICT takes the slot cleanly when a row with this
 		// holder_id already exists but is superseded (a CancelOthers

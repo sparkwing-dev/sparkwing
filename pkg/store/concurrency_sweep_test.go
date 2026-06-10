@@ -165,3 +165,29 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 		t.Fatalf("--no-cache follower got Cached; bypass-read ignored on the resolve path")
 	}
 }
+
+// D-C: a fresh Queue arrival must not barge a waiter already parked on
+// the key when budget frees outside the atomic release+promote (here, a
+// lapsed lease before the reaper runs).
+func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
+	s := newStoreT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
+		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rW/n", RunID: "rW", NodeID: "n",
+		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("W: want Queued, got %s", r.Kind)
+	}
+	time.Sleep(80 * time.Millisecond) // A's lease lapses; no reaper/release yet
+	// Budget reads free (A expired) but W is parked first -- X must queue
+	// behind it, not jump ahead.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rX/n", RunID: "rX", NodeID: "n",
+		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("X: want Queued (FIFO; must not barge W), got %s", r.Kind)
+	}
+}
