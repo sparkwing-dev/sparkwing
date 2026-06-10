@@ -35,11 +35,11 @@ What runs:
 
 - `controller` - queue, dispatcher, webhooks, pool management, state store.
 - `sparkwing-logs` - streaming log store. Runners write, dashboard reads.
-- `cache` - git server, artifact blob store, package registry proxy.
+- `gitcache` - git server, artifact blob store, package registry proxy.
 - `web` - dashboard.
 
 All state persists in docker volumes. Backup `controller-data`,
-`cache-data`, and `logs-data` to protect history.
+`gitcache-data`, and `logs-data` to protect history.
 
 ### Where to host
 
@@ -160,8 +160,8 @@ rm ~/.config/systemd/user/sparkwing-runner.service
                 │                                              │
                 ▼                                              ▼
     long-polled by laptop 1                    long-polled by laptop 2
-    running `sparkwing-runner                 running `sparkwing-runner
-    serve --controller ...`                    serve --controller ...`
+    running the sparkwing-runner               running the sparkwing-runner
+    Service (installed above)                  Service (installed above)
                 │                                              │
                 │ claims + runs                                │ claims + runs
                 │                                              │
@@ -184,9 +184,10 @@ value in `~/Library/LaunchAgents/com.sparkwing.runner.plist` (or the
 systemd unit) matches what's set in the server's `.env`.
 
 **Runner connects but never claims a job.** Check that you're actually
-triggering jobs -- `curl -X POST https://api.example.com/trigger?pipeline=foo`
-with the bearer header. Also check `sparkwing.example.com` dashboard
-for the job status.
+triggering jobs -- `POST https://api.example.com/api/v1/triggers` with the
+bearer header (see [api-reference.md](api-reference.md) for the body), or
+just `sparkwing pipeline trigger <name> --profile prod`. Also check the
+dashboard for the job status.
 
 **Pipeline build fails with "git: could not read Username for github.com".**
 The runner needs SSH access to clone private repos. Make sure your
@@ -202,5 +203,5 @@ macOS, the LaunchAgent inherits the user's Docker socket.
 **Logs stop arriving in the dashboard.** Check `sparkwing-logs` health
 on the server and the logs hostname is reachable from the laptop. The
 runner silently drops log writes on HTTP errors to avoid wedging the
-job -- use `curl https://logs.example.com/health` from the laptop to
-confirm connectivity.
+job -- use `curl https://logs.example.com/api/v1/health` from the laptop
+to confirm connectivity.

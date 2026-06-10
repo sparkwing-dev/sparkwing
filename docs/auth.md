@@ -17,16 +17,19 @@ audit logs. The remaining ~35 characters carry the secret entropy.
 
 ## Scopes
 
-The scope set for v1:
+The scope constants live in `pkg/controller/auth.go`; the full route-to-scope
+mapping is in the generated [api-reference.md](api-reference.md):
 
-| Scope           | Unlocks                                                                                           |
-|-----------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`     | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/trends`, `/agents`, per-node metrics GETs  |
-| `runs.write`    | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`                                   |
-| `nodes.claim`   | POST `/nodes/claim`, `mark-ready`, `revoke-ready`, `heartbeat`; GET `nodes/{id}`, `nodes/{id}/output`, POST `/nodes/{nid}/metrics` |
-| `logs.read`     | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
-| `logs.write`    | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
-| `admin`         | tokens CRUD, cache PUT, state mutation (Create/Start/Finish Job, Events, Locks, Pool, etc.)        |
+| Scope             | Unlocks                                                                                           |
+|-------------------|---------------------------------------------------------------------------------------------------|
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/trends`, `/agents`, per-node metrics GETs  |
+| `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`                                   |
+| `nodes.claim`     | POST `/nodes/claim`, `mark-ready`, `revoke-ready`, `heartbeat`; GET `nodes/{id}`, `nodes/{id}/output`, POST `/nodes/{nid}/metrics` |
+| `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
+| `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
+| `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
+| `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
+| `admin`           | tokens CRUD, cache PUT, state mutation (Create/Start/Finish Job, Events, Locks, Pool, etc.)        |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -41,6 +44,7 @@ Always open, regardless of auth config:
 - `GET /api/v1/health` on the controller -- k8s livenessProbe /
   readinessProbe target. httpGet probes can't carry `Authorization`.
 - `GET /api/v1/health` on the logs-service -- same reasoning.
+- `GET /metrics` on the controller -- Prometheus scrape target.
 - `GET /metrics` on the logs-service -- Prometheus scrape target.
 - `GET /api/v1/auth/whoami` -- authenticated via the middleware just
   like any other endpoint, but without a scope check. Used by the
@@ -114,27 +118,25 @@ impossible to accidentally point at the wrong cluster.
 
 ## Argon2 parameters
 
-Hash parameters (`orchestrator/store/tokens.go`):
+Hash parameters (`pkg/store/tokens.go`):
 
 - `time = 1`
 - `memory = 64 MiB`
 - `threads = 4`
 - key length = 32 bytes
 
-Measured on arm64 laptop: ~30ms per `argon2.IDKey`. Token lookup on the
-hot path is prefix-indexed + cached in-process for 60s, so argon2 is
-only run on cold lookups. Phase-3 measurements of p99 on prod land
-here once the cutover happens.
+Measured on an arm64 laptop: ~8-15ms per `argon2.IDKey`. Token lookup on
+the hot path is prefix-indexed + cached in-process for 60s, so argon2
+only runs on cold lookups.
 
-## Extension points (future sessions)
+## Extension points
 
 - **OIDC / SSO**: not implemented. The `users` + `sessions` tables are
   shape-compatible; an OIDC callback can populate sessions directly.
-- **Audit trail**: structured HTTP logs include the principal +
-  prefix. A dedicated audit DB is a later session.
-- **Per-user multi-tenancy**: principals are a free-form label today.
-  Adding a `users` table with roles is orthogonal and doesn't require
-  a wire-shape change.
+- **Audit trail**: structured HTTP logs include the principal + prefix.
+  There is no dedicated audit database.
+- **Per-user multi-tenancy**: principals are a free-form label. Adding a
+  roles model is orthogonal and doesn't require a wire-shape change.
 - **Fine-grained `admin` split**: the `admin` scope is intentionally
-  broad for v1. Split into `cache.write`, `locks.admin`, etc. when a
+  broad. It can be split into `cache.write`, `locks.admin`, etc. when a
   real caller needs that narrower trust.
