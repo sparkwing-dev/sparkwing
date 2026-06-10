@@ -132,7 +132,7 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 			return false, ctx.Err()
 		case <-ticker.C:
 		}
-		res, err := backends.Concurrency.ResolveWaiter(ctx, key, runID, "", "", "", "")
+		res, err := backends.Concurrency.ResolveWaiter(ctx, key, runID, "", "", "", "", false)
 		if err != nil {
 			return false, err
 		}

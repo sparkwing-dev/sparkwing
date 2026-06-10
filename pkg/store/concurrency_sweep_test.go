@@ -137,3 +137,31 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 		t.Fatalf("C: want Granted (slot freed), got %s", r.Kind)
 	}
 }
+
+// D1: a coalesced follower that asked to bypass the cache (--no-cache)
+// must not replay a stale memo entry via ResolveWaiter -- bypass must be
+// honored on the resolve read just as it is on the acquire read.
+func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
+	s := newStoreT(t)
+	now := time.Now()
+	if _, err := s.DB().Exec(
+		`INSERT INTO concurrency_cache
+		   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"memo:k", "h1", "out-ref", "r0", "n0", now.UnixNano(), now.Add(time.Hour).UnixNano(), now.UnixNano(),
+	); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	// A normal follower replays the still-valid entry.
+	if res, err := s.ResolveWaiter(ctxT(t), "memo:k", "rF", "n", "h1", "", "", false); err != nil {
+		t.Fatalf("resolve (no bypass): %v", err)
+	} else if res.Status != store.WaiterCached {
+		t.Fatalf("no-bypass follower status = %q, want Cached", res.Status)
+	}
+	// A --no-cache follower must NOT replay it.
+	if res, err := s.ResolveWaiter(ctxT(t), "memo:k", "rF2", "n", "h1", "", "", true); err != nil {
+		t.Fatalf("resolve (bypass): %v", err)
+	} else if res.Status == store.WaiterCached {
+		t.Fatalf("--no-cache follower got Cached; bypass-read ignored on the resolve path")
+	}
+}

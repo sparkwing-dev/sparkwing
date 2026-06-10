@@ -301,6 +301,7 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.ResolveWaiter(
 		r.Context(), key, runID, q.Get("node_id"),
 		q.Get("cache_key_hash"), q.Get("leader_run_id"), q.Get("leader_node_id"),
+		q.Get("bypass_read") == "true",
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)

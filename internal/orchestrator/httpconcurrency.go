@@ -91,8 +91,8 @@ func (h *HTTPConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 // orchestrator can wait on a queued/coalesced group slot and observe
 // promotion, a cache hit, leader completion, or cancellation -- the
 // same resolutions the in-process backend serves from the store.
-func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
-	resp, err := h.client.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID)
+func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
+	resp, err := h.client.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
 	if err != nil {
 		return store.WaiterResolution{}, err
 	}

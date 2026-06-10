@@ -170,7 +170,7 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 						errs <- fmt.Errorf("arrival %d: stuck queued past deadline", i)
 						return
 					}
-					res, err := s.ResolveWaiter(ctx, "k", runID, "n", "", "", "")
+					res, err := s.ResolveWaiter(ctx, "k", runID, "n", "", "", "", false)
 					if err != nil {
 						errs <- fmt.Errorf("arrival %d resolve: %w", i, err)
 						return

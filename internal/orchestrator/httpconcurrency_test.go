@@ -58,7 +58,7 @@ func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {
 	}
 
 	// Resolve while still queued.
-	res, err := b.ResolveWaiter(context.Background(), "db", "r3", "n", "", "", "")
+	res, err := b.ResolveWaiter(context.Background(), "db", "r3", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve (queued): %v", err)
 	}
@@ -70,7 +70,7 @@ func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {
 	if err := b.ReleaseSlot(context.Background(), "db", "r1/n", "success", "", "", 0); err != nil {
 		t.Fatalf("release r1: %v", err)
 	}
-	res, err = b.ResolveWaiter(context.Background(), "db", "r3", "n", "", "", "")
+	res, err = b.ResolveWaiter(context.Background(), "db", "r3", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve (after release): %v", err)
 	}
@@ -104,7 +104,7 @@ func TestHTTPConcurrency_MostRestrictiveWins(t *testing.T) {
 	if err := b.ReleaseSlot(context.Background(), "db", "rB/n", "success", "", "", 0); err != nil {
 		t.Fatalf("release B: %v", err)
 	}
-	res, err := b.ResolveWaiter(context.Background(), "db", "rC", "n", "", "", "")
+	res, err := b.ResolveWaiter(context.Background(), "db", "rC", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve C: %v", err)
 	}

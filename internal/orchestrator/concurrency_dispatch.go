@@ -636,7 +636,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		case <-ticker.C:
 		}
 
-		res, err := r.backends.Concurrency.ResolveWaiter(ctx, cp.key, req.RunID, req.Node.ID(), cp.cacheHash, leaderRun, leaderNode)
+		res, err := r.backends.Concurrency.ResolveWaiter(ctx, cp.key, req.RunID, req.Node.ID(), cp.cacheHash, leaderRun, leaderNode, noCacheFromContext(ctx))
 		if err != nil {
 			r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("resolve waiter: %w", err))
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}

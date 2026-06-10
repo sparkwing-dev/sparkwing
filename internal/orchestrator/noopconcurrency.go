@@ -78,7 +78,7 @@ func (*noopConcurrency) ReleaseSlot(_ context.Context, _, _, _, _, _ string, _ t
 	return nil
 }
 
-func (*noopConcurrency) ResolveWaiter(_ context.Context, _, _, _, _, _, _ string) (store.WaiterResolution, error) {
+func (*noopConcurrency) ResolveWaiter(_ context.Context, _, _, _, _, _, _ string, _ bool) (store.WaiterResolution, error) {
 	return store.WaiterResolution{Status: store.WaiterLeaderFinished}, nil
 }
 

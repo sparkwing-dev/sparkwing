@@ -356,7 +356,7 @@ func (f *fakeConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 	return nil
 }
 
-func (f *fakeConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
+func (f *fakeConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
 	return store.WaiterResolution{Status: store.WaiterStillWaiting}, nil
 }
 

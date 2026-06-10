@@ -173,7 +173,7 @@ type WaiterResolution struct {
 
 // ResolveWaiter polls the controller for a parked waiter's resolution
 // (promoted / cached / leader-finished / cancelled / still-waiting).
-func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (*WaiterResolution, error) {
+func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error) {
 	q := url.Values{}
 	q.Set("run_id", runID)
 	if nodeID != "" {
@@ -187,6 +187,9 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	}
 	if leaderNodeID != "" {
 		q.Set("leader_node_id", leaderNodeID)
+	}
+	if bypassRead {
+		q.Set("bypass_read", "true")
 	}
 	u := fmt.Sprintf("%s/api/v1/concurrency/%s/resolve?%s", c.baseURL, url.PathEscape(key), q.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

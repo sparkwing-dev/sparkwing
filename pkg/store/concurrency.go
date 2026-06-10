@@ -1211,8 +1211,10 @@ type WaiterResolution struct {
 
 // ResolveWaiter is the read-side for polling; never inserts waiter
 // rows. cacheKeyHash="" disables memo lookup; leader_* empty for
-// queue/cancel_others waiters.
-func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (WaiterResolution, error) {
+// queue/cancel_others waiters. bypassRead skips the memo lookup so a
+// --no-cache follower waits for the leader instead of replaying a stale
+// entry, mirroring the acquire path's BypassRead.
+func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error) {
 	now := time.Now()
 	nowNS := now.UnixNano()
 
@@ -1247,8 +1249,9 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		return WaiterResolution{}, err
 	}
 
-	// 2. Cache hit on our hash -> Cached.
-	if cacheKeyHash != "" {
+	// 2. Cache hit on our hash -> Cached (skipped when the follower asked
+	// to bypass the read, so --no-cache isn't defeated by coalescing).
+	if cacheKeyHash != "" && !bypassRead {
 		var outputRef, originRun, originNode string
 		var expiresNS int64
 		err := tx.QueryRowContext(
