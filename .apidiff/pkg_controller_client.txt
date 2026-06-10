@@ -88,7 +88,7 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
-func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (*WaiterResolution, error)
+func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
@@ -159,17 +159,18 @@ type WaiterHolder struct {
 	Superseded     bool
 }
 type WaiterResolution struct {
-	Status             string
-	HolderID           string
-	HolderLeaseExpires time.Time
-	OutputRef          string
-	OriginRunID        string
-	OriginNodeID       string
-	LeaderRunID        string
-	LeaderNodeID       string
-	LeaderOutcome      string
-	Position           int
-	Holders            []WaiterHolder
+	Status              string
+	HolderID            string
+	HolderLeaseExpires  time.Time
+	OutputRef           string
+	OriginRunID         string
+	OriginNodeID        string
+	LeaderRunID         string
+	LeaderNodeID        string
+	LeaderOutcome       string
+	LeaderFailureReason string
+	Position            int
+	Holders             []WaiterHolder
 }
 
 # methods on un-declared receiver types (likely a bug)

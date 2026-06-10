@@ -390,7 +390,7 @@ func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
-func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (WaiterResolution, error)
+func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
@@ -485,6 +485,8 @@ type WaiterResolution struct {
 	LeaderNodeID       string
 
 	LeaderOutcome string
+
+	LeaderFailureReason string
 
 	Position int
 	Holders  []ConcurrencyHolder

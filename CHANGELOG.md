@@ -115,6 +115,34 @@ code change to unlock.
 - **controller:** A queued acquire's position, queue length, and
   current holders now cross the HTTP wire, so the dashboard renders the
   real queue depth instead of "0 ahead, held by unknown".
+- **sdk:** The superseded-holder reclaim also covers waiter promotion,
+  not just admission, so promoting a waiter onto a holder id that still
+  carries a superseded row no longer aborts the release transaction.
+- **sdk:** Re-acquiring an *expired* concurrency holder no longer
+  revives it -- the acquire-path twin of the heartbeat-liveness guard.
+- **sdk:** Budget arithmetic no longer overflows: a very large declared
+  cost can't wrap the used-plus-cost sum negative and over-admit.
+- **sdk:** A live holder carrying no declared capacity (a migration
+  backfill or a promoted legacy waiter) no longer vanishes from the
+  effective-capacity floor and over-admits; promotion never mints a
+  zero-capacity holder.
+- **sdk:** Cancelling a queued node also reclaims a holder it was
+  promoted into during the cancel race, so the freed slot isn't pinned
+  until the lease reaps.
+- **sdk:** A fresh `Queue` arrival no longer barges a waiter already
+  parked on the key when budget frees outside the atomic release and
+  promote (e.g. a holder's lease lapsing before the reaper runs); strict
+  FIFO is preserved.
+- **sdk:** Scope-qualified keys also length-prefix the run/box
+  qualifier, so a custom run id or box id containing the separator can't
+  fold two distinct identities onto one key.
+- **sdk:** `--no-cache` is honored end to end for memoized nodes: a
+  coalesced follower no longer replays the leader's result through the
+  resolve path, and a `--no-cache` node runs fresh instead of coalescing
+  onto an in-flight leader.
+- **sdk:** A coalesced follower of a *failed* leader now inherits the
+  leader's categorized `failure_reason` instead of recording it as
+  uncategorized.
 
 ## [v0.9.0] - 2026-06-09
 ### Added
