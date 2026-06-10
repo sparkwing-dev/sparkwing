@@ -204,10 +204,10 @@ func concurrencyFuzzOp(ctx context.Context, s *store.Store, rng *rand.Rand) erro
 	return nil
 }
 
-func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
+func runSequentialPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
 	for _, seed := range fuzzSeeds(t) {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-			s := newStoreT(t)
+			s := newStore(t)
 			rng := rand.New(rand.NewSource(seed))
 			for i := 0; i < fuzzOps(600); i++ {
 				if err := concurrencyFuzzOp(ctxT(t), s, rng); err != nil {
@@ -218,8 +218,8 @@ func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
 	}
 }
 
-func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
-	s := newStoreT(t)
+func runConcurrentPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
+	s := newStore(t)
 	ctx := ctxT(t)
 	const goroutines = 8
 	errCh := make(chan error, goroutines)
@@ -245,12 +245,36 @@ func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
 	}
 }
 
+func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
+	runSequentialPropertySuite(t, newStoreT)
+}
+
+func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
+	runConcurrentPropertySuite(t, newStoreT)
+}
+
+func TestConcurrency_PropertyRandomOpsHoldInvariants_Postgres(t *testing.T) {
+	runSequentialPropertySuite(t, openPGTestStore)
+}
+
+func TestConcurrency_PropertyConcurrentOpsHoldInvariants_Postgres(t *testing.T) {
+	runConcurrentPropertySuite(t, openPGTestStore)
+}
+
 // Promotion among queue-policy waiters must follow arrival order
 // exactly, across a random mix of grants, queues, and releases.
 func TestConcurrency_PropertyFIFOPromotionOrder(t *testing.T) {
+	runFIFOPropertySuite(t, newStoreT)
+}
+
+func TestConcurrency_PropertyFIFOPromotionOrder_Postgres(t *testing.T) {
+	runFIFOPropertySuite(t, openPGTestStore)
+}
+
+func runFIFOPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {
 	for _, seed := range fuzzSeeds(t) {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-			s := newStoreT(t)
+			s := newStore(t)
 			rng := rand.New(rand.NewSource(seed))
 			const key = "fifo"
 			var queue []string
