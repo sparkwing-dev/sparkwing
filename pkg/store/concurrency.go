@@ -253,53 +253,25 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	defer func() { _ = tx.Rollback() }()
 
 	// 1. Cache lookup; atomic with the rest so we never double-run.
-	// BypassRead skips this branch entirely: the request flows into
-	// capacity / coalesce / queue as if no prior entry existed. The
-	// release-time write still records the run's result so a
-	// follow-up request (BypassRead=false) hits cache normally.
-	if req.CacheKeyHash != "" && !req.BypassRead {
-		var outputRef, originRun, originNode string
-		var expiresNS int64
-		err := tx.QueryRowContext(
-			ctx,
-			`SELECT output_ref, origin_run_id, origin_node_id, expires_at
-			   FROM concurrency_cache
-			  WHERE key = ? AND cache_key_hash = ?`,
-			req.Key, req.CacheKeyHash,
-		).Scan(&outputRef, &originRun, &originNode, &expiresNS)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			// miss; fall through
-		case err != nil:
+	// txCacheLookup owns the serve-from-cache decision, including the
+	// BypassRead opt-out: a bypassing request flows into capacity /
+	// coalesce / queue as if no prior entry existed, while the
+	// release-time write still records the run's result so a follow-up
+	// request (BypassRead=false) hits cache normally.
+	hit, err := txCacheLookup(ctx, tx, req.Key, req.CacheKeyHash, nowNS, req.BypassRead, true)
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	if hit != nil {
+		if err := tx.Commit(); err != nil {
 			return AcquireSlotResponse{}, err
-		default:
-			if expiresNS > nowNS {
-				if _, err := tx.ExecContext(
-					ctx,
-					`UPDATE concurrency_cache SET last_hit_at = ? WHERE key = ? AND cache_key_hash = ?`,
-					nowNS, req.Key, req.CacheKeyHash,
-				); err != nil {
-					return AcquireSlotResponse{}, err
-				}
-				if err := tx.Commit(); err != nil {
-					return AcquireSlotResponse{}, err
-				}
-				return AcquireSlotResponse{
-					Kind:         AcquireCached,
-					OutputRef:    outputRef,
-					OriginRunID:  originRun,
-					OriginNodeID: originNode,
-				}, nil
-			}
-			// expired entry; delete so we don't keep re-reading it
-			if _, err := tx.ExecContext(
-				ctx,
-				`DELETE FROM concurrency_cache WHERE key = ? AND cache_key_hash = ? AND expires_at <= ?`,
-				req.Key, req.CacheKeyHash, nowNS,
-			); err != nil {
-				return AcquireSlotResponse{}, err
-			}
 		}
+		return AcquireSlotResponse{
+			Kind:         AcquireCached,
+			OutputRef:    hit.OutputRef,
+			OriginRunID:  hit.OriginRunID,
+			OriginNodeID: hit.OriginNodeID,
+		}, nil
 	}
 
 	// 2. Upsert entry (latest-wins on capacity; drift note on change).
@@ -927,17 +899,32 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var runID, nodeID string
+	released, _, _, err := txReleaseHolder(ctx, tx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return released, nil
+}
+
+// txReleaseHolder is the single definition of "release this holder": it
+// deletes the holder row and, when the release is a successful run of
+// memoized content (outcome "success", a content hash, and a positive
+// TTL), writes the shared cache entry. Reports whether a holder row
+// matched, plus the released holder's (runID, nodeID).
+func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
 	err = tx.QueryRowContext(
 		ctx,
 		`SELECT run_id, node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
 	).Scan(&runID, &nodeID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, tx.Commit()
+		return false, "", "", nil
 	}
 	if err != nil {
-		return false, err
+		return false, "", "", err
 	}
 
 	if _, err := tx.ExecContext(
@@ -945,7 +932,7 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
 	); err != nil {
-		return false, err
+		return false, "", "", err
 	}
 
 	if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
@@ -965,14 +952,65 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 			key, cacheKeyHash, outputRef, runID, nodeID,
 			now.UnixNano(), now.Add(ttl).UnixNano(), now.UnixNano(),
 		); err != nil {
-			return false, err
+			return false, "", "", err
 		}
 	}
+	return true, runID, nodeID, nil
+}
 
-	if err := tx.Commit(); err != nil {
-		return false, err
+// concurrencyCacheHit is a served memo entry.
+type concurrencyCacheHit struct {
+	OutputRef    string
+	OriginRunID  string
+	OriginNodeID string
+}
+
+// txCacheLookup is the single "serve this arrival from the memo
+// cache?" decision, shared by the acquire path and the waiter-resolve
+// path. A request with no content hash, or one that asked to bypass
+// the read (--no-cache), never hits; an unexpired entry hits and
+// touches last_hit_at. deleteExpired additionally drops an expired
+// entry so the acquire path stops re-reading it; the polling resolve
+// path leaves expiry to the sweeper.
+func txCacheLookup(ctx context.Context, tx *storeTx, key, cacheKeyHash string, nowNS int64, bypassRead, deleteExpired bool) (*concurrencyCacheHit, error) {
+	if cacheKeyHash == "" || bypassRead {
+		return nil, nil
 	}
-	return true, nil
+	var hit concurrencyCacheHit
+	var expiresNS int64
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT output_ref, origin_run_id, origin_node_id, expires_at
+		   FROM concurrency_cache
+		  WHERE key = ? AND cache_key_hash = ?`,
+		key, cacheKeyHash,
+	).Scan(&hit.OutputRef, &hit.OriginRunID, &hit.OriginNodeID, &expiresNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if expiresNS <= nowNS {
+		if deleteExpired {
+			if _, err := tx.ExecContext(
+				ctx,
+				`DELETE FROM concurrency_cache WHERE key = ? AND cache_key_hash = ? AND expires_at <= ?`,
+				key, cacheKeyHash, nowNS,
+			); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE concurrency_cache SET last_hit_at = ? WHERE key = ? AND cache_key_hash = ?`,
+		nowNS, key, cacheKeyHash,
+	); err != nil {
+		return nil, err
+	}
+	return &hit, nil
 }
 
 // ReleaseAndNotify atomically performs release + coalesce-resolve +
@@ -987,50 +1025,14 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// 1. Look up the holder to get (runID, nodeID) before deleting.
-	var runID, nodeID string
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT run_id, node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
-		key, holderID,
-	).Scan(&runID, &nodeID)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		// Holder gone (reaped or duplicate release). Still run promote
-		// to unblock waiters; followers stay parked until a real release.
-		released = false
-	case err != nil:
+	// 1. Release the holder (delete + release-time cache write). A
+	// missing holder (reaped or duplicate release) still runs promote to
+	// unblock waiters; followers stay parked until a real release.
+	released, runID, nodeID, err := txReleaseHolder(ctx, tx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
+	if err != nil {
 		return false, nil, nil, err
-	default:
-		released = true
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
-			key, holderID,
-		); err != nil {
-			return false, nil, nil, err
-		}
-		if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
-			now := time.Now()
-			if _, err := tx.ExecContext(
-				ctx,
-				`INSERT INTO concurrency_cache
-				   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-				 ON CONFLICT (key, cache_key_hash) DO UPDATE SET
-				   output_ref     = excluded.output_ref,
-				   origin_run_id  = excluded.origin_run_id,
-				   origin_node_id = excluded.origin_node_id,
-				   created_at     = excluded.created_at,
-				   expires_at     = excluded.expires_at,
-				   last_hit_at    = excluded.last_hit_at`,
-				key, cacheKeyHash, outputRef, runID, nodeID,
-				now.UnixNano(), now.Add(ttl).UnixNano(), now.UnixNano(),
-			); err != nil {
-				return false, nil, nil, err
-			}
-		}
-
+	}
+	if released {
 		// 2. Resolve coalesce followers in the same tx.
 		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
@@ -1263,39 +1265,23 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		return WaiterResolution{}, err
 	}
 
-	// 2. Cache hit on our hash -> Cached (skipped when the follower asked
-	// to bypass the read, so --no-cache isn't defeated by coalescing).
-	if cacheKeyHash != "" && !bypassRead {
-		var outputRef, originRun, originNode string
-		var expiresNS int64
-		err := tx.QueryRowContext(
-			ctx,
-			`SELECT output_ref, origin_run_id, origin_node_id, expires_at
-			   FROM concurrency_cache
-			  WHERE key = ? AND cache_key_hash = ?`,
-			key, cacheKeyHash,
-		).Scan(&outputRef, &originRun, &originNode, &expiresNS)
-		if err == nil && expiresNS > nowNS {
-			if _, err := tx.ExecContext(
-				ctx,
-				`UPDATE concurrency_cache SET last_hit_at = ? WHERE key = ? AND cache_key_hash = ?`,
-				nowNS, key, cacheKeyHash,
-			); err != nil {
-				return WaiterResolution{}, err
-			}
-			if err := tx.Commit(); err != nil {
-				return WaiterResolution{}, err
-			}
-			return WaiterResolution{
-				Status:       WaiterCached,
-				OutputRef:    outputRef,
-				OriginRunID:  originRun,
-				OriginNodeID: originNode,
-			}, nil
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	// 2. Cache hit on our hash -> Cached. txCacheLookup owns the
+	// serve-from-cache decision, including the bypassRead opt-out, so
+	// --no-cache isn't defeated by coalescing.
+	hit, err := txCacheLookup(ctx, tx, key, cacheKeyHash, nowNS, bypassRead, false)
+	if err != nil {
+		return WaiterResolution{}, err
+	}
+	if hit != nil {
+		if err := tx.Commit(); err != nil {
 			return WaiterResolution{}, err
 		}
+		return WaiterResolution{
+			Status:       WaiterCached,
+			OutputRef:    hit.OutputRef,
+			OriginRunID:  hit.OriginRunID,
+			OriginNodeID: hit.OriginNodeID,
+		}, nil
 	}
 
 	// 3. Waiter row still present -> keep waiting.
