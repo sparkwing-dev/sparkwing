@@ -484,6 +484,8 @@ type WaiterResolution struct {
 	LeaderRunID        string
 	LeaderNodeID       string
 
+	LeaderOutcome string
+
 	Position int
 	Holders  []ConcurrencyHolder
 }
