@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,18 +77,18 @@ const memoKeyPrefix = "memo:"
 func memoKeyFor(contentHash string) string { return memoKeyPrefix + contentHash }
 
 // Scope-qualified coordination-key scheme. Each scope gets a distinct
-// leading tag so the key is unambiguous: a Global group whose name
-// happens to contain the qualifier separator can no longer collide with
-// a Box or Run key (the old bare "name@host" form let
-// Global "x@host" and Box "x" on "host" fold to the same key). The tag
-// also lets the CLI label a key's scope precisely. Group names are
-// author-chosen and may contain any of these characters; only the
-// leading tag is load-bearing for scope disambiguation.
+// leading tag, and Run/Box keys length-prefix their qualifier (run id
+// or host) before the group name. Both pieces are author- or
+// operator-supplied and may contain any byte, including the separators,
+// so the encoding must stay injective in (scope, qualifier, name): the
+// length prefix makes the qualifier/name boundary unambiguous, and the
+// leading tag keeps scopes from colliding (a Global name can never fold
+// onto a Box or Run key). The tag also lets the CLI label a key's scope.
 const (
 	scopeKeyGlobalPrefix = "g:"
 	scopeKeyRunPrefix    = "r:"
 	scopeKeyBoxPrefix    = "b:"
-	scopeKeyQualifierSep = "@" // separates the run/box qualifier from the name
+	scopeKeyLenSep       = ":" // separates the qualifier byte-length from the qualifier
 )
 
 // boxHostID is the stable host identity used to qualify ScopeBox keys.
@@ -110,12 +111,35 @@ func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
 	name := g.Name()
 	switch g.Limit().Scope {
 	case sparkwing.ScopeRun:
-		return scopeKeyRunPrefix + runID + scopeKeyQualifierSep + name
+		return qualifiedKey(scopeKeyRunPrefix, runID, name)
 	case sparkwing.ScopeBox:
-		return scopeKeyBoxPrefix + boxHostID() + scopeKeyQualifierSep + name
+		return qualifiedKey(scopeKeyBoxPrefix, boxHostID(), name)
 	default:
 		return scopeKeyGlobalPrefix + name
 	}
+}
+
+// qualifiedKey builds a Run/Box coordination key as
+// <prefix><len><sep><qualifier><name>, length-prefixing the qualifier
+// so a qualifier or name containing the separator can't fold two
+// distinct identities onto the same key.
+func qualifiedKey(prefix, qualifier, name string) string {
+	return prefix + strconv.Itoa(len(qualifier)) + scopeKeyLenSep + qualifier + name
+}
+
+// qualifierFromKey recovers the length-prefixed qualifier from the
+// remainder of a Run/Box key (the bytes after its scheme tag), or ""
+// if the prefix is malformed.
+func qualifierFromKey(rest string) string {
+	sep := strings.IndexByte(rest, scopeKeyLenSep[0])
+	if sep < 0 {
+		return ""
+	}
+	n, err := strconv.Atoi(rest[:sep])
+	if err != nil || n < 0 || sep+1+n > len(rest) {
+		return ""
+	}
+	return rest[sep+1 : sep+1+n]
 }
 
 // ScopeLabelFromKey reports a human label for the scope a coordination
@@ -130,11 +154,9 @@ func ScopeLabelFromKey(key string) string {
 	case strings.HasPrefix(key, scopeKeyGlobalPrefix):
 		return "global"
 	case strings.HasPrefix(key, scopeKeyRunPrefix):
-		qual, _, _ := strings.Cut(key[len(scopeKeyRunPrefix):], scopeKeyQualifierSep)
-		return "run (" + qual + ")"
+		return "run (" + qualifierFromKey(key[len(scopeKeyRunPrefix):]) + ")"
 	case strings.HasPrefix(key, scopeKeyBoxPrefix):
-		qual, _, _ := strings.Cut(key[len(scopeKeyBoxPrefix):], scopeKeyQualifierSep)
-		return "box (" + qual + ")"
+		return "box (" + qualifierFromKey(key[len(scopeKeyBoxPrefix):]) + ")"
 	default:
 		return "global"
 	}

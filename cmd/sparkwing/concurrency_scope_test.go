@@ -9,7 +9,7 @@ func TestScopeFromKey_GlobalNameWithAtNotMislabeled(t *testing.T) {
 	if got := scopeFromKey("g:payments@db"); got != "global" {
 		t.Fatalf("scopeFromKey(global key with @ in name) = %q, want global", got)
 	}
-	if got := scopeFromKey("b:host1@db"); got != "box (host1)" {
+	if got := scopeFromKey("b:5:host1db"); got != "box (host1)" {
 		t.Fatalf("scopeFromKey(box key) = %q, want box (host1)", got)
 	}
 	if got := scopeFromKey("memo:abc123"); got != "content-cache" {
