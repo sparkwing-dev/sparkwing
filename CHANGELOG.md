@@ -60,6 +60,18 @@ code change to unlock.
 
 ### Fixed
 
+- **sdk:** On Postgres (multi-writer modes), every budget-mutating
+  concurrency path -- promotion on release, the reconcile sweep,
+  waiter cancellation, heartbeat lease extension, and the first-ever
+  acquire of a key -- now serializes on the key's entries row the way
+  admission always did. Previously a promotion could race a concurrent
+  acquire's grant and admit past the effective capacity. SQLite is
+  unaffected (single-writer by construction).
+- **sdk:** The lazy local-run orphan reconciler moved into the store
+  and shares the exact cascade the controller-side stale-run reaper
+  uses, so the two sweeps can't drift; it also now goes through the
+  store's placeholder rewriting, so it works against Postgres instead
+  of erroring on `?` parameters.
 - **sdk:** Concurrency liveness decisions read the clock after the
   store transaction holds its lock. A timestamp captured before a
   contended `BEGIN` went stale while waiting, so an acquire or

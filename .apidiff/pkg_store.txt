@@ -143,6 +143,7 @@ var Maintenance = storeMaintenanceFns{
 	FailNodesInRun:               (*Store).failNodesInRun,
 	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
 	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
+	ReconcileOrphanedLocalRuns:   (*Store).reconcileOrphanedLocalRuns,
 	ReapStaleConcurrencyHolders:  (*Store).reapStaleConcurrencyHolders,
 	ReapStaleConcurrencyWaiters:  (*Store).reapStaleConcurrencyWaiters,
 	SweepExpiredConcurrencyCache: (*Store).sweepExpiredConcurrencyCache,
