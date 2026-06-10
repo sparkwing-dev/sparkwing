@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+// fitsBudget reports whether an arrival of the given cost fits a key's
+// effective capacity on top of the already-used cost. It compares by
+// subtraction (cost <= capacity-used) rather than summing used+cost, so
+// a very large declared cost can't overflow the sum into a false "fits"
+// and over-admit.
+func fitsBudget(used, cost, capacity int) bool {
+	return used <= capacity && cost <= capacity-used
+}
+
 // OnLimit policies the coordination layer understands. Queue, Skip,
 // Fail, and CancelOthers map to the SDK's sparkwing.OnLimit values for
 // concurrency groups. Coalesce is the leader/follower policy that backs
@@ -317,7 +326,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}
 	}
 
-	// 3a. Idempotent re-acquire by same holder_id; refreshes lease.
+	// 3a. Idempotent re-acquire by same holder_id; refreshes lease. An
+	// expired row must NOT short-circuit here: its budget may already be
+	// reassigned, so reviving it would over-admit. Let it fall through to
+	// the capacity check, where the ON CONFLICT insert reclaims it.
 	var existingLeaseNS int64
 	var existingSuperInt int
 	err = tx.QueryRowContext(
@@ -326,7 +338,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		  WHERE key = ? AND holder_id = ?`,
 		req.Key, req.HolderID,
 	).Scan(&existingLeaseNS, &existingSuperInt)
-	if err == nil && existingSuperInt == 0 {
+	if err == nil && existingSuperInt == 0 && existingLeaseNS > nowNS {
 		newExpires := now.Add(req.Lease).UnixNano()
 		if _, err := tx.ExecContext(
 			ctx,
@@ -363,7 +375,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 
 	// 4. Budget available -> grant immediately.
-	if activeCost+req.Cost <= effCap {
+	if fitsBudget(activeCost, req.Cost, effCap) {
 		expiresNS := now.Add(req.Lease).UnixNano()
 		// ON CONFLICT takes the slot cleanly when a row with this
 		// holder_id already exists but is superseded (a CancelOthers
@@ -492,7 +504,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		var supersededIDs []string
 		freed := 0
 		for _, hc := range held {
-			if activeCost-freed+req.Cost <= effCap && len(supersededIDs) > 0 {
+			if fitsBudget(activeCost-freed, req.Cost, effCap) && len(supersededIDs) > 0 {
 				break
 			}
 			supersededIDs = append(supersededIDs, hc.id)
@@ -652,11 +664,21 @@ func txSumActiveCost(ctx context.Context, tx *storeTx, key string, nowNS int64) 
 // capacity itself). When no admitted holder has a positive
 // declared_capacity, it falls back to the entries row, then to 1.
 func txEffectiveCapacity(ctx context.Context, tx *storeTx, key string, nowNS int64, incoming int) (int, error) {
+	entryCap, err := txEntryCapacity(ctx, tx, key)
+	if err != nil {
+		return 0, err
+	}
+	// A live holder with declared_capacity<=0 (a v3-migration backfill or a
+	// promoted legacy waiter) still counts toward used cost, so it must
+	// count toward the floor too. Its real declaration is unknown, so it
+	// contributes the most-restrictive capacity (1) rather than vanishing
+	// from the floor and inflating effective capacity into over-admission.
 	var minDeclared sql.NullInt64
 	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT MIN(declared_capacity) FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ? AND declared_capacity > 0`,
+		`SELECT MIN(CASE WHEN declared_capacity > 0 THEN declared_capacity ELSE 1 END)
+		   FROM concurrency_holders
+		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
 		key, nowNS,
 	).Scan(&minDeclared); err != nil {
 		return 0, err
@@ -672,17 +694,24 @@ func txEffectiveCapacity(ctx context.Context, tx *storeTx, key string, nowNS int
 	if eff > 0 {
 		return eff, nil
 	}
+	return entryCap, nil
+}
 
+// txEntryCapacity returns the registered capacity for a key, defaulting
+// to 1 when the entry row is missing or non-positive.
+func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) {
 	var entryCap int
 	err := tx.QueryRowContext(
-		ctx,
-		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
+		ctx, `SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&entryCap)
-	if errors.Is(err, sql.ErrNoRows) || entryCap <= 0 {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 1, nil
 	}
 	if err != nil {
 		return 0, err
+	}
+	if entryCap <= 0 {
+		return 1, nil
 	}
 	return entryCap, nil
 }
@@ -701,11 +730,19 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	// waiter rows that carry no declared_capacity. Parked waiters are
 	// deliberately NOT folded in here -- each candidate's own declared
 	// capacity is the ceiling that gates its own promotion.
+	entryCap, err := txEntryCapacity(ctx, tx, key)
+	if err != nil {
+		return nil, err
+	}
+	// Zero-cap live holders (migration backfill / promoted legacy waiters)
+	// contribute the most-restrictive capacity (1) here too, so they
+	// constrain promotion instead of vanishing from the floor.
 	var holderMinNull sql.NullInt64
 	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT MIN(declared_capacity) FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ? AND declared_capacity > 0`,
+		`SELECT MIN(CASE WHEN declared_capacity > 0 THEN declared_capacity ELSE 1 END)
+		   FROM concurrency_holders
+		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
 		key, nowNS,
 	).Scan(&holderMinNull); err != nil {
 		return nil, err
@@ -713,15 +750,6 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	holderMin := 0
 	if holderMinNull.Valid && holderMinNull.Int64 > 0 {
 		holderMin = int(holderMinNull.Int64)
-	}
-	var entryCap int
-	if err := tx.QueryRowContext(
-		ctx, `SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
-	).Scan(&entryCap); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	if entryCap <= 0 {
-		entryCap = 1
 	}
 	used, err := txSumActiveCost(ctx, tx, key, nowNS)
 	if err != nil {
@@ -772,7 +800,7 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		if holderMin > 0 && holderMin < candCap {
 			candCap = holderMin
 		}
-		if used+c > candCap {
+		if !fitsBudget(used, c, candCap) {
 			break // FIFO head doesn't fit; don't let a cheaper waiter jump it.
 		}
 		used += c
@@ -798,6 +826,13 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		if c <= 0 {
 			c = 1
 		}
+		// Never mint a zero-cap holder: a legacy waiter with no declared
+		// capacity inherits the entry capacity, so it stays visible to the
+		// effective-capacity floor.
+		dc := w.DeclaredCapacity
+		if dc <= 0 {
+			dc = entryCap
+		}
 		// A promoted holder_id can still own a superseded row (a
 		// CancelOthers eviction not yet reaped); clear it so the insert
 		// doesn't hit the UNIQUE constraint. A live (non-superseded) row is
@@ -814,7 +849,7 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 			`INSERT INTO concurrency_holders
 			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
 			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-			w.Key, newHolder, w.RunID, w.NodeID, nowNS, expiresNS, c, w.DeclaredCapacity,
+			w.Key, newHolder, w.RunID, w.NodeID, nowNS, expiresNS, c, dc,
 		); err != nil {
 			return nil, err
 		}
