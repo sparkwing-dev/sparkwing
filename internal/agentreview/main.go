@@ -40,7 +40,16 @@ func main() {
 	root := flag.String("root", ".", "repo root to review")
 	base := flag.String("base", "origin/main", "base ref; the pushed diff is base...HEAD")
 	restartFlag := flag.Bool("restart", false, "wipe reviewer sessions and review fresh")
+	only := flag.String("only", "", "run only the named reviewer(s), comma-separated; empty runs the full roster")
 	flag.Parse()
+
+	roster := agents
+	if *only != "" {
+		roster = filterAgents(*only)
+		if len(roster) == 0 {
+			fail("--only %q matched no reviewer; known: %s", *only, strings.Join(agentNames(), ", "))
+		}
+	}
 
 	abs, err := filepath.Abs(*root)
 	if err != nil {
@@ -83,7 +92,7 @@ func main() {
 		mode = "restarted — fresh review"
 	}
 	fmt.Printf("agent-review: %d reviewers over %d changed file(s) [push %s, %s]\n",
-		len(agents), strings.Count(strings.TrimSpace(files), "\n")+1, key, mode)
+		len(roster), strings.Count(strings.TrimSpace(files), "\n")+1, key, mode)
 
 	var (
 		mu     sync.Mutex
@@ -92,7 +101,7 @@ func main() {
 		sem    = make(chan struct{}, maxConcurrent)
 		wg     sync.WaitGroup
 	)
-	for _, ag := range agents {
+	for _, ag := range roster {
 		wg.Add(1)
 		go func(ag agentDef) {
 			defer wg.Done()

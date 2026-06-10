@@ -36,6 +36,33 @@ var agents = []agentDef{
 	{Name: "security-reviewer", Persona: "config/agents/security-reviewer.md", Model: "opus"},
 }
 
+// filterAgents returns the reviewers named in a comma-separated list,
+// preserving roster order. Unknown names are ignored; the caller reports
+// an empty result.
+func filterAgents(csv string) []agentDef {
+	want := map[string]bool{}
+	for n := range strings.SplitSeq(csv, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			want[n] = true
+		}
+	}
+	var out []agentDef
+	for _, a := range agents {
+		if want[a.Name] {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func agentNames() []string {
+	names := make([]string, len(agents))
+	for i, a := range agents {
+		names[i] = a.Name
+	}
+	return names
+}
+
 // systemPrompt assembles the reviewer's appended system prompt: its
 // persona, plus the rules file inlined for rule-enforcers.
 func (a agentDef) systemPrompt() (string, error) {
