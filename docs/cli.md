@@ -1,273 +1,91 @@
-<!-- markdownlint-disable MD024 -->
-<!-- Two `## sparkwing` H2s are intentional: one documents the
-     runner-shortcut invocation, the other the top-level admin nouns.
-     Both legitimately share the binary name. -->
 # CLI Reference
 
-Sparkwing ships two on-path binaries: `sparkwing` (admin / inspection) and `sparkwing` (the pipeline-runner shortcut -- a symlink to `sparkwing` that dispatches by invocation name).
+Sparkwing ships a single `sparkwing` binary. This page is a map of what
+each command group is *for*; the complete, auto-generated listing of
+every command, flag, and argument lives in
+[cli-reference.md](cli-reference.md) (and offline via
+`sparkwing docs read --topic cli-reference`). Treat that generated
+reference as authoritative -- when this page and it disagree, it wins.
 
-The rule across the `sparkwing` tree: **every input is a named flag** -- no positional args anywhere. `sparkwing` is the intentional exception: it takes the pipeline name positionally because operators type it all day.
+The rule across the whole tree: **every input is a named flag**. The one
+intentional exception is the pipeline name on `sparkwing run <pipeline>`
+(and its `sparkwing pipeline run <pipeline>` long form), which is
+positional because operators type it all day.
 
-Every leaf command has a `--help` page with flags, examples, and the full description. This page is a map, not a manual: for the complete, auto-generated listing of every command, flag, and argument, see [cli-reference.md](cli-reference.md).
-
-## sparkwing
+## sparkwing run
 
 ```
 sparkwing run <pipeline> [flags...]
 ```
 
-Runs a pipeline from the nearest `.sparkwing/`. Identical in behavior to `sparkwing run <name>`.
+Compiles and runs a pipeline from the nearest `.sparkwing/`, locally.
+`sparkwing run` owns a set of control flags prefixed `--sw-*` (plus
+`--profile` and `--target`); everything else on the line is forwarded to
+the pipeline binary and parsed against the pipeline's typed Inputs. The
+`--sw-*` prefix keeps those control flags from colliding with
+pipeline-defined flags -- see the flag-namespace section of
+[sdk.md](sdk.md#typed-inputs) for the full list and the forwarding rules.
 
-Wing-owned flags (consumed before the pipeline sees them):
+`--profile NAME` selects the storage and dispatch addressing
+(state/cache/logs, and any controller auth). Execution still happens
+locally; to hand a run to a cluster, use `sparkwing pipeline trigger`
+instead of `sparkwing run`.
 
-| Flag | Description |
+## Command groups
+
+Top-level groups, each with its own `--help` and a full entry in
+[cli-reference.md](cli-reference.md):
+
+| Group | For |
 |---|---|
-| `--profile <name>` | Resolve state/cache/logs (and any controller auth) from the named profile; execution still happens locally |
-| `--sw-ref <ref>` | Compile from a git ref (branch/tag/SHA) instead of the working tree |
-| `--sw-verbose`, `-v` | Enable debug logging on the pipeline binary |
+| `info` | Agent entrypoint card: what sparkwing is, what's in this repo, what to run next |
+| `pipeline` | This repo's pipelines: list / describe / discover / new / explain / run / trigger / hooks / sparks |
+| `run` | Shortcut for `pipeline run` (the positional form) |
+| `runs` | Inspect and manage runs: list / status / logs / retry / cancel, plus `approvals` and `triggers` |
+| `profile` | Show which profile would resolve right now, and why (read-only; never prints tokens) |
+| `version` | Composite CLI + SDK + sparks version card; `version update --sdk` bumps the pinned SDK |
+| `update` | Self-update the `sparkwing` CLI binary |
+| `dashboard` | Detached local dashboard server: start / kill / status |
+| `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / push / users / tokens / image / webhooks / concurrency |
+| `secrets` | Secrets, laptop dotenv or controller-stored with `--profile`: set / get / list / delete |
+| `configure` | Laptop-local config: init / profiles / xrepo |
+| `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |
+| `docs` | The embedded copy of this doc tree: list / read / all / search |
+| `commands` | The full CLI surface as JSON (agent self-discovery) |
+| `completion` | Shell completion script (`--shell bash\|zsh\|fish`) |
 
-`--profile` picks the storage and dispatch addressing. The pipeline
-itself is the deployment shape -- different shapes (dev, prod, etc.)
-are separate pipelines in YAML that share a Go entrypoint. To hand
-execution to a cluster, use `sparkwing pipeline trigger` instead of
-`sparkwing run`.
-
-All other `--flag value` tokens are forwarded to the pipeline binary and parsed against the pipeline's typed `Args` struct.
-
-## sparkwing
-
-Top-level nouns, in the order `sparkwing --help` lists them:
-
-```
-sparkwing info        Agent entrypoint card: what is sparkwing, what's in this repo
-sparkwing pipeline    discover / list / describe / run / new / explain / hooks / sparks
-sparkwing run         Positional shortcut for `pipeline run`
-sparkwing runs        list / status / logs / retry / cancel / approvals / triggers
-sparkwing version     Composite: CLI + SDK + sparks pins; `update --cli|--sdk`
-sparkwing dashboard   start / kill / status -- detached local dashboard server
-sparkwing cluster     status / agents / worker / gc / push / users / tokens / image / webhooks
-sparkwing secrets     set / get / list / delete (laptop dotenv or controller-stored with --profile)
-sparkwing configure   init / profiles / xrepo
-sparkwing debug       run / release / attach / env / rerun / replay
-sparkwing docs        list / read / all / search (embedded user docs)
-sparkwing commands    Full CLI surface as JSON (agent self-discovery)
-sparkwing completion  Shell completion (run once)
-```
-
-### pipelines
-
-Per-project surface: list / describe / new pipelines plus the SDK pin (version / update). Every entry under `pipelines:` in `.sparkwing/sparkwing.yaml` is a pipeline; entries with an `on:` trigger auto-fire on push / webhook / schedule, entries without are manual-only.
-
-| Command | What |
-|---|---|
-| `sparkwing pipeline list [-o pretty\|json\|plain] [--all]` | Enumerate every pipeline in this repo |
-| `sparkwing pipeline describe --name NAME [-o ...]` | Full metadata: args, examples, triggers, help |
-| `sparkwing pipeline discover --query TEXT [-o ...]` | Fuzzy search across names / descriptions / tags, ranked |
-| `sparkwing pipeline new --name NAME [--template minimal\|build-test-deploy] [--hidden] [--short ...]` | Scaffold a new pipeline (refuses to clobber; auto-bootstraps `.sparkwing/` on first use; default template is `minimal` -- pass `--template build-test-deploy` for a build/test/deploy DAG) |
-| `sparkwing pipeline explain --name NAME [--flag value ...] [-o ...]` | Render the Plan DAG without running; unknown flags forward to the pipeline |
-| `sparkwing pipeline run NAME [--flag value ...]` | Invoke the pipeline (canonical form). `sparkwing run NAME` and `sparkwing NAME` are the positional shortcuts. |
-| `sparkwing pipeline trigger NAME --profile PROF [--detach] [--flag value ...]` | Submit the pipeline to a profile's controller for remote execution; follows the run until terminal (`--detach` returns the run id immediately) |
-| `sparkwing pipeline hooks {install\|uninstall\|status}` | Git pre-commit / pre-push hooks for triggers |
-| `sparkwing pipeline sparks ...` | Manage sparks libraries declared under `sparks:` in `.sparkwing/sparkwing.yaml` (see "sparks" below) |
-
-To inspect or bump the SDK pin in `.sparkwing/go.mod`, use the top-level `sparkwing version` (composite report) and `sparkwing version update --sdk`.
-
-**JSON schema** (from `list` / `describe`): `name`, `group`, `short`, `help`, `hidden`, `tags`, `triggers`, `entrypoint`, `args`, `examples`.
-
-For repo-local bash chores (formatters, port-forwards, the small Makefile-style stuff) use dowing; sparkwing is the Go-pipeline platform.
-
-### runs
-
-Inspect and manage runs. Reads from the local SQLite store by default; `--profile <name>` routes to that profile's backend (a remote controller, a shared bucket, etc.).
-
-| Command | What |
-|---|---|
-| `sparkwing runs list` | Recent runs, filterable by `--pipeline` / `--status` / `--tag` / `--since` |
-| `sparkwing runs status --run ID` | Rich status summary for one run |
-| `sparkwing runs logs --run ID [--node NODE] [--tail N] [--grep STR] [--tree]` | Stream or tail logs for a run / node / subtree |
-| `sparkwing runs errors --run ID` | Just the failure records + messages |
-| `sparkwing runs failures [--since DUR] [--group-by step\|node]` | Recent failures, clusterable |
-| `sparkwing runs stats [--since DUR]` | Aggregate outcomes over a window |
-| `sparkwing runs last [--pipeline NAME] [--watch]` | Most recent run (optionally tail forever) |
-| `sparkwing runs tree --run ID` | Plan DAG with per-node status |
-| `sparkwing runs wait --run ID` | Block until the run reaches a terminal state |
-| `sparkwing runs find --pipeline NAME [--status ...] [--since DUR]` | Search runs; exit non-zero if none match |
-| `sparkwing runs get --run ID [-o json]` | Full run record as JSON |
-| `sparkwing runs retry {--failed\|--all} --run ID` | Re-run a failed / cancelled run; `--failed` reuses passed nodes, `--all` re-executes everything |
-| `sparkwing runs cancel --run ID` | Cancel a running run |
-| `sparkwing runs prune [--older-than DUR] [--dry-run]` | Delete runs + their log files |
-
-Nested surfaces under `runs`:
-
-| Command | What |
-|---|---|
-| `sparkwing runs approvals list [--run ID]` | Pending approval gates (or one run's history) |
-| `sparkwing runs approvals approve --run ID --node ID [--comment STR]` | Resolve a gate as approved |
-| `sparkwing runs approvals deny    --run ID --node ID [--comment STR]` | Resolve a gate as denied |
-| `sparkwing runs triggers list` | Pending / claimed / done triggers |
-| `sparkwing runs triggers get --id ID` | One trigger's metadata |
-
-### profile
-
-Read-side introspection: which profile a sparkwing command would resolve to right now, and the chain that picked it (flag > project hint > detect > default > builtin laptop). Same resolver `sparkwing run` and `pipeline trigger` use, so the answer matches what they would do. Tokens are never printed.
-
-| Command | What |
-|---|---|
-| `sparkwing profile [-o pretty\|json]` | Show the active no-flag resolution + chain |
-| `sparkwing profile --profile NAME [-o ...]` | Hypothetical: what `--profile NAME` would select |
-
-### cluster
-
-Operate + inspect a sparkwing cluster. `--profile NAME` picks which cluster.
-
-| Command | What |
-|---|---|
-| `sparkwing cluster status [--profile NAME]` | Roll-up: controller health + fleet + queue + recent runs |
-| `sparkwing cluster agents [--profile NAME]` | Fleet-view detail (GET /api/v1/agents) |
-| `sparkwing cluster worker [--profile NAME]` | Laptop-side queue drainer against a remote cluster |
-| `sparkwing cluster gc [--profile NAME]` | Sweep stale warm-PVC state |
-| `sparkwing cluster push [--profile NAME]` | Publish HEAD to the profile's gitcache |
-| `sparkwing cluster users {add\|list\|delete} [--profile NAME]` | Dashboard login users stored on the controller |
-| `sparkwing cluster tokens {create\|list\|revoke\|lookup\|rotate} [--profile NAME]` | Controller API tokens |
-| `sparkwing cluster image rollout --image NAME --tag TAG --profile NAME [--wait] [--dry-run]` | Bump a gitops image tag, push, optionally sync + wait |
-| `sparkwing cluster webhooks {list\|deliveries\|replay} [--profile NAME]` | GitHub webhook debug (wraps `gh api`) |
-
-For the laptop-local dashboard server, see `sparkwing dashboard` (next).
-Secrets moved out of `cluster` to top-level `sparkwing secrets`.
-
-### dashboard
-
-Background lifecycle for the laptop-local dashboard. One Go process
-hosts the embedded Next.js SPA, the JSON API, the log endpoints, and
-the SQLite store on the same port (default `http://127.0.0.1:4343`).
-
-| Command | What |
-|---|---|
-| `sparkwing dashboard start` | Spawn the detached server (idempotent; re-running prints the URL if already up) |
-| `sparkwing dashboard kill` | Stop a running dashboard server |
-| `sparkwing dashboard status` | Report whether the dashboard is running and its URL |
-
-### secrets
-
-Top-level since secrets straddle laptop dotenv (default) and
-controller-stored (`--profile NAME`) and are referenced constantly.
-
-| Command | What |
-|---|---|
-| `sparkwing secrets set --name K --value V [--profile NAME] [--plain]` | Store a secret (laptop or controller) |
-| `sparkwing secrets get --name K [--profile NAME]` | Print a secret's raw value to stdout |
-| `sparkwing secrets list [--profile NAME]` | List secret names + metadata (never values) |
-| `sparkwing secrets delete --name K [--profile NAME]` | Remove a secret |
-
-### configure
-
-Laptop-local config: laptop bootstrap (`init`), connection profiles
-(`profiles`), and the cross-repo registry (`xrepo`).
-
-| Command | What |
-|---|---|
-| `sparkwing configure init` | Set up `~/.config/sparkwing/` and report laptop config status (idempotent) |
-| `sparkwing configure profiles list` | Show all profiles (default marked) |
-| `sparkwing configure profiles add --name NAME --controller URL [--token TOKEN] [--logs URL] [--gitcache URL] [--default]` | Register a new profile |
-| `sparkwing configure profiles show --name NAME` | One profile's full record |
-| `sparkwing configure profiles use --name NAME` | Set the active default |
-| `sparkwing configure profiles remove --name NAME` | Delete a profile |
-| `sparkwing configure profiles duplicate --name SRC --to DST` | Clone a profile under a new name |
-| `sparkwing configure profiles set --name NAME [--controller URL] [--token ...] [--logs ...] [--gitcache ...]` | Update fields on an existing profile |
-| `sparkwing configure profiles test --name NAME` | Probe controller / auth / logs / gitcache |
-| `sparkwing configure xrepo {list\|add\|remove\|prune}` | Cross-repo registry of local sparkwing checkouts |
-
-### spark
-
-Sparks-library management. Reads the `sparks:` block in `.sparkwing/sparkwing.yaml`.
-
-| Command | What |
-|---|---|
-| `sparkwing pipeline sparks list` | Declared libraries + resolved versions |
-| `sparkwing pipeline sparks lint [--path DIR]` | Validate a spark.json manifest |
-| `sparkwing pipeline sparks resolve` | Resolve versions + materialize the overlay go.mod |
-| `sparkwing pipeline sparks update [--name NAME]` | Re-resolve one or all libraries |
-| `sparkwing pipeline sparks add --source PATH [--version VER] [--name NAME]` | Append a library to the `sparks:` block |
-| `sparkwing pipeline sparks remove --name NAME` | Remove a library from the `sparks:` block |
-| `sparkwing pipeline sparks warmup` | Pre-compile pipeline binaries + upload to gitcache |
-
-### debug
-
-Interactive debugging for pipeline runs. Ephemeral -- pause directives live only on the run they launch, never in pipeline source.
-
-| Command | What |
-|---|---|
-| `sparkwing debug run --pipeline NAME [--pause-before NODE] [--pause-after NODE] [--pause-on-failure]` | Run a pipeline with pause hooks the orchestrator honors |
-| `sparkwing debug release --run ID --node ID` | Resume a paused node |
-| `sparkwing debug attach --run ID --node ID` | `kubectl exec` into a paused node's pod (cluster mode) |
-| `sparkwing debug env --run ID --node ID` | Print a paused node's env + workdir + claim holder |
-| `sparkwing debug rerun --run ID --node ID` | Reproduce a node's dispatch frame and drop into a shell |
-| `sparkwing debug replay --run ID --node ID` | Headlessly re-execute a single node from a prior run |
-
-### info
-
-```
-sparkwing info [-o json|pretty|plain]
-```
-
-Agent entrypoint card: a short tour of what sparkwing is, what's in
-this repo's `.sparkwing/`, and what to run next. Designed as the first
-command an LLM agent should call when dropped into a new repo.
-
-### docs
-
-The `docs/` tree (this site) is also embedded in the binary so the CLI
-can read it offline.
-
-| Command | What |
-|---|---|
-| `sparkwing docs list` | Index of available topics |
-| `sparkwing docs read --topic SLUG` | Render one topic to stdout |
-| `sparkwing docs all` | Concatenate every topic for piping into an LLM |
-| `sparkwing docs search --query TEXT` | Keyword search across embedded docs |
-
-### completion
-
-```
-sparkwing completion --shell bash|zsh|fish
-```
-
-Emits a shell completion script on stdout. Source it in your rc:
-
-```bash
-source <(sparkwing completion --shell zsh)
-```
-
-zsh + fish get per-entry descriptions; bash is name-only (compgen limitation).
-
-### version
-
-| Command | What |
-|---|---|
-| `sparkwing version [--offline]` | Composite: CLI + latest release + this project's SDK + sparks pins |
-| `sparkwing version update --cli [--version VER]` | Self-update the CLI binary |
-| `sparkwing version update --sdk [--version VER]` | Bump the pipeline SDK pinned in `.sparkwing/go.mod` |
-
-`--cli` and `--sdk` are mutually exclusive; one is required.
+For repo-local shell chores (formatters, port-forwards, Makefile-style
+glue) use dowing; sparkwing is the Go-pipeline platform.
 
 ## Conventions
 
-- **No positional args on `sparkwing`.** Every input is `--flag value`. `sparkwing` is the exception.
-- **Structured output.** Every list / describe / get verb accepts `-o pretty|json|plain` (default `pretty`). `-o`/`--output` is the single output-format selector across the CLI.
-- **Profile addressing.** `--profile NAME` picks the storage/dispatch profile. Absent, commands read local state (SQLite under `~/.sparkwing/`). `sparkwing run` always executes locally; `sparkwing pipeline trigger` is the verb for remote (cluster) execution.
-- **Required flags.** Marked `[required]` in `--help`. Missing required flags fail before any side effect.
-- **Hidden entries.** Pipelines marked `hidden: true` (yaml) or `# hidden: true` (scripts) don't appear in `pipelines list` / tab-complete. Still invocable by exact name. Pass `--all` to `pipelines list` to see them.
+- **Named flags only.** Every input is `--flag value`; the pipeline name
+  on `sparkwing run` is the sole positional.
+- **Structured output.** List / describe / get verbs accept
+  `-o pretty|json|plain` (default `pretty`). `-o` / `--output` is the one
+  output-format selector across the CLI.
+- **Profile addressing.** `--profile NAME` picks the storage/dispatch
+  profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
+  `sparkwing run` always executes locally; `sparkwing pipeline trigger` is
+  the verb for remote (cluster) execution.
+- **Required flags.** Marked `[required]` in `--help`; missing ones fail
+  before any side effect.
+- **Hidden entries.** Pipelines marked `hidden: true` don't appear in
+  `pipeline list` or tab-complete but stay invocable by exact name. Pass
+  `--all` to `pipeline list` to see them.
 
 ## Agent discovery
 
-Agents should read the catalog via JSON:
+Agents should read the catalog as JSON rather than scraping help text:
 
 ```bash
-sparkwing pipeline list -o json           # every invocable with metadata
-sparkwing pipeline describe --name X -o json
-sparkwing pipeline discover --query TEXT -o json
-sparkwing pipeline explain --name X -o json    # Plan DAG before running
-sparkwing run X --flag value  # invoke
+sparkwing pipeline list -o json                 # every invocable with metadata
+sparkwing pipeline describe --name X -o json    # one pipeline's full metadata
+sparkwing pipeline discover --query TEXT -o json # ranked fuzzy search
+sparkwing pipeline explain --name X -o json     # Plan DAG before running
+sparkwing commands                              # the entire CLI surface as JSON
 ```
 
-The JSON schema matches `sparkwing.DescribePipeline` plus `kind` / `group` / `tags` / `triggers` drawn from the `pipelines:` block in `.sparkwing/sparkwing.yaml`.
+The describe schema matches `sparkwing.DescribePipeline` plus
+`group` / `tags` / `triggers` drawn from the `pipelines:` block in
+`.sparkwing/sparkwing.yaml`.
