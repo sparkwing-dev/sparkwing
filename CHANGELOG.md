@@ -48,6 +48,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `sparkwing commands -o markdown` renders the entire CLI
+  surface (every command, flag, and argument) as a reference page,
+  generating `docs/cli-reference.md`. The CLI reference is now derived
+  from the command registry rather than hand-maintained, so it can't
+  drift from the binary; a pre-push gate fails if the committed file is
+  stale.
+
 ### Fixed
 
 - **sdk:** A concurrency heartbeat that arrives after the lease has

@@ -2,7 +2,7 @@
   "categories": [
     {
       "label": "Getting Started",
-      "slugs": ["getting-started", "architecture", "cli"]
+      "slugs": ["getting-started", "architecture", "cli", "cli-reference"]
     },
     {
       "label": "Pipelines",

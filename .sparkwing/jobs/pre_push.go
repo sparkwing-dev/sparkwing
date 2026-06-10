@@ -178,6 +178,18 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
 	}
 
+	// 9. Generated CLI reference is current. docs/cli-reference.md is
+	// rendered from the command registry; regenerate and diff so a
+	// help_registry.go change that wasn't followed by bin/gen-cli-docs.sh
+	// fails here instead of shipping a stale reference.
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./cmd/sparkwing commands -o markdown | diff -u docs/cli-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "cli-reference: current")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}

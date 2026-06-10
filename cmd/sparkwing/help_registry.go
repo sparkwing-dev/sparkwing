@@ -3010,8 +3010,8 @@ var cmdApprovalsList = Command{
 	Path:     "sparkwing runs approvals list",
 	Synopsis: "List pending approvals (or one run's history)",
 	Description: `Prints a table of approval rows. Without --run the list is the
-cross-run pending queue; with --run it's every approval (pending
-+ resolved) for that run.`,
+cross-run pending queue; with --run it's every approval for that
+run, both pending and resolved.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Restrict to one run's approvals", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
