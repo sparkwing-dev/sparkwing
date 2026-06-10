@@ -62,17 +62,30 @@ func fuzzSeeds(t *testing.T) []int64 {
 		}
 		return []int64{seed}
 	}
-	return []int64{1, 2, 3}
+	if testing.Short() {
+		return []int64{1}
+	}
+	return []int64{1, 2, 3, 4, 5}
+}
+
+func fuzzOps(full int) int {
+	if testing.Short() {
+		return full / 4
+	}
+	return full
 }
 
 // concurrencyFuzzOp drives one random store operation. The store's own
 // transaction-boundary invariant checks run in fail-fast mode under go
 // test, so any sequence that violates an invariant surfaces as an error
-// from the op that broke it.
+// from the op that broke it. The mix covers node-level and plan-level
+// (empty NodeID) participants, capacity drift between arrivals, instant
+// lease expiry, every release outcome, both reapers, the cache sweeps,
+// and the startup reconcile pass.
 func concurrencyFuzzOp(ctx context.Context, s *store.Store, rng *rand.Rand) error {
 	keys := []string{"ka", "kb", "kc"}
 	runs := []string{"r0", "r1", "r2", "r3", "r4"}
-	nodes := []string{"n0", "n1"}
+	nodes := []string{"n0", "n1", ""}
 	policies := []string{
 		store.OnLimitQueue, store.OnLimitQueue, store.OnLimitQueue,
 		store.OnLimitCoalesce, store.OnLimitSkip, store.OnLimitFail,
@@ -83,22 +96,28 @@ func concurrencyFuzzOp(ctx context.Context, s *store.Store, rng *rand.Rand) erro
 	run := runs[rng.Intn(len(runs))]
 	node := nodes[rng.Intn(len(nodes))]
 	holderID := run + "/" + node
+	if node == "" {
+		holderID = run + "/-"
+	}
 
-	switch rng.Intn(9) {
+	switch rng.Intn(12) {
 	case 0, 1, 2, 3:
 		req := store.AcquireSlotRequest{
 			Key:      key,
 			HolderID: holderID,
 			RunID:    run,
 			NodeID:   node,
-			Capacity: 1 + rng.Intn(3),
-			Cost:     1 + rng.Intn(3),
+			Capacity: 1 + rng.Intn(5),
+			Cost:     1 + rng.Intn(4),
 			Policy:   policies[rng.Intn(len(policies))],
 		}
 		if req.Policy == store.OnLimitCoalesce {
 			req.CacheKeyHash = "h-" + key
 			req.CacheTTL = time.Hour
 			req.BypassRead = rng.Intn(4) == 0
+		}
+		if req.Policy == store.OnLimitCancelOthers && rng.Intn(2) == 0 {
+			req.CancelTimeout = time.Minute
 		}
 		if rng.Intn(5) == 0 {
 			req.Lease = time.Nanosecond
@@ -117,8 +136,8 @@ func concurrencyFuzzOp(ctx context.Context, s *store.Store, rng *rand.Rand) erro
 			hash = "h-" + key
 			ttl = time.Hour
 		}
-		outcomes := []string{"success", "failed", "skipped"}
-		if _, _, _, err := s.ReleaseAndNotify(ctx, key, holderID, outcomes[rng.Intn(len(outcomes))], run+"/"+node, hash, ttl, 0); err != nil {
+		outcomes := []string{"success", "failed", "skipped", "superseded"}
+		if _, _, _, err := s.ReleaseAndNotify(ctx, key, holderID, outcomes[rng.Intn(len(outcomes))], holderID, hash, ttl, 0); err != nil {
 			return fmt.Errorf("release %s/%s: %w", key, holderID, err)
 		}
 	case 6:
@@ -143,6 +162,33 @@ func concurrencyFuzzOp(ctx context.Context, s *store.Store, rng *rand.Rand) erro
 				return fmt.Errorf("force-release %s: %w", key, err)
 			}
 		}
+	case 9:
+		if _, err := store.Maintenance.ReapStaleConcurrencyHolders(s, ctx); err != nil {
+			return fmt.Errorf("reap holders: %w", err)
+		}
+	case 10:
+		maxAge := time.Hour
+		if rng.Intn(3) == 0 {
+			maxAge = time.Nanosecond
+		}
+		if _, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, maxAge); err != nil {
+			return fmt.Errorf("reap waiters: %w", err)
+		}
+	case 11:
+		switch rng.Intn(3) {
+		case 0:
+			if _, err := store.Maintenance.SweepExpiredConcurrencyCache(s, ctx); err != nil {
+				return fmt.Errorf("sweep expired cache: %w", err)
+			}
+		case 1:
+			if _, err := store.Maintenance.SweepLRUConcurrencyCache(s, ctx, 1); err != nil {
+				return fmt.Errorf("sweep lru cache: %w", err)
+			}
+		default:
+			if _, err := store.Maintenance.ReconcileConcurrencyKeys(s, ctx, 0); err != nil {
+				return fmt.Errorf("reconcile: %w", err)
+			}
+		}
 	}
 
 	st, err := s.GetConcurrencyState(ctx, key)
@@ -163,7 +209,7 @@ func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
 			s := newStoreT(t)
 			rng := rand.New(rand.NewSource(seed))
-			for i := 0; i < 400; i++ {
+			for i := 0; i < fuzzOps(600); i++ {
 				if err := concurrencyFuzzOp(ctxT(t), s, rng); err != nil {
 					t.Fatalf("seed %d op %d: %v", seed, i, err)
 				}
@@ -184,7 +230,7 @@ func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(seed))
-			for i := 0; i < 60; i++ {
+			for i := 0; i < fuzzOps(150); i++ {
 				if err := concurrencyFuzzOp(ctx, s, rng); err != nil {
 					errCh <- fmt.Errorf("goroutine seed %d op %d: %w", seed, i, err)
 					return
