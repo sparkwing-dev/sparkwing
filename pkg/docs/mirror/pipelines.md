@@ -286,7 +286,7 @@ sw.Step(w, "publish", j.publish).
 ## Plan-layer fan-out
 
 Two type-safe verbs cover the Plan-layer fan-out cases. Both return a
-`*Group` whose `name` becomes a collapsible cluster in the dashboard
+`*JobGroup` whose `name` becomes a collapsible cluster in the dashboard
 and a single `Needs(group)` target downstream.
 
 ### Static: `JobFanOut` (slice in hand at Plan-time)
@@ -339,10 +339,10 @@ stranded compute.
 
 ### Group modifiers
 
-`*Group` mirrors the chainable surface of `*Job` (Needs, Retry,
+`*JobGroup` mirrors the chainable surface of `*JobNode` (Needs, Retry,
 Timeout, Requires, SkipIf, Env, Inline, ContinueOnError, Optional,
 BeforeRun, AfterRun, Cache, NeedsOptional). Each call delegates to
-every member and returns the same `*Group` for chaining. `OnFailure`
+every member and returns the same `*JobGroup` for chaining. `OnFailure`
 is intentionally per-Job; group-level recovery has unclear semantics.
 
 ## Layer escape: JobSpawn
@@ -424,14 +424,13 @@ delays every other node's scheduling. Keep inline work under a second
 or two. `.Inline()` on an approval gate panics. `.Requires` labels are
 ignored for inline nodes.
 
-### `.Dynamic()`
+### Dynamic nodes
 
-Annotates a Job whose downstream work is runtime-variable - the
-common case is `RunAndAwait` or external task enqueueing. Purely
-a signal to readers: the plan preview shows `[dynamic]` so reviewers
-know to inspect the run for the actual child nodes. `JobFanOutDynamic`
-source nodes are auto-marked dynamic at plan finalization, so you only
-need `.Dynamic()` for the non-fan-out case.
+A node whose downstream work is runtime-variable is *dynamic*:
+`JobFanOutDynamic` source nodes are auto-marked dynamic at plan
+finalization. `plan.IsDynamicNode(id)` reports it and the plan preview
+shows `[dynamic]`, so reviewers know to inspect the run for the actual
+child nodes rather than expecting the full shape at plan time.
 
 ### `GroupJobs(plan, "name", ...)`
 

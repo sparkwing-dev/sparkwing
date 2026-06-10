@@ -88,13 +88,13 @@ Because a hit restores the *output* and nothing else, it does **not**
 reproduce filesystem side-effects. A node whose real product is files it
 wrote to disk (or any out-of-band state) will hit, return its typed
 output, and leave the run green -- with those files absent. Only put
-`ContentHash` on a node whose value is fully captured by its returned
+`.Cache()` on a node whose value is fully captured by its returned
 output; a node that exists to write files should return what downstream
 needs as typed output, or not memoize at all.
 
-The restore is cross-run, not just in-flight: a `ContentHash` hit from a
+The restore is cross-run, not just in-flight: a `.Cache()` hit from a
 *previous* run writes the output onto the current run's node row, so a
-downstream `RefTo[T]` resolves it -- the same as an in-flight `Coalesce`
+downstream `RefTo[T]` resolves it -- the same as an in-flight dedupe
 follower would.
 
 ## In-flight dedupe
