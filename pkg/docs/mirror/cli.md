@@ -46,7 +46,7 @@ Top-level groups, each with its own `--help` and a full entry in
 | `version` | Composite CLI + SDK + sparks version card; `version update --sdk` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
-| `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / push / users / tokens / image / webhooks / concurrency |
+| `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
 | `secrets` | Secrets, laptop dotenv or controller-stored with `--profile`: set / get / list / delete |
 | `configure` | Laptop-local config: init / profiles / xrepo |
 | `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |

@@ -406,8 +406,6 @@ func runCluster(args []string) error {
 		return runWorker(args[1:])
 	case "gc":
 		return runGC(args[1:])
-	case "push":
-		return runPush(args[1:])
 	case "users":
 		return runUsers(args[1:])
 	case "tokens":

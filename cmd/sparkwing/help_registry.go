@@ -123,7 +123,6 @@ address; set them up with 'sparkwing configure profiles'.`,
 		{"agents", "Fleet-view detail (GET /api/v1/agents)"},
 		{"worker", "Run a laptop-side worker against a remote cluster"},
 		{"gc", "Sweep stale warm-PVC state"},
-		{"push", "Publish the current repo's HEAD to the profile's gitcache"},
 		{"users", "Create / list / delete dashboard login users"},
 		{"tokens", "Create / list / revoke / rotate controller API tokens"},
 		{"image", "Image rollout helpers for gitops-managed deployments"},
@@ -2259,31 +2258,6 @@ Use --dry-run first to confirm the victim list.`,
 		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --profile prod"},
 		{"Delete a few specific runs", "sparkwing runs prune --run run-A --run run-B --profile prod"},
 		{"Prune ids from another query", "sparkwing runs list --pipeline scratch -q | sparkwing runs prune --run - --profile prod"},
-	},
-}
-
-// ---- sparkwing push --------------------------------------------
-
-var cmdPush = Command{
-	Path:     "sparkwing cluster push",
-	Synopsis: "Publish the current repo's HEAD to gitcache",
-	Description: `Pushes the current git HEAD to the selected profile's gitcache
-as a timestamped ref (local-YYYY-MM-DDTHH-MM-SSZ). Use the ref
-it prints with 'sparkwing run --profile <profile> --sw-ref <ref>' to
-run a pipeline against uncommitted-to-upstream code without
-waiting for GitHub to have it.
-
-Only tracks committed work -- staged or unstaged changes are
-NOT uploaded. Commit first (a throwaway amend is fine), push,
-trigger.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Repo name registered with gitcache (default: basename of repo root)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Push the current repo's HEAD to prod's gitcache", "sparkwing cluster push --profile prod"},
-		{"Override the repo name (useful for forks)", "sparkwing cluster push --profile prod --name my-fork"},
 	},
 }
 

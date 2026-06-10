@@ -83,7 +83,6 @@ address; set them up with 'sparkwing configure profiles'.
 - `agents` -- Fleet-view detail (GET /api/v1/agents)
 - `worker` -- Run a laptop-side worker against a remote cluster
 - `gc` -- Sweep stale warm-PVC state
-- `push` -- Publish the current repo's HEAD to the profile's gitcache
 - `users` -- Create / list / delete dashboard login users
 - `tokens` -- Create / list / revoke / rotate controller API tokens
 - `image` -- Image rollout helpers for gitops-managed deployments
@@ -285,37 +284,6 @@ sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --p
 
 # Bump, sync, wait, then tail pod logs
 sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --profile prod --wait --tail-logs
-```
-
-## `sparkwing cluster push`
-
-Publish the current repo's HEAD to gitcache
-
-Pushes the current git HEAD to the selected profile's gitcache
-as a timestamped ref (local-YYYY-MM-DDTHH-MM-SSZ). Use the ref
-it prints with 'sparkwing run --profile <profile> --sw-ref <ref>' to
-run a pipeline against uncommitted-to-upstream code without
-waiting for GitHub to have it.
-
-Only tracks committed work -- staged or unstaged changes are
-NOT uploaded. Commit first (a throwaway amend is fine), push,
-trigger.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Repo name registered with gitcache (default: basename of repo root) |
-| `--profile NAME` | Profile name (default: current default) |
-
-### Examples
-
-```sh
-# Push the current repo's HEAD to prod's gitcache
-sparkwing cluster push --profile prod
-
-# Override the repo name (useful for forks)
-sparkwing cluster push --profile prod --name my-fork
 ```
 
 ## `sparkwing cluster status`
