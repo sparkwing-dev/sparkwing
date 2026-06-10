@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"testing"
 	"time"
 )
 
@@ -263,7 +265,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{}, err
 	}
 	if hit != nil {
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -352,7 +354,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -410,7 +412,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nowNS, expiresNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -425,13 +427,13 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	// 5. Slot full -> branch on the arrival's policy.
 	switch policy {
 	case OnLimitSkip:
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{Kind: AcquireSkipped, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
 	case OnLimitFail:
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{Kind: AcquireFailed, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
@@ -467,7 +469,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -515,7 +517,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nowNS, expiresNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -568,7 +570,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		).Scan(&queueLen); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -791,6 +793,101 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	return promoted, nil
 }
 
+// concurrencyInvariantFailFast selects how a violated concurrency
+// invariant reports. Under `go test` (testing.Testing()) a violation
+// fails the transaction, so every suite in the repo doubles as an
+// invariant monitor. In production it logs loudly and commits anyway:
+// a violation can also be produced by rows written by older binaries
+// (holders that predate declared-capacity tracking), and refusing to
+// commit would wedge release and promote paths on data this code
+// didn't write.
+var concurrencyInvariantFailFast = testing.Testing()
+
+// txCommitChecked verifies the concurrency invariants for every key a
+// mutating transaction touched, then commits. Every mutating
+// concurrency transaction must commit through it, so a path that
+// violates an invariant is caught at its own boundary no matter which
+// site drifted.
+func txCommitChecked(ctx context.Context, tx *storeTx, nowNS int64, keys ...string) error {
+	seen := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		if err := txCheckConcurrencyInvariants(ctx, tx, k, nowNS); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// txCheckConcurrencyInvariants asserts the cross-site invariants for
+// one key: live cost never exceeds the effective capacity, no live
+// holder outweighs its own declaration, every waiter carries a known
+// policy with the leader shape that policy requires, and no
+// participant both holds and waits on the same key.
+func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, key string, nowNS int64) error {
+	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
+	if err != nil {
+		return err
+	}
+	var violations []string
+	if eff := acct.effectiveCapacity(0); acct.used > eff {
+		violations = append(violations, fmt.Sprintf("live cost %d exceeds effective capacity %d", acct.used, eff))
+	}
+	for _, h := range acct.holders {
+		if h.DeclaredCapacity > 0 && h.Cost > h.DeclaredCapacity {
+			violations = append(violations, fmt.Sprintf("holder %q cost %d exceeds its declared capacity %d", h.HolderID, h.Cost, h.DeclaredCapacity))
+		}
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE key = ?`, key,
+	)
+	if err != nil {
+		return err
+	}
+	var waiters []ConcurrencyWaiter
+	for rows.Next() {
+		w, err := scanWaiter(rows)
+		if err != nil {
+			_ = rows.Close()
+			return err
+		}
+		waiters = append(waiters, w)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, w := range waiters {
+		switch w.Policy {
+		case OnLimitCoalesce:
+			if w.LeaderRunID == "" {
+				violations = append(violations, fmt.Sprintf("coalesce waiter %s/%s has no leader", w.RunID, w.NodeID))
+			}
+		case OnLimitQueue, OnLimitCancelOthers:
+		default:
+			violations = append(violations, fmt.Sprintf("waiter %s/%s has unknown policy %q", w.RunID, w.NodeID, w.Policy))
+		}
+		for _, h := range acct.holders {
+			if h.RunID == w.RunID && h.NodeID == w.NodeID {
+				violations = append(violations, fmt.Sprintf("%s/%s both holds and waits", w.RunID, w.NodeID))
+			}
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	msg := fmt.Sprintf("concurrency invariants violated for key %q: %s", key, strings.Join(violations, "; "))
+	if concurrencyInvariantFailFast {
+		return errors.New(msg)
+	}
+	slog.Error(msg)
+	return nil
+}
+
 // holderRow is the input to txInsertHolder: the identity, weight, and
 // declaration a new admission stamps onto its holder row.
 type holderRow struct {
@@ -884,7 +981,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	); err != nil {
 		return time.Time{}, false, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, now.UnixNano(), key); err != nil {
 		return time.Time{}, false, err
 	}
 	return expires, superInt == 1, nil
@@ -903,7 +1000,7 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 	if err != nil {
 		return false, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, time.Now().UnixNano(), key); err != nil {
 		return false, err
 	}
 	return released, nil
@@ -1049,7 +1146,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		`SELECT 1 FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&hasEntry)
 	if errors.Is(err, sql.ErrNoRows) {
-		return released, followers, nil, tx.Commit()
+		return released, followers, nil, txCommitChecked(ctx, tx, time.Now().UnixNano(), key)
 	}
 	if err != nil {
 		return false, nil, nil, err
@@ -1062,7 +1159,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		return false, nil, nil, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, nowNS, key); err != nil {
 		return false, nil, nil, err
 	}
 	return released, followers, promoted, nil
@@ -1081,7 +1178,7 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 	if err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, time.Now().UnixNano(), key); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1161,7 +1258,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 		`SELECT 1 FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&hasEntry)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, tx.Commit()
+		return nil, txCommitChecked(ctx, tx, time.Now().UnixNano(), key)
 	}
 	if err != nil {
 		return nil, err
@@ -1174,7 +1271,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	if err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, nowNS, key); err != nil {
 		return nil, err
 	}
 	return promote, nil
@@ -1383,7 +1480,7 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 			return false, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, time.Now().UnixNano(), key); err != nil {
 		return false, err
 	}
 	return waiterDeleted || hn > 0, nil
@@ -1526,7 +1623,11 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 			return nil, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	keys := make([]string, 0, len(stale))
+	for _, h := range stale {
+		keys = append(keys, h.Key)
+	}
+	if err := txCommitChecked(ctx, tx, now, keys...); err != nil {
 		return nil, err
 	}
 	return stale, nil
@@ -1571,7 +1672,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 			return nil, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, time.Now().UnixNano(), key); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1660,7 +1761,11 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 			return nil, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	keys := make([]string, 0, len(dropped))
+	for _, w := range dropped {
+		keys = append(keys, w.Key)
+	}
+	if err := txCommitChecked(ctx, tx, nowNS, keys...); err != nil {
 		return nil, err
 	}
 	return dropped, nil
