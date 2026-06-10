@@ -67,6 +67,11 @@ code change to unlock.
   is now derived from source (offline-loadable, the same data
   pkg.go.dev shows) instead of hand-typed in `sdk.md`; a pre-push gate
   fails if it drifts.
+- **docs:** `docs/api-reference.md` is generated from the controller and
+  logs-service route registrations -- every method, path, and required
+  scope. The HTTP API reference is now derived from the routing code, so
+  it can't document endpoints that don't exist; a pre-push gate fails if
+  it drifts.
 
 ### Fixed
 

@@ -38,7 +38,15 @@
     },
     {
       "label": "Operations",
-      "slugs": ["observability", "security", "auth", "hooks", "api", "mcp"]
+      "slugs": [
+        "observability",
+        "security",
+        "auth",
+        "hooks",
+        "api",
+        "api-reference",
+        "mcp"
+      ]
     }
   ],
   "excluded": ["design/", "proposals/", "migrations/", "changelog-style"]

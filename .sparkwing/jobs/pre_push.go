@@ -214,6 +214,18 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "sdk-reference: current")
 	}
 
+	// 12. Generated HTTP API reference is current. docs/api-reference.md
+	// is rendered from the controller + logs route registrations;
+	// regenerate and diff so a route change without bin/gen-api-docs.sh
+	// fails here instead of shipping a stale surface.
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/apiref "$ROOT" | diff -u docs/api-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "api-reference: stale -- run `bash bin/gen-api-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "api-reference: current")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
