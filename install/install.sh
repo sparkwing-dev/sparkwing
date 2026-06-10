@@ -15,9 +15,9 @@
 #
 # What it does:
 #   1. Confirms sparkwing-runner is on your PATH (or tells you how to install it)
-#   2. Creates a config directory (~/.sparkwing/ by default)
-#   3. Renders a launchd plist (macOS) or a systemd user unit (Linux) from
-#      the template, with your controller URL, token, and name baked in
+#   2. Writes ~/.config/sparkwing/agent.yaml (controller URL, token, labels)
+#   3. Renders a launchd plist (macOS) or a systemd user unit (Linux) that
+#      runs `sparkwing-runner agent --config <that file>`
 #   4. Loads the service so the runner starts at login / boot
 #   5. Prints instructions for pause / stop / uninstall
 #
@@ -155,6 +155,22 @@ SPARKWING_HOME="${HOME}/.sparkwing"
 LOG_PATH="${SPARKWING_HOME}/runner.log"
 mkdir -p "$SPARKWING_HOME"
 
+# The agent reads its connection config from agent.yaml -- the service
+# just points at this file. The token lives here (mode 600), not in the
+# launchd/systemd unit.
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
+CONFIG_PATH="${CONFIG_DIR}/agent.yaml"
+mkdir -p "$CONFIG_DIR"
+cat > "$CONFIG_PATH" <<YAML
+controller: "${CONTROLLER_URL}"
+logs: "${LOGS_URL}"
+token: "${API_TOKEN}"
+max_concurrent: ${MAX_CONCURRENT}
+holder_prefix: "${RUNNER_NAME}"
+YAML
+chmod 600 "$CONFIG_PATH"  # contains the API token
+log "wrote $CONFIG_PATH (mode 600)"
+
 if [ "$PLATFORM" = "macos" ]; then
   TEMPLATE="${SCRIPT_DIR}/macos/com.sparkwing.runner.plist.template"
   [ -f "$TEMPLATE" ] || err "missing template: $TEMPLATE"
@@ -171,16 +187,12 @@ if [ "$PLATFORM" = "macos" ]; then
 
   sed \
     -e "s|__BINARY_PATH__|${BINARY_PATH}|g" \
-    -e "s|__RUNNER_NAME__|${RUNNER_NAME}|g" \
-    -e "s|__CONTROLLER_URL__|${CONTROLLER_URL}|g" \
-    -e "s|__LOGS_URL__|${LOGS_URL}|g" \
-    -e "s|__API_TOKEN__|${API_TOKEN}|g" \
-    -e "s|__MAX_CONCURRENT__|${MAX_CONCURRENT}|g" \
+    -e "s|__CONFIG_PATH__|${CONFIG_PATH}|g" \
     -e "s|__HOME__|${HOME}|g" \
     -e "s|__LOG_PATH__|${LOG_PATH}|g" \
     "$TEMPLATE" > "$PLIST_PATH"
 
-  chmod 600 "$PLIST_PATH"  # contains the API token
+  chmod 600 "$PLIST_PATH"
   log "wrote $PLIST_PATH (mode 600)"
 
   log "loading LaunchAgent..."
@@ -206,15 +218,10 @@ elif [ "$PLATFORM" = "linux" ]; then
 
   sed \
     -e "s|__BINARY_PATH__|${BINARY_PATH}|g" \
-    -e "s|__RUNNER_NAME__|${RUNNER_NAME}|g" \
-    -e "s|__CONTROLLER_URL__|${CONTROLLER_URL}|g" \
-    -e "s|__LOGS_URL__|${LOGS_URL}|g" \
-    -e "s|__API_TOKEN__|${API_TOKEN}|g" \
-    -e "s|__MAX_CONCURRENT__|${MAX_CONCURRENT}|g" \
+    -e "s|__CONFIG_PATH__|${CONFIG_PATH}|g" \
     "$TEMPLATE" > "$UNIT_PATH"
 
-  chmod 600 "$UNIT_PATH"  # contains the API token
-  log "wrote $UNIT_PATH (mode 600)"
+  log "wrote $UNIT_PATH"
 
   log "reloading systemd user units..."
   systemctl --user daemon-reload

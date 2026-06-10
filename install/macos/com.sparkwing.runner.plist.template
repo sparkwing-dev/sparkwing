@@ -4,13 +4,10 @@
   Installed by install/install.sh -- do not edit directly.
 
   Substitution variables filled in by the installer:
-    __BINARY_PATH__       -- absolute path to sparkwing-runner
-    __RUNNER_NAME__       -- human-readable name for this runner
-    __CONTROLLER_URL__    -- https://controller.example.com
-    __LOGS_URL__          -- https://logs.example.com
-    __API_TOKEN__         -- bearer token shared with the controller
-    __MAX_CONCURRENT__    -- how many jobs this laptop will run in parallel
-    __LOG_PATH__          -- local path for stdout/stderr of the runner itself
+    __BINARY_PATH__   -- absolute path to sparkwing-runner
+    __CONFIG_PATH__   -- absolute path to agent.yaml (controller, token, etc.)
+    __HOME__          -- the user's home directory
+    __LOG_PATH__      -- local path for stdout/stderr of the runner itself
 -->
 <plist version="1.0">
 <dict>
@@ -20,23 +17,13 @@
   <key>ProgramArguments</key>
   <array>
     <string>__BINARY_PATH__</string>
-    <string>serve</string>
-    <string>--controller</string>
-    <string>__CONTROLLER_URL__</string>
-    <string>--name</string>
-    <string>__RUNNER_NAME__</string>
-    <string>--max-concurrent</string>
-    <string>__MAX_CONCURRENT__</string>
+    <string>agent</string>
+    <string>--config</string>
+    <string>__CONFIG_PATH__</string>
   </array>
 
   <key>EnvironmentVariables</key>
   <dict>
-    <key>SPARKWING_CONTROLLER</key>
-    <string>__CONTROLLER_URL__</string>
-    <key>SPARKWING_LOGS</key>
-    <string>__LOGS_URL__</string>
-    <key>SPARKWING_API_TOKEN</key>
-    <string>__API_TOKEN__</string>
     <key>HOME</key>
     <string>__HOME__</string>
     <key>PATH</key>

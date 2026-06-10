@@ -11,7 +11,7 @@
 #
 # Running as a user unit means the runner has the user's Docker
 # access (group membership, rootless docker, etc.) -- same as if
-# the user ran `sparkwing-runner serve` in their terminal.
+# the user ran `sparkwing-runner agent` in their terminal.
 [Unit]
 Description=sparkwing-runner (pulls jobs from a shared sparkwing controller)
 After=network-online.target
@@ -19,10 +19,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=__BINARY_PATH__ serve --controller __CONTROLLER_URL__ --name __RUNNER_NAME__ --max-concurrent __MAX_CONCURRENT__
-Environment=SPARKWING_CONTROLLER=__CONTROLLER_URL__
-Environment=SPARKWING_LOGS=__LOGS_URL__
-Environment=SPARKWING_API_TOKEN=__API_TOKEN__
+ExecStart=__BINARY_PATH__ agent --config __CONFIG_PATH__
 
 # Restart on failure with backoff; don't restart if the user stopped us.
 Restart=on-failure
