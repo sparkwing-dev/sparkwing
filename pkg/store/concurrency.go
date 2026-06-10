@@ -798,6 +798,17 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		if c <= 0 {
 			c = 1
 		}
+		// A promoted holder_id can still own a superseded row (a
+		// CancelOthers eviction not yet reaped); clear it so the insert
+		// doesn't hit the UNIQUE constraint. A live (non-superseded) row is
+		// left intact, so a genuine double-promotion still surfaces.
+		if _, err := tx.ExecContext(
+			ctx,
+			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ? AND superseded = 1`,
+			w.Key, newHolder,
+		); err != nil {
+			return nil, err
+		}
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_holders
