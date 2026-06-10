@@ -908,7 +908,15 @@ type holderRow struct {
 // LIVE row is never clobbered: the insert fails loudly instead, so a
 // path that forgot to check liveness before admitting surfaces as an
 // error rather than as a silently stolen slot.
+//
+// Minting also deletes any waiter row this participant left parked: an
+// admitted arrival is by definition no longer waiting, and a stale row
+// would later be promoted on top of its own live holder, aborting an
+// unrelated release.
 func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expiresNS int64) error {
+	if _, err := txDeleteWaiter(ctx, tx, h.key, h.runID, h.nodeID); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO concurrency_holders
