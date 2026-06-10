@@ -1,11 +1,8 @@
 # Sparks Libraries
 
-Formal reference for the sparks library ecosystem: the `spark.json` manifest,
+Reference for the sparks library ecosystem: the `spark.json` manifest,
 the consumer `sparks:` block in `.sparkwing/sparkwing.yaml`, version
 resolution, and the `sparkwing pipeline sparks` CLI.
-
-This document is the source of truth. Where an item is still pending
-implementation, this document marks it.
 
 ## What a sparks library is
 
@@ -30,7 +27,8 @@ primitives.
 - Docker: `Build`, `BuildAndPush`, `Push`, `Login`, `ComputeTags`
 - Git: `ShortCommit`, `IsDirty`, `FilesetHash`, `CurrentBranch`, `Tags`, `PushTag`
 - Services: `WithServices` (docker-run backed sidecars)
-- Approval: stubbed call-site (`sparkwing.Approval`, panics until designed)
+- Approval gates: `JobApproval` with `ApprovalConfig` (`ApprovalApprove` /
+  `ApprovalDeny` / `ApprovalFail` expiry policies)
 - Plan / modifiers: `ExpandFrom`, `CacheKey`, `Requires`, `AwaitPipelineJob`,
   typed `Ref[T]` outputs
 
@@ -213,10 +211,10 @@ zero-cost beyond the proxy lookup itself.
 
 `latest` hits the Go module proxy on every run
 (`proxy.golang.org/<module>/@latest`). For modules covered by `GOPRIVATE`,
-sparkwing falls back to `git ls-remote --tags` against the source repo and
-picks the highest semver tag that is not a prerelease. Authentication reuses
-the same mechanisms as `go get`: `~/.netrc` for HTTPS, SSH keys for
-`ssh://git@...`.
+sparkwing falls back to `go list -m -json <module>@<query>`, which walks
+the git remote directly and picks the highest semver tag that is not a
+prerelease. Authentication reuses the same mechanisms as `go get`:
+`~/.netrc` for HTTPS, SSH keys for `ssh://git@...`.
 
 Cost: ~100ms per `latest` entry per run. Users who pinned exact tags pay
 nothing.
@@ -225,9 +223,9 @@ nothing.
 
 Both `latest` and semver-range resolution go through `proxy.golang.org` by
 default. Modules whose path matches `GOPRIVATE` (or `GONOPROXY`) bypass the
-proxy; for those, sparkwing resolves tags by invoking `go list -m -versions
-<module>`, which walks the git remote directly using the user's configured
-auth. Set `GOPROXY=direct` to force direct resolution for everything. No
+proxy; for those, sparkwing resolves tags by invoking `go list -m -json
+<module>@<query>`, which walks the git remote directly using the user's
+configured auth. Set `GOPROXY=direct` to force direct resolution for everything. No
 separate sparkwing auth flow exists - if `go get` works, sparks resolution
 works.
 
@@ -284,7 +282,7 @@ pinning is suspended for the duration. The pre-push gate refuses to
 push a committed `go.work` or `go.work.sum`, so this stays a local-only
 convenience -- shipped builds always go through the overlay.
 
-`sparkwing sparks resolve` itself refuses to run while a workspace is
+`sparkwing pipeline sparks resolve` itself refuses to run while a workspace is
 in scope (the same toolchain limitation applies to `go mod download
 -modfile=X`). Remove the workspace file or set `GOWORK=off` in your
 shell to refresh pins.
@@ -294,7 +292,7 @@ shell to refresh pins.
 Compiled pipeline binaries are cached under a `PipelineCacheKey` that hashes
 the pipeline source, local replace targets, the resolved sparks versions,
 and the overlay modfile contents. The same key is used locally
-(`~/.sparkwing/cache/<key>/`) and in gitcache (`/bin/<key>`).
+(`~/.sparkwing/cache/pipelines/<key>/`) and in gitcache (`/bin/<key>`).
 
 Three tiers of cache behavior fall out of that key, each with a rough
 latency cost. Actual numbers vary by machine, network, and repo size; the
@@ -314,25 +312,32 @@ endpoint.
 
 ## `sparkwing pipeline sparks` CLI
 
-Subcommands and one-line purposes:
+The `sparkwing pipeline sparks` command group manages the `sparks:` block
+and the overlay. What each subcommand does:
 
-| Subcommand | Purpose |
-|---|---|
-| `sparkwing pipeline sparks list` | Show declared sparks libraries in the current repo and their resolved versions. |
-| `sparkwing pipeline sparks lint [path]` | Validate the `spark.json` at `path` (defaults to current directory). Checks schema, required fields, package path existence. |
-| `sparkwing pipeline sparks resolve` | Resolve versions per the `sparks:` block and materialize the overlay modfile at `.sparkwing/.resolved.mod` + `.resolved.sum`. Idempotent. Cheap when nothing has drifted. Never modifies git-tracked `go.mod`. |
-| `sparkwing pipeline sparks update [name]` | Bump one or all libraries to the latest version within their declared range. Updates the `sparks:` block only; still does not touch `go.mod`. |
-| `sparkwing pipeline sparks add <source> [--version X]` | Add a library to the `sparks:` block. Defaults `version` to `latest` if not specified. |
-| `sparkwing pipeline sparks remove <name>` | Remove a library from the `sparks:` block. |
-| `sparkwing pipeline sparks warmup` | Pre-compile pipeline binaries across consumer repos after a sparks library release. See "Warmup" below. |
+- **list** -- show the declared sparks libraries and their resolved versions.
+- **lint** -- validate a library's `spark.json` (schema, required fields,
+  package-path existence).
+- **resolve** -- resolve versions per the `sparks:` block and materialize the
+  overlay modfile at `.sparkwing/.resolved.mod` + `.resolved.sum`. Idempotent,
+  cheap when nothing has drifted, and never touches git-tracked `go.mod`.
+- **update** -- bump one or all libraries to the latest version within their
+  declared range. Edits the `sparks:` block only.
+- **add** / **remove** -- add or remove a library entry in the `sparks:` block.
+- **warmup** -- pre-compile pipeline binaries across consumer repos after a
+  release (see [Warmup](#warmup) below).
+
+For the exact flags each subcommand takes, see
+[cli-reference.md](cli-reference.md).
 
 ### Warmup
 
 `sparkwing pipeline sparks warmup` pre-compiles pipeline binaries across consumer repos
-after a sparks library release. It clears the binary cache, resolves the
-latest versions, compiles each pipeline in the repo, and uploads the binaries
-to gitcache. The next `sparkwing run <pipeline>` run - locally or in-cluster - gets
-a binary-cache hit instead of paying the full compile cost.
+after a sparks library release. It resolves the latest versions, compiles
+each pipeline in the repo, and uploads the binaries to gitcache (pass
+`--clear-cache` to discard the existing local binary cache first). The next
+`sparkwing run <pipeline>` run - locally or in-cluster - gets a binary-cache hit
+instead of paying the full compile cost.
 
 Warmup uses the exact same build path as `sparkwing`, so cache keys match. It is
 an optimization, not a requirement: pipelines always resolve versions on
