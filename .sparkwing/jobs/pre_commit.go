@@ -18,18 +18,19 @@ import (
 // tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-, REG-, TOD-); the
 // docs-mirror check fails when docs/ (the source) and pkg/docs/mirror/
 // (the embedded copy) have drifted, so an edit to docs/ can't be
-// committed without re-running bin/sync-docs.sh.
+// committed without re-running bin/sync-docs.sh; the comment check
+// fails when the staged diff adds a comment the policy disallows.
 //
 // Wire it to git: declare the `pre_commit:` trigger in sparkwing.yaml
 // and run `sparkwing pipeline hooks install`.
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Fast pre-commit gate: format, vet, em-dash + tracker-ID sweeps, docs-mirror sync"
+	return "Fast pre-commit gate: format, vet, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt and go vet on the .sparkwing/ module, plus repo-wide checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), and that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted)."
+	return "Runs gofmt and go vet on the .sparkwing/ module, plus repo-wide checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted), and that the staged change adds no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags)."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -54,7 +55,18 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
+	sparkwing.Step(w, "comments", checkComments)
 	return nil, nil
+}
+
+// checkComments fails when the staged diff introduces a comment the repo
+// policy disallows -- anything that isn't godoc on a top-level declaration or
+// a // hack:/safety:/bug:/perf: tag. Scoped to the staged diff so the
+// pre-existing comment corpus is never charged to a new commit; run
+// `go run ./internal/commentcheck .` for a whole-tree audit.
+func checkComments(ctx context.Context) error {
+	_, err := sparkwing.Bash(ctx, `go run ./internal/commentcheck -staged .`).Run()
+	return err
 }
 
 func runGofmt(ctx context.Context) error {

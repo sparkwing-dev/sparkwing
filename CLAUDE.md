@@ -4,7 +4,7 @@ This is the public sparkwing repo. The companion repo `../sparkwing-platform` is
 
 ## Comments
 
-This is enforced, not just advised: `internal/commentcheck` runs in the pre-push gate and fails on any disallowed comment the branch adds. Run `go run ./internal/commentcheck .` for a whole-tree audit.
+This is enforced, not just advised: `internal/commentcheck` runs in the pre-commit gate and fails when the staged change adds a disallowed comment. Run `go run ./internal/commentcheck .` for a whole-tree audit.
 
 - **Two kinds of comment are allowed, nothing else.** Godoc attached to a top-level declaration (package, func, type, const, var, import) or a struct field / interface method; and a tiny set of *tagged* implementation comments. Free-floating comments, body narration, section dividers, and "what" comments that restate the code are rejected.
 - **The only allowed inline tags**, each forcing you to justify the comment's existence:

@@ -29,9 +29,15 @@
 //
 // Usage:
 //
-//	commentcheck <root>             audit the whole tree; fail on any violation
-//	commentcheck -base <ref> <root> fail only on comments this branch adds vs
-//	                                the fork point from <ref> (the push gate)
+//	commentcheck <root>              audit the whole tree; fail on any violation
+//	commentcheck -staged <root>      fail only on comments in the staged diff
+//	                                 (the pre-commit gate)
+//	commentcheck -base <ref> <root>  fail only on comments added vs the fork
+//	                                 point from <ref>
+//
+// The -staged and -base modes scope the gate to lines a change introduces, so
+// the pre-existing comment corpus is never charged to a new commit. They fail
+// open (warn and pass) if git can't produce the diff.
 package main
 
 import (
@@ -67,10 +73,11 @@ type violation struct {
 }
 
 func main() {
-	base := flag.String("base", "", "only report comments added on this branch vs the fork point from this git ref")
+	staged := flag.Bool("staged", false, "only report comments in the staged diff (the pre-commit gate)")
+	base := flag.String("base", "", "only report comments added vs the fork point from this git ref")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: commentcheck [-base ref] <root>")
+		fmt.Fprintln(os.Stderr, "usage: commentcheck [-staged | -base ref] <root>")
 		os.Exit(2)
 	}
 	root := flag.Arg(0)
@@ -81,11 +88,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	if *base != "" {
-		added, aerr := addedLines(root, *base)
+	if *staged || *base != "" {
+		added, aerr := scopedAdds(root, *staged, *base)
 		if aerr != nil {
-			fmt.Fprintf(os.Stderr, "commentcheck: cannot diff against %s (%v); skipping gate\n", *base, aerr)
-			fmt.Println("commentcheck: skipped (no diff base)")
+			fmt.Fprintf(os.Stderr, "commentcheck: cannot compute diff (%v); skipping gate\n", aerr)
+			fmt.Println("commentcheck: skipped (no diff)")
 			return
 		}
 		violations = onlyAdded(violations, root, added)
@@ -240,20 +247,31 @@ func firstLine(text string) string {
 	return text
 }
 
-// addedLines returns, per repo-relative path, the set of line numbers this
-// branch added relative to the fork point from base. It diffs against the
-// merge-base so lines that landed on base after the branch forked aren't
-// charged to the branch.
-func addedLines(root, base string) (map[string]map[int]bool, error) {
-	forkPoint := base
-	if out, err := git(root, "merge-base", base, "HEAD"); err == nil {
-		forkPoint = strings.TrimSpace(out)
+// scopedAdds returns, per repo-relative path, the set of line numbers a change
+// introduces. In staged mode that's the staged diff against HEAD; in base mode
+// it's the diff against the merge-base with base, so lines that landed on base
+// after the branch forked aren't charged to the branch.
+func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool, error) {
+	args := []string{"diff", "--unified=0", "--no-color"}
+	if staged {
+		args = append(args, "--cached")
+	} else {
+		forkPoint := base
+		if out, err := git(root, "merge-base", base, "HEAD"); err == nil {
+			forkPoint = strings.TrimSpace(out)
+		}
+		args = append(args, forkPoint)
 	}
-	diff, err := git(root, "diff", "--unified=0", "--no-color", forkPoint, "--", "*.go")
+	args = append(args, "--", "*.go")
+
+	diff, err := git(root, args...)
 	if err != nil {
 		return nil, err
 	}
+	return parseAddedLines(diff), nil
+}
 
+func parseAddedLines(diff string) map[string]map[int]bool {
 	hunkRE := regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 	added := map[string]map[int]bool{}
 	var cur string
@@ -283,7 +301,7 @@ func addedLines(root, base string) (map[string]map[int]bool, error) {
 			}
 		}
 	}
-	return added, nil
+	return added
 }
 
 func onlyAdded(violations []violation, root string, added map[string]map[int]bool) []violation {
