@@ -44,7 +44,7 @@ type MigrationEntry struct {
 func MigrationsList() []MigrationEntry {
 	index := parseMigrationsIndex()
 	var out []MigrationEntry
-	_ = fs.WalkDir(allDocs, "content/migrations", func(p string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(allDocs, "mirror/migrations", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -176,11 +176,11 @@ type migrationIndexRow struct {
 var migrationsIndexRowPattern = regexp.MustCompile(`^\|\s*\[(v[^\]]+)\]\([^)]*\)\s*\|\s*([^|]*?)\s*\|\s*(.*?)\s*\|\s*$`)
 
 // parseMigrationsIndex returns the parsed rows of
-// content/migrations/README.md keyed by version. Missing or malformed
+// mirror/migrations/README.md keyed by version. Missing or malformed
 // index is non-fatal: callers fall back to the file glob.
 func parseMigrationsIndex() map[string]migrationIndexRow {
 	out := map[string]migrationIndexRow{}
-	body, err := fs.ReadFile(allDocs, "content/migrations/README.md")
+	body, err := fs.ReadFile(allDocs, "mirror/migrations/README.md")
 	if err != nil {
 		return out
 	}
