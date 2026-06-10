@@ -98,7 +98,12 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
 	gatePreCommit.Needs(clean)
 
-	gatePrePush := sparkwing.Job(plan, "gate-pre-push", (&PrePush{}).run)
+	// Run the deterministic pre-push checks (format/vet/lint/test/
+	// doccheck) but not the interactive agent-review gate -- an automated
+	// tag-cut shouldn't block on cloud reviewers.
+	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
+		return (&PrePush{}).run(ctx, PrePushInputs{BypassAgentReview: true})
+	})
 	gatePrePush.Needs(clean)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
