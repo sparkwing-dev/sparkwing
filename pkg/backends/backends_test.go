@@ -6,28 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-func TestDetectMatch_EqualsAndPresent(t *testing.T) {
-	t.Setenv("SW_TEST_DETECT", "yes")
-	cases := []struct {
-		name string
-		d    backends.Detect
-		want bool
-	}{
-		{"equals match", backends.Detect{EnvVar: "SW_TEST_DETECT", Equals: "yes"}, true},
-		{"equals mismatch", backends.Detect{EnvVar: "SW_TEST_DETECT", Equals: "no"}, false},
-		{"present match", backends.Detect{EnvVar: "SW_TEST_DETECT", Present: true}, true},
-		{"present absent var", backends.Detect{EnvVar: "SW_TEST_ABSENT", Present: true}, false},
-		{"empty envvar never matches", backends.Detect{Present: true}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.d.Match(); got != tc.want {
-				t.Fatalf("Match() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestLayerSurfaces_OverWinsPerSurface(t *testing.T) {
 	base := backends.Surfaces{
 		State: &backends.Spec{Type: backends.TypeSQLite, Path: "/base.db"},

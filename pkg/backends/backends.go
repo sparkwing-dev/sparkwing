@@ -126,40 +126,6 @@ func envOr(name, fallback string) string {
 // lookupEnv is a thin wrapper kept for test injection if ever needed.
 var lookupEnv = os.LookupEnv
 
-// Detect describes when a profile auto-selects against the current
-// environment.
-//
-// EnvVar names the variable to consult. Equals matches a specific
-// value; Present matches any non-empty value. Setting neither never
-// matches.
-type Detect struct {
-	EnvVar  string `yaml:"env_var,omitempty"`
-	Equals  string `yaml:"equals,omitempty"`
-	Present bool   `yaml:"present,omitempty"`
-}
-
-// Match reports whether this detect rule evaluates true against the
-// current process environment. A zero EnvVar never matches; Equals
-// requires the variable to equal that value; Present requires it to be
-// set and non-empty. This is the canonical detect predicate used by
-// profile resolution.
-func (d Detect) Match() bool {
-	if d.EnvVar == "" {
-		return false
-	}
-	v, ok := os.LookupEnv(d.EnvVar)
-	if !ok {
-		return false
-	}
-	if d.Equals != "" {
-		return v == d.Equals
-	}
-	if d.Present {
-		return v != ""
-	}
-	return false
-}
-
 // LayerSurfaces overlays over on top of base per surface: a non-nil
 // surface in over wins, otherwise base's surface is kept. Used to
 // layer overrides on top of project defaults.

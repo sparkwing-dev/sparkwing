@@ -1,11 +1,5 @@
 # pkg/backends
 
-type Detect struct {
-	EnvVar  string
-	Equals  string
-	Present bool
-}
-func (d Detect) Match() bool
 func LayerSurfaces(base, over Surfaces) Surfaces
 type Spec struct {
 	Type string
