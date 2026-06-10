@@ -19,10 +19,20 @@ type Config struct {
 // secrets surface. One Go entrypoint can back many pipelines, each
 // with its own policy.
 type Pipeline struct {
-	Name        string   `yaml:"name"`
-	Entrypoint  string   `yaml:"entrypoint"`
-	Description string   `yaml:"description,omitempty"`
-	On          Triggers `yaml:"on,omitempty"`
+	// Name is the invocable name (`sparkwing run <name>`); must equal
+	// the string passed to the SDK's Register call.
+	Name string `yaml:"name"`
+
+	// Entrypoint is the Go pipeline struct type that implements this
+	// entry (equals the struct name). Required.
+	Entrypoint string `yaml:"entrypoint"`
+
+	// Description is the one-line summary surfaced by `pipeline list`.
+	Description string `yaml:"description,omitempty"`
+
+	// On declares the triggers that auto-fire this pipeline. Absent
+	// means manual-only (a command invoked by name).
+	On Triggers `yaml:"on,omitempty"`
 
 	// Hidden omits the entry from default `pipeline list` output; it
 	// stays invocable by exact name and shows under `list --all`.
@@ -157,22 +167,33 @@ func nodeKindName(k yaml.Kind) string {
 // a pipeline with no triggers is manually invocable via
 // `sparkwing run <name>`.
 type Triggers struct {
-	Push     *PushTrigger     `yaml:"push,omitempty"`
-	Schedule string           `yaml:"schedule,omitempty"`
-	Webhook  *WebhookTrigger  `yaml:"webhook,omitempty"`
-	PreHook  *PreHookTrigger  `yaml:"pre_commit,omitempty"`
+	// Push fires on a git push the controller receives via webhook.
+	Push *PushTrigger `yaml:"push,omitempty"`
+	// Schedule is a cron expression the controller evaluates.
+	Schedule string `yaml:"schedule,omitempty"`
+	// Webhook exposes a custom HTTP path that fires the pipeline.
+	Webhook *WebhookTrigger `yaml:"webhook,omitempty"`
+	// PreHook fires from the installed git pre-commit hook.
+	PreHook *PreHookTrigger `yaml:"pre_commit,omitempty"`
+	// PostHook fires from the installed git pre-push hook.
 	PostHook *PostHookTrigger `yaml:"pre_push,omitempty"`
 }
 
 // PushTrigger fires on git push events matching the rules.
 type PushTrigger struct {
+	// Branches limits the trigger to pushes on these branches (glob
+	// patterns); empty matches any branch.
 	Branches []string `yaml:"branches,omitempty"`
-	Paths    []string `yaml:"paths,omitempty"`
+	// Paths limits the trigger to pushes touching these path globs;
+	// empty matches any path.
+	Paths []string `yaml:"paths,omitempty"`
 }
 
 // WebhookTrigger exposes an HTTP path that fires the pipeline. The
 // controller assembles a RunContext from the incoming request.
 type WebhookTrigger struct {
+	// Path is the HTTP path the controller exposes to fire the
+	// pipeline (e.g. /review).
 	Path string `yaml:"path"`
 }
 

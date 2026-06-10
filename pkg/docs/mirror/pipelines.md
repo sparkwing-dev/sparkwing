@@ -48,6 +48,9 @@ hard parse error):
 - **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
 - **hidden** - omit from `pipeline list` (still invocable by exact name)
 
+For the complete schema -- every top-level key, pipeline field, and
+trigger field with types -- see the generated [config-reference.md](config-reference.md).
+
 ## Triggers
 
 Trigger types live under `on:`:

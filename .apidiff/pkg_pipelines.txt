@@ -46,10 +46,13 @@ const KindUnknown GuardKind = iota
 func Parse(r io.Reader) (*Config, error)
 func ParseGuardToken(raw string) (GuardToken, error)
 type Pipeline struct {
-	Name        string
-	Entrypoint  string
+	Name string
+
+	Entrypoint string
+
 	Description string
-	On          Triggers
+
+	On Triggers
 
 	Hidden bool
 
@@ -66,7 +69,8 @@ type PostHookTrigger struct{}
 type PreHookTrigger struct{}
 type PushTrigger struct {
 	Branches []string
-	Paths    []string
+
+	Paths []string
 }
 type SecretEntry struct {
 	Name     string
@@ -76,10 +80,14 @@ type SecretEntry struct {
 func (e SecretEntry) IsRequired() bool
 type SecretsField []SecretEntry
 type Triggers struct {
-	Push     *PushTrigger
+	Push *PushTrigger
+
 	Schedule string
-	Webhook  *WebhookTrigger
-	PreHook  *PreHookTrigger
+
+	Webhook *WebhookTrigger
+
+	PreHook *PreHookTrigger
+
 	PostHook *PostHookTrigger
 }
 type WebhookTrigger struct {

@@ -56,6 +56,11 @@ code change to unlock.
   from the command registry rather than hand-maintained, so it can't
   drift from the binary; a pre-push gate fails if the committed file is
   stale.
+- **docs:** `docs/config-reference.md` is generated from the
+  `sparkwing.yaml` schema structs, so the complete config field
+  reference (top-level keys, pipeline-entry fields, trigger fields) is
+  derived from the parser's own structs and can't claim a field that
+  doesn't exist. A pre-push gate fails if it drifts.
 
 ### Fixed
 

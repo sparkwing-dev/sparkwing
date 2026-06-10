@@ -8,6 +8,7 @@
       "label": "Pipelines",
       "slugs": [
         "pipelines",
+        "config-reference",
         "sdk",
         "local-execution",
         "ci-embedded",

@@ -190,6 +190,18 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "cli-reference: current")
 	}
 
+	// 10. Generated config reference is current. docs/config-reference.md
+	// is rendered from the sparkwing.yaml schema structs; regenerate and
+	// diff so a struct/field change that wasn't followed by
+	// bin/gen-config-docs.sh fails here instead of shipping stale.
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/configref "$ROOT" | diff -u docs/config-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "config-reference: stale -- run `bash bin/gen-config-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "config-reference: current")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
