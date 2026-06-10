@@ -18,6 +18,39 @@ func fitsBudget(used, cost, capacity int) bool {
 	return used <= capacity && cost <= capacity-used
 }
 
+// holderLiveSQL is the canonical SQL predicate for a holder row that
+// still counts toward its key's budget: not superseded and lease
+// unexpired. It consumes exactly one bind parameter, the current time
+// in nanoseconds. alias prefixes the column names (pass "h." for an
+// aliased join, "" otherwise). Every query that filters holders by
+// liveness must use this fragment; holderCountsForBudget is its Go-side
+// twin for rows already scanned.
+func holderLiveSQL(alias string) string {
+	return alias + "superseded = 0 AND " + alias + "lease_expires_at > ?"
+}
+
+// holderCountsForBudget reports whether an already-scanned holder row
+// still counts toward its key's budget. It is the Go-side twin of
+// holderLiveSQL; the two must answer identically. The heartbeat path
+// deliberately does NOT use it: a superseded holder with a live lease
+// still heartbeats successfully (that is how it learns it was
+// superseded), so heartbeat checks the lease alone.
+func holderCountsForBudget(superseded bool, leaseExpiresNS, nowNS int64) bool {
+	return !superseded && leaseExpiresNS > nowNS
+}
+
+// declaredCapacityFloorTerm is one live holder's contribution to the
+// capacity floor: its own declaration, or the most-restrictive capacity
+// (1) when the row predates declared-capacity tracking (zero or
+// negative), so a legacy holder constrains admission instead of
+// vanishing from the floor and inflating it into over-admission.
+func declaredCapacityFloorTerm(declared int) int {
+	if declared > 0 {
+		return declared
+	}
+	return 1
+}
+
 // OnLimit policies the coordination layer understands. Queue, Skip,
 // Fail, and CancelOthers map to the SDK's sparkwing.OnLimit values for
 // concurrency groups. Coalesce is the leader/follower policy that backs
@@ -338,7 +371,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		  WHERE key = ? AND holder_id = ?`,
 		req.Key, req.HolderID,
 	).Scan(&existingLeaseNS, &existingSuperInt)
-	if err == nil && existingSuperInt == 0 && existingLeaseNS > nowNS {
+	if err == nil && holderCountsForBudget(existingSuperInt == 1, existingLeaseNS, nowNS) {
 		newExpires := now.Add(req.Lease).UnixNano()
 		if _, err := tx.ExecContext(
 			ctx,
@@ -362,17 +395,15 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{}, err
 	}
 
-	// 3. Sum active (non-superseded, unexpired) holder cost and resolve
-	// the effective capacity (most-restrictive over live participants
-	// plus this arrival's declaration).
-	activeCost, err := txSumActiveCost(ctx, tx, req.Key, nowNS)
+	// 3. One accounting pass: live holder cost, capacity floor, and the
+	// live holder set, all from the same scan, plus this arrival's
+	// declaration folded into the effective capacity.
+	acct, err := txConcurrencyAccounting(ctx, tx, req.Key, nowNS)
 	if err != nil {
 		return AcquireSlotResponse{}, err
 	}
-	effCap, err := txEffectiveCapacity(ctx, tx, req.Key, nowNS, req.Capacity)
-	if err != nil {
-		return AcquireSlotResponse{}, err
-	}
+	activeCost := acct.used
+	effCap := acct.effectiveCapacity(req.Capacity)
 
 	// A --no-cache (BypassRead) node must not coalesce onto a leader and
 	// inherit its result: treat it as a Queue waiter so it waits for the
@@ -498,41 +529,14 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		// Evict oldest holders first until freeing their cost would let
 		// this arrival's cost fit the effective capacity. Always evict
 		// at least one so a single over-capacity arrival still proceeds.
-		rows, err := tx.QueryContext(
-			ctx,
-			`SELECT holder_id, cost FROM concurrency_holders
-			  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?
-			  ORDER BY claimed_at ASC`,
-			req.Key, nowNS,
-		)
-		if err != nil {
-			return AcquireSlotResponse{}, err
-		}
-		type heldCost struct {
-			id   string
-			cost int
-		}
-		var held []heldCost
-		for rows.Next() {
-			var hc heldCost
-			if err := rows.Scan(&hc.id, &hc.cost); err != nil {
-				_ = rows.Close()
-				return AcquireSlotResponse{}, err
-			}
-			held = append(held, hc)
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		var supersededIDs []string
 		freed := 0
-		for _, hc := range held {
+		for _, h := range acct.holders {
 			if fitsBudget(activeCost-freed, req.Cost, effCap) && len(supersededIDs) > 0 {
 				break
 			}
-			supersededIDs = append(supersededIDs, hc.id)
-			freed += hc.cost
+			supersededIDs = append(supersededIDs, h.HolderID)
+			freed += h.Cost
 		}
 		for _, hid := range supersededIDs {
 			if _, err := tx.ExecContext(
@@ -622,10 +626,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		).Scan(&queueLen); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		holders, err := txActiveHolders(ctx, tx, req.Key, nowNS)
-		if err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		if err := tx.Commit(); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -635,19 +635,19 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			DriftNote:        driftNote,
 			Position:         position,
 			QueueLength:      queueLen,
-			Holders:          holders,
+			Holders:          acct.holders,
 		}, nil
 	}
 }
 
-// txActiveHolders reads the current non-superseded, unexpired holders
+// txActiveHolders reads the current live (per holderLiveSQL) holders
 // for a key within an open transaction, oldest claim first.
 func txActiveHolders(ctx context.Context, tx *storeTx, key string, nowNS int64) ([]ConcurrencyHolder, error) {
 	rows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		`SELECT `+holderColumns+`
 		   FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?
+		  WHERE key = ? AND `+holderLiveSQL("")+`
 		  ORDER BY claimed_at ASC`,
 		key, nowNS,
 	)
@@ -657,77 +657,73 @@ func txActiveHolders(ctx context.Context, tx *storeTx, key string, nowNS int64) 
 	defer func() { _ = rows.Close() }()
 	var out []ConcurrencyHolder
 	for rows.Next() {
-		var h ConcurrencyHolder
-		var claimedNS, expiresNS int64
-		var superInt int
-		if err := rows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
+		h, err := scanHolder(rows)
+		if err != nil {
 			return nil, err
 		}
-		h.ClaimedAt = time.Unix(0, claimedNS)
-		h.LeaseExpiresAt = time.Unix(0, expiresNS)
-		h.Superseded = superInt == 1
 		out = append(out, h)
 	}
 	return out, rows.Err()
 }
 
-// txSumActiveCost returns the summed admission cost of the key's
-// active (non-superseded, unexpired) holders.
-func txSumActiveCost(ctx context.Context, tx *storeTx, key string, nowNS int64) (int, error) {
-	var sum sql.NullInt64
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT COALESCE(SUM(cost), 0) FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
-		key, nowNS,
-	).Scan(&sum); err != nil {
-		return 0, err
-	}
-	return int(sum.Int64), nil
+// concurrencyAccounting is one consistent view of a key's admission
+// state: the used cost, the capacity floor, and the live holder set are
+// all derived from a single scan inside one transaction, so they cannot
+// disagree with each other by construction. Every admission, promotion,
+// and eviction decision routes through it.
+type concurrencyAccounting struct {
+	// used is the summed admission cost of the live holders.
+	used int
+	// floor is the most-restrictive declared capacity over the live
+	// holders (via declaredCapacityFloorTerm); 0 means no live holder
+	// constrains the budget. Parked waiters are NOT folded in -- a
+	// non-admitted waiter holds no budget, so letting its declaration
+	// drag the effective capacity below the already-admitted holders
+	// would invert priority and starve a FIFO head that fits under its
+	// own capacity.
+	floor int
+	// entryCap is the registered capacity from the entries row,
+	// defaulted to 1 when missing or non-positive.
+	entryCap int
+	// holders are the live holders, oldest claim first.
+	holders []ConcurrencyHolder
 }
 
-// txEffectiveCapacity resolves the most-restrictive-wins capacity for a
-// key: the minimum declared_capacity over the **admitted holders** plus
-// the incoming arrival's declared capacity. Parked waiters are NOT
-// folded in -- a non-admitted waiter holds no budget, so letting its
-// declaration drag the effective capacity below the already-admitted
-// holders would invert priority and starve a FIFO head that fits under
-// its own capacity. A non-positive incoming is ignored (the release
-// path has no arrival; the promote path folds each candidate's own
-// capacity itself). When no admitted holder has a positive
-// declared_capacity, it falls back to the entries row, then to 1.
-func txEffectiveCapacity(ctx context.Context, tx *storeTx, key string, nowNS int64, incoming int) (int, error) {
-	entryCap, err := txEntryCapacity(ctx, tx, key)
-	if err != nil {
-		return 0, err
-	}
-	// A live holder with declared_capacity<=0 (a v3-migration backfill or a
-	// promoted legacy waiter) still counts toward used cost, so it must
-	// count toward the floor too. Its real declaration is unknown, so it
-	// contributes the most-restrictive capacity (1) rather than vanishing
-	// from the floor and inflating effective capacity into over-admission.
-	var minDeclared sql.NullInt64
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT MIN(CASE WHEN declared_capacity > 0 THEN declared_capacity ELSE 1 END)
-		   FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
-		key, nowNS,
-	).Scan(&minDeclared); err != nil {
-		return 0, err
-	}
-
-	eff := 0
-	if minDeclared.Valid && minDeclared.Int64 > 0 {
-		eff = int(minDeclared.Int64)
-	}
+// effectiveCapacity resolves the most-restrictive-wins capacity for an
+// arrival declaring the given capacity. A non-positive incoming is
+// ignored (the release path has no arrival; the promote path folds each
+// candidate's own capacity itself). When neither the live holders nor
+// the arrival constrain the budget, the entries row is the fallback.
+func (a concurrencyAccounting) effectiveCapacity(incoming int) int {
+	eff := a.floor
 	if incoming > 0 && (eff == 0 || incoming < eff) {
 		eff = incoming
 	}
 	if eff > 0 {
-		return eff, nil
+		return eff
 	}
-	return entryCap, nil
+	return a.entryCap
+}
+
+// txConcurrencyAccounting computes the key's admission state from one
+// scan of the live holders plus the entries row.
+func txConcurrencyAccounting(ctx context.Context, tx *storeTx, key string, nowNS int64) (concurrencyAccounting, error) {
+	entryCap, err := txEntryCapacity(ctx, tx, key)
+	if err != nil {
+		return concurrencyAccounting{}, err
+	}
+	holders, err := txActiveHolders(ctx, tx, key, nowNS)
+	if err != nil {
+		return concurrencyAccounting{}, err
+	}
+	a := concurrencyAccounting{entryCap: entryCap, holders: holders}
+	for _, h := range holders {
+		a.used += h.Cost
+		if t := declaredCapacityFloorTerm(h.DeclaredCapacity); a.floor == 0 || t < a.floor {
+			a.floor = t
+		}
+	}
+	return a, nil
 }
 
 // txEntryCapacity returns the registered capacity for a key, defaulting
@@ -757,37 +753,17 @@ func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) 
 // the leader path, not here. Returns the promoted waiters with their
 // assigned HolderID set.
 func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
-	// holderMin is the most-restrictive declared capacity over the
-	// currently-admitted holders (0 == no admitted holder constrains
-	// the budget). entryCap is the declared default used for legacy
-	// waiter rows that carry no declared_capacity. Parked waiters are
-	// deliberately NOT folded in here -- each candidate's own declared
-	// capacity is the ceiling that gates its own promotion.
-	entryCap, err := txEntryCapacity(ctx, tx, key)
+	// holderMin (the accounting floor) is the most-restrictive declared
+	// capacity over the currently-admitted holders (0 == no admitted
+	// holder constrains the budget). entryCap is the declared default
+	// used for legacy waiter rows that carry no declared_capacity.
+	// Parked waiters are deliberately NOT folded in -- each candidate's
+	// own declared capacity is the ceiling that gates its own promotion.
+	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
 		return nil, err
 	}
-	// Zero-cap live holders (migration backfill / promoted legacy waiters)
-	// contribute the most-restrictive capacity (1) here too, so they
-	// constrain promotion instead of vanishing from the floor.
-	var holderMinNull sql.NullInt64
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT MIN(CASE WHEN declared_capacity > 0 THEN declared_capacity ELSE 1 END)
-		   FROM concurrency_holders
-		  WHERE key = ? AND superseded = 0 AND lease_expires_at > ?`,
-		key, nowNS,
-	).Scan(&holderMinNull); err != nil {
-		return nil, err
-	}
-	holderMin := 0
-	if holderMinNull.Valid && holderMinNull.Int64 > 0 {
-		holderMin = int(holderMinNull.Int64)
-	}
-	used, err := txSumActiveCost(ctx, tx, key, nowNS)
-	if err != nil {
-		return nil, err
-	}
+	entryCap, holderMin, used := acct.entryCap, acct.floor, acct.used
 
 	rows, err := tx.QueryContext(
 		ctx,
@@ -1054,37 +1030,9 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		}
 
 		// 2. Resolve coalesce followers in the same tx.
-		frows, err := tx.QueryContext(
-			ctx,
-			`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
-			   FROM concurrency_waiters
-			  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
-			  ORDER BY arrived_at ASC`,
-			key, OnLimitCoalesce, runID, nodeID,
-		)
+		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
 			return false, nil, nil, err
-		}
-		for frows.Next() {
-			w, serr := scanWaiter(frows)
-			if serr != nil {
-				_ = frows.Close()
-				return false, nil, nil, serr
-			}
-			followers = append(followers, w)
-		}
-		_ = frows.Close()
-		if err := frows.Err(); err != nil {
-			return false, nil, nil, err
-		}
-		for _, w := range followers {
-			if _, err := tx.ExecContext(
-				ctx,
-				`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-				w.Key, w.RunID, w.NodeID,
-			); err != nil {
-				return false, nil, nil, err
-			}
 		}
 	}
 
@@ -1125,9 +1073,24 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	out, err := txDrainCoalesceFollowers(ctx, tx, key, leaderRunID, leaderNodeID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// txDrainCoalesceFollowers returns and deletes the coalesce waiters
+// parked behind the given leader -- the single definition of "resolve
+// this leader's followers", shared by ReleaseAndNotify and
+// ResolveCoalesceFollowers.
+func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
 	rows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
+		`SELECT `+waiterColumns+`
 		   FROM concurrency_waiters
 		  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
 		  ORDER BY arrived_at ASC`,
@@ -1150,18 +1113,30 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 		return nil, err
 	}
 	for _, w := range out {
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-			w.Key, w.RunID, w.NodeID,
-		); err != nil {
+		if _, err := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); err != nil {
 			return nil, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 	return out, nil
+}
+
+// txDeleteWaiter removes one waiter row by its primary key -- the
+// single DELETE site for concurrency_waiters. Reports whether a row
+// matched.
+func txDeleteWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string) (bool, error) {
+	res, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+		key, runID, nodeID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // PromoteNextWaiters grants holder rows to FIFO queue/cancel-others
@@ -1393,15 +1368,7 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	wres, err := tx.ExecContext(
-		ctx,
-		`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-		key, runID, nodeID,
-	)
-	if err != nil {
-		return false, err
-	}
-	wn, err := wres.RowsAffected()
+	waiterDeleted, err := txDeleteWaiter(ctx, tx, key, runID, nodeID)
 	if err != nil {
 		return false, err
 	}
@@ -1431,13 +1398,26 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	return wn > 0 || hn > 0, nil
+	return waiterDeleted || hn > 0, nil
 }
 
-// GetConcurrencyState returns capacity + holders + waiters; ErrNotFound when undeclared.
+// GetConcurrencyState returns capacity + holders + waiters; ErrNotFound
+// when undeclared. UsedCost and EffectiveCapacity are derived through
+// the same accounting rules the admission path enforces
+// (holderCountsForBudget + declaredCapacityFloorTerm), inside one
+// transaction, so the operator view cannot drift from what admission
+// actually does. Parked waiters are excluded from the floor: a
+// non-admitted waiter holds no budget, so folding its declaration would
+// report a capacity below what the live holders actually enforce.
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var capacity int
-	err := s.queryRow(
+	err = tx.QueryRowContext(
 		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&capacity)
@@ -1451,40 +1431,26 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	state := &ConcurrencyState{Key: key, Capacity: capacity, EffectiveCapacity: capacity}
 
 	nowNS := time.Now().UnixNano()
-	hrows, err := s.query(
+	hrows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity
+		`SELECT `+holderColumns+`
 		   FROM concurrency_holders WHERE key = ? ORDER BY claimed_at ASC`, key,
 	)
 	if err != nil {
 		return nil, err
 	}
-	// minDeclared tracks the most-restrictive declared capacity over the
-	// admitted holders only, mirroring the admission path's
-	// effective-capacity rule. Parked waiters are excluded: a
-	// non-admitted waiter holds no budget, so folding its declaration
-	// would report a capacity below what the live holders actually
-	// enforce (and a negative Available).
-	minDeclared := 0
-	noteDeclared := func(c int) {
-		if c > 0 && (minDeclared == 0 || c < minDeclared) {
-			minDeclared = c
-		}
-	}
+	floor := 0
 	for hrows.Next() {
-		var h ConcurrencyHolder
-		var claimedNS, expiresNS int64
-		var superInt int
-		if err := hrows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt, &h.Cost, &h.DeclaredCapacity); err != nil {
+		h, err := scanHolder(hrows)
+		if err != nil {
 			_ = hrows.Close()
 			return nil, err
 		}
-		h.ClaimedAt = time.Unix(0, claimedNS)
-		h.LeaseExpiresAt = time.Unix(0, expiresNS)
-		h.Superseded = superInt == 1
-		if !h.Superseded && expiresNS > nowNS {
+		if holderCountsForBudget(h.Superseded, h.LeaseExpiresAt.UnixNano(), nowNS) {
 			state.UsedCost += h.Cost
-			noteDeclared(h.DeclaredCapacity)
+			if t := declaredCapacityFloorTerm(h.DeclaredCapacity); floor == 0 || t < floor {
+				floor = t
+			}
 		}
 		state.Holders = append(state.Holders, h)
 	}
@@ -1493,9 +1459,9 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		return nil, err
 	}
 
-	wrows, err := s.query(
+	wrows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
+		`SELECT `+waiterColumns+`
 		   FROM concurrency_waiters WHERE key = ? ORDER BY arrived_at ASC`, key,
 	)
 	if err != nil {
@@ -1522,8 +1488,11 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 			qrank++
 		}
 	}
-	if minDeclared > 0 {
-		state.EffectiveCapacity = minDeclared
+	if floor > 0 {
+		state.EffectiveCapacity = floor
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return state, nil
 }
@@ -1542,7 +1511,7 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 
 	rows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		`SELECT `+holderColumns+`
 		   FROM concurrency_holders WHERE lease_expires_at <= ?`+s.forUpdateSkipLocked(), now,
 	)
 	if err != nil {
@@ -1550,16 +1519,11 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 	}
 	var stale []ConcurrencyHolder
 	for rows.Next() {
-		var h ConcurrencyHolder
-		var claimedNS, expiresNS int64
-		var superInt int
-		if err := rows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
+		h, err := scanHolder(rows)
+		if err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		h.ClaimedAt = time.Unix(0, claimedNS)
-		h.LeaseExpiresAt = time.Unix(0, expiresNS)
-		h.Superseded = superInt == 1
 		stale = append(stale, h)
 	}
 	_ = rows.Close()
@@ -1591,7 +1555,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 
 	rows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		`SELECT `+holderColumns+`
 		   FROM concurrency_holders WHERE key = ? AND superseded = 1`, key,
 	)
 	if err != nil {
@@ -1599,16 +1563,11 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 	}
 	var out []ConcurrencyHolder
 	for rows.Next() {
-		var h ConcurrencyHolder
-		var claimedNS, expiresNS int64
-		var superInt int
-		if err := rows.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt); err != nil {
+		h, err := scanHolder(rows)
+		if err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		h.ClaimedAt = time.Unix(0, claimedNS)
-		h.LeaseExpiresAt = time.Unix(0, expiresNS)
-		h.Superseded = true
 		out = append(out, h)
 	}
 	_ = rows.Close()
@@ -1648,8 +1607,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	// Pass 1: orphan coalesce followers (no live leader holder).
 	orphanRows, err := tx.QueryContext(
 		ctx,
-		`SELECT w.key, w.run_id, w.node_id, w.holder_id, w.arrived_at, w.policy,
-		        w.cache_key_hash, w.leader_run_id, w.leader_node_id, w.cancel_timeout_ns, w.cost, w.declared_capacity
+		`SELECT `+prefixColumns(waiterColumns, "w.")+`
 		   FROM concurrency_waiters w
 		  WHERE w.policy = ?
 		    AND w.leader_run_id <> ''
@@ -1658,8 +1616,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		       WHERE h.key = w.key
 		         AND h.run_id = w.leader_run_id
 		         AND h.node_id = w.leader_node_id
-		         AND h.superseded = 0
-		         AND h.lease_expires_at > ?
+		         AND `+holderLiveSQL("h.")+`
 		    )`+s.forUpdateSkipLocked(),
 		OnLimitCoalesce, nowNS,
 	)
@@ -1683,8 +1640,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	// Pass 2: anything older than maxAge.
 	ageRows, err := tx.QueryContext(
 		ctx,
-		`SELECT key, run_id, node_id, holder_id, arrived_at, policy,
-		        cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity
+		`SELECT `+waiterColumns+`
 		   FROM concurrency_waiters WHERE arrived_at < ?`+s.forUpdateSkipLocked(),
 		cutoff,
 	)
@@ -1712,11 +1668,7 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	}
 
 	for _, w := range dropped {
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-			w.Key, w.RunID, w.NodeID,
-		); err != nil {
+		if _, err := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); err != nil {
 			return nil, err
 		}
 	}
@@ -1724,6 +1676,17 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		return nil, err
 	}
 	return dropped, nil
+}
+
+// prefixColumns prefixes each column in a comma-separated canonical
+// column list with a table alias so the list stays usable in aliased
+// joins without re-spelling it.
+func prefixColumns(cols, alias string) string {
+	parts := strings.Split(cols, ",")
+	for i, p := range parts {
+		parts[i] = alias + strings.TrimSpace(p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // reconcileConcurrencyKeys is the startup recovery sweep; PromoteNext
@@ -1815,6 +1778,24 @@ func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error) {
 	var n int
 	err := s.queryRow(ctx, `SELECT COUNT(*) FROM concurrency_cache`).Scan(&n)
 	return n, err
+}
+
+// holderColumns is the canonical SELECT column list for scanHolder, in
+// the exact order it scans. Centralized so the cost /
+// declared_capacity tail can't drift between call sites.
+const holderColumns = `key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity`
+
+func scanHolder(rs rowScanner) (ConcurrencyHolder, error) {
+	var h ConcurrencyHolder
+	var claimedNS, expiresNS int64
+	var superInt int
+	if err := rs.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt, &h.Cost, &h.DeclaredCapacity); err != nil {
+		return ConcurrencyHolder{}, err
+	}
+	h.ClaimedAt = time.Unix(0, claimedNS)
+	h.LeaseExpiresAt = time.Unix(0, expiresNS)
+	h.Superseded = superInt == 1
+	return h, nil
 }
 
 func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
