@@ -24,10 +24,13 @@ const allowedTools = "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git s
 const findingsSchema = `{"type":"object","additionalProperties":false,"properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string","enum":["blocker","high","medium","low"]},"category":{"type":"string"},"claim":{"type":"string"},"suggestion":{"type":"string"}},"required":["file","severity","claim"]}}},"required":["findings"]}`
 
 type claudeEnvelope struct {
-	IsError   bool   `json:"is_error"`
-	Subtype   string `json:"subtype"`
-	Result    string `json:"result"`
-	SessionID string `json:"session_id"`
+	IsError bool   `json:"is_error"`
+	Subtype string `json:"subtype"`
+	// Result holds the model's text turn -- empty or prose when a schema
+	// is in force, since the conforming output lands in StructuredOutput.
+	Result           string          `json:"result"`
+	StructuredOutput json.RawMessage `json:"structured_output"`
+	SessionID        string          `json:"session_id"`
 }
 
 // review runs one reviewer headless against the diff and returns its
@@ -85,7 +88,7 @@ func review(ctx context.Context, bin, root string, ag agentDef, system, user, se
 		}
 	}
 
-	payload, err := parsePayload(env.Result)
+	payload, err := decodeFindings(env)
 	if err != nil {
 		return nil, fmt.Errorf("decode findings: %v: %s", err, tail(env.Result))
 	}
@@ -98,6 +101,19 @@ func review(ctx context.Context, bin, root string, ag agentDef, system, user, se
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// decodeFindings reads the reviewer's findings from the schema-validated
+// structured_output field, falling back to parsing the text result for
+// older claude builds that don't populate it.
+func decodeFindings(env claudeEnvelope) (agentPayload, error) {
+	if len(env.StructuredOutput) > 0 && string(env.StructuredOutput) != "null" {
+		var p agentPayload
+		if err := json.Unmarshal(env.StructuredOutput, &p); err == nil {
+			return p, nil
+		}
+	}
+	return parsePayload(env.Result)
 }
 
 // parsePayload decodes the reviewer's structured output, tolerating an
