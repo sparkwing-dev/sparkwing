@@ -68,9 +68,10 @@ const (
 	OnLimitCancelOthers = "cancel_others"
 )
 
-// DefaultConcurrencyLease matches DefaultLeaseDuration; a holder must
-// be silent for the full window to be reaped.
-const DefaultConcurrencyLease = 3 * time.Minute
+// DefaultConcurrencyLease is DefaultLeaseDuration by construction so
+// holder and claim leases can't drift apart; a holder must be silent
+// for the full window to be reaped.
+const DefaultConcurrencyLease = DefaultLeaseDuration
 
 // DefaultConcurrencyHeartbeatInterval shares cadence with trigger and
 // run heartbeats so CancelOthers supersedes land within ~3s.
