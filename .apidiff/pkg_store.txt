@@ -108,7 +108,7 @@ type DebugPause struct {
 const DefaultCancelTimeout = 60 * time.Second
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
-const DefaultConcurrencyLease = 3 * time.Minute
+const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultLeaseDuration = 3 * time.Minute
 func DetectDialect(dsn string) Dialect
 type Dialect int
