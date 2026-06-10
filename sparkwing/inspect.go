@@ -17,13 +17,13 @@ type SecretField struct {
 	Name string
 	// GoField, when non-empty, is the Go struct field on Secrets()
 	// that maps to this secret name. Empty for secrets declared
-	// only in pipelines.yaml secrets: list.
+	// only in sparkwing.yaml secrets: list.
 	GoField string
 	// Required reports whether the declaration marked this secret
 	// required. Required secrets fail the run at fail-fast time
 	// when the resolver can't find them.
 	Required bool
-	// DeclaredIn is "pipelines.yaml secrets:" when the secret came
+	// DeclaredIn is "sparkwing.yaml secrets:" when the secret came
 	// from the yaml list, "Secrets() struct" when it came from the
 	// pipeline's typed Secrets struct.
 	DeclaredIn string
@@ -39,7 +39,7 @@ type SecretField struct {
 
 // InspectPipelineSecrets enumerates the pipeline's declared secrets
 // and (when ctx carries a SecretResolver) attempts each one. The
-// returned entries union the pipelines.yaml secrets: list and the
+// returned entries union the sparkwing.yaml secrets: list and the
 // pipeline's Secrets() struct fields, matching the same precedence
 // ResolvePipelineSecrets uses (struct fields can declare required).
 //

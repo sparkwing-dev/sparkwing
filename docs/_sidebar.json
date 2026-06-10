@@ -10,6 +10,7 @@
         "pipelines",
         "config-reference",
         "sdk",
+        "sdk-reference",
         "local-execution",
         "ci-embedded",
         "native-mode"

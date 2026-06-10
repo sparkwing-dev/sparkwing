@@ -61,6 +61,12 @@ code change to unlock.
   reference (top-level keys, pipeline-entry fields, trigger fields) is
   derived from the parser's own structs and can't claim a field that
   doesn't exist. A pre-push gate fails if it drifts.
+- **docs:** `docs/sdk-reference.md` is generated from the `sparkwing`
+  package via go/doc -- every exported function, type, method, and
+  constant with its signature and synopsis. The SDK signature reference
+  is now derived from source (offline-loadable, the same data
+  pkg.go.dev shows) instead of hand-typed in `sdk.md`; a pre-push gate
+  fails if it drifts.
 
 ### Fixed
 

@@ -1,16 +1,17 @@
 # SDK Reference
 
-A curated quick-reference to the `sparkwing` package helpers you call
-from `.sparkwing/jobs/*.go`, plus the SDK-authoring concepts worth
-loading at the start of a task. The complete, always-current API --
-every exported type, signature, and field -- is generated from source
-on pkg.go.dev:
+A curated tour of the `sparkwing` package helpers you call from
+`.sparkwing/jobs/*.go`, plus the SDK-authoring concepts worth loading
+at the start of a task. The **complete** API -- every exported symbol
+with its signature -- is generated from source in
+[sdk-reference.md](sdk-reference.md) (offline:
+`sparkwing docs read --topic sdk-reference`), and browsable with
+cross-links on pkg.go.dev:
+<https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/sparkwing>.
 
-<https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/sparkwing>
-
-When a signature here disagrees with pkg.go.dev, pkg.go.dev wins. For
-the Plan/Work model and the `sparkwing.yaml` shape, see
-[pipelines](pipelines.md).
+When a signature shown here disagrees with the generated reference, the
+generated reference wins. For the Plan/Work model and the
+`sparkwing.yaml` shape, see [pipelines](pipelines.md).
 
 The convention is to import the SDK under the alias `sw`:
 

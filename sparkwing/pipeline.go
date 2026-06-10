@@ -235,7 +235,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 
 // RegisterEntrypoint installs a Go work unit (the entrypoint) under
 // the given type-name, matching the `entrypoint:` field in
-// pipelines.yaml. One entrypoint can back many pipelines -- each
+// sparkwing.yaml. One entrypoint can back many pipelines -- each
 // pipeline in YAML names this entrypoint and supplies its own
 // defaults / dispatch / guards / locked policy.
 //
@@ -272,7 +272,7 @@ func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]
 // BindPipelinesFromYAML walks every pipeline entry in cfg and
 // installs a Registration under the pipeline's name, sharing the
 // Invoke / Schema / Instance of the registered entrypoint. The
-// orchestrator's bootstrap calls this after loading pipelines.yaml
+// orchestrator's bootstrap calls this after loading sparkwing.yaml
 // so `sparkwing run <pipeline-name>` resolves via the standard
 // [Lookup] path.
 //
@@ -375,7 +375,7 @@ func Registered() []string {
 }
 
 // TypeName returns the Go type name of p, suitable for matching against
-// a pipelines.yaml `entrypoint:` field.
+// a sparkwing.yaml `entrypoint:` field.
 func TypeName(p any) string {
 	t := reflect.TypeOf(p)
 	if t == nil {

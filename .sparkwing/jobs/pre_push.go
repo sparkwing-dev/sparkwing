@@ -202,6 +202,18 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "config-reference: current")
 	}
 
+	// 11. Generated SDK reference is current. docs/sdk-reference.md is
+	// rendered from the `sparkwing` package via go/doc; regenerate and
+	// diff so an exported-API change without bin/gen-sdk-docs.sh fails
+	// here instead of shipping a stale reference.
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/sdkref "$ROOT" | diff -u docs/sdk-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "sdk-reference: current")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}

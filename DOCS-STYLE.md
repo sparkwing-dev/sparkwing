@@ -9,7 +9,7 @@ docs don't.
 
 | Layer | Source | Where |
 |---|---|---|
-| **Reference** | generated from code | `docs/cli-reference.md` (command registry), `docs/config-reference.md` (schema structs). Add more; don't hand-maintain reference. |
+| **Reference** | generated from code | `docs/cli-reference.md` (command registry), `docs/config-reference.md` (schema structs), `docs/sdk-reference.md` (the `sparkwing` package via go/doc). Add more; don't hand-maintain reference. |
 | **Executable examples** | compile-checked | every ```` ```go ```` block in `docs/` is compiled against the SDK; every ```` ```yaml ```` `pipelines:` block is parsed by the real config parser. |
 | **Concepts** | hand-written, small | the *why* and the model (execution, profiles, the two-layer DAG, caching). Keep these short. |
 | **Tutorials** | real templates | `sparks-core/templates` + `sparkwing pipeline new`; CI compiles them. Prefer "scaffold this template" over prose steps. |
