@@ -155,12 +155,26 @@ func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
 		t.Fatalf("r2: SupersededIDs = %v, want [r1/n1]", r2.SupersededIDs)
 	}
 
+	// r1 is evicted (superseded); r2, the canceller, takes the slot
+	// immediately (best-effort preemption).
 	state, err := s.GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
 	}
-	if len(state.Holders) != 1 || !state.Holders[0].Superseded {
-		t.Fatalf("holder r1/n1 should be marked superseded: %+v", state.Holders)
+	var r1Superseded, r2Holds bool
+	for _, h := range state.Holders {
+		if h.HolderID == "r1/n1" && h.Superseded {
+			r1Superseded = true
+		}
+		if h.HolderID == "r2/n1" && !h.Superseded {
+			r2Holds = true
+		}
+	}
+	if !r1Superseded {
+		t.Fatalf("r1/n1 should be marked superseded: %+v", state.Holders)
+	}
+	if !r2Holds {
+		t.Fatalf("r2/n1 (canceller) should hold the slot: %+v", state.Holders)
 	}
 }
 

@@ -143,6 +143,12 @@ code change to unlock.
 - **sdk:** A coalesced follower of a *failed* leader now inherits the
   leader's categorized `failure_reason` instead of recording it as
   uncategorized.
+- **sdk:** `CancelOthers` now grants the preempting node the slot
+  immediately and reserves the freed budget, so a later arrival (or a
+  second `CancelOthers`) can no longer steal the slot the canceller
+  evicted others to take. It is documented as best-effort preemption:
+  the canceller may briefly overlap a still-draining victim, so use
+  `Queue` when you need strict mutual exclusion with no overlap.
 
 ## [v0.9.0] - 2026-06-09
 ### Added

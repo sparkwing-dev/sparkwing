@@ -68,14 +68,16 @@ func TestConcurrency_ReacquireSupersededHolderDoesNotCrash(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	// B arrives under CancelOthers and supersedes A (A's row stays, live
-	// lease, superseded=1).
+	// B arrives under CancelOthers, supersedes A (A's row stays, live
+	// lease, superseded=1), and takes the slot.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitCancelOthers,
 	}); r.Kind != store.AcquireCancellingOthers {
 		t.Fatalf("B: want CancellingOthers, got %s", r.Kind)
 	}
+	// B releases, freeing the slot; A's superseded row still lingers.
+	releaseAndPromoteT(t, s, "k", "rB/n")
 	// A's holder_id re-acquires (deterministic runID/nodeID on a
 	// crash/redeliver). The superseded row is still present; the grant
 	// must reclaim it rather than collide.

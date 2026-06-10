@@ -34,9 +34,13 @@ const (
 	Fail OnLimit = "fail"
 	// Skip resolves the node as a no-op without running it.
 	Skip OnLimit = "skip"
-	// CancelOthers evicts running members oldest-first until this node
-	// fits, then runs. Eviction is best-effort: side effects a member
-	// completed before the cancel signal arrived are not rolled back.
+	// CancelOthers is best-effort preemption ("newest wins"): it evicts
+	// running members oldest-first until this node fits, then takes the
+	// slot and runs immediately. Eviction is cooperative -- an evicted
+	// member is signaled to stop and winds down on its own -- so this node
+	// may briefly run alongside a still-draining victim, and side effects a
+	// member completed before the cancel signal are not rolled back. Use
+	// [Queue] when you need strict mutual exclusion with no overlap.
 	CancelOthers OnLimit = "cancel_others"
 )
 
@@ -65,10 +69,10 @@ type ConcurrencyLimit struct {
 	// before failing with failure_reason "queue_timeout". Zero waits
 	// indefinitely. Only meaningful with OnLimit [Queue].
 	QueueTimeout time.Duration
-	// CancelTimeout bounds how long a [CancelOthers] member waits for
-	// evicted holders to release before the slot is force-freed. Zero
-	// uses the backend default. Only meaningful with OnLimit
-	// [CancelOthers].
+	// CancelTimeout bounds how long evicted holders have to cooperatively
+	// release before they are force-released, so a stuck victim can't pin
+	// the budget indefinitely. Zero uses the backend default. Only
+	// meaningful with OnLimit [CancelOthers].
 	CancelTimeout time.Duration
 }
 

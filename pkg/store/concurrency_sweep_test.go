@@ -242,3 +242,40 @@ func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
 		t.Fatalf("--no-cache follower: want Queued (run fresh), got %s", r.Kind)
 	}
 }
+
+// D6: CancelOthers is best-effort preemption -- the canceller takes the
+// slot immediately, so a later arrival can't steal the freed budget, and
+// a second CancelOthers supersedes the canceller rather than degrading to
+// a no-op grant.
+func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
+	s := newStoreT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	// B preempts A and takes the slot immediately.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitCancelOthers,
+	}); r.Kind != store.AcquireCancellingOthers {
+		t.Fatalf("B: want CancellingOthers, got %s", r.Kind)
+	}
+	// A later plain arrival must NOT steal the slot B just took.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rC/n", RunID: "rC", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("C: want Queued (B holds the slot), got %s", r.Kind)
+	}
+	// A second CancelOthers supersedes the canceller B, not a no-op grant.
+	r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rD/n", RunID: "rD", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitCancelOthers,
+	})
+	if r.Kind != store.AcquireCancellingOthers {
+		t.Fatalf("D: want CancellingOthers, got %s", r.Kind)
+	}
+	if len(r.SupersededIDs) != 1 || r.SupersededIDs[0] != "rB/n" {
+		t.Fatalf("D: SupersededIDs = %v, want [rB/n] (must supersede the canceller)", r.SupersededIDs)
+	}
+}

@@ -543,22 +543,29 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 				return AcquireSlotResponse{}, err
 			}
 		}
+		// Grant the canceller the freed budget immediately rather than
+		// parking it as a waiter: eviction already reserved room, and
+		// CancelOthers is best-effort preemption ("take over now"). Holding
+		// the slot keeps a later arrival -- or a second CancelOthers -- from
+		// stealing the budget while the superseded victims cooperatively
+		// drain. The brief overlap with a still-draining victim is inherent
+		// to cooperative cancellation; strict no-overlap is what Queue is
+		// for.
+		expiresNS := now.Add(req.Lease).UnixNano()
 		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO concurrency_waiters
-			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
-			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
-			   holder_id         = excluded.holder_id,
-			   arrived_at        = excluded.arrived_at,
-			   policy            = excluded.policy,
-			   cache_key_hash    = excluded.cache_key_hash,
-			   leader_run_id     = excluded.leader_run_id,
-			   leader_node_id    = excluded.leader_node_id,
-			   cancel_timeout_ns = excluded.cancel_timeout_ns,
+			`INSERT INTO concurrency_holders
+			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+			 ON CONFLICT (key, holder_id) DO UPDATE SET
+			   run_id            = excluded.run_id,
+			   node_id           = excluded.node_id,
+			   claimed_at        = excluded.claimed_at,
+			   lease_expires_at  = excluded.lease_expires_at,
+			   superseded        = 0,
 			   cost              = excluded.cost,
 			   declared_capacity = excluded.declared_capacity`,
-			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCancelOthers, req.CacheKeyHash, int64(req.CancelTimeout), req.Cost, req.Capacity,
+			req.Key, req.HolderID, req.RunID, req.NodeID, nowNS, expiresNS, req.Cost, req.Capacity,
 		); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -567,6 +574,8 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}
 		return AcquireSlotResponse{
 			Kind:             AcquireCancellingOthers,
+			HolderID:         req.HolderID,
+			LeaseExpiresAt:   time.Unix(0, expiresNS),
 			SupersededIDs:    supersededIDs,
 			PreviousCapacity: prevCap,
 			DriftNote:        driftNote,
