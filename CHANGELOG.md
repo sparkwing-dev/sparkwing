@@ -48,6 +48,45 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **sdk:** A concurrency heartbeat that arrives after the lease has
+  already expired no longer revives the holder. Admission may have
+  freed and reassigned that budget once the lease lapsed, so reviving
+  could put two live holders on a capacity-1 group; the stale heartbeat
+  now fails instead.
+- **sdk:** Re-acquiring a superseded-but-unreaped concurrency holder
+  under the same holder id (deterministic `runID/nodeID`, reachable on
+  crash or redeliver) no longer crashes with a `UNIQUE constraint`
+  violation. The grant reclaims the row cleanly.
+- **sdk:** A `Cache` node whose in-flight dedupe leader was *skipped*
+  no longer stamps its coalesced followers `Success` with empty output.
+  Followers now inherit the leader's actual node outcome, so a skipped
+  or failed leader never produces bogus green followers.
+- **sdk:** A parked low-capacity concurrency waiter no longer drags the
+  effective capacity below the already-admitted holders, and no longer
+  blocks a FIFO-head waiter that fits under its own declared capacity.
+  Effective capacity is the minimum over admitted holders plus the
+  arrival, not over non-admitted parked waiters.
+- **sdk:** A `Concurrency` member whose cost exceeds its group capacity
+  is now rejected at Plan time (with a store-side backstop) instead of
+  queuing forever -- it could never be admitted.
+- **sdk:** Cancelling a run whose node is queued or coalesced on a
+  concurrency group now drops the waiter row, so a later release can no
+  longer promote the cancelled node into a phantom holder that pins the
+  budget until reaping. The plan-level wait path is fixed the same way.
+- **sdk:** Scope-qualified concurrency keys are now scheme-tagged
+  (`g:` / `r:` / `b:`) so a `Global` group whose name contains `@`
+  cannot collide with a `Box` or `Run` group of the bare name on that
+  host. `sparkwing cluster concurrency` labels the scope from the tag
+  rather than inferring it from the presence of `@`.
+- **controller:** `--no-cache` (bypass-read) now crosses the HTTP wire,
+  so hosted and cluster runs that ask for fresh execution no longer
+  silently replay a cached result.
+- **controller:** A queued acquire's position, queue length, and
+  current holders now cross the HTTP wire, so the dashboard renders the
+  real queue depth instead of "0 ahead, held by unknown".
+
 ## [v0.9.0] - 2026-06-09
 ### Added
 
