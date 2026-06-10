@@ -131,11 +131,12 @@ var appMapping = []struct {
     {"pkg/",     []string{"api-server", "worker"}},
 }
 
-// Compare against webhook payload (ChangedFiles) or git diff
+// Compare prefixes against rc.Git.ChangedFiles(ctx, base)
 ```
 
-Sources for changed files (in priority order):
+Sources for changed files:
 
-1. `sparkwing.RunContext.Trigger.ChangedFiles` - from webhook payload
-2. `git diff` against a base branch
-3. Explicit `--all` flag to deploy everything
+1. `rc.Git.ChangedFiles(ctx, base)` - repo-relative paths changed
+   between a base ref and HEAD (a git diff; see
+   [sdk-reference.md](sdk-reference.md))
+2. An explicit `--all`-style input on your pipeline to deploy everything

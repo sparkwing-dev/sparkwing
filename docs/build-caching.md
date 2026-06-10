@@ -138,7 +138,7 @@ network is fast (AWS to npm CDN), or the packages aren't in the cache yet
 Always use BuildKit cache mounts for package managers:
 
 ```dockerfile
-# Job
+# Node
 RUN --mount=type=cache,target=/root/.npm npm ci
 
 # Ruby
@@ -180,8 +180,11 @@ RUN if [ -n "$PROXY_URL" ]; then \
     fi && apk add --no-cache git
 ```
 
-The `PROXY_URL` build arg defaults to empty (no proxy). When running in the
-cluster, the controller passes `http://sparkwing-cache.sparkwing.svc.cluster.local:80`.
+`PROXY_URL` is a build arg your pipeline sets -- it is not injected
+automatically. Default it to empty (no proxy) and, for in-cluster builds,
+pass the cache's service URL yourself, e.g.
+`--build-arg PROXY_URL=http://sparkwing-cache.sparkwing.svc.cluster.local`
+when invoking the Docker build from your pipeline.
 
 ### What NOT to optimize (and why)
 
