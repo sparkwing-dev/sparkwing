@@ -11,16 +11,15 @@
 //
 // On-disk shape:
 //
-//	default: laptop
 //	profiles:
 //	  laptop:
 //	    state: { type: sqlite }
 //	    cache: { type: filesystem, path: ~/.cache/sparkwing }
 //	    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
 //	  prod:
-//	    controller: https://api.example.dev
-//	    token: swu_...
-//	    gitcache: https://gitcache.example.dev
+//	    controller:
+//	      url: https://api.example.dev
+//	      token: swu_...
 //	    # state/cache/logs implied by the controller when omitted.
 //
 // Missing optional fields come back as nil specs / empty strings.

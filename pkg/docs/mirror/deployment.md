@@ -39,11 +39,13 @@ Profiles map cluster names to controller URLs. Stored in
 ```yaml
 profiles:
   dev:
-    controller: http://localhost:9001
-    token: <api-token>
+    controller:
+      url: http://localhost:9001
+      token: <api-token>
   prod:
-    controller: https://api.example.com
-    token: <api-token>
+    controller:
+      url: https://api.example.com
+      token: <api-token>
 ```
 
 Register profiles with `sparkwing configure profiles add`.

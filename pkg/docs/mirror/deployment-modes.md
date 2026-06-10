@@ -23,7 +23,8 @@ triple (see [Storage backends](backends.md)) -- and applies uniformly to
 SQLite under `~/.sparkwing/state.db`, with per-run logs under
 `~/.sparkwing/runs/<runID>/`. Zero shared
 infrastructure. This is the default behavior -- the built-in `laptop`
-profile -- when no `--profile` is given and no profile auto-detects.
+profile -- when no `--profile` is given and the project sets no
+`defaults.profile`.
 
 For: a developer working on pipelines on their own laptop.
 
@@ -185,14 +186,15 @@ must survive that box.
 # ~/.config/sparkwing/profiles.yaml
 profiles:
   prod:
-    controller: https://api.example.dev
-    token: swu_xxx
+    controller:
+      url: https://api.example.dev
+      token: swu_xxx
     # state/cache/logs are implied by controller; reads/writes go through it.
 ```
 
-A profile with a `controller:` set routes state, cache, and logs through
-that controller over HTTP; the `token:` authenticates. Register or edit
-profiles with `sparkwing configure profiles`. See
+A profile with a `controller:` block routes state, cache, and logs through
+that controller over HTTP; the nested `token:` authenticates. Register or
+edit profiles with `sparkwing configure profiles`. See
 [Self-hosting](self-hosting.md) for the controller deployment.
 
 ## Forcing local mode for a single run
@@ -206,34 +208,14 @@ against a known-clean local state.
 The flag only affects the one run; subsequent runs without the flag
 resolve a profile normally again.
 
-## Environment auto-detection
+## Selecting a profile
 
-A profile can carry a `detect:` block so the same configuration covers
-laptops, CI, and cluster contexts. When a profile's env condition matches,
-it is auto-selected ahead of the project hint. The built-in `gha` profile
-fires when `GITHUB_ACTIONS=true`; `kubernetes` fires when
-`KUBERNETES_SERVICE_HOST` is set. Declaring a profile of the same name
-overrides it per-field while preserving the built-in detect predicate.
-
-```yaml
-# ~/.config/sparkwing/profiles.yaml
-default: laptop
-profiles:
-  laptop:
-    state: { type: sqlite,     path: ~/.cache/sparkwing/state.db }
-    cache: { type: filesystem, path: ~/.cache/sparkwing }
-    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
-
-  gha:
-    detect: { env_var: GITHUB_ACTIONS, equals: "true" }
-    state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
-    cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
-    logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
-```
-
-A laptop with no `GITHUB_ACTIONS` set falls through to the `default:`
-profile (Mode 1). A GitHub Actions job auto-selects the `gha` profile and
-picks up the shared S3 backends (Mode 2).
+Profile selection is explicit: pass `--profile NAME`, or set
+`defaults.profile` in `.sparkwing/sparkwing.yaml` for the project's
+default. With neither, the built-in `laptop` profile (Mode 1) applies.
+There is no environment-based auto-selection -- a CI job picks its
+profile by passing `--profile` in the run command (see
+[ci-embedded.md](ci-embedded.md)).
 
 ## Choosing a mode
 

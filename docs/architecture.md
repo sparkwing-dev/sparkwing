@@ -261,12 +261,14 @@ Then add a profile pointing at the controller's URL:
 
 ```yaml
 # ~/.config/sparkwing/profiles.yaml
-default: prod
 profiles:
   prod:
-    controller: https://sparkwing.example.com
-    token: <api-token>
+    controller:
+      url: https://sparkwing.example.com
+      token: <api-token>
 ```
 
-The same pipelines run against any sparkwing controller without changes;
+Select it per run with `--profile prod`, or make it the project default
+by setting `defaults.profile: prod` in `.sparkwing/sparkwing.yaml`. The
+same pipelines run against any sparkwing controller without changes;
 only the profile and registries differ.

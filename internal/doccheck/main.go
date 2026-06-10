@@ -50,6 +50,8 @@ func main() {
 	fmt.Println()
 	ok = checkYAMLConfigs(contentDir) && ok
 	fmt.Println()
+	ok = checkProfileConfigs(contentDir) && ok
+	fmt.Println()
 	ok = checkBannedTokens(contentDir, repoRoot) && ok
 	fmt.Println()
 	ok = checkFailureReasons(contentDir, repoRoot) && ok

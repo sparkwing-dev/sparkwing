@@ -11,8 +11,8 @@
 //     via [LayerSurfaces])
 //  2. The resolved profile's state / cache / logs specs
 //
-// A profile may carry a [Detect] predicate so it auto-selects when its
-// environment condition matches.
+// A profile is selected explicitly (--profile NAME) or via the project's
+// defaults.profile; there is no environment-based auto-selection.
 //
 // # Shape (yaml)
 //
@@ -23,9 +23,8 @@
 //	    cache: { type: filesystem, path: ~/.cache/sparkwing }
 //	    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
 //
-//	  gha:
-//	    detect: { env_var: GITHUB_ACTIONS, equals: "true" }
-//	    state: { type: s3, bucket: sparkwing-state, prefix: "${GITHUB_REPOSITORY}/" }
-//	    cache: { type: s3, bucket: sparkwing-cache, prefix: "${GITHUB_REPOSITORY}/" }
-//	    logs:  { type: s3, bucket: sparkwing-logs,  prefix: "${GITHUB_REPOSITORY}/" }
+//	  shared:
+//	    state: { type: s3, bucket: sparkwing-state, prefix: "team/" }
+//	    cache: { type: s3, bucket: sparkwing-cache, prefix: "team/" }
+//	    logs:  { type: s3, bucket: sparkwing-logs,  prefix: "team/" }
 package backends
