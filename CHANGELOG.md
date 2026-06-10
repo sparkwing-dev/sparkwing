@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-06-10
 ### Added
 
 - **cli:** `sparkwing commands -o markdown` renders the entire CLI
