@@ -4,11 +4,18 @@ This is the public sparkwing repo. The companion repo `../sparkwing-platform` is
 
 ## Comments
 
-- Default to none. Add an inline comment only when the *why* is non-obvious -- a hidden constraint, a workaround, surprising behavior. If removing it wouldn't confuse a future reader, don't write it.
-- Don't explain *what* the code does. Names carry that.
-- One short line max for inline comments inside function bodies. No multi-paragraph block comments mid-function.
-- Don't reference the current task, fix, or callers ("added for X flow", "used by Y", "handles case from Z"). Those rot.
-- **Function- and type-level godoc is different -- encouraged.** Document exported APIs properly, including usage examples where they help. The minimalism rule applies to *inline implementation comments*, not godoc.
+This is enforced, not just advised: `internal/commentcheck` runs in the pre-push gate and fails on any disallowed comment the branch adds. Run `go run ./internal/commentcheck .` for a whole-tree audit.
+
+- **Two kinds of comment are allowed, nothing else.** Godoc attached to a top-level declaration (package, func, type, const, var, import) or a struct field / interface method; and a tiny set of *tagged* implementation comments. Free-floating comments, body narration, section dividers, and "what" comments that restate the code are rejected.
+- **The only allowed inline tags**, each forcing you to justify the comment's existence:
+  - `// hack:` -- a deliberate deviation from the obvious/correct approach.
+  - `// safety:` -- an invariant that must hold but isn't visible locally (a lock held, an ordering).
+  - `// bug:` -- a known defect left in on purpose.
+  - `// perf:` -- a non-obvious optimization worth defending.
+  One short line each. Anything you'd reach for `// note:` or `// why:` to write doesn't meet the bar -- delete it or make the code say it.
+- Don't explain *what* the code does. Names carry that. Don't reference the current task, fix, or callers ("added for X flow", "used by Y") -- those rot.
+- **A claim about another package's behavior belongs in a test or a type, never in prose.** "The controller retries three times" rots silently the moment the controller changes; an assertion that retries three times goes red. If you're tempted to write down how code outside your folder behaves, write the assertion instead.
+- **Function- and type-level godoc is different -- encouraged.** Document exported APIs properly, including usage examples where they help. The scarcity rule applies to *inline implementation comments*, not godoc. Compiler directives (`//go:embed`, `//nolint:...`) are always fine.
 
 ## No internal pointers
 

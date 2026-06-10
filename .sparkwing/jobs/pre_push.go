@@ -226,6 +226,21 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "api-reference: current")
 	}
 
+	// 13. Comment policy (internal/commentcheck). The only comments
+	// allowed are godoc on top-level declarations and a tiny tag
+	// allowlist (// hack:/safety:/bug:/perf:); everything else -- body
+	// narration, section dividers, "what" comments -- rots and misleads
+	// readers. Scoped to comments this branch adds vs origin/main so the
+	// pre-existing corpus isn't charged to the current push; run
+	// `go run ./internal/commentcheck .` for a whole-tree audit.
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/commentcheck -base origin/main "$ROOT"`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("comment-policy: %v", err))
+	} else {
+		sparkwing.Info(ctx, "comment-policy: no disallowed comments added")
+	}
+
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
