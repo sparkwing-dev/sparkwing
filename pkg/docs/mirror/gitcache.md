@@ -18,7 +18,7 @@ the cache's bare repos would drift from upstream.
                           │ fetch (background, every 30s)
                    ┌──────▼──────┐
  sparkwing CLI ────────►│   cache     │◄──── runner (clone + pkg proxy)
- (upload tarball)  │  (read-only │
+ (eager refresh)   │  (read-only │
                    │   + blobs   │
                    │   + proxy)  │
                    └─────────────┘
@@ -103,21 +103,25 @@ This keeps repos fresh so that:
 - Runner clones see recent commits without cold-start fetches
 - Ancestor negotiation for incremental uploads succeeds more often
 
-## Code Uploads
+## Code delivery on remote triggers
 
-When you `sparkwing pipeline trigger <pipeline> --profile prod` with a dirty
-or unpushed working tree, the sparkwing CLI uploads a code tarball directly to
-the cache (not through the controller); a clean tree triggers by SHA instead:
+`sparkwing pipeline trigger <pipeline> --profile prod` triggers by commit
+SHA: the CLI sends the branch + SHA to the controller, and the runner
+clones that SHA from the cache. To close the
+`git push && sparkwing pipeline trigger` race -- where the cache hasn't yet
+mirrored the just-pushed commit -- the CLI fires a best-effort eager
+refresh of the repo (`POST /git/refresh`) before returning; the runner
+also retries on a stale SHA.
 
 ```
-sparkwing CLI -> cache /upload (stores tarball, returns ref ID)
-sparkwing CLI -> controller /trigger (job with upload_ref)
-runner   -> cache /uploads/<ref> (downloads tarball)
+sparkwing CLI -> controller /api/v1/triggers (branch + SHA)
+sparkwing CLI -> cache POST /git/refresh    (eager mirror of the pushed SHA)
+runner        -> cache /git/<name>          (clone at SHA)
 ```
 
-For incremental uploads, sparkwing run first negotiates a common ancestor with
-the cache (`/sync/negotiate`), then sends only the changed files since
-that commit.
+The cache also exposes tarball-upload and ancestor-negotiation endpoints
+(`/upload`, `/uploads/<id>`, `/sync/negotiate`) for code-sync flows; see
+the API table below.
 
 ## GitOps Deployment Flow
 
@@ -157,6 +161,7 @@ the ingress sets.
 | GET | `/git/<name>/info/refs?service=git-upload-pack` | Clone/fetch discovery |
 | POST | `/git/<name>/git-upload-pack` | Clone/fetch data |
 | POST | `/git/<name>/git-receive-pack` | **Returns 403** (read-only) |
+| POST | `/git/refresh?name=X` (or `?repo=Y`) | Synchronous fetch of one bare repo (eager refresh) |
 
 ### Archives & Files
 
@@ -230,4 +235,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `/data/archives/` | Cached repo tarballs |
 | `/data/uploads/` | Uploaded code tarballs |
 | `/data/artifacts/` | Job output artifacts |
+| `/data/bins/` | Compiled pipeline binary cache |
+| `/data/cache/` | Dependency-archive cache (gems, node_modules, etc.) |
+| `/data/proxy/` | Package-registry proxy cache (npm, PyPI, Go, etc.) |
 | `/data/repo-names.json` | Friendly name → URL registry |
