@@ -1,10 +1,14 @@
 # Concurrency participant lifecycle as one state machine (proposal)
 
-**Status:** proposed, not implemented. Follow-up to the invariant
-hardening pass that collapsed the store's duplicated guards into named
-helpers (`holderLiveSQL`, `txConcurrencyAccounting`, `txInsertHolder`,
-`txReleaseHolder`, `txCacheLookup`) and added transaction-boundary
-invariant checks plus a randomized property suite.
+**Status:** transition verbs implemented; full re-sequencing of the
+acquire switch deliberately deferred. Each lifecycle edge now has one
+writer -- `txInsertHolder` (admit), `txPark` (wait), `txSupersede`
+(evict), `txDeleteHolder`/`txDeleteWaiter` (reap), `txReleaseHolder`
+(release), `txDrainCoalesceFollowers` (resolve) -- enforced by the
+source-guard tests, and every budget-mutating path serializes on the
+key's entries row. The acquire entry point still selects among the
+verbs with its eight-way policy switch; collapsing that selection
+further remains future work, guarded by the property suite.
 
 ## The remaining structural gap
 

@@ -471,23 +471,12 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		if err != nil {
 			return AcquireSlotResponse{}, fmt.Errorf("coalesce: select leader: %w", err)
 		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_waiters
-			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
-			   holder_id         = excluded.holder_id,
-			   arrived_at        = excluded.arrived_at,
-			   policy            = excluded.policy,
-			   cache_key_hash    = excluded.cache_key_hash,
-			   leader_run_id     = excluded.leader_run_id,
-			   leader_node_id    = excluded.leader_node_id,
-			   cancel_timeout_ns = excluded.cancel_timeout_ns,
-			   cost              = excluded.cost,
-			   declared_capacity = excluded.declared_capacity`,
-			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitCoalesce, req.CacheKeyHash, leaderRun, leaderNode, req.Cost, req.Capacity,
-		); err != nil {
+		if err := txPark(ctx, tx, ConcurrencyWaiter{
+			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
+			Policy: OnLimitCoalesce, CacheKeyHash: req.CacheKeyHash,
+			LeaderRunID: leaderRun, LeaderNodeID: leaderNode,
+			Cost: req.Cost, DeclaredCapacity: req.Capacity,
+		}, nowNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
@@ -515,11 +504,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			freed += h.Cost
 		}
 		for _, hid := range supersededIDs {
-			if _, err := tx.ExecContext(
-				ctx,
-				`UPDATE concurrency_holders SET superseded = 1 WHERE key = ? AND holder_id = ?`,
-				req.Key, hid,
-			); err != nil {
+			if err := txSupersede(ctx, tx, req.Key, hid); err != nil {
 				return AcquireSlotResponse{}, err
 			}
 		}
@@ -553,23 +538,11 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	case OnLimitQueue:
 		fallthrough
 	default:
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_waiters
-			   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0, ?, ?)
-			 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
-			   holder_id         = excluded.holder_id,
-			   arrived_at        = excluded.arrived_at,
-			   policy            = excluded.policy,
-			   cache_key_hash    = excluded.cache_key_hash,
-			   leader_run_id     = excluded.leader_run_id,
-			   leader_node_id    = excluded.leader_node_id,
-			   cancel_timeout_ns = excluded.cancel_timeout_ns,
-			   cost              = excluded.cost,
-			   declared_capacity = excluded.declared_capacity`,
-			req.Key, req.RunID, req.NodeID, req.HolderID, nowNS, OnLimitQueue, req.CacheKeyHash, req.Cost, req.Capacity,
-		); err != nil {
+		if err := txPark(ctx, tx, ConcurrencyWaiter{
+			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
+			Policy: OnLimitQueue, CacheKeyHash: req.CacheKeyHash,
+			Cost: req.Cost, DeclaredCapacity: req.Capacity,
+		}, nowNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		// Observability: this arrival's rank among queue waiters, the
@@ -1087,11 +1060,7 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, o
 		return false, "", "", err
 	}
 
-	if _, err := tx.ExecContext(
-		ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
-		key, holderID,
-	); err != nil {
+	if err := txDeleteHolder(ctx, tx, key, holderID); err != nil {
 		return false, "", "", err
 	}
 
@@ -1287,6 +1256,59 @@ func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID
 		}
 	}
 	return out, nil
+}
+
+// txPark parks an arrival as a waiter -- the single site that writes
+// into concurrency_waiters. Re-parking the same (key, run, node) is an
+// upsert, so a re-arrival after crash or redelivery refreshes its row
+// instead of erroring; its arrival order deliberately resets (the
+// re-arrival is a new wait).
+func txPark(ctx context.Context, tx *storeTx, w ConcurrencyWaiter, arrivedNS int64) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO concurrency_waiters
+		   (key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (key, run_id, node_id) DO UPDATE SET
+		   holder_id         = excluded.holder_id,
+		   arrived_at        = excluded.arrived_at,
+		   policy            = excluded.policy,
+		   cache_key_hash    = excluded.cache_key_hash,
+		   leader_run_id     = excluded.leader_run_id,
+		   leader_node_id    = excluded.leader_node_id,
+		   cancel_timeout_ns = excluded.cancel_timeout_ns,
+		   cost              = excluded.cost,
+		   declared_capacity = excluded.declared_capacity`,
+		w.Key, w.RunID, w.NodeID, w.HolderID, arrivedNS, w.Policy, w.CacheKeyHash,
+		w.LeaderRunID, w.LeaderNodeID, int64(w.CancelTimeout), w.Cost, w.DeclaredCapacity,
+	)
+	return err
+}
+
+// txSupersede marks a holder evicted by a CancelOthers arrival -- the
+// single site that flips superseded. The row keeps its budget weight
+// out of the accounting from this point; the victim drains
+// cooperatively and the row is reclaimed or reaped later.
+func txSupersede(ctx context.Context, tx *storeTx, key, holderID string) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE concurrency_holders SET superseded = 1 WHERE key = ? AND holder_id = ?`,
+		key, holderID,
+	)
+	return err
+}
+
+// txDeleteHolder removes one holder row by its primary key -- the
+// single by-id DELETE site for concurrency_holders (release and the
+// reap sweeps). CancelWaiter reclaims by participant instead, the one
+// other holder-delete site.
+func txDeleteHolder(ctx context.Context, tx *storeTx, key, holderID string) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		key, holderID,
+	)
+	return err
 }
 
 // txDeleteWaiter removes one waiter row by its primary key -- the
@@ -1693,10 +1715,7 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 		return nil, err
 	}
 	for _, h := range stale {
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`, h.Key, h.HolderID,
-		); err != nil {
+		if err := txDeleteHolder(ctx, tx, h.Key, h.HolderID); err != nil {
 			return nil, err
 		}
 	}
@@ -1747,11 +1766,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 		return nil, err
 	}
 	for _, h := range out {
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
-			h.Key, h.HolderID,
-		); err != nil {
+		if err := txDeleteHolder(ctx, tx, h.Key, h.HolderID); err != nil {
 			return nil, err
 		}
 	}
