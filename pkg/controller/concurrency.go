@@ -272,17 +272,18 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 }
 
 type resolveWaiterResp struct {
-	Status             string            `json:"status"`
-	HolderID           string            `json:"holder_id,omitempty"`
-	HolderLeaseExpires time.Time         `json:"holder_lease_expires,omitempty"`
-	OutputRef          string            `json:"output_ref,omitempty"`
-	OriginRunID        string            `json:"origin_run_id,omitempty"`
-	OriginNodeID       string            `json:"origin_node_id,omitempty"`
-	LeaderRunID        string            `json:"leader_run_id,omitempty"`
-	LeaderNodeID       string            `json:"leader_node_id,omitempty"`
-	LeaderOutcome      string            `json:"leader_outcome,omitempty"`
-	Position           int               `json:"position,omitempty"`
-	Holders            []stateHolderResp `json:"holders,omitempty"`
+	Status              string            `json:"status"`
+	HolderID            string            `json:"holder_id,omitempty"`
+	HolderLeaseExpires  time.Time         `json:"holder_lease_expires,omitempty"`
+	OutputRef           string            `json:"output_ref,omitempty"`
+	OriginRunID         string            `json:"origin_run_id,omitempty"`
+	OriginNodeID        string            `json:"origin_node_id,omitempty"`
+	LeaderRunID         string            `json:"leader_run_id,omitempty"`
+	LeaderNodeID        string            `json:"leader_node_id,omitempty"`
+	LeaderOutcome       string            `json:"leader_outcome,omitempty"`
+	LeaderFailureReason string            `json:"leader_failure_reason,omitempty"`
+	Position            int               `json:"position,omitempty"`
+	Holders             []stateHolderResp `json:"holders,omitempty"`
 }
 
 // handleResolveWaiter is the polling read a waiting in-pod orchestrator
@@ -308,16 +309,17 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := resolveWaiterResp{
-		Status:             string(res.Status),
-		HolderID:           res.HolderID,
-		HolderLeaseExpires: res.HolderLeaseExpires,
-		OutputRef:          res.OutputRef,
-		OriginRunID:        res.OriginRunID,
-		OriginNodeID:       res.OriginNodeID,
-		LeaderRunID:        res.LeaderRunID,
-		LeaderNodeID:       res.LeaderNodeID,
-		LeaderOutcome:      res.LeaderOutcome,
-		Position:           res.Position,
+		Status:              string(res.Status),
+		HolderID:            res.HolderID,
+		HolderLeaseExpires:  res.HolderLeaseExpires,
+		OutputRef:           res.OutputRef,
+		OriginRunID:         res.OriginRunID,
+		OriginNodeID:        res.OriginNodeID,
+		LeaderRunID:         res.LeaderRunID,
+		LeaderNodeID:        res.LeaderNodeID,
+		LeaderOutcome:       res.LeaderOutcome,
+		LeaderFailureReason: res.LeaderFailureReason,
+		Position:            res.Position,
 	}
 	for _, h := range res.Holders {
 		out.Holders = append(out.Holders, stateHolderResp{

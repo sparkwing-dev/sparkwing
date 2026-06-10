@@ -673,7 +673,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		case store.WaiterCached:
 			return r.applyCacheHit(ctx, req, cp, res.OutputRef, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:
-			return r.inheritLeaderOutcome(ctx, req, cp, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome)
+			return r.inheritLeaderOutcome(ctx, req, cp, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome, res.LeaderFailureReason)
 		case store.WaiterCancelled:
 			err := fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", cp.key)
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_cancelled", nil)
@@ -729,7 +729,7 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 // caches), so the follower must inherit the leader's actual node
 // outcome -- a Skipped or Failed leader must not stamp the follower
 // Success with empty output.
-func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome string) runner.Result {
+func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
 	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
@@ -746,7 +746,11 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "coalesced", payload)
 
 	outcome := followerOutcomeFromLeader(leaderOutcome)
-	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output)
+	if outcome == sparkwing.Failed {
+		_ = r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(), string(outcome), "", output, leaderFailureReason, nil)
+	} else {
+		_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output)
+	}
 
 	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))

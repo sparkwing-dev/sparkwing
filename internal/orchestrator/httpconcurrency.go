@@ -97,16 +97,17 @@ func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID,
 		return store.WaiterResolution{}, err
 	}
 	res := store.WaiterResolution{
-		Status:             store.WaiterStatus(resp.Status),
-		HolderID:           resp.HolderID,
-		HolderLeaseExpires: resp.HolderLeaseExpires,
-		OutputRef:          resp.OutputRef,
-		OriginRunID:        resp.OriginRunID,
-		OriginNodeID:       resp.OriginNodeID,
-		LeaderRunID:        resp.LeaderRunID,
-		LeaderNodeID:       resp.LeaderNodeID,
-		LeaderOutcome:      resp.LeaderOutcome,
-		Position:           resp.Position,
+		Status:              store.WaiterStatus(resp.Status),
+		HolderID:            resp.HolderID,
+		HolderLeaseExpires:  resp.HolderLeaseExpires,
+		OutputRef:           resp.OutputRef,
+		OriginRunID:         resp.OriginRunID,
+		OriginNodeID:        resp.OriginNodeID,
+		LeaderRunID:         resp.LeaderRunID,
+		LeaderNodeID:        resp.LeaderNodeID,
+		LeaderOutcome:       resp.LeaderOutcome,
+		LeaderFailureReason: resp.LeaderFailureReason,
+		Position:            resp.Position,
 	}
 	for _, hd := range resp.Holders {
 		res.Holders = append(res.Holders, store.ConcurrencyHolder{

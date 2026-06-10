@@ -158,17 +158,18 @@ type WaiterHolder struct {
 
 // WaiterResolution mirrors the controller's resolveWaiterResp.
 type WaiterResolution struct {
-	Status             string         `json:"status"`
-	HolderID           string         `json:"holder_id,omitempty"`
-	HolderLeaseExpires time.Time      `json:"holder_lease_expires,omitempty"`
-	OutputRef          string         `json:"output_ref,omitempty"`
-	OriginRunID        string         `json:"origin_run_id,omitempty"`
-	OriginNodeID       string         `json:"origin_node_id,omitempty"`
-	LeaderRunID        string         `json:"leader_run_id,omitempty"`
-	LeaderNodeID       string         `json:"leader_node_id,omitempty"`
-	LeaderOutcome      string         `json:"leader_outcome,omitempty"`
-	Position           int            `json:"position,omitempty"`
-	Holders            []WaiterHolder `json:"holders,omitempty"`
+	Status              string         `json:"status"`
+	HolderID            string         `json:"holder_id,omitempty"`
+	HolderLeaseExpires  time.Time      `json:"holder_lease_expires,omitempty"`
+	OutputRef           string         `json:"output_ref,omitempty"`
+	OriginRunID         string         `json:"origin_run_id,omitempty"`
+	OriginNodeID        string         `json:"origin_node_id,omitempty"`
+	LeaderRunID         string         `json:"leader_run_id,omitempty"`
+	LeaderNodeID        string         `json:"leader_node_id,omitempty"`
+	LeaderOutcome       string         `json:"leader_outcome,omitempty"`
+	LeaderFailureReason string         `json:"leader_failure_reason,omitempty"`
+	Position            int            `json:"position,omitempty"`
+	Holders             []WaiterHolder `json:"holders,omitempty"`
 }
 
 // ResolveWaiter polls the controller for a parked waiter's resolution

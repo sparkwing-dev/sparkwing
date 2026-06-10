@@ -1216,6 +1216,10 @@ type WaiterResolution struct {
 	// actual node result (a Skipped/Failed leader must not stamp the
 	// follower Success). Empty when the leader row is gone.
 	LeaderOutcome string
+	// LeaderFailureReason is the leader's categorized failure reason,
+	// carried alongside a Failed LeaderOutcome so the follower records the
+	// same reason rather than uncategorized.
+	LeaderFailureReason string
 
 	// Position and Holders are populated on WaiterStillWaiting (queue
 	// policy) so a poller can refresh its "N ahead, held by X" display
@@ -1336,12 +1340,12 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	// (only a successful release caches); carry its terminal outcome so
 	// the follower doesn't go green for work that was skipped or failed.
 	if leaderRunID != "" {
-		var leaderOutcome string
+		var leaderOutcome, leaderReason string
 		err := tx.QueryRowContext(
 			ctx,
-			`SELECT outcome FROM nodes WHERE run_id = ? AND node_id = ?`,
+			`SELECT outcome, failure_reason FROM nodes WHERE run_id = ? AND node_id = ?`,
 			leaderRunID, leaderNodeID,
-		).Scan(&leaderOutcome)
+		).Scan(&leaderOutcome, &leaderReason)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return WaiterResolution{}, err
 		}
@@ -1349,10 +1353,11 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
-			Status:        WaiterLeaderFinished,
-			LeaderRunID:   leaderRunID,
-			LeaderNodeID:  leaderNodeID,
-			LeaderOutcome: leaderOutcome,
+			Status:              WaiterLeaderFinished,
+			LeaderRunID:         leaderRunID,
+			LeaderNodeID:        leaderNodeID,
+			LeaderOutcome:       leaderOutcome,
+			LeaderFailureReason: leaderReason,
 		}, nil
 	}
 
