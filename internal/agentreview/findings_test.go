@@ -103,6 +103,19 @@ func TestReport_GroupsAndMarksSeverity(t *testing.T) {
 	}
 }
 
+func TestSanitizeKey_MakesBranchPathSafe(t *testing.T) {
+	cases := map[string]string{
+		"main":               "main",
+		"feature/agent-gate": "feature-agent-gate",
+		"fix/ISS_42.thing":   "fix-ISS_42.thing",
+	}
+	for in, want := range cases {
+		if got := sanitizeKey(in); got != want {
+			t.Errorf("sanitizeKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestAgents_PersonasAndRulesResolve(t *testing.T) {
 	if len(agents) != 10 {
 		t.Errorf("expected 10 reviewers, got %d", len(agents))

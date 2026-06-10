@@ -4,10 +4,11 @@
 // finding at medium severity or above.
 //
 // Each reviewer keeps a resumable session under
-// .claude-scratch/agent-review/sessions/, so a re-run after addressing
-// feedback resumes the reviewer with memory of what it asked for rather
-// than starting cold. Pass --restart to wipe those sessions and review
-// fresh. The full finding set is written to
+// .claude-scratch/agent-review/sessions/<push-key>/, keyed by branch and
+// fork point so re-runs of the same push resume the reviewer with memory
+// of what it asked for, while a new push (one whose fork point has moved)
+// starts fresh on its own. Pass --restart to force a fresh review of the
+// current push. The full finding set is written to
 // .claude-scratch/agent-review/findings.json on every run.
 //
 // Usage:
@@ -65,16 +66,24 @@ func main() {
 	}
 
 	bucketDir := filepath.Join(abs, ".claude-scratch", "agent-review")
-	sessionsDir := filepath.Join(bucketDir, "sessions")
+	key := sessionKey(ctx, abs, *base)
+	sessionsDir := filepath.Join(bucketDir, "sessions", key)
+	resuming := !*restartFlag && hasSessions(sessionsDir)
 	if *restartFlag {
 		_ = os.RemoveAll(sessionsDir)
 		_ = os.Remove(filepath.Join(bucketDir, "findings.json"))
-		fmt.Println("agent-review: restarted — reviewing fresh")
 	}
 
 	user := userPrompt(*base, files, diff)
 
-	fmt.Printf("agent-review: %d reviewers over %d changed file(s)\n", len(agents), strings.Count(strings.TrimSpace(files), "\n")+1)
+	mode := "fresh review"
+	if resuming {
+		mode = "resuming this push"
+	} else if *restartFlag {
+		mode = "restarted — fresh review"
+	}
+	fmt.Printf("agent-review: %d reviewers over %d changed file(s) [push %s, %s]\n",
+		len(agents), strings.Count(strings.TrimSpace(files), "\n")+1, key, mode)
 
 	var (
 		mu     sync.Mutex
@@ -161,6 +170,51 @@ Apply your mandate. Read surrounding code with Read/Grep when you need context �
 Severity discipline: medium, high, and blocker FAIL the push, so reserve them for real problems you are confident about. Use low for nits, style, and optional improvements. When unsure, prefer low or say nothing.
 
 If you are resuming a prior review of this branch, recall what you flagged before: re-report only findings that the current diff has not addressed, and drop the ones that were fixed.`, base, files, diff, truncated)
+}
+
+// sessionKey identifies one logical push so reviewer sessions resume
+// across iterations of the same work but start fresh for a new push. The
+// key is the branch plus the fork point (the merge-base with base): adding
+// fix commits leaves the fork point unchanged (same push, resume), while a
+// landed push that advances base moves the fork point (new push, fresh).
+func sessionKey(ctx context.Context, root, base string) string {
+	branch := strings.TrimSpace(mustGit(ctx, root, "rev-parse", "--abbrev-ref", "HEAD"))
+	if branch == "" {
+		branch = "HEAD"
+	}
+	fork, err := git(ctx, root, "merge-base", base, "HEAD")
+	if err != nil {
+		fork = mustGit(ctx, root, "rev-parse", "HEAD")
+	}
+	fork = strings.TrimSpace(fork)
+	if len(fork) > 12 {
+		fork = fork[:12]
+	}
+	if fork == "" {
+		fork = "nofork"
+	}
+	return sanitizeKey(branch) + "-" + fork
+}
+
+func sanitizeKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, s)
+}
+
+func hasSessions(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) > 0
+}
+
+func mustGit(ctx context.Context, root string, args ...string) string {
+	out, _ := git(ctx, root, args...)
+	return out
 }
 
 func pushedDiff(ctx context.Context, root, base string) (files, diff string, err error) {
