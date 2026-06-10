@@ -25,6 +25,13 @@ dirty → warming → clean → in-use → clean (returned)
 
 Key design: when a job finishes, the PVC goes back to `clean` (not `dirty`). The Docker cache is still valid. Periodic age-based re-warming handles staleness.
 
+## Enabling the pool
+
+The pool is **off by default**. Start sparkwing-controller with `--pool`
+(which also requires `--pool-namespace`, or `POD_NAMESPACE`) to enable it.
+With the pool disabled, the `/api/v1/pool` routes 404 and builds run
+without warm caches.
+
 ## Pool Management
 
 Pool management runs inside sparkwing-controller in the sparkwing namespace.
@@ -49,19 +56,26 @@ Pool management runs inside sparkwing-controller in the sparkwing namespace.
 - On success: marks PVC `clean`, updates `warmed-at`
 - On failure: marks PVC `dirty` for retry
 
-### HTTP endpoints (port 8090)
+### HTTP endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `POST /checkout?job_id=<id>` | Checkout | Atomically claim a `clean` PVC for a job |
-| `POST /return?pvc=<name>` | Return | Release PVC back to `clean` state |
-| `POST /heartbeat?pvc=<name>&job_id=<id>` | Heartbeat | Keep PVC alive (every 5s) |
-| `GET /pool` | Status | Full pool state with all PVCs |
-| `GET /health` | Health | Liveness check |
+The controller serves the pool API under `/api/v1/pool` on its own bind
+address (`--addr`, default `127.0.0.1:4344`), and only when the pool is
+enabled (see [Enabling the pool](#enabling-the-pool)); otherwise these
+routes return 404. Each returns 503 until the warming/reconcile loops
+report ready.
+
+| Endpoint | Method | Scope | Description |
+|----------|--------|-------|-------------|
+| `GET /api/v1/pool` | List | `runs.read` | Full pool state with all PVCs |
+| `POST /api/v1/pool/checkout?job_id=<id>` | Checkout | `admin` | Atomically claim a `clean` PVC for a job (409 when none free) |
+| `POST /api/v1/pool/return?pvc=<name>` | Return | `admin` | Release a PVC back to `clean` |
+| `POST /api/v1/pool/heartbeat?pvc=<name>&job_id=<id>` | Heartbeat | `admin` | Renew the checkout lease |
 
 ### Configuration
 
-The controller reads pool config from a ConfigMap (`sparkwing-cache-config`), reloaded every reconciliation cycle:
+The controller reads pool config from the `config.yaml` key of a
+ConfigMap named `sparkwing-cache-config`, reloaded every reconciliation
+cycle. The YAML below is the value stored under `data.config.yaml`:
 
 ```yaml
 # Images to pre-pull into each pool PVC
@@ -89,31 +103,23 @@ startup_grace: 2m       # Grace period before first heartbeat expected
 | `sparkwing.dev/checked-out-at` | When checkout happened |
 | `sparkwing.dev/heartbeat-at` | Last heartbeat timestamp |
 
-## Dispatcher PVC usage
+## Consuming a warm PVC
 
-When the dispatcher creates a one-shot k8s Job, it checks out a warm PVC:
+A consumer claims a PVC through the checkout API for the duration of a
+build:
 
-1. Dispatcher calls the internal pool checkout for the job
-2. If a PVC is available: the dispatcher creates a DinD **sidecar** on the runner pod, mounting the warm PVC
-3. If no PVC available: the runner uses the **shared** DinD service instead
+1. `POST /api/v1/pool/checkout?job_id=<id>` returns a `clean` PVC's name,
+   or 409 when none is free.
+2. The build mounts that PVC as its Docker layer cache and renews the
+   lease via `POST /api/v1/pool/heartbeat` so the reconcile loop doesn't
+   reclaim it mid-build.
+3. On completion the consumer calls `POST /api/v1/pool/return`; the PVC
+   goes back to `clean` (cache preserved) regardless of build outcome.
 
-```
-PVC available:
-  Runner pod -> DinD sidecar (tcp://localhost:2375) -> warm PVC at /var/lib/docker
-
-No PVC:
-  Runner pod -> shared DinD service (tcp://dind.sparkwing.svc.cluster.local:2375)
-```
-
-The dispatcher heartbeats the PVC every 5 seconds while the job runs, and returns it on completion (success or failure - the cache is preserved either way).
-
-## Graceful degradation
-
-The warm pool is optional. If all PVCs are in use:
-
-- The dispatcher falls back to shared DinD
-- Jobs still run, just without warm Docker caches
-- No jobs are lost or delayed
+The pod spec that mounts the claimed PVC and wires the Docker daemon is
+part of the cluster deployment (the Helm chart ships separately from this
+repo), not the CLI. The pool is optional: a 409 on checkout means the
+build runs without a warm cache rather than failing.
 
 ## Metrics
 
@@ -126,22 +132,19 @@ The warm pool is optional. If all PVCs are in use:
 
 ## Monitoring
 
-Check pool status:
+Check pool status against the controller's bind address:
 
 ```bash
-curl http://sparkwing-controller:8080/pool
+curl http://127.0.0.1:4344/api/v1/pool
 ```
 
 ```json
 {
-  "total": 2,
-  "clean": 1,
-  "in_use": 1,
-  "dirty": 0,
-  "warming": 0,
+  "pool_size": 2,
+  "pvc_size": "20Gi",
   "pvcs": [
     {"name": "sparkwing-cache-pool-0", "state": "clean", "warmed_at": "2026-04-12T14:30:00Z"},
-    {"name": "sparkwing-cache-pool-1", "state": "in-use", "checked_out_by": "job-abc123"}
+    {"name": "sparkwing-cache-pool-1", "state": "in-use", "checked_out_by": "job-abc123", "checked_out_at": "2026-04-12T14:35:00Z"}
   ]
 }
 ```
