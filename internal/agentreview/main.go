@@ -70,7 +70,7 @@ func main() {
 		fail("compute diff: %v", err)
 	}
 	if strings.TrimSpace(files) == "" {
-		fmt.Println("agent-review: no changes vs", *base, "— nothing to review")
+		fmt.Println("agent-review: no changes vs", *base, "-- nothing to review")
 		return
 	}
 
@@ -89,7 +89,7 @@ func main() {
 	if resuming {
 		mode = "resuming this push"
 	} else if *restartFlag {
-		mode = "restarted — fresh review"
+		mode = "restarted -- fresh review"
 	}
 	fmt.Printf("agent-review: %d reviewers over %d changed file(s) [push %s, %s]\n",
 		len(roster), strings.Count(strings.TrimSpace(files), "\n")+1, key, mode)
@@ -164,7 +164,7 @@ func userPrompt(base, files, diff string) string {
 	truncated := ""
 	if len(diff) > maxDiffBytes {
 		diff = diff[:maxDiffBytes]
-		truncated = "\n\n[diff truncated — use Read/git to inspect the rest of the changed files listed above]"
+		truncated = "\n\n[diff truncated -- use Read/git to inspect the rest of the changed files listed above]"
 	}
 	return fmt.Sprintf(`Review the changes about to be pushed: the diff of %s...HEAD.
 
@@ -174,7 +174,7 @@ Changed files:
 Unified diff:
 %s%s
 
-Apply your mandate. Read surrounding code with Read/Grep when you need context — the diff alone can mislead. Report every issue through the structured findings schema; return an empty findings array if the change is clean.
+Apply your mandate. Read surrounding code with Read/Grep when you need context -- the diff alone can mislead. Report every issue through the structured findings schema; return an empty findings array if the change is clean.
 
 Severity discipline: medium, high, and blocker FAIL the push, so reserve them for real problems you are confident about. Use low for nits, style, and optional improvements. When unsure, prefer low or say nothing.
 

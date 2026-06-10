@@ -109,7 +109,7 @@ func report(fs []Finding) string {
 		if f.Line > 0 {
 			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 		}
-		fmt.Fprintf(&b, "  [%s] %s — %s\n", f.Severity, loc, f.Claim)
+		fmt.Fprintf(&b, "  [%s] %s -- %s\n", f.Severity, loc, f.Claim)
 		if f.Suggestion != "" {
 			fmt.Fprintf(&b, "          ↳ %s\n", f.Suggestion)
 		}

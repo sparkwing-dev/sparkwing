@@ -57,5 +57,5 @@ Point your browser at `http://127.0.0.1:4343`. Both runs stream live; when they 
 
 ## What lives in the controller instead
 
-Cluster mode. The controller dispatches Kubernetes Jobs, ingests GitHub webhooks, and tracks team-wide history — none of which applies when you iterate on your own laptop.
+Cluster mode. The controller dispatches Kubernetes Jobs, ingests GitHub webhooks, and tracks team-wide history -- none of which applies when you iterate on your own laptop.
 
