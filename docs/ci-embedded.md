@@ -42,9 +42,10 @@ jobs:
 ```
 
 State, cache, and logs destinations come from the resolved profile in
-`~/.config/sparkwing/profiles.yaml`. The built-in `gha` profile
-auto-selects when `GITHUB_ACTIONS=true`. See
-[storage backends](backends) for the configuration shape.
+`~/.config/sparkwing/profiles.yaml`. Select one with `--profile NAME`
+(or set `defaults.profile` in `.sparkwing/sparkwing.yaml`); there is no
+environment-based auto-selection. See
+[storage backends](backends.md) for the configuration shape.
 
 A pipeline node that fails fails the GHA job (exit code propagates).
 
@@ -53,8 +54,8 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 1. `--sw-mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
    via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
 2. The orchestrator resolves state, cache, and logs from the active
-   profile. In GHA the built-in `gha` profile auto-detects and selects
-   (e.g.) S3.
+   profile (selected by `--profile` or `defaults.profile`) -- e.g. an
+   S3-backed profile.
 3. SQLite handles fast lifecycle writes; state goes to the profile's
    configured state backend.
 4. Per-node log lines route to the resolved `Logs` backend instead
@@ -70,10 +71,10 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | ---- | ------- | ----------- |
 | `--sw-mode=ci-embedded` | (off) | Enables this mode. |
 | `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. GHA hosted runners are 2-CPU; setting `--sw-workers=4` on small VMs over-subscribes -- pick deliberately. |
-| `--profile PROFILE` | (auto) | Selects a profile from `~/.config/sparkwing/profiles.yaml`. Absent, the auto-detected (`gha`) or default profile applies. |
+| `--profile NAME` | `laptop` | Selects a profile from `~/.config/sparkwing/profiles.yaml`. Absent, the project's `defaults.profile` applies, else the built-in `laptop` defaults. |
 
 State, cache, and logs come from the resolved profile; see
-[storage backends](backends) for the configuration shape.
+[storage backends](backends.md) for the configuration shape.
 
 ### Recommended: `SPARKWING_NO_SPARKS_RESOLVE=1` in CI
 
@@ -204,18 +205,20 @@ steps:
           role: arn:aws:iam::1234:role/buildkite-sparkwing
 ```
 
-State, cache, and logs come from the resolved profile. Buildkite
-doesn't have a built-in detect rule out of the box; declare a profile
-with its own `detect:` block if you want a Buildkite-specific overlay:
+State, cache, and logs come from the resolved profile. Declare a
+profile for the run and pass it with `--profile`:
 
 ```yaml
 # ~/.config/sparkwing/profiles.yaml
 profiles:
   buildkite:
-    detect: { env_var: BUILDKITE, equals: "true" }
     state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
     cache: { type: s3, bucket: my-team-sparkwing, prefix: cache/ }
     logs:  { type: s3, bucket: my-team-sparkwing, prefix: logs/  }
+```
+
+```sh
+sparkwing run release-prod --sw-mode=ci-embedded --profile buildkite
 ```
 
 ## GitLab CI
@@ -230,9 +233,9 @@ release:
     - sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
 ```
 
-Declare a `gitlab` profile with `detect: { env_var: GITLAB_CI, equals:
-"true" }` in `~/.config/sparkwing/profiles.yaml` if you want a
-GitLab-specific overlay.
+Declare a `gitlab` profile in `~/.config/sparkwing/profiles.yaml` and
+select it with `--profile gitlab` (same shape as the Buildkite example
+above).
 
 ## Related
 
