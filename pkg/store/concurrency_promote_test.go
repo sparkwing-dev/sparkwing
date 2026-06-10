@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -37,6 +38,48 @@ func TestConcurrency_PromoteOntoSupersededHolderDoesNotCrash(t *testing.T) {
 	// Releasing B promotes A: the promotion insert reuses A's holder_id,
 	// which still owns the lingering superseded row. Before the fix this
 	// aborted the transaction on the UNIQUE constraint.
+	promoted := releaseAndPromoteT(t, s, "k", "rB/n")
+	var aPromoted bool
+	for _, w := range promoted {
+		if w.RunID == "rA" {
+			aPromoted = true
+		}
+	}
+	if !aPromoted {
+		t.Fatalf("A was not promoted after B released; promoted=%+v", promoted)
+	}
+	if got := activeHolders(t, s, "k"); got != 1 {
+		t.Fatalf("active holders after promotion = %d, want 1", got)
+	}
+}
+
+// A waiter promoted into a holder_id that still owns a lease-expired
+// (but not yet reaped) row must reclaim it the same way the admission
+// grant path does, not abort the release transaction on the UNIQUE
+// constraint and strand the queue.
+func TestConcurrency_PromoteOntoExpiredHolderReclaimsRow(t *testing.T) {
+	s := newStoreT(t)
+	// A grants with a 1ns lease: the row exists but is instantly expired,
+	// holding no budget, and the reaper has not swept it.
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Nanosecond,
+	})
+	// B takes the slot; A's expired row contributes no active cost.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("B: want Granted, got %s", r.Kind)
+	}
+	// A re-arrives; B holds the slot, so A parks while its expired holder
+	// row is still present.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("A re-arrival: want Queued (B holds, expired row lingering), got %s", r.Kind)
+	}
 	promoted := releaseAndPromoteT(t, s, "k", "rB/n")
 	var aPromoted bool
 	for _, w := range promoted {

@@ -432,29 +432,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 	if !fifoBlocked && fitsBudget(activeCost, req.Cost, effCap) {
 		expiresNS := now.Add(req.Lease).UnixNano()
-		// ON CONFLICT takes the slot cleanly when a row with this
-		// holder_id already exists but is superseded (a CancelOthers
-		// eviction not yet reaped). A same-holder_id re-acquire --
-		// deterministic runID/nodeID, reachable on crash/redeliver --
-		// would otherwise hit a UNIQUE violation. The non-superseded
-		// live holder is handled earlier by the idempotent re-acquire
-		// branch, so reaching here means the existing row is superseded
-		// or expired; reclaim it (fresh lease, cleared supersede).
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_holders
-			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-			 ON CONFLICT (key, holder_id) DO UPDATE SET
-			   run_id            = excluded.run_id,
-			   node_id           = excluded.node_id,
-			   claimed_at        = excluded.claimed_at,
-			   lease_expires_at  = excluded.lease_expires_at,
-			   superseded        = 0,
-			   cost              = excluded.cost,
-			   declared_capacity = excluded.declared_capacity`,
-			req.Key, req.HolderID, req.RunID, req.NodeID, nowNS, expiresNS, req.Cost, req.Capacity,
-		); err != nil {
+		if err := txInsertHolder(ctx, tx, holderRow{
+			key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
+			cost: req.Cost, declaredCapacity: req.Capacity,
+		}, nowNS, expiresNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -556,21 +537,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		// to cooperative cancellation; strict no-overlap is what Queue is
 		// for.
 		expiresNS := now.Add(req.Lease).UnixNano()
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_holders
-			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-			 ON CONFLICT (key, holder_id) DO UPDATE SET
-			   run_id            = excluded.run_id,
-			   node_id           = excluded.node_id,
-			   claimed_at        = excluded.claimed_at,
-			   lease_expires_at  = excluded.lease_expires_at,
-			   superseded        = 0,
-			   cost              = excluded.cost,
-			   declared_capacity = excluded.declared_capacity`,
-			req.Key, req.HolderID, req.RunID, req.NodeID, nowNS, expiresNS, req.Cost, req.Capacity,
-		); err != nil {
+		if err := txInsertHolder(ctx, tx, holderRow{
+			key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
+			cost: req.Cost, declaredCapacity: req.Capacity,
+		}, nowNS, expiresNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -824,11 +794,7 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		if newHolder == "" {
 			newHolder = fmt.Sprintf("%s/%s", w.RunID, nodeIDOrDash(w.NodeID))
 		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
-			w.Key, w.RunID, w.NodeID,
-		); err != nil {
+		if _, err := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); err != nil {
 			return nil, err
 		}
 		c := w.Cost
@@ -842,29 +808,65 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		if dc <= 0 {
 			dc = entryCap
 		}
-		// A promoted holder_id can still own a superseded row (a
-		// CancelOthers eviction not yet reaped); clear it so the insert
-		// doesn't hit the UNIQUE constraint. A live (non-superseded) row is
-		// left intact, so a genuine double-promotion still surfaces.
-		if _, err := tx.ExecContext(
-			ctx,
-			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ? AND superseded = 1`,
-			w.Key, newHolder,
-		); err != nil {
-			return nil, err
-		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO concurrency_holders
-			   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-			w.Key, newHolder, w.RunID, w.NodeID, nowNS, expiresNS, c, dc,
-		); err != nil {
+		if err := txInsertHolder(ctx, tx, holderRow{
+			key: w.Key, holderID: newHolder, runID: w.RunID, nodeID: w.NodeID,
+			cost: c, declaredCapacity: dc,
+		}, nowNS, expiresNS); err != nil {
 			return nil, err
 		}
 		promoted[i].HolderID = newHolder
 	}
 	return promoted, nil
+}
+
+// holderRow is the input to txInsertHolder: the identity, weight, and
+// declaration a new admission stamps onto its holder row.
+type holderRow struct {
+	key              string
+	holderID         string
+	runID            string
+	nodeID           string
+	cost             int
+	declaredCapacity int
+}
+
+// txInsertHolder mints the live holder row for an admission -- the
+// single site that writes into concurrency_holders. A conflicting row
+// is reclaimed in place only when it no longer counts toward the budget
+// (superseded by a CancelOthers eviction, or lease-expired); both arise
+// from a same-holder_id re-acquire or promotion after a crash,
+// redelivery, or an eviction the reaper hasn't swept. A conflicting
+// LIVE row is never clobbered: the insert fails loudly instead, so a
+// path that forgot to check liveness before admitting surfaces as an
+// error rather than as a silently stolen slot.
+func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expiresNS int64) error {
+	res, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO concurrency_holders
+		   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
+		 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+		 ON CONFLICT (key, holder_id) DO UPDATE SET
+		   run_id            = excluded.run_id,
+		   node_id           = excluded.node_id,
+		   claimed_at        = excluded.claimed_at,
+		   lease_expires_at  = excluded.lease_expires_at,
+		   superseded        = 0,
+		   cost              = excluded.cost,
+		   declared_capacity = excluded.declared_capacity
+		 WHERE concurrency_holders.superseded = 1 OR concurrency_holders.lease_expires_at <= ?`,
+		h.key, h.holderID, h.runID, h.nodeID, nowNS, expiresNS, h.cost, h.declaredCapacity, nowNS,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("concurrency: holder %q for key %q would clobber a live holder", h.holderID, h.key)
+	}
+	return nil
 }
 
 // HeartbeatConcurrencySlot extends the lease and reports the
