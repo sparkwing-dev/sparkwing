@@ -234,7 +234,7 @@ sparkwing run release --version v0.55.0        # explicit version
 sparkwing run release --dry-run                # full validation chain, skip tag+push
 ```
 
-The pipeline runs four checks before pushing:
+The pipeline runs these checks before pushing:
 
 - `validate-version` -- the resolved tag must be free on origin (refuses
   force-push)

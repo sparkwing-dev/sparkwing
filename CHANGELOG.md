@@ -64,6 +64,10 @@ code change to unlock.
 
 ### Fixed
 
+- **docs:** the `observability.md` failure-reason table now matches the
+  real `failure_reason` set: dropped the non-existent `pod_error`, added
+  `verify`, `runner_lease_expired`, and `logs_auth`. A gate keeps the
+  documented set complete against the `pkg/store` constants.
 - **sdk:** A concurrency heartbeat that arrives after the lease has
   already expired no longer revives the holder. Admission may have
   freed and reassigned that budget once the lease lapsed, so reviving

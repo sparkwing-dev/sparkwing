@@ -51,6 +51,10 @@ func main() {
 	ok = checkYAMLConfigs(contentDir) && ok
 	fmt.Println()
 	ok = checkBannedTokens(contentDir, repoRoot) && ok
+	fmt.Println()
+	ok = checkFailureReasons(contentDir, repoRoot) && ok
+	fmt.Println()
+	ok = checkFrozenCounts(contentDir) && ok
 	if !ok {
 		os.Exit(1)
 	}

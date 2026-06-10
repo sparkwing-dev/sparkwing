@@ -11,12 +11,16 @@ logs to figure out *why* a build died.
 
 | Reason | What happened | What to do |
 |---|---|---|
-| `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Increase the runner memory limit or optimize the pipeline's memory usage. Check the resource chart. |
-| `timeout` | Job exceeded its configured execution timeout. | Increase the timeout in `sparkwing.yaml` or optimize the pipeline. |
-| `agent_lost` | Runner stopped heartbeating (crashed, evicted, or lost network). | Check pod events with `kubectl describe pod`. May indicate node pressure or a bug in the pipeline. |
-| `queue_timeout` | No agent claimed the job within the queue timeout (default 10m). | Ensure agents are running and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
-| `pod_error` | Runner container exited with a non-zero code or k8s couldn't create the pod. | Check the exit code and logs. Common causes: image pull errors, missing secrets, OOM in init containers. |
-| `error` | Pipeline reported failure (normal test/build failure). | Read the logs -- this is a pipeline-level error, not infrastructure. |
+| `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Raise the runner memory limit or reduce the pipeline's memory use; check the resource chart. |
+| `timeout` | Job exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
+| `agent_lost` | Runner stopped heartbeating (crashed, evicted, or lost network). | Check pod events with `kubectl describe pod`; may indicate node pressure or a pipeline bug. |
+| `queue_timeout` | No runner claimed the job within the queue timeout (default 10m). | Ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
+| `runner_lease_expired` | The runner holding the node's claim stopped renewing its lease, so the controller reclaimed it. | Check the runner's health; the node is safe to retry. |
+| `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
+| `logs_auth` | The runner's log-append calls were rejected (401/403) by the controller, so the run's structured logs are unrecoverable. | Check the runner token's `logs.write` scope; the run fails loud rather than reporting success with no output. |
+
+A plain pipeline-level failure (a failed test or command) carries no
+structured `failure_reason` -- read the logs.
 
 ### How detection works
 

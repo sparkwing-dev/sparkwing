@@ -1,6 +1,6 @@
 # Triggers
 
-Pipelines fire from three places:
+Pipelines fire from several sources:
 
 1. **Webhooks** -- the controller matches an incoming GitHub event
    against `on:` blocks under `pipelines:` in `.sparkwing/sparkwing.yaml`.
@@ -27,16 +27,10 @@ pipelines:
         paths: ["*.go", "go.mod"]      # optional path filter
 ```
 
-| Trigger | When |
-|---------|------|
-| `push` | After push to remote (webhook -> controller) |
-| `webhook` | Custom HTTP path that fires the pipeline |
-| `schedule` | Cron schedule |
-| `pre_commit` | Local git pre-commit hook (after `hooks install`) |
-| `pre_push` | Local git pre-push hook (after `hooks install`) |
-
-See [api.md](api.md) for `POST /webhooks/github/{pipeline}` and HMAC
-verification.
+The trigger keys that go under `on:` -- and their fields -- are listed
+in the generated [config-reference.md](config-reference.md); this page
+covers how each fires. See [api.md](api.md) for
+`POST /webhooks/github/{pipeline}` and HMAC verification.
 
 ## Manual / API invocation
 
