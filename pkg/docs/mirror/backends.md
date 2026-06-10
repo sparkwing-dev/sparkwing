@@ -1,22 +1,22 @@
 # Storage backends
 
-Backends are configured per profile, not in a separate file. The three
-persistence surfaces --
+Backends are configured per profile, not in a separate file. A profile
+declares four persistence surfaces plus how to reach a controller:
 
 - **state** -- run records, plan snapshots, status
 - **cache** -- content-addressed artifacts and compiled pipeline binaries
 - **logs** -- per-job log streams
+- **secrets** -- where `sparkwing.Secret` values resolve from
 
--- are now declared per **profile** in `~/.config/sparkwing/profiles.yaml`.
-A profile fully describes "where do my runs go and what auth do I need to
-get there": the `state` / `cache` / `logs` triple plus any `controller` /
-`token`. The same pipeline source runs on a laptop with the filesystem,
-in GitHub Actions with S3, and against a self-hosted controller -- you
-switch by selecting a profile, not by editing a backends file.
+A profile fully describes "where do my runs go and what auth do I need
+to get there." The same pipeline source runs on a laptop with the
+filesystem, in CI with S3, or against a self-hosted controller -- you
+switch by selecting a profile, not by editing a backends file. Laptop
+profiles live in `~/.config/sparkwing/profiles.yaml`; project profiles
+in `.sparkwing/sparkwing.yaml` (see [config-reference.md](config-reference.md)).
 
 ```yaml
 # ~/.config/sparkwing/profiles.yaml
-default: laptop
 profiles:
   laptop:
     state: { type: sqlite }
@@ -29,15 +29,14 @@ profiles:
     logs:  { type: s3, bucket: team, prefix: logs }
 
   prod:
-    controller: https://api.example.dev
-    token: swu_xxx
-    # state/cache/logs are implied by controller; reads/writes go through it.
+    controller: { url: https://api.example.dev, token: swu_xxx }
+    # state/cache/logs are implied by the controller; reads/writes go through it.
 ```
 
-Select a profile with `--profile NAME`; absent a flag, sparkwing resolves
-one from the project hint, a matching per-profile `detect:` block, and the
-`default:` entry. See `sparkwing profile` to print the resolved chain
-without running anything.
+Select a profile with `--profile NAME`; it applies wholesale. Without
+`--profile`, the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`
+applies, falling back to the built-in local (sqlite + filesystem)
+defaults. `sparkwing profile` prints which profile resolved and why.
 
 ## Backend types
 
@@ -73,24 +72,9 @@ Recognized backend types that aren't implemented in the current
 build surface a clear error at run start ("type X is recognized but
 not implemented in this build") instead of silently falling back.
 
-## Environment auto-detection
-
-A profile can carry a `detect:` block; when its env condition matches,
-that profile is auto-selected ahead of the project hint. This replaces
-the old per-environment backend block:
-
-```yaml
-profiles:
-  gha:
-    detect: { env_var: GITHUB_ACTIONS, equals: "true" }
-    state: { type: s3, bucket: team-ci, prefix: state }
-    cache: { type: s3, bucket: team-ci, prefix: cache }
-    logs:  { type: s3, bucket: team-ci, prefix: logs }
-```
-
-`gha` and `kubernetes` ship as built-in profiles that detect their
-respective env vars; declaring a profile of the same name overrides it
-per-field while keeping the built-in detect predicate.
+The fourth surface, `secrets`, names where `sparkwing.Secret` values
+resolve from (laptop dotenv or controller-stored); see
+[security.md](security.md).
 
 ## Per-pipeline backend selection
 
