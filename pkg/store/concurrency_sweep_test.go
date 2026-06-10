@@ -215,3 +215,30 @@ func TestConcurrency_ResolveWaiterCarriesLeaderFailureReason(t *testing.T) {
 		t.Fatalf("leader failure_reason = %q, want %q", res.LeaderFailureReason, store.FailureOOMKilled)
 	}
 }
+
+// D-A: a --no-cache (BypassRead) node must not coalesce onto an in-flight
+// leader -- that would hand it the leader's result via the leader-finished
+// path. It queues for the memo slot instead, to run fresh.
+func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
+	s := newStoreT(t)
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "memo:k", HolderID: "rL/n", RunID: "rL", NodeID: "n",
+		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("leader: want Granted, got %s", r.Kind)
+	}
+	// A normal follower coalesces onto the leader.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "memo:k", HolderID: "rF/n", RunID: "rF", NodeID: "n",
+		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce,
+	}); r.Kind != store.AcquireCoalesced {
+		t.Fatalf("normal follower: want Coalesced, got %s", r.Kind)
+	}
+	// A --no-cache follower must NOT coalesce; it queues to run fresh.
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "memo:k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
+		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce, BypassRead: true,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("--no-cache follower: want Queued (run fresh), got %s", r.Kind)
+	}
+}

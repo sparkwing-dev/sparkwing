@@ -346,6 +346,12 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 		// A leader with identical content is already in flight; wait for
 		// its result rather than competing for the group budget.
 		return r.waitThenRun(ctx, req, memoCP, resp)
+	case store.AcquireQueued:
+		// A --no-cache node does not coalesce onto the leader; it queued
+		// for the memo slot and, once promoted, runs fresh and writes its
+		// own cache entry (via runHeldSlot's release) rather than
+		// inheriting the leader's result.
+		return r.waitThenRun(ctx, req, memoCP, resp)
 	case store.AcquireGranted:
 		// Memo leader: keep the memo lease alive (so followers keep
 		// waiting through our group wait + execution), run under the

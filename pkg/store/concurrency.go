@@ -374,12 +374,20 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{}, err
 	}
 
+	// A --no-cache (BypassRead) node must not coalesce onto a leader and
+	// inherit its result: treat it as a Queue waiter so it waits for the
+	// memo slot and runs fresh (then writes its own cache).
+	policy := req.Policy
+	if policy == OnLimitCoalesce && req.BypassRead {
+		policy = OnLimitQueue
+	}
+
 	// 4. Budget available -> grant immediately, unless a Queue arrival
 	// would barge a waiter already parked on this key. Budget can free
 	// outside the atomic release+promote (e.g. a holder's lease lapses
 	// before the reaper runs); strict FIFO reserves it for the head.
 	fifoBlocked := false
-	if req.Policy == OnLimitQueue {
+	if policy == OnLimitQueue {
 		var earlier int
 		if err := tx.QueryRowContext(
 			ctx,
@@ -431,7 +439,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 
 	// 5. Slot full -> branch on the arrival's policy.
-	switch req.Policy {
+	switch policy {
 	case OnLimitSkip:
 		if err := tx.Commit(); err != nil {
 			return AcquireSlotResponse{}, err
