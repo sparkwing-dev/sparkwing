@@ -48,6 +48,41 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** The store verifies its concurrency invariants (live cost
+  within effective capacity, holder and waiter shape, no participant
+  both holding and waiting) at the end of every mutating transaction.
+  Under `go test` a violation fails the operation; in production it is
+  logged loudly. A seeded randomized property suite drives
+  acquire/release/heartbeat/promote/cancel sequences -- sequential and
+  concurrent -- against a real store to keep those invariants honest.
+
+### Fixed
+
+- **sdk:** Concurrency liveness decisions read the clock after the
+  store transaction holds its lock. A timestamp captured before a
+  contended `BEGIN` went stale while waiting, so an acquire or
+  heartbeat could treat an already-expired holder as live and revive it
+  after its budget had been reassigned -- two live holders on one
+  budget.
+- **sdk:** A queued participant that re-acquires its slot after the
+  budget freed (crash or redeliver) no longer leaves its stale waiter
+  row parked; the row could later be promoted on top of the
+  participant's own live holder and abort an unrelated release.
+- **sdk:** Promoting a waiter whose holder id still owns a
+  lease-expired (not yet reaped) row reclaims the row, the same way
+  admission does, instead of aborting the release transaction on the
+  `UNIQUE` constraint.
+- **sdk:** The operator state view (`cluster concurrency`, the state
+  endpoint) derives used cost and effective capacity through the same
+  accounting rules admission enforces, so a live holder predating
+  declared-capacity tracking can no longer make the display claim more
+  headroom than admission actually allows.
+- **controller:** Holder lists returned by the resolve-waiter and
+  force-release endpoints now carry `cost`, matching the acquire and
+  state endpoints, and the client surfaces it.
+
 ## [v0.9.1] - 2026-06-10
 ### Added
 
@@ -73,13 +108,6 @@ code change to unlock.
   scope. The HTTP API reference is now derived from the routing code, so
   it can't document endpoints that don't exist; a pre-push gate fails if
   it drifts.
-- **sdk:** The store verifies its concurrency invariants (live cost
-  within effective capacity, holder and waiter shape, no participant
-  both holding and waiting) at the end of every mutating transaction.
-  Under `go test` a violation fails the operation; in production it is
-  logged loudly. A seeded randomized property suite drives
-  acquire/release/heartbeat/promote/cancel sequences -- sequential and
-  concurrent -- against a real store to keep those invariants honest.
 
 ### Fixed
 
@@ -157,28 +185,6 @@ code change to unlock.
   evicted others to take. It is documented as best-effort preemption:
   the canceller may briefly overlap a still-draining victim, so use
   `Queue` when you need strict mutual exclusion with no overlap.
-- **sdk:** Concurrency liveness decisions read the clock after the
-  store transaction holds its lock. A timestamp captured before a
-  contended `BEGIN` went stale while waiting, so an acquire or
-  heartbeat could treat an already-expired holder as live and revive it
-  after its budget had been reassigned -- two live holders on one
-  budget.
-- **sdk:** A queued participant that re-acquires its slot after the
-  budget freed (crash or redeliver) no longer leaves its stale waiter
-  row parked; the row could later be promoted on top of the
-  participant's own live holder and abort an unrelated release.
-- **sdk:** Promoting a waiter whose holder id still owns a
-  lease-expired (not yet reaped) row reclaims the row, the same way
-  admission does, instead of aborting the release transaction on the
-  `UNIQUE` constraint.
-- **sdk:** The operator state view (`cluster concurrency`, the state
-  endpoint) derives used cost and effective capacity through the same
-  accounting rules admission enforces, so a live holder predating
-  declared-capacity tracking can no longer make the display claim more
-  headroom than admission actually allows.
-- **controller:** Holder lists returned by the resolve-waiter and
-  force-release endpoints now carry `cost`, matching the acquire and
-  state endpoints, and the client surfaces it.
 
 ## [v0.9.0] - 2026-06-09
 ### Added
