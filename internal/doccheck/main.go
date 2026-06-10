@@ -55,6 +55,8 @@ func main() {
 	ok = checkFailureReasons(contentDir, repoRoot) && ok
 	fmt.Println()
 	ok = checkFrozenCounts(contentDir) && ok
+	fmt.Println()
+	ok = checkLinks(contentDir) && ok
 	if !ok {
 		os.Exit(1)
 	}
