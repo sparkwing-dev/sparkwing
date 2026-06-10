@@ -28,9 +28,8 @@ but carry no support.
 Three repos participate in plugin compatibility:
 
 - `sparkwing` -- SDK + runtime + CLI as one Go module.
-- `sparks-core` -- first-party plugins, one Go module per top-level
-  subdirectory (aws, checks, deploy, docker, gitops, kube,
-  pipelines, s3, step, templates).
+- `sparks-core` -- first-party plugins, a Go module per top-level
+  package (aws, docker, gitops, kube, s3, ...).
 - Third-party `sparks-*` plugins -- independent Go modules with
   their own cadence.
 
@@ -163,7 +162,7 @@ github.com/sparkwing-dev/sparkwing              (everything else)
   concrete impls of SDK interfaces
   DAG executor, scheduler, run lifecycle
   HTTP / dashboard / persistence / caching backends
-  cmd/* binaries (sparkwing, sparkwing, sparkwing-runner, ...)
+  cmd/* binaries (sparkwing, sparkwing-controller, sparkwing-runner, ...)
   everything in internal/
 ```
 

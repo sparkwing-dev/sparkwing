@@ -72,13 +72,13 @@ import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 type Lint struct{ sw.Base }
 
 func (p *Lint) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
-    sw.Job(plan, rc.Pipeline, sw.JobFn(func(ctx context.Context) error {
+    sw.Job(plan, rc.Pipeline, func(ctx context.Context) error {
         if err := sw.Bash(ctx, "gofmt -l .").MustBeEmpty("formatting drift"); err != nil {
             return err
         }
         _, err := sw.Bash(ctx, "go vet ./...").Run()
         return err
-    }))
+    })
     return nil
 }
 ```

@@ -4,7 +4,7 @@ A living checklist of things that make sparkwing pipelines iterate fast.
 These emerged from measuring real iterations (touch a file, rebuild,
 redeploy, observe running) and watching where the time went.
 
-Target for a single-app Go service, laptop -> cluster via upload trigger:
+Target for a single-app Go service, laptop -> cluster via remote trigger:
 **< 15 seconds from edit to running and healthy**.
 
 ---
@@ -35,7 +35,7 @@ docker, or the runner pod's DinD). They survive image-layer
 invalidation - exactly the opposite of a `COPY`-cached `RUN go build`.
 
 Same pattern works for Rust (`/usr/local/cargo/registry`,
-`/app/target`), Job (`/app/node_modules`), Maven (`~/.m2`), etc.
+`/app/target`), Node (`/app/node_modules`), Maven (`~/.m2`), etc.
 
 ## 2. Don't push to registries you don't need
 
@@ -55,18 +55,16 @@ if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 }
 ```
 
-## 3. Use upload triggers, not git pushes, for iteration
+## 3. Use remote triggers for iteration
 
-`sparkwing pipeline trigger build-deploy --profile prod` uploads an
-incremental diff from the current commit to the cache and triggers the
-pipeline in-cluster. Versus `git commit && git push`:
+`sparkwing pipeline trigger build-deploy --profile prod` runs the pipeline
+in-cluster against your current commit and streams live logs back. It
+sends the commit SHA to the controller and eagerly refreshes the cache so
+the runner sees your just-pushed commit without waiting for the
+background fetch -- no waiting on a CI queue between edits.
 
-- no commit pollution of history for every experimental edit
-- incremental sync is `HEAD` + changed files, typically a few KB
-- sparkwing run streams live logs back via SSE
-
-Git-push mode is a good production path (CI-style, audited), but for
-"change a log line and re-run" it is the wrong gear.
+A git-push-driven webhook is the audited production path, but for
+"change a log line and re-run" the direct trigger is the faster gear.
 
 ## 4. Register your repo with the cache on startup
 

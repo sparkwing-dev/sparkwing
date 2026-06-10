@@ -313,7 +313,7 @@ plan.Nodes() []*JobNode                           // all registered nodes, in de
 plan.Job(id) *JobNode                             // lookup by id, nil if absent
 plan.LintWarnings() []sw.LintWarning               // non-fatal Plan-time advisories
 plan.Expansions() []sw.Expansion                   // dynamic fan-out generators
-plan.IsDynamicNode(id) bool                        // dynamic source or .Dynamic()
+plan.IsDynamicNode(id) bool                        // node sources runtime-variable downstream work
 plan.GroupSourceIDs(id) []string                   // ExpandFrom group's source nodes
 ```
 
@@ -346,7 +346,6 @@ Common Plan-layer modifiers (chainable on `*JobNode`):
 .Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
-.Dynamic()                         // mark runtime-variable downstream shape
 .ContinueOnError() / .Optional()   // failure-propagation knobs
 .NeedsOptional(deps...)            // soft upstream dep
 ```
