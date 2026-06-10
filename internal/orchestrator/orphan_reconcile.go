@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -38,103 +37,12 @@ const localOrphanThreshold = 60 * time.Second
 // count reconciled for logging / test assertions.
 //
 // Pass threshold=0 to use the package default (localOrphanThreshold).
+// The sweep itself lives in pkg/store (the shared orphan cascade also
+// drives the controller-side stale-run reaper); this wrapper only
+// supplies the local default threshold.
 func ReconcileOrphanedLocalRuns(ctx context.Context, st *store.Store, threshold time.Duration) (int, error) {
 	if threshold <= 0 {
 		threshold = localOrphanThreshold
 	}
-	cutoff := time.Now().Add(-threshold).UnixNano()
-
-	// Candidate runs: status='running' that started before the cutoff
-	// (so a freshly-started run never trips this) AND whose newest
-	// node heartbeat is also before the cutoff (or has no heartbeat
-	// at all). MAX(last_heartbeat) is NULL when no node has ever
-	// heartbeated; COALESCE pins it to the run's started_at so the
-	// "no heartbeat ever" case is treated as orphaned once we cross
-	// the threshold.
-	rows, err := st.DB().QueryContext(ctx, `
-SELECT r.id
-  FROM runs r
- WHERE r.status = 'running'
-   AND r.started_at < ?
-   AND COALESCE(
-         (SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id),
-         r.started_at
-       ) < ?`,
-		cutoff, cutoff)
-	if err != nil {
-		return 0, err
-	}
-	var orphanIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		orphanIDs = append(orphanIDs, id)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	for _, id := range orphanIDs {
-		// Two node transitions: "running" nodes were actively
-		// executing when the orchestrator died, so they're "failed"
-		// (they reached the runner, just never finished). "pending"
-		// nodes never ran at all -- they were waiting on upstream
-		// deps that will never complete -- so they're "cancelled"
-		// with the orphan-cascade reason. This matches the
-		// in-process dispatch path's "upstream-failed" semantics so
-		// readers don't have to special-case orphan vs. real
-		// upstream failure.
-		now := time.Now().UnixNano()
-		errMsg := fmt.Sprintf("orphaned: no heartbeat for >%s; orchestrator process is no longer running", threshold)
-		if _, err := st.DB().ExecContext(ctx, `
-UPDATE nodes
-   SET status         = 'done',
-       outcome        = 'failed',
-       error          = ?,
-       failure_reason = 'orphaned',
-       finished_at    = ?
- WHERE run_id = ? AND status = 'running'`,
-			errMsg, now, id); err != nil {
-			return 0, err
-		}
-		if _, err := st.DB().ExecContext(ctx, `
-UPDATE nodes
-   SET status         = 'done',
-       outcome        = 'cancelled',
-       error          = 'orphaned: orchestrator process exited before this node ran',
-       failure_reason = 'orphaned',
-       finished_at    = ?
- WHERE run_id = ? AND status = 'pending'`,
-			now, id); err != nil {
-			return 0, err
-		}
-		if err := st.FinishRun(ctx, id, "failed", errMsg); err != nil {
-			return 0, err
-		}
-	}
-
-	// Invariant fixup: any pending node attached to an already-
-	// terminal run (failed/success/cancelled) should be cancelled,
-	// not left in pending. Catches leftover state from earlier
-	// reconciliation passes that didn't cascade pending nodes,
-	// plus any future code path that forgets the cascade. Cheap:
-	// the indexed status column scopes the scan tightly.
-	if _, err := st.DB().ExecContext(ctx, `
-UPDATE nodes
-   SET status         = 'done',
-       outcome        = 'cancelled',
-       error          = COALESCE(NULLIF(error, ''), 'orphaned: run terminated before this node ran'),
-       failure_reason = COALESCE(NULLIF(failure_reason, ''), 'orphaned'),
-       finished_at    = ?
- WHERE status = 'pending'
-   AND run_id IN (SELECT id FROM runs WHERE status IN ('failed', 'success', 'cancelled'))`,
-		time.Now().UnixNano()); err != nil {
-		return len(orphanIDs), err
-	}
-
-	return len(orphanIDs), nil
+	return store.Maintenance.ReconcileOrphanedLocalRuns(st, ctx, threshold)
 }

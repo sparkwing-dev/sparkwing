@@ -23,6 +23,7 @@ type storeMaintenanceFns struct {
 	FailNodesInRun               func(s *Store, ctx context.Context, runID, errMsg, failureReason string) ([]string, error)
 	FailStaleQueuedNodes         func(s *Store, ctx context.Context, olderThan time.Duration) ([][2]string, error)
 	FailExpiredNodeClaims        func(s *Store, ctx context.Context) ([][2]string, error)
+	ReconcileOrphanedLocalRuns   func(s *Store, ctx context.Context, threshold time.Duration) (int, error)
 	ReapStaleConcurrencyHolders  func(s *Store, ctx context.Context) ([]ConcurrencyHolder, error)
 	ReapStaleConcurrencyWaiters  func(s *Store, ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error)
 	SweepExpiredConcurrencyCache func(s *Store, ctx context.Context) (int64, error)
@@ -43,6 +44,7 @@ var Maintenance = storeMaintenanceFns{
 	FailNodesInRun:               (*Store).failNodesInRun,
 	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
 	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
+	ReconcileOrphanedLocalRuns:   (*Store).reconcileOrphanedLocalRuns,
 	ReapStaleConcurrencyHolders:  (*Store).reapStaleConcurrencyHolders,
 	ReapStaleConcurrencyWaiters:  (*Store).reapStaleConcurrencyWaiters,
 	SweepExpiredConcurrencyCache: (*Store).sweepExpiredConcurrencyCache,

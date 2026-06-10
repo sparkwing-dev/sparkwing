@@ -1099,7 +1099,7 @@ ON CONFLICT(id) DO UPDATE SET
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json
-WHERE runs.status = 'pending'`,
+WHERE runs.status = '`+runStatusPending+`'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
@@ -1371,7 +1371,7 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 	rows, err := s.query(ctx,
 		`SELECT id FROM runs
 		   WHERE started_at < ?
-		     AND status IN ('success','failed','cancelled')`,
+		     AND `+runTerminalIn,
 		cutoff.UnixNano())
 	if err != nil {
 		return nil, err
@@ -1508,8 +1508,8 @@ VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
 // StartNode marks a node as running.
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
 	_, err := s.exec(ctx, `
-UPDATE nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), runID, nodeID)
+UPDATE nodes SET status = ?, started_at = ? WHERE run_id = ? AND node_id = ?`,
+		nodeStatusRunning, time.Now().UnixNano(), runID, nodeID)
 	return err
 }
 
@@ -1543,10 +1543,10 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	}
 	_, err := s.exec(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = ?, error = ?, output_json = ?, finished_at = ?,
+   SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?,
        failure_reason = ?, exit_code = ?
  WHERE run_id = ? AND node_id = ?`,
-		outcome, errMsg, output, time.Now().UnixNano(),
+		nodeStatusDone, outcome, errMsg, output, time.Now().UnixNano(),
 		reason, code,
 		runID, nodeID)
 	return err
@@ -1934,7 +1934,7 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 		ctx,
 		`UPDATE nodes SET ready_at = NULL
 		  WHERE run_id = ? AND node_id = ?
-		    AND claimed_by IS NULL AND status != 'done'`,
+		    AND claimed_by IS NULL AND `+nodeNotDone,
 		runID, nodeID,
 	)
 	if err != nil {
@@ -1975,7 +1975,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
        failure_reason, exit_code, annotations_json, summary
   FROM nodes
- WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done'
+ WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
  ORDER BY ready_at ASC
  LIMIT 1`+s.forUpdateSkipLocked()), n)
 		if err != nil {
@@ -2116,7 +2116,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`+s.forUpdateSkipLocked(),
+		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -2140,7 +2140,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`,
+		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
 		return nil, err
 	}
@@ -2162,7 +2162,7 @@ func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`+s.forUpdateSkipLocked(),
+		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -2186,11 +2186,11 @@ func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	for _, p := range pairs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = 'failed',
+   SET `+nodeFailSet+`,
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
        claimed_by = NULL, lease_expires_at = NULL
- WHERE run_id = ? AND node_id = ? AND status != 'done'`,
+ WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err
 		}
@@ -2211,7 +2211,7 @@ func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT node_id FROM nodes WHERE run_id = ? AND status != 'done'`, runID)
+		`SELECT node_id FROM nodes WHERE run_id = ? AND `+nodeNotDone, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -2235,10 +2235,10 @@ func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason
 	for _, nid := range nodeIDs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = 'failed',
+   SET `+nodeFailSet+`,
        error = ?, failure_reason = ?, finished_at = ?,
        ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND status != 'done'`,
+ WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			errMsg, failureReason, now, runID, nid); err != nil {
 			return nil, err
 		}
@@ -2265,7 +2265,7 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE ready_at IS NOT NULL AND claimed_by IS NULL
-		    AND ready_at < ? AND status != 'done'`,
+		    AND ready_at < ? AND `+nodeNotDone,
 		threshold)
 	if err != nil {
 		return nil, err
@@ -2290,11 +2290,11 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	for _, p := range pairs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = 'failed',
+   SET `+nodeFailSet+`,
        error = 'no runner claimed this node before the queue deadline',
        failure_reason = ?, finished_at = ?,
        ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND status != 'done'`,
+ WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
 			FailureQueueTimeout, now, p[0], p[1]); err != nil {
 			return nil, err
 		}
@@ -2558,7 +2558,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status
 	if status == "" {
-		status = "pending"
+		status = triggerStatusPending
 	}
 	var parent sql.NullString
 	if t.ParentRunID != "" {
@@ -2677,8 +2677,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers
- WHERE status = 'pending'`
-	args := []any{}
+ WHERE status = ?`
+	args := []any{triggerStatusPending}
 	if len(pipelines) > 0 {
 		ph := make([]string, len(pipelines))
 		for i, p := range pipelines {
@@ -2724,8 +2724,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	expires := now.Add(lease)
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE triggers SET status = 'claimed', claimed_at = ?, lease_expires_at = ? WHERE id = ?`,
-		now.UnixNano(), expires.UnixNano(), t.ID,
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ? WHERE id = ?`,
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), t.ID,
 	); err != nil {
 		return nil, err
 	}
@@ -2733,7 +2733,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		return nil, err
 	}
 
-	t.Status = "claimed"
+	t.Status = triggerStatusClaimed
 	t.CreatedAt = time.Unix(0, createdNS)
 	t.ClaimedAt = &now
 	t.LeaseExpiresAt = &expires
@@ -2763,8 +2763,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers
 		    SET lease_expires_at = ?
-		  WHERE id = ? AND status = 'claimed'`,
-		expires, id)
+		  WHERE id = ? AND status = ?`,
+		expires, id, triggerStatusClaimed)
 	if err != nil {
 		return false, err
 	}
@@ -2823,9 +2823,9 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM triggers
-		  WHERE status = 'claimed' AND lease_expires_at IS NOT NULL
+		  WHERE status = ? AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ?`,
-		now)
+		triggerStatusClaimed, now)
 	if err != nil {
 		return nil, err
 	}
@@ -2848,12 +2848,12 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE triggers
-		    SET status = 'pending',
+		    SET status = ?,
 		        claimed_at = NULL,
 		        lease_expires_at = NULL
-		  WHERE status = 'claimed' AND lease_expires_at IS NOT NULL
+		  WHERE status = ? AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ?`,
-		now); err != nil {
+		triggerStatusPending, triggerStatusClaimed, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2865,7 +2865,8 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 // FinishTrigger marks a trigger 'done'; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 	_, err := s.exec(ctx,
-		`UPDATE triggers SET status = 'done', lease_expires_at = NULL WHERE id = ?`, id)
+		`UPDATE triggers SET status = ?, lease_expires_at = NULL WHERE id = ?`,
+		triggerStatusDone, id)
 	return err
 }
 
@@ -2973,14 +2974,14 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id FROM runs r
-		WHERE r.status = 'pending'
+		WHERE r.status = ?
 		  AND r.started_at > 0
 		  AND r.started_at < ?
 		  AND EXISTS (
 		      SELECT 1 FROM triggers t
-		       WHERE t.id = r.id AND t.status = 'done'
+		       WHERE t.id = r.id AND t.status = ?
 		  )
-	`, cutoff)
+	`, runStatusPending, cutoff, triggerStatusDone)
 	if err != nil {
 		return nil, err
 	}
@@ -3003,9 +3004,9 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 
 	for _, id := range ids {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE runs SET status = 'failed', error = ?, finished_at = ?
-			  WHERE id = ? AND status = 'pending'`,
-			reason, now, id); err != nil {
+			`UPDATE runs SET status = ?, error = ?, finished_at = ?
+			  WHERE id = ? AND status = ?`,
+			runStatusFailed, reason, now, id, runStatusPending); err != nil {
 			return nil, err
 		}
 	}
@@ -3033,9 +3034,9 @@ func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, r
 
 	rows, err := s.query(ctx, `
 SELECT id FROM runs
- WHERE status = 'running'
+ WHERE status = ?
    AND last_heartbeat_at IS NOT NULL
-   AND last_heartbeat_at < ?`, cutoff)
+   AND last_heartbeat_at < ?`, runStatusRunning, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -3054,33 +3055,108 @@ SELECT id FROM runs
 	}
 
 	for _, id := range ids {
-		if _, err := s.exec(ctx, `
-UPDATE nodes
-   SET status         = 'done',
-       outcome        = 'failed',
-       error          = ?,
-       failure_reason = 'orphaned',
-       finished_at    = ?
- WHERE run_id = ? AND status = 'running'`,
-			reason, now, id); err != nil {
+		if err := s.cascadeOrphanedNodes(ctx, id, reason, now); err != nil {
 			return nil, err
 		}
-		if _, err := s.exec(ctx, `
-UPDATE nodes
-   SET status         = 'done',
-       outcome        = 'cancelled',
-       error          = 'orphaned: orchestrator process exited before this node ran',
-       failure_reason = 'orphaned',
-       finished_at    = ?
- WHERE run_id = ? AND status = 'pending'`,
-			now, id); err != nil {
-			return nil, err
-		}
-		if err := s.FinishRun(ctx, id, "failed", reason); err != nil {
+		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
 			return nil, err
 		}
 	}
 	return ids, nil
+}
+
+// cascadeOrphanedNodes fails the running nodes and cancels the pending
+// nodes of an orphaned run -- the single definition of the orphan
+// cascade, shared by the controller-side stale-run reaper and the local
+// reconciler so the two sweeps cannot drift apart.
+func (s *Store) cascadeOrphanedNodes(ctx context.Context, runID, errMsg string, nowNS int64) error {
+	if _, err := s.exec(ctx, `
+UPDATE nodes
+   SET `+nodeFailSet+`,
+       error          = ?,
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = ?`,
+		errMsg, nowNS, runID, nodeStatusRunning); err != nil {
+		return err
+	}
+	_, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = ?,
+       outcome        = 'cancelled',
+       error          = 'orphaned: orchestrator process exited before this node ran',
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = ?`,
+		nodeStatusDone, nowNS, runID, nodeStatusPending)
+	return err
+}
+
+// reconcileOrphanedLocalRuns sweeps 'running' runs whose newest node
+// heartbeat (or start time, when no node ever heartbeated) is older
+// than threshold and transitions them, and their nodes, to terminal
+// states via the shared orphan cascade. Cheap enough to run lazily on
+// every status / list read: it only scans status='running' rows over
+// indexes already in place. Returns the count reconciled.
+func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	cutoff := time.Now().Add(-threshold).UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT r.id
+  FROM runs r
+ WHERE r.status = ?
+   AND r.started_at < ?
+   AND COALESCE(
+         (SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id),
+         r.started_at
+       ) < ?`,
+		runStatusRunning, cutoff, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	var orphanIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		orphanIDs = append(orphanIDs, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	for _, id := range orphanIDs {
+		now := time.Now().UnixNano()
+		errMsg := fmt.Sprintf("orphaned: no heartbeat for >%s; orchestrator process is no longer running", threshold)
+		if err := s.cascadeOrphanedNodes(ctx, id, errMsg, now); err != nil {
+			return 0, err
+		}
+		if err := s.FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
+			return 0, err
+		}
+	}
+
+	// Invariant fixup: any pending node attached to an already-terminal
+	// run should be cancelled, not left in pending. Catches leftover
+	// state from sweeps that didn't cascade pending nodes, plus any
+	// future code path that forgets the cascade.
+	if _, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = ?,
+       outcome        = 'cancelled',
+       error          = COALESCE(NULLIF(error, ''), 'orphaned: run terminated before this node ran'),
+       failure_reason = COALESCE(NULLIF(failure_reason, ''), 'orphaned'),
+       finished_at    = ?
+ WHERE status = ?
+   AND run_id IN (SELECT id FROM runs WHERE `+runTerminalIn+`)`,
+		nodeStatusDone, time.Now().UnixNano(), nodeStatusPending); err != nil {
+		return len(orphanIDs), err
+	}
+
+	return len(orphanIDs), nil
 }
 
 // ListPendingTriggersForParent returns every pending trigger whose
@@ -3091,8 +3167,8 @@ UPDATE nodes
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
 	rows, err := s.query(ctx, `
 SELECT id FROM triggers
- WHERE status = 'pending' AND parent_run_id = ?
- ORDER BY created_at ASC`, parentRunID)
+ WHERE status = ? AND parent_run_id = ?
+ ORDER BY created_at ASC`, triggerStatusPending, parentRunID)
 	if err != nil {
 		return nil, err
 	}
@@ -3123,9 +3199,9 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	now := time.Now()
 	expires := now.Add(lease)
 	res, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET status = 'claimed', claimed_at = ?, lease_expires_at = ?
-		  WHERE id = ? AND status = 'pending'`,
-		now.UnixNano(), expires.UnixNano(), id)
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?
+		  WHERE id = ? AND status = ?`,
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), id, triggerStatusPending)
 	if err != nil {
 		return nil, err
 	}
