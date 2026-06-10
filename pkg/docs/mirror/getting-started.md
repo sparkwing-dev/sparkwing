@@ -103,26 +103,25 @@ prod-only component.
 
 ### Storage class
 
-When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing`
-or the manifests under `k8s/sparkwing/`), the controller / cache / dind
-pods each provision a PersistentVolumeClaim. PVCs that omit
-`storageClassName` fall back to the cluster's default StorageClass; on
-clusters without one (some bare-metal kubeadm installs, fresh kind
-clusters with the local-path provisioner not installed, etc.) those
-PVCs sit `Pending` indefinitely with no clear error.
+When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),
+the controller provisions a PersistentVolumeClaim for its state DB. A PVC
+that omits `storageClassName` falls back to the cluster's default
+StorageClass; on clusters without one (some bare-metal kubeadm installs,
+fresh kind clusters with the local-path provisioner not installed, etc.)
+the PVC sits `Pending` indefinitely with no clear error.
 
-Set the class explicitly via `storage.className`:
+Set the class explicitly via the chart value:
 
 ```bash
-helm install sparkwing charts/sparkwing --set storage.className=gp3
+helm install sparkwing charts/sparkwing-full \
+    --set controller.storage.pvc.storageClassName=gp3
 ```
 
 Common values: `gp3` (EKS), `standard-rwo` (GKE), `managed-csi` (AKS),
 `standard` (kind/minikube with the default local-path provisioner).
 
-For the kustomize path (`k8s/sparkwing/`), patch `storageClassName` per
-PVC in your overlay. The controller logs a `WARNING` at startup when no
-PVC declares a class and no default exists on the cluster.
+The controller logs a `WARNING` at startup when no PVC declares a class
+and the cluster has no default StorageClass.
 
 ## What `sparkwing pipeline new` Creates
 
@@ -133,7 +132,6 @@ PVC declares a class and no default exists on the cluster.
   go.mod            # Go module for pipeline code
   go.sum            # dependency checksums
   jobs/             # pipeline implementations
-  shared/           # repo-specific reusable helpers (optional)
 ```
 
 ## The Model
@@ -234,14 +232,17 @@ sparkwing run release --version v0.55.0        # explicit version
 sparkwing run release --dry-run                # full validation chain, skip tag+push
 ```
 
-The pipeline runs these checks before pushing:
+The pipeline runs validation gates before tagging, including:
 
 - `validate-version` -- the resolved tag must be free on origin (refuses
   force-push)
 - `check-clean-tree` -- working tree must be clean
-- `check-changelog` -- CHANGELOG.md must contain a matching `[vX.Y.Z]`
+- `gate-pre-commit` / `gate-pre-push` -- the same gates the git hooks run
+- `prepare-changelog` -- CHANGELOG.md must contain a matching `[vX.Y.Z]`
   heading
-- `push-tag` -- creates the annotated tag and pushes to origin
+
+Only after they pass does `push-tag` create the annotated tag and push it
+to origin.
 
 `sparkwing run release` is the canonical sparkwing-side release path. Don't
 hand-tag and `git push` -- it bypasses the validation gates and makes
