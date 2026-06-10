@@ -64,12 +64,20 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		QueueLength:      resp.QueueLength,
 	}
 	for _, hd := range resp.Holders {
-		out.Holders = append(out.Holders, store.ConcurrencyHolder{
-			Key: req.Key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
-			ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt, Superseded: hd.Superseded,
-		})
+		out.Holders = append(out.Holders, storeHolderFromClient(req.Key, hd))
 	}
 	return out, nil
+}
+
+// storeHolderFromClient is the single mapping from the controller's
+// wire holder shape back into the store type, so a field added to one
+// response path can't silently vanish from its siblings.
+func storeHolderFromClient(key string, hd client.WaiterHolder) store.ConcurrencyHolder {
+	return store.ConcurrencyHolder{
+		Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
+		ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt,
+		Superseded: hd.Superseded, Cost: hd.Cost,
+	}
 }
 
 func (h *HTTPConcurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
@@ -110,10 +118,7 @@ func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID,
 		Position:            resp.Position,
 	}
 	for _, hd := range resp.Holders {
-		res.Holders = append(res.Holders, store.ConcurrencyHolder{
-			Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
-			ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt, Superseded: hd.Superseded,
-		})
+		res.Holders = append(res.Holders, storeHolderFromClient(key, hd))
 	}
 	return res, nil
 }
@@ -127,10 +132,7 @@ func (h *HTTPConcurrency) ForceReleaseSuperseded(ctx context.Context, key string
 	}
 	out := make([]store.ConcurrencyHolder, 0, len(dropped))
 	for _, hd := range dropped {
-		out = append(out, store.ConcurrencyHolder{
-			Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
-			ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt, Superseded: hd.Superseded,
-		})
+		out = append(out, storeHolderFromClient(key, hd))
 	}
 	return out, nil
 }

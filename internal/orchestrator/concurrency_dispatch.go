@@ -190,6 +190,39 @@ func concParamsFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID
 	}
 }
 
+// memoParamsFor builds the coordParams for a node's content-memo slot:
+// a capacity-1 Coalesce acquire on the content hash, so identical work
+// dedupes in flight and shares one cache entry.
+func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordParams {
+	return coordParams{
+		key:       memoKeyFor(cacheHash),
+		capacity:  1,
+		cost:      1,
+		policy:    store.OnLimitCoalesce,
+		cacheHash: cacheHash,
+		cacheTTL:  cacheTTL,
+	}
+}
+
+// acquireRequest is the single mapping from coordParams to the store's
+// acquire request for a node-level arrival, so the two acquire sites
+// (group slot and memo slot) cannot diverge on a field.
+func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) store.AcquireSlotRequest {
+	return store.AcquireSlotRequest{
+		Key:           cp.key,
+		HolderID:      runID + "/" + nodeID,
+		RunID:         runID,
+		NodeID:        nodeID,
+		Capacity:      cp.capacity,
+		Cost:          cp.cost,
+		Policy:        cp.policy,
+		CacheKeyHash:  cp.cacheHash,
+		CacheTTL:      cp.cacheTTL,
+		CancelTimeout: cp.cancelTimeout,
+		BypassRead:    bypassRead,
+	}
+}
+
 // runNodeWithCache owns the full Cache()/Concurrency() lifecycle.
 // Memoization (content-keyed) and concurrency admission (group-keyed)
 // are independent: a node may have either, both, or neither. Returns
@@ -210,15 +243,7 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 	case hasMemo && group != nil:
 		return r.runMemoizedUnderConcurrency(ctx, req, group, cacheHash, cacheTTL), true
 	case hasMemo:
-		memoCP := coordParams{
-			key:       memoKeyFor(cacheHash),
-			capacity:  1,
-			cost:      1,
-			policy:    store.OnLimitCoalesce,
-			cacheHash: cacheHash,
-			cacheTTL:  cacheTTL,
-		}
-		return r.acquireAndRun(ctx, req, memoCP), true
+		return r.acquireAndRun(ctx, req, memoParamsFor(cacheHash, cacheTTL)), true
 	case group != nil:
 		return r.acquireAndRun(ctx, req, concParamsFor(node, group, req.RunID)), true
 	default:
@@ -256,19 +281,7 @@ func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.
 func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
 	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
-	resp, err := r.backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key:           cp.key,
-		HolderID:      holderID,
-		RunID:         req.RunID,
-		NodeID:        node.ID(),
-		Capacity:      cp.capacity,
-		Cost:          cp.cost,
-		Policy:        cp.policy,
-		CacheKeyHash:  cp.cacheHash,
-		CacheTTL:      cp.cacheTTL,
-		CancelTimeout: cp.cancelTimeout,
-		BypassRead:    noCacheFromContext(ctx),
-	})
+	resp, err := r.backends.Concurrency.AcquireSlot(ctx, cp.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
 	if err != nil {
 		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("concurrency acquire(%q): %w", cp.key, err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -313,27 +326,9 @@ func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request,
 // writes the shared cache entry.
 func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
 	node := req.Node
-	memoCP := coordParams{
-		key:       memoKeyFor(cacheHash),
-		capacity:  1,
-		cost:      1,
-		policy:    store.OnLimitCoalesce,
-		cacheHash: cacheHash,
-		cacheTTL:  cacheTTL,
-	}
+	memoCP := memoParamsFor(cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
-	resp, err := r.backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key:          memoCP.key,
-		HolderID:     memoHolderID,
-		RunID:        req.RunID,
-		NodeID:       node.ID(),
-		Capacity:     1,
-		Cost:         1,
-		Policy:       store.OnLimitCoalesce,
-		CacheKeyHash: cacheHash,
-		CacheTTL:     cacheTTL,
-		BypassRead:   noCacheFromContext(ctx),
-	})
+	resp, err := r.backends.Concurrency.AcquireSlot(ctx, memoCP.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
 	if err != nil {
 		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("memo acquire(%q): %w", memoCP.key, err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}

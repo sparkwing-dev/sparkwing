@@ -99,11 +99,7 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		QueueLength:      resp.QueueLength,
 	}
 	for _, h := range resp.Holders {
-		bodyOut.Holders = append(bodyOut.Holders, stateHolderResp{
-			HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
-			ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
-			Superseded: h.Superseded, Cost: h.Cost,
-		})
+		bodyOut.Holders = append(bodyOut.Holders, holderResp(h))
 	}
 	switch resp.Kind {
 	case store.AcquireGranted, store.AcquireCached:
@@ -217,6 +213,17 @@ type stateHolderResp struct {
 	Cost           int       `json:"cost,omitempty"`
 }
 
+// holderResp is the single mapping from a store holder to its wire
+// shape; every endpoint that returns holders goes through it so a new
+// field can't silently go missing from one response.
+func holderResp(h store.ConcurrencyHolder) stateHolderResp {
+	return stateHolderResp{
+		HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
+		ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
+		Superseded: h.Superseded, Cost: h.Cost,
+	}
+}
+
 type stateWaiterResp struct {
 	RunID         string    `json:"run_id"`
 	NodeID        string    `json:"node_id,omitempty"`
@@ -250,11 +257,7 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 		EffectiveCapacity: st.EffectiveCapacity, UsedCost: st.UsedCost,
 	}
 	for _, h := range st.Holders {
-		resp.Holders = append(resp.Holders, stateHolderResp{
-			HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
-			ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
-			Superseded: h.Superseded, Cost: h.Cost,
-		})
+		resp.Holders = append(resp.Holders, holderResp(h))
 	}
 	for _, wt := range st.Waiters {
 		var ct string
@@ -322,11 +325,7 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 		Position:            res.Position,
 	}
 	for _, h := range res.Holders {
-		out.Holders = append(out.Holders, stateHolderResp{
-			HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
-			ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
-			Superseded: h.Superseded,
-		})
+		out.Holders = append(out.Holders, holderResp(h))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -383,11 +382,7 @@ func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	var out forceReleaseResp
 	for _, h := range dropped {
-		out.Dropped = append(out.Dropped, stateHolderResp{
-			HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
-			ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
-			Superseded: h.Superseded,
-		})
+		out.Dropped = append(out.Dropped, holderResp(h))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

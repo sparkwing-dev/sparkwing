@@ -157,6 +157,7 @@ type WaiterHolder struct {
 	ClaimedAt      time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
+	Cost           int
 }
 type WaiterResolution struct {
 	Status              string

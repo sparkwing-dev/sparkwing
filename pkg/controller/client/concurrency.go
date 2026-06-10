@@ -154,6 +154,7 @@ type WaiterHolder struct {
 	ClaimedAt      time.Time `json:"claimed_at"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 	Superseded     bool      `json:"superseded"`
+	Cost           int       `json:"cost,omitempty"`
 }
 
 // WaiterResolution mirrors the controller's resolveWaiterResp.
