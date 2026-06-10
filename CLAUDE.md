@@ -33,6 +33,7 @@ Plain English. No internal jargon, no ticket IDs, no version-marker noise. CLI h
 
 ## Docs
 
+- See [DOCS-STYLE.md](DOCS-STYLE.md) for the full guide: the layer model (generate the reference, hand-write only concepts), the source-of-truth rules, and the gates that enforce them.
 - `docs/`, `README.md`, CHANGELOG entries: same rules. Self-contained prose, no internal pointers, no "this will be tightened in <ticket>" future-promises.
 - **Edit `docs/` -- it's the canonical source.** `pkg/docs/mirror/` is a generated copy of `docs/` (the CLI embeds it via `//go:embed`; the sparkwing-product website also builds from `docs/`). After editing `docs/`, run `bash bin/sync-docs.sh` to regenerate the mirror and commit both. NEVER hand-edit `pkg/docs/mirror/` -- the pre-commit gate and a guard test reject drift.
 
