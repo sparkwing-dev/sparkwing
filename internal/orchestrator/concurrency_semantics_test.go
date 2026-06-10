@@ -29,6 +29,100 @@ func resetSem() {
 	sem.runs.Store(0)
 	sem.inflight.Store(0)
 	sem.peak.Store(0)
+	resetLeaderBarrier()
+}
+
+// leaderHolding is set true by a held leader once it is executing -- so
+// it has acquired its slot -- and a test polls it to start the follower
+// deterministically instead of guessing with a sleep. leaderRelease
+// frees the held leader once the follower has resolved. Both are
+// in-process (the orchestrator runs in-process in these tests), so no
+// store handle or timing race is involved.
+var (
+	leaderHolding atomic.Bool
+	leaderRelease atomic.Bool
+)
+
+func resetLeaderBarrier() {
+	leaderHolding.Store(false)
+	leaderRelease.Store(false)
+}
+
+// held returns a job body that marks its slot held, then blocks until
+// the test releases it (or ctx is cancelled), so the leader holds for
+// exactly as long as the test needs -- no fixed sleep to race against.
+// onStart, if non-nil, runs once the body begins and returns a cleanup
+// to run when it ends (e.g. to track in-flight concurrency).
+func held(onStart func() func()) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if onStart != nil {
+			if cleanup := onStart(); cleanup != nil {
+				defer cleanup()
+			}
+		}
+		leaderHolding.Store(true)
+		for !leaderRelease.Load() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(2 * time.Millisecond):
+			}
+		}
+		return nil
+	}
+}
+
+// heldSkip is the SkipIf twin of held: the leader holds its slot through
+// skip evaluation until released, then skips. Used to make a skipped
+// memo leader hold deterministically while a follower coalesces.
+func heldSkip(ctx context.Context) bool {
+	leaderHolding.Store(true)
+	for !leaderRelease.Load() {
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+	return true
+}
+
+// waitForLeaderHolding blocks until a held leader signals it holds its
+// slot, with a generous ceiling so a hang fails loudly rather than
+// hanging the suite.
+func waitForLeaderHolding(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !leaderHolding.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the leader to hold its slot")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitForCoalesceWaiter blocks until a coalesce waiter row exists, i.e. a
+// follower has actually coalesced onto an in-flight leader. Used so a
+// memo leader can be released only once the follower it is meant to
+// coalesce is genuinely parked -- a coalesced follower blocks on the
+// leader finishing, so the leader can't wait on the follower's run.
+func waitForCoalesceWaiter(t *testing.T, dbPath string) {
+	t.Helper()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		if err := st.DB().QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE policy = 'coalesce'`).Scan(&n); err == nil && n > 0 {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for a follower to coalesce")
 }
 
 func semStep(hold time.Duration) func(ctx context.Context) error {
@@ -192,7 +286,7 @@ type queueTimeoutLeaderPipe struct{ sparkwing.Base }
 
 func (queueTimeoutLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("qt-key", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "leader", semStep(2*time.Second)).Concurrency(g)
+	sparkwing.Job(plan, "leader", held(nil)).Concurrency(g)
 	return nil
 }
 
@@ -375,7 +469,7 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "qt-leader", RunID: "qt-leader"})
 		close(leaderDone)
 	}()
-	time.Sleep(150 * time.Millisecond) // leader acquires the slot
+	waitForLeaderHolding(t) // leader holds the only slot
 
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "qt-follower", RunID: "qt-follower"})
 	if followerRes.Status != "failed" {
@@ -385,24 +479,31 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 	if n.FailureReason != store.FailureQueueTimeout {
 		t.Fatalf("follower failure_reason = %q, want %q", n.FailureReason, store.FailureQueueTimeout)
 	}
+	leaderRelease.Store(true) // let the leader finish
 	<-leaderDone
 }
 
 // --- Defect 3: skipped memo leader must not stamp coalesced followers Success ---
 
-type memoLeaderSkipPipe struct{ sparkwing.Base }
+type memoSkipLeaderPipe struct{ sparkwing.Base }
 
-func (memoLeaderSkipPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Two peers, same content key, both skipped. The memo leader holds
-	// the content slot through a slow SkipIf so the other coalesces;
-	// then the leader skips (writing no cache), and the follower must
-	// inherit a non-Success outcome rather than going green empty.
-	slowSkip := func(ctx context.Context) bool {
-		time.Sleep(250 * time.Millisecond)
-		return true
-	}
-	sparkwing.Job(plan, "a", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(slowSkip)
-	sparkwing.Job(plan, "b", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(slowSkip)
+func (memoSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	// The memo leader holds the content slot through its skip evaluation
+	// (heldSkip) until the test releases it, so a follower coalesces
+	// deterministically; then it skips, writing no cache.
+	sparkwing.Job(plan, "leader", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(heldSkip)
+	return nil
+}
+
+type memoSkipFollowerPipe struct{ sparkwing.Base }
+
+func (memoSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	// Same content key: it coalesces onto the in-flight leader and must
+	// inherit the leader's skip rather than going green. Its own SkipIf
+	// is a fallback for the standalone case.
+	sparkwing.Job(plan, "follower", semStep(0)).
+		Cache(contentKey("skip-dup")).
+		SkipIf(func(ctx context.Context) bool { return true })
 	return nil
 }
 
@@ -425,7 +526,8 @@ func (phantomWaiterPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spark
 }
 
 func init() {
-	register("memo-leader-skip", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &memoLeaderSkipPipe{} })
+	register("memo-skip-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &memoSkipLeaderPipe{} })
+	register("memo-skip-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &memoSkipFollowerPipe{} })
 	register("phantom-holder", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &phantomHolderPipe{} })
 	register("phantom-waiter", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &phantomWaiterPipe{} })
 }
@@ -433,24 +535,42 @@ func init() {
 func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-leader-skip"})
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
+
+	leaderDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-skip-leader", RunID: "memo-skip-leader"})
+		leaderDone <- res
+	}()
+	waitForLeaderHolding(t) // leader holds the content slot through its skip
+
+	// The follower coalesces onto the held leader and blocks until the
+	// leader finishes, so run it concurrently and release the leader only
+	// once it has genuinely coalesced.
+	followerDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-skip-follower", RunID: "memo-skip-follower"})
+		followerDone <- res
+	}()
+	waitForCoalesceWaiter(t, p.StateDB())
+	leaderRelease.Store(true) // leader skips; follower inherits the skip
+	leaderRes := <-leaderDone
+	followerRes := <-followerDone
+
 	if got := sem.runs.Load(); got != 0 {
 		t.Fatalf("body ran %d times, want 0 (both nodes skipped)", got)
 	}
-	// Neither node may be Success: the leader skipped, so the coalesced
-	// follower must inherit a non-success outcome, not a bogus green.
+	// Neither node may be Success: the leader skipped (no cache written),
+	// so the coalesced follower must inherit a non-success outcome rather
+	// than going green empty.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
-	nodes, _ := st.ListNodes(context.Background(), res.RunID)
-	if len(nodes) != 2 {
-		t.Fatalf("expected 2 nodes, got %d", len(nodes))
-	}
-	for _, n := range nodes {
-		if n.Outcome == string(sparkwing.Success) {
-			t.Fatalf("node %q is Success after a skipped memo leader; follower inherited a bogus success", n.NodeID)
+	for _, rid := range []string{leaderRes.RunID, followerRes.RunID} {
+		nodes, _ := st.ListNodes(context.Background(), rid)
+		if len(nodes) != 1 {
+			t.Fatalf("run %s: expected 1 node, got %d", rid, len(nodes))
+		}
+		if nodes[0].Outcome == string(sparkwing.Success) {
+			t.Fatalf("node %q in run %s is Success after a skipped memo leader; follower inherited a bogus success", nodes[0].NodeID, rid)
 		}
 	}
 }

@@ -53,7 +53,7 @@ func (cacheSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 	// Slow leader holds the slot while the follower pipeline arrives
 	// under OnLimit:Skip in a separate goroutine.
 	g := sparkwing.NewConcurrencyGroup("cache-skip-key", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "leader", cacheStep(400*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "leader", held(cacheCounterBump)).Concurrency(g)
 	return nil
 }
 
@@ -74,7 +74,7 @@ func (cacheFailLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 	// Slow leader holds the slot long enough for the follower pipeline
 	// to arrive under OnLimit:Fail while the slot is full.
 	g := sparkwing.NewConcurrencyGroup("cache-fail-key", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "leader", cacheStep(400*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "leader", held(cacheCounterBump)).Concurrency(g)
 	return nil
 }
 
@@ -203,6 +203,20 @@ func init() {
 func resetCacheCounter() {
 	cacheCounter.inflight.Store(0)
 	cacheCounter.max.Store(0)
+	resetLeaderBarrier()
+}
+
+// cacheCounterBump records one in-flight body against the peak gauge and
+// returns the matching decrement, for use as held()'s onStart.
+func cacheCounterBump() func() {
+	cur := cacheCounter.inflight.Add(1)
+	for {
+		peak := cacheCounter.max.Load()
+		if cur <= peak || cacheCounter.max.CompareAndSwap(peak, cur) {
+			break
+		}
+	}
+	return func() { cacheCounter.inflight.Add(-1) }
 }
 
 func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
@@ -250,7 +264,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond) // leader acquires
+	waitForLeaderHolding(t) // leader holds the only slot
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
 	if err != nil {
@@ -272,6 +286,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		t.Fatalf("follower outcome = %q, want skipped-concurrent", fnodes[0].Outcome)
 	}
 
+	leaderRelease.Store(true) // let the leader finish
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
@@ -295,7 +310,7 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond) // leader acquires
+	waitForLeaderHolding(t) // leader holds the only slot
 
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-follower"})
 	if followerRes.Status != "failed" {
@@ -317,6 +332,7 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 		t.Fatalf("follower error = %q, want a message mentioning OnLimit:Fail", nodes[0].Error)
 	}
 
+	leaderRelease.Store(true) // let the leader finish
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
