@@ -1,71 +1,61 @@
-# Local Dashboard (native mode)
+# Local dashboard (native mode)
 
-The "native mode" idea started as a daemonized local controller. It was
-overkill. Running `sparkwing` already executes pipelines in-process on your
-laptop. The only thing missing was seeing them side by side when you
-have multiple runs going.
+Running `sparkwing` executes pipelines in-process on your laptop. Native mode adds one thing on top of that: a way to watch several runs side by side.
 
-So the shipped design is much smaller:
+The design is small:
 
-1. Every local `sparkwing` run writes records to the SQLite store under
-   `~/.sparkwing/`.
-2. `sparkwing dashboard start` spawns a detached local web server
-   (`pkg/localws`) against that store, exposing the dashboard and the
-   JSON / logs APIs on one port (default `http://127.0.0.1:4343`).
-   `sparkwing dashboard status` / `kill` manage its lifecycle.
+1. Every local `sparkwing` run writes records to the SQLite store under `~/.sparkwing/`.
+2. `sparkwing dashboard start` spawns a detached local server (`pkg/localws`) against that store, hosting the embedded dashboard SPA, the JSON API, and the log endpoints on one port (default `http://127.0.0.1:4343`). `sparkwing dashboard status` and `sparkwing dashboard kill` manage its lifecycle.
 
-No daemon. No controller pod. No queue. No cluster lifecycle commands.
+No daemon, no controller pod, no queue, no cluster lifecycle commands.
 
 ## What gets written per run
 
-Run state lives in the local SQLite store at `~/.sparkwing/state.db`
-plus per-run log files under `~/.sparkwing/runs/<runID>/`. The dashboard
-reads both. Run IDs sort chronologically.
+Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifacts live under `~/.sparkwing/runs/<runID>/`: one `.log` file per node, plus `_envelope.ndjson` for run-level events (run start, plan, finish). The dashboard reads both the store and the logs.
+
+Run IDs are timestamp-prefixed, so they sort chronologically.
+
+`SPARKWING_HOME` overrides the `~/.sparkwing` root; see [config-reference.md](config-reference.md).
 
 ## Running the dashboard
 
 ```
-sparkwing dashboard start          # spawn detached server (idempotent)
-sparkwing dashboard status         # is it up? prints URL
-sparkwing dashboard kill           # stop it
+sparkwing dashboard start    # spawn detached server (idempotent)
+sparkwing dashboard status   # report liveness, print URL
+sparkwing dashboard kill     # stop it
 ```
 
-That is it. The CLI binary ships with the dashboard embedded; nothing
-else needs to be installed. `start` writes a PID + log file under
-`$SPARKWING_HOME` and prints the URL; re-running while it is already up
-just prints the URL again.
+The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. It is idempotent: if a live server is already on file, it prints the URL and returns without spawning a duplicate.
 
-## Why not a daemon
+For the bind address and the other `dashboard start` flags, see [cli-reference.md](cli-reference.md).
 
-A daemon buys you a queue, a scheduler, and a shared HTTP API. Locally
-none of that is worth the complexity:
+## Why no daemon
 
-- **Concurrency**: if you run 5 `sparkwing`s at once, you get 5 entries.
-  That is the user's call, not the tool's.
-- **History**: the local store *is* the history.
-- **Webhooks / remote triggering**: that is the cluster's job.
+A daemon would buy a queue, a scheduler, and a shared HTTP API. Locally that complexity is not worth it:
+
+- **Concurrency**: run five `sparkwing`s at once and you get five entries. That is the user's call.
+- **History**: the local store is the history.
+- **Webhooks and remote triggering**: that is the cluster's job.
 - **Background runs**: `sparkwing ... &` works in any shell.
 
 ## Multi-run demo
 
-Open two terminals. In each:
+In one terminal, start a couple of background runs:
 
 ```
 sparkwing run build &
 sparkwing run test &
 ```
 
-Open a third:
+In another, start the dashboard:
 
 ```
 sparkwing dashboard start
 ```
 
-Point your browser at `http://127.0.0.1:4343`. Both runs stream live;
-when they finish, status flips to `passed` or `failed`.
+Point your browser at `http://127.0.0.1:4343`. Both runs stream live; when they finish, status flips to `passed` or `failed`.
 
-## What still lives in the controller
+## What lives in the controller instead
 
-Only cluster mode. The controller binary still dispatches Kubernetes
-Jobs, ingests GitHub webhooks, and tracks team-wide history. None of
-that is relevant when you are iterating on your own laptop.
+Cluster mode. The controller dispatches Kubernetes Jobs, ingests GitHub webhooks, and tracks team-wide history — none of which applies when you iterate on your own laptop.
+
