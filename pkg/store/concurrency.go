@@ -245,14 +245,17 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{Kind: AcquireFailed}, nil
 	}
 
-	now := time.Now()
-	nowNS := now.UnixNano()
-
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return AcquireSlotResponse{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: read the clock only after the tx holds the write lock; a
+	// pre-BEGIN timestamp goes stale while waiting and revives expired
+	// holders whose budget was already reassigned.
+	now := time.Now()
+	nowNS := now.UnixNano()
 
 	// 1. Cache lookup; atomic with the rest so we never double-run.
 	// txCacheLookup owns the serve-from-cache decision, including the
@@ -952,14 +955,17 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
-	now := time.Now()
-	expires = now.Add(lease)
 
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return time.Time{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: clock read after BEGIN, or a stale timestamp lets a
+	// heartbeat revive a holder whose lease already lapsed.
+	now := time.Now()
+	expires = now.Add(lease)
 
 	var superInt int
 	var leaseNS int64
@@ -1336,14 +1342,15 @@ type WaiterResolution struct {
 // --no-cache follower waits for the leader instead of replaying a stale
 // entry, mirroring the acquire path's BypassRead.
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error) {
-	now := time.Now()
-	nowNS := now.UnixNano()
-
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return WaiterResolution{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: clock read after BEGIN so liveness answers match what the
+	// serialized writers committed, not a pre-wait snapshot.
+	nowNS := time.Now().UnixNano()
 
 	// 1. Holder row present + not superseded -> Promoted.
 	var holderID string
@@ -1595,12 +1602,14 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 // holds the read locks (FOR UPDATE SKIP LOCKED on Postgres) for the
 // duration so concurrent reapers pick disjoint rows.
 func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
-	now := time.Now().UnixNano()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: clock read after BEGIN; see AcquireConcurrencySlot.
+	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(
 		ctx,
