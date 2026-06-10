@@ -252,6 +252,14 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// safety: entries-row lock before any other row touch -- one lock
+	// order (entries, then cache, then holders/waiters) across every
+	// path, so a release writing cache after deleting its holder can't
+	// deadlock an acquire that read cache first.
+	if err := txLockEntry(ctx, tx, s.forUpdate(), req.Key); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+
 	// safety: read the clock only after the tx holds the write lock; a
 	// pre-BEGIN timestamp goes stale while waiting and revives expired
 	// holders whose budget was already reassigned.
@@ -304,6 +312,15 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			 ON CONFLICT (key) DO NOTHING`,
 			req.Key, req.Capacity, req.RunID, req.NodeID, nowNS,
 		); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		// safety: a conflict-losing insert holds no row lock; re-read FOR
+		// UPDATE so two first-acquires of a key serialize like later pairs.
+		var relockCap int
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT capacity FROM concurrency_entries WHERE key = ?`+s.forUpdate(), req.Key,
+		).Scan(&relockCap); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return AcquireSlotResponse{}, err
 		}
 	case err != nil:
@@ -674,6 +691,25 @@ func txConcurrencyAccounting(ctx context.Context, tx *storeTx, key string, nowNS
 	return a, nil
 }
 
+// txLockEntry serializes the transaction on the key's entries row --
+// the same lock the acquire path takes -- so every budget-mutating
+// path (admission, promotion, lease extension) runs under per-key
+// mutual exclusion on Postgres. Callers pass Store.forUpdate(); SQLite
+// passes an empty suffix because its writers serialize at the database
+// level. A key with no entries row has no holders or waiters to race
+// over, so a missing row is not an error.
+func txLockEntry(ctx context.Context, tx *storeTx, forUpdate, key string) error {
+	var one int
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT 1 FROM concurrency_entries WHERE key = ?`+forUpdate, key,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
+}
+
 // txEntryCapacity returns the registered capacity for a key, defaulting
 // to 1 when the entry row is missing or non-positive.
 func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) {
@@ -963,7 +999,13 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// safety: clock read after BEGIN, or a stale timestamp lets a
+	// safety: entries-row lock first (same order as acquire) so a lease
+	// extension can't race a promotion admitting into the same budget.
+	if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+		return time.Time{}, false, err
+	}
+
+	// safety: clock read after the lock, or a stale timestamp lets a
 	// heartbeat revive a holder whose lease already lapsed.
 	now := time.Now()
 	expires = now.Add(lease)
@@ -1010,6 +1052,12 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: entries-row lock first, keeping the one lock order shared
+	// with acquire and release+promote.
+	if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+		return false, err
+	}
 
 	released, _, _, err := txReleaseHolder(ctx, tx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 	if err != nil {
@@ -1137,6 +1185,19 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// safety: entries-row lock before any row writes (same order as
+	// acquire) so release+promote serializes with admissions without
+	// inverting lock order against a concurrent acquire.
+	var hasEntry int
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT 1 FROM concurrency_entries WHERE key = ?`+s.forUpdate(), key,
+	).Scan(&hasEntry)
+	entryDeclared := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, nil, nil, err
+	}
+
 	// 1. Release the holder (delete + release-time cache write). A
 	// missing holder (reaped or duplicate release) still runs promote to
 	// unblock waiters; followers stay parked until a real release.
@@ -1155,16 +1216,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	// 3. Promote queue / cancel_others waiters against the open budget.
 	// If the key was never declared (no entries row) and nothing is
 	// live, there is nothing to promote.
-	var hasEntry int
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM concurrency_entries WHERE key = ?`, key,
-	).Scan(&hasEntry)
-	if errors.Is(err, sql.ErrNoRows) {
+	if !entryDeclared {
 		return released, followers, nil, txCommitChecked(ctx, tx, time.Now().UnixNano(), key)
-	}
-	if err != nil {
-		return false, nil, nil, err
 	}
 	now := time.Now()
 	nowNS := now.UnixNano()
@@ -1270,7 +1323,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 	var hasEntry int
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT 1 FROM concurrency_entries WHERE key = ?`, key,
+		`SELECT 1 FROM concurrency_entries WHERE key = ?`+s.forUpdate(), key,
 	).Scan(&hasEntry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, txCommitChecked(ctx, tx, time.Now().UnixNano(), key)
@@ -1469,6 +1522,12 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// safety: entries-row lock first; the cancel may reclaim a holder and
+	// promote, which must serialize with concurrent admissions.
+	if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+		return false, err
+	}
+
 	waiterDeleted, err := txDeleteWaiter(ctx, tx, key, runID, nodeID)
 	if err != nil {
 		return false, err
@@ -1659,6 +1718,12 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: entries-row lock first; dropping superseded rows changes
+	// what a concurrent promotion may reclaim.
+	if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+		return nil, err
+	}
 
 	rows, err := tx.QueryContext(
 		ctx,
