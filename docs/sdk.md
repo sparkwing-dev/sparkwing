@@ -129,8 +129,8 @@ Plan-time side effects.
 
 Consumer-side helper packages (sparks-core libraries, custom
 pipeline libs) can opt their own ctx-taking entry points into the
-guard by calling `sparkwing.GuardPlanTime(ctx, "yourpkg.Helper")`
-at the top.
+guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
+(import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
 
 ## Exec - shelling out
 
@@ -257,7 +257,7 @@ Useful fields:
 rc.RunID    string         // unique run identifier
 rc.Pipeline string         // registered pipeline name
 rc.Git      *Git           // repo state at the trigger SHA
-rc.Trigger  TriggerInfo    // {Source: "push|manual|schedule|webhook", User, Env}
+rc.Trigger  TriggerInfo    // {Source: "manual|push|schedule|webhook", User}
 ```
 
 Most one-step Plans don't need `rc` at all - the parameter is named
@@ -266,7 +266,7 @@ for the moment a Plan starts branching on trigger source / SHA.
 Free-function adders (writes; mutate the Plan):
 
 ```
-sw.Job(plan, id, x any) *Job                                                 // register a Job: x is sw.Workable or func(ctx) error
+sw.Job(plan, id, x any) *JobNode                                             // register a Job: x is sw.Workable or func(ctx) error
 sw.JobFanOut[T](plan, name, items, fn) *JobGroup                             // Plan-time static fan-out
 sw.JobFanOutDynamic[T](plan, name, source, fn) *JobGroup                     // runtime fan-out after source completes
 sw.JobApproval(plan, id, cfg) *ApprovalGate                                   // human-decision gate (see "Approval gates")
@@ -281,7 +281,7 @@ case. Reflection at register time accepts either form. Anything else
 panics at materialize time.
 
 Approval gates register through `sw.JobApproval` and return an
-`*ApprovalGate` -- a narrower modifier surface than `*Job` so the
+`*ApprovalGate` -- a narrower modifier surface than `*JobNode` so the
 modifiers that don't apply to gates (`Retry`, `Timeout`, `Cache`,
 `Requires`, `Inline`) are physically absent and a misuse is a compile
 error rather than a runtime surprise:
@@ -299,7 +299,7 @@ sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
 Available modifiers on `*ApprovalGate`: `Needs`, `NeedsOptional`,
 `OnFailure`, `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`,
 `ContinueOnError`. Plus `Job()` as the escape hatch when an author
-genuinely needs the underlying `*Job`.
+genuinely needs the underlying `*JobNode`.
 
 `OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
 `sw.ApprovalDeny`, `sw.ApprovalApprove`. Unknown values panic at
@@ -309,20 +309,20 @@ distinct from `Job.Timeout()`, which bounds per-attempt execution.)
 Plan accessors (reads; methods on `*Plan`):
 
 ```
-plan.Nodes() []*Job                               // all registered nodes, in declaration order
-plan.Job(id) *Job                                // lookup by id, nil if absent
+plan.Nodes() []*JobNode                           // all registered nodes, in declaration order
+plan.Job(id) *JobNode                             // lookup by id, nil if absent
 plan.LintWarnings() []sw.LintWarning               // non-fatal Plan-time advisories
 plan.Expansions() []sw.Expansion                   // dynamic fan-out generators
 plan.IsDynamicNode(id) bool                        // dynamic source or .Dynamic()
 plan.GroupSourceIDs(id) []string                   // ExpandFrom group's source nodes
 ```
 
-Job modifiers (chainable on `*Job`):
+Job modifiers (chainable on `*JobNode`):
 
 ```
-node.Needs(deps...) *Job                          // dependency edges
-node.Env(key, value) *Job                         // per-node env var
-group.Needs(deps...) *JobGroup                    // every member depends on deps; same chainable surface as *Job
+node.Needs(deps...) *JobNode                       // dependency edges
+node.Env(key, value) *JobNode                      // per-node env var
+group.Needs(deps...) *JobGroup                     // every member depends on deps; same chainable surface as *JobNode
 ```
 
 `sw.GroupJobs(plan, name, members...)` returns a `*JobGroup` that is
@@ -333,7 +333,7 @@ name means "structural collection only" -- still a Needs target,
 but no UI cluster. The Work-layer twin is `sw.GroupSteps(w, name,
 steps...)`.
 
-Common Plan-layer modifiers (chainable on `*Job`):
+Common Plan-layer modifiers (chainable on `*JobNode`):
 
 ```
 .Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
@@ -448,10 +448,8 @@ dispatch then picks one of three paths:
 
 For step bodies that need to branch on the mode (e.g. emit a
 structured "would do X" log line for an op without a native
-dry-run flag), read `sparkwing.IsDryRun(ctx)` directly. The
-`sparkwing.WithDryRun(ctx)` constructor is exported for tests
-and embedders that want to invoke RunWork in dry mode without
-going through the sparkwing CLI.
+dry-run flag), read `sparkwing.IsDryRun(ctx)` directly -- the public
+way to detect dry-run from inside a step.
 
 `PreviewPlan` (the pipeline-binary helper behind
 `sparkwing pipeline plan`) renders one of three decisions per step
@@ -474,9 +472,6 @@ Initial modifiers mirror what `*WorkStep` has today:
 group.Needs(deps...) *StepGroup                           // applies to every member
 group.SkipIf(predicate) *StepGroup                        // applies to every member
 ```
-
-As step-level modifiers land (Retry, Optional, hooks, Cache --
-follow-up tickets), `*StepGroup` will mirror them.
 
 Reads on `*Work` stay methods: `w.Steps()`, `w.StepByID(id)`,
 `w.Spawns()`, `w.SpawnGens()`.
@@ -544,7 +539,7 @@ field. The constructor in `Plan()` carries the routing detail:
 
 | Routing | Constructor | What it does |
 |---|---|---|
-| In-run sibling | `sw.RefTo[T](node)` | Read a `*Job` in the same DAG. Implies a `Needs()` edge. |
+| In-run sibling | `sw.RefTo[T](node)` | Read a `*JobNode` in the same DAG. Implies a `Needs()` edge. |
 | Cross-pipeline, passive | `sw.RefToLastRun[T](pipeline, nodeID, opts...)` | Read another pipeline's latest successful run. Does not trigger. |
 | Cross-pipeline, active | `sw.RunAndAwait[Out, In](ctx, ...)` (free fn) | Trigger a fresh run of another pipeline, wait, return its output. |
 
@@ -716,7 +711,7 @@ screen.
 
 Each pipeline declares exactly one Inputs type. Field tags drive CLI
 parsing, `--help`, schema introspection (`sparkwing pipeline describe
---pipeline X -o json`), shell completion, dashboard run-form, and MCP
+--name X -o json`), shell completion, dashboard run-form, and MCP
 tool definitions.
 
 ```
