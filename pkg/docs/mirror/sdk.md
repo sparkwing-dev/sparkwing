@@ -1,13 +1,16 @@
 # SDK Reference
 
-Flat reference of every helper in the `sparkwing` package an agent
-or human is likely to call from a `.sparkwing/jobs/*.go` file. Type
-signatures and one-line summaries - designed to be loaded once at the
-start of a pipeline-authoring task.
+A curated quick-reference to the `sparkwing` package helpers you call
+from `.sparkwing/jobs/*.go`, plus the SDK-authoring concepts worth
+loading at the start of a task. The complete, always-current API --
+every exported type, signature, and field -- is generated from source
+on pkg.go.dev:
 
-For the conceptual tour (Plan, Job, Job, Work, modifiers,
-`sparkwing.yaml` shape), read [pipelines](pipelines.md). This page is
-the authoritative SDK reference for the `sparkwing` Go package.
+<https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/sparkwing>
+
+When a signature here disagrees with pkg.go.dev, pkg.go.dev wins. For
+the Plan/Work model and the `sparkwing.yaml` shape, see
+[pipelines](pipelines.md).
 
 The convention is to import the SDK under the alias `sw`:
 
@@ -50,37 +53,13 @@ tab-completing `Job` shows every way to put a Job into the run
 
 ## The two-layer model
 
-Sparkwing has two DAGs: **Plan / Job** (the outer DAG, units of
-dispatch) and **Work / WorkStep** (the inner DAG, units of work
-within one Job's runner). Plan-only modifiers - Retry, Timeout,
-OnFailure, Cache, Requires, BeforeRun / AfterRun, Approval, Inline -
-live on `*Job`. The inner DAG carries `Needs` and `SkipIf` only.
-
-Every Job's `Work()` runs at Plan-time, so renderers
-(`sparkwing pipeline explain`, the dashboard) walk the full reachable
-nested DAG before any dispatch.
-
-The non-typed step type is named **`WorkStep`** (rather than `Step`)
-because the historical `sparkwing.Step` package-level call was a log
-breadcrumb that has been replaced with structured `step_start` /
-`step_end` events. The inner-DAG entity carries the suffix to keep
-the rename auditable.
-
-### Cost grid
-
-| API | Layer | Cardinality | Cost |
-|---|---|---|---|
-| `sw.Job(plan, id, x)` | Plan | one, declared at Plan-time | normal node |
-| `sw.JobFanOut(plan, name, items, fn)` | Plan | many, items in hand at Plan-time | normal nodes; one per element |
-| `sw.JobFanOutDynamic(plan, name, source, fn)` | Plan | many, source's runtime output | source runner exits before fan-out - no stranded compute |
-| `sw.Step(w, id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
-| `sw.JobSpawn(w, id, job)` | Work | one, decided mid-Work | spawning runner stays suspended until child completes |
-| `sw.JobSpawnEach(w, items, fn)` | Work | many, mid-Work fan-out | spawning runner stays suspended across all children |
-
-The verb tells you the cost: `Job*` adders on `plan` are cheap; the
-`JobSpawn*` adders on `w` flag the layer jump and the
-suspended-runner cost. Reach for `JobSpawn` when you genuinely need
-Plan-only modifiers on a unit decided mid-execution.
+Plan/Job (the outer DAG, units of dispatch) versus Work/WorkStep (the
+inner DAG, units of work inside one Job's runner) -- the Plan-only
+modifier set, the Plan-time materialization, and the per-adder cost
+grid -- is the canonical conceptual tour in
+[pipelines](pipelines.md); the rest of this page assumes it. The
+read/write split above is the SDK-specific corollary: mutating adders
+are free functions, reads are container methods.
 
 ## Plan() must be pure
 
