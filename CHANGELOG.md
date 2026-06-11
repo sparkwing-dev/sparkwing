@@ -57,8 +57,26 @@ code change to unlock.
   logged loudly. A seeded randomized property suite drives
   acquire/release/heartbeat/promote/cancel sequences -- sequential and
   concurrent -- against a real store to keep those invariants honest.
+- **sdk:** `NewConcurrencyGroup` rejects an empty group name (all
+  unnamed groups would silently share one budget) and unknown `Scope`
+  / `OnLimit` values at construction, so a misspelled policy fails at
+  the author's call site instead of silently coordinating with the
+  backend default.
+- **sdk:** Node ids are validated at plan time: slashes remain valid
+  as spawn hierarchy separators (`parent/child`), but traversal
+  references, empty segments, backslashes, and control characters
+  panic at the `Job(...)` call site.
 
 ### Fixed
+
+- **controller:** The log storage backends (filesystem and S3) reject
+  run and node IDs containing path traversal or control characters at
+  the boundary, so an ID arriving over HTTP can never escape the log
+  root on disk or corrupt an object-key listing.
+- **cache:** The registry proxy's cache key length-prefixes its
+  (registry, path) input so a registry name embedding a slash cannot
+  collide with another registry's path and serve its cached response.
+  Existing entries keyed by the older form miss once and re-fetch.
 
 - **sdk:** On Postgres (multi-writer modes), every budget-mutating
   concurrency path -- promotion on release, the reconcile sweep,

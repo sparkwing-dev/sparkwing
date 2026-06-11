@@ -31,6 +31,9 @@ type ReadOpts struct {
 	Lines string
 	Grep  string
 }
+func SafeLogIDs(runID, nodeID string) error
+func SafeRelPath(id string) error
+func SafeSegment(id string) error
 type StateStore interface {
 	Close() error
 
