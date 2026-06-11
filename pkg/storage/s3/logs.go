@@ -3,7 +3,6 @@ package s3
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -61,8 +60,8 @@ func (s *LogStore) appendKey(runID, nodeID string) string {
 }
 
 func (s *LogStore) Append(ctx context.Context, runID, nodeID string, data []byte) error {
-	if runID == "" || nodeID == "" {
-		return errors.New("s3.LogStore.Append: runID and nodeID required")
+	if err := storage.SafeSegments(runID, nodeID); err != nil {
+		return fmt.Errorf("s3.LogStore.Append: %w", err)
 	}
 	// Ensure trailing newline so Read never glues records onto one line.
 	if len(data) > 0 && data[len(data)-1] != '\n' {
@@ -84,6 +83,9 @@ func (s *LogStore) Append(ctx context.Context, runID, nodeID string, data []byte
 }
 
 func (s *LogStore) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error) {
+	if err := storage.SafeSegments(runID, nodeID); err != nil {
+		return nil, fmt.Errorf("s3.LogStore.Read: %w", err)
+	}
 	parts, err := s.listAndConcat(ctx, s.nodePrefix(runID, nodeID))
 	if err != nil {
 		return nil, err
@@ -95,6 +97,9 @@ func (s *LogStore) Read(ctx context.Context, runID, nodeID string, opts storage.
 }
 
 func (s *LogStore) ReadRun(ctx context.Context, runID string) ([]byte, error) {
+	if err := storage.SafeSegment(runID); err != nil {
+		return nil, fmt.Errorf("s3.LogStore.ReadRun: %w", err)
+	}
 	prefix := s.runPrefix(runID)
 	keys, err := s.listKeys(ctx, prefix)
 	if err != nil {
@@ -144,6 +149,9 @@ func (s *LogStore) Stream(context.Context, string, string) (io.ReadCloser, error
 }
 
 func (s *LogStore) DeleteRun(ctx context.Context, runID string) error {
+	if err := storage.SafeSegment(runID); err != nil {
+		return fmt.Errorf("s3.LogStore.DeleteRun: %w", err)
+	}
 	keys, err := s.listKeys(ctx, s.runPrefix(runID))
 	if err != nil {
 		return err

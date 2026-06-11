@@ -67,8 +67,8 @@ func (s *LogStore) runDir(runID string) string {
 }
 
 func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) error {
-	if runID == "" || nodeID == "" {
-		return errors.New("fs.LogStore.Append: runID and nodeID required")
+	if err := storage.SafeSegments(runID, nodeID); err != nil {
+		return fmt.Errorf("fs.LogStore.Append: %w", err)
 	}
 	m := s.lockFor(runID, nodeID)
 	m.Lock()
@@ -96,6 +96,9 @@ func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) 
 }
 
 func (s *LogStore) Read(_ context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error) {
+	if err := storage.SafeSegments(runID, nodeID); err != nil {
+		return nil, fmt.Errorf("fs.LogStore.Read: %w", err)
+	}
 	data, err := os.ReadFile(s.nodePath(runID, nodeID))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -107,6 +110,9 @@ func (s *LogStore) Read(_ context.Context, runID, nodeID string, opts storage.Re
 }
 
 func (s *LogStore) ReadRun(_ context.Context, runID string) ([]byte, error) {
+	if err := storage.SafeSegment(runID); err != nil {
+		return nil, fmt.Errorf("fs.LogStore.ReadRun: %w", err)
+	}
 	dir := s.runDir(runID)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -141,6 +147,9 @@ func (s *LogStore) Stream(context.Context, string, string) (io.ReadCloser, error
 }
 
 func (s *LogStore) DeleteRun(_ context.Context, runID string) error {
+	if err := storage.SafeSegment(runID); err != nil {
+		return fmt.Errorf("fs.LogStore.DeleteRun: %w", err)
+	}
 	err := os.RemoveAll(s.runDir(runID))
 	if err == nil || errors.Is(err, os.ErrNotExist) {
 		return nil

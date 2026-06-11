@@ -137,6 +137,23 @@ type Expansion struct {
 // dispatch path -- every caller that needs a node before it has a
 // home in p.nodes / p.byID.
 //
+// validateNodeID rejects identifiers that cannot safely travel
+// everywhere a node id goes: log file paths, object-store key
+// segments, and the runID/nodeID holder convention. The storage
+// backends enforce the same rule at their boundary; this check fails
+// at the author's call site instead of deep inside a run.
+func validateNodeID(id string) error {
+	if id == "." || id == ".." {
+		return fmt.Errorf("id %q is a path reference", id)
+	}
+	for _, r := range id {
+		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("id must not contain path separators or control characters")
+		}
+	}
+	return nil
+}
+
 // Runs the same validation Job does so a Produces/SetResult typo or
 // an invalid Approval timeout panics at the same point regardless of
 // where the node is destined to live.
@@ -147,6 +164,9 @@ type Expansion struct {
 func newNode(caller, id string, job Workable) *JobNode {
 	if id == "" {
 		panic(fmt.Sprintf("sparkwing: %s: id must not be empty", caller))
+	}
+	if err := validateNodeID(id); err != nil {
+		panic(fmt.Sprintf("sparkwing: %s(%q): %v", caller, id, err))
 	}
 	if job == nil {
 		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))
