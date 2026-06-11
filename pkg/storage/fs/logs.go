@@ -67,7 +67,7 @@ func (s *LogStore) runDir(runID string) string {
 }
 
 func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) error {
-	if err := storage.SafeSegments(runID, nodeID); err != nil {
+	if err := storage.SafeLogIDs(runID, nodeID); err != nil {
 		return fmt.Errorf("fs.LogStore.Append: %w", err)
 	}
 	m := s.lockFor(runID, nodeID)
@@ -96,7 +96,7 @@ func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) 
 }
 
 func (s *LogStore) Read(_ context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error) {
-	if err := storage.SafeSegments(runID, nodeID); err != nil {
+	if err := storage.SafeLogIDs(runID, nodeID); err != nil {
 		return nil, fmt.Errorf("fs.LogStore.Read: %w", err)
 	}
 	data, err := os.ReadFile(s.nodePath(runID, nodeID))

@@ -60,7 +60,7 @@ func (s *LogStore) appendKey(runID, nodeID string) string {
 }
 
 func (s *LogStore) Append(ctx context.Context, runID, nodeID string, data []byte) error {
-	if err := storage.SafeSegments(runID, nodeID); err != nil {
+	if err := storage.SafeLogIDs(runID, nodeID); err != nil {
 		return fmt.Errorf("s3.LogStore.Append: %w", err)
 	}
 	// Ensure trailing newline so Read never glues records onto one line.
@@ -83,7 +83,7 @@ func (s *LogStore) Append(ctx context.Context, runID, nodeID string, data []byte
 }
 
 func (s *LogStore) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error) {
-	if err := storage.SafeSegments(runID, nodeID); err != nil {
+	if err := storage.SafeLogIDs(runID, nodeID); err != nil {
 		return nil, fmt.Errorf("s3.LogStore.Read: %w", err)
 	}
 	parts, err := s.listAndConcat(ctx, s.nodePrefix(runID, nodeID))

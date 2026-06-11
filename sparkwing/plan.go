@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -139,16 +140,25 @@ type Expansion struct {
 //
 // validateNodeID rejects identifiers that cannot safely travel
 // everywhere a node id goes: log file paths, object-store key
-// segments, and the runID/nodeID holder convention. The storage
-// backends enforce the same rule at their boundary; this check fails
-// at the author's call site instead of deep inside a run.
+// segments, and the runID/nodeID holder convention. Slashes are
+// allowed as hierarchy separators (spawned children are
+// "parent/child") but every segment must stand on its own -- no
+// traversal references, empty segments, backslashes, or control
+// characters. The storage backends enforce the same rule at their
+// boundary; this check fails at the author's call site instead of
+// deep inside a run.
 func validateNodeID(id string) error {
-	if id == "." || id == ".." {
-		return fmt.Errorf("id %q is a path reference", id)
-	}
-	for _, r := range id {
-		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
-			return fmt.Errorf("id must not contain path separators or control characters")
+	for _, seg := range strings.Split(id, "/") {
+		if seg == "" {
+			return fmt.Errorf("id must not contain empty path segments")
+		}
+		if seg == "." || seg == ".." {
+			return fmt.Errorf("id segment %q is a path reference", seg)
+		}
+		for _, r := range seg {
+			if r == '\\' || r < 0x20 || r == 0x7f {
+				return fmt.Errorf("id must not contain backslashes or control characters")
+			}
 		}
 	}
 	return nil

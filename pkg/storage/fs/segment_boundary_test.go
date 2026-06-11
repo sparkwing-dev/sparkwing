@@ -24,8 +24,11 @@ func TestLogStore_RejectsPathEscapingIDs(t *testing.T) {
 	if err := ls.Append(ctx, "r1", "../../escape", []byte(`{}`)); err == nil {
 		t.Fatal("Append with traversal nodeID succeeded")
 	}
-	if _, err := ls.Read(ctx, "r1", "a/b", storage.ReadOpts{}); err == nil {
-		t.Fatal("Read with separator nodeID succeeded")
+	if _, err := ls.Read(ctx, "r1", "a/../../b", storage.ReadOpts{}); err == nil {
+		t.Fatal("Read with traversal nodeID succeeded")
+	}
+	if err := ls.Append(ctx, "r1", "parent/shard-a", []byte(`{}`)); err != nil {
+		t.Fatalf("Append with hierarchical (spawned) nodeID failed: %v", err)
 	}
 	if _, err := ls.ReadRun(ctx, ".."); err == nil {
 		t.Fatal("ReadRun with traversal runID succeeded")

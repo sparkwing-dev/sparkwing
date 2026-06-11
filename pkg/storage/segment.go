@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // SafeSegment validates an identifier (run ID, node ID) used as a
@@ -28,13 +29,28 @@ func SafeSegment(id string) error {
 	return nil
 }
 
-// SafeSegments validates several identifiers at once, returning the
-// first violation.
-func SafeSegments(ids ...string) error {
-	for _, id := range ids {
-		if err := SafeSegment(id); err != nil {
+// SafeRelPath validates an identifier that may span several path
+// segments -- spawned node IDs are hierarchical ("parent/child") --
+// by requiring every "/"-separated segment to be a SafeSegment, so
+// the identifier can nest below its run directory but never step out
+// of it.
+func SafeRelPath(id string) error {
+	if id == "" {
+		return errors.New("storage: empty identifier")
+	}
+	for _, seg := range strings.Split(id, "/") {
+		if err := SafeSegment(seg); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// SafeLogIDs validates a (runID, nodeID) pair at a log-store boundary:
+// the run ID is a single segment, the node ID may be hierarchical.
+func SafeLogIDs(runID, nodeID string) error {
+	if err := SafeSegment(runID); err != nil {
+		return err
+	}
+	return SafeRelPath(nodeID)
 }
