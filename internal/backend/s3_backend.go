@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -274,19 +274,10 @@ func parseStateNDJSON(rc io.Reader) (*runState, error) {
 	return st, nil
 }
 
-// runIDFromStateKey returns ("abc", true) for "runs/abc/state.ndjson"
-// and ("", false) for anything else under runs/.
+// runIDFromStateKey parses state keys through the layout owner's
+// single definition in pkg/storage/s3state.
 func runIDFromStateKey(key string) (string, bool) {
-	const prefix = "runs/"
-	const suffix = "/state.ndjson"
-	if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
-		return "", false
-	}
-	mid := key[len(prefix) : len(key)-len(suffix)]
-	if mid == "" || strings.Contains(mid, "/") {
-		return "", false
-	}
-	return mid, true
+	return s3state.RunIDFromStateKey(key)
 }
 
 // applyRunFilter mirrors store.ListRuns' SQL semantics in memory:

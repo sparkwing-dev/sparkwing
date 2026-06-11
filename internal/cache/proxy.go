@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -178,8 +179,13 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// proxyCacheKey hashes a length-prefixed (registry, path) pair so the
+// encoding stays injective: without the prefix, ("npm/scoped",
+// "pkg") and ("npm", "scoped/pkg") hash the same bytes and could
+// serve each other's cached responses. Existing entries keyed by the
+// older unprefixed form simply miss and re-fetch once.
 func proxyCacheKey(registry, path string) string {
-	h := sha256.Sum256([]byte(registry + "/" + path))
+	h := sha256.Sum256([]byte(strconv.Itoa(len(registry)) + ":" + registry + "/" + path))
 	return fmt.Sprintf("%x", h)[:16]
 }
 

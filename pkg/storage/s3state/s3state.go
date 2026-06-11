@@ -526,7 +526,7 @@ func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []
 	}
 	var best *store.Run
 	for _, k := range keys {
-		runID, ok := runIDFromStateKey(k)
+		runID, ok := RunIDFromStateKey(k)
 		if !ok {
 			continue
 		}
@@ -856,9 +856,11 @@ func (b *Backend) ListPendingApprovals(_ context.Context) ([]*store.Approval, er
 	return nil, notSupported("approval gates")
 }
 
-// runIDFromStateKey extracts "abc" from "runs/abc/state.ndjson".
-// Returns ("", false) for keys with a different shape.
-func runIDFromStateKey(key string) (string, bool) {
+// RunIDFromStateKey extracts "abc" from "runs/abc/state.ndjson",
+// returning ("", false) for keys with a different shape. It is the
+// single definition of the state-key layout this backend writes;
+// every consumer that lists the bucket parses keys through it.
+func RunIDFromStateKey(key string) (string, bool) {
 	const prefix = "runs/"
 	const suffix = "/state.ndjson"
 	if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
