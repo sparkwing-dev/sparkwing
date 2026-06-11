@@ -24,16 +24,8 @@ import (
 // golangci-lint, staticcheck (called by golangci-lint), govulncheck.
 type PrePush struct{ sparkwing.Base }
 
-// PrePushInputs carries the optional agent-review controls. Both default
-// to false, so a plain `git push` runs the full gate including the
-// reviewers.
-type PrePushInputs struct {
-	BypassAgentReview  bool `flag:"bypass-agent-review" desc:"Skip the agent-review gate (the deterministic checks still run)."`
-	RestartAgentReview bool `flag:"restart-agent-review" desc:"Wipe the reviewers' resumable sessions and review fresh instead of resuming the last round."`
-}
-
 func (PrePush) ShortHelp() string {
-	return "Pre-push gate: lint, test -race, vuln, freshness, no replace + no go.work, agent review"
+	return "Pre-push gate: lint, test -race, vuln, freshness, no replace + no go.work"
 }
 
 func (PrePush) Help() string {
@@ -44,26 +36,21 @@ func (PrePush) Help() string {
 		"path), refuses to push if any committed go.mod contains a " +
 		"`replace` line, and refuses to push if `go.work` / `go.work.sum` " +
 		"have been committed (workspaces are local-iteration scaffolding " +
-		"and can't be resolved by the Go module proxy). Last, an " +
-		"agent-review gate runs a roster of specialized reviewers over the " +
-		"pushed diff and fails on any finding at medium severity or above; " +
-		"skip it with --bypass-agent-review, or review fresh (no session " +
-		"resume) with --restart-agent-review."
+		"and can't be resolved by the Go module proxy)."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Manually invoke the pre-push gate", Command: "sparkwing run pre-push"},
-		{Comment: "Run the gate but skip the agent reviewers", Command: "sparkwing run pre-push --bypass-agent-review"},
 	}
 }
 
-func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, in PrePushInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return p.run(ctx, in) })
+func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, rc.Pipeline, p.run)
 	return nil
 }
 
-func (p *PrePush) run(ctx context.Context, in PrePushInputs) error {
+func (p *PrePush) run(ctx context.Context) error {
 	var failures []string
 
 	// 1. No `replace` directives in any committed go.mod. Replace is
@@ -239,37 +226,9 @@ func (p *PrePush) run(ctx context.Context, in PrePushInputs) error {
 		sparkwing.Info(ctx, "api-reference: current")
 	}
 
-	if err := p.runAgentReview(ctx, in); err != nil {
-		failures = append(failures, fmt.Sprintf("agent-review: %v", err))
-	}
-
 	if len(failures) > 0 {
 		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
 	}
-	return nil
-}
-
-// runAgentReview is the judgment layer the deterministic checks can't
-// cover: a roster of specialized reviewers (internal/agentreview) reads
-// the pushed diff via headless claude sessions and fails on any finding
-// at medium severity or above. Each reviewer keeps a resumable session,
-// so a re-run after addressing feedback resumes with memory of the last
-// round; in.RestartAgentReview forces a fresh review. in.BypassAgentReview
-// skips it entirely (the rest of the gate still runs); `git push
-// --no-verify` skips the whole hook.
-func (p *PrePush) runAgentReview(ctx context.Context, in PrePushInputs) error {
-	if in.BypassAgentReview {
-		sparkwing.Info(ctx, "agent-review: bypassed")
-		return nil
-	}
-	cmd := `cd "$ROOT" && go run ./internal/agentreview --root "$ROOT"`
-	if in.RestartAgentReview {
-		cmd += " --restart"
-	}
-	if _, err := sparkwing.Bash(ctx, cmd).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "agent-review: clean")
 	return nil
 }
 
@@ -366,5 +325,5 @@ func checkNoCommittedGoWorkFiles(ctx context.Context) error {
 }
 
 func init() {
-	sparkwing.Register[PrePushInputs]("pre-push", func() sparkwing.Pipeline[PrePushInputs] { return &PrePush{} })
+	sparkwing.Register("pre-push", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
 }
