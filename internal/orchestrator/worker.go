@@ -183,11 +183,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	}
 	// Concurrency must go through the controller so cache hits, slot
 	// holders, and waiter resolution are shared across runner pods.
-	backends := Backends{
-		State:       stateClient,
-		Logs:        logsBackend,
-		Concurrency: NewHTTPConcurrency(opts.ControllerURL, opts.HTTPClient, opts.Token, store.DefaultConcurrencyLease),
-	}
+	backends := RemoteBackends(stateClient, logsBackend, opts.HTTPClient, store.DefaultConcurrencyLease)
 	_ = local // local backends still useful for paths/logs fallback
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)

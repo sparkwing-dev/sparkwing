@@ -63,13 +63,7 @@ func RunNodeOnce(
 		logsBackend = localLogs{paths: paths}
 	}
 
-	concurrencyBackend := NewHTTPConcurrency(controllerURL, httpClient, token, store.DefaultConcurrencyLease)
-
-	backends := Backends{
-		State:       stateClient,
-		Logs:        logsBackend,
-		Concurrency: concurrencyBackend,
-	}
+	backends := RemoteBackends(stateClient, logsBackend, httpClient, store.DefaultConcurrencyLease)
 
 	run, err := stateClient.GetRun(ctx, runID)
 	if err != nil {

@@ -652,7 +652,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		if opts.LogStore != nil {
 			logsBackend = NewLogStoreBackend(opts.LogStore, nil)
 		}
-		backends = RemoteBackends(s, logsBackend, 0)
+		backends = RemoteBackends(s, logsBackend, nil, 0)
 	default:
 		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 	}

@@ -123,24 +123,27 @@ var _ StateBackend = (*client.Client)(nil)
 // RemoteBackends builds a Backends bundle for Mode 4 (hosted
 // controller). State + concurrency talk to the same controller HTTP
 // surface; logs is the caller-supplied LogBackend or, when nil, a
-// fresh HTTP logs backend pointed at the same controller. The lease
-// argument shapes how long the HTTPConcurrency holders run before
-// the controller can reap them; zero falls back to the package
+// fresh HTTP logs backend pointed at the same controller. httpClient
+// shapes the concurrency backend's transport; nil picks the default.
+// The lease argument shapes how long the HTTPConcurrency holders run
+// before the controller can reap them; zero falls back to the package
 // default.
 //
 // Use this when state-store creds are an HTTP profile, not direct
-// access to a database. Cluster workers reach the same assembly by
-// inlining the same wiring with extra logs-URL plumbing; this
-// constructor centralizes the laptop path and is symmetric with
-// LocalBackends + S3Backends.
-func RemoteBackends(c *client.Client, logs LogBackend, lease time.Duration) Backends {
+// access to a database. The laptop path, the cluster worker, and the
+// single-node runner all assemble Mode 4 through this one constructor,
+// symmetric with LocalBackends + S3Backends.
+func RemoteBackends(c *client.Client, logs LogBackend, httpClient *http.Client, lease time.Duration) Backends {
 	if logs == nil {
 		logs = NewHTTPLogsWithToken(c.BaseURL(), nil, c.Token(), nil)
+	}
+	if httpClient == nil {
+		httpClient = defaultHTTPClient()
 	}
 	return Backends{
 		State:       c,
 		Logs:        logs,
-		Concurrency: NewHTTPConcurrency(c.BaseURL(), defaultHTTPClient(), c.Token(), lease),
+		Concurrency: NewHTTPConcurrency(c.BaseURL(), httpClient, c.Token(), lease),
 	}
 }
 
