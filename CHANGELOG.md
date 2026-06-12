@@ -50,6 +50,13 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `sparkwing version` reports the binary's embedded runs-store
+  schema version (`schema_version` in JSON, a `schema:` line in the
+  table). A reader confirms which schema a binary speaks without opening
+  a database, and the release pipeline gates published assets on it: a
+  pre-publish check rebuilds the schema reference from the tagged commit
+  and refuses the release if any asset embeds a different schema, so a
+  version string always implies one schema across every install path.
 - **sdk:** The store verifies its concurrency invariants (live cost
   within effective capacity, holder and waiter shape, no participant
   both holding and waiting) at the end of every mutating transaction.

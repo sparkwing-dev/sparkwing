@@ -22,11 +22,13 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // VersionReport is the JSON shape of `sparkwing version --json`.
 type VersionReport struct {
 	CLI            InfoVersion     `json:"cli"`
+	SchemaVersion  int             `json:"schema_version"`
 	LatestRelease  string          `json:"latest_release,omitempty"`
 	LatestFetchErr string          `json:"latest_fetch_error,omitempty"`
 	Behind         bool            `json:"behind"`
@@ -118,7 +120,8 @@ func runVersion(args []string) error {
 
 func gatherVersionReport(offline bool) VersionReport {
 	r := VersionReport{
-		CLI: parseInfoVersion(installedVersion()),
+		CLI:           parseInfoVersion(installedVersion()),
+		SchemaVersion: store.ExpectedSchemaVersion(),
 	}
 	if !offline {
 		latest, err := fetchLatestRelease()
@@ -276,6 +279,7 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing version update --cli"))
 	}
 	fmt.Printf("  releases: https://github.com/sparkwing-dev/sparkwing/releases\n")
+	fmt.Printf("  schema:   %d %s\n", r.SchemaVersion, color.Dim("(embedded runs-store schema)"))
 	fmt.Println()
 
 	if r.Project == nil {
