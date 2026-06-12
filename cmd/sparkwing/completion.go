@@ -307,6 +307,9 @@ func summarizePipelineTriggers(t pipelines.Triggers) string {
 	if t.PostHook != nil {
 		bits = append(bits, "pre-push")
 	}
+	if t.PostCommitHook != nil {
+		bits = append(bits, "post-commit")
+	}
 	if len(bits) == 0 {
 		bits = append(bits, "manual")
 	}

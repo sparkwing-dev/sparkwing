@@ -428,6 +428,9 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 	if t.PostHook != nil {
 		out = append(out, "pre-push")
 	}
+	if t.PostCommitHook != nil {
+		out = append(out, "post-commit")
+	}
 	return out
 }
 

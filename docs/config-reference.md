@@ -52,6 +52,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 | `webhook` | `WebhookTrigger` | no | Webhook exposes a custom HTTP path that fires the pipeline. |
 | `pre_commit` | `PreHookTrigger` | no | PreHook fires from the installed git pre-commit hook. |
 | `pre_push` | `PostHookTrigger` | no | PostHook fires from the installed git pre-push hook. |
+| `post_commit` | `PostCommitHookTrigger` | no | PostCommitHook fires from the installed git post-commit hook, after the commit is recorded. It never blocks or aborts the commit. |
 
 ## `on.push`
 

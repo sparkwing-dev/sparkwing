@@ -72,9 +72,12 @@ func runHooksInstall(args []string) error {
 		if p.On.PostHook != nil {
 			hooksToRun["pre-push"] = append(hooksToRun["pre-push"], p.Name)
 		}
+		if p.On.PostCommitHook != nil {
+			hooksToRun["post-commit"] = append(hooksToRun["post-commit"], p.Name)
+		}
 	}
 	if len(hooksToRun) == 0 {
-		fmt.Fprintln(os.Stdout, "hooks install: no pipelines declare pre_commit or pre_push triggers")
+		fmt.Fprintln(os.Stdout, "hooks install: no pipelines declare pre_commit, pre_push, or post_commit triggers")
 		return nil
 	}
 
@@ -94,7 +97,7 @@ func runHooksInstall(args []string) error {
 				continue
 			}
 		}
-		content := renderHookScript(pipes)
+		content := renderHookScript(hookName, pipes)
 		if err := os.WriteFile(hookPath, []byte(content), 0o755); err != nil {
 			return fmt.Errorf("hooks install: write %s: %w", hookPath, err)
 		}
@@ -190,7 +193,9 @@ func runHooksStatus(args []string) error {
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "sparkwing run ") {
-				pipes = append(pipes, strings.TrimPrefix(line, "sparkwing run "))
+				name := strings.TrimPrefix(line, "sparkwing run ")
+				name = strings.TrimSuffix(name, " || true")
+				pipes = append(pipes, name)
 			}
 		}
 		if len(pipes) > 0 {
@@ -230,16 +235,29 @@ func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
 	return abs, candidate, nil
 }
 
-// renderHookScript builds the hook file contents. Short POSIX sh so
-// it runs anywhere git does; exits non-zero on first pipeline failure
-// so git aborts the commit / push as operators expect.
-func renderHookScript(pipes []string) string {
+// renderHookScript builds the hook file contents. Short POSIX sh so it
+// runs anywhere git does.
+//
+// Blocking hooks (pre-commit, pre-push) exit non-zero on the first
+// pipeline failure so git aborts the commit / push as operators expect.
+// The post-commit hook is non-blocking: the commit has already landed,
+// so it runs every pipeline, tolerates failures, and always exits zero
+// rather than leaving git reporting a failed post-commit step.
+func renderHookScript(hookName string, pipes []string) string {
+	blocking := hookName != "post-commit"
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("# " + sparkwingHookMarker + " -- do not edit; use `sparkwing hooks (un)install`\n")
-	b.WriteString("set -e\n")
-	for _, p := range pipes {
-		fmt.Fprintf(&b, "sparkwing run %s\n", p)
+	if blocking {
+		b.WriteString("set -e\n")
+		for _, p := range pipes {
+			fmt.Fprintf(&b, "sparkwing run %s\n", p)
+		}
+		return b.String()
 	}
+	for _, p := range pipes {
+		fmt.Fprintf(&b, "sparkwing run %s || true\n", p)
+	}
+	b.WriteString("exit 0\n")
 	return b.String()
 }

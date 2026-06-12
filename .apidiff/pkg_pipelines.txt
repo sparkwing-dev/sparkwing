@@ -65,6 +65,7 @@ type Pipeline struct {
 	Requires []string
 }
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
+type PostCommitHookTrigger struct{}
 type PostHookTrigger struct{}
 type PreHookTrigger struct{}
 type PushTrigger struct {
@@ -89,6 +90,8 @@ type Triggers struct {
 	PreHook *PreHookTrigger
 
 	PostHook *PostHookTrigger
+
+	PostCommitHook *PostCommitHookTrigger
 }
 type WebhookTrigger struct {
 	Path string

@@ -56,6 +56,37 @@ pipelines:
 	}
 }
 
+func TestParse_GitHookTriggers(t *testing.T) {
+	yaml := `
+pipelines:
+  - name: lint
+    entrypoint: Lint
+    on:
+      pre_commit: {}
+  - name: suite
+    entrypoint: Suite
+    on:
+      pre_push: {}
+  - name: self-install
+    entrypoint: SelfInstall
+    on:
+      post_commit: {}
+`
+	cfg, err := pipelines.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p := cfg.Find("lint"); p == nil || p.On.PreHook == nil {
+		t.Fatalf("pre_commit mis-parsed: %+v", p)
+	}
+	if p := cfg.Find("suite"); p == nil || p.On.PostHook == nil {
+		t.Fatalf("pre_push mis-parsed: %+v", p)
+	}
+	if p := cfg.Find("self-install"); p == nil || p.On.PostCommitHook == nil {
+		t.Fatalf("post_commit mis-parsed: %+v", p)
+	}
+}
+
 func TestParse_RejectsDuplicateName(t *testing.T) {
 	yaml := `
 pipelines:

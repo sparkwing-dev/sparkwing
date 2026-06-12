@@ -1899,7 +1899,7 @@ Discovery (list / describe / discover / explain) shows what
 pipelines this repo defines. 'new' scaffolds a fresh pipeline
 (auto-bootstraps .sparkwing/ on first use). 'run' invokes one
 (positional name; same as 'sparkwing run <name>'). 'hooks' wires
-pipelines to git pre-commit / pre-push.
+pipelines to git pre-commit / pre-push / post-commit.
 'sparks' manages reusable spark libraries declared in
 .sparkwing/sparks.yaml.
 
@@ -1922,7 +1922,7 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 - `plan` -- Render the runtime-resolved DAG (would-run/would-skip) without running
 - `run` -- Invoke a pipeline (canonical form of `sparkwing run <name>`)
 - `trigger` -- Submit a pipeline to a profile's controller (remote execution)
-- `hooks` -- Git pre-commit / pre-push hooks: install / uninstall / status
+- `hooks` -- Git pre-commit / pre-push / post-commit hooks: install / uninstall / status
 - `sparks` -- Manage sparks libraries: list / add / remove / lint / resolve / update / warmup
 
 ### Examples
@@ -2054,12 +2054,17 @@ sparkwing pipeline explain --all
 
 ## `sparkwing pipeline hooks`
 
-Install / uninstall git pre-commit + pre-push hooks
+Install / uninstall git pre-commit + pre-push + post-commit hooks
 
 Writes small git hook scripts into the repo's .git/hooks/
 directory that call 'sparkwing run <pipeline>' for every pipeline that
-declares pre_commit: or pre_push: in its .sparkwing/sparkwing.yaml
-triggers block.
+declares pre_commit:, pre_push:, or post_commit: in its
+.sparkwing/sparkwing.yaml triggers block.
+
+The post-commit hook is non-blocking: the commit has already
+landed, so it runs its pipelines, tolerates failures, and never
+aborts. pre-commit and pre-push abort the git action on the first
+failing pipeline.
 
 Managed hooks carry a "Installed by sparkwing" marker so
 uninstall and status can tell them apart from hand-written
@@ -2068,17 +2073,17 @@ them with a warning.
 
 ### Subcommands
 
-- `install` -- Write pre-commit / pre-push hooks for the enclosing repo
+- `install` -- Write pre-commit / pre-push / post-commit hooks for the enclosing repo
 - `uninstall` -- Remove sparkwing-managed git hooks
 - `status` -- Report which sparkwing hooks are installed
 
 ## `sparkwing pipeline hooks install`
 
-Install pre-commit / pre-push git hooks from sparkwing.yaml triggers
+Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
 
 Discovers the enclosing .sparkwing/sparkwing.yaml, reads
-pre_commit / pre_push triggers, and writes one hook file per
-hook name that fans out to the matching pipelines. Existing
+pre_commit / pre_push / post_commit triggers, and writes one hook
+file per hook name that fans out to the matching pipelines. Existing
 non-sparkwing hooks are skipped so hand-written ones survive.
 
 ### Flags

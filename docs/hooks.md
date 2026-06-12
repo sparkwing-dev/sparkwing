@@ -8,10 +8,11 @@ Pipelines fire from several sources:
    execution, `sparkwing pipeline trigger <pipeline> --profile prof` for
    remote dispatch.
 3. **Git hooks** (optional) -- `sparkwing pipeline hooks install` writes
-   pre-commit / pre-push hook files into `.git/hooks/` that fan out to
-   pipelines declaring `pre_commit:` / `pre_push:` triggers. Hooks are
-   opt-in and managed: install / uninstall / status are explicit verbs,
-   and unmanaged hooks the user wrote by hand are left alone.
+   pre-commit / pre-push / post-commit hook files into `.git/hooks/` that
+   fan out to pipelines declaring `pre_commit:` / `pre_push:` /
+   `post_commit:` triggers. Hooks are opt-in and managed: install /
+   uninstall / status are explicit verbs, and unmanaged hooks the user
+   wrote by hand are left alone.
 
 ## Webhook triggers
 
@@ -47,11 +48,12 @@ inspects one. To fire a fresh trigger (the sparkwing equivalent of
 
 ## Git hooks
 
-Git hooks are opt-in. After declaring `pre_commit:` or `pre_push:` on
-a pipeline in `.sparkwing/sparkwing.yaml`, install them once per checkout:
+Git hooks are opt-in. After declaring `pre_commit:`, `pre_push:`, or
+`post_commit:` on a pipeline in `.sparkwing/sparkwing.yaml`, install them
+once per checkout:
 
 ```bash
-sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push
+sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
 sparkwing pipeline hooks status      # report which sparkwing hooks are installed
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
@@ -59,6 +61,12 @@ sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
 Existing unmanaged hooks are skipped on install with a warning.
+
+`pre_commit` and `pre_push` are blocking: the hook aborts the commit or
+push when a pipeline fails. `post_commit` is non-blocking -- the commit
+has already landed, so the hook runs its pipelines, tolerates failures,
+and always exits zero. Keep post-commit pipelines fast or detach their
+slow work; the hook runs in the commit's foreground.
 
 ## Running checks locally without a hook
 

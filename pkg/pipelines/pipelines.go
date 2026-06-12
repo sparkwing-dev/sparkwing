@@ -177,6 +177,10 @@ type Triggers struct {
 	PreHook *PreHookTrigger `yaml:"pre_commit,omitempty"`
 	// PostHook fires from the installed git pre-push hook.
 	PostHook *PostHookTrigger `yaml:"pre_push,omitempty"`
+	// PostCommitHook fires from the installed git post-commit hook,
+	// after the commit is recorded. It never blocks or aborts the
+	// commit.
+	PostCommitHook *PostCommitHookTrigger `yaml:"post_commit,omitempty"`
 }
 
 // PushTrigger fires on git push events matching the rules.
@@ -204,6 +208,12 @@ type PreHookTrigger struct{}
 // PostHookTrigger fires from a pre-push git hook. Scoped to heavier
 // checks like full test suites.
 type PostHookTrigger struct{}
+
+// PostCommitHookTrigger fires from a post-commit git hook. The commit
+// has already landed, so the pipeline runs but never aborts it: the
+// installed hook tolerates failures and always exits zero. Scoped to
+// fast, non-blocking follow-ups (self-install, notifications).
+type PostCommitHookTrigger struct{}
 
 // Parse decodes a pipelines config from r (the pipelines: section of
 // sparkwing.yaml, as a standalone document). Retained for tests and

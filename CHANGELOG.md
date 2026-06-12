@@ -50,6 +50,13 @@ code change to unlock.
 
 ### Added
 
+- **config:** Pipelines accept a `post_commit:` trigger alongside
+  `pre_commit:` and `pre_push:`. `sparkwing pipeline hooks install` writes
+  a managed `.git/hooks/post-commit` for any pipeline that declares it.
+  The post-commit hook is non-blocking: the commit has already landed, so
+  it runs its pipelines, tolerates failures, and always exits zero,
+  whereas pre-commit and pre-push still abort the git action on the first
+  failing pipeline.
 - **cli:** `sparkwing version` reports the binary's embedded runs-store
   schema version (`schema_version` in JSON, a `schema:` line in the
   table). A reader confirms which schema a binary speaks without opening
