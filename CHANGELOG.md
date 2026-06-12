@@ -152,6 +152,19 @@ code change to unlock.
   `Queue` when you need strict mutual exclusion with no overlap.
 
 ## [v0.9.0] - 2026-06-09
+
+> **Erratum -- runs-store schema skew in the published binaries.** The binary
+> assets attached to this release were built from pre-schema-3 code and embed
+> runs-store **schema 2**, while a build from the `v0.9.0` module tag
+> (`go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-controller@v0.9.0`)
+> expects and writes **schema 3**. Do not point both artifacts at one runs
+> store: the module build forward-migrates the store from schema 2 to schema 3
+> on its first write, after which the schema-2 release-asset controller can no
+> longer read it and crash-loops on a blank dashboard. Pin a shared store to a
+> single install path -- the module build, which is correct at schema 3 -- until
+> a corrected asset is republished. A store written only by the release assets,
+> or only by a module build, is unaffected.
+
 ### Added
 
 - **cli:** `-C` / `--sw-cd <dir>` now works on the discovery verbs
