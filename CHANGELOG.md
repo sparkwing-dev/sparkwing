@@ -57,6 +57,12 @@ code change to unlock.
   pre-publish check rebuilds the schema reference from the tagged commit
   and refuses the release if any asset embeds a different schema, so a
   version string always implies one schema across every install path.
+- **controller:** `sparkwing-controller` prints a build banner at
+  startup -- its version, the runs-store schema version it embeds, and
+  its build commit -- and refuses to start against a state database
+  recorded at a newer schema than it understands, naming both versions
+  and the remedy. A schema skew is now a one-line diagnosis in the logs
+  instead of an opaque restart loop.
 - **sdk:** The store verifies its concurrency invariants (live cost
   within effective capacity, holder and waiter shape, no participant
   both holding and waiting) at the end of every mutating transaction.

@@ -46,6 +46,8 @@ func run(args []string) error {
 			"hardcoding it in profiles.yaml. Empty disables the announcement.")
 	_ = fs.Parse(args)
 
+	emitStartupProvenance(os.Stderr)
+
 	p, err := paths.DefaultPaths()
 	if err != nil {
 		return err
@@ -55,7 +57,7 @@ func run(args []string) error {
 	}
 	st, err := store.Open(p.StateDB())
 	if err != nil {
-		return fmt.Errorf("open state db: %w", err)
+		return mapStoreOpenError(err)
 	}
 	defer func() { _ = st.Close() }()
 
