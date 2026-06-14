@@ -17,8 +17,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	flag "github.com/spf13/pflag"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 // concState mirrors the controller's GET /api/v1/concurrency/{key}/state
