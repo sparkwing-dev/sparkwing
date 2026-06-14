@@ -747,6 +747,15 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		return nil, err
 	}
 
+	ids := make([]string, 0, len(candidates))
+	for _, w := range candidates {
+		ids = append(ids, w.RunID)
+	}
+	finished, err := txFinishedRunIDs(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+
 	// Promote FIFO. Each candidate's ceiling is the minimum of the
 	// already-admitted holder caps (holderMin) and its own declared
 	// capacity -- most-restrictive-wins over admitted participants only.
@@ -755,6 +764,20 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	// pass; a cheaper waiter behind it never jumps ahead.
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
+		// A liveness primitive must not hand a slot to a corpse: a waiter
+		// whose run has already finished is deleted and skipped rather than
+		// minted into a holder that would only need reaping. Skipping (not
+		// breaking) keeps FIFO honest -- a dead head can't wedge the live
+		// waiters behind it. Run-row absence is left alone: concurrency keys
+		// are decoupled from the runs table, so a missing row is not a corpse
+		// signal here, and aged-out waiters are reclaimed by the stale-waiter
+		// sweep.
+		if finished[w.RunID] {
+			if _, derr := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); derr != nil {
+				return nil, derr
+			}
+			continue
+		}
 		c := w.Cost
 		if c <= 0 {
 			c = 1
@@ -804,6 +827,48 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		promoted[i].HolderID = newHolder
 	}
 	return promoted, nil
+}
+
+// txFinishedRunIDs returns the subset of ids whose runs row exists and has a
+// non-NULL finished_at. Empty and missing ids are absent from the result: a
+// run with no row is not reported finished, since concurrency keys are
+// decoupled from the runs table and absence carries no liveness meaning here.
+func txFinishedRunIDs(ctx context.Context, tx *storeTx, ids []string) (map[string]bool, error) {
+	seen := make(map[string]bool, len(ids))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(args))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT id FROM runs
+		  WHERE finished_at IS NOT NULL AND id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	finished := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		finished[id] = true
+	}
+	return finished, rows.Err()
 }
 
 // concurrencyInvariantFailFast selects how a violated concurrency

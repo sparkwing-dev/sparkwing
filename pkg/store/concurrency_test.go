@@ -311,6 +311,61 @@ func TestConcurrency_PromoteNextWaiters(t *testing.T) {
 	}
 }
 
+func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	started := time.Now()
+	for _, id := range []string{"r2", "r3"} {
+		if err := s.CreateRun(ctx, store.Run{ID: id, Pipeline: "p", Status: "running", StartedAt: started}); err != nil {
+			t.Fatalf("CreateRun %s: %v", id, err)
+		}
+	}
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if err := s.FinishRun(ctx, "r2", "success", ""); err != nil {
+		t.Fatalf("finish r2: %v", err)
+	}
+	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
+	if err != nil || !released {
+		t.Fatalf("release r1: released=%v err=%v", released, err)
+	}
+	promoted, err := s.PromoteNextWaiters(ctx, "k", 30*time.Second)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	// r2's run is finished, so it must be skipped and deleted rather than
+	// minted into a holder; the live waiter behind it (r3) takes the slot,
+	// proving the dead head does not wedge the queue.
+	if len(promoted) != 1 || promoted[0].RunID != "r3" {
+		t.Fatalf("promote: got %+v, want [r3]", promoted)
+	}
+	state, err := s.GetConcurrencyState(ctx, "k")
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if len(state.Holders) != 1 || state.Holders[0].RunID != "r3" {
+		t.Fatalf("expected r3 as the only holder, got %+v", state.Holders)
+	}
+	for _, w := range state.Waiters {
+		if w.RunID == "r2" {
+			t.Fatalf("finished-run waiter r2 should have been deleted, still queued: %+v", state.Waiters)
+		}
+	}
+	if len(state.Waiters) != 0 {
+		t.Fatalf("queue should be drained, got %+v", state.Waiters)
+	}
+}
+
 func TestConcurrency_CoalesceFollowersResolvedByLeader(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
