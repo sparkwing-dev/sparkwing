@@ -70,6 +70,21 @@ type ConcurrencyHolder struct {
 	Cost             int
 	DeclaredCapacity int
 }
+type ConcurrencyMaintenanceOptions struct {
+	Lease time.Duration
+
+	WaiterMaxAge time.Duration
+
+	CacheCap int
+}
+type ConcurrencyMaintenanceResult struct {
+	Reconciled   int
+	StaleHolders []ConcurrencyHolder
+	Promoted     int
+	CacheExpired int64
+	StaleWaiters []ConcurrencyWaiter
+	CacheEvicted int64
+}
 type ConcurrencyState struct {
 	Key               string
 	Capacity          int
@@ -106,6 +121,7 @@ type DebugPause struct {
 	ReleaseKind string
 }
 const DefaultCancelTimeout = 60 * time.Second
+const DefaultConcurrencyCacheCap = 10_000
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
@@ -381,6 +397,8 @@ func (s *Store) ListUsers() ([]User, error)
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
+func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
+func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error)
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)

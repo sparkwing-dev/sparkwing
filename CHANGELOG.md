@@ -48,7 +48,75 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.10.0] - 2026-06-14
+
+This release re-versions the runs-store schema 3 → 4 change that first
+shipped, under-versioned as a patch, in v0.9.2 and v0.9.3. There is no
+functional change over v0.9.3 -- v0.10.0 is the canonical, correctly
+versioned home of the break and the consolidated user-facing narrative
+for everything that landed since v0.9.1. The v0.9.2 and v0.9.3 sections
+below are kept for the audit trail and now carry an erratum.
+
+### Changed
+
+- **store (Breaking):** The runs-store schema moved from version 3 to 4,
+  adding a `sparkwing_meta` table that backs throttle stamps and other
+  small operational state. The store auto-migrates the database on open,
+  so a plain CLI or controller upgrade needs no action. But a module
+  that pins an older (schema-3) sparkwing and shares the same state
+  database has its pre-commit / pre-push gate refuse the migrated
+  database until the pin is bumped. See
+  [docs/migrations/v0.10.0.md](docs/migrations/v0.10.0.md#runs-store-schema-3-to-4)
+  for the upgrade steps.
+
+### Added
+
+- **cli:** `sparkwing maintenance` runs the controller-free janitorial
+  pass over the concurrency tables in the local state database: it reaps
+  lease-expired holders, deletes finished and aged waiter rows, and
+  bounds the concurrency cache and entries by age and size. Local runs
+  trigger the same pass inline (throttled); the command forces a full
+  pass now, for cron or to reclaim a database that grew while idle.
+  Controllerless boxes previously had no path to this cleanup, so
+  finished-run waiter rows and the concurrency tables could grow without
+  bound.
+- **config:** Pipelines accept a `post_commit:` trigger alongside
+  `pre_commit:` and `pre_push:`. `sparkwing pipeline hooks install`
+  writes a managed `.git/hooks/post-commit` for any pipeline that
+  declares it; the post-commit hook is non-blocking and always exits
+  zero, whereas pre-commit and pre-push still abort the git action on
+  the first failing pipeline.
+- **cli:** `sparkwing version` reports the binary's embedded runs-store
+  schema version (`schema_version` in JSON, a `schema:` line in the
+  table), so a reader confirms which schema a binary speaks without
+  opening a database. The release pipeline gates published assets on it:
+  a pre-publish check refuses the release if any asset embeds a
+  different schema than the tagged commit.
+- **controller:** `sparkwing-controller` prints a build banner at
+  startup -- its version, embedded schema version, and build commit --
+  and refuses to start against a state database recorded at a newer
+  schema than it understands, naming both versions and the remedy.
+
+### Fixed
+
+- **sdk:** Promoting queued waiters into freed concurrency slots now
+  deletes and skips any waiter whose run has already finished, keeping
+  FIFO order honest so a finished head can no longer wedge the live
+  waiters queued behind it.
+- **sdk:** Concurrency budgets stay correct under contention across both
+  dialects: budget-mutating paths serialize on the key's row (closing a
+  Postgres admit-past-capacity race), liveness decisions read the clock
+  after the store lock is held (so a contended acquire can't revive an
+  already-expired holder), and cancelled or re-acquired waiters drop
+  their stale rows so a later release can't promote a phantom holder.
+
 ## [v0.9.3] - 2026-06-14
+
+**Erratum:** this release under-versioned the runs-store schema 3 → 4
+change as a patch. The break is correctly versioned and documented in
+[v0.10.0](#v0100---2026-06-14); see its migration guide for upgrade
+steps.
+
 ### Fixed
 
 - **sdk:** Promoting queued waiters into freed concurrency slots now
@@ -62,6 +130,13 @@ code change to unlock.
   stale-waiter sweep.
 
 ## [v0.9.2] - 2026-06-14
+
+**Erratum:** this release shipped the runs-store schema 3 → 4 change as a
+patch, which under-versions a persisted record-shape break (it warrants a
+minor bump pre-1.0). The break is correctly versioned and documented in
+[v0.10.0](#v0100---2026-06-14); see its migration guide for upgrade
+steps.
+
 ### Added
 
 - **config:** Pipelines accept a `post_commit:` trigger alongside
