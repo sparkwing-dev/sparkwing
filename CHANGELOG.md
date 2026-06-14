@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.9.2] - 2026-06-14
 ### Added
 
 - **config:** Pipelines accept a `post_commit:` trigger alongside
