@@ -47,6 +47,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **sdk:** Promoting queued waiters into freed concurrency slots now
+  deletes and skips any waiter whose run has already finished, instead
+  of minting a finished run into a holder that the reaper would only
+  have to clean up. Skipping rather than stopping at the dead waiter
+  keeps FIFO order honest, so a finished head can no longer wedge the
+  live waiters queued behind it. Waiters with no runs-table row are
+  left untouched: concurrency keys are decoupled from the runs table,
+  so a missing row carries no liveness meaning and is reclaimed by the
+  stale-waiter sweep.
 
 ## [v0.9.2] - 2026-06-14
 ### Added
