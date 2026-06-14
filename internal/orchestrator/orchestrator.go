@@ -603,6 +603,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	return &Result{RunID: runID, Status: finalStatus, Error: runErr}, nil
 }
 
+// localConcurrencyMaintenanceInterval throttles the inline janitorial
+// pass on the daemonless run path: a controllerless box has no reaper
+// goroutine, so each run opportunistically sweeps the concurrency tables,
+// but at most once per interval regardless of how often runs fire.
+const localConcurrencyMaintenanceInterval = 5 * time.Minute
+
+// maintainLocalConcurrency runs the throttled concurrency janitorial pass
+// against a local store. Best-effort: a sweep failure is logged and
+// swallowed so it never fails the run that triggered it.
+func maintainLocalConcurrency(ctx context.Context, st *store.Store) {
+	if _, _, err := st.MaintainConcurrencyThrottled(ctx, store.ConcurrencyMaintenanceOptions{}, localConcurrencyMaintenanceInterval); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: concurrency maintenance: %v\n", err)
+	}
+}
+
 // RunLocal opens the local store, wires LocalBackends, and runs.
 // Defaults SecretSource to the laptop dotenv when nil.
 func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
@@ -691,6 +706,16 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		opts.Delegate = envLog
 		defer func() { _ = envLog.Close() }()
 	}
+	// A controllerless box has no reaper goroutine, so the concurrency
+	// tables would grow unbounded. Opportunistically sweep them on the
+	// local run path, throttled so a tight run loop pays the cost at most
+	// once per interval. Best-effort: a sweep failure must never fail the
+	// run. Scoped to runs that own their store -- an injected store (tests,
+	// embedders) keeps its rows untouched.
+	if ownsState && st != nil {
+		maintainLocalConcurrency(ctx, st)
+	}
+
 	res, runErr := Run(ctx, backends, opts)
 	// Dump on error too, for post-mortem of partial runs. Only the
 	// SQLite-backed RunLocal path needs the dump step: the S3-only

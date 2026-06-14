@@ -94,7 +94,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
 		queueTimeout:        15 * time.Minute,
-		concurrencyCacheCap: 10_000,
+		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 	}
 }
 

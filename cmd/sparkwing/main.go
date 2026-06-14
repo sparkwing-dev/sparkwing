@@ -316,6 +316,8 @@ func runSparkwing(args []string) error {
 
 	case "cluster":
 		return runCluster(args[1:])
+	case "maintenance":
+		return runMaintenance(args[1:])
 	case "secrets":
 		return runSecret(args[1:])
 

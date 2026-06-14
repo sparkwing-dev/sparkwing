@@ -1888,6 +1888,40 @@ sparkwing info --for-agent >> CLAUDE.md
 sparkwing info --first-time
 ```
 
+## `sparkwing maintenance`
+
+Sweep the local concurrency tables without a controller
+
+Runs the janitorial pass the controller normally runs on a
+schedule, but against the local state database with no controller
+required. Reaps lease-expired concurrency holders and promotes the next
+queued waiters, deletes stale and orphaned waiters, sweeps expired and
+over-cap cache rows, and reconciles keys with idle capacity.
+
+Local runs trigger this pass inline, throttled to once every few minutes.
+Run this command to force a full pass now -- from cron, or to reclaim a
+database that grew while the box sat idle. It touches only finished or
+expired rows, so it is safe to run alongside live runs.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+
+### Examples
+
+```sh
+# Sweep now
+sparkwing maintenance
+
+# Machine-readable summary
+sparkwing maintenance -o json
+
+# Hourly from cron
+0 * * * * sparkwing maintenance
+```
+
 ## `sparkwing pipeline`
 
 This repo's pipelines

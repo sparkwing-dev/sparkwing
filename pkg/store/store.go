@@ -511,7 +511,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 3
+const expectedSchemaVersion = 4
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -528,6 +528,18 @@ const schemaVersionTable = `CREATE TABLE IF NOT EXISTS sparkwing_schema_version 
     applied_at BIGINT NOT NULL,
     PRIMARY KEY (version)
 );`
+
+// metaTableSQLite is the singleton key/value table backing throttle
+// stamps and other small operational state. Created in migration v4 so
+// existing databases gain it without a full reschema; written in SQLite
+// syntax and translated for Postgres at apply time.
+const metaTableSQLite = `CREATE TABLE IF NOT EXISTS sparkwing_meta (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);`
+
+var metaTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(metaTableSQLite)
 
 // SkewError is returned by Open when the database is at a schema
 // version newer than the binary understands. Callers can use
@@ -712,6 +724,9 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.backfillRunAnnotationRollup()
 	case 2, 3:
 		return s.ensureColumnsAll()
+	case 4:
+		_, err := s.exec(ctx, metaTableSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -730,6 +745,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return s.ensureColumnsAllTx(ctx, tx)
 	case 2, 3:
 		return s.ensureColumnsAllTx(ctx, tx)
+	case 4:
+		_, err := tx.ExecContext(ctx, metaTablePostgres)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

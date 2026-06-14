@@ -33,7 +33,7 @@ var allCommands = []*Command{
 	&cmdPipelineTrigger,
 	&cmdProfile,
 	&cmdDashboard, &cmdDashboardStart, &cmdDashboardKill, &cmdDashboardStatus,
-	&cmdWorker, &cmdGC, &cmdCompletion,
+	&cmdWorker, &cmdGC, &cmdMaintenance, &cmdCompletion,
 	&cmdProfiles, &cmdProfilesAdd, &cmdProfilesList, &cmdProfilesShow,
 	&cmdProfilesUse, &cmdProfilesRemove, &cmdProfilesDuplicate,
 	&cmdProfilesSet, &cmdProfilesTest,
