@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.9.3] - 2026-06-14
 ### Fixed
 
 - **sdk:** Promoting queued waiters into freed concurrency slots now
