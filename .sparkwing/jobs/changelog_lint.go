@@ -95,6 +95,73 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 	return fmt.Errorf("%s", b.String())
 }
 
+// schemaBreakCategory is the issue category emitted when the runs-store
+// schema version changed between releases but the changelog never marked
+// the change `(Breaking)`.
+const schemaBreakCategory = "unmarked-schema-break"
+
+// LintSchemaBreak fails an unmarked runs-store schema change. When the
+// embedded schema version differs between the previous release
+// (prevSchema) and the release being cut (curSchema), the changelog must
+// record the break: the section for the version being cut -- or
+// `[Unreleased]` before the release rewrite renames it -- must carry a
+// `- **<scope> (Breaking):**` entry that names the schema. An unchanged
+// schema yields no issue.
+//
+// Pure function: the caller sources prevSchema/curSchema from the store
+// source at each git ref. A schema bump without a marked breaking entry
+// is the failure mode the releases standard calls out (point 2) and the
+// reason an unmarked break slipped a release.
+func LintSchemaBreak(body, version string, prevSchema, curSchema int) []ChangelogIssue {
+	if prevSchema == curSchema {
+		return nil
+	}
+	sections := parseChangelogSections(body)
+	var versionSec, unreleasedSec *changelogSection
+	for i := range sections {
+		switch {
+		case strings.EqualFold(sections[i].version, version):
+			versionSec = &sections[i]
+		case strings.EqualFold(sections[i].version, "Unreleased"):
+			unreleasedSec = &sections[i]
+		}
+	}
+	for _, s := range []*changelogSection{versionSec, unreleasedSec} {
+		if s != nil && sectionHasSchemaBreakEntry(*s) {
+			return nil
+		}
+	}
+	line := 1
+	label := version
+	switch {
+	case versionSec != nil:
+		line = versionSec.startLine
+		label = versionSec.version
+	case unreleasedSec != nil:
+		line = unreleasedSec.startLine
+		label = unreleasedSec.version
+	}
+	return []ChangelogIssue{{
+		Line:     line,
+		Category: schemaBreakCategory,
+		Message: fmt.Sprintf(
+			"runs-store schema changed %d -> %d but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)` and ship a docs/migrations/%s.md schema section",
+			prevSchema, curSchema, label, version),
+	}}
+}
+
+// sectionHasSchemaBreakEntry reports whether the section carries a
+// top-level `(Breaking)` bullet that names the schema (case-insensitive
+// match on "schema" anywhere in the entry, title or continuation).
+func sectionHasSchemaBreakEntry(s changelogSection) bool {
+	for _, e := range s.entries {
+		if breakingScopeRe.MatchString(e.body) && strings.Contains(strings.ToLower(e.body), "schema") {
+			return true
+		}
+	}
+	return false
+}
+
 // changelogSection is one `## [...]` block: the version label, the
 // line range it covers, and the entries inside.
 type changelogSection struct {

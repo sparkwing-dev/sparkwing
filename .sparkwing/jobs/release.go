@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,11 +127,17 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	// on the v0.5.0 and v0.5.1 cuts; both needed manual finishing.
 	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, changelog)
 
+	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
+		RepoDir: repoDir,
+		Version: versionRef,
+	})
+	schemaGate.Needs(discover, changelog)
+
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, bumpSelf)
+	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate)
 
 	// After the tag is out, restore the self-replace + commit + push
 	// so local development against the next SDK iteration works again.
@@ -930,6 +937,94 @@ func bumpVersion(v, kind string) (string, error) {
 		return "", fmt.Errorf("bump kind %q not in patch|minor|major", kind)
 	}
 	return fmt.Sprintf("v%d.%d.%d", major, minor, patch), nil
+}
+
+// storeSchemaSourcePath is the source file holding the embedded
+// runs-store schema constant, read at HEAD and at the previous release
+// tag to detect a schema bump. Mirrors what bin/check-release-schema-
+// parity.sh compiles; reading the constant straight from source avoids
+// building a binary per release tag.
+const storeSchemaSourcePath = "pkg/store/store.go"
+
+var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
+
+// parseStoreSchemaVersion extracts the `expectedSchemaVersion` constant
+// from pkg/store/store.go source. Pure so the release gate can be tested
+// without git or a build.
+func parseStoreSchemaVersion(goSource string) (int, error) {
+	m := storeSchemaConstRe.FindStringSubmatch(goSource)
+	if m == nil {
+		return 0, fmt.Errorf("no `const expectedSchemaVersion = N` in %s", storeSchemaSourcePath)
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse %s schema version %q: %w", storeSchemaSourcePath, m[1], err)
+	}
+	return n, nil
+}
+
+// checkSchemaBreakJob refuses a release whose runs-store schema changed
+// since the previous tag without a matching `(Breaking)` changelog entry.
+// It reads the schema constant at HEAD (working tree) and at the latest
+// origin tag, and when they differ requires LintSchemaBreak to find a
+// marked schema entry in the section being cut. The first release (no
+// prior tag) has nothing to compare and passes.
+type checkSchemaBreakJob struct {
+	sparkwing.Base
+	RepoDir string
+	Version sparkwing.Ref[string]
+}
+
+func (j *checkSchemaBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+	return nil, nil
+}
+
+func (j *checkSchemaBreakJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: resolve previous tag for schema gate: %w", err)
+	}
+	if prevTag == "" {
+		sparkwing.Info(ctx, "no previous release tag; skipping schema-break changelog gate")
+		return nil
+	}
+	curSrc, err := os.ReadFile(filepath.Join(j.RepoDir, filepath.FromSlash(storeSchemaSourcePath)))
+	if err != nil {
+		return fmt.Errorf("release: read %s: %w", storeSchemaSourcePath, err)
+	}
+	curSchema, err := parseStoreSchemaVersion(string(curSrc))
+	if err != nil {
+		return fmt.Errorf("release: current schema: %w", err)
+	}
+	prevSrc, err := runGitIn(ctx, j.RepoDir, "show", prevTag+":"+storeSchemaSourcePath)
+	if err != nil {
+		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, prevTag, err)
+	}
+	prevSchema, err := parseStoreSchemaVersion(prevSrc)
+	if err != nil {
+		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+	}
+	if prevSchema == curSchema {
+		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	if err != nil {
+		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
+	}
+	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema)
+	if len(issues) > 0 {
+		var b strings.Builder
+		for _, i := range issues {
+			b.WriteString(i.Format())
+			b.WriteByte('\n')
+		}
+		return fmt.Errorf("release: unmarked runs-store schema change blocks %s:\n%s", version, b.String())
+	}
+	sparkwing.Info(ctx, "runs-store schema %d -> %d is marked (Breaking) in the changelog; gate passes", prevSchema, curSchema)
+	return nil
 }
 
 func init() {
