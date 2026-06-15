@@ -137,9 +137,6 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 		if opts.OnWait != nil {
 			opts.OnWait(active)
 		}
-		// Jittered backoff: base + uniform(0, base) capped at PollMax.
-		// Jitter prevents lock-step retries when N waiters wake on the
-		// same released slot and only one wins.
 		wait := opts.PollInterval + time.Duration(rand.Int64N(int64(opts.PollInterval)))
 		if wait > opts.PollMax {
 			wait = opts.PollMax
@@ -208,19 +205,16 @@ func countActiveHolders(lockDir string) (int, error) {
 		path := filepath.Join(lockDir, e.Name())
 		f, err := os.OpenFile(path, os.O_RDWR, 0o600)
 		if err != nil {
-			// Vanished between ReadDir and Open: treat as gone.
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return 0, err
 		}
 		if err := flockExclusiveNonblock(f); err != nil {
-			// Held by a live holder.
 			_ = f.Close()
 			active++
 			continue
 		}
-		// Acquired -> the file's original holder is gone. Clean up.
 		_ = os.Remove(path)
 		_ = flockUnlock(f)
 		_ = f.Close()
@@ -231,10 +225,6 @@ func countActiveHolders(lockDir string) (int, error) {
 var holderCounter atomic.Uint64
 
 func createHolder(lockDir string) (*os.File, error) {
-	// Name combines pid, nanos, and a monotonic in-process counter so
-	// two acquires from the same process inside the same ns can't
-	// collide. The file's *content* is informational only -- the
-	// active/stale distinction comes from whether flock succeeds.
 	name := fmt.Sprintf("%spid%d-%d-%d.lock",
 		holderPrefix,
 		os.Getpid(),
@@ -251,8 +241,6 @@ func createHolder(lockDir string) (*os.File, error) {
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("boxslot: lock fresh holder %s: %w", path, err)
 	}
-	// Best-effort: drop the pid + start time inside for debugging.
-	// Failure to write doesn't invalidate the slot.
 	_, _ = fmt.Fprintf(f, "pid=%d start=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))
 	return f, nil
 }

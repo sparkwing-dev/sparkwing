@@ -60,12 +60,6 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-local-only", Desc: "Force local state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
-	// profile and target are the two deliberately unprefixed
-	// sparkwing-owned flags: v0.5.0 reserves the flat --profile ("run /
-	// read against this storage profile") and --target ("which pipeline
-	// deployment environment") from the pipeline-author namespace by
-	// design (documented in the migration guide). The sw- prefix
-	// invariant carves both out explicitly.
 	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop)", Group: "System", Hot: true},
 	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
 	{Name: "sw-box-slots", Argument: "N", Desc: "Max concurrent sparkwing run processes on this host (default: max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable)", Group: "System"},

@@ -123,9 +123,6 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 		}
 	})
 
-	// --detach: the trigger POST and no follow GETs (services
-	// discovery may fire once as a side effect of gitcache eager-
-	// refresh; we accept it but reject any /runs poll).
 	reqs := spy.requests()
 	sawTrigger := false
 	for _, r := range reqs {
@@ -133,7 +130,6 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 		case r == "POST /api/v1/triggers":
 			sawTrigger = true
 		case r == "GET /api/v1/services":
-			// allowed -- discovery for gitcache lives here
 		case strings.HasPrefix(r, "GET /api/v1/runs"):
 			t.Fatalf("detach should not follow the run; got %v", reqs)
 		}
@@ -141,11 +137,9 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 	if !sawTrigger {
 		t.Fatalf("expected POST /api/v1/triggers; got %v", reqs)
 	}
-	// stdout is the run id alone, machine-parseable.
 	if strings.TrimSpace(out) != "run-test" {
 		t.Errorf("detach stdout = %q, want run id", out)
 	}
-	// Pass-through args reached the payload.
 	if len(spy.bodies) != 1 {
 		t.Fatalf("expected 1 trigger body, got %d", len(spy.bodies))
 	}

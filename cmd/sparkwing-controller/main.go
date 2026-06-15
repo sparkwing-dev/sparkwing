@@ -82,9 +82,7 @@ func run(args []string) error {
 		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithCachePodURL(*cachePodURL)
-	// Wire the cipher only when one was configured; a typed-nil
-	// *secrets.Cipher passed through the Cipher interface would still
-	// register as non-nil at the handler's seam.
+	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
 	}
@@ -159,8 +157,6 @@ func loadSecretsCipher(filePath string) (*secrets.Cipher, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", filePath, err)
 		}
-		// Tolerate both raw 32 bytes and a base64-encoded blob in the
-		// file -- some operators prefer one or the other.
 		if len(data) == secrets.KeySize {
 			return secrets.NewCipher(data)
 		}

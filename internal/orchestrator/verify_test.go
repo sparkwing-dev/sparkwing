@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// --- Verify: success path ---
-
 type verifyOKPipe struct{ sparkwing.Base }
 
 var verifyOKRan atomic.Bool
@@ -25,8 +23,6 @@ func (verifyOKPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 		})
 	return nil
 }
-
-// --- Verify: failure routes to OnFailure with StageVerify ---
 
 type verifyFailsPipe struct{ sparkwing.Base }
 
@@ -56,8 +52,6 @@ func (verifyFailsPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
-// --- Verify: action failure never runs verify, routes with StageAction ---
-
 type verifyActionFailsPipe struct{ sparkwing.Base }
 
 var (
@@ -79,8 +73,6 @@ func (verifyActionFailsPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spa
 		})
 	return nil
 }
-
-// --- Verify: Retry re-runs action + verify together ---
 
 type verifyRetryPipe struct{ sparkwing.Base }
 
@@ -172,7 +164,6 @@ func TestVerify_FailureFailsNodeAtVerifyStage(t *testing.T) {
 		t.Fatalf("recover outcome = %q, want success", byID["recover"].Outcome)
 	}
 
-	// Recovery saw StageVerify, with the check's original (unwrapped) error.
 	if got := vfRecoveryStage.Load(); got != int32(sparkwing.StageVerify)+1 {
 		t.Fatalf("recovery stage = %d, want StageVerify", got-1)
 	}

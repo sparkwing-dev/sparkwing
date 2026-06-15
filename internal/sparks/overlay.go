@@ -49,7 +49,6 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 	if err != nil {
 		return false, fmt.Errorf("sparks: read %s: %w", goModPath, err)
 	}
-	// Fingerprint go.mod so we can assert later it is unchanged.
 	beforeGoMod := append([]byte(nil), raw...)
 
 	overlayBytes, err := buildOverlay(raw, goModPath, resolved)
@@ -60,8 +59,6 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 	overlayPath := filepath.Join(sparkwingDir, OverlayModfileName)
 	sumPath := filepath.Join(sparkwingDir, OverlaySumfileName)
 
-	// Fast path: if the overlay file already exists and matches the
-	// desired bytes exactly, skip regeneration.
 	existing, err := os.ReadFile(overlayPath)
 	if err == nil && bytes.Equal(existing, overlayBytes) {
 		if err := ensureGitignore(sparkwingDir); err != nil {
@@ -77,15 +74,11 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 		return false, fmt.Errorf("sparks: write overlay: %w", err)
 	}
 
-	// Materialize .resolved.sum via `go mod download`. Skip when no
-	// resolved versions were provided (nothing to download).
 	if len(resolved) > 0 {
 		if err := materializeSum(ctx, sparkwingDir, overlayPath); err != nil {
 			return false, err
 		}
 	} else {
-		// Ensure the sum file at least exists (touch) so callers can
-		// rely on both files being present when the overlay is present.
 		if _, err := os.Stat(sumPath); errors.Is(err, os.ErrNotExist) {
 			if err := os.WriteFile(sumPath, nil, 0o644); err != nil {
 				return false, fmt.Errorf("sparks: touch sum: %w", err)
@@ -111,8 +104,6 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 	if err != nil {
 		return nil, fmt.Errorf("sparks: parse go.mod: %w", err)
 	}
-	// Track which resolved entries already have a require line so we can
-	// append the rest.
 	seen := make(map[string]bool, len(resolved))
 	for _, req := range f.Require {
 		if newVer, ok := resolved[req.Mod.Path]; ok {
@@ -143,13 +134,6 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 
 func materializeSum(ctx context.Context, workDir, overlayPath string) error {
 	if work, present := goWorkInScope(workDir); present {
-		// Workspace mode: skip with a single-line warning. The build
-		// step (internal/bincache) already detects the same workspace
-		// and skips `-modfile=overlay` accordingly, so an unmaterialized
-		// .resolved.sum is harmless -- the overlay is dormant for this
-		// build regardless. Erroring here forced operators to choose
-		// between dogfood workspaces and any sparkwing command at all;
-		// matching bincache's tolerant behavior is the consistent fix.
 		fmt.Fprintf(os.Stderr,
 			"sparks: %s in effect; skipping .resolved.sum materialization "+
 				"(workspace mode resolves modules from go.work, not the overlay).\n",
@@ -157,12 +141,6 @@ func materializeSum(ctx context.Context, workDir, overlayPath string) error {
 		)
 		return nil
 	}
-	// `go mod download -modfile=X` without a pattern only resolves
-	// the modules explicitly listed in X -- not their transitive
-	// closure. Building the pipeline binary with `-modfile=X` then
-	// fails with "missing go.sum entry" for every indirect. Passing
-	// the `all` meta-pattern forces the transitive walk so the sum
-	// file covers everything the build actually compiles against.
 	cmd := exec.CommandContext(ctx, goBin(), "mod", "download",
 		"-modfile="+overlayPath, "all")
 	cmd.Dir = workDir
@@ -185,7 +163,6 @@ func goWorkInScope(workDir string) (string, bool) {
 	case "off":
 		return "", false
 	case "":
-		// fall through
 	default:
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
@@ -221,16 +198,9 @@ func assertGoModUntouched(path string, before []byte) error {
 // Walks up from sparkwingDir looking for an existing .gitignore; if none
 // exists, writes one next to the sparkwing dir.
 func ensureGitignore(sparkwingDir string) error {
-	// Prefer a .gitignore at or above sparkwingDir. Start with the repo
-	// root if we can find one (look for .git); otherwise fall back to
-	// sparkwingDir itself.
 	target := locateGitignore(sparkwingDir)
 	entry := filepath.Join(filepath.Base(sparkwingDir), OverlayModfileName)
 	sumEntry := filepath.Join(filepath.Base(sparkwingDir), OverlaySumfileName)
-	// The consumer may have invoked us with a path that is not literally
-	// ".sparkwing". We write both the literal-path entry and the glob
-	// `.sparkwing/.resolved.*` when the dir is named .sparkwing so the
-	// more common case is covered.
 	var lines []string
 	if filepath.Base(sparkwingDir) == ".sparkwing" {
 		lines = []string{".sparkwing/.resolved.*"}

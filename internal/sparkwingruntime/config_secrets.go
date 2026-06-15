@@ -62,14 +62,12 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ 
 		specs = ss
 		elem = rv.Elem()
 		for i := range specs {
-			// Secrets default to required when neither flag is set.
 			if !specs[i].Required && !specs[i].Optional {
 				specs[i].Required = true
 			}
 		}
 	}
 
-	// Track required-ness per name.
 	requiredNames := map[string]struct{}{}
 	optionalNames := map[string]struct{}{}
 	for _, s := range specs {
@@ -87,13 +85,12 @@ func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ 
 		return nil, fmt.Errorf("pipeline %q secrets: declared but no SecretResolver installed on ctx", reg.Name)
 	}
 
-	// Resolve every name, populate the struct field when one exists.
 	specByName := map[string]swtags.FieldSpec{}
 	for _, s := range specs {
 		specByName[s.Name] = s
 	}
 
-	// Required first so the run fails before any optional resolution.
+	// safety: resolve required secrets first so the run fails before any optional resolution begins.
 	for name := range requiredNames {
 		v, _, err := resolver.Resolve(ctx, name)
 		if err != nil {

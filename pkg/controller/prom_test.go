@@ -26,8 +26,6 @@ func newAuthedTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	// Seed a token row so EnableAuthFromStore actually turns auth on
-	// (empty tokens table = pass-through).
 	if _, _, err := s.CreateToken("test-admin", store.TokenKindUser,
 		[]string{controller.ScopeAdmin}, 0, time.Now().UTC()); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -58,10 +56,6 @@ func TestMetrics_EndpointReachable(t *testing.T) {
 	}
 	out := string(body)
 
-	// Gauges + runtime collectors always emit, even with no
-	// observations. Counter and histogram vecs only emit after the
-	// first observation -- those are covered by the activity test
-	// below.
 	mustContain := []string{
 		"sparkwing_pending_nodes",
 		"sparkwing_active_runners",
@@ -95,12 +89,10 @@ func TestMetrics_RunsCounterIncrements(t *testing.T) {
 		http.StatusNoContent)
 
 	body := scrape(t, base)
-	// Counter: exactly one terminal event for this pipeline.
 	wantCounter := `sparkwing_runs_total{pipeline="` + pipeline + `",status="success"} 1`
 	if !strings.Contains(body, wantCounter) {
 		t.Errorf("/metrics missing or wrong counter row\nwant substring: %s\ngot:\n%s", wantCounter, body)
 	}
-	// Histogram: at least one observation for this pipeline+outcome.
 	wantHist := `sparkwing_run_duration_seconds_count{outcome="success",pipeline="` + pipeline + `"}`
 	if !strings.Contains(body, wantHist) {
 		t.Errorf("/metrics missing histogram count row %q:\n%s", wantHist, body)
@@ -115,7 +107,6 @@ func TestMetrics_CardinalityGuard(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 
-	// Seed a run + finish so at least one sparkwing_* row is present.
 	run := store.Run{
 		ID:        "run-card-1",
 		Pipeline:  "card-check",
@@ -134,8 +125,6 @@ func TestMetrics_CardinalityGuard(t *testing.T) {
 
 	body := scrape(t, base)
 
-	// Only inspect sparkwing_* rows -- go_* and process_* rows are
-	// opaque runtime metrics we don't label.
 	banned := []*regexp.Regexp{
 		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*\bnode_id="`),
 		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*\bprincipal="`),
@@ -170,19 +159,15 @@ func TestMetrics_HTTPRequestInstrumentation(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 
-	// Health is unauthenticated and always reachable.
 	resp := mustGet(t, base+"/api/v1/health")
 	resp.Body.Close()
 
 	body := scrape(t, base)
 
-	// Counter row for the health route exists with a normalized path,
-	// a method, and a 200 status.
 	wantCounter := `sparkwing_http_requests_total{method="GET",route="/api/v1/health",status="200"}`
 	if !strings.Contains(body, wantCounter) {
 		t.Errorf("/metrics missing http counter row %q:\n%s", wantCounter, body)
 	}
-	// Histogram _count row is present for the same method+route.
 	wantHist := `sparkwing_http_request_duration_seconds_count{method="GET",route="/api/v1/health"}`
 	if !strings.Contains(body, wantHist) {
 		t.Errorf("/metrics missing http duration histogram %q:\n%s", wantHist, body)
@@ -196,7 +181,6 @@ func TestMetrics_HTTPRouteNormalization(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 
-	// GETs against non-existent runs are fine -- 404 still records.
 	for _, id := range []string{"abc", "def", "xyz-123"} {
 		resp := mustGet(t, base+"/api/v1/runs/"+id)
 		resp.Body.Close()
@@ -204,12 +188,10 @@ func TestMetrics_HTTPRouteNormalization(t *testing.T) {
 
 	body := scrape(t, base)
 
-	// Only one normalized row, not three per-id rows.
 	wantRoute := `route="/api/v1/runs/{id}"`
 	if !strings.Contains(body, wantRoute) {
 		t.Errorf("/metrics missing normalized run route label %q:\n%s", wantRoute, body)
 	}
-	// Assert the raw ids never enter a label value.
 	for _, id := range []string{"abc", "def", "xyz-123"} {
 		if strings.Contains(body, `route="/api/v1/runs/`+id) {
 			t.Errorf("raw run id %q leaked into route label", id)
@@ -226,7 +208,6 @@ func TestMetrics_EndpointUnauthWithAuthEnabled(t *testing.T) {
 	defer cleanup()
 	_ = st
 
-	// No Authorization header on the scrape.
 	resp := mustGet(t, base+"/metrics")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -240,8 +221,6 @@ func TestMetrics_EndpointUnauthWithAuthEnabled(t *testing.T) {
 		t.Errorf("/metrics under auth returned 200 but body is not the sparkwing registry:\n%s", string(body))
 	}
 
-	// Sanity: an authed endpoint without a header still 401s. Proves
-	// auth really is live; /metrics is routed around it.
 	resp2 := mustGet(t, base+"/api/v1/runs")
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusUnauthorized {

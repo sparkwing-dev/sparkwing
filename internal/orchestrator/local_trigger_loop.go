@@ -62,7 +62,6 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 			if err := dispatchLocalTrigger(ctx, st, t, profileName, cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
-				// Mark run failed so the parent's awaiter stops polling.
 				_ = st.CreateRun(ctx, store.Run{
 					ID:        t.ID,
 					Pipeline:  t.Pipeline,
@@ -143,7 +142,6 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 		return nil, err
 	}
 	for _, id := range candidates {
-		// ErrNotFound = race lost; try next.
 		t, err := st.ClaimSpecificTrigger(ctx, id, store.DefaultLeaseDuration)
 		if err == nil {
 			return t, nil
@@ -163,8 +161,6 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
 	profileName string, cache *localCompileCache, logger *slog.Logger,
 ) error {
-	// Repo resolution: registry by pipeline name first, then slug
-	// fallback via LocalRepoDir.
 	var repoDir string
 	if path, err := repos.ResolveRepoForPipeline(trig.Pipeline); err == nil {
 		repoDir = path
@@ -198,19 +194,12 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		"repo_dir", repoDir,
 	)
 
-	// --local MUST precede the positional trigger ID -- Go's flag
-	// package stops parsing at the first non-flag, so the reverse
-	// order silently falls back to cluster mode. --profile, if set,
-	// rides alongside --local so the child opens the same backends
-	// (e.g. postgres) the parent did.
 	args := []string{"handle-trigger", "--local"}
 	if profileName != "" {
 		args = append(args, "--profile", profileName)
 	}
 	args = append(args, trig.ID)
 	cmd := exec.CommandContext(ctx, binPath, args...)
-	// cwd drives the SDK's walk-up to .sparkwing/; do NOT pass
-	// SPARKWING_WORK_DIR -- it leaks parent-repo paths into children.
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

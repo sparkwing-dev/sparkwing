@@ -1,14 +1,5 @@
 package orchestrator
 
-// `sparkwing run X --explain --skip Y -o json` must produce a Plan snapshot
-// identical (modulo formatting) to `sparkwing run X --explain --skip Y`. The
-// bug was that explain-output flags (-o / --output / --json) were
-// forwarded into parseTypedFlags, which rejected them as unknown and
-// silently dropped *every* parsed flag (including --skip / --only)
-// into an empty argsMap. The Plan was then built without any
-// SkipFilter applied -- diverging from the no-`-o` invocation, where
-// parsing succeeded and SkipFilter ran.
-
 import (
 	"context"
 	"encoding/json"
@@ -124,7 +115,6 @@ func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out := captureExplainStdout(t, "explain-skip-test", tc.rest)
 			ids := nodeIDsFromSnapshot(t, out)
-			// "artifact" must NOT appear -- the SkipFilter dropped it.
 			for _, id := range ids {
 				if id == "artifact" {
 					t.Fatalf("--skip artifact ignored: nodes=%v\nraw=%s", ids, string(out))
@@ -156,8 +146,6 @@ func TestStripExplainOutputFlags_RemovesWrapperFlagsKeepsRest(t *testing.T) {
 		{[]string{"--skip", "artifact", "--output=json"}, []string{"--skip", "artifact"}},
 		{[]string{"--skip", "artifact", "-o=json"}, []string{"--skip", "artifact"}},
 		{[]string{"--only", "build", "-o", "table"}, []string{"--only", "build"}},
-		// Defensive: -o followed by a flag (malformed) must not eat
-		// the next flag.
 		{[]string{"-o", "--skip", "artifact"}, []string{"--skip", "artifact"}},
 	}
 	for _, tc := range cases {

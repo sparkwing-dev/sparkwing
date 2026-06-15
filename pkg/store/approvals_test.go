@@ -122,7 +122,6 @@ func TestListPendingApprovals_OrdersByRequestedAsc(t *testing.T) {
 	_ = s.CreateApproval(ctx, store.Approval{RunID: "run-1", NodeID: "a", RequestedAt: t0})
 	_ = s.CreateApproval(ctx, store.Approval{RunID: "run-1", NodeID: "c", RequestedAt: t2})
 
-	// Resolve "a" so it should no longer appear in pending.
 	if _, err := s.ResolveApproval(ctx, "run-1", "a",
 		store.ApprovalResolutionApproved, "alice", ""); err != nil {
 		t.Fatal(err)
@@ -163,8 +162,6 @@ func TestListApprovalsForRun_IncludesResolved(t *testing.T) {
 }
 
 func TestCreateApproval_OverwritesPreviousRow(t *testing.T) {
-	// A retry of a gated node asks for approval again; CreateApproval
-	// must reset resolution so the waiter isn't handed stale state.
 	s := newStoreT(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "gate")

@@ -17,7 +17,6 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
 
-	// Leader + 2 waiters.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -45,7 +44,6 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 		t.Fatalf("expected w1 promoted, got %+v", promoted)
 	}
 
-	// State: holder=w1, waiter=w2.
 	state, _ := s.GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
 		t.Fatalf("holders = %+v", state.Holders)
@@ -62,10 +60,6 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
 
-	// Simulate the crashed-mid-release state: acquire + manually
-	// delete the holder row (bypassing ReleaseAndNotify so no promote
-	// fires). This is what the DB would look like if the controller
-	// died between release.commit and promote.commit.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -74,14 +68,12 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	// Manually drop the holder (simulating an ACID release without promote).
 	if _, err := s.DB().ExecContext(ctx,
 		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	// Pre-reconcile: state has 0 holders, 1 waiter. Stuck.
 	state, _ := s.GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 0 || len(state.Waiters) != 1 {
 		t.Fatalf("setup: expected 0 holders + 1 waiter, got %+v", state)
@@ -95,7 +87,6 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		t.Fatalf("expected 1 waiter promoted, got %d", promoted)
 	}
 
-	// Post-reconcile: w1 is the holder.
 	state, _ = s.GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
 		t.Fatalf("post-reconcile holders: %+v", state.Holders)
@@ -107,7 +98,6 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
 
-	// Leader + coalesce follower.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -120,16 +110,12 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 		t.Fatalf("follower: want Coalesced got %s", resp.Kind)
 	}
 
-	// Simulate leader release WITHOUT ResolveCoalesceFollowers running
-	// (controller crash between release tx and resolve tx). Drop the
-	// holder row by hand.
 	if _, err := s.DB().ExecContext(ctx,
 		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	// Waiter reaper should detect the orphan follower and drop it.
 	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, time.Hour)
 	if err != nil {
 		t.Fatalf("reap: %v", err)
@@ -157,9 +143,6 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 
-	// Fast-forward the waiter's arrived_at into the past by rewriting
-	// the column directly. Simulates a caller that crashed an hour ago
-	// and never called cancel.
 	oneHourAgo := time.Now().Add(-time.Hour).UnixNano()
 	if _, err := s.DB().ExecContext(ctx,
 		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ?`,
@@ -175,7 +158,6 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		t.Fatalf("expected 1 reaped, got %d", len(dropped))
 	}
 
-	// A more recent waiter stays.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,

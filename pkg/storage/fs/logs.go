@@ -86,7 +86,6 @@ func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) 
 	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	// Ensure trailing newline so ReadRun never glues records onto one line.
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		if _, err := f.Write([]byte{'\n'}); err != nil {
 			return err

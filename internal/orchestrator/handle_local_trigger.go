@@ -54,8 +54,6 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 
 	backends := LocalBackends(paths, st)
 
-	// Parent owns the trigger lifetime; SIGINT cascades via the
-	// process group, so no heartbeat or cancel-poll here.
 	defer func() {
 		if ferr := st.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger (local) failed",
@@ -64,7 +62,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	}()
 
 	cancelled := &atomic.Bool{}
-	_ = cancelled // parity with ExecuteClaimedTrigger; no local cancel path yet.
+	_ = cancelled
 
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)

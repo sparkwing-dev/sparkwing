@@ -8,10 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// These tests exercise the SDK's public shape. They do not run a
-// pipeline; the orchestrator that dispatches nodes lives in a separate
-// package. The point here is to catch API regressions early.
-
 type buildOut struct {
 	Tag    string
 	Digest string
@@ -224,7 +220,6 @@ func TestNeeds_AcceptsVariedForms(t *testing.T) {
 	group := sparkwing.GroupJobs(plan, "", a, b)
 	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(c, group, a)
 	deps := d.DepIDs()
-	// "a" is also in the group but should dedupe.
 	if len(deps) != 3 {
 		t.Fatalf("Needs dedup failed: got deps %v, want 3 entries (a,b,c in some order)", deps)
 	}
@@ -232,7 +227,6 @@ func TestNeeds_AcceptsVariedForms(t *testing.T) {
 
 func TestLogger_NopWhenUnset(t *testing.T) {
 	ctx := context.Background()
-	// Should not panic on a bare ctx (no logger installed).
 	sparkwing.Info(ctx, "hello %s", "world")
 	sparkwing.Error(ctx, "oh no")
 }

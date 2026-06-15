@@ -124,8 +124,8 @@ func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
 	type JobNode struct {
 		Build    Ref[buildOut]
 		NotARef  string
-		InRun    Ref[buildOut] // Pipeline=="" -> in-run, excluded
-		Unfilled Ref[buildOut] // empty everywhere, excluded
+		InRun    Ref[buildOut]
+		Unfilled Ref[buildOut]
 	}
 	job := &JobNode{
 		Build: RefToLastRun[buildOut]("build", "artifact", MaxAge(1*time.Hour)),

@@ -68,10 +68,6 @@ func TestCipher(t *testing.T, factory func() controller.Cipher) {
 		if len(envelope) < 2 {
 			t.Fatalf("Seal returned %q, too short to tamper meaningfully", envelope)
 		}
-		// Flip the last byte of the envelope. Encoding-agnostic: any
-		// reasonable envelope rejects this. (If the last byte happens
-		// to be valid in the encoding scheme, the AEAD tag verification
-		// fails downstream and Open still errors.)
 		bs := []byte(envelope)
 		bs[len(bs)-1] ^= 0xFF
 		tampered := string(bs)
@@ -97,19 +93,12 @@ func TestCipher(t *testing.T, factory func() controller.Cipher) {
 
 	t.Run("OpenRejectsUnsealedInput", func(t *testing.T) {
 		c := factory()
-		// A bare plaintext that was never sealed should not decrypt to
-		// itself.
 		if got, err := c.Open("not-an-envelope"); err == nil {
 			t.Fatalf("Open(%q) returned %q with nil error; expected an error", "not-an-envelope", got)
 		}
 	})
 
 	t.Run("OpenAcrossInstancesWithSameKey", func(t *testing.T) {
-		// Two cipher instances from the same factory should be able to
-		// open each other's envelopes -- key material is the contract,
-		// not instance state. A factory that returns ciphers backed by
-		// different keys per call would fail here, but that's not what
-		// "fresh isolation" should mean for a Cipher.
 		a := factory()
 		b := factory()
 		envelope, err := a.Seal("cross-instance plaintext")

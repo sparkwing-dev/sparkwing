@@ -25,8 +25,6 @@ func helpExampleScratchDir(name string) string {
 	return "/tmp/" + name
 }
 
-// ---- top-level --------------------------------------------------
-
 var cmdSparkwing = Command{
 	Path:     "sparkwing",
 	Synopsis: "sparkwing -- CI/CD pipelines written in Go",
@@ -36,7 +34,6 @@ webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.`,
 	Subcommands: []SubcommandRef{
-		// Project flow (most-used)
 		{"info", "What is sparkwing, what's in this repo, what to run next"},
 		{"pipeline", "This repo's pipelines"},
 		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
@@ -44,13 +41,11 @@ for agent-facing discovery.`,
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
-		// Local + remote ops
 		{"dashboard", "Local dashboard server"},
 		{"cluster", "Cluster ops"},
 		{"secrets", "Manage secrets"},
 		{"configure", "Laptop-local config"},
 		{"debug", "Interactive run debugging"},
-		// Docs + agent surface
 		{"docs", "Embedded user docs (offline)"},
 		{"commands", "Full CLI surface as JSON (agent self-discovery)"},
 		{"completion", "Shell completion script"},
@@ -64,8 +59,6 @@ for agent-facing discovery.`,
 		{"Start the local dashboard", "sparkwing dashboard start"},
 	},
 }
-
-// ---- sparkwing info -------------------------------------------
 
 var cmdInfo = Command{
 	Path:     "sparkwing info",
@@ -94,8 +87,6 @@ pipelines (head -n1 yields the most-likely next command).`,
 		{"Reprint the post-install onboarding card", "sparkwing info --first-time"},
 	},
 }
-
-// ---- sparkwing cluster ----------------------------------------
 
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
@@ -135,8 +126,6 @@ address; set them up with 'sparkwing configure profiles'.`,
 	},
 }
 
-// ---- sparkwing configure --------------------------------------
-
 var cmdConfigure = Command{
 	Path:     "sparkwing configure",
 	Synopsis: "Configure laptop-local settings",
@@ -163,8 +152,6 @@ controller, not the local config. Secrets are top-level
 		{"Register the current repo with the cross-repo registry", "sparkwing configure xrepo add"},
 	},
 }
-
-// ---- sparkwing configure init --------------------------------
 
 var cmdConfigureInit = Command{
 	Path:     "sparkwing configure init",
@@ -193,8 +180,6 @@ Re-running on an already-set-up laptop is a no-op status report.
 		{"Probe without writing anything", "sparkwing configure init --dry-run"},
 	},
 }
-
-// ---- sparkwing version ----------------------------------------
 
 var cmdVersion = Command{
 	Path:     "sparkwing version",
@@ -229,8 +214,6 @@ latest) for shell pipelines.`,
 		{"Bump the SDK pin in this project", "sparkwing version update --sdk"},
 	},
 }
-
-// ---- sparkwing update ----------------------------------------
 
 // cmdUpdate is the top-level binary self-update verb. Binary-only
 // (no --cli/--sdk split); for SDK updates use `version update --sdk`.
@@ -309,8 +292,6 @@ applies to whichever target is selected.`,
 	},
 }
 
-// ---- sparkwing commands ---------------------------------------
-
 var cmdCommands = Command{
 	Path:             "sparkwing commands",
 	Synopsis:         "Emit the full CLI surface as structured data (agent self-discovery)",
@@ -337,8 +318,6 @@ plain emits one path per line for shell consumption.`,
 		{"All paths, one per line", "sparkwing commands -o plain"},
 	},
 }
-
-// ---- sparkwing docs -------------------------------------------
 
 var cmdDocs = Command{
 	Path:     "sparkwing docs",
@@ -628,8 +607,6 @@ faster than the 24h TTL window, or when debugging --web behavior.`,
 	},
 }
 
-// ---- sparkwing debug ------------------------------------------
-
 var cmdDebug = Command{
 	Path:     "sparkwing debug",
 	Synopsis: "Interactive debugging for pipeline runs",
@@ -805,8 +782,6 @@ continuously.`,
 	},
 }
 
-// ---- sparkwing run flag specs ----------------------------------
-
 // runFlagSpecs is shared between cmdRun (the `sparkwing run` help
 // page) and cmdPipelineRun (the `sparkwing pipeline run` help page),
 // since the two invocation surfaces are the same execution path
@@ -833,8 +808,6 @@ func runFlagSpecsFromDocs() []FlagSpec {
 	}
 	return out
 }
-
-// ---- sparkwing pipeline------------------------------------------
 
 var cmdPipeline = Command{
 	Path:     "sparkwing pipeline",
@@ -1253,8 +1226,6 @@ SPARKWING_LOG_FORMAT=pretty|json.`,
 	},
 }
 
-// ---- sparkwing profile -----------------------------------------
-
 // cmdProfile is read-side introspection: which profile would sparkwing
 // pick right now, and why. No positional args; --profile NAME drives the
 // hypothetical "what if I passed --profile NAME" case.
@@ -1281,8 +1252,6 @@ to your next command would select. Tokens are never printed.`,
 		{"Machine-readable", "sparkwing profile -o json"},
 	},
 }
-
-// ---- sparkwing dashboard ---------------------------------------
 
 var cmdDashboard = Command{
 	Path:     "sparkwing dashboard",
@@ -1366,8 +1335,6 @@ running, 1 when not.`,
 	},
 }
 
-// ---- sparkwing worker ------------------------------------------
-
 var cmdWorker = Command{
 	Path:     "sparkwing cluster worker",
 	Synopsis: "Claim triggers from a profile's controller and run them in-process",
@@ -1393,8 +1360,6 @@ or against a local 'sparkwing dashboard start' via --profile local. With
 	},
 }
 
-// ---- sparkwing gc ----------------------------------------------
-
 var cmdGC = Command{
 	Path:     "sparkwing cluster gc",
 	Synopsis: "Sweep stale warm-PVC state",
@@ -1416,8 +1381,6 @@ mtime-based git/ and tmp/ sweeps still run and free disk. Supply
 		{"Target a specific warm root", "sparkwing cluster gc --root /var/lib/sparkwing --profile prod"},
 	},
 }
-
-// ---- sparkwing maintenance -------------------------------------
 
 var cmdMaintenance = Command{
 	Path:     "sparkwing maintenance",
@@ -1442,8 +1405,6 @@ expired rows, so it is safe to run alongside live runs.`,
 		{"Hourly from cron", "0 * * * * sparkwing maintenance"},
 	},
 }
-
-// ---- sparkwing completion --------------------------------------
 
 var cmdCompletion = Command{
 	Path:             "sparkwing completion",
@@ -1472,8 +1433,6 @@ compgen lacks the facility.`,
 		{"Install persistent completion for fish", "sparkwing completion --shell fish > ~/.config/fish/completions/sparkwing.fish"},
 	},
 }
-
-// ---- sparkwing profiles ---------------------------------------
 
 var cmdProfiles = Command{
 	Path:     "sparkwing configure profiles",
@@ -1610,8 +1569,6 @@ clears the token (empty value, not an omitted flag). Use
 	},
 }
 
-// ---- sparkwing tokens ------------------------------------------
-
 var cmdTokens = Command{
 	Path:     "sparkwing cluster tokens",
 	Synopsis: "Manage controller API tokens",
@@ -1718,8 +1675,6 @@ lets callers cycle credentials without downtime.`,
 	},
 }
 
-// ---- sparkwing users -------------------------------------------
-
 var cmdUsers = Command{
 	Path:     "sparkwing cluster users",
 	Synopsis: "Manage dashboard login users",
@@ -1780,8 +1735,6 @@ proactively invalidate active cookies on delete.`,
 		{"Delete a user", "sparkwing cluster users delete --name alice"},
 	},
 }
-
-// ---- sparkwing runs --------------------------------------------
 
 var cmdJobs = Command{
 	Path:     "sparkwing runs",
@@ -1951,8 +1904,6 @@ var cmdJobsErrors = Command{
 	},
 }
 
-// --- new verbs: failures / stats / last / tree / get -------------
-
 var cmdJobsFailures = Command{
 	Path:        "sparkwing runs failures",
 	Synopsis:    "List recent failed runs, optionally clustered",
@@ -2061,8 +2012,6 @@ configured rate (not the local profile) supplies cost.`,
 		{"Prod receipt", "sparkwing runs receipt --run run-... --profile prod"},
 	},
 }
-
-// --- jobs wait / find -------------------------------------------
 
 var cmdJobsWait = Command{
 	Path:     "sparkwing runs wait",
@@ -2287,8 +2236,6 @@ Use --dry-run first to confirm the victim list.`,
 	},
 }
 
-// ---- sparkwing hooks -------------------------------------------
-
 var cmdHooks = Command{
 	Path:     "sparkwing pipeline hooks",
 	Synopsis: "Install / uninstall git pre-commit + pre-push + post-commit hooks",
@@ -2352,8 +2299,6 @@ var cmdHooksStatus = Command{
 		{"Show hook status", "sparkwing pipeline hooks status"},
 	},
 }
-
-// ---- sparkwing secrets -----------------------------------------
 
 var cmdSecret = Command{
 	Path:     "sparkwing secrets",
@@ -2442,8 +2387,6 @@ var cmdSecretDelete = Command{
 	},
 }
 
-// ---- sparkwing triggers ----------------------------------------
-
 var cmdTriggers = Command{
 	Path:     "sparkwing runs triggers",
 	Synopsis: "Fire, list, or inspect controller triggers",
@@ -2515,8 +2458,6 @@ var cmdTriggersGet = Command{
 	},
 }
 
-// ---- sparkwing image -------------------------------------------
-
 var cmdImage = Command{
 	Path:     "sparkwing cluster image",
 	Synopsis: "Rollout helpers for images referenced by a gitops repo",
@@ -2578,8 +2519,6 @@ image to the registry before calling rollout.`,
 	},
 }
 
-// ---- sparkwing profiles test ----------------------------------
-
 var cmdProfilesTest = Command{
 	Path:     "sparkwing configure profiles test",
 	Synopsis: "Probe controller/auth/logs/gitcache for one profile",
@@ -2604,8 +2543,6 @@ minimally-configured laptop profile can still exit 0.`,
 		{"JSON for scripting", "sparkwing configure profiles test --profile prod -o json"},
 	},
 }
-
-// ---- sparkwing health -----------------------------------------
 
 var cmdHealth = Command{
 	Path:     "sparkwing cluster status",
@@ -2636,8 +2573,6 @@ on "is the cluster reachable at all?".`,
 		{"Structured output for a status dashboard", "sparkwing cluster status --profile prod -o json"},
 	},
 }
-
-// ---- sparkwing webhooks ---------------------------------------
 
 var cmdWebhooks = Command{
 	Path:     "sparkwing cluster webhooks",
@@ -2726,8 +2661,6 @@ appears in the hook's delivery log within seconds.`,
 	},
 }
 
-// ---- sparkwing agents -----------------------------------------
-
 var cmdAgents = Command{
 	Path:     "sparkwing cluster agents",
 	Synopsis: "Inspect the controller's fleet view",
@@ -2786,8 +2719,6 @@ selected profile's controller.`,
 		{"Who holds and who's queued", "sparkwing cluster concurrency --namespace deploy-prod --profile prod"},
 	},
 }
-
-// ---- sparkwing pipeline sparks ------------------------------------------
 
 var cmdSparks = Command{
 	Path:     "sparkwing pipeline sparks",
@@ -2953,8 +2884,6 @@ new sparks version is published.`,
 	},
 }
 
-// ---- sparkwing approvals / approve / deny ------------------------
-
 var cmdApprove = Command{
 	Path:     "sparkwing runs approvals approve",
 	Synopsis: "Approve a pending approval-gate node",
@@ -3030,8 +2959,6 @@ run, both pending and resolved.`,
 		{"Emit JSON for an agent", "sparkwing runs approvals list -o json"},
 	},
 }
-
-// ---- sparkwing runs annotations --------------------------------
 
 var cmdAnnotations = Command{
 	Path:     "sparkwing runs annotations",

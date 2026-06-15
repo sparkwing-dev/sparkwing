@@ -16,8 +16,6 @@ import (
 // server serves @latest = last, @v/list = newline-joined.
 func newMockProxy(t *testing.T, versions map[string][]string) *httptest.Server {
 	t.Helper()
-	// Key the table by escaped path so lookup matches what the resolver
-	// actually sends (proxy.golang.org lower-escapes upper-case chars).
 	escaped := make(map[string][]string, len(versions))
 	for mod, list := range versions {
 		e, err := module.EscapePath(mod)
@@ -59,7 +57,6 @@ func resolverAt(srv *httptest.Server) *Resolver {
 }
 
 func TestResolveExactVersion(t *testing.T) {
-	// No mock server - an exact pin must not hit the network.
 	r := &Resolver{Proxies: []string{"http://proxy.invalid.example"}}
 	m := &Manifest{Libraries: []Library{
 		{Name: "x", Source: "example.com/x", Version: "v1.2.3"},
@@ -84,10 +81,10 @@ func TestResolveSemverRange(t *testing.T) {
 		constraint string
 		want       string
 	}{
-		{"^v0.10.0", "v0.11.0"}, // same-major compatible
-		{"~v0.10.0", "v0.10.3"}, // patch-only
-		{">=v0.10.0", "v1.0.0"}, // anything >= 0.10.0
-		{"v0.10.3", "v0.10.3"},  // exact
+		{"^v0.10.0", "v0.11.0"},
+		{"~v0.10.0", "v0.10.3"},
+		{">=v0.10.0", "v1.0.0"},
+		{"v0.10.3", "v0.10.3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.constraint, func(t *testing.T) {

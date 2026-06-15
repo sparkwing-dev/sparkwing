@@ -247,8 +247,6 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 	case group != nil:
 		return r.acquireAndRun(ctx, req, concParamsFor(node, group, req.RunID)), true
 	default:
-		// Cache() was declared but produced no usable key (NoCache or
-		// empty) and there is no group: run uncached on the normal path.
 		return runner.Result{}, false
 	}
 }
@@ -338,20 +336,10 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 	case store.AcquireCached:
 		return r.applyCacheHit(ctx, req, memoCP, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireCoalesced:
-		// A leader with identical content is already in flight; wait for
-		// its result rather than competing for the group budget.
 		return r.waitThenRun(ctx, req, memoCP, resp)
 	case store.AcquireQueued:
-		// A --no-cache node does not coalesce onto the leader; it queued
-		// for the memo slot and, once promoted, runs fresh and writes its
-		// own cache entry (via runHeldSlot's release) rather than
-		// inheriting the leader's result.
 		return r.waitThenRun(ctx, req, memoCP, resp)
 	case store.AcquireGranted:
-		// Memo leader: keep the memo lease alive (so followers keep
-		// waiting through our group wait + execution), run under the
-		// group budget, then release the memo slot -- writing the shared
-		// cache entry on success.
 		execCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var lost atomic.Bool
@@ -461,8 +449,6 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 		}
 	}()
 
-	// SkipIf evaluated after acquisition so the predicate sees the
-	// executing-node env. Skipped still releases via defer.
 	if reason, skip := evalSkipPredicates(execCtx, req.Node); skip {
 		r.markSkipped(execCtx, req.RunID, req.Node.ID(), reason)
 		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Skipped))
@@ -558,24 +544,13 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload)
 
-	// Surface the wait on the node so the dashboard shows "queued ... N
-	// ahead, held by X" instead of an indistinguishable spinner, and emit
-	// it into the log stream (from the dispatcher -- the node hasn't
-	// started its runner yet). Refreshed below as the queue advances;
-	// cleared on promotion.
 	lastDetail := concWaitDetail(cp.key, initial, leaderRun, leaderNode)
 	if lastDetail != "" {
 		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), lastDetail)
 		r.emitConcWaitLog(ctx, req, lastDetail)
 	}
-	// Only queue waiters have an advancing position worth refreshing;
-	// coalesce/cancel-others keep their initial detail.
 	queueRefresh := initial.Kind == store.AcquireQueued
 
-	// Back-stop: force-release evicted holders after the cancel timeout
-	// so forward progress is bounded. A zero cancelTimeout relies on the
-	// store's default eviction; the timer below only arms when the group
-	// declared an explicit CancelTimeout.
 	if initial.Kind == store.AcquireCancellingOthers && cp.cancelTimeout > 0 {
 		timer := time.AfterFunc(cp.cancelTimeout, func() {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -598,23 +573,15 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		defer timer.Stop()
 	}
 
-	// queueTimeout bounds a queued waiter's wait. Zero = wait forever.
-	// Only the Queue policy honors it.
 	var queueDeadline time.Time
 	if cp.queueTimeout > 0 && initial.Kind == store.AcquireQueued {
 		queueDeadline = time.Now().Add(cp.queueTimeout)
 	}
 
-	// Give back the worker slot for the duration of the wait so a queue
-	// of waiters can't starve other ready nodes. It is re-acquired
-	// before execution on promotion; the paths that resolve without
-	// executing (cache hit, leader-finished, cancel, timeout) leave it
-	// released and runWithCap's deferred release no-ops.
 	if req.ReleaseWorkerSlot != nil {
 		req.ReleaseWorkerSlot()
 	}
 
-	// In-process only (cluster's HTTPConcurrency stubs ResolveWaiter).
 	const pollInterval = 100 * time.Millisecond
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -622,10 +589,6 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 	for {
 		select {
 		case <-ctx.Done():
-			// Drop the parked waiter row so a later release can't promote
-			// this cancelled node into a real holder (a phantom slot that
-			// pins the budget until reaping). ctx is done, so cancel on a
-			// fresh background context.
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if _, err := r.backends.Concurrency.CancelWaiter(bg, cp.key, req.RunID, req.Node.ID()); err != nil {
 				slog.Warn("cancel waiter on context cancellation failed; reaper will sweep it",
@@ -648,10 +611,6 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			if !queueDeadline.IsZero() && time.Now().After(queueDeadline) {
 				return r.failQueueTimeout(ctx, req, cp)
 			}
-			// Refresh the wait display as the queue advances. ResolveWaiter
-			// recomputes position against the fully-committed queue, so this
-			// self-corrects any stale insert-time value. Only writes when the
-			// summary actually changes.
 			if queueRefresh {
 				if d := concQueuedDetail(cp.key, res.Position, res.Holders); d != lastDetail {
 					lastDetail = d
@@ -661,14 +620,11 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			}
 			continue
 		case store.WaiterPromoted:
-			// Re-take the worker slot before executing so the MaxParallel
-			// cap is honored during the run, not just during the wait.
 			if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
 				r.markFailed(ctx, req.RunID, req.Node.ID(), context.Canceled)
 				return runner.Result{Outcome: sparkwing.Cancelled}
 			}
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
-			// Clear the "queued ..." detail now that the node holds a slot.
 			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
 			return r.runHeldSlot(ctx, req, cp, res.HolderID)
 		case store.WaiterCached:
@@ -770,7 +726,7 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 
 // fetchCachedOutput resolves output_ref to the origin's stored bytes.
 func (r *InProcessRunner) fetchCachedOutput(ctx context.Context, outputRef, originRun, originNode string) ([]byte, error) {
-	_ = outputRef // reserved for future encodings
+	_ = outputRef
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
 }
 

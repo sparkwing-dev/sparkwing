@@ -108,12 +108,8 @@ func checkGoBlocks(contentDir, repoRoot string) bool {
 		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 		out, berr := cmd.CombinedOutput()
 		if berr == nil {
-			continue // compiled clean
+			continue
 		}
-		// Only SDK-API drift (wrong/removed sparkwing|sw symbol or
-		// signature) is a real doc bug. Errors about undeclared business
-		// identifiers / unused vars are snippet-not-self-contained noise,
-		// not something the doc author got wrong about the API.
 		drift := sdkDriftLines(string(out))
 		if len(drift) == 0 {
 			partial++
@@ -179,9 +175,6 @@ func extract(dir, lang string) ([]block, error) {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
-		// migrations/ and proposals/ intentionally show old or future
-		// APIs (design history) -- the docs sidebar already excludes them,
-		// so they're not part of the current-API gate.
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}
@@ -196,7 +189,6 @@ func extract(dir, lang string) ([]block, error) {
 				continue
 			}
 			skip := ""
-			// look back over blank lines for a skip marker
 			for k := i - 1; k >= 0; k-- {
 				t := strings.TrimSpace(lines[k])
 				if t == "" {
@@ -271,7 +263,6 @@ func writeModule(tmp, repoRoot string) error {
 	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte(gomod), 0o644); err != nil {
 		return err
 	}
-	// A trivial root file so `go mod tidy` has a package to anchor on.
 	root := "package doccheck\n\nimport _ \"github.com/sparkwing-dev/sparkwing/sparkwing\"\n"
 	if err := os.WriteFile(filepath.Join(tmp, "root.go"), []byte(root), 0o644); err != nil {
 		return err

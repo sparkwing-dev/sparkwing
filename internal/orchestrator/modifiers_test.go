@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// --- Retry ---
-
 // flakyState counts invocations of a closure so tests can assert on
 // retry behavior without racy sleeps. One instance per registered
 // pipeline (orch.Register is global).
@@ -52,8 +50,6 @@ func (retryExhausted) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 	return nil
 }
 
-// --- Timeout ---
-
 type timeoutPipe struct{ sparkwing.Base }
 
 func (timeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -67,8 +63,6 @@ func (timeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	}).Timeout(50 * time.Millisecond)
 	return nil
 }
-
-// --- OnFailure ---
 
 type onFailurePipe struct{ sparkwing.Base }
 
@@ -120,7 +114,7 @@ var skipRollbackCalled atomic.Bool
 
 func (onFailureSkipPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
-		return nil // succeeds
+		return nil
 	}).OnFailure("rollback", func(ctx context.Context) error {
 		skipRollbackCalled.Store(true)
 		return nil
@@ -136,8 +130,6 @@ func init() {
 	register("mod-onfailure-skip", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureSkipPipe{} })
 	register("mod-onfailure-detached", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureDetachedPipe{} })
 }
-
-// --- Tests ---
 
 func TestRetry_EventuallySucceeds(t *testing.T) {
 	atomic.StoreInt32(&retryOKState.attempts, 0)
@@ -166,7 +158,6 @@ func TestRetry_ExhaustedStillFails(t *testing.T) {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
 	got := atomic.LoadInt32(&retryExhaustedState.attempts)
-	// Retry(2) means total of 3 attempts (1 original + 2 retries).
 	if got != 3 {
 		t.Fatalf("attempts = %d, want 3 total", got)
 	}
@@ -184,10 +175,7 @@ func TestRetry_LogCapturesAttempts(t *testing.T) {
 		t.Fatalf("expected always-fails node, got %+v", nodes)
 	}
 
-	// Log file should contain retry banners for attempts 2 and 3.
 	logPath := p.NodeLog(res.RunID, "always-fails")
-	// Read via jobs-logs API which knows the path layout.
-	// (Direct read is simpler here -- use sparkwing's utils wouldn't help.)
 	body, err := readFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
@@ -211,7 +199,6 @@ func TestTimeout_CancelsSlowJob(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
-	// Timeout is 50ms -- should finish well under the job's 2s sleep.
 	if elapsed > 1*time.Second {
 		t.Fatalf("run took %s; timeout should have cancelled much sooner", elapsed)
 	}

@@ -133,9 +133,6 @@ func renderConcurrencyState(w io.Writer, st *concState) {
 			active++
 		}
 	}
-	// Budget is cost-summed: a member draws its declared cost, not one
-	// slot. EffectiveCapacity is the most-restrictive minimum enforced
-	// when versions disagree; available is what's left for new arrivals.
 	eff := st.EffectiveCapacity
 	if eff == 0 {
 		eff = st.Capacity

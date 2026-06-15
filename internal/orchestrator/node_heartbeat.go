@@ -12,7 +12,6 @@ func runNodeHeartbeatLoop(ctx context.Context, interval time.Duration, state Sta
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	// Stamp once so last_heartbeat is non-NULL before the first tick.
 	_ = state.TouchNodeHeartbeat(ctx, runID, nodeID)
 	t := time.NewTicker(interval)
 	defer t.Stop()

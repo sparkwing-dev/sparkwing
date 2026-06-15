@@ -44,7 +44,6 @@ func NewArtifactStore(root string) (*ArtifactStore, error) {
 var _ storage.ArtifactStore = (*ArtifactStore)(nil)
 
 func (s *ArtifactStore) path(key string) string {
-	// Keys shorter than 2 chars share an "_" shard.
 	if len(key) >= 2 {
 		return filepath.Join(s.Root, key[:2], key)
 	}
@@ -117,7 +116,6 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 		if d.IsDir() {
 			return nil
 		}
-		// Skip in-flight tempfiles from atomic Put.
 		name := filepath.Base(path)
 		if strings.HasPrefix(name, ".put-") {
 			return nil

@@ -201,9 +201,6 @@ func runProfilesSet(args []string) error {
 	if !ok {
 		return fmt.Errorf("profiles set: %q not found", name)
 	}
-	// Only overwrite fields the user passed a flag for. pflag
-	// distinguishes "flag not given" from "flag given with empty
-	// value" via fs.Changed.
 	if fs.Changed("controller") || fs.Changed("token") {
 		if p.Controller == nil {
 			p.Controller = &profile.ControllerSpec{}

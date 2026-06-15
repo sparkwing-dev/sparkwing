@@ -200,9 +200,6 @@ func scanRemoteRuns(ctx context.Context, c *client.Client, logc storage.LogStore
 			sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 			for sc.Scan() {
 				lineNo++
-				// The service-side grep guarantees every line matched;
-				// still defensively re-check so a future no-op service
-				// doesn't quietly turn this into a full-log dump.
 				line := sc.Text()
 				if !strings.Contains(line, opts.Pattern) {
 					continue

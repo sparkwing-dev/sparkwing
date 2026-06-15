@@ -58,6 +58,10 @@ import (
 
 var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):`)
 
+// outputRE matches the Go testable-example output markers recognized by
+// the testing package: "// Output:" and "// Unordered output:".
+var outputRE = regexp.MustCompile(`(?i)^// (Unordered output|Output):`)
+
 var skipDirs = map[string]bool{
 	"vendor":          true,
 	"testdata":        true,
@@ -144,6 +148,15 @@ func checkFile(path string) ([]violation, error) {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			mark(allowed, d.Doc)
+			if d.Name != nil && strings.HasPrefix(d.Name.Name, "Example") && d.Body != nil {
+				bodyStart := d.Body.Lbrace
+				bodyEnd := d.Body.Rbrace
+				for _, cg := range f.Comments {
+					if cg.Pos() >= bodyStart && cg.Pos() <= bodyEnd && outputRE.MatchString(cg.List[0].Text) {
+						mark(allowed, cg)
+					}
+				}
+			}
 		case *ast.GenDecl:
 			mark(allowed, d.Doc)
 			for _, spec := range d.Specs {

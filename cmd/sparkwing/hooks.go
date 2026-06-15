@@ -62,8 +62,6 @@ func runHooksInstall(args []string) error {
 		cfg = &projectconfig.Config{}
 	}
 
-	// Collect hook -> pipelines mapping so one hook can fan out to
-	// multiple pipelines if needed.
 	hooksToRun := map[string][]string{}
 	for _, p := range cfg.Pipelines {
 		if p.On.PreHook != nil {
@@ -124,7 +122,6 @@ func runHooksUninstall(args []string) error {
 	hooksDir := filepath.Join(repoRoot, ".git", "hooks")
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
-		// No hooks dir means nothing to remove.
 		fmt.Fprintln(os.Stdout, "no sparkwing hooks installed")
 		return nil
 	}
@@ -187,8 +184,6 @@ func runHooksStatus(args []string) error {
 		if !strings.Contains(string(data), sparkwingHookMarker) {
 			continue
 		}
-		// Extract pipeline names from `sparkwing run <name>` lines so
-		// status is informative not just "yes it's there."
 		var pipes []string
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)

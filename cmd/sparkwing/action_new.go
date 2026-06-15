@@ -66,7 +66,6 @@ func runPipelineNew(args []string) error {
 		sparkwingDir = filepath.Join(cwd, ".sparkwing")
 	}
 
-	// Refuse silent clobber on duplicate name.
 	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			if p.Name == name {
@@ -110,8 +109,6 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 	}
 	rendered, err := templates.Render(templateName, pm)
 	if err != nil {
-		// Render reports missing-required and unknown params with
-		// actionable messages; surface them as-is.
 		return fmt.Errorf("new: %w", err)
 	}
 
@@ -128,8 +125,6 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 	if err := finishScaffold(sparkwingDir, file, name, bootstrapped); err != nil {
 		return err
 	}
-	// Surface what the repo must already have for the first `sparkwing
-	// run` to succeed, so a scaffold into an empty repo isn't a surprise.
 	if pre := strings.TrimSpace(tmpl.Manifest.Prerequisite); pre != "" {
 		fmt.Printf("\n%s %s\n", color.Bold("prerequisite:"), pre)
 	}
@@ -212,13 +207,11 @@ func kebabToSnake(name string) string {
 // scaffold landing on these silently gets build-tagged out.
 var goReservedTrailingTokens = map[string]bool{
 	"test": true,
-	// GOOS
-	"aix": true, "android": true, "darwin": true, "dragonfly": true,
+	"aix":  true, "android": true, "darwin": true, "dragonfly": true,
 	"freebsd": true, "hurd": true, "illumos": true, "ios": true,
 	"js": true, "linux": true, "nacl": true, "netbsd": true,
 	"openbsd": true, "plan9": true, "solaris": true, "wasip1": true,
 	"windows": true, "zos": true,
-	// GOARCH
 	"386": true, "amd64": true, "amd64p32": true, "arm": true,
 	"arm64": true, "arm64be": true, "armbe": true, "loong64": true,
 	"mips": true, "mips64": true, "mips64le": true, "mips64p32": true,
@@ -299,7 +292,6 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	tidy := tidySkeleton(sparkwingDir, true)
 	switch {
 	case tidy.Skipped:
-		// nothing
 	case tidy.OK:
 		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim(tidy.Note))
 	default:

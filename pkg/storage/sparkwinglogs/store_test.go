@@ -16,7 +16,7 @@ func TestStore_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
-	store := map[string][]byte{} // runID/nodeID -> bytes
+	store := map[string][]byte{}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/logs/")
@@ -30,7 +30,7 @@ func TestStore_RoundTrip(t *testing.T) {
 		case http.MethodGet:
 			mu.Lock()
 			defer mu.Unlock()
-			if !strings.Contains(path, "/") { // ReadRun
+			if !strings.Contains(path, "/") {
 				var buf []byte
 				for k, v := range store {
 					if strings.HasPrefix(k, path+"/") {

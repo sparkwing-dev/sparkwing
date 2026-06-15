@@ -16,14 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Mode 2 (S3-only shared) integration tests. Two RunLocal invocations
-// against the same S3 bucket; the second sees what the first wrote.
-// Per-runner state writes to runs/<id>/state.ndjson; cache blobs are
-// content-addressed under cache/.
-//
-// The S3 endpoint is a gofakes3 in-process server; cross-runner
-// sharing through the real S3 protocol is the assertion target.
-
 var s3IntegRegisterOnce sync.Once
 
 // invocations counter is captured at registration time so each Run
@@ -143,8 +135,6 @@ func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
 		t.Fatalf("status = %q", res.Status)
 	}
 
-	// Fresh S3Backend over the same bucket; mirrors what
-	// sparkwing-web does when configured for Mode 2.
 	b := backend.NewS3Backend(art, logs)
 	got, err := b.GetRun(context.Background(), res.RunID)
 	if err != nil {
@@ -202,9 +192,6 @@ func TestS3Sharing_TriggerSurfacesErrNotSupported(t *testing.T) {
 		ArtifactStore: art,
 	})
 	if err != nil {
-		// Some pipeline-level errors bubble through err rather than
-		// the Result.Error field; check for the underlying sentinel
-		// in either path.
 		if errors.Is(err, s3state.ErrNotSupported) || containsNotSupported(err) {
 			return
 		}
@@ -214,7 +201,6 @@ func TestS3Sharing_TriggerSurfacesErrNotSupported(t *testing.T) {
 		t.Fatalf("trigger pipeline succeeded; expected failure")
 	}
 
-	// Inspect the failed node to confirm the underlying error message.
 	b := backend.NewS3Backend(art, logs)
 	nodes, err := b.ListNodes(context.Background(), res.RunID)
 	if err != nil {

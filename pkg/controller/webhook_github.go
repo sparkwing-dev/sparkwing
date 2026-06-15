@@ -128,11 +128,6 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		Source: "github",
 		User:   payload.Pusher.Name,
 	}
-	// triggerEnv carries the GitHub-delivery metadata onto the
-	// persisted store row. The SDK TriggerInfo type no longer
-	// surfaces these to step bodies; consumers that need the
-	// delivery id, repository, or commit range read them from the
-	// store/DTO column.
 	triggerEnv := map[string]string{
 		"GITHUB_DELIVERY":   delivery,
 		"GITHUB_REPOSITORY": payload.Repository.FullName,

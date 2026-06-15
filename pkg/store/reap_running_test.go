@@ -34,7 +34,6 @@ func TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed(t *testing.T) {
 		t.Fatalf("TouchRunHeartbeat: %v", err)
 	}
 
-	// Backdate the heartbeat well past the grace window.
 	if _, err := s.DB().ExecContext(ctx,
 		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
 		time.Now().Add(-10*time.Minute).UnixNano(), runID); err != nil {
@@ -129,8 +128,6 @@ func TestReapStaleRunningRuns_IgnoresNullHeartbeat(t *testing.T) {
 
 	const runID, nodeID = "run-noheartbeat", "node-a"
 	seedRunAndNode(t, s, runID, nodeID)
-	// Deliberately skip TouchRunHeartbeat -- last_heartbeat_at stays NULL.
-
 	ids, err := store.Maintenance.ReapStaleRunningRuns(s, ctx,
 		1*time.Nanosecond, "test reason")
 	if err != nil {

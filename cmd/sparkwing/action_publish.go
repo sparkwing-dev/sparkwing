@@ -50,7 +50,6 @@ func runPipelinePublish(args []string) error {
 		return err
 	}
 
-	// Resolve the artifact-store target. URL flag wins over profile.
 	storeURL, err := resolveArtifactStoreURL(*on, *artifactStore)
 	if err != nil {
 		return err
@@ -63,7 +62,6 @@ func runPipelinePublish(args []string) error {
 		return fmt.Errorf("open artifact-store: %w", err)
 	}
 
-	// Resolve .sparkwing/ -- explicit --dir wins, fallback to walk-up.
 	dir := *sparkwingDirFlag
 	if dir == "" {
 		d, err := findSparkwingDir()
@@ -73,8 +71,6 @@ func runPipelinePublish(args []string) error {
 		dir = d
 	}
 
-	// Parse --platform list. Empty = current platform only, matches
-	// what `sparkwing run` would compile for.
 	platformsList, err := parsePlatforms(*platforms)
 	if err != nil {
 		return err
@@ -135,14 +131,8 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 	if err != nil {
 		return publishedBinary{}, fmt.Errorf("hash: %w", err)
 	}
-	// Per-platform local cache path so a cross-compile doesn't stomp
-	// the operator's host-platform binary (which lives at the same
-	// hash if not for the platform mix-in).
 	binPath := bincache.CachedBinaryPath(key)
 
-	// Compile if not already cached locally for this hash. The local
-	// cache is keyed on hash, which mixes platform, so cross-compiles
-	// don't collide with the operator's native build.
 	if _, err := os.Stat(binPath); err != nil {
 		if err := compileForPlatform(sparkwingDir, binPath, p); err != nil {
 			return publishedBinary{}, fmt.Errorf("compile: %w", err)
@@ -218,7 +208,6 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 	case "off":
 		return "", false
 	case "":
-		// fall through
 	default:
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
@@ -258,8 +247,6 @@ func renderPublishResults(rows []publishedBinary, format string) error {
 		}
 		return nil
 	default:
-		// table: stable column order so agents that grep for fields
-		// don't break across releases.
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Platform < rows[j].Platform })
 		fmt.Printf("%-20s  %-8s  %s\n", "PLATFORM", "SIZE", "URL")
 		for _, r := range rows {

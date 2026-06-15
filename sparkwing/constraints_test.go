@@ -267,7 +267,6 @@ func TestCustom_RejectsDoubleSet(t *testing.T) {
 }
 
 func TestChained_ComposesIntoSingleMeta(t *testing.T) {
-	// Realistic chain: RequiredWhen + Default + DependsOn + Min/Max + Bind.
 	m, err := applyAll(
 		RequiredWhen(ArgEq("target", "prod")),
 		Default(3),

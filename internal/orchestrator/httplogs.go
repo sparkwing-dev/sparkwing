@@ -112,7 +112,6 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 		rec.JobID = l.nodeID
 	}
 
-	// Mirror first so a logs-service outage doesn't hide the line.
 	if l.delegate != nil {
 		l.delegate.Emit(rec)
 	}
@@ -122,9 +121,6 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	fatal := l.fatal
 	l.mu.Unlock()
 	if closed || fatal != nil {
-		// Once auth has latched fatal there's no point spamming the
-		// service with attempts that will all 401/403; we'll surface
-		// the latched error via Fatal() at node close.
 		return
 	}
 
@@ -145,9 +141,6 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 	var lastErr error
 	for attempt := 0; attempt < httpNodeLogRetryAttempts; attempt++ {
 		if attempt > 0 {
-			// Exponential-ish backoff (200ms, 400ms, 800ms by default).
-			// Cheap because we only spend it when the service is sick;
-			// the ctx timeout below caps total wall-clock per line.
 			time.Sleep(httpNodeLogRetryBackoff << (attempt - 1))
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -174,9 +167,6 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 			return
 		}
 	}
-	// Retries exhausted on a non-auth error: record the drop and
-	// keep the run going. The count surfaces on the Run record at
-	// node-close time so `runs status` shows it.
 	l.mu.Lock()
 	l.dropCount++
 	if l.dropReason == "" && lastErr != nil {

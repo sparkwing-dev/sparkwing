@@ -43,9 +43,6 @@ func runGC(args []string) error {
 	defer stop()
 
 	var ctrl orchestrator.TerminalRunLister
-	// Only attempt profile resolution when the operator asked for it.
-	// A completely profile-less gc run is legitimate for mtime-only
-	// sweeps (git/, tmp/); the run-dir sweep just skips quietly.
 	if *on != "" {
 		prof, err := resolveProfile(*on)
 		if err != nil {

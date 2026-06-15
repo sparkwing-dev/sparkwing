@@ -89,9 +89,6 @@ func resolveSource(ctx context.Context, f docsWebFlags) (webResolution, error) {
 
 	v, err := r.client.Versions(ctx)
 	if err != nil {
-		// Offline-fallback path. Per the spec, log a one-line warning
-		// to stderr and continue; per-resource fetch may also fail
-		// with a more specific message.
 		r.discoveryW = fmt.Sprintf(
 			"unable to reach %s/versions.json (%v). Proceeding without version validation; the per-resource fetch may also fail. Use --no-cache to bypass any stale cache.",
 			r.client.BaseURL, err)
@@ -103,7 +100,6 @@ func resolveSource(ctx context.Context, f docsWebFlags) (webResolution, error) {
 		r.version = embedVer
 	}
 	if r.version == "" {
-		// No embedded version; pick latest if we have it.
 		if r.versions != nil && r.versions.Latest != "" {
 			r.version = r.versions.Latest
 		} else {

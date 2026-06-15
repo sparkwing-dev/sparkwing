@@ -23,8 +23,6 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	// Seed a run with 2 nodes: one claimed by a pool pod (busy),
-	// one by a laptop agent that finished (idle wrt active jobs).
 	if err := st.CreateRun(ctx, store.Run{
 		ID:        "run-a",
 		Pipeline:  "demo",

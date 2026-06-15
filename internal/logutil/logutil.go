@@ -23,7 +23,6 @@ func Init() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
-	// Bridge standard log.Printf to slog with level detection.
 	log.SetFlags(0)
 	log.SetOutput(&bridgeWriter{logger: logger})
 }
@@ -52,19 +51,16 @@ func (w *bridgeWriter) Write(p []byte) (int, error) {
 	lower := strings.ToLower(msg)
 
 	switch {
-	// Error-level: critical failures, data loss risks
 	case strings.HasPrefix(lower, "critical:"),
 		strings.HasPrefix(lower, "error:"),
 		strings.HasPrefix(lower, "fatal:"):
 		w.logger.Error(msg)
 
-	// Warn-level: degraded state, recoverable issues
 	case strings.HasPrefix(lower, "warning:"),
 		strings.HasPrefix(lower, "warn:"),
 		strings.HasPrefix(lower, "rejected:"):
 		w.logger.Warn(msg)
 
-	// Debug-level: noisy per-request/per-tick messages
 	case strings.HasPrefix(lower, "heartbeat:"),
 		strings.HasPrefix(lower, "cleanup:"),
 		strings.HasPrefix(lower, "background fetch:"),

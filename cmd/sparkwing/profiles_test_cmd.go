@@ -61,11 +61,6 @@ func runProfilesTest(args []string) error {
 
 	report := profileTestReport{Profile: prof.Name, OK: true}
 
-	// Probe order is fixed so operators reading the table top-to-
-	// bottom see reachability -> auth -> aux services. Each probe is
-	// independent; downstream probes still run even when an earlier
-	// one fails, because a 401 on /runs still tells us the controller
-	// is reachable even though /health failed.
 	report.Probes = append(report.Probes, probeController(ctx, prof))
 	report.Probes = append(report.Probes, probeAuth(ctx, prof))
 	report.Probes = append(report.Probes, probeLogs(ctx, prof))
@@ -135,10 +130,6 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) bool {
 		return true
 	}
 	var body healthResp
-	// Best-effort decode: services that predate the shape return an
-	// empty body or a plain `{"status":"ok"}`; treat unparseable as
-	// "ok, no self-report available" rather than flagging operators
-	// about a server that isn't telling them anything actionable.
 	_ = json.Unmarshal(raw, &body)
 	if body.Status == "degraded" || len(body.Problems) > 0 {
 		r.Status = "warn"
@@ -188,8 +179,6 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 		return r
 	}
 	if prof.ControllerToken() == "" {
-		// Missing token is a warn, not a fail: laptop dev mode runs
-		// with auth disabled, and that's a legitimate configuration.
 		r.Status = "warn"
 		r.Detail = "no token in profile (ok for unauthed local stacks)"
 		return r
@@ -205,7 +194,6 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		// Fall through -- we'll enrich with whoami below.
 	case http.StatusUnauthorized, http.StatusForbidden:
 		r.Status = "fail"
 		r.Detail = fmt.Sprintf("token rejected (%s)", resp.Status)
@@ -216,9 +204,6 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 		return r
 	}
 
-	// Enrich with principal + scopes via /auth/whoami. If whoami is
-	// down but /runs succeeded, keep status=ok and note the degraded
-	// introspection -- the important signal (token works) is green.
 	who, err := fetchWhoami(ctx, prof)
 	if err != nil {
 		r.Status = "ok"

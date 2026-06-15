@@ -19,21 +19,16 @@ func TestLifecycleGuard_StatusLiteralsStayCanonical(t *testing.T) {
 	storeSrc := storePackageSource(t)
 
 	for needle, allowed := range map[string]int{
-		// lifecycle.go (nodeNotDone) + the nodes partial index DDL.
-		"status != 'done'": 2,
-		// lifecycle.go (nodeFailSet) only.
+		"status != 'done'":                    2,
 		"status = 'done', outcome = 'failed'": 1,
-		// Trigger partial-index DDL only.
-		"WHERE status = 'pending'": 1,
-		"WHERE status = 'claimed'": 1,
+		"WHERE status = 'pending'":            1,
+		"WHERE status = 'claimed'":            1,
 	} {
 		if got := strings.Count(storeSrc, needle); got != allowed {
 			t.Errorf("%q appears %d times in pkg/store sources, want %d (lifecycle.go fragments + schema DDL); route new sites through lifecycle.go", needle, got, allowed)
 		}
 	}
 
-	// No package outside pkg/store writes lifecycle statuses into the
-	// store's tables directly.
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

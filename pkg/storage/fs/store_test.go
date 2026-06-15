@@ -59,7 +59,6 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 }
 
 func TestArtifactStore_AtomicPut(t *testing.T) {
-	// Verify rename-from-tmp pattern: no .put-* tempfiles linger.
 	t.Parallel()
 	root := t.TempDir()
 	s, _ := NewArtifactStore(root)
@@ -71,7 +70,6 @@ func TestArtifactStore_AtomicPut(t *testing.T) {
 			t.Fatalf("Put: %v", err)
 		}
 	}
-	// shard dir is "ab"
 	entries, err := os.ReadDir(root + "/ab")
 	if err != nil {
 		t.Fatalf("readdir: %v", err)

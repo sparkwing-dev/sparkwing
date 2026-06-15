@@ -276,71 +276,50 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	// Runs: lifecycle writes + read surface for dashboards/CLI.
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
-	// per-run audit + cost receipt; recomputed on demand.
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishRun)))
 	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdatePlanSnapshot)))
 
-	// Nodes: lifecycle writes for individual DAG nodes. Workers
-	// (orchestrator) call these, so they need admin scope.
 	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateNode)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeAdmin, http.HandlerFunc(s.handleStartNode)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishNode)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdateNodeDeps)))
-	// nodes.claim scope: the same runner that claims a node reads its
-	// upstream refs.
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetNode)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetNodeOutput)))
-	// Dispatch snapshots: runners write at dispatch time; dashboard reads.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleWriteNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
-	// Events: append-only ordered log per run.
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAppendEvent)))
 
-	// Triggers.
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
 	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeAdmin, http.HandlerFunc(s.handleClaimTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeat)))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishTrigger)))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
-	// Static-segment path so the {id} matcher below doesn't consume
-	// "spawned-child" as an id.
+	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
 
-	// Operator cancellation.
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 
-	// Read-side aggregations.
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
 
-	// Retry: creates a fresh run. Same write scope as triggers.
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
-	// Retry tree: every run sharing the same root retry ancestor,
-	// ordered by created_at. Drives the dashboard's Attempts dropdown.
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
-	// Cross-pipeline refs: "latest run of pipeline X matching these
-	// statuses / within this age." Powers sparkwing.Ref[T].Get.
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 
-	// Per-node metrics.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAddNodeMetric)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeMetrics)))
 
-	// Maintenance.
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
 
-	// Concurrency primitive: supports all 5 OnLimit policies plus
-	// optional memoization.
 	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAcquireSlot)))
 	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeatSlot)))
 	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReleaseSlot)))
@@ -350,14 +329,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
-	// Node claim surface.
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleMarkNodeReady)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRevokeNodeReady)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchRunHeartbeat)))
 
-	// Activity / heartbeat surface for the dashboard's liveness dot.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleUpdateNodeActivity)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchNodeHeartbeat)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAppendNodeAnnotation)))
@@ -370,30 +347,21 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetStepSummary)))
 	mux.Handle("GET /api/v1/runs/{id}/steps", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeSteps)))
 
-	// Debug pauses. /paused is an alias for the dashboard SPA;
-	// /debug-pauses is the orchestrator + admin-write surface.
 	mux.Handle("POST /api/v1/runs/{id}/debug-pauses", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateDebugPause)))
 	mux.Handle("GET /api/v1/runs/{id}/debug-pauses", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListDebugPauses)))
 	mux.Handle("GET /api/v1/runs/{id}/paused", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListDebugPauses)))
 
-	// Event log tail (structured SSE). Dashboard SSE endpoint lives on
-	// the web server; this is the underlying read.
 	mux.Handle("GET /api/v1/runs/{id}/events", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListEvents)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetActiveDebugPause)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleReleaseDebugPause)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetNodeStatus)))
 
-	// Approval gates. Request is orchestrator-written (admin), resolve
-	// is human-facing (approvals.write), reads open via approvals.read.
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, http.HandlerFunc(s.handleResolveApproval)))
 	mux.Handle("GET /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetApproval)))
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
-	// Warm-PVC pool routes register only when AttachPool wired a
-	// binding (cluster mode). Laptop mode leaves these absent so
-	// GET /api/v1/pool/... 404s, advertising the feature is off.
 	if s.pool != nil {
 		mux.Handle("GET /api/v1/pool", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePoolList)))
 		mux.Handle("POST /api/v1/pool/checkout", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolCheckout)))
@@ -401,47 +369,27 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /api/v1/pool/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handlePoolHeartbeat)))
 	}
 
-	// Artifact reads register only when WithArtifactStore wired a
-	// backend (laptop mode). Cluster mode leaves this absent so
-	// GET /api/v1/artifacts/{key} 404s; cluster artifact reads go
-	// through a dedicated process.
 	if s.artifactStore != nil {
 		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleArtifactGet)))
 	}
 
-	// Tokens CRUD. Admin-only; the bootstrap admin token is minted
-	// out-of-band via `sparkwing tokens create`.
 	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
 	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))
 	mux.Handle("GET /api/v1/tokens/{prefix}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleLookupTokenByPrefix)))
 	mux.Handle("DELETE /api/v1/tokens/{prefix}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRevokeToken)))
 
-	// Auth introspection: returns the calling principal + scopes for
-	// whichever token authenticated the request.
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 
-	// Session lookup is registered on the OUTER router (see below) so
-	// the `Authorization: Session <raw>` header can resolve before the
-	// bearer-token middleware runs and rejects it.
-
-	// Token rotation.
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 
-	// Users CRUD. POST /api/v1/users is registered on the OUTER router
-	// instead so the first-visit signup path can accept an
-	// unauthenticated first-admin create when the table is empty.
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("DELETE /api/v1/users/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteUser)))
 
-	// Secrets CRUD. Admin-only because GET returns the raw value.
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret)))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListSecrets)))
 	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 
-	// Health + login + session + bootstrap probe + metrics + webhook
-	// route at the outermost layer so they never see an Authorization
-	// check.
 	authed := s.authMiddleware().Middleware(mux)
 
 	router := http.NewServeMux()
@@ -451,18 +399,11 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
-	// POST /api/v1/users routes through the outer router so the
-	// handler can choose "unauthenticated bootstrap" vs "admin-scoped
-	// create" on its own. See handleCreateUserOrBootstrap.
 	router.Handle("POST /api/v1/users", http.HandlerFunc(s.handleCreateUserOrBootstrap))
 	router.Handle("GET /metrics", metricsHandler())
-	// GitHub webhook intake. HMAC-verified inside the handler; bearer
-	// auth does not apply because GitHub cannot carry one.
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("/", authed)
 
-	// otelhttp wraps the outermost layer; withRequestLog stays inside
-	// so log lines carry the trace_id via otelutil's slog bridge.
 	return otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger))
 }
 
@@ -490,10 +431,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		IdleTimeout:       2 * time.Minute,
 	}
 
-	// If the previous controller crashed between a release commit and
-	// the matching PromoteNextWaiters tx, keys can have queued waiters
-	// and open capacity sitting idle. Sweep once on startup so those
-	// waiters don't wait for a new arrival to unstick them.
 	if n, err := store.Maintenance.ReconcileConcurrencyKeys(s.store, ctx, store.DefaultConcurrencyLease); err != nil {
 		s.logger.Warn("concurrency reconcile on startup failed", "err", err)
 	} else if n > 0 {
@@ -502,8 +439,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	go s.runReaper(ctx, 10*time.Second)
 
-	// Pool loops run only when AttachPool was called. Without it, the
-	// pool HTTP handlers return 503 until the loops report ready.
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)
 	}
@@ -539,9 +474,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Stale holder sweep promotes the next FIFO waiter so a
-			// crashed pod mid-node doesn't wedge the whole key. Cache
-			// TTL and LRU sweeps keep the cache table bounded.
 			if stale, err := store.Maintenance.ReapStaleConcurrencyHolders(s.store, ctx); err != nil {
 				s.logger.Error("concurrency stale-holder reap failed", "err", err)
 			} else {
@@ -560,9 +492,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else if n > 0 {
 				s.logger.Info("swept expired concurrency cache entries", "count", n)
 			}
-			// Orphan coalesce followers (leader gone) and any waiter
-			// older than 2x the node lease, lining up with the
-			// node-level queue timeout.
 			if dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s.store, ctx, 2*store.DefaultConcurrencyLease); err != nil {
 				s.logger.Error("concurrency waiter reap failed", "err", err)
 			} else {
@@ -578,10 +507,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else if n > 0 {
 				s.logger.Info("evicted LRU concurrency cache entries", "count", n)
 			}
-			// Node claims whose lease has expired: terminate as
-			// failed with failure_reason=agent_lost. A clean failure
-			// surfaces the problem; the orchestrator's Retry modifier
-			// can redeliver intentionally.
 			if pairs, err := store.Maintenance.FailExpiredNodeClaims(s.store, ctx); err != nil {
 				s.logger.Error("node agent-lost sweep failed", "err", err)
 			} else {
@@ -590,10 +515,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"run_id", p[0], "node_id", p[1])
 				}
 			}
-			// Queued nodes that no runner claimed before the queue
-			// deadline: terminate with failure_reason=queue_timeout.
-			// Protects against pools that drained or label sets that
-			// nothing matches.
 			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, s.queueTimeout); err != nil {
 				s.logger.Error("queue-timeout sweep failed", "err", err)
 			} else {
@@ -608,14 +529,9 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				continue
 			}
 			for _, id := range ids {
-				// GetRun may miss if the dead worker never reached
-				// CreateRun -- that's fine, no stale state to clean.
 				run, err := s.store.GetRun(ctx, id)
 				if err == nil && run.FinishedAt == nil {
 					_ = s.store.FinishRun(ctx, id, "failed", "runner lease expired")
-					// Cascade-fail nodes still marked running or
-					// pending: the trigger lease expired, so any
-					// orphaned node row is by definition stale.
 					if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 						"runner lease expired before node reported completion",
 						store.FailureRunnerLeaseExpired); nerr != nil {
@@ -634,15 +550,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 					"had_run", err == nil,
 				)
 			}
-			// Stale-pending sweep: catches runs whose trigger was
-			// finished without the run row ever flipping past
-			// 'pending'. The bug this guards against is a runner
-			// that calls FinishTrigger but not FinishRun on a
-			// pre-orchestrator failure (fetch/compile/exec). The
-			// grace window has to outlast the normal claim ->
-			// FinishRun gap a healthy runner takes; 5 * trigger
-			// lease is comfortably beyond it without leaving
-			// genuinely-stuck runs visible for too long.
 			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
 				5*store.DefaultLeaseDuration,
 				"reaped: trigger consumer finished without dispatching the pipeline"); err != nil {
@@ -653,12 +560,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				}
 			}
 
-			// Stale-running sweep: catches fully-orphaned dispatching
-			// orchestrators (closed laptop, network gone, process
-			// killed) whose runs aren't actively claiming a node, so
-			// the node-claim reaper has nothing to expire. The
-			// orchestrator pings every 30s; 3 minutes of silence is
-			// unambiguous orphan territory.
 			if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
 				3*time.Minute,
 				"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
@@ -669,13 +570,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				}
 			}
 
-			// Approval-timeout sweep: enforces the per-approval
-			// timeout_ms when the dispatching orchestrator's own
-			// timeout loop isn't running it (orchestrator process
-			// crashed / lost connection between request and
-			// resolve). Writes resolution='timed_out' so a
-			// re-attached orchestrator maps it back to the
-			// author-configured on_timeout policy.
 			if pairs, err := store.Maintenance.ReapTimedOutApprovals(s.store, ctx); err != nil {
 				s.logger.Error("approval timeout sweep failed", "err", err)
 			} else {
@@ -685,9 +579,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				}
 			}
 
-			// Sample queue-depth + active-runner gauges on the
-			// reaper's cadence. A stale gauge is preferable to a
-			// crashed reaper.
 			if n, err := s.store.CountPendingNodes(ctx); err != nil {
 				s.logger.Error("pending nodes sample failed", "err", err)
 			} else {

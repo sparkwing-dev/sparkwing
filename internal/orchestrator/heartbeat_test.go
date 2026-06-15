@@ -145,7 +145,6 @@ func TestRunHeartbeat_OperatorCancel(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for the cancel flag to be observed.
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if cancelled.Load() {

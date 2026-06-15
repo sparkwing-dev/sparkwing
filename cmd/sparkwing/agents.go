@@ -84,7 +84,6 @@ func runAgentsList(args []string) error {
 		return fmt.Errorf("agents list: %w", err)
 	}
 
-	// Stable order by name so repeated invocations diff cleanly.
 	sort.Slice(agents, func(i, j int) bool {
 		if agents[i].Type != agents[j].Type {
 			return agents[i].Type < agents[j].Type

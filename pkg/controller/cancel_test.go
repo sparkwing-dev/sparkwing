@@ -30,7 +30,6 @@ func TestCancel_HeartbeatReportsFlag(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Seed + claim so heartbeats are legal.
 	_ = st.CreateTrigger(ctx, store.Trigger{
 		ID: "run-cancel-1", Pipeline: "demo", CreatedAt: time.Now(),
 	})
@@ -38,7 +37,6 @@ func TestCancel_HeartbeatReportsFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// First heartbeat: no cancel yet.
 	status, err := c.HeartbeatTrigger(ctx, "run-cancel-1")
 	if err != nil {
 		t.Fatalf("hb pre-cancel: %v", err)
@@ -47,12 +45,10 @@ func TestCancel_HeartbeatReportsFlag(t *testing.T) {
 		t.Error("cancel reported before request")
 	}
 
-	// Request cancellation.
 	if err := c.CancelRun(ctx, "run-cancel-1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 
-	// Next heartbeat sees the flag.
 	status, err = c.HeartbeatTrigger(ctx, "run-cancel-1")
 	if err != nil {
 		t.Fatalf("hb post-cancel: %v", err)
@@ -87,7 +83,6 @@ func TestCancel_Idempotent(t *testing.T) {
 			t.Fatalf("CancelRun %d: %v", i, err)
 		}
 	}
-	// No panic, no error.
 }
 
 // TestCancel_MissingRun returns 404 so the CLI can surface a clear

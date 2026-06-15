@@ -197,15 +197,6 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (
 	return g
 }
 
-// Group chainable modifiers delegate to every current member,
-// returning the same *JobGroup so calls can chain. For dynamic groups
-// (JobFanOutDynamic), only members materialized at call time are
-// affected; modifiers applied to runtime-fan-out groups should
-// typically be set on the generator's per-element Job instead.
-//
-// OnFailure is intentionally NOT mirrored on *JobGroup: recovery
-// handlers are per-node by intent.
-
 // Needs declares an upstream dependency on every member of the group.
 // Accepts any [Dep], same as [JobNode.Needs].
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup {

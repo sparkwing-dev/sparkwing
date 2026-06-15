@@ -65,7 +65,6 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		t.Errorf("retry_of=%v want %s", body["retry_of"], src.ID)
 	}
 
-	// Confirm the trigger row landed with matching args / git.
 	trig, err := st.GetTrigger(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
@@ -135,7 +134,6 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 		t.Fatal("empty id in response")
 	}
 
-	// Pre-allocated Run row visible immediately.
 	run, err := st.GetRun(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetRun(%s): %v", newID, err)

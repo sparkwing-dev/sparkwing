@@ -93,10 +93,6 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait", payload)
 
-		// queueTimeout is zero in chunk 1 (the new API drops the knob),
-		// so a queued plan waits indefinitely and CancelOthers eviction
-		// relies on the store's default rather than an orchestrator-side
-		// force-release back-stop.
 		promoted, err := waitForPlanSlot(ctx, backends, key, runID, holderID, 0)
 		if err != nil {
 			return nil, "", err
@@ -107,7 +103,6 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 		return makePlanSlotRelease(backends, key, holderID), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
-		// A plan never memoizes, so these are unreachable at plan scope.
 		return nil, "", fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
 	}
 
@@ -155,7 +150,6 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 		case store.WaiterCancelled:
 			return false, nil
 		case store.WaiterCached, store.WaiterLeaderFinished:
-			// Node-level only; unexpected at plan scope.
 			return false, fmt.Errorf("plan waiter got unexpected status %q", res.Status)
 		}
 	}

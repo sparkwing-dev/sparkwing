@@ -90,9 +90,6 @@ func ExampleWorkStep_Risk() {
 		_, err := sw.Bash(ctx, "rm -rf /var/cache/sparkwing/old").Run()
 		return err
 	})
-	// The Risk() modifier lives on the inner WorkStep; for a single-
-	// step Job built from a bare func, declare a typed Job (see
-	// ExampleRefTo's deploy) so you have a WorkStep to mark.
 	_ = plan
 }
 

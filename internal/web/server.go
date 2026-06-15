@@ -151,12 +151,8 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 
 // HandlerFromOptions returns the full dashboard HTTP handler.
 func HandlerFromOptions(opts HandlerOptions) http.Handler {
-	// Inner mux is authenticated; outer router exposes login/logout
-	// + /api/health unauthenticated to avoid a login catch-22.
 	authedMux := http.NewServeMux()
 
-	// Method+path-param routes register before the catch-all proxy so
-	// Go 1.22's ServeMux picks these over /api/v1/.
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs", runLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/search", runLogsSearchHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/grep", runsGrepHandler(opts.Backend))
@@ -164,8 +160,6 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
 
-	// Aggregate health probe lives on the dashboard because only the
-	// dashboard knows every sibling service URL in a deployment.
 	services := append(defaultServices(opts, opts.LogsURL), opts.ExtraServices...)
 	authedMux.HandleFunc("/api/v1/health/services", healthServicesHandler(services, opts.Token))
 
@@ -178,10 +172,6 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token))
 	} else {
-		// Controller-less dashboard (S3-only, Postgres-direct, or local
-		// SQLite). Serve the read-only runs surface from opts.Backend;
-		// fall through to 501 for anything else (writes, retries,
-		// trigger CRUD -- those require a controller).
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
 		authedMux.HandleFunc("/api/v1/", notImplementedHandler)
@@ -189,10 +179,6 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
-		// VerifyBundleEmbedded ran at process start and would have
-		// reported any missing-bundle condition there; reaching here
-		// means the embed.FS itself is corrupted, which is a build
-		// invariant, not a runtime condition.
 		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
 	}
 	authedMux.Handle("/", spaHandler(subFS, opts))
@@ -200,8 +186,6 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)
 	router.HandleFunc("GET /login", loginPageHandler(opts))
-	// Shared bucket across /login + /login/bootstrap so an attacker
-	// probing both endpoints can't spend its budget twice.
 	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
 		rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts)))
@@ -231,9 +215,7 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 			return
 		}
 
-		// Stat <route>.html before the directory check: Next 16's export
-		// creates a same-named directory of Turbopack internals that
-		// http.FileServer would 301-redirect into a dead end.
+		// hack: stat <route>.html before the directory check; Next 16 emits a same-named Turbopack dir that http.FileServer 301s into a dead end.
 		if _, err := fs.Stat(bundleFS, p+".html"); err == nil {
 			serveTemplatedHTML(w, r, bundleFS, p+".html", opts)
 			return
@@ -265,9 +247,6 @@ func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, 
 		http.NotFound(w, nil)
 		return
 	}
-	// Escape values so quotes/backslashes in a token don't break the
-	// <script> literal. Markers are inside JSON strings in layout.tsx;
-	// only the inside is replaced.
 	body := bytes.ReplaceAll(raw,
 		[]byte("__SPARKWING_TOKEN_MARKER__"),
 		[]byte(jsStringEscape(opts.Token)))
@@ -296,7 +275,7 @@ func jsStringEscape(s string) string {
 			b.WriteString(`\n`)
 		case '\r':
 			b.WriteString(`\r`)
-		case '<': // avoid breaking out of <script>
+		case '<': // safety: prevents injection that breaks out of the surrounding <script> tag
 			b.WriteString(`<`)
 		default:
 			b.WriteRune(r)
@@ -343,8 +322,6 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	if body == nil {
-		// Source doesn't support streaming (disk in local mode); 501
-		// lets the dashboard fall back to polling.
 		w.WriteHeader(http.StatusNotImplemented)
 		return
 	}
@@ -391,8 +368,6 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Verify up-front so a typo returns 404 instead of an open stream
-	// that never produces anything.
 	run, err := b.GetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -408,22 +383,16 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	// Disable nginx proxy buffering so events land within one poll tick.
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	// Open-comment keeps the connection alive while we wait on the
-	// first poll; EventSource tolerates leading comment lines.
 	_, _ = w.Write([]byte(": open\n\n"))
 	flusher.Flush()
 
 	ctx := r.Context()
 	const (
-		pollInterval = 250 * time.Millisecond
-		pageSize     = 500
-		// Re-read the run row every N event ticks so a long stream
-		// doesn't hammer the store for a single column we only need
-		// for termination detection.
+		pollInterval    = 250 * time.Millisecond
+		pageSize        = 500
 		runStatusEveryN = 8
 		heartbeatEvery  = 20 * time.Second
 	)
@@ -437,8 +406,6 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	for {
 		events, err := b.ListEventsAfter(ctx, runID, afterSeq, pageSize)
 		if err != nil {
-			// Closing is the cleanest signal in an already-open SSE
-			// stream; the client's onerror triggers fallback polling.
 			return
 		}
 		for _, ev := range events {
@@ -452,16 +419,12 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 			lastHB = time.Now()
 		}
 
-		// On terminal-and-drained, send an end-of-stream hint so the
-		// client closes cleanly without waiting for onerror.
 		if terminal && len(events) == 0 {
 			_, _ = w.Write([]byte("event: stream_end\ndata: {}\n\n"))
 			flusher.Flush()
 			return
 		}
 
-		// Some proxies (dev-mode Next.js included) reap idle SSE
-		// streams after ~30s without a keepalive.
 		if time.Since(lastHB) >= heartbeatEvery {
 			if _, werr := w.Write([]byte(": keepalive\n\n")); werr != nil {
 				return
@@ -679,10 +642,7 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		// Read + grep each node's log concurrently. ReadNodeLog is a
-		// per-node HTTP hop in cluster-mode (ClientBackend), so the
-		// difference between serial and parallel here is N round-trips
-		// vs. one round-trip wall-clock per search.
+		// perf: fan out per-node reads; each ReadNodeLog is a separate HTTP hop in cluster mode.
 		type nodeResult struct {
 			matches []match
 			count   int
@@ -814,9 +774,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		if len(branches) > 0 || len(shaPrefixes) > 0 {
 			runs = filterRunsByBranchSHA(runs, branches, shaPrefixes)
 		}
-		// Build (run, node) work units up front so the worker pool can
-		// drain them with a single fanout cap rather than nested
-		// per-run goroutines.
 		type work struct {
 			run    *store.Run
 			nodeID string
@@ -892,9 +849,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		for _, run := range runs {
 			runIndex[run.ID] = run
 		}
-		// Return the full Run object for each matched run so the
-		// dashboard can render the same row layout the Activity view
-		// uses (status dot, branch/sha pills, error preview, etc.).
 		runsMeta := make(map[string]*store.Run, len(hitRuns))
 		for id := range hitRuns {
 			if run := runIndex[id]; run != nil {

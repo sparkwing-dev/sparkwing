@@ -23,9 +23,5 @@ func rehydratePipelineSecrets(ctx context.Context, _ []byte, reg *sparkwing.Regi
 	if reg == nil {
 		return nil, nil
 	}
-	// Pod has the pipeline registered (same binary on both sides),
-	// so secret declarations come straight from the Go provider on
-	// reg. The snapshot is no longer consulted -- kept in the
-	// signature so existing callers don't churn.
 	return sparkwingruntime.ResolvePipelineSecrets(ctx, reg, nil)
 }

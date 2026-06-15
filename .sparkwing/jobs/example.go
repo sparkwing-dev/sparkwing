@@ -68,9 +68,6 @@ type BuildOut struct {
 }
 
 func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	// Single-closure Job with BeforeRun + AfterRun hooks. Inline so
-	// the dispatcher runs it in-process -- typical of lightweight
-	// setup/config work that doesn't need a runner boot.
 	configure := sparkwing.Job(plan, "configure", configureFn).
 		Inline().
 		BeforeRun(func(ctx context.Context) error {
@@ -81,21 +78,12 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			sparkwing.Info(ctx, "AfterRun: cleanup (err=%v)", err)
 		})
 
-	// JobFanOut: three parallel Plan-layer Nodes returned as one
-	// NodeGroup. The group is a single Needs() target downstream and
-	// renders as a collapsible cluster.
 	checks := sparkwing.JobFanOut(plan, "checks",
 		[]string{"audit-secrets", "validate-config", "scan-deps"},
 		func(name string) (string, any) {
 			return name, checkFn(name)
 		}).Needs(configure)
 
-	// Off-shoot branches that depend on configure but never rejoin
-	// the build/deploy/notify lane -- useful for testing taller DAG
-	// layouts. Six nodes hang directly off configure; three of those
-	// chain further to exercise deep columns.
-	// Lightweight offshoot leaves run Inline -- they're sub-second
-	// closures that don't justify spinning up a runner.
 	sparkwing.Job(plan, "audit-permissions", offshootFn("audit-permissions", 3)).Needs(configure).Inline()
 	sparkwing.Job(plan, "audit-licenses", offshootFn("audit-licenses", 3)).Needs(configure).Inline()
 	sparkwing.Job(plan, "docs-snapshot", offshootFn("docs-snapshot", 2)).Needs(configure).Inline()
@@ -110,69 +98,36 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
 	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
-	// Cross-pipeline dependency: spawn the `weather-report` pipeline
-	// from inside a step body and consume its typed output. Demos
-	// sparkwing.RunAndAwait -- the imperative path for using another
-	// pipeline as a dependency without importing its Go package.
 	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline()
 
-	// Error-canary: single Plan-layer node with a Work containing four
-	// parallel "shard" steps. Each shard emits ~60 chatty lines (with
-	// graduated WARN/ERROR-level entries near the end) then returns
-	// a distinct failure. Each step is .ContinueOnError() so a fail
-	// doesn't cancel its siblings -- all four run to completion
-	// independently. Node-level .Optional() keeps the run reporting
-	// success while the per-step failures stay visible. No downstream
-	// needs the node; the point is to test stepping through multiple
-	// errored, chatty steps.
 	sparkwing.Job(plan, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
 
-	// Multi-step Job with typed output (Produces[BuildOut]). The
-	// returned Node is the source for buildRef below; Retry is set
-	// so a flake retries once.
 	build := sparkwing.Job(plan, "build", &ExampleBuild{}).
 		Needs(checks).
 		Retry(1, sparkwing.RetryBackoff(200*time.Millisecond))
 	buildRef := sparkwing.RefTo[BuildOut](build)
 
-	// JobFanOut whose member closures consume the typed buildRef. The
-	// group's .Needs(build) doubles as the data-availability gate.
 	publishImages := sparkwing.JobFanOut(plan, "publish-images",
 		[]string{"linux-amd64", "linux-arm64", "darwin-arm64"},
 		func(target string) (string, any) {
 			return "publish-" + target, publishFn(target, buildRef)
 		}).Needs(build)
 
-	// Approval gate between publish and deploy. Real pipelines block
-	// here for a human; the demo uses a 20s Timeout with OnExpiry=
-	// ApprovalApprove so the gate auto-approves and the run flows
-	// through. Swap to ApprovalFail/Deny to see the blocked paths.
 	approveDeploy := sparkwing.JobApproval(plan, "approve-deploy", sparkwing.ApprovalConfig{
 		Message:  "Promote example:sha-abc1234 to prod?",
 		Timeout:  20 * time.Second,
 		OnExpiry: sparkwing.ApprovalApprove,
 	}).Needs(publishImages)
 
-	// deploy times out after 10s and registers a sibling rollback
-	// node that only runs if deploy fails (OnFailure). The rollback
-	// is wired but won't fire in the success path.
 	deploy := sparkwing.Job(plan, "deploy", &ExampleDeploy{Build: buildRef}).
 		Needs(approveDeploy).
 		Timeout(10*time.Second).
 		OnFailure("deploy-rollback", rollbackFn)
 
-	// GroupJobs: the Plan-layer analog of GroupSteps. Takes
-	// already-constructed sibling Nodes and folds them into a single
-	// NodeGroup for collapsible dashboard rendering + one .Needs()
-	// target downstream. Distinct from JobFanOut, which synthesizes
-	// the members from a slice. Here we hand-write two heterogeneous
-	// post-deploy verifications and cluster them.
 	smokeTest := sparkwing.Job(plan, "smoke-test", smokeTestFn).Needs(deploy)
 	metricsCheck := sparkwing.Job(plan, "metrics-check", metricsCheckFn).Needs(deploy)
 	verify := sparkwing.GroupJobs(plan, "post-deploy-verify", smokeTest, metricsCheck)
 
-	// Plan-layer SkipIf: notify is skipped when NO_NOTIFY=1. Inline
-	// because the body is a single Slack webhook post.
 	sparkwing.Job(plan, "notify", notifyFn).
 		Needs(verify).
 		Inline().
@@ -185,8 +140,6 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 
 	return nil
 }
-
-// --- Plan-layer node bodies (single closures) ---
 
 func configureFn(ctx context.Context) error {
 	if err := chatter(ctx, 800, []string{
@@ -284,8 +237,6 @@ func (j *ExampleErrorCanary) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 // failure so the run records the structured outcome too.
 func canaryShard(label string, items, durMS int, fail string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		// Tick budget: spread `durMS` evenly across items so the
-		// pacing matches the previous chatter() behavior.
 		tick := time.Duration(durMS) * time.Millisecond / time.Duration(items)
 		warnStart := items - 14
 		errorStart := items - 4
@@ -396,8 +347,6 @@ Within SLO.`)
 	return nil
 }
 
-// --- ExampleBuild: multi-step Work + typed output ---
-
 type ExampleBuild struct {
 	sparkwing.Base
 	sparkwing.Produces[BuildOut]
@@ -417,8 +366,6 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		"git status: clean",
 	}).Needs(fetchRefs)
 
-	// GroupSteps: parallel CI gates folded into one collapsible
-	// StepGroup. Downstream .Needs(ci) waits for every member.
 	ci := sparkwing.GroupSteps(
 		w, "ci",
 		chattyStep(w, "lint", 1500, "gofmt: 0 files reformatted", []string{
@@ -436,7 +383,6 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"go vet ./cmd/...",
 			"vet: 12 packages, 0 findings",
 		}).Needs(fetchCheckout),
-		// Very chatty: 15 lines over 4.5s -- what a "real" test runner feels like.
 		chattyStep(w, "test", 4500, "33 tests passed across 3 packages", []string{
 			"discovering test packages: 3 found",
 			"compiling test binaries",
@@ -456,9 +402,6 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		}).Needs(fetchCheckout),
 	)
 
-	// Typed step: returns (BuildOut, error). StepGet[BuildOut] reads
-	// it from downstream steps in the same Work. Compile is the
-	// other "really chatty" step: ~3.5s with one line per phase.
 	compile := sparkwing.Step(w, "compile", func(ctx context.Context) (BuildOut, error) {
 		lines := []string{
 			"loading go.mod",
@@ -493,8 +436,6 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return nil
 	}).Needs(compile)
 
-	// Result step: its typed return value becomes the Job's Output,
-	// which downstream Nodes read via Ref[BuildOut].
 	return sparkwing.Step(w, "package", func(ctx context.Context) (BuildOut, error) {
 		out := sparkwing.StepGet[BuildOut](ctx, compile)
 		if err := chatter(ctx, 900, []string{
@@ -525,8 +466,6 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}).Needs(strip), nil
 }
 
-// --- ExampleDeploy: multi-step Work with Work-layer SkipIf ---
-
 type ExampleDeploy struct {
 	sparkwing.Base
 	Build sparkwing.Ref[BuildOut]
@@ -543,7 +482,6 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"validating with kubeconform",
 		})
 	})
-	// Apply is chatty: one line per resource (~10 lines over 3s).
 	apply := sparkwing.Step(w, "apply", func(ctx context.Context) error {
 		lines := []string{
 			"kubectl apply --server-side -f -",
@@ -563,8 +501,6 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return nil
 	}).Needs(render)
 
-	// Rollout is the most chatty step: ~14 status pings over 5s
-	// simulating a kubectl rollout watch. Skipped under DRY_RUN=1.
 	return sparkwing.Step(w, "rollout", func(ctx context.Context) error {
 		out := j.Build.Get(ctx)
 		lines := []string{

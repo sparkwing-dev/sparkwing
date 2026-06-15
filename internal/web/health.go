@@ -96,8 +96,6 @@ func probeService(ctx context.Context, svc HealthService, token string) serviceS
 		status.Status = "degraded"
 		status.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	}
-	// Slow-but-ok responses degrade so latency issues surface before
-	// they become failures.
 	if status.Status == "ok" && status.LatencyMs > 1500 {
 		status.Status = "degraded"
 		status.Problems = append(status.Problems,

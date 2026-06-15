@@ -67,8 +67,7 @@ func CurrentSHA(ctx context.Context, repoDir string) (string, error) {
 func CurrentBranch(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGit(ctx, repoDir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
-		// symbolic-ref --quiet exits 1 on detached HEAD with no
-		// output; rev-parse confirms we're still in a git repo.
+		// hack: symbolic-ref --quiet exits 1 on detached HEAD with no output; rev-parse confirms we're in a repo.
 		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
 			return "", sErr
 		}
@@ -104,7 +103,7 @@ func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
 func RemoteOriginURL(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGit(ctx, repoDir, "remote", "get-url", "origin")
 	if err != nil {
-		// Distinguish "no origin" from "not a repo".
+		// safety: rev-parse distinguishes "no origin" from "not a git repo" — both cause runGit to fail.
 		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
 			return "", sErr
 		}
@@ -372,8 +371,7 @@ func PushTag(ctx context.Context, repoDir, tag, message string) error {
 // runGit runs `git <args...>` in repoDir and returns stdout. Errors
 // include stderr. Empty repoDir runs in process CWD.
 func runGit(ctx context.Context, repoDir string, args ...string) (string, error) {
-	// All public ctx-taking git helpers funnel through this point,
-	// so a single guard here covers them all.
+	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
 	planguard.Guard(ctx, "git "+firstWord(args))
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if repoDir != "" {

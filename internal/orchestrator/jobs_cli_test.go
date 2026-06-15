@@ -92,13 +92,12 @@ func TestListJobs_FilterByStatus(t *testing.T) {
 func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 	p := newPaths(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
-	// Sleep so the subsequent Since filter cleanly excludes the prior run.
 	time.Sleep(50 * time.Millisecond)
 
 	var buf bytes.Buffer
 	err := orchestrator.ListJobs(context.Background(), p, orchestrator.ListOpts{
 		Limit: 10,
-		Since: 10 * time.Millisecond, // only very recent runs
+		Since: 10 * time.Millisecond,
 	}, &buf)
 	if err != nil {
 		t.Fatalf("ListJobs: %v", err)
@@ -164,12 +163,7 @@ func TestJobStatus_ShowsError(t *testing.T) {
 	if !strings.Contains(out, "cancelled") {
 		t.Fatalf("status should show cancelled downstream, got:\n%s", out)
 	}
-	// Downstream-cancelled noise should be suppressed from the error
-	// trailer (root cause is already printed).
 	if strings.Count(out, "upstream-failed") > 0 {
-		// It may appear once in the table but not in the error trailer.
-		// Quick check: count should be at most 1 (table outcome cell).
-		// Verify no trailing "c error:" section appears.
 		if strings.Contains(out, "c error:") {
 			t.Fatalf("upstream-failed should not appear as error trailer: %s", out)
 		}
@@ -236,12 +230,6 @@ func TestJobLogs_UnknownNode(t *testing.T) {
 }
 
 func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
-	// Whole-run logs on a pipeline with a cancelled-downstream node
-	// should summarize the cancelled node, not dump an empty log file
-	// banner. The default reads the envelope stream
-	// (which includes the run_summary event listing the cancelled
-	// node); the legacy per-node "did not execute" banner only
-	// surfaces under --no-events.
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-middle-fails"})
 	if err != nil {
@@ -256,14 +244,10 @@ func TestJobLogs_CancelledNodeIsQuiet(t *testing.T) {
 	if strings.Contains(out, "(no log file yet)") {
 		t.Fatalf("cancelled node should be summarized, not show 'no log file': %s", out)
 	}
-	// Default mode now sources the envelope stream: the cancelled
-	// node appears in the run_summary event listing.
 	if !strings.Contains(out, "cancelled") {
 		t.Fatalf("cancelled node should be summarized via envelope stream: %s", out)
 	}
 
-	// Legacy --no-events mode keeps the original "did not execute"
-	// per-node banner shape.
 	var legacy bytes.Buffer
 	if err := orchestrator.JobLogs(context.Background(), p, res.RunID,
 		orchestrator.LogsOpts{NoEvents: true}, &legacy); err != nil {
@@ -288,8 +272,6 @@ func TestJobErrors(t *testing.T) {
 	if !strings.Contains(out, "mid fail") {
 		t.Fatalf("errors missing root-cause: %s", out)
 	}
-	// Cancelled downstream should NOT be listed -- it did not actually
-	// run, so reporting its error adds noise.
 	if strings.Contains(out, "c:\n") {
 		t.Fatalf("errors should skip cancelled-downstream nodes: %s", out)
 	}

@@ -53,9 +53,6 @@ func runDebugReplay(args []string) error {
 		}
 	}
 
-	// Don't defer close: we exec the pipeline binary below, which opens
-	// the store itself. Closing here releases the file lock cleanly
-	// before exec replaces the process.
 	newRunID, err := orchestrator.MintReplayRun(ctx, st, t.run, t.node)
 	_ = st.Close()
 	if err != nil {

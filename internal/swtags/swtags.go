@@ -67,7 +67,6 @@ func Parse(t reflect.Type) ([]FieldSpec, error) {
 			case "optional":
 				spec.Optional = true
 			case "":
-				// trailing comma, ignore
 			default:
 				return nil, fmt.Errorf("field %s: unknown sw modifier %q", f.Name, mod)
 			}

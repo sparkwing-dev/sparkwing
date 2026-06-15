@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Pipeline fixtures used to exercise parseTypedFlags directly. These
-// register at package init and are referenced by name from the test
-// bodies below; sync.Map dedup avoids "already registered" panics
-// across parallel/repeat runs.
-
 type ptfDemoInputs struct {
 	Loud   bool              `flag:"loud" short:"l" desc:"verbose"`
 	Target string            `flag:"target" enum:"local,staging,prod" default:"local"`

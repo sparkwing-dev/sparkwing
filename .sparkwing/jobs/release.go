@@ -69,9 +69,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		return fmt.Errorf("release: locate repo root: %w", err)
 	}
 
-	// All git/changelog probing happens inside Jobs. The
-	// version-resolve probe is small enough to inline; the rest are
-	// regular nodes so retries work cleanly on a transient origin.
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{
 		Explicit: r.args.Version,
 		Bump:     r.args.Bump,
@@ -89,13 +86,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
-	// Substance gates: same checks a human push faces. PreCommit and
-	// PrePush are exported job types in this package, so they compose
-	// directly into the release DAG as regular nodes -- no subprocess,
-	// no controller round-trip, no gitcache. The work runs in the same
-	// process as the release orchestrator, sub-steps appear natively in
-	// the parent run's event stream. See
-	// docs/proposals/release-pipeline-gates.md for the rationale.
 	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
 	gatePreCommit.Needs(clean)
 
@@ -110,21 +100,10 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	changelog.Needs(discover, gatePreCommit, gatePrePush)
 
-	// Bump .sparkwing/go.mod's sparkwing pin to the release version
-	// and strip the dogfood self-replace before push-tag. The replace
-	// is mandatory during development (so .sparkwing/ pipelines build
-	// against local SDK edits) but pre-push refuses to ship it, and a
-	// shipped go.mod with a relative-path replace breaks anyone who
-	// clones the tag.
 	bumpSelf := sparkwing.Job(plan, "bump-self-replace", &prepareSelfReplaceJob{
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	// Serialized after changelog: both jobs stage a file and then
-	// `git commit -m ...` without path scoping. Running in parallel
-	// caused whichever committed second to find "nothing to commit"
-	// because the first commit swept up both staged files. Observed
-	// on the v0.5.0 and v0.5.1 cuts; both needed manual finishing.
 	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, changelog)
 
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
@@ -139,11 +118,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate)
 
-	// After the tag is out, restore the self-replace + commit + push
-	// so local development against the next SDK iteration works again.
-	// Leaving the post-release tree in shipped-state would force every
-	// platform-dev edit to go through `go mod download` against the
-	// proxy instead of the source tree next door.
 	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{
 		RepoDir: repoDir,
 	})
@@ -520,34 +494,19 @@ func (j *restoreSelfReplaceJob) dryRun(ctx context.Context) error {
 //     (body, false, nil) -- already in shipped shape.
 //   - Otherwise: bump require, strip the comment + replace trailer.
 func stripSelfReplace(body, version string) (string, bool, error) {
-	// Match both the block-internal form (`\tmodule-path vX.Y.Z`
-	// inside a `require ( ... )` block) and the standalone form
-	// (`require module-path vX.Y.Z` on its own line). The optional
-	// `require\s+` prefix lets one regex cover both.
 	requireRe := regexp.MustCompile(`(?m)^([\t ]*(?:require[\t ]+)?)` + regexp.QuoteMeta(sparkwingModulePath) + `[\t ]+v[0-9][0-9A-Za-z.+-]*[\t ]*$`)
 	if !requireRe.MatchString(body) {
 		return "", false, fmt.Errorf(".sparkwing/go.mod: no `%s vX.Y.Z` require line found", sparkwingModulePath)
 	}
 	newBody := requireRe.ReplaceAllString(body, "${1}"+sparkwingModulePath+" "+version)
 
-	// Detect and strip the trailing comment + replace block. The
-	// canonical form is two consecutive blank lines off the end of the
-	// require closure, the multi-line comment, the replace line, and
-	// an optional trailing newline. We anchor on the replace line and
-	// walk backwards through any contiguous `^//` comment lines.
 	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
 	loc := replaceRe.FindStringIndex(newBody)
 	if loc == nil {
-		// No replace to strip. Already-shipped shape if the require
-		// pin matched the requested version; otherwise we still made
-		// a require-line change.
 		return newBody, newBody != body, nil
 	}
-	// Walk backwards from loc[0] to swallow the contiguous `^//`
-	// comment block and a single blank line above it.
 	start := loc[0]
 	for start > 0 {
-		// Find the start of the previous line.
 		prevEnd := start - 1
 		if prevEnd >= 0 && newBody[prevEnd] != '\n' {
 			break
@@ -562,7 +521,6 @@ func stripSelfReplace(body, version string) (string, bool, error) {
 		}
 		start = prevStart + 1
 	}
-	// Swallow one blank line above the comment block, if present.
 	if start >= 2 && newBody[start-1] == '\n' && newBody[start-2] == '\n' {
 		start--
 	}
@@ -670,11 +628,8 @@ func versionEntries(body, version string) (int, error) {
 		line := strings.TrimRight(raw, "\r")
 		if strings.HasPrefix(line, "## ") {
 			rest := strings.TrimPrefix(line, "## ")
-			// Tolerate `## [v1.2.3]` and `## [v1.2.3] - 2026-05-20`
-			// and bare `## v1.2.3` forms.
 			rest = strings.TrimSpace(rest)
 			rest = strings.TrimSuffix(strings.TrimPrefix(rest, "["), "]")
-			// Strip any trailing ` - date` after the version label.
 			if i := strings.Index(rest, "] - "); i >= 0 {
 				rest = rest[:i]
 			}
@@ -770,10 +725,6 @@ func (j *pushTagJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: refusing to push from branch %q -- release pipeline expects to run on main "+
 			"so the changelog-rewrite commit and the tag land on the default branch", branch)
 	}
-	// Push the branch first so origin has the CHANGELOG-rewrite commit
-	// the tag points at. Then the tag. Go modules and the GH-Actions
-	// release workflow both assume the tagged commit is reachable from
-	// a branch ref on origin.
 	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
 		return fmt.Errorf("release: push branch: %w", err)
 	}
@@ -809,9 +760,6 @@ func currentBranch(ctx context.Context, repoDir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// --- helpers (kept local; cross-module helper imports don't work
-// for the .sparkwing/ tree since it's a separate Go module). ---
-
 func validateReleaseVersion(v string) error {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -830,12 +778,7 @@ func validateReleaseVersion(v string) error {
 	if len(parts) != 3 {
 		return fmt.Errorf("release: version %q must be vX.Y.Z", v)
 	}
-	// Pre-1.0 lock. Every breaking change is permitted in minor
-	// bumps while we're on v0.x (see VERSIONING.md). Stepping to
-	// v1.0.0+ commits the public API surface and switches the
-	// deprecation contract -- that decision must be a deliberate
-	// code change, not a typo or `--bump major` accident. To unlock:
-	// remove this branch.
+	// safety: module is locked to v0.x; remove this check to allow v1+ tags.
 	if semver.Major(v) != "v0" {
 		return fmt.Errorf("release: version %q is v1.0.0+ but sparkwing is locked to v0.x. "+
 			"Bumping to v1+ commits the public API surface (see VERSIONING.md); "+
@@ -878,10 +821,6 @@ func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 	}
 	var best string
 	for _, line := range strings.Split(out, "\n") {
-		// Each line: "<sha>\trefs/tags/<tag>" or
-		// "<sha>\trefs/tags/<tag>^{}" for the dereferenced peel of an
-		// annotated tag. The peeled entry duplicates the name; either
-		// form works for our compare so we just strip both suffixes.
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue

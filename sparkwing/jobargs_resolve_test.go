@@ -40,7 +40,6 @@ func TestResolveAndBindJobArgs_BindsToWithArgsHolder(t *testing.T) {
 		t.Fatalf("resolveAndBindJobArgs: %v", err)
 	}
 
-	// The bound args should be readable via j.Args(ctx).
 	a := j.Args(context.Background())
 	if a.Replicas != 5 {
 		t.Errorf("Replicas: got %d, want 5", a.Replicas)
@@ -49,7 +48,6 @@ func TestResolveAndBindJobArgs_BindsToWithArgsHolder(t *testing.T) {
 		t.Errorf("Image (default): got %q, want nginx:latest", a.Image)
 	}
 
-	// Merged map should carry both fields keyed by flag name.
 	if v, ok := merged["replicas"].(int); !ok || v != 5 {
 		t.Errorf("merged[replicas]: got %v (ok=%v)", merged["replicas"], ok)
 	}
@@ -62,7 +60,6 @@ func TestResolveAndBindJobArgs_RequiredErrorSurfacesWithJobID(t *testing.T) {
 	p := NewPlan()
 	Job(p, "deploy", &resolveE2EJob{})
 
-	// Missing required --replicas.
 	_, err := resolveAndBindJobArgs(p, ResolveInputs{})
 	if err == nil || !strings.Contains(err.Error(), "deploy") ||
 		!strings.Contains(err.Error(), "replicas") {

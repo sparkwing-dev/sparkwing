@@ -129,8 +129,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}()
 
 	if opts.InputDir != "" {
-		// Trailing /. copies directory contents into WorkDir;
-		// matches `cp -r src/. dst/` semantics.
+		// hack: trailing /. copies directory contents (not the dir itself); matches `cp -r src/. dst/`.
 		if _, err := runDocker(ctx, nil, "cp", opts.InputDir+"/.", name+":"+opts.WorkDir); err != nil {
 			return fmt.Errorf("docker cp inputs into %s: %w", name, err)
 		}

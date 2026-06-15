@@ -89,7 +89,7 @@ func (p *Pool) Reconcile(ctx context.Context, heartbeatTimeout, startupGrace tim
 			}
 		}
 		if lastContact.IsZero() {
-			// No heartbeat yet -- use checked-out-at with startupGrace.
+			// safety: no heartbeat yet; use checked-out-at with startupGrace to avoid premature reclaim
 			if s := pvc.Annotations[AnnCheckedOutAt]; s != "" {
 				if t, err := time.Parse(time.RFC3339, s); err == nil {
 					lastContact = t
@@ -171,7 +171,7 @@ func (p *Pool) create(ctx context.Context, index int) error {
 				"sparkwing.dev/managed": "pool-manager",
 			},
 			Annotations: map[string]string{
-				AnnPoolState:  StateDirty, // new PVCs need warming
+				AnnPoolState:  StateDirty,
 				AnnPoolMember: fmt.Sprintf("%d", index),
 			},
 		},
@@ -203,13 +203,10 @@ func (p *Pool) Checkout(ctx context.Context, jobID string) (string, error) {
 		if pvc.Annotations[AnnPoolState] != StateClean {
 			continue
 		}
-		// Optimistic concurrency via resourceVersion prevents
-		// double-checkout under contention.
+		// safety: optimistic resourceVersion prevents double-checkout under concurrent claims
 		pvc.Annotations[AnnPoolState] = StateInUse
 		pvc.Annotations[AnnCheckedOutBy] = jobID
 		pvc.Annotations[AnnCheckedOutAt] = now
-		// Initial heartbeat so the reclaim logic has something to
-		// anchor on.
 		pvc.Annotations[AnnHeartbeatAt] = now
 		_, err := p.Client.CoreV1().PersistentVolumeClaims(p.Namespace).Update(ctx, &pvc, metav1.UpdateOptions{})
 		if err != nil {
@@ -221,7 +218,7 @@ func (p *Pool) Checkout(ctx context.Context, jobID string) (string, error) {
 		log.Printf("pool: checked out PVC %s for job %s", pvc.Name, jobID)
 		return pvc.Name, nil
 	}
-	return "", nil // pool exhausted
+	return "", nil
 }
 
 // Return marks a PVC as clean (ready for the next checkout) after a
@@ -270,7 +267,6 @@ func (p *Pool) NextToWarm(ctx context.Context, refreshInterval time.Duration) (s
 	if len(candidates) == 0 {
 		return "", nil
 	}
-	// Dirty first, then oldest warmed-at.
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].dirty != candidates[j].dirty {
 			return candidates[i].dirty

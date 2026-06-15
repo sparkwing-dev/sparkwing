@@ -1,9 +1,5 @@
 package controller
 
-// handleReleaseDebugPause must derive released_by from the
-// authenticated principal, not the request body, so the audit row
-// tracks who actually performed the release.
-
 import (
 	"bytes"
 	"context"
@@ -161,7 +157,7 @@ func TestReleaseDebugPause_AuthDisabledFallback(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	srv := New(st, nil) // no authenticator => disabled
+	srv := New(st, nil)
 	seedActivePause(t, st, "run-4", "node-d")
 
 	req := httptest.NewRequest(http.MethodPost,

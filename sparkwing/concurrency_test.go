@@ -107,8 +107,6 @@ func TestConcurrencyGroup_LimitDefaults(t *testing.T) {
 	if limit.Capacity != 3 {
 		t.Fatalf("Capacity = %d, want 3", limit.Capacity)
 	}
-	// The zero values read as Global scope and Queue policy at the
-	// coordination layer.
 	if limit.Scope != "" && limit.Scope != sparkwing.ScopeGlobal {
 		t.Fatalf("unexpected scope %q", limit.Scope)
 	}

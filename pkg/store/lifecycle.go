@@ -1,12 +1,5 @@
 package store
 
-// Lifecycle vocabulary for node, trigger, and run rows. The status
-// strings live in the database; every Go-side query that filters or
-// writes a lifecycle state routes through these definitions so a
-// transition adjusted in one claim/reap/fail path cannot be missed by
-// its siblings. The schema DDL keeps one literal copy inside a
-// partial-index definition; the lifecycle guard test pins the counts.
-
 // nodeNotDone is the canonical SQL filter for a node that has not
 // reached its terminal status. Claim, revoke, reap, and fail paths all
 // share it.

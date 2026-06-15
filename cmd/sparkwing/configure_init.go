@@ -78,9 +78,6 @@ func runConfigureInit(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(info)
 	case "plain":
-		// One next-step command per line, same convention as `sparkwing
-		// info -o plain` -- pipe to head -n1 for "what should I do
-		// next?" in shell wrappers.
 		for _, ns := range info.NextSteps {
 			fmt.Println(ns.Command)
 		}
@@ -99,9 +96,6 @@ func runConfigureInit(args []string) error {
 func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	out := ConfigureInit{}
 
-	// Resolve the config dir via profile.DefaultPath()'s parent, so
-	// any future relocation (XDG override, env var) flows through one
-	// helper. profile + repos use the same conventions.
 	profilesPath, err := profile.DefaultPath()
 	if err != nil {
 		return out, fmt.Errorf("configure init: resolve config dir: %w", err)

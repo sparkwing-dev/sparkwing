@@ -62,6 +62,71 @@ func unused() {} // bug: never called, kept for symmetry
 	}
 }
 
+func TestCheckFile_AllowsExampleOutputMarkers(t *testing.T) {
+	src := `package widget_test
+
+import "fmt"
+
+// ExampleAdder shows the call shape.
+func ExampleAdder() {
+	fmt.Println("3")
+	// Output: 3
+}
+
+// ExampleAdder_unordered shows unordered output.
+func ExampleAdder_unordered() {
+	fmt.Println("a")
+	fmt.Println("b")
+	// Unordered output:
+	// a
+	// b
+}
+
+// ExampleAdder_narration mixes a disallowed body comment with an Output marker.
+func ExampleAdder_narration() {
+	// this narration restates the code and must be rejected
+	fmt.Println("9")
+	// Output: 9
+}
+
+// notAnExample is a normal function; its Output marker is narration, not a
+// testable-example directive, so it must still be rejected.
+func notAnExample() {
+	// Output: this is not a testable example
+	fmt.Println("x")
+}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "example_widget_test.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+
+	gotLines := map[int]bool{}
+	for _, v := range got {
+		gotLines[v.line] = true
+	}
+
+	wantRejected := []int{22, 30}
+	for _, ln := range wantRejected {
+		if !gotLines[ln] {
+			t.Errorf("expected line %d to be rejected, but it was allowed", ln)
+		}
+	}
+
+	allowed := []int{8, 15, 24}
+	for _, ln := range allowed {
+		if gotLines[ln] {
+			t.Errorf("expected Output marker on line %d to be allowed, but it was rejected", ln)
+		}
+	}
+}
+
 func TestIsDirective(t *testing.T) {
 	cases := map[string]bool{
 		"//go:build linux":   true,

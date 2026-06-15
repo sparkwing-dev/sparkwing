@@ -50,8 +50,6 @@ func TestStripSelfReplace_BumpsRequireAndDropsReplace(t *testing.T) {
 }
 
 func TestStripSelfReplace_NoopWhenReplaceAbsent(t *testing.T) {
-	// After a release cut the replace is gone; running again should
-	// detect the require already pins the target version.
 	body := `module sparkwing-pipelines
 
 go 1.26.0
@@ -119,7 +117,6 @@ require github.com/sparkwing-dev/sparkwing v0.4.0
 	if !strings.Contains(out, "// The pipelines tree is consumed") {
 		t.Errorf("comment block not appended:\n%s", out)
 	}
-	// Restore is idempotent: a second call should be a noop.
 	out2, changed2 := restoreSelfReplace(out)
 	if changed2 {
 		t.Error("restoreSelfReplace not idempotent")
@@ -130,9 +127,6 @@ require github.com/sparkwing-dev/sparkwing v0.4.0
 }
 
 func TestStripRestoreRoundTrip(t *testing.T) {
-	// strip then restore should yield a body equivalent to the
-	// original, modulo whitespace at the trailer (we don't promise
-	// byte-for-byte identity, just functional equivalence).
 	stripped, changed, err := stripSelfReplace(fixtureBeforeCut, "v0.4.0")
 	if err != nil || !changed {
 		t.Fatalf("strip: changed=%v err=%v", changed, err)
@@ -141,9 +135,6 @@ func TestStripRestoreRoundTrip(t *testing.T) {
 	if !changed {
 		t.Fatal("restore: expected changed=true")
 	}
-	// The restored body should have both the bumped require and the
-	// replace block back. The require stays at v0.4.0 -- restore
-	// doesn't rewind the pin.
 	if !strings.Contains(restored, "github.com/sparkwing-dev/sparkwing v0.4.0") {
 		t.Errorf("restored body missing bumped require:\n%s", restored)
 	}

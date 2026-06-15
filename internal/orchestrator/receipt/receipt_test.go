@@ -74,9 +74,6 @@ func TestBuildReceipt_SuccessRun(t *testing.T) {
 	if r.Cost.Currency != "USD" {
 		t.Fatalf("currency = %q, want USD", r.Cost.Currency)
 	}
-	// 12 seconds × $0.05/hr = $0.000167 = 0 cents (rounded). Test the
-	// nonzero-rate case in its own test below; this just proves the
-	// rate plumbing reaches buildCost.
 	if r.Cost.ComputeCents < 0 {
 		t.Fatalf("compute_cents = %d, expected >= 0", r.Cost.ComputeCents)
 	}
@@ -108,8 +105,6 @@ func TestBuildReceipt_FailedRunWithOnFailureStep(t *testing.T) {
 	if r.Steps[1].Outcome != "success" {
 		t.Fatalf("on-failure step outcome = %q, want success", r.Steps[1].Outcome)
 	}
-	// Build emitted no output (nil); notify did. Only notify should
-	// appear in outputs_hash.
 	if _, ok := r.Identity.OutputsHash["build"]; ok {
 		t.Fatalf("build had no output; should not appear in outputs_hash")
 	}
@@ -142,8 +137,6 @@ func TestBuildReceipt_SkippedSteps(t *testing.T) {
 	if r.Steps[1].SkipReason != "skipped: pre-condition false" {
 		t.Fatalf("skip_reason = %q", r.Steps[1].SkipReason)
 	}
-	// 4s of runner time × $1/hr = $0.001111 = 0 cents (rounded).
-	// Skipped step contributes nothing.
 	if r.Cost.ComputeCents != 0 {
 		t.Fatalf("compute_cents = %d, want 0 (sub-cent rounded)", r.Cost.ComputeCents)
 	}
@@ -169,7 +162,6 @@ func TestBuildReceipt_NonZeroRateProduces_PositiveCost(t *testing.T) {
 	t.Parallel()
 	run := fixedRun()
 	start := run.StartedAt
-	// Two hours of runner time at $0.05/hr = $0.10 = 10 cents.
 	nodes := []*store.Node{
 		node("build", "success", start, 1*time.Hour, nil),
 		node("deploy", "success", start.Add(1*time.Hour), 1*time.Hour, nil, "build"),
@@ -196,7 +188,6 @@ func TestBuildReceipt_ReceiptSHAStableAcrossRecomputes(t *testing.T) {
 	if r1.ReceiptSHA != r2.ReceiptSHA {
 		t.Fatalf("receipt_sha unstable: %q vs %q", r1.ReceiptSHA, r2.ReceiptSHA)
 	}
-	// Sanity: changing the inputs flips the hash.
 	run2 := *run
 	run2.Args = map[string]string{"env": "stage"}
 	r3 := receipt.BuildReceipt(&run2, nodes, 0.05, "profile:test")

@@ -24,7 +24,6 @@ func repoTest(t *testing.T, files map[string]string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		// Suppress git's "Initialized empty Git repository in ..." chatter.
 		cmd.Stdout, cmd.Stderr = nil, nil
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -65,8 +64,6 @@ func hashIn(t *testing.T, dir string, fn func()) {
 	fn()
 }
 
-// ── RepoFiles end-to-end ─────────────────────────────────────────────────
-
 func TestRepoFiles_StableAcrossReruns(t *testing.T) {
 	dir := repoTest(t, map[string]string{
 		"src/foo.tsx":  "export const x = 1;\n",
@@ -89,8 +86,6 @@ func TestRepoFiles_BustsOnSourceEdit(t *testing.T) {
 	hashIn(t, dir, func() {
 		before := RepoFiles()(context.Background())
 
-		// Edit the working tree without staging -- tests that we hash
-		// disk content, not the git index.
 		writeAll(t, dir, map[string]string{
 			"src/foo.tsx": "export const x = 2;\n",
 		})
@@ -149,7 +144,6 @@ func TestRepoFiles_NewFileBusts(t *testing.T) {
 	hashIn(t, dir, func() {
 		before := RepoFiles()(context.Background())
 
-		// Add a new file and commit so `git ls-files` sees it.
 		writeAll(t, dir, map[string]string{"src/bar.tsx": "v1"})
 		gitIn(t, dir, "add", ".")
 		gitIn(t, dir, "commit", "--quiet", "-m", "add bar")
@@ -169,8 +163,6 @@ func TestRepoFiles_HandlesIndexTreeMismatch(t *testing.T) {
 		"b.txt": "content",
 	})
 	hashIn(t, dir, func() {
-		// Delete b.txt from the working tree without staging -- index
-		// still lists it.
 		if err := os.Remove(filepath.Join(dir, "b.txt")); err != nil {
 			t.Fatal(err)
 		}
@@ -180,8 +172,6 @@ func TestRepoFiles_HandlesIndexTreeMismatch(t *testing.T) {
 		}
 	})
 }
-
-// ── Files (glob include) end-to-end ──────────────────────────────────────
 
 func TestFiles_OnlyMatchingPathsContribute(t *testing.T) {
 	dir := repoTest(t, map[string]string{
@@ -193,7 +183,6 @@ func TestFiles_OnlyMatchingPathsContribute(t *testing.T) {
 		fn := Files("src/**", "package.json")
 		before := fn(context.Background())
 
-		// Edit something NOT in the include list -- hash should be stable.
 		writeAll(t, dir, map[string]string{"README.md": "# changed"})
 
 		after := fn(context.Background())
@@ -219,8 +208,6 @@ func TestFiles_EditWithinGlobBusts(t *testing.T) {
 	})
 }
 
-// ── WorkDir = subdir must NOT silently drop tree ─────────────────────────
-
 // When WorkDir() points at a subdirectory of the repo (e.g. .sparkwing/
 // after the env-var handoff was retired), `git ls-files` from that
 // cwd default-scopes to the subdir. The hash silently dropped every
@@ -242,7 +229,6 @@ func TestRepoFiles_HashCoversWholeTreeFromSubdirWorkDir(t *testing.T) {
 			t.Fatal("RepoFiles returned empty hash from subdir WorkDir; ls-files likely couldn't enumerate")
 		}
 
-		// Edit a file OUTSIDE the WorkDir subdirectory.
 		if err := os.WriteFile(filepath.Join(dir, "public", "install.sh"),
 			[]byte("#!/bin/sh\necho v2"), 0o644); err != nil {
 			t.Fatalf("rewrite install.sh: %v", err)
@@ -257,8 +243,6 @@ func TestRepoFiles_HashCoversWholeTreeFromSubdirWorkDir(t *testing.T) {
 		}
 	})
 }
-
-// ── Compose composes ─────────────────────────────────────────────────────
 
 func TestCompose_FoldsRepoFilesWithEnv(t *testing.T) {
 	dir := repoTest(t, map[string]string{"x.txt": "v1"})
@@ -278,7 +262,6 @@ func TestCompose_FoldsRepoFilesWithEnv(t *testing.T) {
 func TestCompose_FoldsRepoFilesWithConst(t *testing.T) {
 	dir := repoTest(t, map[string]string{"x.txt": "v1"})
 	hashIn(t, dir, func() {
-		// Bumping Const value must invalidate even when files are stable.
 		a := Compose(RepoFiles(), Const("v1"))(context.Background())
 		b := Compose(RepoFiles(), Const("v2"))(context.Background())
 		if a == b {
@@ -286,8 +269,6 @@ func TestCompose_FoldsRepoFilesWithConst(t *testing.T) {
 		}
 	})
 }
-
-// ── Tree end-to-end ──────────────────────────────────────────────────────
 
 func TestTree_StableAcrossReruns(t *testing.T) {
 	dir := repoTest(t, map[string]string{
@@ -320,11 +301,6 @@ func TestTree_BustsOnEdit(t *testing.T) {
 }
 
 func TestTree_BustsOnGitignoredFile(t *testing.T) {
-	// The whole point of Tree: it sees gitignored files that
-	// RepoFiles skips. A .gitignored file inside the watched dir
-	// must contribute to the hash, otherwise build artifacts the
-	// caller deliberately put outside git would produce stale cache
-	// hits.
 	dir := repoTest(t, map[string]string{
 		"sibling/.gitignore": "ignored.md\n",
 		"sibling/tracked.md": "real",
@@ -371,8 +347,6 @@ func TestTree_NewFileBusts(t *testing.T) {
 		}
 	})
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()

@@ -35,8 +35,6 @@ func (setupJob) run(ctx context.Context) (setupOut, error) {
 	return setupOut{SkipDeploy: skipDeployWant.Load()}, nil
 }
 
-// --- pipelines ---
-
 // skipOnDeployFlag: deploy is gated on the setup's SkipDeploy output.
 // When SkipDeploy=true, deploy should be marked Skipped.
 type skipOnDeployFlag struct{ sparkwing.Base }
@@ -92,7 +90,7 @@ func (slowPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 		case <-ctx.Done():
 			return false
 		}
-	}, sparkwing.SkipBudget(200*time.Millisecond)) // tight budget for the test
+	}, sparkwing.SkipBudget(200*time.Millisecond))
 	return nil
 }
 
@@ -136,8 +134,6 @@ func init() {
 	register("skipif-downstream", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &skippedUpstream{} })
 }
 
-// --- tests ---
-
 func TestSkipIf_SkipsWhenPredicateTrue(t *testing.T) {
 	skipDeployWant.Store(true)
 	deployRan.Store(false)
@@ -179,7 +175,7 @@ func TestSkipIf_RunsWhenPredicateFalse(t *testing.T) {
 }
 
 func TestSkipIf_MultiplePredicatesOR(t *testing.T) {
-	skipDeployWant.Store(true) // second predicate should return true
+	skipDeployWant.Store(true)
 	multiRan.Store(false)
 	p := newPaths(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-multi"})
@@ -207,8 +203,6 @@ func TestSkipIf_SlowPredicateDefaultsToRun(t *testing.T) {
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-slow"})
 	elapsed := time.Since(start)
 
-	// Predicate budget on the pipeline is 200ms (explicitly set via
-	// SkipBudget); run must finish quickly and the job must run.
 	if elapsed > 1*time.Second {
 		t.Fatalf("slow predicate should time out near 200ms, took %s", elapsed)
 	}
@@ -257,7 +251,6 @@ func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-generous"})
 	elapsed := time.Since(start)
 
-	// 50ms budget, predicate sleeps 500ms -> timeout fires, job runs.
 	if elapsed > 500*time.Millisecond {
 		t.Fatalf("override budget should fire near 50ms, took %s", elapsed)
 	}

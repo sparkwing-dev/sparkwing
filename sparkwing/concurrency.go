@@ -157,12 +157,6 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 	if c < 1 {
 		c = 1
 	}
-	// A cost above the group's capacity can never be admitted -- the
-	// open budget never reaches it even on an idle group -- so the node
-	// would queue forever. Reject at Plan time with a clear message
-	// rather than let it strand at dispatch. Capacity <= 0 means "use
-	// the backend default of 1", so compare against that effective
-	// floor.
 	if eff := g.limit.Capacity; eff > 0 && c > eff {
 		panic(fmt.Sprintf(
 			"sparkwing: Concurrency: node %q cost %d exceeds group %q capacity %d -- it could never be admitted",

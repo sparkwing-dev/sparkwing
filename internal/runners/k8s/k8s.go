@@ -146,9 +146,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	name := JobName(req.RunID, req.NodeID, 0)
 	job := r.buildJob(name, req)
 
-	// Create the Job. If it already exists (duplicate dispatch from a
-	// racing orchestrator), treat as idempotent and watch the
-	// existing one. Any other error is fatal.
+	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return runner.Result{
@@ -157,10 +155,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		}
 	}
 
-	// Ensure the Job is deleted on cancellation so downstream pods
-	// stop quickly and don't linger consuming quota. Propagate
-	// background deletion so the Job's owner-reference cleanup
-	// removes the pod too.
 	defer func() {
 		if ctx.Err() != nil {
 			policy := metav1.DeletePropagationBackground
@@ -171,22 +165,13 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		}
 	}()
 
-	// Heartbeat ticker runs for the life of the Job poll. A fresh
-	// pod can spend 5-15s in ContainerCreating + ImagePull before it
-	// even calls StartNode; without this loop the dashboard would
-	// show "no heartbeat" through that whole window even though the
-	// runner is actively waiting.
 	hbCtx, stopHB := context.WithCancel(ctx)
 	defer stopHB()
 	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
 
-	// Stamp an initial activity so the dashboard has something to
-	// show before the pod schedules. phaseTracker ensures we only
-	// write on actual transitions.
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "job created")
 	var lastPhase string
 
-	// Poll to terminal state.
 	t := time.NewTicker(r.cfg.PollInterval)
 	defer t.Stop()
 	for {
@@ -196,18 +181,12 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		case <-t.C:
 			j, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
-				// Transient API server hiccups happen; log and keep polling.
 				r.logger.Warn("job poll failed", "job", name, "err", err)
 				continue
 			}
 			if isJobDone(j) {
 				return r.readFinalResult(ctx, req, j)
 			}
-			// Surface pod-phase transitions so operators can distinguish
-			// Pending (scheduler wait) from ContainerCreating (image
-			// pull) from Running (actually executing). Querying pods is
-			// a second round-trip per tick; the runner is already polling
-			// Jobs so the added cost is modest.
 			if phase := r.observePodPhase(ctx, name); phase != "" && phase != lastPhase {
 				_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, phase)
 				lastPhase = phase
@@ -229,16 +208,13 @@ func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 	if err != nil || len(pods.Items) == 0 {
 		return ""
 	}
-	// Use the newest pod; retries create new pods with fresh CreationTimestamps.
+	// safety: use the newest pod; retries create new pods with fresh CreationTimestamps
 	p := pods.Items[0]
 	for _, cand := range pods.Items[1:] {
 		if cand.CreationTimestamp.After(p.CreationTimestamp.Time) {
 			p = cand
 		}
 	}
-	// Prefer a container-waiting reason over the bare phase: an
-	// "ImagePullBackOff" in ContainerCreating is more informative
-	// than "Pending".
 	for _, cs := range p.Status.ContainerStatuses {
 		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
 			return cs.State.Waiting.Reason
@@ -286,13 +262,7 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		}
 	}
 
-	// Map controller outcome -> runner.Result. Output is handed back
-	// as raw JSON bytes (not an unmarshaled `any`): the dispatcher
-	// cannot know the job's typed output shape, so unmarshaling here
-	// would produce map[string]interface{} and break Ref[T].Get's
-	// type assertion. The dispatcher routes []byte outputs through
-	// the JSON resolver path where Ref[T].Get unmarshals into the
-	// caller's declared type.
+	// safety: pass Output as raw []byte; unmarshaling here would erase the typed shape and break Ref[T].Get
 	oc := sparkwing.Outcome(n.Outcome)
 	res := runner.Result{Outcome: oc}
 	if n.Error != "" {
@@ -301,12 +271,7 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 	if len(n.Output) > 0 {
 		res.Output = n.Output
 	}
-	// Defensive: if the node is still "running" according to the
-	// controller but the Job has finished, the pod crashed before
-	// writing. Surface that as Failed and try to classify the cause
-	// (OOMKilled / non-zero exit) from the pod's container status so
-	// the dashboard can render a structured FailureReasonBadge
-	// instead of a generic "unknown error".
+	// safety: pod crashed before writing terminal state; synthesize Failed so the orchestrator sees something deterministic
 	if n.Status != "done" {
 		res.Outcome = sparkwing.Failed
 		reason, exitCode := r.inspectTerminatedPod(ctx, j)
@@ -317,10 +282,6 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		if res.Err == nil {
 			res.Err = errors.New(errMsg)
 		}
-		// Best-effort: record the structured reason + exit code on
-		// the controller. Failure here leaves the node in its pre-
-		// written state; the dispatcher still surfaces a Failed
-		// outcome.
 		_ = r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
 			string(sparkwing.Failed), errMsg, nil, reason, exitCode)
 	}
@@ -376,9 +337,7 @@ func (r *Runner) inspectTerminatedPod(ctx context.Context, j *batchv1.Job) (stri
 func JobName(runID, nodeID string, attempt int) string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%s/%s/%d", runID, nodeID, attempt)))
 	hashSeg := hex.EncodeToString(h[:])[:10]
-	// readable tail: sanitized, truncated nodeID. Total budget:
-	// "sw-" (3) + hashSeg (10) + "-" (1) + nodeSeg (≤48) + "-0" (2) = 64
-	// Cap nodeSeg at 47 to stay under 63.
+	// safety: 47 cap keeps "sw-"(3)+hash(10)+"-"(1)+nodeSeg(≤47)+"-0"(2)=63 within K8s limit
 	nodeSeg := sanitizeK8sName(truncate(nodeID, 47))
 	name := fmt.Sprintf("sw-%s-%s-%d", hashSeg, nodeSeg, attempt)
 	return truncate(name, 63)
@@ -389,18 +348,13 @@ func (r *Runner) buildJob(name string, req runner.Request) *batchv1.Job {
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
 		{Name: "SPARKWING_RUN_ID", Value: req.RunID},
 		{Name: "SPARKWING_NODE_ID", Value: req.NodeID},
-		// Pod runs as nonroot; point SPARKWING_HOME at a writable
-		// tmpfs so orchestrator.DefaultPaths doesn't try to mkdir
-		// /.sparkwing in the root filesystem.
+		// safety: pod runs as nonroot; SPARKWING_HOME must be a writable path or DefaultPaths mkdir fails
 		{Name: "SPARKWING_HOME", Value: "/tmp/sparkwing"},
 	}
 	if r.cfg.LogsURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: r.cfg.LogsURL})
 	}
 	if r.cfg.AgentToken != "" {
-		// FOLLOWUPS #2: stamp the worker's own bearer on the Job pod
-		// so its controller + logs calls authenticate. Without this,
-		// K8sRunner fallback under auth crash-loops every Job on 401.
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})
 	}
 
@@ -484,9 +438,7 @@ func isJobDone(j *batchv1.Job) bool {
 			return true
 		}
 	}
-	// Some cluster versions surface `.status.succeeded` / `.status.failed`
-	// before setting a condition. Treat those as terminal too so we
-	// don't hang on the transition window.
+	// hack: some cluster versions surface status counts before setting a condition
 	if j.Status.Succeeded > 0 || j.Status.Failed > 0 {
 		return true
 	}

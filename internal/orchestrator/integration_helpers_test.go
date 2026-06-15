@@ -21,18 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Integration tests in this package exercise cross-runner state and
-// cache sharing through the real S3 and Postgres protocols. They are
-// gated by:
-//
-//   - SPARKWING_INTEGRATION_DISABLE=1: hard opt-out (CI smoke runs).
-//   - Per-backend availability: Postgres needs SPARKWING_TEST_PG_URL;
-//     S3 uses an in-process gofakes3 server so it has no external
-//     prerequisite.
-//
-// Skip reasons are deliberately distinct so a CI test report
-// distinguishes "deliberately disabled" from "no Postgres available."
-
 const (
 	integrationDisableEnv = "SPARKWING_INTEGRATION_DISABLE"
 	pgTestURLEnv          = "SPARKWING_TEST_PG_URL"

@@ -77,12 +77,6 @@ func runSecretSet(args []string) error {
 	masked := !plain
 
 	if !fs.Changed("profile") {
-		// Local: pick the file by mask intent. Plain values go to
-		// config.env so an operator can chmod / share / version-
-		// control them independently of the (still-0600) secrets
-		// file. WriteDotenvEntry handles the chmod 0600 either way
-		// -- there's no harm in tightening config.env too, and it
-		// keeps the write path uniform.
 		path, perr := localPathFor(masked)
 		if perr != nil {
 			return fmt.Errorf("secret set: %w", perr)
@@ -90,10 +84,6 @@ func runSecretSet(args []string) error {
 		if err := secrets.WriteDotenvEntry(path, name, raw); err != nil {
 			return fmt.Errorf("secret set: %w", err)
 		}
-		// Prevent collision the other direction: if the operator
-		// flipped a name's masked flag (was masked, now plain), the
-		// stale row in the other file will keep winning until they
-		// remove it. Strip the duplicate proactively.
 		other, oerr := localPathFor(!masked)
 		if oerr == nil {
 			_ = secrets.DeleteDotenvEntry(other, name)
@@ -174,8 +164,6 @@ func runSecretGet(args []string) error {
 		}
 		return fmt.Errorf("secret get: %w", err)
 	}
-	// No trailing newline so the raw value pipes cleanly (e.g.
-	// `sparkwing secrets get --name X | docker login --password-stdin`).
 	fmt.Fprint(os.Stdout, sec.Value)
 	return nil
 }
@@ -193,9 +181,6 @@ func runSecretList(args []string) error {
 	grep := v.String("grep")
 
 	if !fs.Changed("profile") {
-		// Read both files: secrets.env (masked) and config.env (plain).
-		// On collision, plain wins -- mirrors DotenvSource.Read so
-		// what the list shows is what jobs will see.
 		secretsPath, _ := secrets.DefaultDotenvPath()
 		configPath, _ := secrets.DefaultConfigPath()
 		maskedEntries, err := secrets.ListDotenvEntries(secretsPath)
@@ -222,8 +207,6 @@ func runSecretList(args []string) error {
 			if grep != "" && !strings.Contains(k, grep) {
 				continue
 			}
-			// Plain wins on collision -- intentional dup is treated
-			// as the operator having flipped the entry's class.
 			rowByName[k] = row{name: k, masked: false, path: configPath}
 		}
 		if len(rowByName) == 0 {
@@ -258,9 +241,6 @@ func runSecretList(args []string) error {
 	if err != nil {
 		return fmt.Errorf("secret list: %w", err)
 	}
-	// Client-side name filter: secret counts are small (< dozens in
-	// practice), so the extra hop to the controller for a server-side
-	// filter isn't worth it. Keeps the surface narrow.
 	if grep != "" {
 		filtered := secs[:0]
 		for _, s := range secs {
@@ -303,8 +283,6 @@ func runSecretDelete(args []string) error {
 	}
 
 	if !fs.Changed("profile") {
-		// Try both files; either may hold the entry. At least one
-		// must hit -- otherwise the name is genuinely absent.
 		secretsPath, _ := secrets.DefaultDotenvPath()
 		configPath, _ := secrets.DefaultConfigPath()
 		removedFrom := ""

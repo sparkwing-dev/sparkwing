@@ -82,7 +82,6 @@ func commit(t *testing.T, msg string) {
 }
 
 func TestErrDockerUnavailable(t *testing.T) {
-	// Point PATH at an empty temp dir so `docker` is not findable.
 	t.Setenv("PATH", t.TempDir())
 
 	ctx := context.Background()
@@ -111,7 +110,6 @@ func TestErrDockerUnavailable(t *testing.T) {
 func fakeBuildxInspectDocker(t *testing.T, inspectOutput string) string {
 	t.Helper()
 	dir := t.TempDir()
-	// Marker file so the script can locate its inspect payload.
 	payload := filepath.Join(dir, "inspect.txt")
 	if err := os.WriteFile(payload, []byte(inspectOutput), 0o644); err != nil {
 		t.Fatalf("write inspect payload: %v", err)
@@ -135,9 +133,6 @@ exit 0
 }
 
 func TestParseBuildxPlatforms(t *testing.T) {
-	// Realistic shape from `docker buildx inspect` on Docker Desktop:
-	// native marker `*`, amd64 instruction-set variants, multiple
-	// `Platforms:` lines (multi-node builders).
 	raw := `Name:          default
 Driver:        docker
 
@@ -183,7 +178,7 @@ func TestPlatformAdvertised(t *testing.T) {
 		{"linux/amd64", true},
 		{"linux/amd64/v3", true},
 		{"linux/386", false},
-		{"linux/arm", false}, // bare "arm" must not be matched by "arm64"
+		{"linux/arm", false},
 	}
 	for _, c := range cases {
 		if got := platformAdvertised(c.wish, advertised); got != c.want {
@@ -191,8 +186,6 @@ func TestPlatformAdvertised(t *testing.T) {
 		}
 	}
 
-	// `arm64` should NOT match `arm/v7`-style entries (no false-positive
-	// from a substring or unintended prefix).
 	if platformAdvertised("linux/arm", []string{"linux/arm64"}) {
 		t.Errorf("linux/arm spuriously matched against [linux/arm64]")
 	}
@@ -213,7 +206,6 @@ Platforms: linux/arm64*, linux/amd64
 }
 
 func TestFilterBuildxPlatforms(t *testing.T) {
-	// Builder advertises arm64 only (mimics arm64 cluster without QEMU).
 	fakeBuildxInspectDocker(t, `Nodes:
 Platforms: linux/arm64*
 `)
@@ -227,8 +219,6 @@ Platforms: linux/arm64*
 }
 
 func TestBuildPreFlightUnsupportedPlatform(t *testing.T) {
-	// Builder advertises arm64 only; caller asks for amd64. Build must
-	// reject before invoking buildx, citing ErrPlatformUnsupported.
 	fakeBuildxInspectDocker(t, `Nodes:
 Platforms: linux/arm64*
 `)
@@ -240,8 +230,6 @@ Platforms: linux/arm64*
 	if !errors.Is(err, ErrPlatformUnsupported) {
 		t.Fatalf("got %v, want ErrPlatformUnsupported", err)
 	}
-	// Error message should name the missing platform and the advertised
-	// list so a human can act on it.
 	msg := err.Error()
 	for _, want := range []string{"linux/amd64", "linux/arm64", "QEMU"} {
 		if !strings.Contains(msg, want) {
@@ -251,9 +239,6 @@ Platforms: linux/arm64*
 }
 
 func TestErrBuildxRequired(t *testing.T) {
-	// Put a fake `docker` on PATH that succeeds for every call except
-	// `docker buildx version`, which exits non-zero. Build called with
-	// non-empty Platforms must return ErrBuildxRequired.
 	dir := t.TempDir()
 	script := `#!/bin/sh
 if [ "$1" = "buildx" ]; then
@@ -278,16 +263,11 @@ exit 0
 }
 
 func TestLoginSecretNotInArgv(t *testing.T) {
-	// Fake `docker` that writes its argv and stdin to files in a spy
-	// dir, then exits 0. Login(..., secret) must never appear in argv.
 	spyDir := t.TempDir()
 	argvFile := filepath.Join(spyDir, "argv")
 	stdinFile := filepath.Join(spyDir, "stdin")
 
 	binDir := t.TempDir()
-	// Absolute paths to /bin/cat and /bin/echo so the script works
-	// even when PATH is restricted (Login is invoked with the caller's
-	// PATH, which isn't guaranteed to include /bin or /usr/bin in tests).
 	script := fmt.Sprintf(`#!/bin/sh
 /bin/cat > %q
 for a in "$@"; do
@@ -314,7 +294,6 @@ exit 0
 	if strings.Contains(argvStr, secret) {
 		t.Errorf("secret leaked into argv:\n%s", argvStr)
 	}
-	// Positive assertions on the shape we do want.
 	for _, want := range []string{"login", "--username", "alice", "--password-stdin", "registry.example.com"} {
 		if !strings.Contains(argvStr, want) {
 			t.Errorf("argv missing %q:\n%s", want, argvStr)
@@ -331,8 +310,6 @@ exit 0
 }
 
 func TestPushComputesCorrectArgs(t *testing.T) {
-	// Fake docker that records every invocation to a log file. No real
-	// daemon required.
 	spyDir := t.TempDir()
 	logFile := filepath.Join(spyDir, "calls")
 
@@ -357,7 +334,6 @@ exit 0
 		t.Fatalf("read log: %v", err)
 	}
 	calls := strings.Split(strings.TrimSpace(string(body)), "\n")
-	// Expect 2 tag + 2 push per registry = 8 total calls.
 	if len(calls) != 8 {
 		t.Fatalf("expected 8 docker calls, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
 	}
@@ -415,7 +391,6 @@ func TestComputeTags(t *testing.T) {
 		t.Errorf("All = %v, want [DeployTag, ProdTag]", all)
 	}
 
-	// Dirty the tree and recompute.
 	writeFile(t, "a.txt", "modified")
 	tag, err = ComputeTags(ctx)
 	if err != nil {
@@ -453,7 +428,6 @@ func TestComputeTagsDetachedHead(t *testing.T) {
 	writeFile(t, "a.txt", "hello")
 	commit(t, "init")
 
-	// Detach HEAD at the current commit.
 	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("rev-parse: %v", err)
@@ -499,8 +473,6 @@ func TestBuildDefaults(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	// Minimal Dockerfile using scratch to avoid network pulls when
-	// possible. scratch exists without any registry round-trip.
 	dockerfile := filepath.Join(dir, "Dockerfile")
 	writeFile(t, dockerfile, "FROM scratch\nLABEL sparkwing-test=1\n")
 
@@ -520,7 +492,6 @@ func TestBuildDefaults(t *testing.T) {
 	if res.Image == "" {
 		t.Errorf("empty Image in result")
 	}
-	// Cleanup.
 	_ = exec.Command("docker", "rmi", "-f", fmt.Sprintf("%s:%s", image, tag)).Run()
 }
 
@@ -536,7 +507,6 @@ func TestBuildAndPushLocalRegistry(t *testing.T) {
 	if reg == "" {
 		t.Skip("SPARKWING_TEST_REGISTRY not set; skipping push end-to-end")
 	}
-	// Sanity-probe the registry's /v2/ endpoint.
 	if !registryReachable(reg) {
 		t.Skipf("registry %s not reachable", reg)
 	}
@@ -564,7 +534,6 @@ func TestBuildAndPushLocalRegistry(t *testing.T) {
 		t.Errorf("Image = %q, want to contain %q", res.Image, reg)
 	}
 
-	// Cleanup local refs.
 	_ = exec.Command(
 		"docker", "rmi", "-f",
 		fmt.Sprintf("%s:%s", image, tag),
@@ -581,7 +550,6 @@ func registryReachable(registry string) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	// 200 or 401 are both healthy signals for a registry:2.
 	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
 }
 

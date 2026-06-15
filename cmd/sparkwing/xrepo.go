@@ -94,12 +94,6 @@ func runXrepoList(args []string) error {
 	for _, e := range entries {
 		row := rowOut{Path: e.Path, Status: e.Status, Worktree: e.Worktree}
 		if *pipelines && e.Status == "ok" {
-			// pipelineNamesForRepo lives in pkg/repos but isn't
-			// exported -- the resolver builds its own map. Replay
-			// describe here via the same caching path: the
-			// resolver's process-wide map is rebuilt lazily so a
-			// fresh `repo list` after a registry edit shows the
-			// current pipelines.
 			repos.InvalidateCache()
 			if pipes, perr := repoListPipelines(e.Path); perr == nil {
 				sort.Strings(pipes)
@@ -215,14 +209,6 @@ func entryWord(n int) string {
 // a list -- the orchestrator's resolver uses an in-memory map. If
 // a third caller materializes, hoist this into pkg/repos.
 func repoListPipelines(absPath string) ([]string, error) {
-	// Use the resolver's defaultResolver build path indirectly by
-	// resolving a sentinel that won't match -- this populates the
-	// nameToPath map and we read out names whose path equals our
-	// row. ResolveRepoForPipeline returns ErrNotFound for the
-	// sentinel; we don't care.
 	_, _ = repos.ResolveRepoForPipeline("__sparkwing_repo_list_probe__")
-	// We don't have a public accessor to the populated map, so
-	// fall back to a fresh describe via the same code path the
-	// resolver uses internally.
 	return repos.PipelineNamesForRepo(absPath)
 }

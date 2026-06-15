@@ -487,7 +487,6 @@ func tipAgentBlockMissing(info Info) (InfoTip, bool) {
 		return InfoTip{}, false
 	}
 	root := info.Project.SparkwingDir
-	// SparkwingDir points at .sparkwing/; agent files live one up.
 	if i := strings.LastIndex(root, "/.sparkwing"); i >= 0 {
 		root = root[:i]
 	}

@@ -70,7 +70,6 @@ func (b *StoreBackend) ReadNodeLog(ctx context.Context, runID, nodeID string, op
 	if b.logStore != nil {
 		return b.logStore.Read(ctx, runID, nodeID, toStorageReadOpts(opts))
 	}
-	// Disk fallback: missing files render as empty (no logs yet).
 	f, err := os.Open(b.paths.NodeLog(runID, nodeID))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -86,7 +85,6 @@ func (b *StoreBackend) StreamNodeLog(ctx context.Context, runID, nodeID string) 
 	if b.logStore != nil {
 		return b.logStore.Stream(ctx, runID, nodeID)
 	}
-	// Disk fallback has no streaming; the dashboard polls.
 	return nil, nil
 }
 

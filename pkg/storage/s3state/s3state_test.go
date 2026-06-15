@@ -126,7 +126,6 @@ func TestS3StateBackend_FinishNode_PersistsEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Reopen on the same bucket: replay should recover terminal state.
 	b2 := s3state.New(art)
 	t.Cleanup(func() { _ = b2.Close() })
 	n, err := b2.GetNode(ctx, "r", "n")
@@ -236,7 +235,6 @@ func TestS3StateBackend_GetLatestRun_FiltersByPipeline(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Force flush so List sees every run.
 	if err := b.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -266,15 +264,10 @@ func TestS3StateBackend_AppendEvent_AndEventSequence(t *testing.T) {
 			t.Fatalf("AppendEvent: %v", err)
 		}
 	}
-	// We can't read events directly from the StateStore surface; round-
-	// trip through the dashboard backend would re-read NDJSON. Here we
-	// just verify each AppendEvent call returns nil and stage cleanly.
 }
 
 func TestS3StateBackend_BufferThreshold_TriggersFlush(t *testing.T) {
 	art := newMemArt()
-	// 100-byte threshold + a long flushInterval guarantees the
-	// in-band flush path is what writes to the bucket, not the timer.
 	b := s3state.New(art,
 		s3state.WithFlushInterval(10*time.Second),
 		s3state.WithBufferThreshold(100),
@@ -285,9 +278,6 @@ func TestS3StateBackend_BufferThreshold_TriggersFlush(t *testing.T) {
 	if err := b.CreateRun(ctx, store.Run{ID: "r", Pipeline: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	// UpdatePlanSnapshot writes a Run envelope carrying the snapshot
-	// bytes inline -- enough to cross the 100-byte threshold and
-	// trigger an in-band flush.
 	if err := b.UpdatePlanSnapshot(ctx, "r", bytes.Repeat([]byte("y"), 4096)); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +294,6 @@ func TestS3StateBackend_BufferThreshold_TriggersFlush(t *testing.T) {
 
 func TestS3StateBackend_Close_FlushesPending(t *testing.T) {
 	art := newMemArt()
-	// Long interval so only Close can flush.
 	b := s3state.New(art, s3state.WithFlushInterval(10*time.Second))
 	ctx := context.Background()
 	if err := b.CreateRun(ctx, store.Run{ID: "r", Pipeline: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
@@ -330,7 +319,6 @@ func TestOutbox_DrainsAfterTransientError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = outbox.Close() })
 
-	// Stage a write while "S3 is down" -- the body lands in the outbox.
 	body := []byte(`{"kind":"run","data":{"id":"r","pipeline":"p"}}`)
 	ctx := context.Background()
 	if err := outbox.Stage(ctx, s3state.OutboxKindState, "runs/r/state.ndjson", body); err != nil {
@@ -341,8 +329,6 @@ func TestOutbox_DrainsAfterTransientError(t *testing.T) {
 		t.Fatalf("Pending = %d, %v; want 1, nil", n, err)
 	}
 
-	// Connectivity returns; drain should clear the outbox + write the
-	// blob to the store.
 	if err := outbox.Drain(ctx); err != nil {
 		t.Fatalf("Drain: %v", err)
 	}

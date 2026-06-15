@@ -81,14 +81,12 @@ func TestStress_HighConcurrency(t *testing.T) {
 		t.Fatalf("completed = %d, want %d (some goroutines starved?)",
 			c, goroutines*iterations)
 	}
-	// Sanity check on elapsed time. Lower bound: serial work / slots.
 	expectedMin := time.Duration(goroutines*iterations) * holdPerIter / time.Duration(slots)
 	if elapsed < expectedMin/2 {
 		t.Fatalf("elapsed=%s suspiciously fast; lower bound ~%s",
 			elapsed, expectedMin/2)
 	}
 
-	// Lock dir should be clean of holder files after everyone released.
 	staleHolders := countHolders(t, dir)
 	if staleHolders != 0 {
 		t.Errorf("stale holder files after stress: %d", staleHolders)
@@ -180,8 +178,6 @@ func TestStress_CoordContention(t *testing.T) {
 						break
 					}
 				}
-				// No real work; the test is about lock churn under
-				// minimal hold time.
 				inflight.Add(-1)
 				release()
 			}
@@ -206,7 +202,6 @@ func TestStress_SIGKILLHolderRecovery(t *testing.T) {
 		t.Skip("SIGKILL semantics differ on windows; covered by stale-holder test")
 	}
 	if os.Getenv("BOXSLOT_CHILD_LOCK_DIR") != "" {
-		// We're the child: acquire and block forever.
 		release, err := boxslot.Acquire(context.Background(), boxslot.Options{
 			MaxSlots: 1,
 			LockDir:  os.Getenv("BOXSLOT_CHILD_LOCK_DIR"),
@@ -215,15 +210,13 @@ func TestStress_SIGKILLHolderRecovery(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "child: Acquire: %v\n", err)
 			os.Exit(2)
 		}
-		fmt.Fprintln(os.Stdout, "READY") // signal acquired
-		_ = release                      // prevent unused; never actually called
-		select {}                        // block until SIGKILLed
+		fmt.Fprintln(os.Stdout, "READY")
+		_ = release
+		select {}
 	}
 
 	dir := t.TempDir()
 
-	// Re-exec this test binary, running just this test, which the
-	// env-var branch above intercepts. The child becomes a holder.
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
@@ -239,7 +232,6 @@ func TestStress_SIGKILLHolderRecovery(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 
-	// Wait for child to signal READY.
 	ready := make(chan struct{})
 	go func() {
 		buf := make([]byte, 512)
@@ -260,22 +252,17 @@ func TestStress_SIGKILLHolderRecovery(t *testing.T) {
 		t.Fatal("child never signaled READY")
 	}
 
-	// Confirm a NoWait acquire fails while the child holds the slot.
 	if _, err := boxslot.Acquire(context.Background(), boxslot.Options{
 		MaxSlots: 1, LockDir: dir, NoWait: true,
 	}); !errors.Is(err, boxslot.ErrSlotsFull) {
 		t.Fatalf("pre-kill Acquire err = %v, want ErrSlotsFull", err)
 	}
 
-	// SIGKILL the child. The OS releases its flock; the next
-	// Acquire should reclaim the slot.
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("Kill child: %v", err)
 	}
 	_, _ = cmd.Process.Wait()
 
-	// The next Acquire under NoWait should succeed because the stale
-	// holder file is flock-probable.
 	release, err := boxslot.Acquire(context.Background(), boxslot.Options{
 		MaxSlots: 1, LockDir: dir, NoWait: true,
 	})
@@ -284,8 +271,6 @@ func TestStress_SIGKILLHolderRecovery(t *testing.T) {
 	}
 	defer release()
 
-	// The dead child's holder file should have been removed by the
-	// scan-and-reclaim path.
 	if h := countHolders(t, dir); h != 1 {
 		t.Errorf("holders after reclaim = %d, want 1 (us only)", h)
 	}
@@ -312,7 +297,7 @@ func TestStress_ManyStaleHolders(t *testing.T) {
 	}
 	defer release()
 
-	remaining := countHolders(t, dir) - 1 // minus our holder
+	remaining := countHolders(t, dir) - 1
 	if remaining != 0 {
 		t.Errorf("%d stale holders not cleaned up", remaining)
 	}
@@ -352,15 +337,11 @@ func TestStress_ManyWaitersOneSlot(t *testing.T) {
 				return
 			}
 			acquireTimes <- time.Now()
-			// Brief hold so the next waiter actually has to acquire,
-			// rather than the test racing through with all waiters
-			// finding the slot free at once after primary release.
 			time.Sleep(2 * time.Millisecond)
 			release()
 		}()
 	}
 
-	// Hold long enough that every waiter is blocked.
 	time.Sleep(80 * time.Millisecond)
 	primary()
 	wg.Wait()

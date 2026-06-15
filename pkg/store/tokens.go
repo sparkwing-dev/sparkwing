@@ -168,8 +168,6 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		if !t.IsValid(now) {
 			return nil, errors.New("token is revoked or expired")
 		}
-		// Touch last_used_at. Best-effort: a failed UPDATE doesn't
-		// invalidate the auth result.
 		_, _ = s.execNoCtx(
 			`UPDATE tokens SET last_used_at = ? WHERE hash = ?`,
 			now.UTC().Unix(), t.Hash,
@@ -348,8 +346,6 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 	oldTok.ReplacedBy = newTok.Prefix
 	return raw, newTok, oldTok, nil
 }
-
-// --- helpers ---
 
 func prefixForKind(kind string) (string, bool) {
 	switch kind {

@@ -132,15 +132,9 @@ SELECT id, kind, key, body FROM outbox_writes ORDER BY id ASC LIMIT 1`)
 				if isTransient(perr) {
 					return perr
 				}
-				// Non-transient: drop and surface to logs via the next
-				// caller's error handling. We delete so the queue doesn't
-				// jam on a permanent failure.
 			}
 		case OutboxKindLog:
-			// Log replay is out of scope here -- the log backend has
-			// its own outbox if needed. Drop the row.
 		default:
-			// Unknown kind from a forward-incompatible writer; drop.
 		}
 		o.mu.Lock()
 		_, _ = o.db.ExecContext(ctx, `DELETE FROM outbox_writes WHERE id = ?`, id)

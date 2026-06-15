@@ -7,7 +7,7 @@ func TestRead_RewritesCrossDocLinks(t *testing.T) {
 		name     string
 		in       string
 		want     string
-		wantSame bool // when true, no rewrite expected
+		wantSame bool
 	}{
 		{
 			name: "labeled link to known topic",

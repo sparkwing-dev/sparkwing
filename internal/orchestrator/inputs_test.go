@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// An end-to-end run drives a pipeline with typed Inputs and asserts
-// a step body deep in the DAG sees the same values via
-// sparkwing.Inputs[T](ctx) -- no closure threading, no struct field.
-
 type inputsArgs struct {
 	Service string `flag:"service"`
 	Env     string `flag:"env" default:"staging"`
@@ -30,8 +26,6 @@ var (
 type inputsPipe struct{ sparkwing.Base }
 
 func (inputsPipe) Plan(_ context.Context, plan *sparkwing.Plan, in inputsArgs, rc sparkwing.RunContext) error {
-	// Sanity-pin Plan-time view too: the value we get here should
-	// equal what a step body retrieves via Inputs[T](ctx).
 	planArgs := in
 	sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
 		got := sparkwing.Inputs[inputsArgs](ctx)
@@ -48,8 +42,6 @@ func (inputsPipe) Plan(_ context.Context, plan *sparkwing.Plan, in inputsArgs, r
 }
 
 func init() {
-	// Custom Register because the package-shared `register` helper
-	// only handles NoInputs.
 	sparkwing.Register[inputsArgs]("orch-inputs", func() sparkwing.Pipeline[inputsArgs] {
 		return &inputsPipe{}
 	})

@@ -126,19 +126,13 @@ func TestRun_SkipPassedOnRetry(t *testing.T) {
 	if second.Status != "success" {
 		t.Fatalf("second run status = %q, want success (err=%v)", second.Status, second.Error)
 	}
-	// build was passed in the first run, so skip-passed should NOT
-	// invoke it again on the retry. The counter must still read 1.
 	if got := retryCnt.get("build"); got != 1 {
 		t.Fatalf("build counter = %d after retry, want 1 (build should not re-run)", got)
 	}
-	// deploy failed in the first run, so it re-runs on retry.
 	if got := retryCnt.get("deploy"); got != 2 {
 		t.Fatalf("deploy counter = %d after retry, want 2", got)
 	}
 
-	// Store-side assertions: the retry's build node row should be
-	// marked done with the rehydrated output, and a node_skipped_from_retry
-	// event should be recorded.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	buildNode, err := st.GetNode(context.Background(), second.RunID, "build")

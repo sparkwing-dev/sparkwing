@@ -57,8 +57,6 @@ func TestPipelineCacheKey_StableAcrossRuns(t *testing.T) {
 	if k1 != k2 {
 		t.Fatalf("cache key should be stable: %q vs %q", k1, k2)
 	}
-	// Format is `aaaaaaaa-bbbbbbbb` so it matches the cache server's
-	// /bin/<hash> regex; 17 chars = 16 hex + 1 hyphen.
 	if len(k1) != 17 {
 		t.Fatalf("cache key should be 17 chars (two 8-hex segments + hyphen), got %d", len(k1))
 	}
@@ -68,11 +66,8 @@ func TestPipelineCacheKey_ChangesWhenPipelineSourceChanges(t *testing.T) {
 	pipDir := scaffoldPipelineRepo(t)
 	k1, _ := bincache.PipelineCacheKey(pipDir)
 
-	// Bump mtime + size of main.go. Size delta ensures the hash
-	// changes even if mtime resolution swallows the touch.
 	writeFile(t, filepath.Join(pipDir, "main.go"),
 		"package main\n\nfunc main() { println(\"hi\") }\n")
-	// Guarantee a fresh mtime on filesystems with second-level resolution.
 	time.Sleep(10 * time.Millisecond)
 
 	k2, _ := bincache.PipelineCacheKey(pipDir)
@@ -85,8 +80,6 @@ func TestPipelineCacheKey_ChangesWhenReplaceTargetChanges(t *testing.T) {
 	pipDir := scaffoldPipelineRepo(t)
 	k1, _ := bincache.PipelineCacheKey(pipDir)
 
-	// Edit the SDK (via replace). Pipeline binary depends on it, so
-	// the key must change.
 	sdkFile := filepath.Join(filepath.Dir(pipDir), "sdk", "sdk.go")
 	writeFile(t, sdkFile, "package sdk\n\nconst Version = \"2\"\n// extra\n")
 	time.Sleep(10 * time.Millisecond)
@@ -101,9 +94,6 @@ func TestPipelineCacheKey_IgnoresNonGoFilesInReplaceTarget(t *testing.T) {
 	pipDir := scaffoldPipelineRepo(t)
 	k1, _ := bincache.PipelineCacheKey(pipDir)
 
-	// Add a README to the replace target. Not Go source, so it must
-	// not bust the cache (would cause spurious rebuilds from
-	// unrelated file edits).
 	sdkReadme := filepath.Join(filepath.Dir(pipDir), "sdk", "README.md")
 	writeFile(t, sdkReadme, "hello world")
 
@@ -121,9 +111,6 @@ func newSparksFixture(t *testing.T, manifest string) string {
 	writeFile(t, filepath.Join(dir, "go.mod"),
 		"module example.com/consumer\n\ngo 1.22\n")
 	if manifest != "" {
-		// The sparks: section of sparkwing.yaml carries the library list
-		// directly (no `libraries:` wrapper). Fixtures pass the legacy
-		// wrapper form for brevity; rewrite it to the section key.
 		section := strings.Replace(manifest, "libraries:", "sparks:", 1)
 		writeFile(t, filepath.Join(dir, "sparkwing.yaml"), section)
 	}
@@ -152,9 +139,6 @@ func pointResolverAt(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 	t.Setenv("GOPROXY", srv.URL)
 	t.Setenv("GOPRIVATE", "")
-	// Ensure `go mod download` (invoked inside WriteOverlay) is a
-	// no-op -- we're testing the resolve + overlay write behavior,
-	// not the downloader.
 	fakeGo(t)
 }
 
@@ -183,9 +167,6 @@ func fakeGo(t *testing.T) {
 }
 
 func TestResolveSparks_NoManifest_FastPath(t *testing.T) {
-	// With no sparks.yaml, resolveSparks must not touch the network
-	// nor write any overlay. Point at an invalid proxy URL -- if a
-	// network call happens it'll surface as an error.
 	t.Setenv("GOPROXY", "http://proxy.invalid.example")
 	dir := newSparksFixture(t, "")
 	if err := resolveSparks(context.Background(), dir, compileOptions{}); err != nil {
@@ -216,8 +197,6 @@ func TestResolveSparks_WithManifest_WritesOverlay(t *testing.T) {
 }
 
 func TestResolveSparks_NoUpdate_SkipsResolve(t *testing.T) {
-	// Proxy intentionally broken; --no-update must short-circuit
-	// before any network call is attempted.
 	t.Setenv("GOPROXY", "http://proxy.invalid.example")
 	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
 	dir := newSparksFixture(t, manifest)
@@ -242,9 +221,6 @@ func TestResolveSparks_EnvVar_SkipsResolve(t *testing.T) {
 }
 
 func TestResolveSparks_ProxyDown_FailsLoudly(t *testing.T) {
-	// No --no-update set. Broken proxy should surface as a compile
-	// error so an agent wanting `latest` knows the resolve failed
-	// instead of silently pinning to stale go.mod versions.
 	t.Setenv("GOPROXY", "http://127.0.0.1:1")
 	t.Setenv("GOPRIVATE", "")
 	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
@@ -260,8 +236,6 @@ func TestResolveSparks_ProxyDown_FailsLoudly(t *testing.T) {
 }
 
 func TestPipelineCacheKey_PipelineDirTreatsAllFilesAsInputs(t *testing.T) {
-	// The pipeline module itself gets full-tree hashing because
-	// pipelines.yaml and other non-Go files can drive behavior.
 	pipDir := scaffoldPipelineRepo(t)
 	k1, _ := bincache.PipelineCacheKey(pipDir)
 

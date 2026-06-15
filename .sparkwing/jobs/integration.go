@@ -50,16 +50,12 @@ const (
 )
 
 func (Integration) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	// fixtures: bring the containers up; Verify they're ready. A failed
-	// bring-up or readiness check tears down via OnFailure.
 	fixtures := sparkwing.Job(plan, "fixtures", startFixtures).
 		Verify(fixturesReady).
 		OnFailure("teardown-on-fixture-fail", func(ctx context.Context, _ sparkwing.Failure) error {
 			return teardownFixtures(ctx)
 		})
 
-	// test: run the suite against the live backends; tear down regardless
-	// of outcome via AfterRun.
 	sparkwing.Job(plan, "test", runIntegrationSuite).
 		Needs(fixtures).
 		Timeout(20 * time.Minute).
@@ -106,8 +102,6 @@ func fixturesReady(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	// MinIO doesn't auto-create buckets; the storeurl real-bucket test
-	// assumes it exists. Created from the host via the published port.
 	mb := exec.CommandContext(ctx, "aws", "--endpoint-url", itS3Endpt, "--region", "us-east-1",
 		"s3", "mb", "s3://"+itBucket)
 	mb.Env = append(os.Environ(),

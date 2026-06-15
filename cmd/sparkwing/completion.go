@@ -47,9 +47,6 @@ func runCompletion(args []string) error {
 	return nil
 }
 
-// Hidden helpers below print one entry per line and exit 0 quietly;
-// completion scripts rely on empty output to mean "nothing to offer".
-
 func runInternalCompleteProfiles(_ []string) error {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -84,10 +81,9 @@ func runInternalCompletePipelines(_ []string) error {
 			}
 		}
 	}
-	// 4 tab-separated columns: name, group, kind, desc.
 	type completionRow struct {
 		name string
-		kind string // "pipeline", "command", "script"
+		kind string
 		desc string
 	}
 	var rows []completionRow
@@ -101,8 +97,6 @@ func runInternalCompletePipelines(_ []string) error {
 			})
 		}
 	}
-	// Flat list, alphabetical. No group bucketing -- the completion menu
-	// stays one section; agents and humans both scan it as one list.
 	sort.Slice(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
 	for _, r := range rows {
 		fmt.Printf("%s\t%s\t%s\t%s\n",
@@ -820,8 +814,6 @@ end
 `)
 	b.WriteString("\n# Flags per leaf, pulled from the registry.\n")
 
-	// Emit flags for every leaf, gated on the argv path.
-	// Sort keys for stable output.
 	leaves := leafCommands()
 	keys := make([]string, 0, len(leaves))
 	for k := range leaves {
@@ -843,8 +835,6 @@ end
 			case f.RequiredWhen != "":
 				desc = "[conditional] " + desc
 			}
-			// Fish long-flag uses -l; short via -s. Value flags
-			// (Argument != "") take -r so fish suggests an arg.
 			line := fmt.Sprintf(
 				"complete -c sparkwing -n '__sparkwing_has_path %s' -l %s",
 				k, f.Name,

@@ -55,7 +55,6 @@ func TestController_RunLifecycle(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 
-	// 1. CreateRun.
 	run := store.Run{
 		ID:        "run-ctrl-1",
 		Pipeline:  "test",
@@ -64,11 +63,9 @@ func TestController_RunLifecycle(t *testing.T) {
 	}
 	mustPostJSON(t, base+"/api/v1/runs", run, http.StatusCreated)
 
-	// 2. UpdatePlanSnapshot (raw bytes body).
 	snapshot := []byte(`{"nodes":[{"id":"a"},{"id":"b"}]}`)
 	mustPostRaw(t, base+"/api/v1/runs/run-ctrl-1/plan", snapshot, http.StatusNoContent)
 
-	// 3. CreateNode twice.
 	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes",
 		store.Node{NodeID: "a", Status: "pending"},
 		http.StatusCreated)
@@ -76,7 +73,6 @@ func TestController_RunLifecycle(t *testing.T) {
 		store.Node{NodeID: "b", Status: "pending", Deps: []string{"a"}},
 		http.StatusCreated)
 
-	// 4. StartNode + AppendEvent + FinishNode for "a".
 	mustPost(t, base+"/api/v1/runs/run-ctrl-1/nodes/a/start", http.StatusNoContent)
 	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/events",
 		map[string]any{"node_id": "a", "kind": "node_started"},
@@ -85,17 +81,14 @@ func TestController_RunLifecycle(t *testing.T) {
 		map[string]any{"outcome": "success"},
 		http.StatusNoContent)
 
-	// 5. UpdateNodeDeps on "b" (simulate an expansion backfill).
 	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes/b/deps",
 		map[string]any{"deps": []string{"a", "dyn-1", "dyn-2"}},
 		http.StatusNoContent)
 
-	// 6. FinishRun.
 	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/finish",
 		map[string]any{"status": "success"},
 		http.StatusNoContent)
 
-	// --- verify via the underlying store ---
 	got, err := st.GetRun(context.Background(), "run-ctrl-1")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
@@ -114,7 +107,6 @@ func TestController_RunLifecycle(t *testing.T) {
 	if len(nodes) != 2 {
 		t.Fatalf("nodes=%d want 2", len(nodes))
 	}
-	// Node "b" should carry the expanded deps list.
 	var bNode *store.Node
 	for _, n := range nodes {
 		if n.NodeID == "b" {
@@ -147,7 +139,6 @@ func TestController_GetRun_IncludeNodes(t *testing.T) {
 		store.Node{NodeID: "b", Status: "pending", Deps: []string{"a"}},
 		http.StatusCreated)
 
-	// Default shape: raw store.Run, no wrapper.
 	resp := mustGet(t, base+"/api/v1/runs/run-incl")
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
@@ -166,7 +157,6 @@ func TestController_GetRun_IncludeNodes(t *testing.T) {
 		t.Errorf("default shape leaked the {run:...} wrapper: %v", raw)
 	}
 
-	// include=nodes shape: {run, nodes}.
 	resp = mustGet(t, base+"/api/v1/runs/run-incl?include=nodes")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -205,8 +195,6 @@ func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
 		ID: "run-deco", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}, http.StatusCreated)
 
-	// PlanSnapshot covers every decoration: modifiers, group,
-	// approval, on_failure_of, dynamic, inner-Work tree.
 	snapshot := []byte(`{
   "nodes": [
     {"id": "build", "groups": ["ci"],
@@ -242,7 +230,6 @@ func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
 		byID[n["id"].(string)] = n
 	}
 
-	// build: modifiers + groups + work
 	build := byID["build"]
 	if build == nil {
 		t.Fatal("missing build node")
@@ -263,22 +250,18 @@ func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
 		t.Errorf("build.decorations.work missing: %v", bd)
 	}
 
-	// release: approval pill
 	if rd, ok := byID["release"]["decorations"].(map[string]any); !ok || rd["approval"] != true {
 		t.Errorf("release.decorations.approval=%v want true (entry %v)", rd["approval"], byID["release"])
 	}
 
-	// rollback: on_failure_of
 	if rd, ok := byID["rollback"]["decorations"].(map[string]any); !ok || rd["on_failure_of"] != "release" {
 		t.Errorf("rollback.decorations.on_failure_of=%v want release", rd["on_failure_of"])
 	}
 
-	// expand: dynamic
 	if rd, ok := byID["expand"]["decorations"].(map[string]any); !ok || rd["dynamic"] != true {
 		t.Errorf("expand.decorations.dynamic=%v want true", rd["dynamic"])
 	}
 
-	// plain: no decorations key (omitempty)
 	if _, ok := byID["plain"]["decorations"]; ok {
 		t.Errorf("plain node leaked decorations key: %v", byID["plain"])
 	}
@@ -330,7 +313,6 @@ func TestController_ListPausesAlias(t *testing.T) {
 		ID: "run-pause", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}, http.StatusCreated)
 
-	// Empty list response (no pauses created): both routes return [].
 	resp := mustGet(t, base+"/api/v1/runs/run-pause/paused")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("paused alias status=%d", resp.StatusCode)
@@ -353,18 +335,14 @@ func TestController_ValidationErrors(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 
-	// CreateRun requires id/pipeline/status.
 	mustPostJSON(t, base+"/api/v1/runs",
 		map[string]any{"pipeline": "only-pipeline"},
 		http.StatusBadRequest)
 
-	// FinishRun requires status.
 	mustPostJSON(t, base+"/api/v1/runs/none/finish",
 		map[string]any{},
 		http.StatusBadRequest)
 }
-
-// --- test helpers ---
 
 func mustGet(t *testing.T, url string) *http.Response {
 	t.Helper()

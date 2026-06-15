@@ -21,7 +21,6 @@ func TestDotenvSource_RoundTrip(t *testing.T) {
 		t.Fatalf("write quoted: %v", err)
 	}
 
-	// chmod must clamp to 0600 regardless of pre-existing perms.
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -30,8 +29,6 @@ func TestDotenvSource_RoundTrip(t *testing.T) {
 		t.Fatalf("perms = %o, want 0600", info.Mode().Perm())
 	}
 
-	// Only secrets file populated; config path defaults to a missing
-	// file under the test HOME, treated as empty.
 	t.Setenv("HOME", dir)
 	src := NewDotenvSource(path)
 	got, masked, err := src.Read("TOKEN")
@@ -63,7 +60,6 @@ func TestDotenvSource_PlainAndMasked(t *testing.T) {
 	if err := WriteDotenvEntry(configPath, "REGION", "us-east-1"); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	// Collision: same name in both files, plain wins.
 	if err := WriteDotenvEntry(secretsPath, "MODE", "masked-loses"); err != nil {
 		t.Fatalf("write masked: %v", err)
 	}
@@ -128,7 +124,7 @@ func TestMasker_RegisterAndMask(t *testing.T) {
 	m := NewMasker()
 	m.Register("supersecret")
 	m.Register("another")
-	m.Register("") // ignored
+	m.Register("")
 	got := m.Mask("token=supersecret other=another visible")
 	if got != "token=*** other=*** visible" {
 		t.Fatalf("Mask = %q", got)

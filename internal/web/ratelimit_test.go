@@ -20,8 +20,6 @@ func TestRateLimiter_BucketDrainAndRefill(t *testing.T) {
 		t.Fatalf("expected deny once bucket drains")
 	}
 
-	// Half a window later: 1.5 tokens refilled, so one more allow
-	// fits before we run out again.
 	half := now.Add(30 * time.Second)
 	if !l.allow("1.2.3.4", half) {
 		t.Fatalf("expected allow after half-window refill")

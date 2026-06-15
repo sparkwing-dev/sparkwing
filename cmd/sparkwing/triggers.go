@@ -37,13 +37,6 @@ func runTriggers(args []string) error {
 	}
 }
 
-// 'sparkwing triggers fire' was a functional duplicate of submitting a
-// trigger to a controller. Both called CreateTrigger on the controller
-// with the same request shape, so the fire subcommand was removed. Use
-// 'sparkwing pipeline trigger X --profile <profile>' instead.
-
-// --- list -------------------------------------------------------
-
 func runTriggersList(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersList.Path, flag.ContinueOnError)
 	status := fs.String("status", "", "filter by status (pending|claimed|done)")
@@ -133,8 +126,6 @@ func runTriggersList(args []string) error {
 	return tw.Flush()
 }
 
-// --- get --------------------------------------------------------
-
 func runTriggersGet(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersGet.Path, flag.ContinueOnError)
 	id := fs.String("id", "", "trigger identifier")
@@ -169,7 +160,6 @@ func runTriggersGet(args []string) error {
 		fmt.Fprintln(os.Stdout, string(buf))
 		return nil
 	}
-	// Plain multi-line render. Stable alignment so eyeball diffs work.
 	fmt.Fprintf(os.Stdout, "id:         %s\n", trig.ID)
 	fmt.Fprintf(os.Stdout, "pipeline:   %s\n", trig.Pipeline)
 	fmt.Fprintf(os.Stdout, "status:     %s\n", trig.Status)

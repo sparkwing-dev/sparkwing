@@ -100,7 +100,6 @@ func TestAuthenticator_StoreToken(t *testing.T) {
 		t.Fatalf("authed: expected 418, got %d", rec.Code)
 	}
 
-	// A well-formed but unknown token (correct prefix, random tail) 401s.
 	req = httptest.NewRequest(http.MethodPost, "/x", nil)
 	req.Header.Set("Authorization", "Bearer swu_unknownXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
 	rec = httptest.NewRecorder()

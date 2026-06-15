@@ -81,8 +81,6 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
-		// migrations/ and proposals/ are design history and may show old
-		// or future names on purpose -- same exclusion as the go-block gate.
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}

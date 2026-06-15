@@ -158,8 +158,6 @@ func runCommands(args []string) error {
 		return fmt.Errorf("commands: unexpected positional %q", fs.Arg(0))
 	}
 
-	// Sort by Path so the output is reproducible and agents diffing
-	// successive emissions see meaningful changes.
 	sorted := make([]*Command, len(allCommands))
 	copy(sorted, allCommands)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
@@ -189,17 +187,12 @@ func runCommands(args []string) error {
 		}
 		return nil
 	case "pretty", "table":
-		// Token effort -- a wide table of every verb is rarely the
-		// right view for humans; they should use sparkwing -h. Render
-		// a thin two-column table so the verb is at least usable.
 		w := 0
 		for _, c := range picked {
 			if n := len(c.Path); n > w {
 				w = n
 			}
 		}
-		// Pad before coloring so ANSI bytes in the header don't
-		// throw off %-*s width tracking.
 		fmt.Printf("%s  %s\n",
 			color.Bold(fmt.Sprintf("%-*s", w, "PATH")),
 			color.Bold("SYNOPSIS"))
@@ -220,10 +213,6 @@ func runCommands(args []string) error {
 func renderCommandsMarkdown(cmds []CommandJSON) string {
 	var b strings.Builder
 	b.WriteString("<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n")
-	// Command descriptions are authored for terminal help and may
-	// contain indented or +/- prefixed lines; disable the list-shape
-	// rules here so help-text wording never has to satisfy markdownlint
-	// in this derived file. Structural markdown below is generator-owned.
 	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
 	b.WriteString("# CLI reference\n\n")
 	b.WriteString("Complete listing of every `sparkwing` command, flag, and argument, " +

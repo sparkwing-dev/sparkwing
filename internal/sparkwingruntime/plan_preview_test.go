@@ -19,8 +19,6 @@ func nopStep(ctx context.Context) error {
 	return nil
 }
 
-// --- Single-step pipeline: every step would_run, no skips. ---
-
 type previewSinglePipe struct{ sparkwing.Base }
 
 func (previewSinglePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -52,8 +50,6 @@ func TestPreviewPlan_SingleStepWouldRun(t *testing.T) {
 		t.Errorf("expected would_run, got %q", preview.Nodes[0].Decision)
 	}
 }
-
-// --- SkipIf-always-true: step shows skip_reason=user_skipif. ---
 
 type previewSkipPipe struct{ sparkwing.Base }
 
@@ -103,8 +99,6 @@ func TestPreviewPlan_UserSkipIfReportedAsUserSkipIf(t *testing.T) {
 		}
 	}
 }
-
-// --- --start-at on second step: first step shows skip_reason=range_skip. ---
 
 type previewRangePipe struct{ sparkwing.Base }
 
@@ -156,12 +150,6 @@ func TestPreviewPlan_StartAtRangeSkipReported(t *testing.T) {
 		}
 	}
 }
-
-// --- PreviewPlan rejects unknown --start-at / --stop-at with the same
-// Levenshtein-suggesting error as the orchestrator's dispatch path.
-// Without this, a typo silently no-ops the filter and every step
-// renders would_run -- the same footgun the dispatch path already
-// guards against.
 
 type previewRangeValidatePipe struct{ sparkwing.Base }
 
@@ -225,8 +213,6 @@ func TestPreviewPlan_UnknownStartAtFarMissListsAvailable(t *testing.T) {
 	if previewExecCounter.Load() != 0 {
 		t.Fatalf("step body executed during failed preview (counter = %d)", previewExecCounter.Load())
 	}
-	// Far miss: no Levenshtein suggestion, but the available step ids
-	// should appear so the operator can pick one.
 	for _, want := range []string{"--sw-start-at", `"completely-unrelated-name"`, "install-argocd", "install-karpenter"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q\nfull: %s", want, err.Error())
@@ -262,13 +248,10 @@ func TestPreviewPlan_KnownStartAtSucceeds(t *testing.T) {
 	}
 }
 
-// --- Dynamic fan-out: SpawnNodeForEach reports cardinality=unresolved. ---
-
 type previewFanOutJob struct{ sparkwing.Base }
 
 func (previewFanOutJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "seed", nopStep)
-	// Empty-slice generator is fine for plan-time -- we never run it.
 	sparkwing.JobSpawnEach(w, []string{}, func(s string) (string, any) {
 		return "child-" + s, nopStep
 	})
@@ -311,8 +294,6 @@ func TestPreviewPlan_DynamicFanOutCardinalityUnresolved(t *testing.T) {
 	}
 }
 
-// --- Resolved args + lint warnings round-trip onto the wire shape. ---
-
 type previewArgsInputs struct {
 	Tag string `flag:"tag" desc:"a tag"`
 }
@@ -323,9 +304,6 @@ func (previewArgsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ preview
 	sparkwing.Job(plan, "only", nopStep)
 	return nil
 }
-
-// --- OnFailure recovery node surfaces with on_failure_of pointing
-// back at the parent.
 
 type previewOnFailurePipe struct{ sparkwing.Base }
 
@@ -367,8 +345,6 @@ func TestPreviewPlan_OnFailureRecoverySurfaced(t *testing.T) {
 		t.Errorf("recovery OnFailureOf: got %q, want %q", rec.OnFailureOf, "build")
 	}
 
-	// Parent should NOT carry OnFailureOf -- it's the source, not the
-	// recovery target.
 	for _, n := range preview.Nodes {
 		if n.ID == "build" && n.OnFailureOf != "" {
 			t.Errorf("parent 'build' should have empty OnFailureOf, got %q", n.OnFailureOf)

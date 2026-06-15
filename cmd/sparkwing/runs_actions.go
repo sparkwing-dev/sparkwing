@@ -131,8 +131,6 @@ func reportResults(out io.Writer, action string, results []runResult) error {
 	return nil
 }
 
-// ---- retry ---------------------------------------------------------
-
 func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
@@ -148,11 +146,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsRetry.Path, rest[0])
 	}
-	// Force callers to make the rerun-scope choice explicit: silent
-	// defaults caused operators to ship "rerun from failed" when they
-	// meant "rerun all" (and vice versa) because the two are visually
-	// indistinguishable in the trigger queue. Requiring one of the
-	// flags makes the intent show up in the shell history.
 	switch {
 	case *fromFailed && *all:
 		return fmt.Errorf("%s: --failed and --all are mutually exclusive", cmdJobsRetry.Path)
@@ -172,13 +165,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// Reruns dispatch asynchronously in the localws consumer, so the
-	// CLI returns as soon as the trigger lands. For each queued
-	// retry, print a single-line "submitted" confirmation followed
-	// by the matching `runs logs --follow` command so the operator
-	// can copy-paste straight into the same terminal. Failures keep
-	// the source id visible so the user can correlate which retry
-	// blew up when several were piped in at once.
 	failures := 0
 	for _, srcID := range ids {
 		newID, err := c.RetryRun(ctx, srcID, full)
@@ -206,8 +192,6 @@ func profileSuffix(on string) string {
 	}
 	return " --profile " + on
 }
-
-// ---- cancel --------------------------------------------------------
 
 func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
@@ -243,8 +227,6 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	}
 	return reportResults(os.Stdout, "cancel", results)
 }
-
-// ---- prune ---------------------------------------------------------
 
 func runRunsPrune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)

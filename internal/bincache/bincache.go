@@ -74,8 +74,6 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	// Temp + rename so partial downloads never leave a half-written
-	// binary at the canonical path.
 	tmp := dest + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
@@ -156,7 +154,6 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return "", err
 	}
-	// git refuses to write into a non-empty dir; wipe stale state.
 	if err := os.RemoveAll(workTree); err != nil {
 		return "", fmt.Errorf("clear workTree: %w", err)
 	}
@@ -318,8 +315,6 @@ func RepoURLFromGitHub(fullName string) string {
 	return "git@github.com:" + fullName + ".git"
 }
 
-// --- compile helpers ---
-
 // SparkwingHome honors SPARKWING_HOME if set, otherwise ~/.sparkwing.
 func SparkwingHome() string {
 	if h := os.Getenv("SPARKWING_HOME"); h != "" {
@@ -401,8 +396,6 @@ func (lb *lockedBuffer) Bytes() []byte {
 // warning is written to stderr so the operator knows sparks pinning
 // is dormant for this build.
 func CompilePipeline(sparkwingDir, dest string) error {
-	// Bare exec.Command("go", ...) with no Go on PATH surfaces a
-	// confusing message; preempt with a clearer one.
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
@@ -428,10 +421,6 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
 	cmd.Dir = sparkwingDir
-	// Capture both streams: go-build splits diagnostics across stdout
-	// and stderr depending on flags / toolchain stage (e.g. the
-	// `go: go.mod requires go >= X` toolchain check writes to stderr,
-	// while compiler errors land on stdout). We surface both.
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
@@ -465,7 +454,6 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 	case "off":
 		return "", false
 	case "":
-		// fall through to the walk
 	default:
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
@@ -502,9 +490,6 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
 	h := sha256.New()
 
-	// Mix only major.minor of the Go runtime; patch releases don't
-	// change generated-code ABI but commonly differ between operator
-	// + CI installs.
 	fmt.Fprintf(h, "go:%s\n", goMajorMinor())
 	fmt.Fprintf(h, "arch:%s/%s\n", goos, goarch)
 
@@ -525,9 +510,6 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 		}
 	}
 
-	// Overlay modfile: when sparks are consumed via .resolved.mod
-	// instead of local replaces, the replace-target walk doesn't
-	// capture version bumps. Hash overlay contents directly.
 	for _, overlay := range []struct {
 		name   string
 		prefix string
@@ -604,7 +586,7 @@ func goSourceOnly(name string) bool {
 // goMajorMinor returns runtime.Version()'s "go1.26" prefix, stripping
 // the patch component.
 func goMajorMinor() string {
-	v := runtime.Version() // "go1.26.0", "go1.26.2", "devel ..."
+	v := runtime.Version()
 	dots := 0
 	for i, c := range v {
 		if c == '.' {
@@ -634,8 +616,6 @@ func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, path)
-		// Content-hash, not mtime+size: cross-machine cache requires
-		// a reproducible key (mtime diverges between checkouts).
 		f, err := os.Open(path)
 		if err != nil {
 			return err

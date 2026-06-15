@@ -20,8 +20,6 @@ func TestBuildRunInvocation_NoProfileOmitsBlocks(t *testing.T) {
 }
 
 func TestBuildRunInvocation_ProfileSetButNoChainOmits(t *testing.T) {
-	// Defensive: a profile without a chain (caller forgot, legacy path)
-	// emits nothing rather than a partial block.
 	opts := Options{Pipeline: "demo", Profile: &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}}
 	inv := buildRunInvocation(opts, "run-1")
 	if _, ok := inv["profile"]; ok {
@@ -50,7 +48,6 @@ func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
 	if be["state"] != "controller://prod" || be["logs"] != "controller://prod" || be["cache"] != "controller://prod" {
 		t.Errorf("backends block = %#v", be)
 	}
-	// Neither the controller URL nor the token may appear anywhere.
 	if _, leaked := prof["controller"]; leaked {
 		t.Error("profile block must not carry a controller field")
 	}

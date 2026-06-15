@@ -112,7 +112,7 @@ func glyphFor(status string, style SparklineStyle) string {
 		default:
 			return "·"
 		}
-	default: // ascii
+	default:
 		switch status {
 		case "success":
 			return "✓"

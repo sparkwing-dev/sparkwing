@@ -28,8 +28,6 @@ type claimResp struct {
 func (s *stubClaimer) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error) {
 	idx := int(s.calls.Add(1)) - 1
 	if idx >= len(s.responses) {
-		// Exhausted responses: block until cancel so the test's bound
-		// is MaxClaims, not len(responses).
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -47,8 +45,6 @@ func discardLogger() *slog.Logger {
 }
 
 func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
-	// 5 successive claimed results, MaxClaims=3 -> loop exits after
-	// the third claim is dispatched. 4th ClaimNode should never run.
 	stub := &stubClaimer{responses: []claimResp{
 		{node: fakeNode("a")},
 		{node: fakeNode("b")},
@@ -66,7 +62,7 @@ func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
 		ControllerURL: "http://stub",
 		HolderPrefix:  "test",
 		MaxConcurrent: 1,
-		PollInterval:  time.Millisecond, // fast spin; no empty responses expected
+		PollInterval:  time.Millisecond,
 		MaxClaims:     3,
 		SourceName:    "test runner",
 	})
@@ -87,9 +83,6 @@ func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
 }
 
 func TestRunPoolLoop_MaxClaimsZeroIsUnlimited(t *testing.T) {
-	// MaxClaims=0 must not terminate the loop; it runs until ctx
-	// cancels regardless of claim count. We program 50 claims and
-	// bail via ctx cancel after ~100ms, expecting >20 to happen.
 	nodes := make([]claimResp, 50)
 	for i := range nodes {
 		nodes[i] = claimResp{node: fakeNode("n")}
@@ -106,7 +99,7 @@ func TestRunPoolLoop_MaxClaimsZeroIsUnlimited(t *testing.T) {
 		HolderPrefix:  "test",
 		MaxConcurrent: 1,
 		PollInterval:  time.Millisecond,
-		MaxClaims:     0, // unlimited
+		MaxClaims:     0,
 		SourceName:    "test agent",
 	})
 
@@ -117,24 +110,17 @@ func TestRunPoolLoop_MaxClaimsZeroIsUnlimited(t *testing.T) {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 
-	// Loose bound: 100ms with microsecond-fast stubs should comfortably
-	// exceed a few claims; exact count is scheduler-dependent. We just
-	// want to confirm the loop did NOT stop at some implicit small N.
 	if got := executed.Load(); got < 5 {
 		t.Errorf("unlimited loop dispatched %d; want at least 5", got)
 	}
 }
 
 func TestRunPoolLoop_EmptyPollsDoNotTickCounter(t *testing.T) {
-	// The MaxClaims counter must only tick on "claimed" outcomes. A
-	// transient empty poll followed by real work should still run to
-	// MaxClaims successful claims, not terminate early because the
-	// empty poll ate budget.
 	stub := &stubClaimer{responses: []claimResp{
-		{node: nil},           // empty
-		{node: fakeNode("a")}, // claimed 1
-		{node: nil, err: errors.New("transient")}, // error
-		{node: fakeNode("b")},                     // claimed 2
+		{node: nil},
+		{node: fakeNode("a")},
+		{node: nil, err: errors.New("transient")},
+		{node: fakeNode("b")},
 	}}
 
 	var executed atomic.Int64

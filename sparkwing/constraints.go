@@ -59,8 +59,6 @@ type fieldMeta struct {
 	Custom    reflect.Value // func(T) error
 }
 
-// --- Required / RequiredWhen ---
-
 type requiredConstraint struct{}
 
 func (requiredConstraint) applyTo(m *fieldMeta) error {
@@ -97,8 +95,6 @@ func (requiredWhenConstraint) isConstraint() {}
 // express conditions like "required when target=prod AND image
 // unset"; see [Predicate] for the full vocabulary.
 func RequiredWhen(p Predicate) Constraint { return requiredWhenConstraint{pred: p} }
-
-// --- Default / Computed ---
 
 type defaultConstraint struct{ value any }
 
@@ -155,8 +151,6 @@ func (computedConstraint) isConstraint() {}
 // when possible).
 func Computed(fn any) Constraint { return computedConstraint{fn: fn} }
 
-// --- DependsOn / Bind ---
-
 type dependsOnConstraint struct{ names []string }
 
 func (c dependsOnConstraint) applyTo(m *fieldMeta) error {
@@ -196,8 +190,6 @@ func (bindConstraint) isConstraint() {}
 // for future schema-bearing kinds; passing an unknown name errors at
 // schema-build time.
 func Bind(argName string) Constraint { return bindConstraint{argName: argName} }
-
-// --- Value validators: OneOf / Min / Max / Range / Positive / Custom ---
 
 type oneOfConstraint struct{ values []any }
 

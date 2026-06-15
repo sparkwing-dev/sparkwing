@@ -46,8 +46,6 @@ func runDocsMigrationsList(args []string) error {
 	var output string
 	var wf docsWebFlags
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | table | json | plain")
-	// Migrations list is version-agnostic (it enumerates every guide
-	// the source knows about), so we don't expose --version here.
 	registerWebFlags(fs, &wf, false)
 	if err := parseAndCheck(cmdDocsMigrationsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -116,8 +114,6 @@ func runDocsMigrationsRead(args []string) error {
 		}
 		body = b
 	} else {
-		// Embedded path. If the requested version isn't in this
-		// binary, suggest --web.
 		b, err := docs.MigrationsRead(wf.version)
 		if err != nil {
 			var sb strings.Builder
@@ -237,7 +233,6 @@ func filterAndOrderBetween(all []docs.MigrationEntry, from, to string) []docs.Mi
 			picked = append(picked, e)
 		}
 	}
-	// Ascending.
 	for i := 1; i < len(picked); i++ {
 		for j := i; j > 0 && semver.Compare(picked[j-1].Version, picked[j].Version) > 0; j-- {
 			picked[j-1], picked[j] = picked[j], picked[j-1]

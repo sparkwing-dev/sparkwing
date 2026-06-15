@@ -119,9 +119,6 @@ func runDashboardStart(args []string) error {
 		return err
 	}
 
-	// Fail loudly in the foreground if this binary was built without
-	// the dashboard bundle; otherwise the detached supervisor would
-	// crash into dashboard.log where the user is unlikely to look.
 	if err := web.VerifyBundleEmbedded(); err != nil {
 		return err
 	}
@@ -131,9 +128,6 @@ func runDashboardStart(args []string) error {
 		return err
 	}
 
-	// If a supervisor we own is already running, restart it. Common
-	// case: user upgraded the sparkwing binary and wants the fresh
-	// embedded dashboard bundle picked up without a manual kill cycle.
 	if pid, alive := readLivePID(dp.pid); alive {
 		fmt.Fprintf(os.Stdout, "==> stopping previous dashboard (pid %d) for restart\n", pid)
 		if err := stopSupervisor(pid, dp.pid); err != nil {
@@ -141,12 +135,6 @@ func runDashboardStart(args []string) error {
 		}
 	}
 
-	// Pre-check the bind address. If something else is already on it
-	// (a stale sparkwing-local-ws, another dashboard supervisor we
-	// don't track, a port-clash with a dev server), the supervisor
-	// would crash silently into dashboard.log and `kill` would then
-	// report "not running" -- because we never got to write the PID
-	// file. Surface the clash here instead.
 	if holder, err := portHolder(addr); err != nil {
 		return err
 	} else if holder != "" {
@@ -196,8 +184,6 @@ func runDashboardStart(args []string) error {
 		return fmt.Errorf("spawn supervisor: %w", err)
 	}
 	pid := cmd.Process.Pid
-	// Don't Wait -- detached on purpose. The OS reaps on exit; we'll
-	// pick up via PID file + kill(0) on subsequent invocations.
 	_ = cmd.Process.Release()
 
 	baseURL := "http://" + addr
@@ -209,8 +195,6 @@ func runDashboardStart(args []string) error {
 		}
 		return fmt.Errorf("dashboard supervisor (pid %d) failed to accept connections within 3s; tail of %s:\n%s", pid, dp.log, tail)
 	}
-	// Confirm the supervisor wrote its PID file -- otherwise `kill`
-	// later will say "not running" even though the listener is up.
 	if _, alive := readLivePID(dp.pid); !alive {
 		_ = signalTerminate(pid)
 		return fmt.Errorf("dashboard supervisor came up but never wrote %s; check %s", dp.pid, dp.log)
@@ -394,14 +378,9 @@ func portHolder(addr string) (string, error) {
 		_ = ln.Close()
 		return "", nil
 	}
-	// errno EADDRINUSE on POSIX, WSAEADDRINUSE on Windows. We don't
-	// match on the errno value (cross-platform pain); the substring
-	// "in use" is in both standard messages.
 	if !strings.Contains(strings.ToLower(err.Error()), "in use") {
 		return "", fmt.Errorf("probe %s: %w", addr, err)
 	}
-	// Best-effort identification. lsof is on macOS + most Linux
-	// distros; fall back to "another process" if it's missing.
 	port := addr
 	if i := strings.LastIndex(addr, ":"); i >= 0 {
 		port = addr[i+1:]

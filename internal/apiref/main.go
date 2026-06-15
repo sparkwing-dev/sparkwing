@@ -44,7 +44,7 @@ func main() {
 
 	scopes := map[string]string{}
 	collectScopes(scopes, authsrc)
-	collectScopes(scopes, logs) // logs declares scope consts in server.go
+	collectScopes(scopes, logs)
 
 	var b strings.Builder
 	b.WriteString("<!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->\n")

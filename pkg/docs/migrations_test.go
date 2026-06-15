@@ -46,8 +46,6 @@ func TestMigrationsList_PopulatesTitle(t *testing.T) {
 }
 
 func TestMigrationsList_PopulatesDateAndSummaryFromIndex(t *testing.T) {
-	// docs/migrations/README.md has a row for v0.4.0; verify the
-	// index enrichment fired.
 	var got *MigrationEntry
 	for i, e := range MigrationsList() {
 		if e.Version == "v0.4.0" {
@@ -91,7 +89,6 @@ func TestMigrationsRead_InvalidSemverErrors(t *testing.T) {
 }
 
 func TestMigrationsBetween_IncludesToButExcludesFrom(t *testing.T) {
-	// (v0.3.0, v0.4.0] should include v0.4.0 (which is embedded).
 	entries, err := MigrationsBetween("v0.3.0", "v0.4.0")
 	if err != nil {
 		t.Fatalf("MigrationsBetween: %v", err)
@@ -106,7 +103,6 @@ func TestMigrationsBetween_IncludesToButExcludesFrom(t *testing.T) {
 		t.Errorf("expected v0.4.0 in (v0.3.0, v0.4.0]; got %+v", entries)
 	}
 
-	// (v0.4.0, v0.4.0] should be empty (from is exclusive).
 	entries, err = MigrationsBetween("v0.4.0", "v0.4.0")
 	if err != nil {
 		t.Fatalf("MigrationsBetween: %v", err)

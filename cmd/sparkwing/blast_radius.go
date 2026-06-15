@@ -48,9 +48,6 @@ func lookupCachedRisks(sparkwingDir, pipelineName string) []stepRiskFinding {
 				Labels: row.Labels,
 			})
 		}
-		// Fallback to the union list when the per-step breakdown is
-		// empty but the union is populated. Step ids are unknown so
-		// the surfaced finding references the pipeline only.
 		if len(out) == 0 && len(s.Risks) > 0 {
 			out = append(out, stepRiskFinding{Labels: s.Risks})
 		}
@@ -108,8 +105,6 @@ func enforceRiskGate(
 		return nil
 	}
 
-	// Report the first offending step with the FULL missing union so
-	// the operator can satisfy the gate in one retry.
 	allMissing := make([]string, 0, len(missingUnion))
 	for l := range missingUnion {
 		allMissing = append(allMissing, l)

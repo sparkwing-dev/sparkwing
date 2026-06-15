@@ -50,7 +50,7 @@ func runDocsVersions(args []string) error {
 	cliVersion := embeddedVersion()
 
 	rows := make([]versionRow, 0, len(embedded))
-	seen := map[string]int{} // version -> index into rows
+	seen := map[string]int{}
 	for _, v := range embedded {
 		row := versionRow{Version: v, Source: "embedded"}
 		if v == cliVersion {

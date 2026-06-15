@@ -71,7 +71,7 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 	useColor := f == formatANSI
 	pr := logpretty.NewPrettyRendererTo(w, useColor)
 	scanner := bufio.NewScanner(bytes.NewReader(src))
-	// 1 MiB matches the largest single-line payload observed in CI.
+	// perf: 1 MiB cap matches the largest single-line payload seen in CI; default 64 KiB drops lines silently.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -94,8 +94,6 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 		}
 		pr.Emit(rec)
 	}
-	// End-of-stream: drain any buffered node_start / step_end so a
-	// log fetched without a follow-up event still surfaces them.
 	pr.Flush()
 }
 
@@ -150,10 +148,6 @@ func renderSSELogLine(payload []byte, f logFormat) []string {
 	var buf bytes.Buffer
 	pr := logpretty.NewPrettyRendererTo(&buf, f == formatANSI)
 	pr.Emit(rec)
-	// SSE renders one record per call with a fresh renderer, so the
-	// buffer-and-collapse logic in Emit has no follow-up event to
-	// merge with. Flush immediately so each record produces its
-	// stand-alone line.
 	pr.Flush()
 	return strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 }

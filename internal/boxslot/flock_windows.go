@@ -8,14 +8,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// LockFileEx mirrors POSIX flock's per-process advisory-exclusive
-// semantics closely enough for the boxslot scheme: the lock is
-// released when the file handle closes (process exit included), and
-// LOCKFILE_FAIL_IMMEDIATELY gives the non-blocking variant.
-//
-// We lock the full file extent so adding a future shared-lock variant
-// over a different byte range stays a clean extension.
-
 const lockBytes = 1 << 30
 
 func flockExclusive(f *os.File) error {

@@ -178,7 +178,6 @@ func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 	if produced.OutputType() == nil {
 		t.Fatal("typed sw.Step should set OutputType from fn return")
 	}
-	// Drive the producing step's fn directly so we control timing.
 	out, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(produced)(context.Background())
 	if err != nil {
 		t.Fatalf("produce fn returned %v", err)
@@ -342,8 +341,6 @@ func TestJobFanOutDynamic_RegistersExpansion(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("fn should not run at registration; ran %d times", calls)
 	}
-	// Resolve via an in-process Ref resolver to exercise the
-	// reflection-driven slice traversal end-to-end.
 	ctx := sparkwingruntime.WithResolver(context.Background(), func(id string) (any, bool) {
 		if id == "discover" {
 			return []string{"a", "b", "c"}, true
@@ -392,12 +389,6 @@ func TestWork_StepFnReturnsError(t *testing.T) {
 	}
 }
 
-// SpawnNodeForEach validates fn signature at Plan time so
-// a wrong-shaped fn panics during plan construction rather than
-// during dispatch (which previously surfaced as a runtime spawn
-// error after the parent's Needs cleared, much later than the
-// structural mistake actually happened).
-
 func TestSpawnNodeForEach_RejectsNonSliceItems(t *testing.T) {
 	expectSpawnEachPanic(t, "items must be a slice", func() {
 		w := sparkwing.NewWork()
@@ -426,8 +417,6 @@ func TestSpawnNodeForEach_RejectsWrongArgCount(t *testing.T) {
 func TestSpawnNodeForEach_RejectsWrongReturnCount(t *testing.T) {
 	expectSpawnEachPanic(t, "fn must return (string, sparkwing.Workable)", func() {
 		w := sparkwing.NewWork()
-		// The panic message lists both accepted shapes; we just need
-		// "(string, sparkwing.Workable)" to appear somewhere in it.
 		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) string { return "" })
 	})
 }
@@ -453,7 +442,6 @@ func TestSpawnNodeForEach_RejectsNonStringFirstReturn(t *testing.T) {
 func TestSpawnNodeForEach_RejectsNonWorkableSecondReturn(t *testing.T) {
 	expectSpawnEachPanic(t, "must be sparkwing.Workable or func", func() {
 		w := sparkwing.NewWork()
-		// int is neither Workable nor func(ctx) error.
 		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) (string, int) {
 			return "", 0
 		})

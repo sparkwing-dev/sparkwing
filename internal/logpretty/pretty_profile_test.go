@@ -39,7 +39,6 @@ func TestProfileBanner_ControllerRendersAllFields(t *testing.T) {
 		map[string]any{"name": "prod", "source": "flag", "detect_via": "", "mirror_local": true},
 		map[string]any{"state": "controller://prod", "logs": "controller://prod", "cache": "controller://prod"},
 	)
-	// Order: profile header, then via/state/logs/cache/mirror.
 	for _, want := range []string{
 		"profile:  prod",
 		"via:    --profile flag",
@@ -52,8 +51,6 @@ func TestProfileBanner_ControllerRendersAllFields(t *testing.T) {
 			t.Errorf("banner missing %q; got:\n%s", want, out)
 		}
 	}
-	// Token / controller URL must never leak (we only emit the strings
-	// we were given, but assert defensively).
 	if strings.Contains(out, "swu_") {
 		t.Errorf("token leaked:\n%s", out)
 	}

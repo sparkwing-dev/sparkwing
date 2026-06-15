@@ -1,9 +1,5 @@
 package docs_test
 
-// Guardrail: pkg/docs/mirror/ must match docs/ byte-for-byte so the
-// embedded CLI docs don't drift from the canonical docs/ source tree.
-// To unblock: bash bin/sync-docs.sh && git add pkg/docs/mirror/.
-
 import (
 	"crypto/sha256"
 	"encoding/hex"

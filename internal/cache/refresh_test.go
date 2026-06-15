@@ -33,7 +33,6 @@ func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Build an upstream "GitHub" with one commit on main.
 	upstream := filepath.Join(tmp, "upstream.git")
 	mustGit(t, "", "init", "--bare", upstream)
 	work := filepath.Join(tmp, "work")
@@ -41,30 +40,22 @@ func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 	mustGit(t, work, "config", "user.email", "t@t")
 	mustGit(t, work, "config", "user.name", "t")
 	mustGit(t, work, "commit", "--allow-empty", "-m", "first")
-	// rename default branch to main if needed
 	mustGit(t, work, "branch", "-M", "main")
 	mustGit(t, work, "push", "origin", "main")
 
-	// 2. Pretend the cache has already cloned this upstream as a bare mirror.
-	//    Use the real repoHash so handleGitRefresh's name->URL->hash chain
-	//    resolves to the same path on disk.
 	repoURL := upstream
 	hash := repoHash(repoURL)
 	bareRepo := filepath.Join(repoDir, hash+".git")
 	mustGit(t, "", "clone", "--bare", upstream, bareRepo)
 
-	// 3. Push a NEW commit to upstream that the bare mirror doesn't know
-	//    about yet (mirrors the "operator pushed; cache hasn't fetched" race).
 	mustGit(t, work, "commit", "--allow-empty", "-m", "post-push")
 	mustGit(t, work, "push", "origin", "main")
 	wantSHA := strings.TrimSpace(string(mustGitOut(t, work, "rev-parse", "HEAD")))
 
-	// Sanity: the bare mirror should NOT contain wantSHA yet.
 	if err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", wantSHA).Run(); err == nil {
 		t.Fatalf("setup wrong: bare mirror already had %s before refresh", wantSHA)
 	}
 
-	// 4. Hit the endpoint.
 	req := httptest.NewRequest(http.MethodPost, "/git/refresh?repo="+repoURL, nil)
 	w := httptest.NewRecorder()
 	handleGitRefresh(w, req)
@@ -81,7 +72,6 @@ func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 		t.Errorf("response missing ok=true: %v", resp)
 	}
 
-	// 5. Verify the fetch actually landed: the bare mirror now knows wantSHA.
 	if err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", wantSHA).Run(); err != nil {
 		t.Errorf("after /git/refresh, bare mirror still missing %s: %v", wantSHA, err)
 	}
@@ -130,8 +120,6 @@ func TestHandleGitRefresh_GETRejected(t *testing.T) {
 		t.Errorf("status: got %d, want 405", w.Code)
 	}
 }
-
-// --- helpers ---
 
 func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()

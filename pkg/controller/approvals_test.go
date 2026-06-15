@@ -51,7 +51,6 @@ func TestApprovals_RequestThenApprove(t *testing.T) {
 		t.Fatalf("CreateApproval: %v", err)
 	}
 
-	// Node flipped to approval_pending.
 	n, err := st.GetNode(ctx, "run-1", "gate")
 	if err != nil {
 		t.Fatal(err)

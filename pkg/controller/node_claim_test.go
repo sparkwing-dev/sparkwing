@@ -48,7 +48,6 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	c := client.New(srv.URL, nil)
 	ctx := context.Background()
 
-	// Empty queue.
 	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second)
 	if err != nil || n != nil {
 		t.Fatalf("expected (nil, nil) on empty queue, got (%v, %v)", n, err)
@@ -70,18 +69,15 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 		t.Fatalf("claimed_by: %q", n.ClaimedBy)
 	}
 
-	// Heartbeat by the holder succeeds.
 	if err := c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-1", 30*time.Second); err != nil {
 		t.Fatalf("HeartbeatNodeClaim (holder): %v", err)
 	}
 
-	// Heartbeat by a different pod -> ErrLockHeld.
 	err = c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 30*time.Second)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
 	}
 
-	// Revoke while claimed -> false.
 	revoked, err := c.RevokeNodeReady(ctx, "run-1", "node-a")
 	if err != nil {
 		t.Fatalf("RevokeNodeReady: %v", err)
@@ -119,7 +115,6 @@ func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
 	if !revoked {
 		t.Fatal("revoke should succeed on ready, unclaimed node")
 	}
-	// Now unclaimable.
 	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -161,8 +156,6 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Mark special ready first so FIFO would hand it out before anyone,
-	// proving the label filter -- not ordering -- is what skips it.
 	if err := c.MarkNodeReady(ctx, "run-1", "special"); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +164,6 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Unlabeled runner claims the unlabeled node; 'special' is skipped.
 	n, err := c.ClaimNode(ctx, "plain-runner", nil, 30*time.Second)
 	if err != nil {
 		t.Fatalf("ClaimNode plain: %v", err)
@@ -180,7 +172,6 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 		t.Fatalf("plain runner claim: %+v", n)
 	}
 
-	// Labeled runner claims the skipped node.
 	n, err = c.ClaimNode(ctx, "special-runner", []string{"special"}, 30*time.Second)
 	if err != nil {
 		t.Fatalf("ClaimNode labeled: %v", err)

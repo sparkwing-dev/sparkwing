@@ -8,14 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Every "unknown pipeline X" surface in the orchestrator
-// (printPipelineHelp, printPipelinePlan, parseTypedFlags,
-// printPipelineRuntimePlan) routes through unknownPipelineErr,
-// which composes a Levenshtein "did you mean Y?" suggestion when
-// the typo is close to a registered name. These tests pin the
-// suggestion behavior so a future helper edit can't silently
-// regress to the flat error.
-
 // suggestFixturePipe is a minimal registered pipeline used to
 // populate sparkwing.Registered() for the suggestion tests.
 type suggestFixturePipe struct{ sparkwing.Base }
@@ -26,13 +18,7 @@ func (suggestFixturePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 
 func registerSuggestFixtures(t *testing.T) {
 	t.Helper()
-	// Names chosen so "claster-up" is one edit from "cluster-up"
-	// (close), "totallyunrelated" is far from any (no suggestion),
-	// and "helo" / "hello" exercises the typo-suggestion path.
 	for _, n := range []string{"cluster-up", "cluster-down", "hello"} {
-		// Re-register is idempotent if the same name was used in a
-		// previous test run; sparkwing.Register panics on duplicate
-		// so we guard via Lookup.
 		if _, ok := sparkwing.Lookup(n); ok {
 			continue
 		}

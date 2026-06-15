@@ -60,12 +60,6 @@ func (l *nodeLogger) Close() error {
 	return l.file.Close()
 }
 
-// PrettyRenderer, NewPrettyRenderer, NewPrettyRendererTo, and
-// StripANSI moved to internal/logpretty so thin binaries (web,
-// controller, logs) can render log streams without dragging in the
-// dispatch engine. These re-exports keep the orchestrator package's
-// existing call sites compiling unchanged.
-
 // PrettyRenderer is the TTY-facing Logger.
 type PrettyRenderer = logpretty.PrettyRenderer
 

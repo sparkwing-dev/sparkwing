@@ -31,14 +31,10 @@ func TestSecretsRoundTrip(t *testing.T) {
 	if got.Value != "abc123" {
 		t.Fatalf("GetSecret value=%q want abc123", got.Value)
 	}
-	// Auth is disabled in newTestServer, so the handler stamps
-	// "anonymous" as the principal.
 	if got.Principal != "anonymous" {
 		t.Fatalf("GetSecret principal=%q want anonymous", got.Principal)
 	}
 
-	// List must NOT leak the raw value -- that is the entire reason
-	// the list and get endpoints are split.
 	secs, err := c.ListSecrets(ctx)
 	if err != nil {
 		t.Fatalf("ListSecrets: %v", err)
@@ -53,8 +49,6 @@ func TestSecretsRoundTrip(t *testing.T) {
 		t.Fatalf("ListSecrets name=%q want api_token", secs[0].Name)
 	}
 
-	// Delete returns nil; a follow-up returns ErrNotFound so the CLI
-	// can surface a clear "already gone" message.
 	if err := c.DeleteSecret(ctx, "api_token"); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}

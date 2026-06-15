@@ -32,9 +32,6 @@ func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	// Match the route literal inside every `mux.Handle(...)` /
-	// `mux.HandleFunc(...)` / `router.Handle(...)` /
-	// `router.HandleFunc(...)` call.
 	re := regexp.MustCompile(`(?:mux|router)\.Handle(?:Func)?\("((?:GET|POST|PUT|DELETE|PATCH) [^"]+)"`)
 	seen := map[string]int{}
 	for _, m := range re.FindAllSubmatch(body, -1) {
@@ -90,10 +87,6 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		t.Fatalf("decode body %q: %v", body, err)
 	}
-	// handleSession writes {"error": "session header required"}.
-	// authMiddleware writes authErrorBody, which also includes
-	// `message` (and may include `missing_scope`). Presence of
-	// `message` is the distinguishing signal.
 	if _, hasMessage := parsed["message"]; hasMessage {
 		t.Fatalf("bearer middleware caught the request before handleSession ran: "+
 			"someone gated /api/v1/auth/session behind auth, breaking the dashboard "+

@@ -87,7 +87,6 @@ func runDocsRead(args []string) error {
 		}
 		return err
 	}
-	// Allow a positional fallback for ergonomics: `sparkwing docs read pipelines`.
 	if *topic == "" && fs.NArg() > 0 {
 		*topic = fs.Arg(0)
 	}
@@ -156,8 +155,6 @@ func runDocsSearch(args []string) error {
 		}
 		return err
 	}
-	// Positional fallback so `sparkwing docs search "warm pool"` works
-	// without --query.
 	if query == "" && fs.NArg() > 0 {
 		query = strings.Join(fs.Args(), " ")
 	}
@@ -176,8 +173,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(entries)
 	case "plain":
-		// One slug per line. Useful for shell loops:
-		// `for s in $(sparkwing docs list -o plain); do ...`
 		for _, e := range entries {
 			fmt.Println(e.Slug)
 		}
@@ -187,7 +182,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 			fmt.Println(color.Dim("(no docs match)"))
 			return nil
 		}
-		// Compute column widths for human-readable alignment.
 		slugW := len("SLUG")
 		titleW := len("TITLE")
 		for _, e := range entries {
@@ -198,14 +192,8 @@ func renderDocsList(entries []docs.Entry, output string) error {
 				titleW = n
 			}
 		}
-		// Cap title width so a long title doesn't push the summary
-		// off-screen on a typical 120-col terminal.
 		const titleCap = 40
 		titleW = min(titleW, titleCap)
-		// Pad the headers BEFORE wrapping in color.Bold -- the bold
-		// escapes contain invisible ANSI bytes that %-*s would
-		// count toward the column width, shifting the header row
-		// out of alignment with the data rows below it.
 		fmt.Printf("%s  %s  %s\n",
 			color.Bold(fmt.Sprintf("%-*s", slugW, "SLUG")),
 			color.Bold(fmt.Sprintf("%-*s", titleW, "TITLE")),
@@ -216,7 +204,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 				title = title[:titleW-1] + "…"
 			}
 			summary := e.Summary
-			// Trim summary to leave room on a typical 120-col term.
 			const summaryCap = 70
 			if len(summary) > summaryCap {
 				summary = summary[:summaryCap-1] + "…"

@@ -72,7 +72,6 @@ func TestConcurrency_Semaphore(t *testing.T) {
 			t.Fatalf("arrival %d: want Granted got %s", i, resp.Kind)
 		}
 	}
-	// Fourth arrival should queue.
 	r4 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r4/n1", RunID: "r4", NodeID: "n1",
 		Capacity: 3, Policy: store.OnLimitQueue,
@@ -113,7 +112,6 @@ func TestConcurrency_Skip(t *testing.T) {
 	if r2.Kind != store.AcquireSkipped {
 		t.Fatalf("r2: want Skipped got %s", r2.Kind)
 	}
-	// Skip must not insert a waiter row.
 	state, err := s.GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
@@ -155,8 +153,6 @@ func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
 		t.Fatalf("r2: SupersededIDs = %v, want [r1/n1]", r2.SupersededIDs)
 	}
 
-	// r1 is evicted (superseded); r2, the canceller, takes the slot
-	// immediately (best-effort preemption).
 	state, err := s.GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
@@ -181,8 +177,6 @@ func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
 func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
-	// Seed a cache entry by going through a full acquire -> release
-	// with a cache key on a key that starts with no holders.
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
@@ -195,8 +189,6 @@ func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
 
-	// Now a second acquire with the same cache-key hash should return
-	// Cached without inserting any holder row.
 	r2 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
@@ -224,7 +216,6 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
 
-	// BypassRead must not short-circuit on the seeded cache entry.
 	r2 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
@@ -234,15 +225,11 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 		t.Fatalf("r2 with BypassRead: want Granted got %s", r2.Kind)
 	}
 
-	// Release r2 with the same cache-key hash; this is the write that
-	// must still happen under BypassRead.
 	released2, err := s.ReleaseConcurrencySlot(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour)
 	if err != nil || !released2 {
 		t.Fatalf("release r2: released=%v err=%v", released2, err)
 	}
 
-	// A subsequent acquire without BypassRead must hit the cache entry
-	// r2 just wrote (origin = r2/n1, not r1/n1 -- write replaced the row).
 	r3 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
@@ -343,9 +330,6 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
-	// r2's run is finished, so it must be skipped and deleted rather than
-	// minted into a holder; the live waiter behind it (r3) takes the slot,
-	// proving the dead head does not wedge the queue.
 	if len(promoted) != 1 || promoted[0].RunID != "r3" {
 		t.Fatalf("promote: got %+v, want [r3]", promoted)
 	}
@@ -412,7 +396,6 @@ func TestConcurrency_HeartbeatReportsSuperseded(t *testing.T) {
 	if superseded {
 		t.Fatalf("first heartbeat should not report superseded")
 	}
-	// New arrival with CancelOthers -> r1 marked superseded.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitCancelOthers,

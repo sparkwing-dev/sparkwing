@@ -11,11 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// Alternate path for the binary cache via the pluggable
-// storage.ArtifactStore. Same hash keyspace as the HTTP variant
-// (PipelineCacheKey output). Convention: keys are stored at bin/<key>;
-// helpers prepend the prefix.
-
 // FetchFromArtifactStore reads bin/<key> from store and atomic-renames
 // into dest with mode 0o755. Returns storage.ErrNotFound on miss.
 func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, key, dest string) error {

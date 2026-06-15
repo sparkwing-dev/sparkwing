@@ -125,7 +125,6 @@ func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runne
 		}
 	}
 
-	// Cache()/Concurrency() delegate the full acquire/run/release cycle.
 	if result, handled := r.runNodeWithCache(ctx, req); handled {
 		return result
 	}
@@ -148,13 +147,9 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	if err != nil {
 		return nil, err
 	}
-	// Redact secrets before persist + delegate.
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
-	// Persist sparkwing.Annotate() messages onto the node row.
 	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
-	// Persist sparkwing.Summary() markdown onto the node / step row.
 	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
-	// Persist step_start / step_end / step_skipped to node_steps rows.
 	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
 	defer func() { _ = nlog.Close() }()
 
@@ -185,7 +180,6 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		})
 	}
 
-	// Per-node attribution is approximate when nodes share a process.
 	samplerCtx, stopSampler := context.WithCancel(ctx)
 	go nodemetrics.Run(samplerCtx, 2*time.Second, stateMetricsSink{
 		backend: r.backends.State,
@@ -201,8 +195,6 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	nodeCtx := sparkwingruntime.WithLogger(ctx, nlog)
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
 
-	// Snapshot before BeforeRun so replay re-runs hooks fresh.
-	// Best-effort: snapshot failures don't fail the node.
 	if err := r.writeDispatchSnapshot(nodeCtx, runID, node); err != nil {
 		sparkwing.Debug(nodeCtx, "dispatch snapshot: %v", err)
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "dispatch_snapshot_failed", []byte(err.Error()))
@@ -220,8 +212,6 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		}
 	}
 
-	// When RetryConfig.Auto is set, dispatch owns retry; the in-runner
-	// step loop must not also retry or budgets multiply.
 	retryCfg := node.RetryConfig()
 	attempts := retryCfg.Attempts
 	backoff := retryCfg.Backoff
@@ -285,19 +275,10 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		lastErr = aerr
 		timedOut := false
 		if timeout > 0 && errors.Is(aerr, context.DeadlineExceeded) && nodeCtx.Err() == nil {
-			// Attempt ctx fired but parent is live: Timeout modifier,
-			// not operator cancel.
 			lastErr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
 			timedOut = true
 		}
 		lastTimeout = timedOut
-		// IMP-NOTE: we used to also emit a `level=error` log line
-		// here re-stating lastErr.Error(). That duplicated the
-		// structured error already on step_end.attrs.error, doubling
-		// every failure record an agent had to dedupe. The pretty
-		// renderer now surfaces the error message directly under the
-		// merged step_end/node_end line by reading attrs.error from
-		// step_end -- single source of truth, no duplicates.
 	}
 
 done:
@@ -306,10 +287,6 @@ done:
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
 
-	// A sticky logs-append auth failure must fail the node even if
-	// the user job body returned success, since the run's observable
-	// logs are gone. Auth wins over a transient timeout/error since
-	// fixing the user code can't unblock it.
 	if fatal := nodeLogFatal(nlog); fatal != nil {
 		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
 		emitNodeEnd(sparkwing.Failed, wrapped.Error())
@@ -333,9 +310,6 @@ done:
 		return nil, lastErr
 	}
 
-	// Surface soft drops on the run summary so 5xx-driven log loss
-	// stops being a silent observability hole. Best-effort event;
-	// renderers can also aggregate from `logs_drop` events later.
 	if count, reason := nodeLogDrops(nlog); count > 0 {
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
@@ -351,7 +325,6 @@ done:
 	_ = r.backends.State.FinishNode(ctx, runID, node.ID(), string(sparkwing.Success), "", outBytes)
 	_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_succeeded", nil)
 
-	// Memoization runs in the concurrency primitive's release path.
 	return output, nil
 }
 

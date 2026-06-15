@@ -162,11 +162,6 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	if err != nil {
 		return fmt.Errorf("decode snapshot env: %w", err)
 	}
-	// Add the rerun marker but skip the refs scratch dir -- we'd need
-	// to copy outputs into the pod for that to work, which is
-	// out-of-scope for v1. Operators who need ref bodies in cluster
-	// mode can `sparkwing jobs status` then re-fetch from the
-	// controller via curl from inside the pod.
 	envMap["SPARKWING_RERUN"] = "1"
 
 	pod := podName(t.run, t.node)
@@ -247,8 +242,6 @@ func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID s
 		n, err := st.GetNode(ctx, runID, dep)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				// A dep that no longer exists is a soft warning, not
-				// a hard fail -- the operator may still want the shell.
 				fmt.Fprintf(os.Stderr, "warning: dep %s not found, skipping ref file\n", dep)
 				continue
 			}

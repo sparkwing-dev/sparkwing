@@ -13,12 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Mode 3 (direct-DB Postgres) integration tests. Two RunLocal
-// invocations against the same Postgres schema and the same S3
-// bucket; the second hits a coordinated cache reservation written by
-// the first. Cache() routes through pg's concurrency_cache table, so
-// cross-runner reuse falls out for free.
-
 var pgIntegRegisterOnce sync.Once
 
 var pgCacheReplayInvocations atomic.Int32
@@ -111,8 +105,6 @@ func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
 		t.Errorf("invocations after Run B = %d, want 1 (Run B should have hit the pg-coordinated cache)", got)
 	}
 
-	// Inspect Run B's build node -- outcome must be Cached, evidence
-	// the orchestrator routed it through applyCacheHit.
 	nodes, err := stB.ListNodes(context.Background(), resB.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes B: %v", err)
@@ -195,11 +187,8 @@ func TestPgSharing_StateVisibleToStoreBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capabilities: %v", err)
 	}
-	_ = caps // shape varies; we just want to confirm the call doesn't fail.
+	_ = caps
 
-	// Sanity: the pg path keeps using `?` placeholders only at the
-	// store layer; ensure that didn't accidentally leak into the
-	// rendered run.
 	if strings.Contains(got.Pipeline, "?") {
 		t.Errorf("unexpected '?' in pipeline name: %q", got.Pipeline)
 	}

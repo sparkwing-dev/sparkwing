@@ -65,7 +65,6 @@ func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 }
 
 func (s *Store) Put(ctx context.Context, key string, r io.Reader) error {
-	// Buffer: cache server requires Content-Length (no chunked PUTs).
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return err
@@ -97,7 +96,6 @@ func (s *Store) Has(ctx context.Context, key string) (bool, error) {
 	}
 	resp, err := s.http.Do(req)
 	if err != nil {
-		// Fall back to GET on servers that don't support HEAD.
 		if errors.Is(err, http.ErrNotSupported) {
 			rc, gerr := s.Get(ctx, key)
 			if errors.Is(gerr, storage.ErrNotFound) {

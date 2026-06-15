@@ -137,9 +137,6 @@ func TestWorkableLabels_JobFanOutDynamicHeterogeneous(t *testing.T) {
 	sparkwing.JobFanOutDynamic(plan, "shards", source, func(i int) (string, any) {
 		return fmt.Sprintf("shard-%d", i), shardJob{NeedsUSB: i%2 == 0}
 	})
-	// Dynamic fan-out generators run at dispatch time. Trigger the
-	// generator manually by retrieving the registered expansion and
-	// invoking it with a resolver carrying the source's output.
 	exps := plan.Expansions()
 	if len(exps) != 1 {
 		t.Fatalf("expected one expansion, got %d", len(exps))
@@ -155,16 +152,6 @@ func TestWorkableLabels_JobFanOutDynamicHeterogeneous(t *testing.T) {
 	if len(children) != 4 {
 		t.Fatalf("expected 4 children, got %d", len(children))
 	}
-	want := map[string][]string{
-		"shard-0": {"cloud-linux"}, // i%2==0 -> NeedsUSB=true ... wait inverted
-	}
-	_ = want
-	// shardJob.NeedsUSB toggles the labels: NeedsUSB=true -> ["local"];
-	// NeedsUSB=false -> ["cloud-linux"]. With NeedsUSB = (i%2 == 0):
-	//   i=0 -> NeedsUSB=true  -> local
-	//   i=1 -> NeedsUSB=false -> cloud-linux
-	//   i=2 -> NeedsUSB=true  -> local
-	//   i=3 -> NeedsUSB=false -> cloud-linux
 	gotLabels := map[string][]string{}
 	for _, c := range children {
 		gotLabels[c.ID()] = c.RequiresLabels()

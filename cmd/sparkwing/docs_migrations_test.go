@@ -75,8 +75,6 @@ func TestRunDocsMigrationsList_JSONSchemaMatchesWeb(t *testing.T) {
 			t.Errorf("row missing key %q (web schema requires it)", k)
 		}
 	}
-	// Field-order check: re-encode the first row and parse the raw
-	// JSON to make sure keys appear in the same order as the web.
 	gotOrder := keysInOrder(out)
 	if len(gotOrder) != len(wantKeys) {
 		t.Errorf("ordered keys = %v; want %v", gotOrder, wantKeys)
@@ -130,11 +128,9 @@ func keysOf(m map[string]json.RawMessage) []string {
 // map iteration randomness doesn't interfere.
 func keysInOrder(jsonArray string) []string {
 	dec := json.NewDecoder(strings.NewReader(jsonArray))
-	// Read `[`.
 	if _, err := dec.Token(); err != nil {
 		return nil
 	}
-	// Read `{`.
 	if _, err := dec.Token(); err != nil {
 		return nil
 	}
@@ -149,7 +145,6 @@ func keysInOrder(jsonArray string) []string {
 			return nil
 		}
 		keys = append(keys, key)
-		// Skip the value.
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
 			return nil

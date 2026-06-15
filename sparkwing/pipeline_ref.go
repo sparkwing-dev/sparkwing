@@ -5,12 +5,6 @@ import (
 	"time"
 )
 
-// This file holds the cross-pipeline ref RESOLVER infrastructure
-// installed on ctx by orchestrator implementations. The user-facing
-// Ref[T] type and its RefToLastRun constructor live in ref.go --
-// the unified Ref[T] gives authors one field type for both in-run
-// and cross-pipeline outputs.
-
 // ResolvedPipelineRef is what a PipelineResolver returns: the source
 // run id (for audit) + raw output JSON (for Ref[T].Get to unmarshal).
 type ResolvedPipelineRef struct {

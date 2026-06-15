@@ -67,10 +67,6 @@ func (c *Cached) Resolve(ctx context.Context, name string) (string, bool, error)
 	c.mu.Lock()
 	c.cache[name] = cachedEntry{value: v, masked: masked}
 	c.mu.Unlock()
-	// Only masked entries register with the run's log masker --
-	// non-secret config (region, log level) intentionally renders
-	// raw in stdout/stderr captures so operators can see what's
-	// configured.
 	if masked && c.masker != nil {
 		c.masker.Register(v)
 	}

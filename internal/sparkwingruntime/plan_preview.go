@@ -138,13 +138,6 @@ func PreviewPlan(plan *sparkwing.Plan, pipeline string, resolvedArgs map[string]
 	if plan == nil {
 		return nil, fmt.Errorf("PreviewPlan: plan is nil")
 	}
-	// A typo in --start-at / --stop-at must surface as a "did you mean
-	// X?" error before any preview is rendered, matching the
-	// orchestrator's dispatch-time validation (orchestrator/
-	// orchestrator.go ValidateStepRange call). Without this, an
-	// unknown id silently no-ops the range filter and every step shows
-	// would_run -- exactly the iteration footgun the range-resume
-	// flags must prevent.
 	if err := ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
 		return nil, err
 	}
@@ -161,25 +154,13 @@ func PreviewPlan(plan *sparkwing.Plan, pipeline string, resolvedArgs map[string]
 		})
 	}
 
-	// Plan-only ctx so SkipIf predicates that touch side-effect-guarded
-	// helpers panic with the canonical "Plan() must be pure-
-	// declarative" message rather than silently shelling out.
 	planCtx := planguard.With(context.Background())
 
-	// Dedupe recovery nodes that are also plan.Add'd directly --
-	// mirrors the orchestrator's marshalPlanSnapshot walk so the
-	// preview wire shape matches the explain snapshot.
 	seen := make(map[string]bool)
 	for _, n := range plan.Nodes() {
 		out.Nodes = append(out.Nodes, previewNode(planCtx, n, "", opts))
 		seen[n.ID()] = true
 	}
-	// Surface .OnFailure(id, job) recovery nodes. They're
-	// constructed detached and live on the parent's onFailure pointer,
-	// so plan.Nodes() doesn't return them. Emit a PreviewNode for each
-	// unseen recovery with OnFailureOf pointing back to the parent so
-	// `pipeline plan` can render the failure-branch attachment without
-	// re-parsing the snapshot.
 	for _, n := range plan.Nodes() {
 		rec := n.OnFailureNode()
 		if rec == nil {
@@ -223,9 +204,6 @@ func previewNode(ctx context.Context, n *sparkwing.JobNode, onFailureOf string, 
 	pw := previewWork(ctx, w, opts)
 	pn.Work = pw
 
-	// Roll up the node-level decision: "would_skip" only when every
-	// visible item is itself skipped. Otherwise the node still
-	// dispatches (even if some inner steps no-op individually).
 	allSkipped := true
 	hasVisible := false
 	for _, items := range [][]PreviewItem{pw.Steps, pw.Spawns, pw.SpawnEach} {
@@ -253,24 +231,14 @@ func previewWork(ctx context.Context, w *sparkwing.Work, opts PreviewOptions) *P
 	pw := &PreviewWork{}
 	for _, s := range w.Steps() {
 		item := previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates())
-		// Surface the author-declared risk labels on the preview
-		// item so agents reading `pipeline plan --json` see the
-		// contract alongside the runtime decision.
 		if risks := s.Risks(); len(risks) > 0 {
 			item.Risks = risks
 		}
-		// Refine the per-step decision through the dry-run
-		// lens AFTER the skip precedence (range / user-skipif) is
-		// computed -- a step that's already going to be skipped
-		// keeps that reason regardless of dry-run mode.
 		if opts.DryRun && item.Decision == "would_run" {
 			switch {
 			case s.HasDryRun():
 				item.Decision = "would_dry_run"
 			case s.IsSafeWithoutDryRun():
-				// keep "would_run" -- author marked the apply Fn
-				// read-only, so dispatch under --dry-run runs it
-				// unmodified.
 			default:
 				item.Decision = "would_skip"
 				item.SkipReason = "no_dry_run_defined"
@@ -282,18 +250,9 @@ func previewWork(ctx context.Context, w *sparkwing.Work, opts PreviewOptions) *P
 		pw.Spawns = append(pw.Spawns, previewItem(ctx, sp.ID(), sp.DepIDs(), rangeSkips, sp.SkipPredicates()))
 	}
 	for _, g := range w.SpawnGens() {
-		// SpawnNodeForEach generators are scheduled like steps but
-		// fan out at runtime to N children whose count depends on
-		// the upstream item's typed output. At plan time we don't
-		// have that output; surface "unresolved" + the source-id
-		// hint so renderers can be honest about the limit.
 		item := previewItem(ctx, g.ID(), g.DepIDs(), rangeSkips, nil)
 		item.Cardinality = "unresolved"
 		if deps := g.DepIDs(); len(deps) > 0 {
-			// First dep is conventionally the source whose output
-			// drives the fan-out; renderers can show all deps in
-			// the Needs list separately. This is best-effort -- the
-			// SDK doesn't enforce "first dep == source" today.
 			item.CardinalitySource = deps[0]
 		}
 		pw.SpawnEach = append(pw.SpawnEach, item)
@@ -324,11 +283,6 @@ func previewItem(ctx context.Context, id string, needs []string, rangeSkips map[
 		}
 		match, panicMsg := safeEvalPredicate(ctx, p)
 		if panicMsg != "" {
-			// Predicate panicked under the plan-only ctx (likely an
-			// side-effect guard fired on a helper). Mark the
-			// item as "would_skip user_skipif" with the panic
-			// message attached so the operator sees the contract
-			// violation rather than guessing.
 			item.Decision = "would_skip"
 			item.SkipReason = "user_skipif"
 			item.SkipDetail = "predicate panicked at plan time: " + panicMsg

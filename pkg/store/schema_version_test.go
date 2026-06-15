@@ -65,8 +65,6 @@ func TestSchemaVersion_SQLiteSkewRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
-	// Insert a future version row to simulate a DB schema-evolved past
-	// this binary's expectations.
 	future := store.ExpectedSchemaVersion() + 1
 	if _, err := st.DB().Exec(
 		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
@@ -121,11 +119,6 @@ func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
-	// Re-open against the same per-test schema; the search_path is
-	// preserved by the DSN appended in openPGTestStore. We bypass
-	// openPGTestStore here because it always creates a fresh schema;
-	// instead reuse the existing schema via the DSN the helper baked.
-	// Pull the schema name out of the connected DB.
 	var searchPath string
 	if err := st.DB().QueryRow(`SHOW search_path`).Scan(&searchPath); err != nil {
 		t.Fatalf("read search_path: %v", err)
@@ -156,7 +149,6 @@ func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 // no-op. All N must succeed.
 func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 	dsn := pgTestDSN(t)
-	// Build a single fresh schema and have all goroutines open into it.
 	schema := "sw_test_concurrent_" + uniq()
 	admin, err := store.OpenPostgres(context.Background(), dsn)
 	if err != nil {
@@ -206,8 +198,6 @@ func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 		t.Cleanup(func() { _ = r.st.Close() })
 	}
 
-	// Exactly one version row should be present even with N concurrent
-	// first-time opens.
 	verify, err := store.OpenPostgres(context.Background(), scoped)
 	if err != nil {
 		t.Fatalf("verify open: %v", err)

@@ -105,9 +105,6 @@ func OpenReadOnly(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	// WAL permits several concurrent readers; a small pool lets the
-	// dashboard serve overlapping HTTP reads without serializing them
-	// behind a single connection.
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(2)
 	return &Store{db: db, dialect: DialectSQLite}, nil
@@ -137,8 +134,6 @@ func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
 	}
 	switch dialect {
 	case DialectSQLite:
-		// SQLite serializes writes; an explicit single-connection
-		// avoids the "database is locked" failure mode under load.
 		db.SetMaxOpenConns(1)
 	case DialectPostgres:
 		db.SetMaxOpenConns(25)
@@ -581,20 +576,8 @@ func (e *SkewError) Error() string {
 func (s *Store) migrate() error {
 	ctx := context.Background()
 	if s.dialect == DialectPostgres {
-		// CREATE TABLE IF NOT EXISTS on Postgres races at the system
-		// catalog under contention (pg_type_typname_nsp_index unique
-		// violation when N concurrent CREATE statements collide). The
-		// pg migrate path therefore creates the version table inside
-		// the advisory-lock-guarded transaction so it serializes too.
 		return s.migratePostgres(ctx)
 	}
-	// SQLite serializes writers at the database level. busy_timeout
-	// absorbs most cold-start overlap, but the brief exclusive windows
-	// during initial table creation can still surface SQLITE_BUSY when
-	// several processes open a fresh state.db at once -- a real path now
-	// that Box-scoped budgeting encourages concurrent runs on one host.
-	// Retry the whole setup a few times so a cold start converges
-	// instead of aborting the run.
 	return retryOnBusy(func() error {
 		if _, err := s.exec(ctx, schemaVersionTable); err != nil {
 			return fmt.Errorf("create sparkwing_schema_version table: %w", err)
@@ -664,16 +647,10 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// pg_advisory_xact_lock auto-releases on commit/rollback so N
-	// runners opening the same fresh database serialize cleanly on
-	// the migration path. The hash key is stable across versions.
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`); err != nil {
 		return fmt.Errorf("acquire migrate advisory lock: %w", err)
 	}
-	// Create the version table under the lock; outside it, CREATE TABLE
-	// IF NOT EXISTS races at the catalog level when N processes
-	// arrive simultaneously against a fresh database.
 	if _, err := tx.ExecContext(ctx, schemaVersionTable); err != nil {
 		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
 	}
@@ -703,9 +680,6 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	// backfillRunAnnotationRollup runs after the lock is released so
-	// it doesn't hold writers; it's idempotent and re-running across
-	// retries is harmless.
 	return s.backfillRunAnnotationRollup()
 }
 
@@ -985,10 +959,6 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		}
 		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, name, typ)
 		if _, err := s.execNoCtx(stmt); err != nil {
-			// A concurrent cold-start migrator may have added the column
-			// between our table_info read and this ALTER; SQLite has no
-			// ADD COLUMN IF NOT EXISTS, so treat "duplicate column" as
-			// already-applied rather than a failure.
 			if isDuplicateColumnErr(err) {
 				continue
 			}
@@ -1004,8 +974,6 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 func isDuplicateColumnErr(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
 }
-
-// --- Runs ---
 
 // Run is one row in the runs table.
 type Run struct {
@@ -1069,30 +1037,18 @@ type Run struct {
 // are left untouched so this stays a no-op on retry / replay paths.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	argsJSON, _ := json.Marshal(r.Args)
-	// Invocation snapshot is omitted (NULL) when nil/empty so the
-	// scanner can distinguish "no snapshot recorded" from "explicitly
-	// empty map". Existing rows from before the column landed will
-	// also read NULL.
 	var invocationJSON []byte
 	if len(r.Invocation) > 0 {
 		invocationJSON, _ = json.Marshal(r.Invocation)
 	}
-	// NULL parent so ancestor walks terminate via IS NULL.
 	var parent sql.NullString
 	if r.ParentRunID != "" {
 		parent = sql.NullString{String: r.ParentRunID, Valid: true}
 	}
 	created := r.CreatedAt
 	if created.IsZero() {
-		// Direct CreateRun (no controller pre-allocation): created_at
-		// = started_at so the column is never zero outside the migration.
 		created = r.StartedAt
 	}
-	// ON CONFLICT DO UPDATE WHERE existing.status = 'pending':
-	// the only legal transition for an existing row is the
-	// orchestrator promoting a controller-allocated pending run to
-	// running. We deliberately do NOT clobber created_at on the
-	// upsert so the trigger-intake timestamp survives.
 	_, err := s.exec(
 		ctx, `
 INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json)
@@ -1179,7 +1135,6 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 	if runID == "" {
 		return nil, nil
 	}
-	// Walk up to the root.
 	const maxDepth = 256
 	rootID := runID
 	for range maxDepth {
@@ -1197,7 +1152,6 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 		}
 		rootID = parent
 	}
-	// BFS down: collect every run whose retry_of chain reaches rootID.
 	collected := map[string]*Run{}
 	root, err := s.GetRun(ctx, rootID)
 	if err != nil {
@@ -1345,7 +1299,6 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		where += " AND status IN (" + strings.Join(ph, ",") + ")"
 	}
 	if maxAge > 0 {
-		// COALESCE so in-flight rows don't slip past the bound.
 		where += " AND COALESCE(finished_at, started_at) >= ?"
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
@@ -1463,8 +1416,6 @@ func scanRun(rs rowScanner) (*Run, error) {
 	r.PlanSnapshot = planJSON
 	return &r, nil
 }
-
-// --- Nodes ---
 
 // Node is one row in the nodes table.
 type Node struct {
@@ -2323,8 +2274,6 @@ UPDATE nodes
 	return pairs, nil
 }
 
-// --- Events ---
-
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
 	RunID   string          `json:"run_id"`
@@ -2361,14 +2310,6 @@ SELECT run_id, seq, node_id, kind, ts, payload
 		}
 		e.TS = time.Unix(0, tsNanos)
 		if len(payload) > 0 {
-			// Several AppendEvent callsites write plain strings (error
-			// reason text, "upstream-failed" markers) rather than JSON
-			// objects. json.RawMessage refuses to marshal anything that
-			// isn't valid JSON, so leaving the raw bytes in place would
-			// break the entire response any time one of those events is
-			// included. Wrap unparseable payloads as JSON strings so
-			// readers get the original text and the list response can
-			// always be encoded cleanly.
 			if json.Valid(payload) {
 				e.Payload = json.RawMessage(payload)
 			} else {
@@ -2410,8 +2351,6 @@ VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, time.Now().UnixNano(), payload)
 
 // ErrNotFound is returned when a lookup misses.
 var ErrNotFound = errors.New("not found")
-
-// --- Debug pauses ---
 
 // Pause reasons; exported wire values.
 const (
@@ -2527,8 +2466,6 @@ func scanDebugPause(rs rowScanner) (*DebugPause, error) {
 	}
 	return &p, nil
 }
-
-// --- Triggers ---
 
 // Trigger is one row in the triggers table; ID becomes the run ID.
 type Trigger struct {
@@ -2646,7 +2583,7 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 	}
 	var out []string
 	cur := runID
-	const maxDepth = 64 // generous; real chains are <=5 in practice
+	const maxDepth = 64
 	for range maxDepth {
 		var parent sql.NullString
 		var pipeline string
@@ -2660,7 +2597,6 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 			}
 			return nil, err
 		}
-		// Skip the seed; callers want only ancestors.
 		if cur != runID {
 			out = append(out, pipeline)
 		}
@@ -2669,7 +2605,6 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 		}
 		cur = parent.String
 	}
-	// Max depth: data is cyclic; partial result still detects cycles.
 	return out, nil
 }
 
@@ -3157,10 +3092,6 @@ SELECT r.id
 		}
 	}
 
-	// Invariant fixup: any pending node attached to an already-terminal
-	// run should be cancelled, not left in pending. Catches leftover
-	// state from sweeps that didn't cascade pending nodes, plus any
-	// future code path that forgets the cascade.
 	if _, err := s.exec(ctx, `
 UPDATE nodes
    SET status         = ?,
@@ -3385,7 +3316,6 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	}
 	defer func() { _ = rows.Close() }()
 
-	// Repo filter is client-side; trigger_env is an unindexed JSON blob.
 	var out []*Trigger
 	for rows.Next() {
 		var t Trigger
@@ -3432,8 +3362,6 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	return out, nil
 }
 
-// --- Locks ---
-
 // ErrLockHeld signals the caller is not the current slot holder. HTTP -> 409.
 var ErrLockHeld = errors.New("held by another holder")
 
@@ -3461,8 +3389,6 @@ func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (i
 	).Scan(&n)
 	return n, err
 }
-
-// --- Approvals (approval-gate primitive) ---
 
 // NodeStatusApprovalPending = nodes.status while waiting on a human.
 const NodeStatusApprovalPending = "approval_pending"

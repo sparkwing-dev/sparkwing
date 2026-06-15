@@ -40,8 +40,6 @@ func registerRemotePipelines(t *testing.T) {
 func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	registerRemotePipelines(t)
 
-	// Controller-side store. The httptest server's controller.New
-	// wraps this; nothing the laptop side touches it directly.
 	ctrlDB := filepath.Join(t.TempDir(), "controller.db")
 	ctrlStore, err := store.Open(ctrlDB)
 	if err != nil {
@@ -69,8 +67,6 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
 	}
 
-	// Verify the run record landed on the controller side, not the
-	// laptop's default state.db.
 	run, err := ctrlStore.GetRun(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("controller-side GetRun: %v", err)

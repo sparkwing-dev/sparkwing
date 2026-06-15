@@ -105,9 +105,6 @@ func TestGroup_WhenRunnerDelegatesToMembers(t *testing.T) {
 }
 
 func TestRequires_StillTrimsEmpty_AfterCommaWork(t *testing.T) {
-	// Regression: the Requires accessor stores the verbatim term
-	// (including any commas). Empty entries continue to drop, matching
-	// the pre-Prefers behavior.
 	plan := sparkwing.NewPlan()
 	n := sparkwing.Job(plan, "x", &buildJob{}).Requires("", "linux,macos", "")
 	got := n.RequiresLabels()

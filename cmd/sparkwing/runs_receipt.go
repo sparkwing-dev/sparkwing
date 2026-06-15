@@ -31,9 +31,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 		}
 		return err
 	}
-	// Receipts are JSON-only today; resolveOutputFormat would default
-	// to "table" which we don't support, so accept json (or empty)
-	// and reject anything else explicitly.
 	switch *outFmt {
 	case "", "json":
 	default:
@@ -58,10 +55,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 		if err != nil {
 			return err
 		}
-		// Re-encode for stable indentation; the receipt's hashes
-		// commit to canonical (compact, sorted-key) bytes the server
-		// already produced, so pretty-printing here doesn't break
-		// receipt_sha verification.
 		var v any
 		if err := json.Unmarshal(body, &v); err != nil {
 			return fmt.Errorf("decode receipt: %w", err)

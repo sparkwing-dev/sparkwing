@@ -39,7 +39,6 @@ func TestMigrate_ConcurrentColdStartConverges(t *testing.T) {
 		}
 	}
 
-	// The schema is fully provisioned and at the expected version.
 	s, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("reopen after concurrent cold start: %v", err)

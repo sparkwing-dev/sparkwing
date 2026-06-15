@@ -69,7 +69,6 @@ func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 			"GIT_PROJECT_ROOT=" + repoParent,
 			"GIT_HTTP_EXPORT_ALL=1",
 		},
-		// Strip /git so PATH_INFO becomes /<name>.git/info/refs etc.
 		Root: "/git",
 	})
 	return httptest.NewServer(mux)
@@ -125,9 +124,7 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 
 	bare := filepath.Join(repoParent, name+".git")
 	mustGit("", "clone", "--bare", "--quiet", work, bare)
-	// Required for fetch-by-SHA over smart-HTTP.
 	mustGit(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
-	// http-backend rejects bare repos that aren't marked exportable.
 	if err := os.WriteFile(filepath.Join(bare, "git-daemon-export-ok"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}

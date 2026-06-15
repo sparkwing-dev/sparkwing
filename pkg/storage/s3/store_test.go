@@ -146,8 +146,6 @@ func TestLogStore_RoundTrip(t *testing.T) {
 }
 
 func TestArtifactStore_PrefixIsolation(t *testing.T) {
-	// Two stores with different prefixes in the same bucket must not
-	// see each other's keys.
 	t.Parallel()
 	client, closer := fakeS3(t)
 	defer closer()
@@ -208,7 +206,6 @@ func TestArtifactStore_List(t *testing.T) {
 		}
 	}
 
-	// Sibling-prefix store must not show up under our List.
 	other := NewArtifactStore(testBucket, "other", client)
 	if err := other.Put(ctx, "runs/xyz/state.ndjson", bytes.NewReader([]byte("x"))); err != nil {
 		t.Fatalf("Put other: %v", err)

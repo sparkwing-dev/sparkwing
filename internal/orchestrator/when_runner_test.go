@@ -12,8 +12,6 @@ import (
 type whenRunnerSkipPipe struct{ sparkwing.Base }
 
 func (whenRunnerSkipPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	// The in-process runner advertises ["local"]; this job demands a
-	// runner advertising "cloud-windows" and so should be skipped.
 	preflight := sparkwing.Job(plan, "windows-only", func(ctx context.Context) error {
 		return nil
 	}).WhenRunner("cloud-windows")
@@ -35,9 +33,6 @@ func (whenRunnerLocalPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spark
 type whenRunnerCommaOrPipe struct{ sparkwing.Base }
 
 func (whenRunnerCommaOrPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	// Local in-process runner advertises ["local"]; the comma-OR
-	// expression accepts either local or cloud-linux, so the job
-	// should run.
 	sparkwing.Job(plan, "preflight", func(ctx context.Context) error {
 		return nil
 	}).WhenRunner("local,cloud-linux")

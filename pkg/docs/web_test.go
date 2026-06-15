@@ -153,7 +153,6 @@ func TestWebClient_ExpiredCacheRefetches(t *testing.T) {
 	if _, err := c.Versions(context.Background()); err != nil {
 		t.Fatalf("first fetch: %v", err)
 	}
-	// Backdate the sidecar so the TTL check expires it.
 	metaPath := filepath.Join(c.CacheDir, "versions.json.meta")
 	expired := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 	body := fmt.Sprintf(`{"fetched_at":"%s","status":200,"url":"x"}`, expired)
@@ -291,8 +290,7 @@ func TestWebClient_ConcurrentWritesDoNotCorrupt(t *testing.T) {
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"latest":"v0.4.0","versions":["v0.4.0"]}`))
 	}))
-	c.NoCache = true // force HTTP hits, but writes still happen via fetch()? No -- NoCache short-circuits writeCache too.
-	// Re-enable cache for the actual concurrency test:
+	c.NoCache = true
 	c.NoCache = false
 	var wg sync.WaitGroup
 	for range 8 {
@@ -328,7 +326,6 @@ func TestClearCache_RemovesEverythingInsideButNothingOutside(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Sentinel outside the cache to make sure ClearCache doesn't escape.
 	outside := filepath.Join(filepath.Dir(c.CacheDir), "outside.txt")
 	if err := os.WriteFile(outside, []byte("don't touch"), 0o644); err != nil {
 		t.Fatal(err)
@@ -429,9 +426,6 @@ func TestNewWebClient_FallsBackToDefault(t *testing.T) {
 
 func TestCachePath_RefusesToEscape(t *testing.T) {
 	c := &WebClient{CacheDir: t.TempDir()}
-	// filepath.Clean("/" + "../..") becomes "/", which equals CacheDir
-	// after join, so rel returns "."; treat as fine for now and only
-	// fail when the escape is unambiguous.
 	bad := []string{"/../../etc/passwd"}
 	for _, p := range bad {
 		got := c.cachePath(p)

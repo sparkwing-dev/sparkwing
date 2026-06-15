@@ -146,9 +146,6 @@ func TestAPI_StaticIndexServed(t *testing.T) {
 	if !strings.Contains(string(body), "<title>Sparkwing</title>") {
 		t.Fatalf("index missing expected title: %s", string(body))
 	}
-	// Go-side templating must leave the runtime markers consumable:
-	// the React shim in api.ts treats both the literal marker and an
-	// empty string as "not configured".
 	if !strings.Contains(string(body), `window.__SPARKWING_TOKEN__="";`) {
 		t.Fatalf("token template not substituted in index")
 	}

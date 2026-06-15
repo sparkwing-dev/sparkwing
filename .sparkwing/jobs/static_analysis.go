@@ -42,8 +42,6 @@ func (p *StaticAnalysis) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwi
 }
 
 func (p *StaticAnalysis) staticcheck(ctx context.Context) error {
-	// `go run` ensures the tool is available without a separate
-	// install step; the module proxy caches it after first use.
 	if _, err := sparkwing.Bash(ctx, "go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...").Run(); err != nil {
 		return err
 	}

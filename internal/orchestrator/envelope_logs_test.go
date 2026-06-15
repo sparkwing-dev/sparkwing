@@ -100,7 +100,6 @@ func TestJobLogs_NoEventsMatchesLegacy(t *testing.T) {
 	if !strings.Contains(out, "work complete") {
 		t.Fatalf("--no-events should still surface body output, got:\n%s", out)
 	}
-	// Run-level events must NOT appear under --no-events.
 	if strings.Contains(out, `"event":"run_start"`) || strings.Contains(out, `"event":"run_finish"`) {
 		t.Fatalf("--no-events leaked envelope events:\n%s", out)
 	}

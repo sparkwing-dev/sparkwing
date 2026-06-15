@@ -66,7 +66,7 @@ func runTokensCreate(args []string) error {
 	}
 
 	body := map[string]any{
-		"kind":      *kind, // wire shape unchanged -- controller still reads `kind`
+		"kind":      *kind,
 		"principal": *principal,
 		"scopes":    splitCSV(*scopes),
 	}
@@ -294,8 +294,6 @@ func runTokensRotate(args []string) error {
 	return nil
 }
 
-// --- HTTP helpers ---
-
 func tokensPost(controller, token, path string, body any) ([]byte, error) {
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -347,8 +345,6 @@ func doTokenReq(req *http.Request) ([]byte, error) {
 	}
 	return body, nil
 }
-
-// --- misc helpers ---
 
 type urlQuery struct {
 	parts []string

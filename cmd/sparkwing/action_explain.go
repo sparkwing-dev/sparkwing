@@ -139,10 +139,6 @@ func parsePipelineExplainArgs(args []string) (pipelineExplainArgs, bool, error) 
 		case tok == "-h", tok == "--help":
 			return parsed, true, nil
 		case tok == "--":
-			// End of wrapper flags; everything that follows is
-			// forwarded raw to the inner pipeline binary. Drop
-			// the "--" itself so the inner flag parser keeps
-			// processing the trailing tokens as flags.
 			parsed.passthrough = append(parsed.passthrough, args[i+1:]...)
 			return parsed, false, nil
 		case tok == "--all", tok == "--all=true":
@@ -228,9 +224,6 @@ func runPipelineExplain(args []string) error {
 	}
 	var snap planSnapshotDoc
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &snap); err != nil {
-		// Fallback: if the output isn't parseable JSON, dump it raw so
-		// the operator sees what actually came back rather than a
-		// cryptic decode error.
 		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
@@ -495,9 +488,6 @@ func nodeModifiersSuffix(n *planSnapshotNode) string {
 
 func printWork(w *planSnapshotWork, indent string) {
 	fmt.Printf("%sWork\n", indent)
-	// Reverse-index step id -> group names so a step in one or more
-	// GroupSteps clusters surfaces "(groups=ci)" alongside its other
-	// modifiers, mirroring the Node-layer NodeGroup display.
 	groupByStep := map[string][]string{}
 	for _, g := range w.StepGroups {
 		if g.Name == "" {
@@ -515,10 +505,6 @@ func printWork(w *planSnapshotWork, indent string) {
 		if s.HasSkipIf {
 			marker += " [skip_if]"
 		}
-		// Surface risk labels next to the step id so a reader
-		// scanning explain output sees the contract before reading
-		// the deps. Suppressed when no label is declared (the common
-		// case).
 		if len(s.Risks) > 0 {
 			marker += " [" + strings.Join(s.Risks, ",") + "]"
 		}
@@ -575,7 +561,6 @@ func printPlanEdges(nodes []planSnapshotNode) {
 	type edge struct{ From, To string }
 	var edges []edge
 	for _, n := range nodes {
-		// Sort deps for stable output.
 		deps := append([]string(nil), n.Deps...)
 		sort.Strings(deps)
 		for _, d := range deps {

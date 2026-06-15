@@ -1,10 +1,5 @@
 package controller
 
-// Auth middleware. Flow: extract `Authorization: Bearer X`, look it up
-// in the tokens table (prefix index + argon2 verify), stamp the
-// principal on ctx. Handlers gate themselves with requireScope; the
-// middleware only authenticates.
-
 import (
 	"context"
 	"errors"
@@ -88,8 +83,6 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 		if v, ok := a.cache.Load(raw); ok {
 			e := v.(*authCacheEntry)
 			if now.Before(e.expires) {
-				// Copy so callers mutating the principal don't affect
-				// the cached entry.
 				cp := *e.principal
 				cp.Authed = now
 				return &cp, nil
@@ -105,8 +98,6 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Rotation-grace telemetry: token replaced but still in grace
-	// window. Helps operators identify callers that need to swap.
 	if tok.RevokedAt != nil && tok.ReplacedBy != "" {
 		slog.Warn(
 			"token.rotating",
@@ -194,7 +185,6 @@ func requireScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
 		if !ok {
-			// Auth disabled -- pass through unconditionally.
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -237,8 +227,6 @@ type authErrorBody struct {
 func writeAuthError(w http.ResponseWriter, status int, body authErrorBody) {
 	writeJSON(w, status, body)
 }
-
-// --- principal ctx helpers ---
 
 type principalCtxKey struct{}
 

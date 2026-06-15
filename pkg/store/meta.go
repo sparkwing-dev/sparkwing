@@ -31,7 +31,6 @@ func (s *Store) claimSweepWindow(ctx context.Context, key string, minInterval ti
 		`SELECT value FROM sparkwing_meta WHERE key = ?`+s.forUpdate(), key).Scan(&prev)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		// Never swept; fall through and claim the first window.
 	case err != nil:
 		return false, err
 	default:

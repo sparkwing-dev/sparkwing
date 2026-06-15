@@ -52,8 +52,6 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 		}
 		if ok {
 			args.FieldByName(fname).Set(val)
-			// Predicate keys are flag names so consumers write
-			// ArgEq("target", "prod") -- not the Go field name.
 			resolved[m.Flag] = val.Interface()
 		}
 	}
@@ -62,8 +60,6 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 		return reflect.Value{}, errors.Join(problems...)
 	}
 
-	// All fields bound; now run validation that needs the full
-	// resolved set.
 	pctx := &resolvedPredCtx{
 		values:  resolved,
 		profile: in.ProfileName,
@@ -74,7 +70,6 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 		m := s.fields[fname]
 		val, set := resolved[m.Flag]
 
-		// RequiredWhen / Required check.
 		mustHave := m.Required
 		if !mustHave && m.RequiredWhen != nil && m.RequiredWhen.Eval(pctx) {
 			mustHave = true
@@ -97,9 +92,6 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 		}
 	}
 
-	// Custom validators run with the typed args struct (after Required
-	// gating so they don't see partial state when a required arg is
-	// missing).
 	if len(problems) == 0 {
 		for _, fname := range s.order {
 			m := s.fields[fname]
@@ -114,10 +106,7 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 		}
 	}
 
-	// Group constraints run against the final resolved set.
 	for _, g := range s.groups {
-		// Group fields use Go field names; map them to flag names for
-		// the PredicateContext lookup that the group eval performs.
 		flagFields := make([]string, len(g.fields))
 		for i, gf := range g.fields {
 			if fm, ok := s.fields[gf]; ok {
@@ -142,8 +131,6 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 // returns (value, set, err). set=false means no source provided a
 // value; the caller leaves the struct field at its zero value.
 func (s *Schema) resolveField(m *fieldMeta, args reflect.Value, resolved map[string]any, in ResolveInputs) (reflect.Value, bool, error) {
-	// 1. Explicit CLI flag wins (post-merge with YAML defaults at the
-	//    orchestrator boundary, so this layer sees the union).
 	if raw, ok := in.FlagValues[m.Flag]; ok {
 		v, err := parseTypedValue(raw, m.GoType)
 		if err != nil {
@@ -151,12 +138,10 @@ func (s *Schema) resolveField(m *fieldMeta, args reflect.Value, resolved map[str
 		}
 		return v, true, nil
 	}
-	// 2. Computed (function of already-resolved args).
 	if m.HasComputed {
 		out := m.Computed.Call([]reflect.Value{args})
 		return out[0].Convert(m.GoType), true, nil
 	}
-	// 3. Literal default.
 	if m.HasDefault {
 		v, err := coerceToType(m.Default, m.GoType)
 		if err != nil {
@@ -442,7 +427,6 @@ func NewSchemaFromType(t reflect.Type) (*Schema, error) {
 		return nil, err
 	}
 	s.order = order
-	// Check duplicate flag names (matches SchemaBuilder.Build's check).
 	seen := make(map[string]string, len(s.fields))
 	for name, m := range s.fields {
 		if prior, dup := seen[m.Flag]; dup {

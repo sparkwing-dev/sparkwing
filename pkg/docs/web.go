@@ -91,9 +91,7 @@ func NewWebClient() *WebClient {
 func defaultHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
-		// Redirect policy: max 5 hops; reject cross-host so a
-		// compromised CDN can't poison the cache with content from an
-		// unrelated origin.
+		// safety: reject cross-host redirects; a compromised CDN must not redirect to an unrelated origin.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return errors.New("stopped after 5 redirects")
@@ -299,7 +297,6 @@ func (c *WebClient) httpGetWithRetry(ctx context.Context, fullURL string) ([]byt
 		if err == nil {
 			return body, meta, nil
 		}
-		// 4xx is terminal; retry only for transport errors / 5xx.
 		if errors.Is(err, ErrNotFound) {
 			return nil, cacheMeta{}, err
 		}
@@ -393,8 +390,6 @@ func (c *WebClient) readCache(urlPath string, ttl time.Duration) ([]byte, bool) 
 	if ttl > 0 {
 		metaBytes, merr := os.ReadFile(bodyPath + ".meta")
 		if merr != nil {
-			// No sidecar: treat as expired. Reader can rewrite it on
-			// next fetch.
 			return nil, false
 		}
 		var m cacheMeta
@@ -507,7 +502,6 @@ func (c *WebClient) ClearCache() (int, error) {
 	if err != nil {
 		return removed, err
 	}
-	// Best-effort: prune now-empty subdirectories.
 	_ = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, _ error) error {
 		if !info.IsDir() || p == c.CacheDir {
 			return nil

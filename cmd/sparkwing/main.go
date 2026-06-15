@@ -28,7 +28,6 @@ func init() {
 }
 
 func main() {
-	// Windows self-update defers deletion of the running binary; clean it up here.
 	cleanupStaleUpdate()
 
 	if err := runSparkwing(os.Args[1:]); err != nil {
@@ -118,25 +117,15 @@ func dispatchRun(args []string) error {
 	wf, passthrough := parseRunFlags(args[1:])
 	var err error
 
-	// Catch a retired/renamed where-flag (--on / --sw-on / --sw-profile /
-	// --sw-target) before it falls through to the pipeline binary, so the
-	// user gets a migration pointer instead of an opaque pipeline error.
 	if err := checkRetiredWhereFlags(passthrough); err != nil {
 		return err
 	}
-	// Validate --profile against profiles.yaml up front so a bad name
-	// errors before we compile or exec the pipeline binary. The inner
-	// binary re-resolves from SPARKWING_PROFILE at run time.
 	if wf.profile != "" {
 		if _, perr := resolveProfileFlag(wf.profile); perr != nil {
 			return perr
 		}
 	}
 
-	// Hard-error on a half-migrated repo (legacy pipelines.yaml etc. in
-	// .sparkwing/) before compile so the failure is fast and names the
-	// migration guide. A fully-migrated repo (only sparkwing.yaml) is
-	// silent.
 	legacyStart := wf.changeDir
 	if legacyStart == "" {
 		if cwd, cerr := os.Getwd(); cerr == nil {
@@ -147,7 +136,6 @@ func dispatchRun(args []string) error {
 		return err
 	}
 
-	// `-C <path>` re-anchors discovery (same shape as `git -C`).
 	var dir string
 	if wf.changeDir != "" {
 		dir, err = findSparkwingDirFrom(wf.changeDir)
@@ -158,28 +146,10 @@ func dispatchRun(args []string) error {
 		return err
 	}
 
-	// Auto-register so cross-repo RunAndAwait can resolve names without
-	// a hardcoded WithFreshRepo. Errors dropped: read-only home shouldn't break dispatch.
+	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
-	// Pipeline-level dispatch gating now flows through the runner
-	// resolution rule: pipelines.yaml declares which runners a
-	// target accepts, the orchestrator picks one whose labels
-	// satisfy the job's Requires terms, and a mismatch produces a
-	// clear error at run start. No CLI-side venue check is needed.
-
-	// Risk-label gate. Walk per-step risk labels via the describe
-	// cache and refuse dispatch when any reachable step declares a
-	// label the operator hasn't authorized via --sw-allow (or
-	// --sw-dry-run, which bypasses every gate per the safe-mode
-	// contract). A profile-level auto_allow can pre-authorize
-	// specific labels for a low-stakes environment. A cold cache
-	// degrades to "no labels detected, no gate fires"; the next
-	// --describe refresh populates it.
 	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
-		// Resolve the active profile (flag, else default/detect/laptop)
-		// so a profile-level auto_allow can pre-authorize risk labels.
-		// Best-effort: a resolution failure leaves the gate profile-less.
 		var prof *profile.Profile
 		if p, perr := resolveProfileFlag(wf.profile); perr == nil {
 			prof = p
@@ -189,7 +159,6 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	// --sw-ref re-roots compilation on a git worktree; cleanup must run on both paths.
 	if wf.ref != "" {
 		_, sparkwingSub, cleanup, err := setupRefWorktree(dir, wf.ref)
 		if err != nil {
@@ -200,8 +169,6 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
-	// Decide renderer here so a CLI upgrade fixes TTY detection without
-	// needing per-project SDK pin bumps. User-set value always wins.
 	if os.Getenv("SPARKWING_LOG_FORMAT") == "" {
 		if color.IsInteractiveStdout() {
 			env = append(env, "SPARKWING_LOG_FORMAT=pretty")
@@ -212,17 +179,12 @@ func dispatchRun(args []string) error {
 	if wf.verbose {
 		env = append(env, "SPARKWING_LOG_LEVEL=debug")
 	}
-	// Forward --start-at / --stop-at via env so the pipeline binary's
-	// orchestrator/main.go can lift them onto Options.
 	if wf.startAt != "" {
 		env = append(env, "SPARKWING_START_AT="+wf.startAt)
 	}
 	if wf.stopAt != "" {
 		env = append(env, "SPARKWING_STOP_AT="+wf.stopAt)
 	}
-	// Same env-var protocol for --dry-run; the pipeline binary lifts
-	// SPARKWING_DRY_RUN onto Options.DryRun and the orchestrator
-	// installs WithDryRun(ctx) on the run.
 	if wf.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
@@ -235,30 +197,15 @@ func dispatchRun(args []string) error {
 	if wf.localOnly {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
-	// --sw-allow forwards the operator-authorized risk labels to the
-	// orchestrator. Surfaced on the run record (run_start.attrs.flags)
-	// so an agent re-invoking knows which labels were authorized.
 	if len(wf.allow) > 0 {
 		env = append(env, "SPARKWING_ALLOW="+strings.Join(wf.allow, ","))
 	}
-	// Forward pre-flight sparkwing flags as env vars purely so
-	// emitRunStart can surface them on run_start.attrs.flags. The
-	// pipeline binary itself doesn't read these (--sw-ref is
-	// consumed before exec via setupRefWorktree, --sw-no-update
-	// gates sparks resolve in compile.go) -- they appear only as
-	// reproducibility breadcrumbs in the run record.
 	if wf.ref != "" {
 		env = append(env, "SPARKWING_REF="+wf.ref)
 	}
 	if wf.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")
 	}
-	// --profile drives local execution against a storage profile. The
-	// inner binary reads SPARKWING_PROFILE, resolves it, and routes
-	// state/logs/cache through the profile (with a local mirror).
-	// setEnv overrides any shell-inherited SPARKWING_PROFILE so the
-	// flag wins. --sw-local-only still takes precedence inside the
-	// inner binary's resolver.
 	if wf.profile != "" {
 		env = setEnv(env, "SPARKWING_PROFILE", wf.profile)
 	}
@@ -273,16 +220,6 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	// Host-local box-slot semaphore knobs (see internal/boxslot).
-	// Forwarded to the inner pipeline binary, which acquires the
-	// slot before RunLocal so the wait blocks at run start rather
-	// than wasting compile cycles on a pre-rejected run.
-	//
-	// Use setEnv (not append) so the flag overrides any preexisting
-	// shell-environment SPARKWING_BOX_SLOTS / SPARKWING_BOX_NO_WAIT.
-	// Plain append would leave duplicates, and POSIX getenv returns
-	// the first match, so the user's shell var would silently
-	// shadow the explicit flag.
 	if wf.boxSlots != "" {
 		env = setEnv(env, "SPARKWING_BOX_SLOTS", wf.boxSlots)
 	}
@@ -372,9 +309,6 @@ func runRunsApprovals(ctx context.Context, paths orchestrator.Paths, args []stri
 	if handleParentHelp(cmdApprovals, args) {
 		return nil
 	}
-	// Default to `list` when no subcommand is given or the first token
-	// is a flag, so `runs approvals`, `runs approvals --run <id>`, and
-	// `runs approvals -o json` all list (the verb is its own default).
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return runApprovalsList(ctx, paths, args)
 	}

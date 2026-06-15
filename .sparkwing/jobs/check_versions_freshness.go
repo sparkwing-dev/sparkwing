@@ -46,12 +46,7 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 				continue
 			}
 			if replace := findReplaceFor(f, req.Mod.Path); replace != nil {
-				// Replace -> local path: check the local checkout is
-				// not behind its origin/main.
 				if !isLocalReplace(replace) {
-					// Replace to a different module/version on the
-					// proxy: treat like a normal pin for the purpose
-					// of the freshness check.
 					if msg := checkAgainstLatest(ctx, replace.New.Path, replace.New.Version, modPath); msg != "" {
 						problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 					}
@@ -74,7 +69,6 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 					))
 				}
 			} else {
-				// Direct pin: check pin against latest released tag.
 				if msg := checkAgainstLatest(ctx, req.Mod.Path, req.Mod.Version, modPath); msg != "" {
 					problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 				}
@@ -188,13 +182,10 @@ func resolveLocalReplacePath(target, modPath string) (string, error) {
 // blow up on that. fetches origin/main first so the comparison is
 // against current remote state.
 func localBehindRemote(ctx context.Context, localPath string) (bool, int, error) {
-	// Bail if not a git repo.
 	if _, err := os.Stat(filepath.Join(localPath, ".git")); err != nil {
 		return false, 0, nil
 	}
-	// Best-effort fetch so we don't compare against stale refs.
 	_ = runGit(ctx, localPath, "fetch", "--quiet", "origin", "main")
-	// Check that origin/main resolves before asking for behind count.
 	if err := runGit(ctx, localPath, "rev-parse", "--verify", "--quiet", "origin/main"); err != nil {
 		return false, 0, nil
 	}
@@ -218,11 +209,7 @@ func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile str
 		return ""
 	}
 	cap := majorCapFor(modulePath)
-	// Reject pins that exceed the configured major-version cap. The
-	// sparkwing SDK is intentionally pre-v1; v1.0.0+ tags were
-	// accidentally pushed and the proxy cache cannot be undone, so any
-	// consumer pinning a capped module past its cap is wrong by policy
-	// regardless of what the proxy reports as "latest".
+	// safety: v1.0.0+ tags were pushed by mistake and can't be removed from the proxy cache.
 	if cap >= 0 {
 		if pinnedMajor, ok := semverMajor(pinned); ok && pinnedMajor > cap {
 			return fmt.Sprintf(
@@ -233,14 +220,8 @@ func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile str
 	}
 	latest, err := latestReleasedVersion(ctx, modulePath, fromModFile)
 	if err != nil {
-		// Resolution failure is non-fatal -- surface the error but
-		// don't block. Some modules are still pre-release / private
-		// and may not resolve via the proxy in every environment.
 		return fmt.Sprintf("%s: cannot resolve latest version (%v)", modulePath, err)
 	}
-	// modfile pseudo-versions (v0.0.0-YYYYMMDDHHMMSS-sha) for an
-	// untagged commit sort below tagged releases, so semver.Compare
-	// handles those correctly.
 	if semver.Compare(pinned, latest) >= 0 {
 		return ""
 	}
@@ -280,16 +261,11 @@ func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) 
 	if err != nil {
 		return "", err
 	}
-	// Output: "<module> v1 v2 v3 ..." -- last token is the highest.
 	parts := strings.Fields(strings.TrimSpace(out))
 	if len(parts) < 2 {
 		return "", fmt.Errorf("no versions reported for %s", modulePath)
 	}
 	cap := majorCapFor(modulePath)
-	// Filter to released semver tags (skip pre-release for the
-	// "latest" comparison so that a -rc tag doesn't shadow a stable
-	// release of the same series). Also drop anything above the
-	// configured major cap.
 	var stable []string
 	for _, v := range parts[1:] {
 		if !semver.IsValid(v) || semver.Prerelease(v) != "" {

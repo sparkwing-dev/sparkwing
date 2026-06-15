@@ -58,24 +58,20 @@ func TestArg_TypeMismatchErrors(t *testing.T) {
 }
 
 func TestArgOrDefault_FallsBackOnMissingOrMismatch(t *testing.T) {
-	// No args installed -> default.
 	if got := ArgOrDefault(context.Background(), "anything", 42); got != 42 {
 		t.Errorf("missing context: got %d, want 42", got)
 	}
 
-	// Args installed, name missing -> default.
 	ctx := withResolvedArgs(context.Background(), map[string]any{"other": 1})
 	if got := ArgOrDefault(ctx, "missing", 42); got != 42 {
 		t.Errorf("missing name: got %d, want 42", got)
 	}
 
-	// Type mismatch -> default.
 	ctx = withResolvedArgs(context.Background(), map[string]any{"x": "not an int"})
 	if got := ArgOrDefault(ctx, "x", 42); got != 42 {
 		t.Errorf("type mismatch: got %d, want 42", got)
 	}
 
-	// Present + correct type -> returned value.
 	ctx = withResolvedArgs(context.Background(), map[string]any{"x": 7})
 	if got := ArgOrDefault(ctx, "x", 42); got != 7 {
 		t.Errorf("present: got %d, want 7", got)

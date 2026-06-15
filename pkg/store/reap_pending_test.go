@@ -87,8 +87,6 @@ func TestReapStalePendingRuns_LeavesRunsWithLiveTriggerAlone(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	// Trigger left at status='pending' (not finished).
-
 	ids, err := store.Maintenance.ReapStalePendingRuns(s, ctx,
 		1*time.Minute, "test reason")
 	if err != nil {
@@ -126,7 +124,7 @@ func TestReapStalePendingRuns_RespectsGracePeriod(t *testing.T) {
 		ID:        freshID,
 		Pipeline:  "weather-report",
 		Status:    "pending",
-		StartedAt: time.Now(), // fresh
+		StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

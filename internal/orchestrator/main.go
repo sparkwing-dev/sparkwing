@@ -70,12 +70,6 @@ func Main() {
 	pipeline := args[0]
 	rest := args[1:]
 
-	// `<pipeline> config` is a pure inspection subverb: print the
-	// layered Config + declared Secrets for the selected target,
-	// no Plan, no dispatch. Honors SPARKWING_TARGET (the --sw-target
-	// value the outer CLI forwarded). Recognized before --help so
-	// `sparkwing run X config --help` is a future extension point
-	// if needed.
 	if len(rest) > 0 && rest[0] == "config" {
 		if err := runPipelineConfigInspect(pipeline, rest[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, pipeline+":", err)
@@ -84,7 +78,6 @@ func Main() {
 		return
 	}
 
-	// --help short-circuits before typed-flag parsing.
 	for _, tok := range rest {
 		if tok == "-h" || tok == "--help" {
 			if err := printPipelineHelp(pipeline); err != nil {
@@ -95,7 +88,6 @@ func Main() {
 		}
 	}
 
-	// --explain emits the plan snapshot without dispatching.
 	for _, tok := range rest {
 		if tok == "--explain" {
 			if err := printPipelinePlan(pipeline, filterTok(rest, "--explain")); err != nil {
@@ -106,10 +98,6 @@ func Main() {
 		}
 	}
 
-	// --plan emits the runtime-resolved plan preview -- same DAG as
-	// --explain plus per-step would-run / would-skip decisions
-	// evaluated against the supplied args + --start-at / --stop-at
-	// bounds. NO step bodies execute.
 	for _, tok := range rest {
 		if tok == "--plan" {
 			if err := printPipelineRuntimePlan(pipeline, filterTok(rest, "--plan")); err != nil {
@@ -120,12 +108,6 @@ func Main() {
 		}
 	}
 
-	// Bind YAML pipeline names to their entrypoint factories BEFORE
-	// flag parsing -- parseTypedFlags resolves typed args by Lookup,
-	// which only sees pipelines that have been Register'd or bound
-	// via BindPipelinesFromYAML. Without this ordering, YAML-only
-	// pipeline names (multiple pipelines sharing one entrypoint via
-	// RegisterEntrypoint) fail with "unknown pipeline".
 	var projectCfg *projectconfig.Config
 	if cwd, err := os.Getwd(); err == nil {
 		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
@@ -146,11 +128,6 @@ func Main() {
 		os.Exit(1)
 	}
 
-	// Load the on-disk pipelines.yaml entry (if any) so guards /
-	// args / profile resolve at run start. A missing sparkwing.yaml
-	// is not an error -- pipelines declared in Go via sparkwing.Register
-	// still work via the legacy pipeline-name-as-entrypoint-name
-	// registry binding.
 	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
 
 	delegate := selectLocalRenderer()
@@ -173,10 +150,6 @@ func Main() {
 	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
-		// Fold defaults.guards / defaults.requires into pipelineYAML
-		// (wholesale replace -- a pipeline declares its own block to
-		// opt out of defaults). The orchestrator only ever sees the
-		// resolved Pipeline.
 		if pipelineYAML != nil {
 			if pipelineYAML.Guards.IsEmpty() {
 				pipelineYAML.Guards = projectCfg.Defaults.Guards
@@ -186,8 +159,6 @@ func Main() {
 			}
 		}
 	}
-	// The "local" label in requires pins this run to in-process
-	// execution (same effect as --sw-local-only).
 	if pipelineYAML != nil {
 		for _, r := range pipelineYAML.Requires {
 			if r == "local" {
@@ -196,10 +167,6 @@ func Main() {
 			}
 		}
 	}
-	// Resolve the active profile through the 3-layer chain:
-	// --profile (user) > pipeline.profile (project) > project default
-	// profile:. nil profile is acceptable -- the orchestrator falls
-	// back to a local sqlite shape (test/dev path).
 	prof, profChain, profErr := resolveActiveProfile(pipelineYAML, projectCfg)
 	if profErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
@@ -211,7 +178,6 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
 		os.Exit(1)
 	}
-	// --secrets PROF: resolve via SPARKWING_SECRETS_PROFILE.
 	if prof := os.Getenv("SPARKWING_SECRETS_PROFILE"); prof != "" {
 		src, perr := remoteSecretSource(prof)
 		if perr != nil {
@@ -221,11 +187,6 @@ func Main() {
 		opts.SecretSource = src
 	}
 
-	// Host-local box-slot semaphore: caps concurrent `sparkwing run`
-	// orchestrators on this machine. Acquisition wraps RunLocal only;
-	// the handle-trigger / run-node / replay-node subcommands above
-	// run inside cluster pods whose CPU is already capped by k8s.
-	// See acquireBoxSlot for env-var precedence.
 	ctx, stopBoxWait := context.WithCancel(context.Background())
 	defer stopBoxWait()
 	release, err := acquireBoxSlot(ctx, paths, workersHintForBoxSlot())
@@ -238,23 +199,11 @@ func Main() {
 	res, err := RunLocal(ctx, paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
-		// os.Exit skips deferred functions; release the box slot
-		// explicitly so the holder file is unlinked rather than
-		// relying on stale-detection in the next acquirer.
 		release()
 		os.Exit(1)
 	}
-	// run_finish is emitted inside Run() so the envelope tee
-	// captures it. The previous outer emission here happened
-	// after RunLocal had already closed the envelope file, leaving
-	// `runs logs --follow` without a terminal event. Keep the
-	// non-zero exit so wrapper scripts still see the failure.
 	_ = delegate
 	if res != nil && res.Error != nil {
-		// Run-lifecycle failures (validator rejections, FinishRun-recorded
-		// errors) come back as Result.Error with a nil Go error from
-		// RunLocal. Surface them so the operator isn't left with a
-		// silent exit-1.
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}
 	if res != nil && res.Status != "success" {
@@ -390,10 +339,6 @@ func printPipelineHelp(pipeline string) error {
 		}
 		fmt.Fprintln(w)
 	}
-	// Enumerate sparkwing-owned flags from
-	// sparkwing.SparkwingFlagDocs() so this footer stays in lockstep
-	// with `sparkwing run --help`. Sourcing from one list future-
-	// proofs additions.
 	printSparkwingFlagsSection(w)
 	return nil
 }
@@ -489,14 +434,11 @@ func stripExplainOutputFlags(args []string) []string {
 		tok := args[i]
 		switch {
 		case tok == "-o", tok == "--output":
-			// Two-token flag; consume the value too if present and
-			// not itself a flag (defensive against malformed input).
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 			}
 		case strings.HasPrefix(tok, "-o="),
 			strings.HasPrefix(tok, "--output="):
-			// Single-token =value form; consumed.
 		default:
 			out = append(out, tok)
 		}
@@ -558,7 +500,6 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 		}
 		if !found {
 			if schema.Extra {
-				// Forward to the bag field; treated as scalar string.
 				if !hasEq {
 					if i+1 >= len(args) {
 						return nil, fmt.Errorf("flag --%s expects a value (extra-bag forwarding)", name)
@@ -681,7 +622,7 @@ func detectGit() *sparkwing.Git {
 	}
 	if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		branch := strings.TrimSpace(string(out))
-		if branch != "HEAD" { // detached -> empty
+		if branch != "HEAD" {
 			g.Branch = branch
 		}
 	}

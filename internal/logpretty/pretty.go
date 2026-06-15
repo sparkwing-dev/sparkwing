@@ -601,10 +601,6 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 		fmt.Fprintln(w, "  "+p.color("status ", ansiDim)+" "+statusLine)
 	}
 
-	// Lead with the root cause: the node(s) that actually errored
-	// (outcome=failed) and a one-line error tail, with cascaded
-	// cancellations summarized separately so they don't read as
-	// failures.
 	if status == "failed" && summary != nil {
 		nodes, _ := summary.Attrs["nodes"].([]any)
 		p.writeFailureHeadline(w, nodes)
@@ -840,9 +836,6 @@ func summaryTally(nodes []any) summaryCounts {
 		case "failed":
 			c.failed++
 		case "cancelled":
-			// Upstream-failure cascade; kept distinct from skipped (a
-			// SkipIf / filter decision) so the tally doesn't read as
-			// "everything downstream also broke."
 			c.cancelled++
 		case "skipped", "skipped-concurrent":
 			c.skipped++
@@ -1127,8 +1120,6 @@ func (p *PrettyRenderer) writeProfileBlock(w io.Writer, runStart *sparkwing.LogR
 	fmt.Fprintln(w, "  "+p.color(padRight("state:", 7), ansiDim)+" "+state)
 	fmt.Fprintln(w, "  "+p.color(padRight("logs:", 7), ansiDim)+" "+logs)
 	fmt.Fprintln(w, "  "+p.color(padRight("cache:", 7), ansiDim)+" "+cache)
-	// The mirror only engages for non-local (non-sqlite) state, so the
-	// line is noise for a local profile; omit it there.
 	if !strings.HasPrefix(state, "sqlite") {
 		mirror := "off"
 		if mirrorLocal {

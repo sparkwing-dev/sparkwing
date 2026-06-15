@@ -33,10 +33,6 @@ func runInternalCompleteTargets(args []string) error {
 	if p == nil {
 		return nil
 	}
-	// v0.6 removed the per-pipeline targets block; --target is no
-	// longer a flag. Leave this completer in place as a no-op so any
-	// stale shell completion script referencing the verb doesn't
-	// error -- it just emits an empty list.
 	_ = p
 	return nil
 }

@@ -79,7 +79,7 @@ func TestOrchestratorRun_MissingRequiredSecretFailsRun(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "orch-sec-reader",
-		SecretSource: staticSource{}, // no DEPLOY_TOKEN
+		SecretSource: staticSource{},
 	})
 	if err != nil {
 		t.Fatalf("RunLocal returned err: %v", err)

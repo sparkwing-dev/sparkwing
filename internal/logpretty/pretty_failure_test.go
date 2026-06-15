@@ -44,7 +44,6 @@ func TestRunSummary_HeadlineLeadsWithRootCauseLeaf(t *testing.T) {
 		map[string]any{"id": "notify", "outcome": "cancelled"},
 	})
 
-	// Root cause named with its error tail.
 	causeIdx := strings.Index(out, "cause")
 	if causeIdx < 0 {
 		t.Fatalf("no root-cause line in headline:\n%s", out)
@@ -55,7 +54,6 @@ func TestRunSummary_HeadlineLeadsWithRootCauseLeaf(t *testing.T) {
 		}
 	}
 
-	// Cascade reported separately, as cancellations.
 	if !strings.Contains(out, "2 nodes cancelled by the failure") {
 		t.Errorf("missing cascade summary:\n%s", out)
 	}
@@ -64,8 +62,6 @@ func TestRunSummary_HeadlineLeadsWithRootCauseLeaf(t *testing.T) {
 		t.Errorf("cascade line should follow the root cause; cause@%d cascade@%d:\n%s", causeIdx, cascadeIdx, out)
 	}
 
-	// Tally distinguishes failed from cancelled; dependents are NOT
-	// counted as failures.
 	if !strings.Contains(out, "1 failed") {
 		t.Errorf("tally should show 1 failed:\n%s", out)
 	}

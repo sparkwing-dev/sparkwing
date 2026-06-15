@@ -37,8 +37,6 @@ func pipelinesHandler() http.HandlerFunc {
 		}
 		_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 		if err != nil {
-			// No .sparkwing nearby (e.g. prod dashboard pod): empty map
-			// lets TriggerForm fall back to a free-text input.
 			writeJSON(w, http.StatusOK, payload)
 			return
 		}

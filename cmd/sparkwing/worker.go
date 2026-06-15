@@ -49,10 +49,6 @@ func runWorker(args []string) error {
 		prof.Name, prof.ControllerURL(), *poll)
 
 	cli := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-	// Empty pipeline and source filters = accept any trigger. The
-	// claim loop here doesn't know the consumer's registry; the
-	// spawned handle-trigger child will reject the trigger at Plan()
-	// time if it doesn't recognize the pipeline.
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil

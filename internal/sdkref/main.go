@@ -56,9 +56,6 @@ func main() {
 
 	var b strings.Builder
 	b.WriteString("<!-- GENERATED from the `sparkwing` package via go/doc (internal/sdkref). Do not edit by hand; regenerate with `bash bin/gen-sdk-docs.sh`. -->\n")
-	// Synopses are godoc prose and may start a line with a list marker;
-	// disable the shape rules so godoc wording never has to satisfy
-	// markdownlint in this derived file.
 	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
 	b.WriteString("# SDK API reference\n\n")
 	b.WriteString("Every exported symbol in the `sparkwing` package (the SDK you import " +
@@ -82,7 +79,7 @@ func main() {
 				b.WriteString(s + "\n\n")
 			}
 			b.WriteString("```\n" + decl(fset, t.Decl) + "\n```\n\n")
-			for _, c := range t.Funcs { // constructors (factory funcs)
+			for _, c := range t.Funcs {
 				b.WriteString(symbolLine(dpkg, fset, c.Decl, c.Doc))
 			}
 			for _, m := range t.Methods {

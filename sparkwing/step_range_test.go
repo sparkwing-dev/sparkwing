@@ -121,9 +121,9 @@ func TestStepRange_UserSkipIfStillApplies(t *testing.T) {
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { ranA.Store(true); return nil })
 	sparkwing.Step(w, "b", func(ctx context.Context) error { ranB.Store(true); return nil }).
 		Needs(a).
-		SkipIf(func(context.Context) bool { return true }) // user wants b skipped
+		SkipIf(func(context.Context) bool { return true })
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "a", "b") // range includes b
+	ctx := sparkwingruntime.WithStepRange(context.Background(), "a", "b")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -175,11 +175,9 @@ func TestTopologicalStepOrder_Stable(t *testing.T) {
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
 	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil }).Needs(a)
 	sparkwing.Step(w, "c", func(ctx context.Context) error { return nil }).Needs(b)
-	sparkwing.Step(w, "d", func(ctx context.Context) error { return nil }).Needs(a) // parallel branch
+	sparkwing.Step(w, "d", func(ctx context.Context) error { return nil }).Needs(a)
 
 	got := w.TopologicalStepOrder()
-	// 'a' must come before its descendants; relative order of b vs d
-	// is stable on registration order (b before d).
 	pos := func(id string) int {
 		for i, x := range got {
 			if x == id {

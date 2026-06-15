@@ -60,7 +60,7 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("B: want Queued, got %s", r.Kind)
 	}
-	time.Sleep(80 * time.Millisecond) // A's lease lapses; no reaper runs
+	time.Sleep(80 * time.Millisecond)
 
 	res, err := s.MaintainConcurrency(ctxT(t), store.ConcurrencyMaintenanceOptions{})
 	if err != nil {

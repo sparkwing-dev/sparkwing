@@ -73,21 +73,12 @@ func runPipeline(args []string) error {
 	case "plan":
 		return runPipelinePlan(args[1:])
 	case "run":
-		// Canonical run path. `sparkwing run <name>` is an alias for
-		// this; both end up at the same dispatch entrypoint.
 		return dispatchRun(args[1:])
 	case "trigger":
-		// Submit a trigger to a profile's controller for remote
-		// execution; follows the run by default. The v0.5.0 successor
-		// to `sparkwing run --sw-profile`.
 		return runPipelineTrigger(args[1:])
 	case "publish":
-		// : compile + upload pipeline binary to the
-		// configured ArtifactStore. Explicit operator action -- the
-		// run path never auto-uploads.
 		return runPipelinePublish(args[1:])
 	case "hooks":
-		// Git hooks fire pipelines on pre-commit / pre-push.
 		return runHooks(args[1:])
 	case "sparks":
 		return runSparks(args[1:])
@@ -216,8 +207,6 @@ func runPipelineDiscover(args []string) error {
 		fmt.Printf("no pipelines matched %q (try `sparkwing pipeline list` to see everything)\n", query)
 		return nil
 	}
-	// Name column width capped at longest hit, 24 max -- one global
-	// width keeps the score column aligned.
 	const widthCap = 24
 	nameWidth := 0
 	for _, r := range results {
@@ -261,8 +250,6 @@ func scorePipeline(a Pipeline, tokens []string) int {
 			}
 		}
 		if best == 0 {
-			// Every token must match something; a token with no hit
-			// means the overall match fails.
 			return 0
 		}
 		score += best
@@ -304,9 +291,6 @@ func runPipelineDescribe(args []string) error {
 		return err
 	}
 	name := *pipelineName
-	// Describe always considers hidden entries -- the operator is
-	// asking for a specific name, so opacity is a worse failure mode
-	// than surface area.
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
 		return err
@@ -319,13 +303,6 @@ func runPipelineDescribe(args []string) error {
 		}
 	}
 	if found == nil {
-		// Surface a "did you mean X?" suggestion when the typo is
-		// close to a registered name. Source the candidate set from
-		// the catalog we just gathered
-		// (rather than sparkwing.Registered() -- this CLI verb runs in
-		// the sparkwing process, not the inner pipeline binary, so the
-		// in-process registry is empty here). Far typos fall through
-		// to the existing "list --all" hint.
 		candidates := make([]string, 0, len(pipelines))
 		for _, p := range pipelines {
 			candidates = append(candidates, p.Name)
@@ -390,8 +367,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Args = dp.Args
 				a.Examples = dp.Examples
 				a.EnvVars = dp.EnvVars
-				// Surface risk labels in
-				// `pipeline list / describe -o json`.
 				a.Risks = dp.Risks
 				a.RisksBySteps = dp.RisksBySteps
 			}

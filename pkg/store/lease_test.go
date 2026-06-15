@@ -60,7 +60,6 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 	}
 	before := *claimed.LeaseExpiresAt
 
-	// Heartbeat with a longer lease; expiry must move forward.
 	time.Sleep(20 * time.Millisecond)
 	if _, err := s.HeartbeatTrigger(context.Background(), claimed.ID, 10*time.Second); err != nil {
 		t.Fatalf("HeartbeatTrigger: %v", err)
@@ -90,13 +89,10 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 	s := newStoreT(t)
 	seedPending(t, s, "trig-c")
 
-	// First worker claims with a tiny lease, then "dies" (no
-	// heartbeat, no release).
 	_, err := s.ClaimNextTrigger(context.Background(), 50*time.Millisecond)
 	if err != nil {
 		t.Fatalf("initial claim: %v", err)
 	}
-	// Reaper too early: nothing reaped.
 	ids, err := store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +101,6 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 		t.Errorf("premature reap: %v", ids)
 	}
 
-	// Wait for the lease to expire, then reap.
 	time.Sleep(80 * time.Millisecond)
 	ids, err = store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
@@ -115,7 +110,6 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 		t.Fatalf("reaped=%v want [trig-c]", ids)
 	}
 
-	// Row is back to pending with cleared claim state.
 	got, err := s.GetTrigger(context.Background(), "trig-c")
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +121,6 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 		t.Errorf("claim/lease not cleared: %+v", got)
 	}
 
-	// A fresh worker can claim it.
 	second, err := s.ClaimNextTrigger(context.Background(), 1*time.Second)
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
@@ -156,7 +149,6 @@ func TestLease_ReaperSkipsNonExpired(t *testing.T) {
 		t.Errorf("reaped healthy claim: %v", ids)
 	}
 
-	// Row remains claimed with its full lease.
 	got, err := s.GetTrigger(context.Background(), claimed.ID)
 	if err != nil {
 		t.Fatal(err)

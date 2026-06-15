@@ -82,8 +82,6 @@ func (m *mirrorStateBackend) Close() error {
 	return localErr
 }
 
-// Runs.
-
 func (m *mirrorStateBackend) CreateRun(ctx context.Context, r store.Run) error {
 	return m.tee("CreateRun", r.ID,
 		func() error { return m.canonical.CreateRun(ctx, r) },
@@ -115,8 +113,6 @@ func (m *mirrorStateBackend) GetRun(ctx context.Context, runID string) (*store.R
 func (m *mirrorStateBackend) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	return m.canonical.GetLatestRun(ctx, pipeline, statuses, maxAge)
 }
-
-// Nodes.
 
 func (m *mirrorStateBackend) CreateNode(ctx context.Context, n store.Node) error {
 	return m.tee("CreateNode", n.RunID,
@@ -186,8 +182,6 @@ func (m *mirrorStateBackend) SetNodeSummary(ctx context.Context, runID, nodeID, 
 		func() error { return m.local.SetNodeSummary(ctx, runID, nodeID, md) })
 }
 
-// Per-step state.
-
 func (m *mirrorStateBackend) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return m.tee("StartNodeStep", runID,
 		func() error { return m.canonical.StartNodeStep(ctx, runID, nodeID, stepID) },
@@ -222,15 +216,11 @@ func (m *mirrorStateBackend) ListNodeSteps(ctx context.Context, runID string) ([
 	return m.canonical.ListNodeSteps(ctx, runID)
 }
 
-// Metric samples.
-
 func (m *mirrorStateBackend) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return m.tee("AddNodeMetricSample", runID,
 		func() error { return m.canonical.AddNodeMetricSample(ctx, runID, nodeID, sample) },
 		func() error { return m.local.AddNodeMetricSample(ctx, runID, nodeID, sample) })
 }
-
-// Dispatch snapshots.
 
 func (m *mirrorStateBackend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	return m.tee("WriteNodeDispatch", d.RunID,
@@ -245,8 +235,6 @@ func (m *mirrorStateBackend) GetNodeDispatch(ctx context.Context, runID, nodeID 
 func (m *mirrorStateBackend) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error) {
 	return m.canonical.ListNodeDispatches(ctx, runID, nodeID)
 }
-
-// Debug pauses.
 
 func (m *mirrorStateBackend) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	return m.tee("CreateDebugPause", p.RunID,
@@ -268,13 +256,9 @@ func (m *mirrorStateBackend) ListDebugPauses(ctx context.Context, runID string) 
 	return m.canonical.ListDebugPauses(ctx, runID)
 }
 
-// Triggers (read-only here).
-
 func (m *mirrorStateBackend) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
 	return m.canonical.FindSpawnedChildTriggerID(ctx, parentRunID, parentNodeID, pipeline)
 }
-
-// Approvals.
 
 func (m *mirrorStateBackend) CreateApproval(ctx context.Context, a store.Approval) error {
 	return m.tee("CreateApproval", a.RunID,
@@ -312,8 +296,6 @@ func (m *mirrorStateBackend) ResolveApproval(ctx context.Context, runID, nodeID,
 func (m *mirrorStateBackend) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
 	return m.canonical.ListPendingApprovals(ctx)
 }
-
-// StateBackend extras.
 
 // AppendEvent is a write and is teed: run-level events (run_start, node
 // events, ...) are part of the state the laptop mirror should reflect.

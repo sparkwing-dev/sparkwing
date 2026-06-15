@@ -96,12 +96,10 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		{"sparkwing pipeline run", cmdPipelineRun},
 	}
 	allFlags := []string{
-		// Hot tier
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
 		"--target", "--profile",
-		// Advanced tier -- also surface in --help
 		"--sw-cd", "--sw-verbose",
 		"--sw-allow",
 	}
@@ -186,10 +184,6 @@ func containsFlagRow(out, flagName string) bool {
 }
 
 func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {
-	// Walk every parent in the registry; for each subcommand it
-	// lists, the corresponding child Command (if found) reports its
-	// Hidden state. A parent that lists a Hidden child must have it
-	// filtered out by visibleSubcommands.
 	parents := parentCommands()
 	leaves := leafCommands()
 	for parentKey, parent := range parents {

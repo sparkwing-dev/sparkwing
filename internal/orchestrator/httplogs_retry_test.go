@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// 5xx responses must be retried up to the per-line cap; after
-// exhausting retries the runner records the drop count + the
-// first-seen reason rather than failing the node.
 func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	var posts atomic.Int64
 	var healthy atomic.Bool
@@ -31,7 +28,6 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Shrink retry timing so the test isn't gated on real backoff.
 	orchestrator.SetTestHTTPNodeLogRetry(t, 3, 1)
 
 	be := orchestrator.NewHTTPLogs(srv.URL, nil, nil)
@@ -66,8 +62,6 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 		t.Errorf("Fatal: got %v, want nil (5xx is not auth-fatal)", fataler.Fatal())
 	}
 
-	// And once the service recovers, a line lands on the first try
-	// and the drop count is unaffected.
 	posts.Store(0)
 	healthy.Store(true)
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "second"})
@@ -105,7 +99,6 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 		t.Errorf("first emit: got %d POSTs, want 1 (auth latches before retry budget)", first)
 	}
 
-	// Subsequent emits skip the network entirely.
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "second"})
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "third"})
 	if posts.Load() != first {

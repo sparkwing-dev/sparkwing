@@ -74,13 +74,6 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	}
 	defer func() { _ = closer.Close() }()
 
-	// Lazy orphan reconciliation: any "running" rows whose orchestrator
-	// process is dead get transitioned to "failed" before we read.
-	// Only meaningful when the underlying state is a local SQLite store
-	// the CLI itself can write to; S3 / controller backends are
-	// reconciled by their own owners (orchestrator process / controller
-	// reaper). Errors are swallowed -- a stale-heartbeat sweep failing
-	// mustn't break the list itself.
 	if st := localStore(b); st != nil {
 		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
 	}
@@ -220,9 +213,6 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 	defer func() { _ = closer.Close() }()
 
-	// Lazy orphan reconciliation only applies to the local SQLite
-	// backend; remote / object-store backends are reconciled by
-	// their own owners.
 	if st := localStore(b); st != nil {
 		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
 	}
@@ -231,10 +221,6 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		if st := localStore(b); st != nil {
 			return writeRunDetailJSON(ctx, st, runID, out)
 		}
-		// Backend-backed JSON: a minimal shape with run + nodes,
-		// without the local-only step/approval expansion. Matches the
-		// keys the SPA needs from S3 / controller modes; richer fields
-		// stay sqlite-only until we lift them onto Backend.
 		run, err := b.GetRun(ctx, runID)
 		if err != nil {
 			return err
@@ -285,10 +271,6 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	if err != nil {
 		return err
 	}
-	// Steps and approvals aren't on the Backend interface yet -- they
-	// live on the local *store.Store path. Render as empty when the
-	// backend is S3 or controller. The rest of the status surface
-	// (run header, node table, errors) still renders.
 	var steps []*store.NodeStep
 	if st := localStore(b); st != nil {
 		steps, _ = st.ListNodeSteps(ctx, runID)
@@ -337,7 +319,6 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		}
 	}
 
-	// Skip "upstream-failed" -- root cause is already printed.
 	for _, n := range nodes {
 		if n.Error != "" && n.Error != "upstream-failed" {
 			fmt.Fprintf(out, "\n%s error:\n  %s\n", n.NodeID, indent(n.Error, "  "))
@@ -375,15 +356,11 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	for _, n := range nodes {
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
-		// Skip detail block for vanilla success nodes unless forced.
 		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
 		fmt.Fprintf(out, "    %s\n", color.Bold(n.NodeID+":"))
-		// A live phase string (e.g. "queued in <ns>: N ahead, held by
-		// X" while blocked on a concurrency slot) explains why an
-		// otherwise-idle node hasn't progressed.
 		if n.StatusDetail != "" {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("↳"), n.StatusDetail)
 		}
@@ -393,9 +370,7 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 		if n.Summary != "" {
 			writeIndentedSummary(out, "      ", n.Summary)
 		}
-		// Compute column widths so step rows align even though
-		// annotations/summaries interleave (a single tabwriter can't
-		// flush across the intervening rows).
+		// hack: tabwriter can't flush across interleaved annotation/summary rows, so we compute column widths manually
 		idWidth := 0
 		for _, s := range steps {
 			if n := len(s.StepID); n > idWidth {
@@ -661,9 +636,6 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	defer func() { _ = closer.Close() }()
 
 	if st := localStore(b); st == nil {
-		// Non-local backend (S3 / controller). --tree assumes
-		// local descendant-run discovery; reject it with a clear
-		// error rather than silently behaving wrong.
 		if opts.Tree {
 			return fmt.Errorf("--tree is only supported against local SQLite state; " +
 				"unset --tree to read this run from the configured remote backend")
@@ -725,13 +697,6 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return writeLogsTreeLocal(paths, runID, opts, out)
 	}
 
-	// When the envelope file exists (post-rewrite runs) and the user
-	// hasn't asked for the legacy body-only view or pinned to a
-	// single node, the envelope file IS the merged stream -- the
-	// dispatcher tees every run-wide event into it, including
-	// exec_line body lines. Read it directly. Older runs without an
-	// envelope file fall back to the per-node path so historical runs
-	// stay readable.
 	if !opts.NoEvents && opts.Node == "" && envelopeExists(paths, runID) {
 		if !opts.Follow {
 			return writeLogsFromEnvelope(paths, runID, opts, out)
@@ -739,7 +704,6 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return followFromEnvelope(ctx, st, paths, runID, opts, out)
 	}
 	if opts.EventsOnly {
-		// Envelope file missing on an older run; nothing to show.
 		return nil
 	}
 
@@ -769,10 +733,6 @@ func writeLogsFromEnvelope(paths Paths, runID string, opts LogsOpts, out io.Writ
 	}
 	defer f.Close()
 
-	// Apply filters (grep / tail / head / lines + events-only) by
-	// buffering; envelope files are bounded by run duration and tend
-	// to be small relative to body output. For very large runs the
-	// follow path is the right tool anyway.
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return err
@@ -801,7 +761,6 @@ func filterEventsOnly(data []byte) []byte {
 		line := sc.Bytes()
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			// Unparseable; preserve so debugging stays possible.
 			out = append(out, line...)
 			out = append(out, '\n')
 			continue
@@ -869,9 +828,6 @@ func followFromEnvelope(ctx context.Context, st *store.Store, paths Paths, runID
 			return err
 		}
 		if isTerminalStatus(run.Status) {
-			// One final drain pass after terminal: file may still
-			// have a trailing run_finish that landed between the last
-			// read and FinishRun's commit. Re-open and drain to EOF.
 			return drainEnvelopeAfterTerminal(path, offset, partial, opts, out)
 		}
 		select {
@@ -909,8 +865,6 @@ func drainEnvelopeAfterTerminal(path string, offset int64, partial []byte, opts 
 	combined := append(partial, rest...)
 	lastNL := bytes.LastIndexByte(combined, '\n')
 	if lastNL < 0 {
-		// No complete line; emit what we have so the operator at
-		// least sees the partial.
 		if len(combined) == 0 {
 			return nil
 		}
@@ -928,7 +882,6 @@ func drainEnvelopeAfterTerminal(path string, offset int64, partial []byte, opts 
 }
 
 func writeLogsText(paths Paths, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {
-	// JSON = flat JSONL; no banner lines, no wrapper.
 	jsonOut := opts.JSON || opts.Format == "json"
 	for i, n := range target {
 		if len(target) > 1 && !jsonOut {
@@ -938,7 +891,6 @@ func writeLogsText(paths Paths, runID string, target []*store.Node, opts LogsOpt
 			fmt.Fprintf(out, "=== %s (%s) ===\n", n.NodeID, orDash(n.Outcome))
 		}
 		if n.StartedAt == nil {
-			// Skip read entirely; silent in JSONL.
 			if len(target) > 1 && !jsonOut {
 				fmt.Fprintln(out, "(did not execute)")
 			}
@@ -962,9 +914,6 @@ func writeFile(path string, opts LogsOpts, out io.Writer) error {
 	}
 	defer f.Close()
 
-	// Sniff: JSONL canonical log files start with `{`. Old pre-JSONL
-	// text files start with a digit (timestamp) -- fall back to the
-	// plain-text printer so pre-rewrite runs stay readable.
 	hdr := make([]byte, 1)
 	_, _ = f.Read(hdr)
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -972,11 +921,6 @@ func writeFile(path string, opts LogsOpts, out io.Writer) error {
 	}
 	isJSONL := len(hdr) == 1 && hdr[0] == '{'
 
-	// When no filters are active we stream through the scanner to keep
-	// memory flat on large logs. With filters active we must buffer
-	// the whole file because grep / tail / lines windows are line-set
-	// operations. The buffer cap matches the scanner's (4 MiB) so the
-	// two paths handle the same maximum line length.
 	if opts.Tail == 0 && opts.Head == 0 && opts.Lines == "" && opts.Grep == "" {
 		if isJSONL {
 			return renderJSONLStream(f, opts, out)
@@ -1041,7 +985,6 @@ func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error
 		_, err := out.Write(data)
 		return err
 	}
-	// Pre-JSONL legacy logs (no `{` prefix) pass through verbatim.
 	trimmed := bytes.TrimLeft(data, " \t\r\n")
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		_, err := out.Write(data)
@@ -1115,7 +1058,7 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 			path := paths.NodeLog(runID, n.NodeID)
 			f, err := os.Open(path)
 			if err != nil {
-				continue // file may not exist yet
+				continue
 			}
 			if _, err := f.Seek(offsets[n.NodeID], io.SeekStart); err != nil {
 				f.Close()
@@ -1126,8 +1069,6 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 				banners[n.NodeID] = true
 			}
 			buf := make([]byte, 32*1024)
-			// Drain available bytes; split on \n; hold trailing
-			// partial for the next tick.
 			var chunk []byte
 			for {
 				n2, rerr := f.Read(buf)
@@ -1207,7 +1148,6 @@ func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer
 			if err != nil {
 				continue
 			}
-			// Grep per node; tail/head once at the end.
 			if opts.Grep != "" {
 				filtered := LogsOpts{Grep: opts.Grep}.applyClientFilters(data)
 				data = filtered
@@ -1337,8 +1277,6 @@ func filterNodesBySince(nodes []*store.Node, since time.Duration) []*store.Node 
 	return out
 }
 
-// --- helpers ---
-
 // sparkwingFailedStr mirrors sparkwing.Failed.
 const sparkwingFailedStr = "failed"
 
@@ -1398,9 +1336,6 @@ func formatNodeDuration(n *store.Node) string {
 	}
 	if n.StartedAt != nil {
 		base := "running " + time.Since(*n.StartedAt).Round(100*time.Millisecond).String()
-		// Surface staleness for "running" nodes whose last heartbeat
-		// is older than the threshold. Matches the dashboard's
-		// liveness indicator so CLI and UI report the same orphan.
 		if n.LastHeartbeat != nil {
 			since := time.Since(*n.LastHeartbeat)
 			if since > staleHeartbeatThreshold {

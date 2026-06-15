@@ -116,15 +116,12 @@ func TestRewriteUnreleasedToVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Two headings present after rewrite.
 	if !strings.Contains(out, "## [Unreleased]") {
 		t.Errorf("expected fresh [Unreleased] heading, got:\n%s", out)
 	}
 	if !strings.Contains(out, "## [v1.0.0] - 2026-05-20") {
 		t.Errorf("expected [v1.0.0] - 2026-05-20 heading, got:\n%s", out)
 	}
-	// The bullet content stays under the new versioned section
-	// (i.e. directly after the [v1.0.0] heading, before [v0.9.0]).
 	idxVer := strings.Index(out, "## [v1.0.0]")
 	idxThing := strings.Index(out, "- thing one")
 	idxOld := strings.Index(out, "## [v0.9.0]")
@@ -144,7 +141,7 @@ func TestRewriteUnreleasedToVersion_NoUnreleasedHeading(t *testing.T) {
 func TestValidateReleaseVersion_Pre1Lock(t *testing.T) {
 	cases := []struct {
 		version string
-		wantErr string // substring; empty = no error
+		wantErr string
 	}{
 		{version: "v0.1.0", wantErr: ""},
 		{version: "v0.6.1", wantErr: ""},
@@ -179,8 +176,8 @@ func TestPlanChangelogRewrite(t *testing.T) {
 		body     string
 		version  string
 		wantKind changelogRewriteKind
-		wantErr  string // substring; empty = no error expected
-		wantBody string // optional: substring expected in newBody
+		wantErr  string
+		wantBody string
 	}{
 		{
 			name:     "apply when Unreleased has content and version absent",

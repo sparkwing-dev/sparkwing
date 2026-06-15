@@ -48,8 +48,6 @@ func runProfileCmd(args []string) error {
 	return renderProfilePretty(p, chain, cfgPath, os.Stdout)
 }
 
-// --- JSON output ---
-
 type profileEffectiveJSON struct {
 	Name        string `json:"name"`
 	Source      string `json:"source"`
@@ -89,8 +87,6 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
 }
-
-// --- pretty output ---
 
 func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string, out io.Writer) error {
 	state, logs, cache := p.SurfaceStrings()

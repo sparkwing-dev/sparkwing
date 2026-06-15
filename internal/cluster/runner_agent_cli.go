@@ -62,11 +62,6 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	}
 	switch out.SpawnPolicy {
 	case "return-to-queue":
-		// The only policy implemented today: spawned work always
-		// flows through the controller queue. run-local and auto
-		// are reserved for a later session and rejected here so a
-		// misconfigured agent fails loudly rather than silently
-		// defaulting.
 	case "run-local", "auto":
 		return out, fmt.Errorf("agent.yaml: spawn_policy %q is not implemented yet (only return-to-queue is supported in v0)", out.SpawnPolicy)
 	default:
@@ -81,8 +76,6 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	if out.Lease <= 0 {
 		out.Lease = store.DefaultLeaseDuration
 	}
-	// Blank labels slots (leading / trailing whitespace in YAML) get
-	// dropped so the controller filter doesn't see phantom labels.
 	clean := make([]string, 0, len(out.Labels))
 	for _, l := range out.Labels {
 		l = strings.TrimSpace(l)
@@ -162,19 +155,14 @@ func RunAgentCLI(args []string) error {
 	}
 
 	return RunPoolLoop(ctx, PoolLoopConfig{
-		ControllerURL: cfg.Controller,
-		LogsURL:       cfg.Logs,
-		Token:         cfg.Token,
-		HolderPrefix:  prefix,
-		Labels:        cfg.Labels,
-		MaxConcurrent: cfg.MaxConcurrent,
-		PollInterval:  cfg.Poll,
-		Lease:         cfg.Lease,
-		// MaxClaims deliberately left at 0 (unlimited): laptop agents
-		// have no kubelet supervisor, so an agent that exits just stops
-		// accepting work. Bounded lifetime is only useful when something
-		// is going to restart you, which is the in-cluster pool pod's
-		// world, not the laptop's.
+		ControllerURL:     cfg.Controller,
+		LogsURL:           cfg.Logs,
+		Token:             cfg.Token,
+		HolderPrefix:      prefix,
+		Labels:            cfg.Labels,
+		MaxConcurrent:     cfg.MaxConcurrent,
+		PollInterval:      cfg.Poll,
+		Lease:             cfg.Lease,
 		HeartbeatInterval: cfg.Heartbeat,
 		SourceName:        "agent",
 	}, logger)

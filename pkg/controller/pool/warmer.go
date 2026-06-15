@@ -20,7 +20,6 @@ import (
 func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcName string, warmImages []string) error {
 	podName := fmt.Sprintf("sparkwing-cache-warmer-%s-%d", strings.TrimPrefix(pvcName, "sparkwing-cache-pool-"), time.Now().Unix())
 
-	// Build the pull script that runs inside the DinD container
 	var script strings.Builder
 	script.WriteString("set -e\n")
 	script.WriteString("echo 'starting dockerd...'\n")
@@ -108,7 +107,6 @@ func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcNam
 	}
 	log.Printf("warmer: warming %s via pod %s", pvcName, created.Name)
 
-	// Wait for completion
 	timeout := 30 * time.Minute
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

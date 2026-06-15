@@ -57,9 +57,6 @@ func TestGCWarmRoot_SweepsByAge(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 
-	// git/: old dir should go, fresh dir should stay. Set the dir's
-	// mtime *after* writing its contents -- creating files inside a
-	// dir bumps the parent's mtime on most filesystems.
 	oldGit := filepath.Join(root, "git", "old-repo")
 	mustTouch(t, filepath.Join(oldGit, "HEAD"), "ref: refs/heads/main\n", now.Add(-30*24*time.Hour))
 	if err := os.Chtimes(oldGit, now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour)); err != nil {
@@ -71,7 +68,6 @@ func TestGCWarmRoot_SweepsByAge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// tmp/: old file + fresh file.
 	mustTouch(t, filepath.Join(root, "tmp", "old.log"), "stale data", now.Add(-48*time.Hour))
 	mustTouch(t, filepath.Join(root, "tmp", "fresh.log"), "recent data", now.Add(-1*time.Hour))
 
@@ -107,8 +103,6 @@ func TestGCWarmRoot_RemovesTerminalRunDirs(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 
-	// Two run dirs on disk: one the controller says is terminal + old,
-	// one terminal + within grace, one not listed at all.
 	oldRun := filepath.Join(root, "runs", "run-old")
 	mustMkdir(t, oldRun, now)
 	mustTouch(t, filepath.Join(oldRun, "stdout.log"), "output", now)

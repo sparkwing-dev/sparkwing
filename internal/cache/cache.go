@@ -139,10 +139,6 @@ func New(cfg Config) (*Server, error) {
 		cfg.GitForkLimit = 4
 	}
 
-	// Apply Config to the package-level path / interval vars the
-	// existing handlers + background loops still read directly.
-	// (Converting every handler to a method on *Server is a future
-	// cleanup; this preserves behavior with the smallest diff.)
 	dataRoot = cfg.DataDir
 	repoDir = filepath.Join(cfg.DataDir, "repos")
 	archDir = filepath.Join(cfg.DataDir, "archives")
@@ -177,7 +173,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)
 
-	// Gitcache routes.
 	s.mux.HandleFunc("/archive", handleArchive)
 	s.mux.HandleFunc("/repos", handleRepos)
 	s.mux.HandleFunc("/artifacts/", handleArtifacts)
@@ -194,7 +189,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/git/refresh", handleGitRefresh)
 	s.mux.HandleFunc("/git/", handleGit)
 
-	// Proxy routes (package registry cache).
 	s.mux.HandleFunc("/proxy/", handleProxy)
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
@@ -204,7 +198,7 @@ func New(cfg Config) (*Server, error) {
 		Addr:         cfg.Addr,
 		Handler:      otelhttp.NewHandler(s.mux, "sparkwing-cache"),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Minute, // archives can be large
+		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
 

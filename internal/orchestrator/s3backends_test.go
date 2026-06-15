@@ -66,8 +66,6 @@ func TestRunLocal_S3State_DispatchesToS3Backends(t *testing.T) {
 		t.Fatalf("status = %q, want success (err=%v)", res.Status, res.Error)
 	}
 
-	// State.ndjson should be readable via a fresh backend pointed at the
-	// same bucket.
 	reader := s3state.New(art)
 	t.Cleanup(func() { _ = reader.Close() })
 	got, err := reader.GetRun(context.Background(), res.RunID)
@@ -100,7 +98,6 @@ func TestRunLocal_S3State_NoLogStore_Fails(t *testing.T) {
 	_, err = orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline: "s3-ok",
 		State:    state,
-		// LogStore intentionally nil.
 	})
 	if err == nil {
 		t.Fatal("RunLocal succeeded without a LogStore; want error")

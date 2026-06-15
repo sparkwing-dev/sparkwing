@@ -70,18 +70,16 @@ func TestGroup_WhenGatesActivation(t *testing.T) {
 		AtLeastOne().
 		When(ArgEq("mode", "deploy"))
 
-	// Active context: predicate true, group enforced.
 	if err := evalGroup(g.meta, ctxArgs(map[string]any{"mode": "deploy"})); err == nil {
 		t.Fatal("group should fire when active and unsatisfied")
 	}
-	// Inactive context: predicate false, group dormant -> no error.
 	if err := evalGroup(g.meta, ctxArgs(map[string]any{"mode": "off"})); err != nil {
 		t.Fatalf("dormant group should not fire; got %v", err)
 	}
 }
 
 func TestGroup_UnsetKindIsAnInternalError(t *testing.T) {
-	g := newGroupBuilder([]string{"A", "B"}) // no kind method called
+	g := newGroupBuilder([]string{"A", "B"})
 	if err := evalGroup(g.meta, ctxArgs(map[string]any{})); err == nil ||
 		!strings.Contains(err.Error(), "no cardinality") {
 		t.Fatalf("unset kind should error explicitly; got %v", err)

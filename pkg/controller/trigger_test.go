@@ -35,14 +35,12 @@ func TestTrigger_Validation(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	// Empty pipeline.
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]string{})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d want 400", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 
-	// Unknown field.
 	resp2 := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "demo",
 		"unknown":  true,
@@ -68,7 +66,6 @@ func TestTrigger_MissingSource400(t *testing.T) {
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "demo",
-		// trigger.source intentionally omitted
 	})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -122,9 +119,6 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	registerPipeline("trigger-e2e", func() sparkwing.Pipeline[sparkwing.NoInputs] { return triggerE2EPipe{} })
 
-	// Build the server first; httptest gives us a URL; we can then
-	// construct an InProcessDispatcher whose Backends point back at
-	// that URL via the HTTP client.
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -136,14 +130,11 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Local Logs + Locks; State is the HTTP client targeting the
-	// same controller. This is the cluster-mode shape, collapsed
-	// into one process.
 	paths := orchestrator.PathsAt(dir)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	local := orchestrator.LocalBackends(paths, st) // State discarded
+	local := orchestrator.LocalBackends(paths, st)
 	backends := orchestrator.Backends{
 		State:       client.New(ts.URL, nil),
 		Logs:        local.Logs,
@@ -151,7 +142,6 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	}
 	srv.WithDispatcher(inprocdispatch.InProcessDispatcher{Backends: backends})
 
-	// Fire the webhook.
 	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "trigger-e2e",
 		"trigger":  map[string]string{"source": "github"},
@@ -170,8 +160,6 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 		t.Fatal("empty run_id")
 	}
 
-	// Poll until the run terminates. Budget is generous; the
-	// pipeline is trivial.
 	deadline := time.Now().Add(3 * time.Second)
 	var finalRun *store.Run
 	for time.Now().Before(deadline) {
@@ -255,7 +243,6 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if run.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
 	}
-	// runs list should include it.
 	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
@@ -297,7 +284,6 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 		t.Fatalf("CreateRun pending: %v", err)
 	}
 
-	// Orchestrator-side promotion: same id, status=running, fresh started_at.
 	started := time.Now()
 	if err := st.CreateRun(ctx, store.Run{
 		ID:        "run-pending-1",
@@ -315,7 +301,6 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	if got.Status != "running" {
 		t.Errorf("Status=%q want running", got.Status)
 	}
-	// CreatedAt preserved from original pending insert.
 	if got.CreatedAt.Truncate(time.Second) != created.Truncate(time.Second) {
 		t.Errorf("CreatedAt=%v want %v (lost on upsert)", got.CreatedAt, created)
 	}
@@ -346,8 +331,6 @@ func TestTrigger_DispatcherError(t *testing.T) {
 		t.Errorf("status=%d want 500", resp.StatusCode)
 	}
 }
-
-// --- fixtures ---
 
 type triggerE2EPipe struct{ sparkwing.Base }
 

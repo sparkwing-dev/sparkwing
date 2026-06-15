@@ -31,7 +31,6 @@ func TestProxyCacheKey_Different(t *testing.T) {
 		t.Error("different paths should produce different keys")
 	}
 
-	// Different registries, same path
 	k3 := proxyCacheKey("pypi", "lodash/-/lodash-4.17.21.tgz")
 	if k1 == k3 {
 		t.Error("different registries should produce different keys")
@@ -138,7 +137,6 @@ func TestHandleProxy_CacheMissAndHit(t *testing.T) {
 	withTestProxy(t, map[string]Registry{
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
-		// First request: cache miss
 		req1 := httptest.NewRequest(http.MethodGet, "/proxy/test/testpkg", nil)
 		w1 := httptest.NewRecorder()
 		handleProxy(w1, req1)
@@ -153,7 +151,6 @@ func TestHandleProxy_CacheMissAndHit(t *testing.T) {
 			t.Errorf("expected response body, got: %s", w1.Body.String())
 		}
 
-		// Second request: cache hit
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/testpkg", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
@@ -190,7 +187,6 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 			t.Fatalf("expected 1 upstream hit, got %d", hitCount.Load())
 		}
 
-		// Verify meta says immutable
 		key := proxyCacheKey("test", "pkg/-/pkg-1.0.0.tgz")
 		metaData, err := os.ReadFile(filepath.Join(proxyDir, "test", key+".meta"))
 		if err != nil {
@@ -202,7 +198,6 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 			t.Error("tgz file should be marked immutable")
 		}
 
-		// Second fetch should come from cache
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
@@ -237,7 +232,6 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 			t.Fatalf("expected 1 upstream hit, got %d", hitCount.Load())
 		}
 
-		// Immediately: should be cached
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)
@@ -246,10 +240,8 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 			t.Errorf("expected cache hit, but got %d upstream hits", hitCount.Load())
 		}
 
-		// Wait for TTL to expire
 		time.Sleep(1100 * time.Millisecond)
 
-		// Should re-fetch
 		req3 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w3 := httptest.NewRecorder()
 		handleProxy(w3, req3)
@@ -272,7 +264,6 @@ func TestHandleProxy_ConcurrentReads(t *testing.T) {
 	withTestProxy(t, map[string]Registry{
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
-		// Prime the cache
 		req := httptest.NewRequest(http.MethodGet, "/proxy/test/pkg/-/pkg-1.0.0.tgz", nil)
 		w := httptest.NewRecorder()
 		handleProxy(w, req)
@@ -280,7 +271,6 @@ func TestHandleProxy_ConcurrentReads(t *testing.T) {
 			t.Fatalf("expected 1 upstream hit, got %d", hitCount.Load())
 		}
 
-		// Fire 10 concurrent reads -- all should get cache hits, no upstream calls
 		var wg sync.WaitGroup
 		for range 10 {
 			wg.Add(1)
@@ -322,7 +312,6 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 	withTestProxy(t, map[string]Registry{
 		"test": {Name: "test", Upstream: upstream.URL, RewriteBody: false},
 	}, func() {
-		// First request -- populates cache
 		req1 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w1 := httptest.NewRecorder()
 		handleProxy(w1, req1)
@@ -332,7 +321,6 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 
 		time.Sleep(10 * time.Millisecond)
 
-		// Upstream returns 502 -- forwarded to client
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w2 := httptest.NewRecorder()
 		handleProxy(w2, req2)

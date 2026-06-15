@@ -93,8 +93,6 @@ func TestSearch_MissingQueryReturns400(t *testing.T) {
 }
 
 func TestSearch_EmptyLogsVolume(t *testing.T) {
-	// Logs service freshly created, no runs dir yet -- should return
-	// an empty result set, not a 500.
 	root := t.TempDir()
 	s, _ := New(root, nil)
 	srv := httptest.NewServer(s.Handler())

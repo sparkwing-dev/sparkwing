@@ -53,30 +53,18 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 func (p *PrePush) run(ctx context.Context) error {
 	var failures []string
 
-	// 1. No `replace` directives in any committed go.mod. Replace is
-	// fine locally during iteration; it must NEVER reach main.
 	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
 		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(ctx, "no-replace check: clean")
 	}
 
-	// 1a. No committed go.work / go.work.sum. Workspaces are a
-	// local-only convenience; they can't be resolved by the Go module
-	// proxy and silently override the published versions for anyone
-	// who clones the repo. Same rule as `replace`: fine locally, never
-	// in main.
 	if err := checkNoCommittedGoWorkFiles(ctx); err != nil {
 		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(ctx, "no-go.work check: clean")
 	}
 
-	// 1b. `go mod tidy` drift: running tidy should produce no diff. A
-	// non-tidy go.mod is a near-certain sign that a recent `go get`
-	// wasn't followed by tidy. We swallow tidy's own error (it can fail
-	// in workspaces with unreleased local sibling modules); the actual
-	// signal is `git diff --quiet` against go.mod/go.sum after tidy ran.
 	if _, err := sparkwing.Bash(ctx,
 		`go -C .sparkwing mod tidy 2>/dev/null || true; git diff --quiet -- .sparkwing/go.mod .sparkwing/go.sum`,
 	).Run(); err != nil {
@@ -85,27 +73,18 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "go mod tidy: no drift")
 	}
 
-	// 2. Version freshness: every sparkwing-ecosystem dep must be at
-	// the latest released tag (or a not-behind local replace).
 	if err := CheckVersionsFreshness(ctx, sparkwing.WorkDir()); err != nil {
 		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(ctx, "version freshness: current")
 	}
 
-	// 2b. Pre-v1 policy: CHANGELOG and VERSIONING.md must not assert
-	// the project has shipped v1.0.0; the version-gate in release.go
-	// blocks v1+ tags at cut-time, this check catches the indirect
-	// signals (doc edits, manual tag pushes).
 	if err := CheckPreV1Policy(ctx, sparkwing.WorkDir()); err != nil {
 		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(ctx, "pre-v1 policy: clean")
 	}
 
-	// 3. Repo-wide gofmt sweep. golangci-lint runs in .sparkwing/ only,
-	// so a struct-alignment fix at the top of the tree never lands here.
-	// `gofmt -l` lists every unformatted file; non-empty output = fail.
 	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
 		MustBeEmpty("gofmt reported unformatted files"); err != nil {
 		failures = append(failures, fmt.Sprintf("gofmt: %v", err))
@@ -113,63 +92,36 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "gofmt: clean")
 	}
 
-	// 4. Full golangci-lint sweep on .sparkwing/ (if a config is
-	// present there; falls back to a no-op message otherwise).
 	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && golangci-lint run ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("golangci-lint: %v", err))
 	} else {
 		sparkwing.Info(ctx, "golangci-lint: clean")
 	}
 
-	// 4. Test suite with the race detector.
 	if _, err := sparkwing.Bash(ctx, "go -C .sparkwing test -race ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("go test -race: %v", err))
 	} else {
 		sparkwing.Info(ctx, "go test -race: passed")
 	}
 
-	// 5. Known-vulnerabilities scan.
-	//
-	// `go run` compiles govulncheck against the current toolchain so
-	// the scan reports against the actual stdlib version the project
-	// builds with. The standalone `govulncheck` binary on PATH is
-	// frozen to whatever Go version installed it, which produces stale
-	// false-positives after a system Go upgrade.
 	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && go run golang.org/x/vuln/cmd/govulncheck@latest ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("govulncheck: %v", err))
 	} else {
 		sparkwing.Info(ctx, "govulncheck: clean")
 	}
 
-	// 6. Shell-script gate. bin/check-shell.sh discovers every tracked
-	// .sh + bash-shebanged file and runs shellcheck on it. No-op when
-	// the repo has no shell scripts.
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
 	} else {
 		sparkwing.Info(ctx, "shellcheck: clean")
 	}
 
-	// 7. Markdown lint. .markdownlint-cli2.yaml selects which files
-	// to check; CHANGELOG.md is exempt (the changelog-style gate
-	// owns that surface).
 	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
 	} else {
 		sparkwing.Info(ctx, "markdownlint: clean")
 	}
 
-	// 8. Docs-vs-reality gate (internal/doccheck), three checks over
-	// docs/ (the canonical source -- not the pkg/docs/mirror copy, so
-	// authors are caught where they edit) + the CLI help registry:
-	//   - go blocks compile against the in-repo SDK (catches removed
-	//     helpers, wrong signatures, methods gone from *Plan/*Work);
-	//   - sparkwing.yaml blocks decode through the real strict
-	//     projectconfig parser (catches renamed/removed config keys and
-	//     triggers that would hard-error on load);
-	//   - a denylist of dead tokens (renamed flags, old file/path names)
-	//     that must never reappear in docs or help text.
-	// migrations/ and proposals/ are excluded (design history).
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
@@ -178,10 +130,6 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
 	}
 
-	// 9. Generated CLI reference is current. docs/cli-reference.md is
-	// rendered from the command registry; regenerate and diff so a
-	// help_registry.go change that wasn't followed by bin/gen-cli-docs.sh
-	// fails here instead of shipping a stale reference.
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./cmd/sparkwing commands -o markdown | diff -u docs/cli-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
@@ -190,10 +138,6 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "cli-reference: current")
 	}
 
-	// 10. Generated config reference is current. docs/config-reference.md
-	// is rendered from the sparkwing.yaml schema structs; regenerate and
-	// diff so a struct/field change that wasn't followed by
-	// bin/gen-config-docs.sh fails here instead of shipping stale.
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/configref "$ROOT" | diff -u docs/config-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
@@ -202,10 +146,6 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "config-reference: current")
 	}
 
-	// 11. Generated SDK reference is current. docs/sdk-reference.md is
-	// rendered from the `sparkwing` package via go/doc; regenerate and
-	// diff so an exported-API change without bin/gen-sdk-docs.sh fails
-	// here instead of shipping a stale reference.
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/sdkref "$ROOT" | diff -u docs/sdk-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
@@ -214,10 +154,6 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "sdk-reference: current")
 	}
 
-	// 12. Generated HTTP API reference is current. docs/api-reference.md
-	// is rendered from the controller + logs route registrations;
-	// regenerate and diff so a route change without bin/gen-api-docs.sh
-	// fails here instead of shipping a stale surface.
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/apiref "$ROOT" | diff -u docs/api-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
@@ -246,9 +182,7 @@ func (p *PrePush) run(ctx context.Context) error {
 // resolves to the parent checkout for anyone who could possibly
 // build it. See isSparkwingDogfoodReplace for the exact pattern.
 func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
-	// Run from the repo root explicitly so the paths git emits are
-	// repo-root-relative regardless of where the pipeline binary's
-	// process cwd is.
+	// safety: git -C anchors paths to repo root regardless of process cwd.
 	out, err := sparkwing.Bash(ctx,
 		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
 	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()

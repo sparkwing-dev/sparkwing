@@ -172,7 +172,6 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 func TestWebhookGitHub_BadSignature(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"ref":"refs/heads/main","after":"x","repository":{"full_name":"x/y"}}`)
-	// Sign with a different secret.
 	bad := signWebhook("wrong-secret", body)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, bad)
 	defer func() { _ = resp.Body.Close() }()
@@ -253,7 +252,6 @@ func TestWebhookGitHub_UnknownEventIgnored(t *testing.T) {
 // malicious or buggy payload.
 func TestWebhookGitHub_BodyTooLarge(t *testing.T) {
 	ts, _ := newWebhookServer(t, testWebhookSecret)
-	// 2 MiB; limit is 1 MiB.
 	body := []byte(`{"filler":"` + strings.Repeat("x", 2<<20) + `"}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook(testWebhookSecret, body))
 	defer func() { _ = resp.Body.Close() }()

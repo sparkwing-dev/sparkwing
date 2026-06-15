@@ -133,10 +133,6 @@ func fetchServices(ctx context.Context, controllerURL, token string) (Services, 
 		}
 		return out, nil
 	case http.StatusNotFound:
-		// Either the endpoint isn't registered (older controller)
-		// or cache_pod_url wasn't set. Both mean "no auxiliary
-		// services" -- the right thing for the caller to do is
-		// fall through with whatever explicit config it has.
 		return Services{}, nil
 	default:
 		return Services{}, fmt.Errorf("controller services: HTTP %d", resp.StatusCode)

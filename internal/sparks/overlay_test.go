@@ -98,11 +98,9 @@ func TestWriteOverlayFastPath(t *testing.T) {
 	resolved := map[string]string{
 		"github.com/sparkwing-dev/sparks-core": "v0.10.3",
 	}
-	// First call writes.
 	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	// Second call: inputs unchanged, should be fast-path.
 	changed, err := WriteOverlay(context.Background(), dir, resolved)
 	if err != nil {
 		t.Fatalf("second write: %v", err)
@@ -115,8 +113,6 @@ func TestWriteOverlayFastPath(t *testing.T) {
 func TestWriteOverlayAppendsMissingRequire(t *testing.T) {
 	fakeGoBin(t)
 	dir := t.TempDir()
-	// go.mod has NO mention of sparks-core; overlay should append a
-	// require line (this covers the ghost-pin / no-pin cases).
 	writeGoMod(t, dir, nil)
 	_, err := WriteOverlay(context.Background(), dir, map[string]string{
 		"github.com/sparkwing-dev/sparks-core": "v0.10.3",
@@ -151,7 +147,6 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 	writeGoMod(t, dir, map[string]string{
 		"github.com/sparkwing-dev/sparks-core": "v0.9.0",
 	})
-	// Manifest pins to exact version v0.10.3; no network needed.
 	m1 := &Manifest{Libraries: []Library{
 		{Name: "sparks-core", Source: "github.com/sparkwing-dev/sparks-core", Version: "v0.10.3"},
 	}}
@@ -163,7 +158,6 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 		t.Fatal("expected first call to change overlay")
 	}
 
-	// A newer exact pin; resolution changes.
 	m2 := &Manifest{Libraries: []Library{
 		{Name: "sparks-core", Source: "github.com/sparkwing-dev/sparks-core", Version: "v0.11.0"},
 	}}
@@ -179,7 +173,6 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 		t.Fatalf("overlay did not update to v0.11.0:\n%s", overlay)
 	}
 
-	// Third call with the same manifest: fast path.
 	changed3, err := ResolveAndWrite(context.Background(), dir, m2)
 	if err != nil {
 		t.Fatalf("third: %v", err)
@@ -191,9 +184,6 @@ func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
 
 func TestGitignoreAdds(t *testing.T) {
 	fakeGoBin(t)
-	// Simulate a repo root: sparkwingDir is a subdirectory named
-	// ".sparkwing". Place a .git marker at the parent so locateGitignore
-	// finds it.
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -217,7 +207,6 @@ func TestGitignoreAdds(t *testing.T) {
 		t.Fatalf("gitignore missing entry:\n%s", gi)
 	}
 
-	// Second run must be idempotent (no duplicate line).
 	if _, err := WriteOverlay(context.Background(), sparkwingDir, map[string]string{
 		"example.com/m": "v0.1.0",
 	}); err != nil {

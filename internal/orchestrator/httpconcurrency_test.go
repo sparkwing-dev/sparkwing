@@ -12,12 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// The hosted-controller path uses HTTPConcurrency, which proxies the
-// concurrency backend over /api/v1/concurrency/*. These tests confirm
-// the chunk-2 engine semantics -- cost-weighted admission,
-// most-restrictive capacity, scope-qualified keys, and waiter
-// resolution -- hold across the wire, not only in-process.
-
 func newHTTPConcurrency(t *testing.T) (*orchestrator.HTTPConcurrency, *store.Store) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -57,7 +51,6 @@ func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {
 		t.Fatalf("r3: want Queued (8+4>8) got %s", r.Kind)
 	}
 
-	// Resolve while still queued.
 	res, err := b.ResolveWaiter(context.Background(), "db", "r3", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve (queued): %v", err)
@@ -66,7 +59,6 @@ func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {
 		t.Fatalf("r3 resolve = %s, want still_waiting", res.Status)
 	}
 
-	// Drain r1; the queued cost-4 member now fits and is promoted.
 	if err := b.ReleaseSlot(context.Background(), "db", "r1/n", "success", "", "", 0); err != nil {
 		t.Fatalf("release r1: %v", err)
 	}
@@ -96,11 +88,9 @@ func TestHTTPConcurrency_MostRestrictiveWins(t *testing.T) {
 	if r := acquireHTTP(t, b, mk("rB", 2)); r.Kind != store.AcquireGranted {
 		t.Fatalf("B: want Granted got %s", r.Kind)
 	}
-	// Effective capacity is min(5,2,5)=2; C queues despite declaring 5.
 	if r := acquireHTTP(t, b, mk("rC", 5)); r.Kind != store.AcquireQueued {
 		t.Fatalf("C: want Queued under effective cap 2, got %s", r.Kind)
 	}
-	// Drain the restrictive participant; effective rises to 5, C promotes.
 	if err := b.ReleaseSlot(context.Background(), "db", "rB/n", "success", "", "", 0); err != nil {
 		t.Fatalf("release B: %v", err)
 	}
@@ -115,8 +105,6 @@ func TestHTTPConcurrency_MostRestrictiveWins(t *testing.T) {
 
 func TestHTTPConcurrency_ScopeQualifiedKeysAreIndependent(t *testing.T) {
 	b, _ := newHTTPConcurrency(t)
-	// Two run-scoped keys (name@runID) share capacity 1 each but are
-	// independent of one another -- both grant.
 	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
 		Key: "g@run-1", HolderID: "run-1/n", RunID: "run-1", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
@@ -129,7 +117,6 @@ func TestHTTPConcurrency_ScopeQualifiedKeysAreIndependent(t *testing.T) {
 	}); r.Kind != store.AcquireGranted {
 		t.Fatalf("run-2: want Granted (independent scoped key) got %s", r.Kind)
 	}
-	// A second arrival on the same scoped key queues.
 	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
 		Key: "g@run-1", HolderID: "run-1/m", RunID: "run-1", NodeID: "m",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
@@ -140,7 +127,6 @@ func TestHTTPConcurrency_ScopeQualifiedKeysAreIndependent(t *testing.T) {
 
 func TestHTTPConcurrency_CancelWaiterAndForceRelease(t *testing.T) {
 	b, _ := newHTTPConcurrency(t)
-	// Holder + queued waiter.
 	acquireHTTP(t, b, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n", RunID: "r1", NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
 	})
@@ -154,8 +140,6 @@ func TestHTTPConcurrency_CancelWaiterAndForceRelease(t *testing.T) {
 	if !cancelled {
 		t.Fatalf("expected the queued waiter to be cancelled")
 	}
-	// ForceReleaseSuperseded is a no-op here (no superseded holders) but
-	// must round-trip without error over the wire.
 	if _, err := b.ForceReleaseSuperseded(context.Background(), "k"); err != nil {
 		t.Fatalf("force release: %v", err)
 	}
@@ -167,7 +151,6 @@ func TestHTTPConcurrency_CancelWaiterAndForceRelease(t *testing.T) {
 func TestParity_BypassRead_NoCache(t *testing.T) {
 	b, _ := newHTTPConcurrency(t)
 	ctx := context.Background()
-	// Leader runs and writes a cache entry on release.
 	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
 		Key: "memo:h", HolderID: "r1/n", RunID: "r1", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "h", CacheTTL: time.Hour,
@@ -177,14 +160,12 @@ func TestParity_BypassRead_NoCache(t *testing.T) {
 	if err := b.ReleaseSlot(ctx, "memo:h", "r1/n", "success", "r1/n", "h", time.Hour); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	// Without bypass, a fresh arrival hits the cache.
 	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
 		Key: "memo:h", HolderID: "r2/n", RunID: "r2", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "h",
 	}); r.Kind != store.AcquireCached {
 		t.Fatalf("sanity: want Cached got %s", r.Kind)
 	}
-	// With BypassRead, the cache read is skipped and the node runs fresh.
 	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
 		Key: "memo:h", HolderID: "r3/n", RunID: "r3", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "h", BypassRead: true,

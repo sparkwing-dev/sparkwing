@@ -35,7 +35,6 @@ func TestArtifactUpload(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Verify file was created
 	data, err := os.ReadFile(filepath.Join(artifactsDir, "job123", "coverage", "report.html"))
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +73,6 @@ func TestArtifactList(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	// Create some files
 	os.MkdirAll(filepath.Join(artifactsDir, "job123", "sub"), 0o755)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "a.txt"), nil, 0o644)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "sub", "b.txt"), nil, 0o644)
@@ -186,7 +184,6 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	root := t.TempDir()
 
-	// Local upstream the cache will clone from.
 	upstream := filepath.Join(root, "upstream.git")
 	if out, err := gitCmd("init", "--bare", upstream); err != nil {
 		t.Fatalf("init upstream: %v (%s)", err, out)
@@ -211,8 +208,6 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	repoNames["auto-clone-fixture"] = upstream
 	repoNamesMu.Unlock()
 
-	// Bare-repo dir intentionally not created; resolveGitRepo should
-	// auto-clone it.
 	bare, err := resolveGitRepo("auto-clone-fixture")
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
@@ -221,7 +216,6 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 		t.Fatalf("cloned bare missing HEAD: %v", err)
 	}
 
-	// Second resolve returns the same path without re-cloning.
 	bare2, err := resolveGitRepo("auto-clone-fixture")
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)

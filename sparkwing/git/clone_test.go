@@ -11,7 +11,6 @@ import (
 func TestResolveCloneURL_NoCache(t *testing.T) {
 	t.Setenv("SPARKWING_GITCACHE", "")
 
-	// Point the probe at an unbound port so detection fails fast.
 	prev := gitcacheProbeURL
 	gitcacheProbeURL = "http://127.0.0.1:1"
 	defer func() { gitcacheProbeURL = prev }()

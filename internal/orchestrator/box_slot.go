@@ -80,8 +80,6 @@ func parseBoxSlots(s string) (int, bool) {
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		// Treat junk as unset so a typo still gets the safe default
-		// instead of leaving the user wide-open.
 		return 0, false
 	}
 	return n, true

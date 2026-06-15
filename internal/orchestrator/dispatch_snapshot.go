@@ -72,8 +72,6 @@ func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID strin
 		return fmt.Errorf("marshal envelope: %w", err)
 	}
 
-	// Run row supplies SPARKWING_*/GITHUB_* keys that aren't in
-	// os.Environ() under laptop dispatch, plus code_version.
 	var run *store.Run
 	if got, _ := r.backends.State.GetRun(ctx, runID); got != nil {
 		run = got
@@ -104,7 +102,7 @@ func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID strin
 	return r.backends.State.WriteNodeDispatch(ctx, store.NodeDispatch{
 		RunID:            runID,
 		NodeID:           node.ID(),
-		Seq:              -1, // store assigns next attempt
+		Seq:              -1,
 		CodeVersion:      codeVersion,
 		RunnerLabels:     labelsBytes,
 		EnvJSON:          envBytes,
@@ -129,8 +127,6 @@ func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) m
 		}
 		out[k] = v
 	}
-	// Empty values are skipped so a partial run row doesn't introduce
-	// empty SPARKWING_* entries.
 	stamp := func(k, v string) {
 		if v != "" {
 			out[k] = v

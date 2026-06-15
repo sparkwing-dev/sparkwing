@@ -133,8 +133,6 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 
 	backends := LocalBackends(paths, st)
 
-	// Replay-run nodes first (chain-of-replays sees latest), then
-	// fall back to the original.
 	originalRunID := run.ReplayOfRunID
 	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) {
 		if data, err := st.GetNode(ctx, runID, id); err == nil && len(data.Output) > 0 {
@@ -176,7 +174,6 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		}
 	}
 	if ferr := st.FinishRun(ctx, runID, finalStatus, errMsg); ferr != nil {
-		// Node was finalized in RunNode; this is best-effort.
 		fmt.Fprintf(os.Stderr, "warning: finish replay run %s: %v\n", runID, ferr)
 	}
 	return res, nil

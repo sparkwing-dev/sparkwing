@@ -92,16 +92,12 @@ func runPipelineTrigger(args []string) error {
 			"Use sparkwing run --profile %s for local execution against this profile's storage instead", prof.Name, prof.Name)
 	}
 
-	// Build the trigger with the same core `run --sw-profile` uses, so
-	// the wire payload is byte-identical except for the source tag.
 	resp, err := createRemoteTrigger(prof, pipelineName, triggerSource("pipeline-trigger"), runFlags{}, passthrough)
 	if err != nil {
 		return err
 	}
 
 	if detach {
-		// Fire-and-forget the FOLLOW only: the POST already acked above.
-		// Print the run id alone, one machine-parseable line.
 		fmt.Fprintln(os.Stdout, resp.RunID)
 		return nil
 	}
@@ -119,9 +115,6 @@ func runPipelineTrigger(args []string) error {
 			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
 	}
 
-	// Controller-only profile (no logs: spec): follow node status from
-	// the controller so the run still gets a blocking "watch it finish"
-	// UX without log bodies.
 	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
 		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
 			"Add a logs: spec in profiles.yaml to see streaming output.", prof.Name)))

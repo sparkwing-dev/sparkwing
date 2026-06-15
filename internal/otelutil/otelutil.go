@@ -109,10 +109,6 @@ func Meter(name string) metric.Meter {
 func Init(ctx context.Context, cfg Config) *Telemetry {
 	t := &Telemetry{}
 
-	// OTEL_SERVICE_NAME env wins over the compiled default so one
-	// image with multiple subcommands (controller / worker / pool /
-	// web) gets the right service.name per-deployment by setting the
-	// env in its manifest.
 	serviceName := cfg.ServiceName
 	if env := os.Getenv("OTEL_SERVICE_NAME"); env != "" {
 		serviceName = env
@@ -130,7 +126,6 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		res = resource.Default()
 	}
 
-	// ── Metrics: Prometheus exporter (always active) ──
 	registry := promclient.NewRegistry()
 	promExporter, err := prometheus.New(prometheus.WithRegisterer(registry))
 	if err != nil {
@@ -146,10 +141,6 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	otel.SetMeterProvider(mp)
 	t.shutdowns = append(t.shutdowns, mp.Shutdown)
 
-	// ── Traces: OTLP exporter (optional) ──
-	// The Go SDK's otlptracehttp respects OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-	// natively for the actual endpoint URL. We just need to know whether to
-	// initialize the exporter at all.
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") != "" {
 		traceCtx, traceCancel := context.WithTimeout(ctx, 5*time.Second)
 		traceExporter, err := otlptracehttp.New(traceCtx)
@@ -168,12 +159,6 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		}
 	}
 
-	// ── Logs: OTLP exporter + slog bridge (optional) ──
-	//
-	// The log exporter is created in a goroutine with a timeout because
-	// otlploghttp.New() can block for 30+ seconds when the collector is
-	// unreachable, ignoring context cancellation. We start the server
-	// first and wire in the log bridge later if it succeeds.
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "" {
 		go func() {
 			logCtx, logCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -209,7 +194,6 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		propagation.Baggage{},
 	))
 
-	// ── Service-specific metric instruments ──
 	if cfg.RegisterMetrics != nil {
 		cfg.RegisterMetrics(otel.Meter(cfg.ServiceName))
 	}

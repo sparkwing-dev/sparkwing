@@ -32,7 +32,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Fatalf("status=%q want success; err=%v", res.Status, res.Error)
 	}
 
-	// CreateRun + FinishRun -- must cover the lifecycle.
 	if fakes.state.createRuns != 1 {
 		t.Errorf("CreateRun called %d times; want 1", fakes.state.createRuns)
 	}
@@ -40,7 +39,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("FinishRun called %d times; want 1", fakes.state.finishRuns)
 	}
 
-	// Two nodes -> two CreateNode, two StartNode, two FinishNode.
 	if fakes.state.createNodes != 2 {
 		t.Errorf("CreateNode called %d times; want 2", fakes.state.createNodes)
 	}
@@ -51,7 +49,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("FinishNode called %d times; want 2", fakes.state.finishNodes)
 	}
 
-	// Node events: _started + _succeeded for each of two nodes.
 	if got := fakes.state.eventKinds["node_started"]; got != 2 {
 		t.Errorf("node_started events=%d; want 2", got)
 	}
@@ -59,12 +56,10 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("node_succeeded events=%d; want 2", got)
 	}
 
-	// Each node gets its own log sink.
 	if fakes.logs.opened != 2 {
 		t.Errorf("OpenNodeLog called %d times; want 2", fakes.logs.opened)
 	}
 
-	// The .Concurrency()-declared node -- exactly one -- acquires a slot.
 	if fakes.concurrency.acquires != 1 {
 		t.Errorf("Concurrency.AcquireSlot called %d times; want 1", fakes.concurrency.acquires)
 	}
@@ -89,8 +84,6 @@ func TestBackendsSeam_StateErrorPropagates(t *testing.T) {
 	}
 }
 
-// --- fixture pipeline ---
-
 type seamOK struct{ sparkwing.Base }
 
 func (seamOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -99,8 +92,6 @@ func (seamOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInpu
 		Needs(a).Concurrency(sparkwing.NewConcurrencyGroup("seam-lock", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	return nil
 }
-
-// --- fake backends ---
 
 type fakeBackends struct {
 	state       *fakeState

@@ -73,7 +73,6 @@ func TestEmbeddedArgs_FindsHolderOnJobThatEmbedsWithArgs(t *testing.T) {
 		t.Errorf("embeddedArgs returned wrong type: %v", argsType)
 	}
 
-	// Bind via the discovered holder; verify the change is visible on the original job.
 	if err := holder.BindFromAny(witArgsTestArgs{Replicas: 7}); err != nil {
 		t.Fatalf("holder.BindFromAny: %v", err)
 	}

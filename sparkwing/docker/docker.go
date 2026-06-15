@@ -114,9 +114,6 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 		if !buildxAvailable(ctx) {
 			return BuildResult{}, ErrBuildxRequired
 		}
-		// Pre-flight: fail fast if any requested platform is missing
-		// from the builder's advertised list. Best-effort: on
-		// introspection failure, let buildx surface the actual error.
 		if advertised, err := BuildxPlatforms(ctx); err == nil && len(advertised) > 0 {
 			var missing []string
 			for _, p := range cfg.Platforms {
@@ -149,8 +146,7 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 		if push && len(cfg.Registries) > 0 {
 			args = append(args, "--push")
 		} else if len(cfg.Platforms) == 1 {
-			// Single-platform buildx build can load into the local
-			// daemon; multi-platform builds cannot be loaded.
+			// hack: buildx cannot --load multi-platform images; single-platform only.
 			args = append(args, "--load")
 		}
 	} else {
@@ -159,9 +155,7 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 
 	args = append(args, "-f", cfg.Dockerfile)
 
-	// In multi-platform + push mode buildx pushes every -t target;
-	// bare `image:tag` tags resolve to docker.io, which we have no
-	// credentials for, so omit them.
+	// hack: in multi-platform push mode, bare image:tag resolves to docker.io (no credentials); omit local refs.
 	includeLocal := !(multiPlatform && push && len(cfg.Registries) > 0)
 	if includeLocal {
 		for _, t := range localRefs {
@@ -169,8 +163,6 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 		}
 	}
 	if multiPlatform {
-		// Include remote refs in the build itself so buildx pushes
-		// them directly.
 		for _, r := range remoteRefs {
 			args = append(args, "-t", r)
 		}
@@ -199,7 +191,6 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 	}
 
 	if multiPlatform {
-		// buildx already pushed everything inline.
 		result.Registries = append(result.Registries, cfg.Registries...)
 		if len(remoteRefs) > 0 {
 			result.Image = remoteRefs[0]
@@ -207,7 +198,6 @@ func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error)
 		return result, nil
 	}
 
-	// Single-platform path: we must tag and push each remote ref.
 	primaryLocal := localRefs[0]
 
 	var pushed []string
@@ -267,7 +257,6 @@ func Push(ctx context.Context, image string, tags, registries []string) error {
 		return errors.New("docker: Push requires at least one registry")
 	}
 
-	// Strip any trailing :tag so the base reference is clean.
 	base := image
 	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
 		base = image[:i]

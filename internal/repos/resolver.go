@@ -100,11 +100,6 @@ func (r *resolver) build() error {
 	}
 	r.nameToPath = map[string]string{}
 
-	// Two-pass to encode "non-worktree wins on tie": pass 1 fills
-	// from regular checkouts, pass 2 fills any names still empty
-	// from worktrees. Within each pass we stay in declaration
-	// order so the user can promote a primary repo by listing it
-	// first in repos.yaml.
 	for _, pass := range []bool{false, true} {
 		for _, c := range cands {
 			if c.Worktree != pass {
@@ -112,11 +107,6 @@ func (r *resolver) build() error {
 			}
 			names, err := PipelineNamesForRepo(c.Path)
 			if err != nil {
-				// Don't fail the whole resolve on one broken
-				// checkout -- a half-deleted repo or a compile
-				// failure in a fallback shouldn't block resolution
-				// against the others. Stderr already got the gory
-				// detail when describe was invoked.
 				continue
 			}
 			for _, n := range names {

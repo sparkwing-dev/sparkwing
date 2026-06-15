@@ -35,9 +35,6 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("sparkwing-web", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:4343", "bind address")
 
-	// Legacy cluster-mode flags. Kept for compatibility with existing
-	// deployments; equivalent to --state-spec=controller://<profile>
-	// plus --logs-spec=<sparkwing-logs URL> at the cmd line.
 	controllerURL := fs.String("controller", "", "controller URL to read from (legacy; prefer --state-spec=controller://<profile>)")
 	logsURL := fs.String("logs", "", "sparkwing-logs URL (legacy; prefer --logs-spec)")
 
@@ -46,9 +43,6 @@ func run(args []string) error {
 	requireLogin := fs.Bool("require-login", false,
 		"redirect unauthed browsers to /login (prod). Leave off for laptop-local dev where the tokens table is empty and login would loop.")
 
-	// Shared-backends configuration. Specs accept the compact URL
-	// form parsed by backend.ParseInlineSpec; --profile names a storage
-	// profile whose state/cache/logs surfaces the dashboard reads from.
 	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/profiles.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
 	logsSpecFlag := fs.String("logs-spec", "", "inline logs backend spec, e.g. s3://bucket/logs or stdout:")
@@ -74,11 +68,6 @@ func run(args []string) error {
 		*token = os.Getenv("SPARKWING_AGENT_TOKEN")
 	}
 
-	// Resolution precedence: explicit per-surface inline specs and/or
-	// --profile override the historical --controller/--logs/local SQLite
-	// paths. The legacy flags remain so existing dashboard deployments
-	// (k8s manifests pointing at the in-cluster controller) keep
-	// working unchanged.
 	usingNewConfig := *profileName != "" || *stateSpec != "" || *logsSpecFlag != "" || *artifactsSpec != ""
 
 	if usingNewConfig {
@@ -97,24 +86,14 @@ func run(args []string) error {
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
 
-	// Cluster-mode wiring: --controller swaps state reads to HTTP,
-	// --logs swaps log reads to the sparkwing-logs service. Each is
-	// independent; set both for a full cluster dashboard.
 	if *controllerURL != "" || *logsURL != "" {
 		if *controllerURL == "" {
 			return fmt.Errorf("--logs requires --controller (dashboard needs node list from controller)")
 		}
 		var logStore storage.LogStore
 		if *logsURL != "" {
-			// Pass the web pod's service token so the logs service
-			// actually returns content; an unauthenticated request
-			// comes back 401 and the dashboard renders "No logs
-			// captured" even though the log is on disk.
 			logStore = sparkwinglogs.New(*logsURL, nil, *token)
 		}
-		// Controller client needs the token too -- /api/runs on the
-		// web's local mux delegates to ClientBackend which hits
-		// controller /api/v1/runs.
 		var c *client.Client
 		if *token != "" {
 			c = client.NewWithToken(*controllerURL, nil, *token)
@@ -133,7 +112,6 @@ func run(args []string) error {
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
 
-	// Local mode: simple handler over local Paths (today's default).
 	return web.Serve(ctx, paths, *addr)
 }
 
@@ -148,9 +126,6 @@ func openFromConfig(
 	var stateSpec, logsSpec, artifactsSpec *backends.Spec
 	var lookup storeurl.ProfileLookup
 
-	// 1. Profile resolution: a named profile supplies the backend triple.
-	// A controller-only profile routes every surface through its
-	// controller. Skipped when only inline specs are passed.
 	if profileName != "" {
 		path, err := profile.DefaultPath()
 		if err != nil {
@@ -170,7 +145,6 @@ func openFromConfig(
 		}
 	}
 
-	// 2. Inline overrides.
 	if stateInline != "" {
 		spec, err := backend.ParseInlineSpec(stateInline)
 		if err != nil {

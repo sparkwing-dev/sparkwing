@@ -39,8 +39,6 @@ func resolveProfile(name string) (*profile.Profile, error) {
 	}
 	p, _, err := profile.Resolve(name, cfg)
 	if err != nil {
-		// Format with hint inline so the caller just returns the err
-		// and the user sees a full, actionable message.
 		fmt.Fprintln(os.Stderr, profile.HintMissing(err, cfg))
 		return nil, errors.New("no profile resolved")
 	}

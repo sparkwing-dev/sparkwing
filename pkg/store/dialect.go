@@ -105,9 +105,6 @@ func rewritePh(dialect Dialect, q string) string {
 	for i := 0; i < len(q); i++ {
 		c := q[i]
 		if c == '\'' {
-			// SQL single-quote escape is doubled ('').  Flipping the
-			// flag on each ' still bookkeeps correctly: '' inside a
-			// literal toggles out then back in on the same char pair.
 			inStr = !inStr
 			b.WriteByte(c)
 			continue
@@ -122,11 +119,6 @@ func rewritePh(dialect Dialect, q string) string {
 	}
 	return b.String()
 }
-
-// Querier methods on *Store transparently rewrite `?` to `$N` for
-// Postgres before delegating to the underlying *sql.DB. Use these in
-// place of s.db.* everywhere in pkg/store so each call site stays
-// dialect-agnostic.
 
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	return s.db.ExecContext(ctx, rewritePh(s.dialect, q), args...)

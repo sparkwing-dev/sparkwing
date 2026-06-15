@@ -24,8 +24,6 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	// Seed a runner token BEFORE the server starts so
-	// EnableAuthFromStore picks it up.
 	raw, _, err := st.CreateToken("test-runner", store.TokenKindRunner,
 		[]string{"nodes.claim"}, 0, time.Now().UTC())
 	if err != nil {
@@ -37,7 +35,6 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 		Handler())
 	defer srv.Close()
 
-	// Seed a ready node so claim would succeed if auth allowed it.
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
@@ -50,13 +47,11 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Mark-ready without auth should fail.
 	bare := client.New(srv.URL, nil)
 	if err := bare.MarkNodeReady(ctx, "run-1", "only"); err == nil {
 		t.Fatal("expected MarkNodeReady without token to fail")
 	}
 
-	// With the real sw*_ token, mark-ready and claim both succeed.
 	authed := client.NewWithToken(srv.URL, nil, raw)
 	if err := authed.MarkNodeReady(ctx, "run-1", "only"); err != nil {
 		t.Fatalf("authed MarkNodeReady: %v", err)
@@ -69,7 +64,6 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 		t.Fatalf("wrong claim: %+v", n)
 	}
 
-	// A well-formed but unknown sw*_ token fails.
 	wrong := client.NewWithToken(srv.URL, nil, "swu_bogusvaluetrailing00000000000000000000000")
 	if _, err := wrong.ClaimNode(ctx, "agent-bad", nil, 30*time.Second); err == nil {
 		t.Fatal("expected wrong-token claim to fail")

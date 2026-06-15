@@ -143,7 +143,6 @@ func TestMustSecret_PanicMessageIncludesName(t *testing.T) {
 			t.Fatalf("panic %q should name the calling helper", msg)
 		}
 	}()
-	// No resolver installed -> Secret returns an error -> MustSecret panics.
 	MustSecret(context.Background(), "DATABASE_URL")
 }
 
@@ -169,6 +168,5 @@ func TestMustConfig_PanicMessageIncludesName(t *testing.T) {
 			t.Fatalf("panic %q should name the calling helper", msg)
 		}
 	}()
-	// No resolver installed -> Config returns an error -> MustConfig panics.
 	MustConfig(context.Background(), "REGION")
 }

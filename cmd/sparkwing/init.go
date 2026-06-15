@@ -83,7 +83,6 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 	}
 
 	if err := ensureGitignoreEntry(filepath.Dir(sparkwingDir), ".sparkwing/sparkwing-pipeline"); err != nil {
-		// Non-fatal: not every project tracks .gitignore.
 		fmt.Fprintf(os.Stderr, "init: note: could not update .gitignore: %v\n", err)
 	}
 
@@ -93,7 +92,6 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 func renderInitGoMod(moduleName string) string {
 	goDirective := userGoModDirective()
 	if goDirective == "" {
-		// SDK ≥ v1.3.0 requires Go 1.26 (transitive k8s.io/client-go bump).
 		goDirective = "1.26"
 	}
 	return fmt.Sprintf(`module %s
@@ -329,7 +327,6 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	}
 	switch {
 	case tidy.Skipped:
-		// nothing to print
 	case tidy.OK:
 		fmt.Printf("  %s resolved dependencies (go mod tidy)\n", color.Green("+"))
 	default:

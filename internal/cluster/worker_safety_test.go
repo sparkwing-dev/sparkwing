@@ -1,27 +1,5 @@
 package cluster
 
-// Cluster-mode RunWorker safety: HTTP-only Backends invariant.
-//
-// orchestrator/cluster_safety_test.go pins the runner-pod path that
-// HandleClaimedTrigger constructs. RunWorker (this package) takes a
-// parallel path: it claims triggers from the controller AND, in the
-// same process, invokes ExecuteClaimedTrigger -- which calls
-// orchestrator.Run, which executes .inline() user code in-process
-// against the same Backends. So the same HTTP-only invariant must
-// hold here:
-//
-//   Backends.State       -> *client.Client  (controller HTTP API)
-//   Backends.Concurrency -> *HTTPConcurrency (controller HTTP API)
-//
-// It MUST NEVER receive a *store.Store directly. If RunWorker wired
-// Concurrency from a throwaway local SQLite store (e.g. opened just
-// to satisfy LocalBackends), that would be a privilege-escalation
-// regression in waiting: the moment the sparkwing-runner image (or
-// any future binary linking internal/cluster) bakes user pipelines
-// in, .inline() jobs would have direct SQLite access via
-// Backends.Concurrency. This test pins the HTTP-only wiring so a
-// future "simplification" can't silently re-introduce that regression.
-
 import (
 	"reflect"
 	"strings"
@@ -42,7 +20,7 @@ func buildRunWorkerBackends() orchestrator.Backends {
 	stateClient := client.NewWithToken(ctrlURL, nil, "")
 	return orchestrator.Backends{
 		State:       stateClient,
-		Logs:        nil, // Logs may be local-fs or HTTP; not the privilege boundary.
+		Logs:        nil,
 		Concurrency: orchestrator.NewHTTPConcurrency(ctrlURL, nil, "", store.DefaultConcurrencyLease),
 	}
 }

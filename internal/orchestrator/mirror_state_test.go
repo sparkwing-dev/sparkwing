@@ -151,8 +151,6 @@ func TestMirrorState_EnqueueTriggerCanonicalOnly(t *testing.T) {
 	}
 }
 
-// --- end-to-end: a real run through RunLocal mirrors state to local ---
-
 type mirrorOKPipe struct{ sparkwing.Base }
 
 func (mirrorOKPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -168,8 +166,6 @@ func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &mirrorOKPipe{} })
 	})
 
-	// Canonical = a real controller over its own SQLite store, reached
-	// over HTTP via *client.Client (the non-local state backend).
 	ctrlStore, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {
 		t.Fatalf("controller store: %v", err)
@@ -186,8 +182,6 @@ func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("local store: %v", err)
 	}
-	// RunLocal owns closing opts.MirrorLocal; a redundant close here is
-	// safe (sql.DB.Close is idempotent).
 	t.Cleanup(func() { _ = local.Close() })
 
 	res, err := RunLocal(context.Background(), paths, Options{
@@ -202,12 +196,9 @@ func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
 	}
 
-	// Canonical (controller side) has the run.
 	if run, err := ctrlStore.GetRun(context.Background(), res.RunID); err != nil || run == nil {
 		t.Fatalf("controller-side run missing: %v %#v", err, run)
 	}
-	// And the local shadow has it too -- reopen independently since
-	// RunLocal closed the mirror's handle.
 	reader, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("reopen local: %v", err)

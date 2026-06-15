@@ -107,7 +107,7 @@ func TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError(t *testing.T) {
 		triggerFetchRetryDelay = prevDelay
 		triggerFetchMaxAttempts = prevAttempts
 	})
-	triggerFetchRetryDelay = 1 * time.Second // would be obvious if hit
+	triggerFetchRetryDelay = 1 * time.Second
 	triggerFetchMaxAttempts = 3
 
 	authErr := errors.New("git fetch: Permission denied (publickey)")
@@ -146,7 +146,7 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 		triggerFetchRetryDelay = prevDelay
 		triggerFetchMaxAttempts = prevAttempts
 	})
-	triggerFetchRetryDelay = 30 * time.Second // would block the test if honored
+	triggerFetchRetryDelay = 30 * time.Second
 	triggerFetchMaxAttempts = 3
 
 	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {

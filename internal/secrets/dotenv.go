@@ -127,10 +127,6 @@ func parseDotenvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// Treat a missing file as an empty source. First-time
-			// laptop callers haven't created it yet; resolution
-			// errors will surface as ErrSecretMissing rather than
-			// "file not found" which is more actionable.
 			return map[string]string{}, nil
 		}
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -151,8 +147,6 @@ func parseDotenvFile(path string) (map[string]string, error) {
 		}
 		key := strings.TrimSpace(line[:eq])
 		val := strings.TrimSpace(line[eq+1:])
-		// Strip a single layer of surrounding quotes so writers can
-		// quote values that contain spaces / special chars.
 		if len(val) >= 2 {
 			if (val[0] == '"' && val[len(val)-1] == '"') ||
 				(val[0] == '\'' && val[len(val)-1] == '\'') {
@@ -227,19 +221,14 @@ func ListDotenvEntries(path string) (map[string]string, error) {
 }
 
 func writeDotenvFile(path string, data map[string]string) error {
-	// Sort keys so re-reads + version-control diffs are stable.
 	keys := make([]string, 0, len(data))
 	for k := range data {
 		keys = append(keys, k)
 	}
-	// strings.Slice import would be heavier; use a tiny inline sort.
 	sortStrings(keys)
 	var b strings.Builder
 	for _, k := range keys {
 		v := data[k]
-		// Quote values that contain whitespace, '=', or '#' so a
-		// reader with a stricter parser won't trip. Values without
-		// those round-trip cleanly without quotes.
 		needsQuote := strings.ContainsAny(v, " \t=#\n")
 		if needsQuote {
 			fmt.Fprintf(&b, "%s=%q\n", k, v)

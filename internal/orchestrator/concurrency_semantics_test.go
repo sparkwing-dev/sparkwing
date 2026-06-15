@@ -14,13 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Engine-semantics coverage for the cache/concurrency split: memo
-// decoupled from groups, content-keyed in-flight dedupe, scope-folded
-// keys, cost-weighted admission across a scope, the worker-slot yield
-// during waits, and the queue timeout.
-
 var sem struct {
-	runs     atomic.Int32 // total body invocations
+	runs     atomic.Int32
 	inflight atomic.Int32
 	peak     atomic.Int32
 }
@@ -145,8 +140,6 @@ func contentKey(v string) sparkwing.CacheKeyFn {
 	return func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("sem", v) }
 }
 
-// --- Memo decoupled from concurrency group ---
-
 type memoDiffGroupsPipe struct{ sparkwing.Base }
 
 func (memoDiffGroupsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -171,14 +164,10 @@ func (memoSameGroupDiffContentPipe) Plan(ctx context.Context, plan *sparkwing.Pl
 type memoInFlightPipe struct{ sparkwing.Base }
 
 func (memoInFlightPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Two peers, same content, no group, dispatched together: one leads,
-	// the other dedupes in flight on the content hash.
 	sparkwing.Job(plan, "a", semStep(300*time.Millisecond)).Cache(contentKey("dup"))
 	sparkwing.Job(plan, "b", semStep(300*time.Millisecond)).Cache(contentKey("dup"))
 	return nil
 }
-
-// --- Scope ---
 
 type scopeBoxPipe struct{ sparkwing.Base }
 
@@ -233,8 +222,6 @@ func (scopeRunPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// --- Cost summed across a Box scope ---
-
 type costBoxAPipe struct{ sparkwing.Base }
 
 func costBoxGroup() *sparkwing.ConcurrencyGroup {
@@ -258,18 +245,13 @@ func (costBoxBPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// --- Worker-slot yield during wait ---
-
-var freeNodeLatency atomic.Int64 // ns from run start to free node completion
+var freeNodeLatency atomic.Int64
 
 type workerSlotPipe struct{ sparkwing.Base }
 
 func (workerSlotPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	start := time.Now()
 	g := sparkwing.NewConcurrencyGroup("worker-block", sparkwing.ConcurrencyLimit{Capacity: 1})
-	// One holder plus two waiters on a capacity-1 group; under a bug
-	// where waiters keep their worker slot, two slots are consumed and
-	// the free node starves.
 	sparkwing.Job(plan, "g1", semStep(500*time.Millisecond)).Concurrency(g)
 	sparkwing.Job(plan, "g2", semStep(500*time.Millisecond)).Concurrency(g)
 	sparkwing.Job(plan, "g3", semStep(500*time.Millisecond)).Concurrency(g)
@@ -279,8 +261,6 @@ func (workerSlotPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 	})
 	return nil
 }
-
-// --- Queue timeout ---
 
 type queueTimeoutLeaderPipe struct{ sparkwing.Base }
 
@@ -434,8 +414,6 @@ func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
 		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cost-box-b", RunID: "cb-b"})
 	}()
 	wg.Wait()
-	// Capacity 8, three cost-4 members across two runs on one host:
-	// at most two run at once.
 	if peak := sem.peak.Load(); peak > 2 {
 		t.Fatalf("cost-weighted Box peak = %d, want <= 2 (8/4)", peak)
 	}
@@ -451,10 +429,6 @@ func TestConcurrency_WaitDoesNotHoldWorkerSlot(t *testing.T) {
 	if err != nil || res.Status != "success" {
 		t.Fatalf("run: status=%q err=%v", res.Status, err)
 	}
-	// With waiters yielding their worker slot, the free node runs while a
-	// group member holds the only group slot -- well before the ~1.5s a
-	// fully serialized group queue would take. A bug that pins the slot
-	// to queued waiters would delay free past the first 500ms holder.
 	latency := time.Duration(freeNodeLatency.Load())
 	if latency == 0 || latency > 300*time.Millisecond {
 		t.Fatalf("free node latency = %s, want < 300ms (queued waiters must not pin worker slots)", latency)
@@ -469,7 +443,7 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "qt-leader", RunID: "qt-leader"})
 		close(leaderDone)
 	}()
-	waitForLeaderHolding(t) // leader holds the only slot
+	waitForLeaderHolding(t)
 
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "qt-follower", RunID: "qt-follower"})
 	if followerRes.Status != "failed" {
@@ -479,18 +453,13 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 	if n.FailureReason != store.FailureQueueTimeout {
 		t.Fatalf("follower failure_reason = %q, want %q", n.FailureReason, store.FailureQueueTimeout)
 	}
-	leaderRelease.Store(true) // let the leader finish
+	leaderRelease.Store(true)
 	<-leaderDone
 }
-
-// --- Defect 3: skipped memo leader must not stamp coalesced followers Success ---
 
 type memoSkipLeaderPipe struct{ sparkwing.Base }
 
 func (memoSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// The memo leader holds the content slot through its skip evaluation
-	// (heldSkip) until the test releases it, so a follower coalesces
-	// deterministically; then it skips, writing no cache.
 	sparkwing.Job(plan, "leader", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(heldSkip)
 	return nil
 }
@@ -498,16 +467,11 @@ func (memoSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 type memoSkipFollowerPipe struct{ sparkwing.Base }
 
 func (memoSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Same content key: it coalesces onto the in-flight leader and must
-	// inherit the leader's skip rather than going green. Its own SkipIf
-	// is a fallback for the standalone case.
 	sparkwing.Job(plan, "follower", semStep(0)).
 		Cache(contentKey("skip-dup")).
 		SkipIf(func(ctx context.Context) bool { return true })
 	return nil
 }
-
-// --- Defect 5: cancelling a queued grouped node must not leak a phantom holder ---
 
 type phantomHolderPipe struct{ sparkwing.Base }
 
@@ -541,27 +505,21 @@ func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-skip-leader", RunID: "memo-skip-leader"})
 		leaderDone <- res
 	}()
-	waitForLeaderHolding(t) // leader holds the content slot through its skip
+	waitForLeaderHolding(t)
 
-	// The follower coalesces onto the held leader and blocks until the
-	// leader finishes, so run it concurrently and release the leader only
-	// once it has genuinely coalesced.
 	followerDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-skip-follower", RunID: "memo-skip-follower"})
 		followerDone <- res
 	}()
 	waitForCoalesceWaiter(t, p.StateDB())
-	leaderRelease.Store(true) // leader skips; follower inherits the skip
+	leaderRelease.Store(true)
 	leaderRes := <-leaderDone
 	followerRes := <-followerDone
 
 	if got := sem.runs.Load(); got != 0 {
 		t.Fatalf("body ran %d times, want 0 (both nodes skipped)", got)
 	}
-	// Neither node may be Success: the leader skipped (no cache written),
-	// so the coalesced follower must inherit a non-success outcome rather
-	// than going green empty.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	for _, rid := range []string{leaderRes.RunID, followerRes.RunID} {
@@ -579,33 +537,29 @@ func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T
 	resetSem()
 	p := newPaths(t)
 
-	// Holder run takes the only slot for ~1.2s.
 	holderDone := make(chan struct{})
 	go func() {
 		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "phantom-holder", RunID: "phantom-holder"})
 		close(holderDone)
 	}()
-	time.Sleep(250 * time.Millisecond) // holder acquires
+	time.Sleep(250 * time.Millisecond)
 
-	// Waiter run queues on the same group, then is cancelled while queued.
 	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
 	waiterDone := make(chan struct{})
 	go func() {
 		_, _ = orchestrator.RunLocal(waiterCtx, p, orchestrator.Options{Pipeline: "phantom-waiter", RunID: "phantom-waiter"})
 		close(waiterDone)
 	}()
-	time.Sleep(300 * time.Millisecond) // waiter parks in the queue
+	time.Sleep(300 * time.Millisecond)
 	cancelWaiter()
 	<-waiterDone
-	<-holderDone // holder releases and promotes the next waiter (if any)
+	<-holderDone
 
-	// The cancelled waiter must not have been promoted into a real
-	// holder. Inspect the group's coordination key.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	state, err := st.GetConcurrencyState(context.Background(), "g:phantom")
 	if err != nil {
-		return // key reaped entirely is also fine -- no phantom holder
+		return
 	}
 	now := time.Now()
 	for _, h := range state.Holders {

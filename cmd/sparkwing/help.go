@@ -109,9 +109,6 @@ var errHelpRequested = errors.New("help requested")
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
 
-	// A retired/renamed where-flag (--on / --sw-on / --sw-profile /
-	// --sw-target) gets a migration pointer instead of the bare pflag
-	// "unknown flag" error.
 	if err := checkRetiredWhereFlags(args); err != nil {
 		return err
 	}
@@ -140,7 +137,6 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 	for _, spec := range cmd.Flags {
 		if fs.Lookup(spec.Name) == nil {
-			// Spec-only flag the handler didn't register; skip rather than panic.
 			continue
 		}
 		changed := fs.Changed(spec.Name)
@@ -193,7 +189,6 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		fmt.Fprint(w, " <subcommand>")
 	}
 	if len(cmd.Flags) > 0 || len(cmd.Subcommands) == 0 {
-		// Always show "[flags]" on leaves; --help is auto-injected.
 		fmt.Fprint(w, " [flags]")
 	}
 	if cmd.UsageSuffix != "" {
@@ -237,9 +232,6 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		fmt.Fprintln(w)
 	}
 
-	// Flat flag list -- no per-group section headers. With sw-prefix,
-	// pipeline-author flags (unprefixed) and sparkwing flags (--sw-*)
-	// distinguish themselves visually; section labels add noise.
 	if len(flags) > 0 {
 		fmt.Fprintln(w, "FLAGS")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

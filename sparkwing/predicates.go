@@ -52,8 +52,6 @@ type PredicateContext interface {
 	ProfileIsLocal() bool
 }
 
-// --- value comparison predicates ---
-
 type argEqPredicate struct {
 	name  string
 	value any
@@ -86,10 +84,6 @@ type argNeqPredicate struct {
 func (p argNeqPredicate) Eval(ctx PredicateContext) bool {
 	v, ok := ctx.Arg(p.name)
 	if !ok {
-		// Unresolved args don't satisfy "not equal X" -- treating an
-		// unresolved value as "different from anything" makes
-		// required-when predicates fire surprisingly often. Use
-		// ArgUnset explicitly when that's the intent.
 		return false
 	}
 	return !predicateValueEqual(v, p.value)
@@ -143,8 +137,6 @@ func ArgIn(name string, values ...any) Predicate {
 	return argInPredicate{name: name, values: values}
 }
 
-// --- presence predicates ---
-
 type argSetPredicate struct{ name string }
 
 func (p argSetPredicate) Eval(ctx PredicateContext) bool {
@@ -175,8 +167,6 @@ func (argUnsetPredicate) isPredicate()     {}
 // no resolved value at all. Useful for "required when no image is
 // given" style fallbacks.
 func ArgUnset(name string) Predicate { return argUnsetPredicate{name: name} }
-
-// --- combinators ---
 
 type andPredicate struct{ preds []Predicate }
 
@@ -245,8 +235,6 @@ func (notPredicate) isPredicate()                     {}
 // can build small boolean expressions over the resolved args.
 func Not(p Predicate) Predicate { return notPredicate{inner: p} }
 
-// --- context predicates ---
-
 type localPredicate struct{}
 
 func (localPredicate) Eval(ctx PredicateContext) bool { return ctx.ProfileIsLocal() }
@@ -290,8 +278,6 @@ func (alwaysPredicate) isPredicate()               {}
 // but composable into Or expressions for "required when X or always
 // in some fallback profile" patterns.
 func Always() Predicate { return alwaysPredicate{} }
-
-// --- helpers ---
 
 // predicateValueEqual compares two values for predicate purposes.
 // Uses reflect.DeepEqual but normalizes numeric types so user-typed

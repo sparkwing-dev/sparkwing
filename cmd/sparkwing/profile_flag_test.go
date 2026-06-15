@@ -52,9 +52,6 @@ profiles:
 }
 
 func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
-	// The retired --sw-profile flag must error with a migration pointer
-	// before any discovery/compile rather than falling through to the
-	// pipeline binary.
 	err := dispatchRun([]string{"some-pipeline", "--profile", "x", "--sw-profile", "y"})
 	if err == nil {
 		t.Fatal("expected retired-flag error for --sw-profile")
@@ -69,8 +66,6 @@ func TestDispatchRun_ProfileNotFoundBeforeCompile(t *testing.T) {
 profiles:
   prod: { controller: { url: https://api.example.dev } }
 `)
-	// A bad --profile must fail fast (before findSparkwingDir / compile),
-	// so this resolves and errors even outside any .sparkwing/ project.
 	err := dispatchRun([]string{"some-pipeline", "--profile", "ghost"})
 	if err == nil {
 		t.Fatal("expected not-found error")
@@ -78,7 +73,6 @@ profiles:
 	if !strings.Contains(err.Error(), `profile "ghost" not found`) {
 		t.Errorf("message = %q, want not-found text", err.Error())
 	}
-	// Sanity: not a mutual-exclusion error and not exit-2.
 	if errors.Is(err, errHelpRequested) {
 		t.Error("unexpected help-requested error")
 	}

@@ -180,7 +180,6 @@ func TestReconcileOrphanedLocalRuns_RecentHeartbeatUntouched(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	// Stamp a current heartbeat so the run looks live.
 	if _, err := st.DB().ExecContext(ctx,
 		`UPDATE nodes SET last_heartbeat = ? WHERE run_id = ?`,
 		time.Now().UnixNano(), "run-live"); err != nil {

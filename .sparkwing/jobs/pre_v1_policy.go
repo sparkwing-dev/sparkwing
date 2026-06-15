@@ -36,10 +36,6 @@ func CheckPreV1Policy(ctx context.Context, repoRoot string) error {
 		problems = append(problems, msg)
 	}
 	if msg := checkLocalGitTagsPreV1(ctx, repoRoot); msg != "" {
-		// Existing v1+ tags from the proxy-poisoning incident are
-		// surfaced as a warning, not a failure. We can't delete them.
-		// Newly-created v1+ tags would also show up here, but the
-		// release pipeline's version-gate refuses to create them.
 		fmt.Fprintf(os.Stderr, "pre-v1 policy: %s\n", msg)
 	}
 
@@ -106,7 +102,6 @@ func checkVersioningDocPreV1(path string) string {
 	if !versioningDocV1Pattern.Match(data) {
 		return ""
 	}
-	// Find the offending line for the error message.
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	lineNum := 0
 	for scanner.Scan() {
@@ -137,9 +132,6 @@ func checkLocalGitTagsPreV1(ctx context.Context, repoRoot string) string {
 		if t == "" {
 			continue
 		}
-		// Match v1+ at the start of the tag, anchored, allowing
-		// optional patch suffixes. Skip submodule-style tags
-		// (`pkg/foo/v1.0.0`) by requiring the v at index 0.
 		if regexp.MustCompile(`^v[1-9]\d*\.\d+\.\d+`).MatchString(t) {
 			bad = append(bad, t)
 		}

@@ -25,9 +25,6 @@ import (
 func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 
-	// One open up front creates the schema so the racing opens below
-	// don't also contend on migration; the race we care about is the
-	// acquire path.
 	seed, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
@@ -200,7 +197,6 @@ func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
 		t.Fatalf("open rw: %v", err)
 	}
 	defer func() { _ = rw.Close() }()
-	// Seed a row so the read transaction has something to read.
 	if err := rw.CreateRun(context.Background(), store.Run{
 		ID: "seed", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
@@ -213,7 +209,6 @@ func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
 	}
 	defer func() { _ = ro.Close() }()
 
-	// Hold a read transaction open on the read-only connection.
 	readTx, err := ro.DB().BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("begin read tx: %v", err)
@@ -224,7 +219,6 @@ func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
 		t.Fatalf("read query: %v", err)
 	}
 
-	// The writer must commit promptly despite the held reader.
 	done := make(chan error, 1)
 	go func() {
 		done <- rw.CreateRun(context.Background(), store.Run{

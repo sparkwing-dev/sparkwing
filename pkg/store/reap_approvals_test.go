@@ -18,8 +18,6 @@ func TestReapTimedOutApprovals_ResolvesElapsedApprovals(t *testing.T) {
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-stuck", "gate")
 
-	// Approval requested 1 hour ago with a 2s timeout. Well past
-	// the deadline.
 	if err := s.CreateApproval(ctx, store.Approval{
 		RunID:       "run-stuck",
 		NodeID:      "gate",
@@ -64,7 +62,7 @@ func TestReapTimedOutApprovals_LeavesInsideWindow(t *testing.T) {
 		RunID:       "run-active",
 		NodeID:      "gate",
 		RequestedAt: time.Now(),
-		TimeoutMS:   60_000, // 60s, just started
+		TimeoutMS:   60_000,
 		OnTimeout:   store.ApprovalOnTimeoutFail,
 	}); err != nil {
 		t.Fatalf("CreateApproval: %v", err)

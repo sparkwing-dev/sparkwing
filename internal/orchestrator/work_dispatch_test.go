@@ -15,13 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestWorkDispatch_* tests Work-shape nodes: registered via sw.Job,
-// dispatched through the in-process runner's Work-execution path
-// (RunWork), emitting structured step_start/step_end events and
-// producing typed output via the designated ResultStep.
-
-// --- Work-shape pipelines ---
-
 // multiStepWork emits step boundary events and threads typed output
 // between steps via sw.StepGet + step.Needs.
 type multiStepWorkJob struct {
@@ -97,8 +90,6 @@ func init() {
 	register("workdisp-jobfn", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &jobFnPipe{} })
 }
 
-// --- tests ---
-
 func TestWorkDispatch_MultiStepWorkSucceeds(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "workdisp-multi"})
@@ -158,9 +149,6 @@ func TestWorkDispatch_FailingStepFailsTheNode(t *testing.T) {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
 
-	// Run-level error is summary-only ("nodes failed: [fail-work]");
-	// the underlying step error is on the per-node row, so assert
-	// against the store rather than res.Error.
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)

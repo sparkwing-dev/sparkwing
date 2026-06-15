@@ -9,13 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Plan-time guard sentinel basics. Helper-specific guard coverage lives
-// next to each helper (exec_test.go, docker package tests, git package
-// tests).
-
-// guardingPipe deliberately calls a side-effect helper inside Plan().
-// Used to exercise the runtime sentinel via Registration.Invoke (the
-// canonical wiring point).
 type guardingPipe struct{ sparkwing.Base }
 
 func (guardingPipe) Plan(ctx context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -45,7 +38,6 @@ func TestPlanTime_GuardPanicsUnderPlanContext(t *testing.T) {
 }
 
 func TestPlanTime_GuardSilentOutsidePlanContext(t *testing.T) {
-	// Plain ctx (no Plan() in flight). GuardPlanTime should be a no-op.
 	sparkwingruntime.GuardPlanTime(context.Background(), "test.helper")
 }
 

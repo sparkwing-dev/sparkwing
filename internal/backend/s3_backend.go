@@ -102,7 +102,6 @@ func (b *S3Backend) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.R
 		}
 		st, err := b.loadState(ctx, runID)
 		if err != nil {
-			// One bad dump must not poison the whole list.
 			continue
 		}
 		if st.run != nil {
@@ -201,7 +200,6 @@ func (b *S3Backend) loadState(ctx context.Context, runID string) (*runState, err
 
 	b.mu.Lock()
 	b.cache[runID] = &cachedState{state: st, fetchedAt: time.Now()}
-	// Drop-on-overflow safety valve; not a true LRU.
 	if len(b.cache) > 1024 {
 		for k := range b.cache {
 			delete(b.cache, k)
@@ -228,8 +226,6 @@ func parseStateNDJSON(rc io.Reader) (*runState, error) {
 	nodesByID := map[string]*store.Node{}
 	var nodeOrder []string
 	scanner := bufio.NewScanner(rc)
-	// state.ndjson can carry long PlanSnapshot blobs inlined into the
-	// run record; default 64K bufio limit is not enough.
 	buf := make([]byte, 0, 1<<20)
 	scanner.Buffer(buf, 16<<20)
 	for scanner.Scan() {

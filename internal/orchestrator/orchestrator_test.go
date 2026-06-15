@@ -28,8 +28,6 @@ func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]
 	sparkwing.Register[sparkwing.NoInputs](name, factory)
 }
 
-// --- pipelines used across tests ---
-
 type okPipe struct{ sparkwing.Base }
 
 func (okPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -65,8 +63,6 @@ func (middleFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	sparkwing.Job(plan, "c", func(ctx context.Context) error { return nil }).Needs(b)
 	return nil
 }
-
-// --- typed ref chain ---
 
 type refBuildOut struct {
 	Tag string `json:"tag"`
@@ -143,8 +139,6 @@ func isolateProfiles(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 }
 
-// --- tests ---
-
 func TestRun_SingleJobSuccess(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
@@ -157,7 +151,6 @@ func TestRun_SingleJobSuccess(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unexpected error: %v", res.Error)
 	}
-	// Log file should exist with content.
 	body, err := os.ReadFile(p.NodeLog(res.RunID, "orch-ok"))
 	if err != nil {
 		t.Fatalf("read log: %v", err)
@@ -331,7 +324,6 @@ func TestRun_UnknownPipelineErrors(t *testing.T) {
 }
 
 func TestRun_PathsIsolation(t *testing.T) {
-	// Verify run dir has the log file and no cross-run leakage.
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -347,6 +339,5 @@ func TestRun_PathsIsolation(t *testing.T) {
 	if !strings.HasSuffix(filepath.Base(p.NodeLog(res.RunID, "orch-ok")), ".log") {
 		t.Fatal("log name convention broken")
 	}
-	// Avoid flake if OS clock resolution is coarse.
 	_ = time.Millisecond
 }

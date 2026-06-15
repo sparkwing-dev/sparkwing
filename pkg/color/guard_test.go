@@ -1,17 +1,5 @@
 package color_test
 
-// Guardrail: agents (Claude Code, Cursor, etc.) and CI logs see
-// stdout as a non-TTY pipe. The pkg/color helpers auto-disable ANSI
-// emission in that case, so anything that goes through them is safe
-// to add freely. This test fails if anyone reintroduces raw ANSI
-// escape codes outside the sanctioned spots, since those bypass the
-// TTY check and would dump literal `\x1b[31m...` into agent logs.
-//
-// To unblock: route the new color through pkg/color (color.Green,
-// color.Bold, ...). If the new code is genuinely outside the color
-// system (cursor control, etc.) and you're sure it's gated on a TTY,
-// extend `allowed` below.
-
 import (
 	"os"
 	"path/filepath"
@@ -60,9 +48,6 @@ func TestNoRawANSIOutsideAllowed(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
-			// Skip vendored / generated / scratch trees that aren't
-			// part of the production codebase. These can be noisy and
-			// aren't compiled into the shipped binary.
 			name := info.Name()
 			if name == "node_modules" || name == "vendor" || name == ".git" ||
 				name == ".claude" || name == ".sparkwing" || name == "out" ||
@@ -74,8 +59,6 @@ func TestNoRawANSIOutsideAllowed(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-		// _test.go files can hold ANSI in test fixtures (asserting
-		// on rendered output, etc.). Keep them out of the guard.
 		if strings.HasSuffix(path, "_test.go") {
 			return nil
 		}

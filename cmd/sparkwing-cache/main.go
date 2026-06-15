@@ -29,10 +29,6 @@ func run(args []string) error {
 	cfg := cache.DefaultConfig()
 	fs := flag.NewFlagSet("sparkwing-cache", flag.ExitOnError)
 
-	// Every flag defaults to the env-var value when set, otherwise
-	// the legacy hard-coded default. Preserves existing k8s
-	// ConfigMap-style env-var configs while letting new deploys
-	// use flags.
 	fs.StringVar(&cfg.Addr, "addr",
 		envOr("PORT_ADDR", ":"+envOr("PORT", trimColon(cfg.Addr))),
 		"bind address (e.g. :8090). Default: $PORT_ADDR or :$PORT or :8090.")

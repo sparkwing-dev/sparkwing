@@ -38,8 +38,6 @@ func TestAcquire_SingleHolderRoundtrip(t *testing.T) {
 	}
 	release()
 
-	// After release, the holder file should be gone so the next
-	// acquirer sees a clean directory.
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) == ".lock" && e.Name() != "coord.lock" {
@@ -98,8 +96,6 @@ func TestAcquire_BlocksUntilSlotFrees(t *testing.T) {
 		close(acquired)
 	}()
 
-	// Let the waiter accumulate at least one OnWait callback so we
-	// know it actually polled rather than racing past the busy slot.
 	time.Sleep(80 * time.Millisecond)
 	if waitCount.Load() == 0 {
 		t.Error("expected at least one OnWait callback while slot busy")
@@ -149,9 +145,6 @@ func TestAcquire_ContextCancelAbortsWait(t *testing.T) {
 }
 
 func TestAcquire_RecoversFromStaleHolder(t *testing.T) {
-	// Simulate a crashed holder by creating a holder-*.lock file
-	// nobody is flocking. The next acquirer should reclaim the slot
-	// (count it as inactive, unlink it, take its own slot).
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "holder-pid99999-0-0.lock")
 	if err := os.WriteFile(stale, []byte("stale"), 0o600); err != nil {
@@ -188,7 +181,6 @@ func TestAcquire_MultipleSlotsAdmitInParallel(t *testing.T) {
 		}
 		releases = append(releases, rel)
 	}
-	// (N+1)th should fail under NoWait.
 	if _, err := boxslot.Acquire(context.Background(), boxslot.Options{
 		MaxSlots: N,
 		LockDir:  dir,
@@ -202,8 +194,6 @@ func TestAcquire_MultipleSlotsAdmitInParallel(t *testing.T) {
 }
 
 func TestAcquire_ConcurrentRaceNeverExceedsMax(t *testing.T) {
-	// Stress: M goroutines try to acquire and release rapidly under
-	// MaxSlots=K. Peak observed concurrency must never exceed K.
 	const M = 12
 	const K = 3
 	dir := t.TempDir()
@@ -244,12 +234,6 @@ func TestAcquire_ConcurrentRaceNeverExceedsMax(t *testing.T) {
 }
 
 func TestDefaultMaxSlots(t *testing.T) {
-	// Default is "disabled" (0) -- box-slot is opt-in via
-	// SPARKWING_BOX_SLOTS / --sw-box-slots. Most pipelines aren't
-	// CPU-pegged and the agent-feedback shape (host throttle separate
-	// from coordination) is served by the knob existing, not by an
-	// always-on default. The arg is retained for caller compat;
-	// the function ignores it.
 	for _, workers := range []int{0, 1, 4, 1 << 20} {
 		if got := boxslot.DefaultMaxSlots(workers); got != 0 {
 			t.Errorf("DefaultMaxSlots(%d) = %d, want 0 (disabled)", workers, got)
@@ -279,8 +263,6 @@ func TestAcquire_ReadOnlyLockDirFails(t *testing.T) {
 		t.Skip("root bypasses POSIX file permissions; skipping")
 	}
 	parent := t.TempDir()
-	// Pre-create the lock dir then strip write perms so MkdirAll
-	// short-circuits and the OpenFile of coord.lock fails.
 	lockDir := filepath.Join(parent, "box-slots")
 	if err := os.Mkdir(lockDir, 0o500); err != nil {
 		t.Fatalf("mkdir: %v", err)

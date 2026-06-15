@@ -19,7 +19,6 @@ type schemaTestArgs struct {
 }
 
 func TestSchema_BuildSucceedsForUnconstrainedStruct(t *testing.T) {
-	// Zero schema entries; every field becomes a plain optional flag.
 	sb := NewSchema[schemaTestArgs]()
 	s, err := sb.Build()
 	if err != nil {
@@ -28,7 +27,6 @@ func TestSchema_BuildSucceedsForUnconstrainedStruct(t *testing.T) {
 	if got, want := len(s.fields), 6; got != want {
 		t.Fatalf("schema should reflect all 6 struct fields; got %d", got)
 	}
-	// Flag inference.
 	cases := map[string]string{
 		"Replicas":     "replicas",
 		"Image":        "image",
@@ -47,7 +45,6 @@ func TestSchema_BuildSucceedsForUnconstrainedStruct(t *testing.T) {
 			t.Errorf("flag for %q: got %q, want %q", fieldName, m.Flag, wantFlag)
 		}
 	}
-	// Desc propagation from struct tag.
 	if d := s.field("Replicas").Desc; d != "target replica count" {
 		t.Errorf("Desc for Replicas: got %q", d)
 	}
@@ -67,7 +64,7 @@ func TestSchema_FieldReferenceNonexistentErrors(t *testing.T) {
 
 func TestSchema_DefaultTypeMismatchErrors(t *testing.T) {
 	sb := NewSchema[schemaTestArgs]()
-	sb.Field("Image").Default(42) // string field, int default
+	sb.Field("Image").Default(42)
 	_, err := sb.Build()
 	if err == nil || !strings.Contains(err.Error(), "Default") {
 		t.Fatalf("Build should reject Default type mismatch; got %v", err)
@@ -75,8 +72,6 @@ func TestSchema_DefaultTypeMismatchErrors(t *testing.T) {
 }
 
 func TestSchema_DefaultNumericCoercionIsAllowed(t *testing.T) {
-	// Default(int) on an int field is fine; we relax numeric kind
-	// matching across int/int32/int64 so calls stay terse.
 	sb := NewSchema[schemaTestArgs]()
 	sb.Field("Replicas").Default(int32(3))
 	if _, err := sb.Build(); err != nil {
@@ -92,13 +87,13 @@ func TestSchema_ComputedFuncSignatureValidated(t *testing.T) {
 	}
 
 	sb2 := NewSchema[schemaTestArgs]()
-	sb2.Field("PoolSize").Computed(func(a int) int { return a * 2 }) // wrong arg type
+	sb2.Field("PoolSize").Computed(func(a int) int { return a * 2 })
 	if _, err := sb2.Build(); err == nil || !strings.Contains(err.Error(), "Computed") {
 		t.Fatalf("Build should reject Computed with wrong arg type; got %v", err)
 	}
 
 	sb3 := NewSchema[schemaTestArgs]()
-	sb3.Field("PoolSize").Computed(func(a schemaTestArgs) string { return "x" }) // wrong return type
+	sb3.Field("PoolSize").Computed(func(a schemaTestArgs) string { return "x" })
 	if _, err := sb3.Build(); err == nil || !strings.Contains(err.Error(), "Computed") {
 		t.Fatalf("Build should reject Computed with wrong return type; got %v", err)
 	}
@@ -120,7 +115,7 @@ func TestSchema_CustomFuncSignatureValidated(t *testing.T) {
 
 func TestSchema_MinMaxRequiresNumericField(t *testing.T) {
 	sb := NewSchema[schemaTestArgs]()
-	sb.Field("Image").Min(1) // string field
+	sb.Field("Image").Min(1)
 	_, err := sb.Build()
 	if err == nil || !strings.Contains(err.Error(), "numeric") {
 		t.Fatalf("Build should reject Min on non-numeric field; got %v", err)
@@ -129,7 +124,7 @@ func TestSchema_MinMaxRequiresNumericField(t *testing.T) {
 
 func TestSchema_OneOfTypeChecked(t *testing.T) {
 	sb := NewSchema[schemaTestArgs]()
-	sb.Field("Image").OneOf("auto", "manual", "off") // string field, string values: OK
+	sb.Field("Image").OneOf("auto", "manual", "off")
 	if _, err := sb.Build(); err != nil {
 		t.Fatalf("OneOf with matching types should pass; got %v", err)
 	}
@@ -178,7 +173,6 @@ func TestSchema_TopoOrderRespectsDependsOn(t *testing.T) {
 }
 
 func TestSchema_DuplicateFlagNameErrors(t *testing.T) {
-	// Two struct fields can collide if their flag tags happen to match.
 	type dupArgs struct {
 		A string `flag:"thing"`
 		B string `flag:"thing"`
@@ -192,7 +186,7 @@ func TestSchema_DuplicateFlagNameErrors(t *testing.T) {
 
 func TestSchema_BindRestrictedToKnownNames(t *testing.T) {
 	sb := NewSchema[schemaTestArgs]()
-	sb.Field("Image").Bind("runner") // not yet a supported bind
+	sb.Field("Image").Bind("runner")
 	_, err := sb.Build()
 	if err == nil || !strings.Contains(err.Error(), "Bind") {
 		t.Fatalf("Build should reject unknown bind name; got %v", err)
@@ -220,7 +214,7 @@ func TestSchema_GroupValidatesFieldsAndKind(t *testing.T) {
 	}
 
 	sb3 := NewSchema[schemaTestArgs]()
-	sb3.Group("Image", "Replicas") // no kind set
+	sb3.Group("Image", "Replicas")
 	_, err = sb3.Build()
 	if err == nil || !strings.Contains(err.Error(), "cardinality") {
 		t.Fatalf("group without a kind should fail; got %v", err)
@@ -228,16 +222,13 @@ func TestSchema_GroupValidatesFieldsAndKind(t *testing.T) {
 }
 
 func TestSchema_ConstraintErrorsAccumulate(t *testing.T) {
-	// Two distinct problems on the same Build should surface together,
-	// not stop at the first.
 	sb := NewSchema[schemaTestArgs]()
-	sb.Field("Image").Min(1)             // non-numeric -> err
-	sb.Field("Replicas").Default("nope") // type mismatch -> err
+	sb.Field("Image").Min(1)
+	sb.Field("Replicas").Default("nope")
 	_, err := sb.Build()
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	// errors.Join wraps both; both should be reachable via errors.Unwrap walk.
 	count := 0
 	for _, sub := range allErrors(err) {
 		if strings.Contains(sub.Error(), "Min/Max") || strings.Contains(sub.Error(), "numeric") {
@@ -253,10 +244,9 @@ func TestSchema_ConstraintErrorsAccumulate(t *testing.T) {
 }
 
 func TestSchema_FieldCalledTwiceReturnsSameBuilder(t *testing.T) {
-	// Chaining across statements should accumulate on one fieldMeta.
 	sb := NewSchema[schemaTestArgs]()
 	sb.Field("Replicas").Required()
-	sb.Field("Replicas").Min(1) // second call -- should pile on
+	sb.Field("Replicas").Min(1)
 	s, err := sb.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)

@@ -232,13 +232,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		req.CancelTimeout = DefaultCancelTimeout
 	}
 
-	// An arrival whose cost exceeds the key's capacity can never be
-	// admitted -- the open budget never reaches its cost even when the
-	// key is idle. Queuing it would strand it forever (default
-	// QueueTimeout is "wait indefinitely"), so reject up front: Skip
-	// resolves it as a no-op, every other policy fails it. The SDK has a
-	// plan-time guard for the common case; this is the backstop for
-	// version skew (another writer lowered capacity below this cost).
 	if req.Cost > req.Capacity {
 		if req.Policy == OnLimitSkip {
 			return AcquireSlotResponse{Kind: AcquireSkipped}, nil
@@ -266,12 +259,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	now := time.Now()
 	nowNS := now.UnixNano()
 
-	// 1. Cache lookup; atomic with the rest so we never double-run.
-	// txCacheLookup owns the serve-from-cache decision, including the
-	// BypassRead opt-out: a bypassing request flows into capacity /
-	// coalesce / queue as if no prior entry existed, while the
-	// release-time write still records the run's result so a follow-up
-	// request (BypassRead=false) hits cache normally.
 	hit, err := txCacheLookup(ctx, tx, req.Key, req.CacheKeyHash, nowNS, req.BypassRead, true)
 	if err != nil {
 		return AcquireSlotResponse{}, err
@@ -288,13 +275,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nil
 	}
 
-	// 2. Upsert entry (latest-wins on capacity; drift note on change).
-	// On Postgres the SELECT also acquires a row-level lock so
-	// concurrent AcquireConcurrencySlot calls for the same key
-	// serialize through the rest of the transaction (capacity check,
-	// holder count, policy branch). The ON CONFLICT DO NOTHING on the
-	// first-write path closes the race where two transactions discover
-	// the row missing simultaneously.
 	driftNote := ""
 	prevCap := 0
 	var existingCap int
@@ -354,10 +334,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}
 	}
 
-	// 3a. Idempotent re-acquire by same holder_id; refreshes lease. An
-	// expired row must NOT short-circuit here: its budget may already be
-	// reassigned, so reviving it would over-admit. Let it fall through to
-	// the capacity check, where the ON CONFLICT insert reclaims it.
 	var existingLeaseNS int64
 	var existingSuperInt int
 	err = tx.QueryRowContext(
@@ -390,9 +366,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		return AcquireSlotResponse{}, err
 	}
 
-	// 3. One accounting pass: live holder cost, capacity floor, and the
-	// live holder set, all from the same scan, plus this arrival's
-	// declaration folded into the effective capacity.
 	acct, err := txConcurrencyAccounting(ctx, tx, req.Key, nowNS)
 	if err != nil {
 		return AcquireSlotResponse{}, err
@@ -400,18 +373,11 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	activeCost := acct.used
 	effCap := acct.effectiveCapacity(req.Capacity)
 
-	// A --no-cache (BypassRead) node must not coalesce onto a leader and
-	// inherit its result: treat it as a Queue waiter so it waits for the
-	// memo slot and runs fresh (then writes its own cache).
 	policy := req.Policy
 	if policy == OnLimitCoalesce && req.BypassRead {
 		policy = OnLimitQueue
 	}
 
-	// 4. Budget available -> grant immediately, unless a Queue arrival
-	// would barge a waiter already parked on this key. Budget can free
-	// outside the atomic release+promote (e.g. a holder's lease lapses
-	// before the reaper runs); strict FIFO reserves it for the head.
 	fifoBlocked := false
 	if policy == OnLimitQueue {
 		var earlier int
@@ -445,7 +411,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nil
 	}
 
-	// 5. Slot full -> branch on the arrival's policy.
 	switch policy {
 	case OnLimitSkip:
 		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
@@ -491,9 +456,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nil
 
 	case OnLimitCancelOthers:
-		// Evict oldest holders first until freeing their cost would let
-		// this arrival's cost fit the effective capacity. Always evict
-		// at least one so a single over-capacity arrival still proceeds.
 		var supersededIDs []string
 		freed := 0
 		for _, h := range acct.holders {
@@ -508,14 +470,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 				return AcquireSlotResponse{}, err
 			}
 		}
-		// Grant the canceller the freed budget immediately rather than
-		// parking it as a waiter: eviction already reserved room, and
-		// CancelOthers is best-effort preemption ("take over now"). Holding
-		// the slot keeps a later arrival -- or a second CancelOthers -- from
-		// stealing the budget while the superseded victims cooperatively
-		// drain. The brief overlap with a still-draining victim is inherent
-		// to cooperative cancellation; strict no-overlap is what Queue is
-		// for.
 		expiresNS := now.Add(req.Lease).UnixNano()
 		if err := txInsertHolder(ctx, tx, holderRow{
 			key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
@@ -545,10 +499,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		}, nowNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		// Observability: this arrival's rank among queue waiters, the
-		// total queued, and who holds the slots -- computed in the same
-		// transaction so they're consistent with the queue this wait
-		// joined. arrived_at < nowNS excludes the just-inserted self.
 		var position, queueLen int
 		if err := tx.QueryRowContext(
 			ctx,
@@ -710,12 +660,6 @@ func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) 
 // the leader path, not here. Returns the promoted waiters with their
 // assigned HolderID set.
 func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
-	// holderMin (the accounting floor) is the most-restrictive declared
-	// capacity over the currently-admitted holders (0 == no admitted
-	// holder constrains the budget). entryCap is the declared default
-	// used for legacy waiter rows that carry no declared_capacity.
-	// Parked waiters are deliberately NOT folded in -- each candidate's
-	// own declared capacity is the ceiling that gates its own promotion.
 	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -756,22 +700,8 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		return nil, err
 	}
 
-	// Promote FIFO. Each candidate's ceiling is the minimum of the
-	// already-admitted holder caps (holderMin) and its own declared
-	// capacity -- most-restrictive-wins over admitted participants only.
-	// As a candidate is admitted, its own cap joins holderMin so it
-	// constrains the rest of the pass. A head that doesn't fit stops the
-	// pass; a cheaper waiter behind it never jumps ahead.
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
-		// A liveness primitive must not hand a slot to a corpse: a waiter
-		// whose run has already finished is deleted and skipped rather than
-		// minted into a holder that would only need reaping. Skipping (not
-		// breaking) keeps FIFO honest -- a dead head can't wedge the live
-		// waiters behind it. Run-row absence is left alone: concurrency keys
-		// are decoupled from the runs table, so a missing row is not a corpse
-		// signal here, and aged-out waiters are reclaimed by the stale-waiter
-		// sweep.
 		if finished[w.RunID] {
 			if _, derr := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); derr != nil {
 				return nil, derr
@@ -790,7 +720,7 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 			candCap = holderMin
 		}
 		if !fitsBudget(used, c, candCap) {
-			break // FIFO head doesn't fit; don't let a cheaper waiter jump it.
+			break
 		}
 		used += c
 		if holderMin == 0 || candCap < holderMin {
@@ -811,9 +741,6 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 		if c <= 0 {
 			c = 1
 		}
-		// Never mint a zero-cap holder: a legacy waiter with no declared
-		// capacity inherits the entry capacity, so it stays visible to the
-		// effective-capacity floor.
 		dc := w.DeclaredCapacity
 		if dc <= 0 {
 			dc = entryCap
@@ -1061,11 +988,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	// A heartbeat that lands after the lease already expired must NOT
-	// revive the holder: admission may have freed and reassigned that
-	// budget once the lease lapsed, so reviving would put two live
-	// holders on the same key. The reaper deletes expired rows; until it
-	// does, treat the lease as lost.
+	// safety: expired lease means admission may have reassigned the budget; reviving would double-admit.
 	if leaseNS <= now.UnixNano() {
 		return time.Time{}, false, ErrLockHeld
 	}
@@ -1232,24 +1155,17 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 		return false, nil, nil, err
 	}
 
-	// 1. Release the holder (delete + release-time cache write). A
-	// missing holder (reaped or duplicate release) still runs promote to
-	// unblock waiters; followers stay parked until a real release.
 	released, runID, nodeID, err := txReleaseHolder(ctx, tx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 	if err != nil {
 		return false, nil, nil, err
 	}
 	if released {
-		// 2. Resolve coalesce followers in the same tx.
 		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
 			return false, nil, nil, err
 		}
 	}
 
-	// 3. Promote queue / cancel_others waiters against the open budget.
-	// If the key was never declared (no entries row) and nothing is
-	// live, there is nothing to promote.
 	if !entryDeclared {
 		return released, followers, nil, txCommitChecked(ctx, tx, time.Now().UnixNano(), key)
 	}
@@ -1493,7 +1409,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	// serialized writers committed, not a pre-wait snapshot.
 	nowNS := time.Now().UnixNano()
 
-	// 1. Holder row present + not superseded -> Promoted.
 	var holderID string
 	var leaseNS int64
 	var superInt int
@@ -1518,9 +1433,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		return WaiterResolution{}, err
 	}
 
-	// 2. Cache hit on our hash -> Cached. txCacheLookup owns the
-	// serve-from-cache decision, including the bypassRead opt-out, so
-	// --no-cache isn't defeated by coalescing.
 	hit, err := txCacheLookup(ctx, tx, key, cacheKeyHash, nowNS, bypassRead, false)
 	if err != nil {
 		return WaiterResolution{}, err
@@ -1537,7 +1449,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		}, nil
 	}
 
-	// 3. Waiter row still present -> keep waiting.
 	var waiterArrivedNS int64
 	err = tx.QueryRowContext(
 		ctx,
@@ -1545,8 +1456,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		key, runID, nodeID,
 	).Scan(&waiterArrivedNS)
 	if err == nil {
-		// Recompute position against the now-fully-committed queue, plus
-		// the current holders, for the poller's live display.
 		var position int
 		if e := tx.QueryRowContext(
 			ctx,
@@ -1568,10 +1477,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		return WaiterResolution{}, err
 	}
 
-	// 4. Leader released, no cache entry; follower inherits the leader's
-	// node outcome. The leader wrote no cache row, so it did not succeed
-	// (only a successful release caches); carry its terminal outcome so
-	// the follower doesn't go green for work that was skipped or failed.
 	if leaderRunID != "" {
 		var leaderOutcome, leaderReason string
 		err := tx.QueryRowContext(
@@ -1594,7 +1499,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		}, nil
 	}
 
-	// 5. Fallthrough: request was cancelled or reaped.
 	if err := tx.Commit(); err != nil {
 		return WaiterResolution{}, err
 	}
@@ -1620,10 +1524,6 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 		return false, err
 	}
 
-	// The waiter may have been promoted into a holder in the race window
-	// between giving up and this call. Reclaim that orphaned holder --
-	// otherwise it pins budget with no dispatcher until the lease reaps --
-	// and promote the next waiters into the freed budget.
 	hres, err := tx.ExecContext(
 		ctx,
 		`DELETE FROM concurrency_holders WHERE key = ? AND run_id = ? AND node_id = ?`,
@@ -1726,8 +1626,6 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	if err := wrows.Err(); err != nil {
 		return nil, err
 	}
-	// Derive each queue-policy waiter's rank in arrival order. Waiters
-	// are already ordered by arrived_at ASC.
 	qrank := 0
 	for i := range state.Waiters {
 		if state.Waiters[i].Policy == OnLimitQueue {
@@ -1856,7 +1754,6 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	nowNS := time.Now().UnixNano()
 	cutoff := time.Now().Add(-maxAge).UnixNano()
 
-	// Pass 1: orphan coalesce followers (no live leader holder).
 	orphanRows, err := tx.QueryContext(
 		ctx,
 		`SELECT `+prefixColumns(waiterColumns, "w.")+`
@@ -1889,7 +1786,6 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		return nil, err
 	}
 
-	// Pass 2: anything older than maxAge.
 	ageRows, err := tx.QueryContext(
 		ctx,
 		`SELECT `+waiterColumns+`
@@ -1899,7 +1795,6 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	if err != nil {
 		return nil, err
 	}
-	// Dedupe against pass 1.
 	already := make(map[string]bool, len(dropped))
 	for _, d := range dropped {
 		already[d.Key+"|"+d.RunID+"|"+d.NodeID] = true
@@ -2011,10 +1906,7 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 		return 0, nil
 	}
 	evict := count - keepCount
-	// (key, cache_key_hash) is the primary key -- using it as the
-	// IN selector is portable across SQLite and Postgres, where
-	// SQLite's `rowid` and Postgres's `ctid` would otherwise need
-	// dialect branching.
+	// hack: composite PK in IN-subselect avoids rowid/ctid dialect branching.
 	res, err := s.exec(
 		ctx,
 		`DELETE FROM concurrency_cache

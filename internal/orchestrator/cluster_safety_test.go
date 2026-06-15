@@ -1,44 +1,5 @@
 package orchestrator_test
 
-// Cluster-mode orchestrator safety: HTTP-only Backends invariant.
-//
-// WHY THIS TEST EXISTS
-// --------------------
-// The orchestrator running inside a runner pod -- the binary that
-// executes user-authored pipeline code, including .inline() jobs --
-// MUST always receive HTTP-backed Backends:
-//
-//   Backends.State       -> *client.Client  (controller HTTP API)
-//   Backends.Concurrency -> *HTTPConcurrency (controller HTTP API)
-//
-// It MUST NEVER receive a *store.Store directly.
-//
-// If a future refactor "simplifies" the cluster wiring by passing a
-// *store.Store into the runner pod's Backends struct, every pipeline
-// that calls .inline() instantly gains direct write access to the
-// controller's authoritative state DB. No compile error. No
-// observable bug under normal operation. Just a silent privilege
-// escalation that any sufficiently-motivated .inline() job could
-// exploit.
-//
-// This is the load-bearing security boundary in the open-core
-// architecture (see decisions/0001-open-core-tier-strategy.md). The
-// runner pod is the multi-tenant trust boundary; the controller is
-// the single-tenant authority. Direct SQLite access from the runner
-// side collapses the boundary.
-//
-// This test reflects over the Backends value the runner pod's claim
-// path constructs (mirroring orchestrator.HandleClaimedTrigger,
-// worker.go ~lines 225-243) and fails LOUDLY if the concrete types
-// regress.
-//
-// Out of scope: laptop mode (pkg/controller wired via pkg/localws) is
-// single-process / single-trust-domain. Direct *store.Store access is
-// CORRECT there and the LocalBackends() helper is the canonical
-// laptop path. This test only pins the cluster-runner-pod path.
-//
-// See: decisions/0001-open-core-tier-strategy.md.
-
 import (
 	"reflect"
 	"strings"
@@ -60,7 +21,7 @@ func buildClusterRunnerBackends() orchestrator.Backends {
 	stateClient := client.NewWithToken(ctrlURL, nil, "")
 	return orchestrator.Backends{
 		State:       stateClient,
-		Logs:        nil, // Logs may be local-fs or HTTP; not the privilege boundary.
+		Logs:        nil,
 		Concurrency: orchestrator.NewHTTPConcurrency(ctrlURL, nil, "", store.DefaultConcurrencyLease),
 	}
 }
@@ -77,9 +38,6 @@ func TestClusterBackends_StateMustBeHTTP(t *testing.T) {
 
 	stateType := reflect.TypeOf(backends.State).String()
 
-	// Hard reject: *store.Store would be a privilege-escalation
-	// regression. Loud message so the next maintainer who hits this
-	// test understands what they just broke.
 	if stateType == "*store.Store" {
 		t.Fatalf(`cluster orchestrator Backends.State must be HTTP-backed for cluster
 mode; got *store.Store. This is a PRIVILEGE-ESCALATION REGRESSION --
@@ -88,9 +46,6 @@ controller-level write access to the state DB. See
 decisions/0001-open-core-tier-strategy.md for the security rationale.`)
 	}
 
-	// Positive assertion: it IS the HTTP client. Catches the case
-	// where someone substitutes a different direct-store wrapper that
-	// happens not to be *store.Store but still bypasses HTTP.
 	if !strings.Contains(stateType, "client.Client") {
 		t.Fatalf(`cluster orchestrator Backends.State must be HTTP-backed
 (*client.Client); got %s. Any non-HTTP StateBackend in the runner
@@ -113,9 +68,6 @@ func TestClusterBackends_ConcurrencyMustBeHTTP(t *testing.T) {
 
 	concType := reflect.TypeOf(backends.Concurrency).String()
 
-	// Hard reject: localConcurrency embeds *store.Store and would
-	// give .inline() jobs direct SQLite access to the controller's
-	// concurrency tables.
 	if strings.Contains(concType, "localConcurrency") {
 		t.Fatalf(`cluster orchestrator Backends.Concurrency must be HTTP-backed
 for cluster mode; got %s (SQLite-direct). This is a
@@ -125,7 +77,6 @@ concurrency tables. See decisions/0001-open-core-tier-strategy.md
 for the security rationale.`, concType)
 	}
 
-	// Positive assertion: it IS the HTTP variant.
 	if !strings.Contains(concType, "HTTPConcurrency") {
 		t.Fatalf(`cluster orchestrator Backends.Concurrency must be
 *HTTPConcurrency; got %s. Any non-HTTP ConcurrencyBackend in the
@@ -183,16 +134,10 @@ func findStoreType(v reflect.Value, depth int) string {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			f := v.Field(i)
-			// Skip stdlib types we know are huge graphs (http
-			// transport, tls config) -- they can't contain a
-			// *store.Store and walking them is expensive.
 			pkg := f.Type().PkgPath()
 			if pkg == "net/http" || pkg == "crypto/tls" || pkg == "sync" {
 				continue
 			}
-			// reflect can't read unexported fields directly; use
-			// CanInterface as a guard but still walk via Field for
-			// type inspection.
 			if found := findStoreType(f, depth+1); found != "" {
 				return t.Name() + "." + t.Field(i).Name + " -> " + found
 			}
@@ -209,9 +154,6 @@ func findStoreType(v reflect.Value, depth int) string {
 // Constructs a deliberately-wrong Backends bundle and confirms the
 // type checks classify it as a regression.
 func TestClusterBackends_GuardCatchesViolation(t *testing.T) {
-	// We don't need a real, working *store.Store -- just one whose
-	// reflect.TypeOf().String() == "*store.Store". A nil-pointer of
-	// the right type satisfies that.
 	var bad *store.Store
 	stateType := reflect.TypeOf(bad).String()
 	if stateType != "*store.Store" {
@@ -219,8 +161,6 @@ func TestClusterBackends_GuardCatchesViolation(t *testing.T) {
 			"*store.Store", stateType)
 	}
 
-	// Confirm the substring assertion would also catch a non-HTTP
-	// State by name.
 	if strings.Contains(stateType, "client.Client") {
 		t.Fatalf("guard meta-test: %q unexpectedly contains client.Client", stateType)
 	}

@@ -143,8 +143,6 @@ func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error
 	if fn == nil {
 		panic("sparkwing: Step: fn must be non-nil")
 	}
-	// Fast paths for the two concrete signatures avoid reflection at
-	// dispatch-time for the common cases.
 	switch f := fn.(type) {
 	case func(ctx context.Context) error:
 		return nil, func(ctx context.Context) (any, error) { return nil, f(ctx) }
@@ -315,8 +313,6 @@ func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	spec := &SpawnGenSpec{
-		// Synthetic id keyed by ordinal so downstream .Needs(spec)
-		// has a stable scheduling target.
 		id:    fmt.Sprintf("__spawn_each_%d", len(w.spawnGens)),
 		items: items,
 		fn:    fn,
@@ -378,9 +374,6 @@ func validateSpawnEach(items, fn any) {
 	closureT := reflect.TypeOf((func(context.Context) error)(nil))
 	emptyIfaceT := reflect.TypeOf((*any)(nil)).Elem()
 	out1 := fnT.Out(1)
-	// Accept Workable, func(ctx) error, or any. The any case defers
-	// the runtime check to coerceSpawnEachJob, mirroring how
-	// sparkwing.Job handles its `any` third arg.
 	if !out1.Implements(workableT) && out1 != closureT && out1 != emptyIfaceT {
 		panic(fmt.Sprintf(
 			"sparkwing: JobSpawnEach: fn second return value must be sparkwing.Workable "+
@@ -478,9 +471,6 @@ type WorkDep interface {
 
 func (s *WorkStep) workDepID() string { return s.id }
 func (g *StepGroup) workDepID() string {
-	// StepGroup is expanded inline by the Needs caller; this id is
-	// the group's name and is not added directly to needs lists.
-	// Kept here so *StepGroup satisfies WorkDep at the type level.
 	return g.name
 }
 

@@ -20,8 +20,6 @@ func TestListJobs_ReadsFromProfileBackend(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "profile-state.db")
 
-	// Seed the profile's state store with a run, then close it so
-	// ListJobs opens its own handle.
 	seed, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
@@ -33,8 +31,6 @@ func TestListJobs_ReadsFromProfileBackend(t *testing.T) {
 
 	p := &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: dbPath}}
 	var buf bytes.Buffer
-	// Paths.Root points elsewhere (no state.db there); the run must come
-	// from the profile's backend, proving the routing.
 	err = ListJobs(ctx, Paths{Root: t.TempDir()}, ListOpts{Profile: p, Quiet: true}, &buf)
 	if err != nil {
 		t.Fatalf("ListJobs: %v", err)

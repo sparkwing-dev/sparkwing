@@ -128,9 +128,6 @@ func TestCapabilitiesHandler_ServesBackendCaps(t *testing.T) {
 
 func TestListRunsHandler_AppliesParseRunFilter(t *testing.T) {
 	t.Parallel()
-	// The handler must hand whatever store.ParseRunFilter returns
-	// through to Backend.ListRuns so dashboard and controller can't
-	// drift on query-param semantics.
 	var observed store.RunFilter
 	b := &fakeBackend{
 		listRuns: func(f store.RunFilter) ([]*store.Run, error) {

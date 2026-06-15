@@ -430,8 +430,6 @@ func encodeEnvelope(kind string, data any) (envelope, error) {
 	return envelope{Kind: kind, Data: raw}, nil
 }
 
-// ---- storage.StateStore ----
-
 func (b *Backend) CreateRun(ctx context.Context, r store.Run) error {
 	env, err := encodeEnvelope(KindRun, r)
 	if err != nil {
@@ -771,9 +769,6 @@ func (b *Backend) AddNodeMetricSample(ctx context.Context, runID, nodeID string,
 	return b.appendEnvelope(ctx, runID, env)
 }
 
-// ---- AppendEvent / GetNodeOutput (used by the orchestrator's
-// adapter to satisfy its extra StateBackend methods). ----
-
 // AppendEvent serializes payload as an event envelope. Seq is
 // process-monotonic; survives crashes only at the per-PUT granularity.
 func (b *Backend) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
@@ -801,8 +796,6 @@ func (b *Backend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]by
 	}
 	return n.Output, nil
 }
-
-// ---- ErrNotSupported stubs ----
 
 func notSupported(op string) error {
 	return fmt.Errorf("%w: %s requires Mode 3 (Postgres) or Mode 4 (hosted controller)", ErrNotSupported, op)

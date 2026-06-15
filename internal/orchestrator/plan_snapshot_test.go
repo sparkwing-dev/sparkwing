@@ -61,7 +61,6 @@ func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 	}
 	m := snap.Nodes[0].Modifiers
 
-	// Content cache: independent of the group.
 	if !m.Cache {
 		t.Errorf("Cache flag not set")
 	}
@@ -69,7 +68,6 @@ func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 		t.Errorf("CacheTTLMS = %d, want %d", m.CacheTTLMS, (48 * time.Hour).Milliseconds())
 	}
 
-	// Concurrency facts.
 	if m.ConcGroup != "db" {
 		t.Errorf("ConcGroup = %q, want db", m.ConcGroup)
 	}
@@ -89,8 +87,6 @@ func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 		t.Errorf("ConcCancelTimeoutMS = %d, want %d", m.ConcCancelTimeoutMS, (10 * time.Second).Milliseconds())
 	}
 
-	// The snapshot JSON must not carry any legacy "cache_max" /
-	// "cache_on_limit" / Coalesce remnants.
 	for _, banned := range []string{"cache_max", "cache_on_limit", "coalesce"} {
 		if strings.Contains(string(raw), banned) {
 			t.Errorf("snapshot JSON still contains %q", banned)
@@ -234,9 +230,6 @@ func TestMarshalPlanSnapshot_EmitsStepGroupsInDeclarationOrder(t *testing.T) {
 		t.Errorf("step_groups[1].Members = %v, want %v", groups[1].Members, wantVerify)
 	}
 
-	// Round-trip: re-marshal the parsed snapshot and confirm
-	// step_groups survives the next decode (the storage path is JSON
-	// blob on runs.plan_json, so this is the persistence shape).
 	again, err := json.Marshal(snap)
 	if err != nil {
 		t.Fatalf("re-marshal: %v", err)

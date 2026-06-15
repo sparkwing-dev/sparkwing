@@ -156,9 +156,7 @@ func (s *Spec) ValidateSecrets() error {
 			return secretsErr("type=filesystem requires path")
 		}
 	case TypeEnv:
-		// prefix optional
 	case TypeNone:
-		// explicit "no secrets backend"; Secret() calls fail at runtime
 	case "":
 		return secretsErr("type is required (controller | filesystem | env | none)")
 	default:

@@ -91,7 +91,6 @@ func runUpdateBinary(version string, force bool) error {
 		return nil
 	}
 
-	// Require --force to downgrade.
 	if !force && isSemver(current) && isSemver(resolved) {
 		if semver.Compare(resolved, current) < 0 {
 			return fmt.Errorf(
@@ -191,7 +190,6 @@ func downloadAndInstall(version, currentBin string) error {
 		return fmt.Errorf("download SHA256SUMS: %w", err)
 	}
 
-	// Hard-fail on missing/stale manifest -- skipping would be a supply-chain foot-gun.
 	expected, err := lookupSHA256(sumsPath, asset)
 	if err != nil {
 		return err
@@ -204,7 +202,6 @@ func downloadAndInstall(version, currentBin string) error {
 		return fmt.Errorf("checksum mismatch for %s\n  expected: %s\n  actual:   %s", asset, expected, actual)
 	}
 
-	// Stage same-fs so the final rename is atomic (cross-fs renames EXDEV).
 	stagedBin := currentBin + ".update.tmp"
 	if err := copyFile(binPath, stagedBin); err != nil {
 		return fmt.Errorf("stage new binary: %w", err)
@@ -214,7 +211,6 @@ func downloadAndInstall(version, currentBin string) error {
 		return err
 	}
 
-	// macOS ad-hoc codesign; best-effort.
 	if runtime.GOOS == "darwin" {
 		_ = exec.Command("codesign", "--force", "--sign", "-", stagedBin).Run()
 	}

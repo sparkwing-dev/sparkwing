@@ -315,7 +315,6 @@ func gitCommitAndPush(repoRoot, kustPath, message string) (sha string, committed
 	if _, aerr := runGit(repoRoot, "add", relPath); aerr != nil {
 		return "", false, fmt.Errorf("%w", aerr)
 	}
-	// `git diff --cached --quiet` exit 0 = nothing staged.
 	cmd := exec.Command("git", "-C", repoRoot, "diff", "--cached", "--quiet")
 	if cerr := cmd.Run(); cerr == nil {
 		out, herr := runGit(repoRoot, "rev-parse", "HEAD")

@@ -72,9 +72,6 @@ func TestDescribePipelineShape(t *testing.T) {
 		t.Errorf("timeout = %+v", to)
 	}
 
-	// Round-trip through JSON so the wire shape is locked down. The
-	// sparkwing CLI consumes this exact encoding out of the describe
-	// subprocess.
 	blob, err := json.Marshal(dp)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -189,7 +186,6 @@ func TestDescribePipeline_EnvVarDocer(t *testing.T) {
 		t.Errorf("second env var default = %q, want 30s", dp.EnvVars[1].Default)
 	}
 
-	// JSON wire shape lock-down.
 	blob, _ := json.Marshal(dp)
 	if !strings.Contains(string(blob), "env_vars") {
 		t.Errorf("JSON missing env_vars key: %s", blob)

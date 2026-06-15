@@ -104,9 +104,6 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	// Back-date ready_at so the sweep sees a stale entry. The column
-	// is INTEGER unix-nanos; write directly since MarkNodeReady
-	// stamps "now".
 	past := time.Now().Add(-1 * time.Hour).UnixNano()
 	if _, err := s.DB().ExecContext(ctx,
 		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`,

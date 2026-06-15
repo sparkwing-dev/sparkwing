@@ -33,14 +33,11 @@ func activeHolders(t *testing.T, s *store.Store, key string) int {
 // reviving would put two live holders on a capacity-1 key.
 func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 	s := newStoreT(t)
-	// Holder A takes the only slot with a short lease.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
-	time.Sleep(80 * time.Millisecond) // A's lease lapses
-
-	// Admission reassigns the freed budget to B (A is expired, uncounted).
+	time.Sleep(80 * time.Millisecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -48,7 +45,6 @@ func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 		t.Fatalf("B: want Granted (A expired), got %s", r.Kind)
 	}
 
-	// A's delayed heartbeat must fail, not revive A.
 	_, _, err := s.HeartbeatConcurrencySlot(ctxT(t), "k", "rA/n", time.Minute)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("heartbeat on expired lease err = %v, want ErrLockHeld", err)
@@ -63,24 +59,17 @@ func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 // constraint.
 func TestConcurrency_ReacquireSupersededHolderDoesNotCrash(t *testing.T) {
 	s := newStoreT(t)
-	// A holds the only slot.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	// B arrives under CancelOthers, supersedes A (A's row stays, live
-	// lease, superseded=1), and takes the slot.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitCancelOthers,
 	}); r.Kind != store.AcquireCancellingOthers {
 		t.Fatalf("B: want CancellingOthers, got %s", r.Kind)
 	}
-	// B releases, freeing the slot; A's superseded row still lingers.
 	releaseAndPromoteT(t, s, "k", "rB/n")
-	// A's holder_id re-acquires (deterministic runID/nodeID on a
-	// crash/redeliver). The superseded row is still present; the grant
-	// must reclaim it rather than collide.
 	resp, err := s.AcquireConcurrencySlot(ctxT(t), store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -97,12 +86,10 @@ func TestConcurrency_ReacquireSupersededHolderDoesNotCrash(t *testing.T) {
 // capacity below the already-admitted holders (used <= effective).
 func TestConcurrency_ParkedWaiterDoesNotInvertEffectiveCapacity(t *testing.T) {
 	s := newStoreT(t)
-	// A cap-4 cost-4 holder fills the budget.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 4, Cost: 4, Policy: store.OnLimitQueue,
 	})
-	// A cap-3 cost-1 waiter queues (budget full).
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 3, Cost: 1, Policy: store.OnLimitQueue,
@@ -113,7 +100,6 @@ func TestConcurrency_ParkedWaiterDoesNotInvertEffectiveCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
 	}
-	// Before the fix the parked cap-3 waiter forced eff=3 against used=4.
 	if st.UsedCost > st.EffectiveCapacity {
 		t.Fatalf("used=%d > effective=%d: a parked waiter dragged effective capacity below admitted holders",
 			st.UsedCost, st.EffectiveCapacity)
@@ -124,23 +110,18 @@ func TestConcurrency_ParkedWaiterDoesNotInvertEffectiveCapacity(t *testing.T) {
 // FIFO-head waiter that fits under its own declared capacity.
 func TestConcurrency_ParkedWaiterDoesNotStallFIFOHeadPromotion(t *testing.T) {
 	s := newStoreT(t)
-	// Holder fills a cap-4 budget.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "h/n", RunID: "h", NodeID: "n",
 		Capacity: 4, Cost: 4, Policy: store.OnLimitQueue,
 	})
-	// FIFO head: cap-4 cost-2, queues.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "head/n", RunID: "head", NodeID: "n",
 		Capacity: 4, Cost: 2, Policy: store.OnLimitQueue,
 	})
-	// Behind it: cap-1 cost-1, queues. Its low cap must not pin the
-	// effective capacity and block the head.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "tail/n", RunID: "tail", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
 	})
-	// Release the holder; the head (cost 2) fits the freed cap-4 budget.
 	promoted := releaseAndPromoteT(t, s, "k", "h/n")
 	var headPromoted bool
 	for _, w := range promoted {

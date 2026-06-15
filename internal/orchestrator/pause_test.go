@@ -247,9 +247,6 @@ func TestPause_OnFailure_SkipsOnSuccess(t *testing.T) {
 // Failed outcome.
 func TestPause_OnFailure_SkipsOnCancelled(t *testing.T) {
 	h := newPauseHarness(t)
-	// orch-middle-fails: a -> b(fail) -> c. c should be cancelled, not
-	// paused. b's Run errors, so b *should* pause; release it so the
-	// run completes and we can assert c has no pause row.
 	opts := orchestrator.Options{
 		Pipeline: "orch-middle-fails",
 		Debug: orchestrator.DebugDirectives{
@@ -272,7 +269,6 @@ func TestPause_OnFailure_SkipsOnCancelled(t *testing.T) {
 	h.release(st.RunID, "b")
 	select {
 	case r := <-done:
-		// c must be cancelled, never paused.
 		ps, _ := h.st.ListDebugPauses(context.Background(), r.res.RunID)
 		for _, p := range ps {
 			if p.NodeID == "c" {

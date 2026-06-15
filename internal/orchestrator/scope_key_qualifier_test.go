@@ -15,9 +15,9 @@ func TestScopeKey_QualifierWithSeparatorDoesNotCollide(t *testing.T) {
 		return sparkwing.NewConcurrencyGroup(name, sparkwing.ConcurrencyLimit{Scope: sparkwing.ScopeRun})
 	}
 	cases := []struct{ qA, nA, qB, nB string }{
-		{"a", "@b", "a@", "b"}, // bare '@' boundary
-		{"a", ":b", "a:", "b"}, // length-separator ':' boundary
-		{"1", ":x", "1:", "x"}, // qualifier that mimics a length prefix
+		{"a", "@b", "a@", "b"},
+		{"a", ":b", "a:", "b"},
+		{"1", ":x", "1:", "x"},
 	}
 	for _, c := range cases {
 		kA := scopedGroupKey(run(c.nA), c.qA)

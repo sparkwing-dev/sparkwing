@@ -70,8 +70,6 @@ func aggregatedPipelinesHandler() http.HandlerFunc {
 				}
 			}
 		}
-		// TriggerForm sorts keys client-side, so the unordered map
-		// shape matches internal/web.pipelinesHandler over the wire.
 		writeJSON(w, out)
 	}
 }

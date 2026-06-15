@@ -52,8 +52,6 @@ func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	// approval_requested event so the dashboard SSE log renders the
-	// prompt banner without a full refresh.
 	payload, _ := json.Marshal(map[string]any{
 		"message":    body.Message,
 		"timeout_ms": body.TimeoutMS,

@@ -182,14 +182,9 @@ func newNode(caller, id string, job Workable) *JobNode {
 		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))
 	}
 
-	// Approval gates: the *approvalJob Workable is a marker -- Work()
-	// is empty and never executes; the orchestrator routes via
-	// n.approval. Pipeline authors construct via sw.JobApproval,
-	// never build *approvalJob directly.
 	if app, ok := job.(*approvalJob); ok {
 		switch app.cfg.OnExpiry {
 		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
-			// ok
 		default:
 			panic(fmt.Sprintf(
 				"sparkwing: %s(%q): ApprovalConfig.OnExpiry = %q is not one of "+
@@ -211,8 +206,6 @@ func newNode(caller, id string, job Workable) *JobNode {
 		workType = resultStep.outType
 	}
 
-	// Strict Produces / Work-return contract: typed jobs must declare
-	// both. Either alone is a Plan-time error.
 	var outType reflect.Type
 	pr, hasMarker := job.(producer)
 	switch {
@@ -346,11 +339,6 @@ func Job(p *Plan, id string, x any) *JobNode {
 	n := newNode("Job", id, job)
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
-	// Discover and register the job's typed args schema if it embeds
-	// WithArgs[T]. Plain-function jobs and structs without an
-	// embedded WithArgs are no-ops here. Panics on schema errors
-	// (collisions, build failures) so misconfiguration surfaces at
-	// Plan() rather than at run time.
 	registerJobArgs(p, id, x)
 	return n
 }
@@ -759,8 +747,6 @@ func (n *JobNode) Needs(deps ...Dep) *JobNode {
 		if d == nil {
 			continue
 		}
-		// Dynamic *JobGroup membership materializes at dispatch
-		// once the expansion generator runs.
 		if g, ok := d.(*JobGroup); ok && g != nil {
 			if g.dynamic {
 				n.needsGroups = append(n.needsGroups, g)

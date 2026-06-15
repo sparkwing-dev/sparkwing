@@ -67,12 +67,6 @@ func DescribePipelineByName(name string) (sparkwing.DescribePipeline, bool, erro
 			Secret:   f.Secret,
 		})
 	}
-	// Best-effort risk-label union + per-step breakdown + transitive
-	// WithArgs[T] args. All three need a Plan() walk, so we share one
-	// invocation. Pipelines with required Inputs (or that panic at
-	// Plan-time without args) gracefully degrade -- the dispatcher
-	// treats absent labels as "no gate fires" and an absent transitive
-	// args list as "no extra flags," both safe defaults.
 	if plan, ok := bestEffortPlan(reg); ok {
 		if union, perStep := collectRisksFromPlan(plan); len(union) > 0 || len(perStep) > 0 {
 			if len(union) > 0 {

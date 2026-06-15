@@ -12,8 +12,6 @@ import (
 // cookie when RequireLogin is set. Bearer tokens bypass the cookie
 // lookup so scripts and agents authenticate via the upstream controller.
 func sessionAuthMiddleware(opts HandlerOptions, next http.Handler) http.Handler {
-	// Disabled-by-default keeps the laptop-local dev loop working: with
-	// no tokens minted, a login redirect would loop forever.
 	if !opts.RequireLogin || opts.ControllerURL == "" {
 		return next
 	}

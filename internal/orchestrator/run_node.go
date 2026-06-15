@@ -71,9 +71,6 @@ func RunNodeOnce(
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
-	// When the trigger carries GITHUB_REPOSITORY, that repo is the
-	// source of truth -- baked-in pipelines must NOT win, since
-	// they'd run against the runner pod's empty workdir.
 	if shouldRunRemote(ctx, stateClient, runID) {
 		return runNodeRemote(ctx, stateClient, run, controllerURL, logsURL, runID, nodeID, token, logger)
 	}
@@ -95,8 +92,6 @@ func RunNodeOnce(
 		StartedAt: run.StartedAt,
 	}
 	sparkwing.SetGit(rc.Git)
-	// Pre-populate from `secret:"true"` Inputs fields so their values
-	// are redacted in every log stream and resolver path.
 	masker := secrets.NewMasker()
 	for _, v := range reg.SecretValues(run.Args) {
 		masker.Register(v)
@@ -113,8 +108,6 @@ func RunNodeOnce(
 		return data, true
 	})
 
-	// Pod-side secret resolver. Cached memoizes per-name and registers
-	// values with the run's masker so they get redacted in logs.
 	httpSource := secrets.SourceFunc(func(name string) (string, bool, error) {
 		sec, gerr := stateClient.GetSecret(ctx, name)
 		if gerr != nil {
@@ -129,35 +122,20 @@ func RunNodeOnce(
 		secrets.NewCached(httpSource, masker).AsResolver())
 	_ = masker
 
-	// Pod-side install of the typed Inputs the registration parsed,
-	// so step bodies can read via sparkwing.Inputs[T](ctx) without
-	// per-job closure threading.
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}
 
-	// Pod-side install of the runner identity so adapters branching
-	// on sparkwing.Runner(ctx) see "kubernetes" (or whatever the
-	// cluster trigger loop stamped) instead of falling back to the
-	// in-process default. Env-driven so the per-pod overrides set by
-	// the trigger loop flow through without a fresh API.
 	if info := podRunnerInfo(); info != nil {
 		ctx = sparkwingruntime.WithRunner(ctx, info)
 	}
 
-	// Pod-side re-resolution of PipelineSecrets via the controller's
-	// HTTP secret store (the resolver installed above). Reads the
-	// SecretsField the orchestrator persisted in the snapshot; the
-	// resolver itself is the pod's existing controller-backed source,
-	// so secret values stay on the pod and never cross the wire as
-	// part of the snapshot.
 	if sec, serr := rehydratePipelineSecrets(ctx, run.PlanSnapshot, reg); serr != nil {
 		logger.Warn("pod: rehydrate pipeline secrets", "err", serr)
 	} else if sec != nil {
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, sec)
 	}
 
-	// Pod-side twin of dispatchState.pipelineRef.
 	ctx = sparkwingruntime.WithPipelineResolver(ctx, sparkwing.PipelineResolverFunc(
 		func(innerCtx context.Context, pipeline, refNode string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
 			run, err := stateClient.GetLatestRun(innerCtx, pipeline, []string{"success"}, maxAge)
@@ -168,7 +146,6 @@ func RunNodeOnce(
 			if err != nil {
 				return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, refNode, err)
 			}
-			// Best-effort audit event against the consuming node.
 			currentNode := sparkwing.NodeFromContext(innerCtx)
 			if currentNode != "" {
 				payload, _ := json.Marshal(map[string]any{
@@ -188,13 +165,10 @@ func RunNodeOnce(
 		},
 	))
 
-	// Cluster-mode equivalent of dispatchState.pipelineAwaiter.
 	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
 		func(innerCtx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
 			currentNode := sparkwing.NodeFromContext(innerCtx)
 
-			// Retry-lineage chain: thread the prior run's child
-			// trigger into retry_of for skip-passed treatment.
 			var childRetryOf string
 			if run.RetryOf != "" && currentNode != "" {
 				if id, ferr := stateClient.FindSpawnedChildTriggerID(innerCtx, run.RetryOf, currentNode, req.Pipeline); ferr != nil {
@@ -212,10 +186,6 @@ func RunNodeOnce(
 				return nil, fmt.Errorf("enqueue trigger: %w", err)
 			}
 			startedAt := time.Now()
-			// child_run_finish links the child's run_id + terminal
-			// status into the parent's stream; the child's own output
-			// stays in its envelope (read via `sparkwing runs logs
-			// --run <child>` or `--run <parent> --tree`).
 			emitChildFinish := func(status, errMsg string) {
 				if currentNode == "" {
 					return
@@ -265,7 +235,6 @@ func RunNodeOnce(
 					switch run.Status {
 					case "success":
 						emitChildFinish("success", "")
-						// Empty NodeID = caller doesn't need output.
 						if req.NodeID == "" {
 							return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
 						}

@@ -40,7 +40,7 @@ func Key(parts ...any) CacheKey {
 	var b strings.Builder
 	for i, p := range parts {
 		if i > 0 {
-			b.WriteByte('\x1e') // ASCII record-separator
+			b.WriteByte('\x1e')
 		}
 		fmt.Fprintf(&b, "%v", p)
 	}

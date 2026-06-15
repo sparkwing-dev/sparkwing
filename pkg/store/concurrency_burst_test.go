@@ -21,7 +21,6 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 	const N = 20
 	const key = "burst-key"
 
-	// First arrival acquires directly (Granted).
 	resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: key, HolderID: "holder-0", RunID: "run-0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -33,7 +32,6 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 		t.Fatalf("arrival 0: want Granted, got %s", resp.Kind)
 	}
 
-	// N more arrivals queue up.
 	for i := 1; i <= N; i++ {
 		resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 			Key: key, HolderID: fmt.Sprintf("holder-%d", i),
@@ -48,8 +46,6 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 		}
 	}
 
-	// Drain the queue: release the current holder N+1 times, each
-	// time promoting the next waiter.
 	current := "holder-0"
 	for step := 1; step <= N+1; step++ {
 		released, err := s.ReleaseConcurrencySlot(ctx, key, current, "success", "", "", 0)
@@ -71,7 +67,6 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 			if len(promoted) != 1 {
 				t.Fatalf("step %d: expected 1 promoted, got %d", step, len(promoted))
 			}
-			// The promoted holder_id MUST match the caller's declared holder_id.
 			want := fmt.Sprintf("holder-%d", step)
 			if promoted[0].HolderID != want {
 				t.Fatalf("step %d: promoted holder_id = %q, want %q", step, promoted[0].HolderID, want)
@@ -84,7 +79,6 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 		}
 	}
 
-	// State must be empty.
 	state, err := s.GetConcurrencyState(ctx, key)
 	if err != nil {
 		t.Fatalf("state: %v", err)
@@ -101,7 +95,6 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
 
-	// Leader.
 	_, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader-id", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -110,7 +103,6 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 		t.Fatalf("leader: %v", err)
 	}
 
-	// Waiter with custom holder_id.
 	_, err = s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "custom-follower", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -119,14 +111,12 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 		t.Fatalf("waiter: %v", err)
 	}
 
-	// Release + promote.
 	_, _ = s.ReleaseConcurrencySlot(ctx, "k", "leader-id", "success", "", "", 0)
 	promoted, _ := s.PromoteNextWaiters(ctx, "k", time.Minute)
 	if len(promoted) != 1 {
 		t.Fatalf("expected 1 promoted, got %d", len(promoted))
 	}
 
-	// Heartbeat with the custom holder_id must succeed.
 	_, _, err = s.HeartbeatConcurrencySlot(ctx, "k", "custom-follower", time.Minute)
 	if err != nil {
 		t.Fatalf("heartbeat custom-follower: %v (holder_id not preserved)", err)
@@ -152,9 +142,6 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 			holder := fmt.Sprintf("h-%d", i)
 			runID := fmt.Sprintf("r-%d", i)
 
-			// Single Acquire call to enter the queue (or get Granted
-			// if the slot is free). Then poll ResolveWaiter -- the
-			// intended read-only resolution API -- until we're promoted.
 			resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 				Key: "k", HolderID: holder, RunID: runID, NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitQueue,
@@ -186,7 +173,6 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 				}
 			}
 
-			// Hold, release, promote, resolve.
 			time.Sleep(5 * time.Millisecond)
 			_, relErr := s.ReleaseConcurrencySlot(ctx, "k", holder, "success", "", "", 0)
 			if relErr != nil {

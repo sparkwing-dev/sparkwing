@@ -10,12 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// These tests pin ApplyProfileBackendsWithMirror's selection logic: it
-// opens a local SQLite store into opts.MirrorLocal only when the profile
-// resolves to a non-local state backend and mirroring is enabled. It no
-// longer wraps opts.State (the tee moved to RunLocal at the StateBackend
-// layer -- see mirror_state.go); opts.State stays the canonical handle.
-
 func TestApplyProfileBackendsWithMirror_S3SetsMirrorLocal(t *testing.T) {
 	neutralizeEnv(t)
 	t.Setenv("AWS_REGION", "us-east-1")

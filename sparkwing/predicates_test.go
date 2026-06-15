@@ -37,9 +37,6 @@ func TestArgEq_UnresolvedReturnsFalse(t *testing.T) {
 }
 
 func TestArgEq_NumericCoercionAcrossKinds(t *testing.T) {
-	// User-typed int literals (3) should match args declared as
-	// int32/int64 without forcing the predicate caller to know the
-	// exact struct field type.
 	cases := []struct {
 		name string
 		v    any
@@ -174,7 +171,6 @@ func TestAlways_HoldsRegardlessOfContext(t *testing.T) {
 }
 
 func TestCompose_RealWorldShape(t *testing.T) {
-	// "required when target=prod AND no image is set"
 	ctx := fakePredCtx{args: map[string]any{"target": "prod"}}
 	pred := And(ArgEq("target", "prod"), ArgUnset("image"))
 	if !pred.Eval(ctx) {

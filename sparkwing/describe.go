@@ -1,19 +1,5 @@
 package sparkwing
 
-// Describe surfaces a pipeline's typed-flag schema as a stable JSON
-// shape so the sparkwing CLI can parse typed flags, render --help, drive
-// tab completion, and feed shells without re-importing the SDK's
-// reflect machinery.
-//
-// DescribePipeline is the wire-format projection of the schema parsed
-// by Register[T]: the compiled pipeline binary emits JSON; sparkwing
-// reads it.
-//
-// Pipelines opt into help / examples via the optional provider
-// interfaces below.
-
-// (no imports -- types only)
-
 // HelpProvider is optionally implemented by pipelines to contribute
 // a short description to `sparkwing run <name> --help`. One or two sentences
 // explaining what the pipeline does and when to use it.

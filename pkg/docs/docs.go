@@ -189,7 +189,7 @@ const ErrNotFound = docsError("doc not found")
 func extractTitleSummary(body []byte) (title, summary string) {
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	state := 0 // 0: looking for title, 1: looking for summary, 2: collecting summary
+	state := 0
 	var summaryLines []string
 	for scanner.Scan() {
 		line := scanner.Text()

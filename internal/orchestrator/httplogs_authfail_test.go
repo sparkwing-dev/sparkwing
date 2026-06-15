@@ -18,9 +18,6 @@ type authFailPipe struct{ sparkwing.Base }
 
 func (authFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "only", func(ctx context.Context) error {
-		// User code "succeeds" but every Emit silently fails on 403
-		// in the unfixed world; with the auth-fatal path wired in the
-		// run still ends up failed because the auth error is fatal.
 		sparkwing.Info(ctx, "doing the work")
 		return nil
 	})
@@ -36,7 +33,6 @@ func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 
 	var hits atomic.Int64
 	logsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// All POSTs to log endpoints get 403.
 		if r.Method == http.MethodPost {
 			hits.Add(1)
 			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
@@ -72,10 +68,6 @@ func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 	if res.Status != "failed" {
 		t.Errorf("Status: got %q, want failed (auth-blocked logs.append must abort the run)", res.Status)
 	}
-	// The dispatcher aggregates Run.Error to "nodes failed: [...]";
-	// the actionable detail lives on the failing node row, where
-	// `runs status` reads it for the per-node table. Pin both so
-	// the auth message + structured FailureReason both land.
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)

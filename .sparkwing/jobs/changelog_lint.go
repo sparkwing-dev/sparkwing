@@ -78,8 +78,6 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 	if info, statErr := os.Stat(migrationsDir); statErr == nil && info.IsDir() {
 		migrations = os.DirFS(migrationsDir)
 	} else {
-		// No migrations dir yet -- pass an empty FS so file-existence
-		// checks all fail cleanly.
 		migrations = emptyFS{}
 	}
 	issues := LintChangelog(string(body), migrations)
@@ -238,14 +236,11 @@ func parseChangelogSections(body string) []changelogSection {
 			})
 			continue
 		}
-		// Top-level bullet: starts at column 0 with "- ".
 		if strings.HasPrefix(line, "- ") {
 			flushEntry()
 			entry = &changelogEntry{titleLine: lineNum, body: line}
 			continue
 		}
-		// Continuation of the current entry: blank line, or indented
-		// content. Append until the next bullet/heading.
 		if entry != nil {
 			entry.body += "\n" + line
 		}
@@ -320,17 +315,14 @@ func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []Changelo
 // validateMigrationLink resolves one `docs/migrations/...` URL against
 // the migrations FS and the containing section.
 func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string, migrations fs.FS, isUnreleased bool) []ChangelogIssue {
-	// Split path from anchor.
 	path, anchor, _ := strings.Cut(urlTail, "#")
 	path = strings.TrimSpace(path)
 	anchor = strings.TrimSpace(anchor)
 
-	// Placeholder for [Unreleased]: the release agent fills these in.
 	if isUnreleased && path == "_unreleased.md" {
 		return nil
 	}
 
-	// Version-mismatch check: only meaningful inside a versioned section.
 	if !isUnreleased {
 		expected := s.version
 		if !strings.HasPrefix(expected, "v") {
@@ -347,7 +339,6 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 		}
 	}
 
-	// File-existence check.
 	headings, fileExists := readMigrationHeadings(migrations, path)
 	if !fileExists {
 		return []ChangelogIssue{{
@@ -358,7 +349,6 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 		}}
 	}
 
-	// Anchor-resolution check.
 	if anchor == "" {
 		return []ChangelogIssue{{
 			Line:     e.titleLine,
@@ -425,8 +415,6 @@ func slugifyHeading(s string) string {
 		case r == ' ' || r == '\t':
 			b.WriteRune('-')
 		default:
-			// Drop everything else (parens, periods, backticks,
-			// arrows, em-dashes, etc.).
 		}
 	}
 	return b.String()

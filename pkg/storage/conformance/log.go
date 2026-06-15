@@ -67,8 +67,6 @@ func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 		if err != nil {
 			t.Fatalf("Read with Tail=2: %v", err)
 		}
-		// Implementations may or may not include a trailing newline; the
-		// invariant is "the last two lines and nothing before d."
 		s2 := strings.TrimRight(string(body), "\n")
 		lines := strings.Split(s2, "\n")
 		if len(lines) != 2 || lines[0] != "d" || lines[1] != "e" {
@@ -136,7 +134,6 @@ func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 		s := factory()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		// Append once before subscribing so the stream has a starting state.
 		mustAppend(t, s, ctx, "run-1", "build", "first\n")
 		rc, err := s.Stream(ctx, "run-1", "build")
 		if maybeSkipUnsupported(t, err, "Stream") {
@@ -146,14 +143,10 @@ func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 			t.Fatalf("Stream: %v", err)
 		}
 		if rc == nil {
-			// Per the LogStore contract: (nil, nil) is an allowed
-			// "no streaming, caller polls Read" signal. Treat as a
-			// soft skip.
 			t.Skip("Stream returned (nil, nil); implementation opts out")
 		}
 		defer rc.Close()
 
-		// Append more in a goroutine so the stream surfaces it.
 		go func() {
 			time.Sleep(10 * time.Millisecond)
 			_ = s.Append(ctx, "run-1", "build", []byte("second\n"))
@@ -161,8 +154,6 @@ func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 			cancel()
 		}()
 		body, _ := io.ReadAll(rc)
-		// Either "first" or "second" should appear; implementations
-		// may begin streaming from "now" rather than from the start.
 		if !bytes.Contains(body, []byte("first")) && !bytes.Contains(body, []byte("second")) {
 			t.Fatalf("Stream returned %q, expected to see first or second", body)
 		}
@@ -221,10 +212,6 @@ func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 
 func mustAppend(t *testing.T, s storage.LogStore, ctx context.Context, runID, nodeID, payload string) {
 	t.Helper()
-	// errors.Is on ErrNotSupported is not exempted here: Append is
-	// the one operation every LogStore (including write-only) MUST
-	// support, by definition. A stdoutlogs that returned NotSupported
-	// on Append would be a real bug.
 	if err := s.Append(ctx, runID, nodeID, []byte(payload)); err != nil {
 		t.Fatalf("Append(%s/%s): %v", runID, nodeID, err)
 	}

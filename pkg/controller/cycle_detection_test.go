@@ -27,7 +27,6 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	// Seed: a parent run for pipeline "A".
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "A", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
@@ -37,7 +36,6 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	// Trigger for pipeline "A" carrying parent_run_id=parent -> cycle.
 	body := strings.NewReader(`{"pipeline":"A","parent_run_id":"parent","trigger":{"source":"manual"}}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
@@ -65,7 +63,6 @@ func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	// Chain: A -> B. Spawning C from B is fine.
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "root", Pipeline: "A", Status: "success", StartedAt: time.Now(),
 	}); err != nil {
@@ -291,7 +288,6 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	// Cross-repo spawn: declare a different repo, no SHA.
 	body := strings.NewReader(`{
 		"pipeline":"build",
 		"parent_run_id":"parent",

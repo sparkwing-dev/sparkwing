@@ -63,8 +63,6 @@ func TestLoad_RoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Re-marshal the parsed config and parse it again: a stable
-	// round-trip means the loader and the section types agree on shape.
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -127,17 +125,12 @@ func TestLoad_UnknownTopLevelFieldFails(t *testing.T) {
 	}
 }
 
-// The next four tests assert each section parses identically to its
-// standalone per-file loader on the same content.
-
 func TestLoad_PipelinesMatchesParse(t *testing.T) {
 	const bare = "pipelines:\n  - name: a\n    entrypoint: A\n  - name: b\n    entrypoint: B\n"
 	want, err := pipelines.Parse(strings.NewReader(bare))
 	if err != nil {
 		t.Fatalf("pipelines.Parse: %v", err)
 	}
-	// The bare pipelines.yaml already nests its list under pipelines:,
-	// so it doubles as the merged-file pipelines section verbatim.
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, bare)
 	cfg, err := projectconfig.Load(path)
 	if err != nil {

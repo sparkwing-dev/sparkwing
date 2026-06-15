@@ -34,8 +34,6 @@ func TestTrends_BucketsRuns(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	// Seed 3 successful runs in the same hour, 1 failure in the
-	// previous hour.
 	for i := range 3 {
 		id := "r-succ-" + string(rune('a'+i))
 		start := now.Add(-10 * time.Minute).Add(time.Duration(i) * time.Minute)
@@ -107,8 +105,6 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	// One run with a clear 500ms wait (created 500ms before started),
-	// one with a 1500ms wait. Average should be 1000ms.
 	start := now.Add(-5 * time.Minute)
 	for i, waitMs := range []int{500, 1500} {
 		id := "r-wait-" + string(rune('a'+i))
@@ -162,8 +158,6 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	now := time.Now()
 	start := now.Add(-5 * time.Minute)
 
-	// One run with a real wait; one "legacy" row with created_at == 0
-	// (simulated by writing the column directly after insert).
 	if err := st.CreateRun(ctx, store.Run{
 		ID:        "r-real",
 		Pipeline:  "demo",
@@ -208,7 +202,6 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 			got = p.AvgWaitMs
 		}
 	}
-	// Legacy row excluded; real-row wait (~2000ms) is the average.
 	if got < 1900 || got > 2100 {
 		t.Errorf("avg_wait_ms=%d want ~2000 (legacy row should have been excluded): %+v", got, body.Points)
 	}

@@ -50,9 +50,6 @@ func ensurePodRTPipe(t *testing.T) *sparkwing.Registration {
 func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	reg := ensurePodRTPipe(t)
 
-	// 1. Fake controller serving /api/v1/secrets/<name>. Auth header
-	// is checked so a missing/wrong token surfaces as 401, matching
-	// the production controller's contract.
 	const wantToken = "pod-rt-token"
 	hits := map[string]int{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,14 +74,6 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Pod-side rehydrate reads secret declarations from the registered
-	// pipeline's Secrets() provider (same binary on both sides); the
-	// snapshot no longer carries them.
-
-	// 3. Pod-side: build the resolver the cluster worker would
-	// install for a remote-controller source binding. The SDK
-	// factory handles the http wiring; we just supply the URL+token
-	// via the profile-lookup callback.
 	src := backends.Spec{Type: backends.TypeController, URL: srv.URL, Token: wantToken}
 	resolver, err := sparkwing.NewSecretResolverFromSpec(context.Background(), src)
 	if err != nil {
@@ -92,9 +81,6 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	}
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
 
-	// 4. Re-resolve secrets against the controller-backed resolver.
-	// DEPLOY_TOKEN must come back with the value the fake server
-	// served; SLACK_HOOK is optional so a 404 doesn't fail the run.
 	gotSec, err := rehydratePipelineSecrets(ctx, nil, reg)
 	if err != nil {
 		t.Fatalf("rehydrate secrets: %v", err)
@@ -107,8 +93,6 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 		t.Errorf("SLACK_HOOK should be empty (optional, 404'd), got %q", s.SlackHook)
 	}
 
-	// 6. Confirm the controller was actually hit. The snapshot
-	// shipped names only -- values came over the wire at run time.
 	if hits["DEPLOY_TOKEN"] == 0 {
 		t.Errorf("controller never queried for DEPLOY_TOKEN")
 	}

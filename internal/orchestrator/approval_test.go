@@ -18,12 +18,6 @@ type approvePipe struct{ sparkwing.Base }
 func (approvePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.JobApproval(plan, "gate", sparkwing.ApprovalConfig{
 		Message: "approve?",
-		// 30s rather than 5s because under -race + count=N the
-		// resolver goroutine has occasionally been outraced by the
-		// orchestrator's deadline. The test is meant to exercise
-		// "approval flows to success", not "approval beats the
-		// deadline" -- a wide window keeps the timing concern out
-		// of the assertion path.
 		Timeout: 30 * time.Second,
 	})
 	return nil
@@ -49,8 +43,6 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
 
-	// Kick off the run on a goroutine; mark the gate approved once the
-	// row appears.
 	done := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, err := orchestrator.RunLocal(context.Background(), p,
@@ -61,15 +53,6 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 		done <- res
 	}()
 
-	// Resolver coroutine: polls until the approval row exists, then
-	// approves it. The orchestrator's 500ms waiter tick picks this up.
-	// The run id isn't known up-front, so scan pending approvals.
-	// A short initial sleep lets RunLocal open the DB first; SQLite
-	// serializes the Open migration under single-writer and we don't
-	// want the resolver's reopen-loop to starve that out.
-	// Errors are surfaced via t.Errorf -- a silent return here would
-	// leave the orchestrator to time out and the test would report a
-	// misleading "status = \"failed\"" instead of the real cause.
 	resolverDone := make(chan struct{})
 	go func() {
 		defer close(resolverDone)
@@ -113,7 +96,6 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	}
 	<-resolverDone
 
-	// Confirm durable state reflects the approval.
 	st, _ := store.Open(dbPath)
 	defer func() { _ = st.Close() }()
 	runs, _ := st.ListRuns(context.Background(), store.RunFilter{Pipelines: []string{"appr-basic"}, Limit: 1})

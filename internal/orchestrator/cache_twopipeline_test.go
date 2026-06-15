@@ -13,24 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestCache_TwoPipelinesShareKey exercises the realistic case where
-// two distinct pipelines each have their own shape + unrelated
-// steps, but share a single .Cache() key on one middle step (mocked
-// S3 push). The shared step must serialize: only one pipeline's
-// push runs at a time. The unrelated steps are free to run in
-// parallel across the two pipelines.
-//
-// Shape of each pipeline:
-//
-//   publish-release:    build -> push-s3(shared) -> notify
-//   sync-backup:        snapshot -> push-s3(shared) -> inventory
-//
-// With mocked 300ms s3-push steps and 50ms other steps, a serial
-// schedule is ~700ms; a fully parallel schedule would be ~400ms.
-// The test asserts the shared step's peak concurrency is 1 AND
-// that the two pipelines' non-shared steps overlap (proving the
-// coordination is step-scoped, not pipeline-scoped).
-
 // sharedS3 is the mocked push target for both pipelines. Every time
 // either pipeline's "push-s3" step fires, we observe the in-flight
 // count. Peak must stay at 1.
@@ -61,7 +43,6 @@ func s3Push() func(ctx context.Context) error {
 			}
 		}
 		sharedS3.pushes.Add(1)
-		// Simulate a real push: ~300ms of network + serialization.
 		select {
 		case <-time.After(300 * time.Millisecond):
 			return nil
@@ -72,7 +53,7 @@ func s3Push() func(ctx context.Context) error {
 }
 
 func unsharedStep(label string) func(ctx context.Context) error {
-	_ = label // retained for readability in pipeline definitions
+	_ = label
 	return func(ctx context.Context) error {
 		cur := sharedS3.otherConcurrent.Add(1)
 		defer sharedS3.otherConcurrent.Add(-1)
@@ -82,8 +63,6 @@ func unsharedStep(label string) func(ctx context.Context) error {
 				break
 			}
 		}
-		// Short work so the test stays fast but the overlap window
-		// with the other pipeline's unshared step is observable.
 		select {
 		case <-time.After(80 * time.Millisecond):
 			return nil
@@ -144,7 +123,6 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	// Fire both pipelines concurrently against one shared Store.
 	type result struct {
 		name string
 		res  *orchestrator.Result
@@ -165,7 +143,6 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 	close(results)
 	elapsed := time.Since(start)
 
-	// Both pipelines must succeed.
 	var succeeded int
 	for r := range results {
 		if r.err != nil {
@@ -182,33 +159,19 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 		t.Fatalf("expected both pipelines to succeed, got %d", succeeded)
 	}
 
-	// Shared-key assertion: push-s3 peak inflight must be 1.
 	if peak := sharedS3.maxInflight.Load(); peak > 1 {
 		t.Fatalf("push-s3 peak concurrency = %d, want 1 (shared cache key violated)", peak)
 	}
 
-	// Both pipelines definitely ran their push step exactly once.
 	if pushes := sharedS3.pushes.Load(); pushes != 2 {
 		t.Fatalf("expected 2 pushes total, got %d", pushes)
 	}
 
-	// Unshared steps should have been able to overlap. Non-strict
-	// assertion: peak >= 2 would PROVE overlap, but the scheduler
-	// might happen to run them sequentially. We instead assert the
-	// total wall time is less than a fully-serial schedule.
-	//
-	// Fully serial: 80 (buildA) + 300 (pushA) + 80 (notifyA) + 80
-	// (snapshotB) + 300 (pushB) + 80 (inventoryB) = 920ms.
-	// Fully overlapped non-shared: ~680ms.
-	// Pick a generous bound that catches "accidentally plan-level
-	// serialized" but tolerates CI jitter.
 	maxParallel := 850 * time.Millisecond
 	if elapsed > maxParallel {
 		t.Logf("elapsed=%s (expected <%s for step-scoped coordination)", elapsed, maxParallel)
 	}
 
-	// Dig into node-level detail to prove push ran exactly once per
-	// pipeline and both pipelines' unshared steps completed.
 	runs, _ := st.ListRuns(context.Background(), store.RunFilter{Limit: 5})
 	pushNodes := 0
 	for _, r := range runs {
@@ -287,5 +250,5 @@ func debugConcurrencyState(t *testing.T, st *store.Store, key string) {
 	for i, w := range state.Waiters {
 		t.Logf("  waiter[%d] run=%s node=%s policy=%s", i, w.RunID, w.NodeID, w.Policy)
 	}
-	_ = fmt.Sprintf // retain fmt import if unused otherwise
+	_ = fmt.Sprintf
 }

@@ -44,10 +44,6 @@ func init() {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-	// Plug the cluster-side prometheus histogram into the
-	// orchestrator's consumer-safe hook. The consumer binary leaves
-	// this nil (no prometheus import); sparkwing-runner wires it up
-	// here so RunNodeOnce observations are recorded.
 	orchestrator.MetricsHook = observeNodeExecution
 }
 

@@ -256,9 +256,6 @@ func (c *Cmd) MustBeEmpty(reason string) error {
 }
 
 func (c *Cmd) execute(silent bool) (ExecResult, error) {
-	// Guard at execution time (not Bash/Exec construction) so authors
-	// can still build a *Cmd and pass it around as data inside Plan();
-	// the panic only fires when something actually tries to run it.
 	var helper string
 	switch c.kind {
 	case kindBash:
@@ -300,8 +297,6 @@ func isSilent(ctx context.Context) bool {
 
 func execCmd(ctx context.Context, name string, args []string, dir string, extraEnv map[string]string) (ExecResult, error) {
 	display := renderCommand(name, args)
-	// Empty dir means WorkDir() is unset; refuse to execute against
-	// whatever cwd the binary happens to inherit.
 	if dir == "" {
 		return ExecResult{Command: display}, &ExecError{
 			Command:  display,
@@ -320,9 +315,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 		dir = filepath.Join(wd, dir)
 	}
-	// Pre-validate dir so a missing subdirectory surfaces a clean,
-	// typed error rather than chdir EACCES/ENOENT bubbling up from
-	// cmd.Start().
 	if dir != "" {
 		if info, statErr := os.Stat(dir); statErr != nil {
 			return ExecResult{Command: display}, &ExecError{
@@ -348,8 +340,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 
-	// Log the invocation so silent-success commands still have visible
-	// proof of life in the run log.
 	logger := LoggerFromContext(ctx)
 	logger.Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
@@ -379,10 +369,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	var outBuf, errBuf strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
-	// Both streams log at info level: docker/go/kubectl/npm/next all
-	// write progress + deprecation warnings to stderr under normal
-	// success paths. Severity tracks the command's exit outcome, not
-	// a per-line judgment.
 	go streamLines(ctx, &wg, stdout, "info", logger, &outBuf)
 	go streamLines(ctx, &wg, stderr, "info", logger, &errBuf)
 
@@ -408,9 +394,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 				Cause:    waitErr,
 			}
 		}
-		// waitErr is not an ExitError: the process never produced an
-		// exit status. Tag with ExitNotStarted so Error() doesn't
-		// render the misleading "exit 0".
 		return res, &ExecError{
 			Command:  display,
 			ExitCode: ExitNotStarted,
@@ -434,8 +417,6 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 		buf.WriteString(line)
 		buf.WriteByte('\n')
 		if silent {
-			// Capture: drained to keep the child from blocking on
-			// the pipe, but don't emit a record per line.
 			continue
 		}
 		logger.Emit(recordEnvelope(ctx, LogRecord{

@@ -123,10 +123,6 @@ Some prose.
 
 More prose.
 `
-	// Both "Notes" headings would dedup-flag because we treat
-	// any repeated ### within a section as a duplicate. This is
-	// stricter than the spec, which only mentions the known
-	// categories -- but flagging here is the conservative behavior.
 	issues := LintChangelog(body, fstest.MapFS{})
 	if len(issues) != 1 {
 		t.Fatalf("expected 1 issue, got %d", len(issues))
@@ -152,10 +148,6 @@ func TestLintChangelog_Dedupe_CaseSensitivity(t *testing.T) {
 		t.Fatalf("### Added vs ### added are distinct; expected 0 issues, got %v", formatAllIssues(issues))
 	}
 }
-
-// ---------------------------------------------------------------
-// Breaking-entry / migration-link tests
-// ---------------------------------------------------------------
 
 func TestLintChangelog_Breaking_VersionedSection_LinkResolves(t *testing.T) {
 	body := `## [v0.4.0] - 2026-05-20
@@ -245,8 +237,6 @@ more stuff
 	if issues[0].Category != "missing-migration-anchor" {
 		t.Errorf("category: got %q", issues[0].Category)
 	}
-	// Message should surface the available anchors so the author
-	// can fix a typo without re-opening the file.
 	if !strings.Contains(issues[0].Message, "#typed-dep-interface") {
 		t.Errorf("message missing #typed-dep-interface in available list: %q", issues[0].Message)
 	}
@@ -336,10 +326,6 @@ func TestLintChangelog_BreakingInProseNotInTitleLine_Ignored(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------
-// Slugifier coverage
-// ---------------------------------------------------------------
-
 func TestSlugifyHeading(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -351,9 +337,6 @@ func TestSlugifyHeading(t *testing.T) {
 		{"Drops Punctuation, Like Commas.", "drops-punctuation-like-commas"},
 		{"underscores_are_kept_and-hyphens-too", "underscores_are_kept_and-hyphens-too"},
 		{"Already-Lower 123", "already-lower-123"},
-		// Code-like heading: GitHub strips backticks, parens, dots,
-		// arrows. Our slugifier matches that behavior for the common
-		// shapes.
 		{"`Needs(...any)`→`Needs(...Dep)`", "needsanyneedsdep"},
 	}
 	for _, c := range cases {

@@ -34,8 +34,6 @@ pipelines:
 }
 
 func TestParse_RejectsSecretsBlock(t *testing.T) {
-	// secrets: is no longer a YAML field; declarations live on the
-	// pipeline's Secrets() provider in Go.
 	yaml := `
 pipelines:
   - name: deploy
@@ -90,8 +88,6 @@ pipelines:
 		t.Fatalf("expected unknown-namespace rejection; got %v", err)
 	}
 }
-
-// --- Unknown-field rejection (catch typos / removed-key holdovers) ---
 
 func TestParse_UnknownPipelineFieldRejected(t *testing.T) {
 	cases := []string{"targets", "runners", "values", "locked", "dispatch", "defaults", "completely_bogus"}

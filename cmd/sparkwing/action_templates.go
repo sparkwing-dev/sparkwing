@@ -23,7 +23,7 @@ func runPipelineTemplates(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineTemplates.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
-	_ = chdirFlag(fs) // accepted for consistency; the registry is embedded, no cwd needed
+	_ = chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineTemplates, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

@@ -42,8 +42,6 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 
-	// Bucket size: hour for <=48h windows, 3 hours for <=7 days,
-	// else daily.
 	bucketDur := time.Hour
 	switch {
 	case hours > 48 && hours <= 7*24:
@@ -89,8 +87,6 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 		runs = append(runs, rr)
 	}
 
-	// "Cached" == every node's outcome is cached or satisfied. Done
-	// in Go to keep the SQL simple.
 	cachedIDs := map[string]bool{}
 	if len(runs) > 0 {
 		cq := `SELECT run_id, outcome FROM nodes WHERE run_id IN (` + placeholders(len(runs)) + `)`
@@ -150,9 +146,6 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 			durMs := (*rr.finishedNs - rr.startedNs) / 1_000_000
 			bkt.durationsMs = append(bkt.durationsMs, durMs)
 		}
-		// Wait = started_at - created_at. Skip legacy rows (created_at
-		// == 0 sentinel) and clock-skew cases (created_at > started_at)
-		// so the average reflects real intake-to-start latency.
 		if rr.createdNs > 0 && rr.createdNs <= rr.startedNs {
 			bkt.waitSumNs += rr.startedNs - rr.createdNs
 			bkt.waitCount++

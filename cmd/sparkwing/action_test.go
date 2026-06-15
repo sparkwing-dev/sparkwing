@@ -115,7 +115,6 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 // the suggestion-composition logic from action.go's
 // runPipelineDescribe.
 func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
-	// Mirror the catalog-search fragment in runPipelineDescribe.
 	catalog := []Pipeline{
 		{Name: "cluster-up"},
 		{Name: "cluster-down"},
@@ -132,7 +131,6 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 		t.Fatalf("SuggestClosest(%q) = %q, want %q", name, suggestion, "cluster-up")
 	}
 
-	// And the message shape we emit when a suggestion exists:
 	msg := fmt.Sprintf("no pipeline named %q; did you mean %q? (run `sparkwing pipeline list --all` to see every entry)", name, suggestion)
 	for _, want := range []string{
 		`no pipeline named "claster-up"`,

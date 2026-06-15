@@ -20,7 +20,6 @@ import (
 // so the exception is a conscious, reviewed act.
 func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 	anyAuthenticated := map[string]bool{
-		// Introspection: reports the caller's own principal + scopes.
 		"GET /api/v1/auth/whoami": true,
 	}
 	fset := token.NewFileSet()

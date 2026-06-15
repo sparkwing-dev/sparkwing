@@ -33,9 +33,6 @@ func seedRun(t *testing.T, s *store.Store, id, pipeline, status string, startedA
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if status != "running" {
-		// FinishRun writes finished_at = now, but we want a
-		// controllable offset for maxAge testing. Poke the raw DB via
-		// the store's query path.
 		_, err := s.DB().ExecContext(ctx, `
 UPDATE runs SET status = ?, error = '', finished_at = ? WHERE id = ?`,
 			status, time.Now().Add(-finishedAgo).UnixNano(), id)

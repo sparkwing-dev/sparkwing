@@ -130,7 +130,7 @@ func AutoRegister(absPath string) error {
 	}
 	for _, e := range cfg.Repos {
 		if pathsEqual(e.Path, abs) {
-			return nil // already registered, no-op
+			return nil
 		}
 	}
 	cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
@@ -321,9 +321,6 @@ func CandidatePaths() ([]Candidate, error) {
 		if err != nil {
 			continue
 		}
-		// Sort for determinism: file system iteration order is not
-		// guaranteed, and resolve-order surprises here are
-		// debugging-hostile.
 		names := make([]string, 0, len(entries))
 		for _, e := range entries {
 			if e.IsDir() {
@@ -337,8 +334,6 @@ func CandidatePaths() ([]Candidate, error) {
 	}
 	return out, nil
 }
-
-// --- internals ---
 
 type repoKindEnum int
 

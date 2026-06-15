@@ -96,8 +96,6 @@ func TestRun_GuardRejectFiresBeforeDispatch(t *testing.T) {
 			},
 		},
 	})
-	// With no opts.Profile set, ProfileIsLocal is false so the guard
-	// doesn't fire -- the run succeeds.
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
 	}

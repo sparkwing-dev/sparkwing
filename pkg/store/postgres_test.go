@@ -38,7 +38,6 @@ func openPGTestStore(t *testing.T) *store.Store {
 	baseDSN := pgTestDSN(t)
 	schema := "sw_test_" + sanitize(t.Name()) + "_" + uniq()
 
-	// Step 1: admin-create the schema on a short-lived connection.
 	adminCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	admin, err := store.OpenPostgres(adminCtx, baseDSN)
@@ -51,12 +50,9 @@ func openPGTestStore(t *testing.T) *store.Store {
 	}
 	_ = admin.Close()
 
-	// Step 2: re-open with search_path pointing at the per-test schema
-	// so migrate() builds tables inside it.
 	scoped := withSearchPath(baseDSN, schema)
 	st, err := store.OpenPostgres(context.Background(), scoped)
 	if err != nil {
-		// Drop the schema on failure so we don't leak it.
 		if cleanup, e := store.OpenPostgres(adminCtx, baseDSN); e == nil {
 			_, _ = cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 			_ = cleanup.Close()
@@ -96,9 +92,6 @@ func sanitize(s string) string {
 }
 
 func withSearchPath(dsn, schema string) string {
-	// pgx accepts options=-csearch_path%3Dvalue in query string. Use
-	// the documented `search_path` parameter instead, which pgx also
-	// honors when present.
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
@@ -115,8 +108,6 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 	if got, want := st.Dialect(), store.DialectPostgres; got != want {
 		t.Errorf("Dialect = %v, want %v", got, want)
 	}
-	// A trivial round-trip confirms the schema applied: write a run,
-	// read it back.
 	ctx := context.Background()
 	r := store.Run{
 		ID:        "pg-open-test",

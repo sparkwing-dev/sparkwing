@@ -19,8 +19,6 @@ func TestResolveSampler_Default(t *testing.T) {
 	if s == nil {
 		t.Fatalf("resolveSampler returned nil")
 	}
-	// ParentBased + always-sample stringifies like
-	// "ParentBased{root:TraceIDRatioBased{1}, ...}".
 	if got := s.Description(); !containsAll(got, "ParentBased", "TraceIDRatioBased") {
 		t.Errorf("sampler description missing expected tokens: %s", got)
 	}
@@ -100,9 +98,6 @@ func TestStampSpan_SkipsEmptyAttrs(t *testing.T) {
 	ctx, span := tp.Tracer("test").Start(context.Background(), "unit")
 	defer span.End()
 	StampSpan(ctx, SpanAttrs{RunID: "only-this"})
-	// Not asserting span contents (sdk-internal) -- this test is a
-	// regression guard against a panic path when the only set field
-	// is one of several.
 }
 
 // TestTraceParentEnv_EmptyWithoutSpan: no active span -> empty string.
@@ -130,12 +125,8 @@ func TestTraceParentEnv_WithSpan(t *testing.T) {
 		t.Fatalf("unexpected env var: %q", env)
 	}
 
-	// Feed it back through the reader. Use os.Setenv via t.Setenv so
-	// the test stays hermetic.
 	t.Setenv("TRACEPARENT", env[len(prefix):])
 	extracted := ContextFromEnv(context.Background())
-	// The extracted context should carry the same TraceID as the
-	// original span.
 	want := span.SpanContext().TraceID().String()
 	got := spanTraceIDString(extracted)
 	if got != want {

@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Concurrency service. Callers declare their OnLimit policy on every
-// acquire; the store enforces capacity per-key with latest-wins drift
-// handling. All decisions happen inside one SQLite transaction.
-
 type acquireSlotReq struct {
 	HolderID        string `json:"holder_id"`
 	RunID           string `json:"run_id"`
@@ -177,8 +173,6 @@ func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	// One atomic transaction so a mid-handler crash leaves no
-	// stranded waiters.
 	_, _, _, err := s.store.ReleaseAndNotify(
 		r.Context(), key, body.HolderID, body.Outcome,
 		body.OutputRef, body.CacheKeyHash,

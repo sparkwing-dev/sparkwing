@@ -88,7 +88,6 @@ func installFakeGo(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
 	log := filepath.Join(binDir, "argv.log")
-	// Honors `-o <dest>` by creating an empty file there.
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n" +
 		"while [ $# -gt 0 ]; do\n" +
 		"  if [ \"$1\" = \"-o\" ]; then\n" +
@@ -247,8 +246,6 @@ func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	if !strings.Contains(out, wantStdout) {
 		t.Errorf("captured output missing stdout line %q:\n%s", wantStdout, out)
 	}
-	// The wrapper string stays terse so existing log lines don't
-	// suddenly explode in volume.
 	if !strings.HasPrefix(err.Error(), "compile .sparkwing/:") {
 		t.Errorf("expected terse wrapper prefix, got: %q", err.Error())
 	}
@@ -262,7 +259,6 @@ func TestPipelineCacheKey_IgnoresMissingOverlay(t *testing.T) {
 		t.Fatalf("key should be stable when overlays absent: %s vs %s", keyA, keyB)
 	}
 
-	// .resolved.sum without .resolved.mod must still work.
 	if err := os.WriteFile(filepath.Join(dir, ".resolved.sum"), []byte("x\n"), 0o644); err != nil {
 		t.Fatalf("write lone sum: %v", err)
 	}

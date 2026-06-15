@@ -12,13 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Nested-spawn retry_of propagation. When a parent run is
-// retried, child runs spawned via RunAndAwait during the retry
-// must carry retry_of pointing to the prior run's child spawned at
-// the same node + pipeline. Without that chain, the new child's own
-// DAG runs from scratch instead of skip-passed -- defeating the
-// retry's purpose for the spawned subtree.
-
 type spawnerOut struct{}
 
 // spawnerNode calls RunAndAwait with a tight timeout so the
@@ -138,9 +131,6 @@ func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second (retry) run: %v", err)
 	}
-	// The retry's spawner re-runs (it failed in p1) and the spawn
-	// times out again -- expected; we only care that the new child
-	// trigger row carries the right lineage.
 	if second.Status != "failed" {
 		t.Logf("second run status = %q (expected failed; non-fatal for this test)", second.Status)
 	}
@@ -199,8 +189,6 @@ func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	// Sanity: no child trigger was created in the first run because
-	// the spawner never executed.
 	priorChildID, err := st.FindSpawnedChildTriggerID(ctx, "ef1", "spawner", "spawn-retry-child")
 	if err != nil {
 		t.Fatalf("FindSpawnedChildTriggerID(ef1): %v", err)

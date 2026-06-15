@@ -21,7 +21,7 @@ import (
 func TestConformance_LogStore(t *testing.T) {
 	conformance.TestLogStore(t, func() storage.LogStore {
 		var mu sync.Mutex
-		blobs := map[string][]byte{} // "runID/nodeID" -> bytes
+		blobs := map[string][]byte{}
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := strings.TrimPrefix(r.URL.Path, "/api/v1/logs/")
@@ -35,17 +35,12 @@ func TestConformance_LogStore(t *testing.T) {
 			case http.MethodGet:
 				mu.Lock()
 				defer mu.Unlock()
-				// /stream subpath: return whatever bytes exist now, no
-				// SSE framing. The real sparkwing-logs server serves SSE
-				// here; the conformance Stream subtest is happy to see
-				// existing content as long as the channel surfaces
-				// something.
 				if strings.HasSuffix(path, "/stream") {
 					key := strings.TrimSuffix(path, "/stream")
 					_, _ = w.Write(blobs[key])
 					return
 				}
-				if !strings.Contains(path, "/") { // ReadRun
+				if !strings.Contains(path, "/") {
 					var buf []byte
 					for k, v := range blobs {
 						if strings.HasPrefix(k, path+"/") {

@@ -170,8 +170,6 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 	return nil
 }
 
-// --- local implementations ---
-
 type localState struct {
 	st *store.Store
 }
@@ -338,7 +336,6 @@ func (l localState) EnqueueTrigger(ctx context.Context, pipeline string, args ma
 	if pipeline == "" {
 		return "", errors.New("EnqueueTrigger: pipeline required")
 	}
-	// Walk ancestors and reject cycles, matching the controller.
 	if parentRunID != "" {
 		ancestors, err := l.st.GetRunAncestorPipelines(ctx, parentRunID)
 		if err != nil {
@@ -356,8 +353,6 @@ func (l localState) EnqueueTrigger(ctx context.Context, pipeline string, args ma
 		}
 	}
 	runID := localNewRunID()
-	// Cross-repo: leave SHA empty so the runner clones branch tip.
-	// Same-repo: inherit parent git context.
 	tg := store.Trigger{
 		ID:            runID,
 		Pipeline:      pipeline,
@@ -430,7 +425,6 @@ type localLogs struct {
 }
 
 func (l localLogs) OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error) {
-	// Idempotent; safe even when callers skip Run().
 	if err := os.MkdirAll(l.paths.RunDir(runID), 0o755); err != nil {
 		return nil, err
 	}
@@ -452,8 +446,6 @@ func (l localConcurrency) HeartbeatSlot(ctx context.Context, key, holderID strin
 }
 
 func (l localConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
-	// All three phases (delete, drain, promote) in one txn so a crash
-	// between them can't strand downstream callers.
 	_, _, _, err := l.st.ReleaseAndNotify(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl, store.DefaultConcurrencyLease)
 	return err
 }

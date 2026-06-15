@@ -90,7 +90,6 @@ profiles:
 	if report.Effective.State != "controller://prod" {
 		t.Errorf("effective.state = %q, want controller://prod", report.Effective.State)
 	}
-	// Token must never appear in the output.
 	if strings.Contains(out, "swu_secret") {
 		t.Errorf("token leaked into output:\n%s", out)
 	}

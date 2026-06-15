@@ -120,7 +120,6 @@ func fsPath(rest string) (string, error) {
 // s3BucketPrefix splits "bucket" or "bucket/prefix..." into its parts.
 // Bucket is required; prefix may be empty (root of bucket).
 func s3BucketPrefix(rest string) (bucket, prefix string, err error) {
-	// net/url validates shape so stray query strings or fragments fail loudly.
 	u, err := url.Parse("s3://" + rest)
 	if err != nil {
 		return "", "", fmt.Errorf("storeurl: parse s3 url: %w", err)

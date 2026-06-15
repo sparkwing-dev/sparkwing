@@ -46,8 +46,6 @@ func TestComputeOnlySkip_GlobMatchesSiblingsPullsSharedAncestor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("computeOnlySkip: %v", err)
 	}
-	// keep: prep (ancestor) + test-phase-a + test-phase-b-shard-1 + test-phase-b-shard-2
-	// skip: standalone
 	if _, ok := skip["prep"]; ok {
 		t.Errorf("prep should NOT be skipped: ancestor of matched nodes")
 	}
@@ -90,7 +88,6 @@ func TestComputeOnlySkip_NoMatchErrors(t *testing.T) {
 	if !strings.Contains(msg, "matched no jobs") {
 		t.Errorf("error %q should mention 'matched no jobs'", msg)
 	}
-	// The error must list declared ids so the operator can fix the typo.
 	for _, id := range []string{"prep", "test-phase-a", "standalone"} {
 		if !strings.Contains(msg, id) {
 			t.Errorf("error %q should mention declared id %q", msg, id)

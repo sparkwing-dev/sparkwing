@@ -62,8 +62,6 @@ func (p *Profile) SurfaceStrings() (state, logs, cache string) {
 	}
 	state = SpecString(surf.State)
 	if surf.State == nil && p.ControllerURL() == "" {
-		// Bare profile: the run path falls back to local SQLite state
-		// with no shared logs/cache.
 		state = "sqlite"
 	}
 	return state, SpecString(surf.Logs), SpecString(surf.Cache)

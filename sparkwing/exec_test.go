@@ -26,7 +26,6 @@ func TestSh_Success(t *testing.T) {
 	if !strings.Contains(res.Stdout, "hello-world") {
 		t.Fatalf("Stdout missing echo: %q", res.Stdout)
 	}
-	// Logger should have received the output line.
 	if len(logger.lines) == 0 {
 		t.Fatal("logger saw no lines")
 	}
@@ -85,7 +84,6 @@ func TestCmd_EnvSingle(t *testing.T) {
 
 func TestBash_RunsBashOnlyFeatures(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	// `[[ ... ]]` is bash-only; busybox sh / dash reject it.
 	res, err := sparkwing.Bash(ctx, `if [[ "abc" == a* ]]; then echo matched; fi`).Run()
 	if err != nil {
 		t.Fatalf("Bash: %v", err)
@@ -123,7 +121,6 @@ func TestExecError_MessageIncludesCommandAndOutput(t *testing.T) {
 
 func TestBash_EnvInjects(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	// Use a bash-only construct to confirm we really ran under bash.
 	res, err := sparkwing.Bash(ctx, `if [[ -n "$SPARKWING_TEST_VAR" ]]; then echo got-$SPARKWING_TEST_VAR; fi`).
 		Env("SPARKWING_TEST_VAR", "bashval").
 		Run()
@@ -206,8 +203,6 @@ func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	got := strings.TrimSpace(res.Stdout)
-	// On macOS, t.TempDir paths get a /private prefix when cd'd into
-	// (symlink resolution). Compare on the suffix.
 	if !strings.HasSuffix(got, filepath.Join(root, "sub")) && !strings.HasSuffix(got, "/sub") {
 		t.Fatalf("pwd = %q, expected suffix %q", got, filepath.Join(root, "sub"))
 	}

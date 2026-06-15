@@ -151,9 +151,6 @@ func runPipelinePlan(args []string) error {
 		binary = "sparkwing"
 	}
 
-	// Plumb --start-at / --stop-at via the same env-var contract
-	// the run path uses so the inner --plan handler reads them
-	// identically to a real run.
 	cmd := exec.Command(binary, pipelineArgs...)
 	cmd.Env = os.Environ()
 	if parsed.startAt != "" {
@@ -174,8 +171,6 @@ func runPipelinePlan(args []string) error {
 	}
 	var doc planPreviewDoc
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &doc); err != nil {
-		// Fall back to raw output so the operator sees what came
-		// back rather than a cryptic decode error.
 		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
@@ -231,9 +226,6 @@ func printPlanPreviewNode(n *planPreviewNodeDoc, indent string) {
 	if n.SkipReason != "" {
 		decision += " (" + n.SkipReason + ")"
 	}
-	// Surface the recovery attachment so a `pipeline plan` reader
-	// sees which parent's failure dispatches this node, not just
-	// that the node is a recovery in the abstract.
 	if n.OnFailureOf != "" {
 		decision += " [OnFailure: " + n.OnFailureOf + "]"
 	}
@@ -260,11 +252,6 @@ func printPlanPreviewItem(kind string, it *planPreviewItemDoc, indent string) {
 	if it.SkipReason != "" {
 		decision += " (" + it.SkipReason + ")"
 	}
-	// Append the risk-label set inline so a `pipeline plan` reader
-	// sees both the runtime decision and the contract before
-	// drilling into needs / cardinality. Tucked into the same header
-	// line so the renderer stays compact for the common no-label
-	// case.
 	if len(it.Risks) > 0 {
 		decision += " risks=" + strings.Join(it.Risks, ",")
 	}

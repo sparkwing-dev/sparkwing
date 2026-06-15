@@ -53,7 +53,6 @@ func TestMetrics_RoundTrip(t *testing.T) {
 		t.Errorf("sample ordering: %+v", samples)
 	}
 
-	// Inserting the exact same (run, node, ts) again is a no-op.
 	dup := samples[0]
 	if err := st.AddNodeMetricSample(ctx, "run-1", "a", dup); err != nil {
 		t.Fatalf("duplicate insert returned error: %v", err)

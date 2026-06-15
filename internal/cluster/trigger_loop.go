@@ -104,22 +104,12 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		if err != nil {
 			logger.Error("trigger loop: trigger failed",
 				"run_id", trigger.ID, "err", err)
-			// Pre-orchestrator failures (fetch / compile /
-			// no-baked-binary) never reach orchestrator.Run, which is
-			// where FinishRun would normally fire. Mark the
-			// controller-pre-allocated Run row failed here so the
-			// operator sees status=failed + the wrapper error in
-			// `runs list` / `runs status` instead of a stuck pending
-			// row. Use a fresh ctx; the trigger ctx may already be
-			// shutting down. Best-effort: a failed write logs and
-			// moves on, since the trigger is about to be finished.
 			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
 				logger.Warn("trigger loop: FinishRun failed",
 					"run_id", trigger.ID, "err", ferr)
 			}
 			cancel()
-			// Best-effort finish so a broken trigger doesn't get re-claimed forever.
 			_ = cli.FinishTrigger(ctx, trigger.ID)
 		}
 		if selfTerminate {
@@ -142,15 +132,11 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		Pipeline: trigger.Pipeline,
 	})
 
-	// Prefer the env var (set by webhook intake); fall back to owner/repo fields.
 	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
 	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
 		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
 	}
 
-	// childCtx is canceled by the heartbeat goroutine on reaped/silenced
-	// outcomes so the child process tears down instead of writing to a
-	// run the controller already wrote off.
 	childCtx, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()
 
@@ -159,19 +145,12 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		outcomeCh <- triggerClaimHeartbeat(childCtx, cli, trigger.ID, cancelChild, logger)
 	}()
 
-	// awaitHeartbeat returns whether the runner should self-terminate.
-	// Always called exactly once per trigger so the goroutine is
-	// joined before we return.
 	awaitHeartbeat := func() bool {
 		cancelChild()
 		outcome := <-outcomeCh
 		return outcome == triggerClaimSilenced
 	}
 
-	// Baked-in path: trigger has no repo (synthetic POST trigger,
-	// internal test, etc). Exec the image's own baked binary so the
-	// demo pipelines registered in its .sparkwing/ module are
-	// visible to Plan(). No gitcache fetch, no compile.
 	if repo == "" {
 		if BakedBinary == "" {
 			return awaitHeartbeat(), fmt.Errorf("trigger %s has no GITHUB_REPOSITORY and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)
@@ -193,10 +172,6 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	logger.Info("trigger loop: fetching source",
 		"run_id", trigger.ID, "repo", repoURL, "branch", branch, "sha", sha)
 	if sha == "" {
-		// Manual CLI dispatch (no webhook payload) lands here. The
-		// runner builds the branch tip rather than a pinned commit;
-		// flag it so operators can correlate "the dashboard says X
-		// but I expected Y" against this code path.
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
@@ -240,10 +215,6 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 		"SPARKWING_CONTROLLER_URL="+opts.ControllerURL,
 		"SPARKWING_LOGS_URL="+opts.LogsURL,
 		"SPARKWING_AGENT_TOKEN="+opts.Token,
-		// Runner identity for sparkwing.Runner(ctx) on the pod side.
-		// The pod doesn't otherwise know which kind of runner it is;
-		// adapters branching on r.HasLabel("local") or r.Type read
-		// from these env vars at orchestrator boot.
 		"SPARKWING_RUNNER_TYPE=kubernetes",
 	)
 	if tp := otelutil.TraceParentEnv(ctx); tp != "" {
@@ -274,9 +245,6 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 		return
 	}
 	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token)
-	// Use a fresh context: the trigger ctx may already be cancelling
-	// (heartbeat goroutine signaled the parent), but we still want
-	// to ship the diagnostic so operators can see why compile failed.
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := cli.Append(postCtx, runID, CompileLogNode, ce.Output); err != nil {
@@ -333,7 +301,6 @@ func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, repoURL, branch, s
 		}
 		lastErr = err
 		if !strings.Contains(err.Error(), notOurRefSubstr) {
-			// Real failure -- don't delay surfacing it.
 			return "", err
 		}
 		if i == attempts-1 {

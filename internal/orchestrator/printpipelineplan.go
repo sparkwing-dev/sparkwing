@@ -26,10 +26,6 @@ func printPipelineRuntimePlan(pipeline string, rest []string) error {
 	rest = stripExplainOutputFlags(rest)
 	argsMap, err := parseTypedFlags(pipeline, rest)
 	if err != nil {
-		// Match printPipelinePlan's leniency: empty argsMap on parse
-		// failure so the user sees the structural plan even when
-		// flag values are off. The wrapper reports the parse error
-		// in the JSON summary if useful.
 		argsMap = map[string]string{}
 	}
 	rc := sparkwing.RunContext{

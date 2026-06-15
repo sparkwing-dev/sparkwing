@@ -111,8 +111,6 @@ func TestOpenArtifactStoreFromSpec_FilesystemMissingPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	// not validated again here; pkg/backends.Validate catches it.
-	// The factory still surfaces it through expandPath.
 	if !strings.Contains(err.Error(), "path is required") {
 		t.Errorf("want 'path is required', got: %v", err)
 	}
@@ -162,8 +160,6 @@ func TestOpenStateStoreFromSpec_Unimplemented(t *testing.T) {
 }
 
 func TestOpenStateStoreFromSpec_PostgresInvalidDSN(t *testing.T) {
-	// Postgres now opens for real; an obviously bad DSN should surface
-	// the driver error rather than the "not implemented" sentinel.
 	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
 		backends.Spec{Type: backends.TypePostgres, URL: "x"}, nil)
 	if err == nil {

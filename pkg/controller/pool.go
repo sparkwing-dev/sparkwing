@@ -91,8 +91,6 @@ func (p *poolBinding) ready() bool {
 	return p != nil && p.pool != nil
 }
 
-// --- HTTP handlers ---
-
 func (s *Server) handlePoolList(w http.ResponseWriter, r *http.Request) {
 	if !s.pool.ready() {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("pool not ready"))
@@ -143,8 +141,6 @@ func (s *Server) handlePoolCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	name, err := s.pool.pool.Checkout(r.Context(), jobID)
 	if err != nil {
-		// No clean PVC available -> 409 so the caller falls back to a
-		// cache-less build instead of erroring.
 		writeError(w, http.StatusConflict, err)
 		return
 	}

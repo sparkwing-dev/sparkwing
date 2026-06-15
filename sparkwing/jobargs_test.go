@@ -194,7 +194,6 @@ func TestJobArgs_TransitiveArgsSurface(t *testing.T) {
 	if len(surface) != 3 {
 		t.Fatalf("expected 3 flags across both jobs; got %d (%v)", len(surface), keysOf(surface))
 	}
-	// Each flag should know which job owns it.
 	if surface["replicas"].JobID != "deploy" {
 		t.Errorf("--replicas should be owned by deploy; got %q", surface["replicas"].JobID)
 	}

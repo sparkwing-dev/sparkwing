@@ -13,14 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestSpawnDispatch_* covers spawn dispatch: a node's Work declares
-// SpawnNode / SpawnNodeForEach; the orchestrator-side handler fires
-// each spawn as a fresh Plan node (namespaced "{parent}/{spawnID}"),
-// dispatches it through the regular scheduling loop, and blocks the
-// parent runner until the child terminates.
-
-// --- spawn-shape pipelines ---
-
 type spawnedChildJob struct {
 	sparkwing.Base
 	tag string
@@ -124,8 +116,6 @@ func (sp *spawnEachPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwi
 	return nil
 }
 
-// --- shared test pipeline factory ---
-
 var (
 	spawnSingleChildRan atomic.Bool
 	spawnEachCount      atomic.Int32
@@ -140,8 +130,6 @@ func init() {
 		return &spawnEachPipe{count: &spawnEachCount}
 	})
 }
-
-// --- tests ---
 
 func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
 	spawnSingleChildRan.Store(false)
@@ -238,8 +226,6 @@ func TestSpawnDispatch_ForEachFansOut(t *testing.T) {
 		}
 	}
 }
-
-// --- helpers ---
 
 func find(nodes []*store.Node, id string) *store.Node {
 	for _, n := range nodes {

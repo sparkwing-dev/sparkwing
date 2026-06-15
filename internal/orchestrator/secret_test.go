@@ -13,11 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// End-to-end check that a job calling sparkwing.Secret resolves
-// through the per-run resolver wired from
-// Options.SecretSource. Uses a dotenv source seeded in TempDir so the
-// test never touches the user's real ~/.config/sparkwing.
-
 type secretReaderJob struct{ sparkwing.Base }
 
 var observedToken string
@@ -74,7 +69,6 @@ func TestSecret_ResolvesFromDotenvSource(t *testing.T) {
 func TestSecret_MissingNameFailsTheJob(t *testing.T) {
 	dir := t.TempDir()
 	dotenvPath := filepath.Join(dir, "secrets.env")
-	// Empty file: TOKEN won't resolve.
 	if err := secrets.WriteDotenvEntry(dotenvPath, "OTHER", "1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -94,8 +88,6 @@ func TestSecret_MissingNameFailsTheJob(t *testing.T) {
 	if res.Error == nil {
 		t.Fatal("expected non-nil run error")
 	}
-	// Per-node error carries the verbatim message; the run-level
-	// error just lists which nodes failed.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	node, gerr := st.GetNode(context.Background(), res.RunID, "read")
@@ -189,7 +181,6 @@ func TestSecret_MaskerRedactsResolvedValues(t *testing.T) {
 			t.Fatalf("delegate received a record with the raw secret value: %+v", rec)
 		}
 	}
-	// Sanity: the redaction marker is present on the deploy log line.
 	var sawRedacted bool
 	for _, rec := range cap.Snapshot() {
 		if strings.Contains(rec.Msg, "deploying with token=***") {

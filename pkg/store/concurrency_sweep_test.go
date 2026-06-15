@@ -17,7 +17,7 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
-	time.Sleep(80 * time.Millisecond) // A's lease lapses
+	time.Sleep(80 * time.Millisecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -40,7 +40,7 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 // all be admitted.
 func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
 	s := newStoreT(t)
-	big := math.MaxInt/3 + 1 // three of these overflow the running sum
+	big := math.MaxInt/3 + 1
 	holders := []string{"r1/n", "r2/n", "r3/n"}
 	granted := 0
 	for _, h := range holders {
@@ -70,22 +70,16 @@ func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
 // over-admit.
 func TestConcurrency_ZeroDeclaredCapacityHolderConstrainsFloor(t *testing.T) {
 	s := newStoreT(t)
-	// A holds the cap-1 budget; the key's entry capacity is 1.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
 	})
-	// Simulate a v3-migration survivor: a live holder whose
-	// declared_capacity was backfilled to 0 across the upgrade.
 	if _, err := s.DB().Exec(
 		`UPDATE concurrency_holders SET declared_capacity = 0 WHERE key = ? AND holder_id = ?`,
 		"k", "rA/n",
 	); err != nil {
 		t.Fatalf("inject zero-cap holder: %v", err)
 	}
-	// C declares a big capacity. If the zero-cap holder is invisible to
-	// the floor, C sees an inflated effective capacity and is granted on a
-	// cap-1 key -> over-admission.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rC/n", RunID: "rC", NodeID: "n",
 		Capacity: 100, Cost: 1, Policy: store.OnLimitQueue,
@@ -112,13 +106,10 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("B: want Queued, got %s", r.Kind)
 	}
-	// A releases; B is promoted into a holder.
 	releaseAndPromoteT(t, s, "k", "rA/n")
 	if got := activeHolders(t, s, "k"); got != 1 {
 		t.Fatalf("after A release: active holders = %d, want 1 (B promoted)", got)
 	}
-	// B gave up waiting and cancels, unaware it was promoted. The orphaned
-	// holder must be reclaimed.
 	matched, err := s.CancelWaiter(ctxT(t), "k", "rB", "n")
 	if err != nil {
 		t.Fatalf("CancelWaiter: %v", err)
@@ -129,7 +120,6 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 	if got := activeHolders(t, s, "k"); got != 0 {
 		t.Fatalf("active holders after cancel = %d, want 0 (orphan reclaimed)", got)
 	}
-	// The freed slot is available to a fresh arrival, not pinned.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rC/n", RunID: "rC", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -152,13 +142,11 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed cache: %v", err)
 	}
-	// A normal follower replays the still-valid entry.
 	if res, err := s.ResolveWaiter(ctxT(t), "memo:k", "rF", "n", "h1", "", "", false); err != nil {
 		t.Fatalf("resolve (no bypass): %v", err)
 	} else if res.Status != store.WaiterCached {
 		t.Fatalf("no-bypass follower status = %q, want Cached", res.Status)
 	}
-	// A --no-cache follower must NOT replay it.
 	if res, err := s.ResolveWaiter(ctxT(t), "memo:k", "rF2", "n", "h1", "", "", true); err != nil {
 		t.Fatalf("resolve (bypass): %v", err)
 	} else if res.Status == store.WaiterCached {
@@ -181,9 +169,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("W: want Queued, got %s", r.Kind)
 	}
-	time.Sleep(80 * time.Millisecond) // A's lease lapses; no reaper/release yet
-	// Budget reads free (A expired) but W is parked first -- X must queue
-	// behind it, not jump ahead.
+	time.Sleep(80 * time.Millisecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rX/n", RunID: "rX", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
@@ -227,14 +213,12 @@ func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
 	}); r.Kind != store.AcquireGranted {
 		t.Fatalf("leader: want Granted, got %s", r.Kind)
 	}
-	// A normal follower coalesces onto the leader.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "memo:k", HolderID: "rF/n", RunID: "rF", NodeID: "n",
 		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce,
 	}); r.Kind != store.AcquireCoalesced {
 		t.Fatalf("normal follower: want Coalesced, got %s", r.Kind)
 	}
-	// A --no-cache follower must NOT coalesce; it queues to run fresh.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "memo:k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce, BypassRead: true,
@@ -253,21 +237,18 @@ func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	// B preempts A and takes the slot immediately.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitCancelOthers,
 	}); r.Kind != store.AcquireCancellingOthers {
 		t.Fatalf("B: want CancellingOthers, got %s", r.Kind)
 	}
-	// A later plain arrival must NOT steal the slot B just took.
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rC/n", RunID: "rC", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("C: want Queued (B holds the slot), got %s", r.Kind)
 	}
-	// A second CancelOthers supersedes the canceller B, not a no-op grant.
 	r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rD/n", RunID: "rD", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitCancelOthers,

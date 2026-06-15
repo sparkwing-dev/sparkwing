@@ -68,7 +68,6 @@ func TestCipher_OpenRejectsTampered(t *testing.T) {
 	c, _ := NewCipher(key)
 
 	env, _ := c.Seal("hello")
-	// Flip the last base64 char to break the auth tag.
 	tampered := env[:len(env)-1] + "A"
 	if tampered == env {
 		tampered = env[:len(env)-1] + "B"
@@ -100,7 +99,6 @@ func TestDecodeKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCipher: %v", err)
 	}
-	// Round-trip via base64 the way the env var carries it.
 	env, _ := c.Seal("checkpoint")
 	encoded := encodeKey(t, key)
 	decoded, err := DecodeKey(encoded)
@@ -125,7 +123,6 @@ func TestDecodeKey(t *testing.T) {
 	if _, err := DecodeKey("not-base64!"); err == nil {
 		t.Fatal("malformed base64 must error")
 	}
-	// Wrong length after decode.
 	if _, err := DecodeKey("aGVsbG8="); err == nil {
 		t.Fatal("short key must error")
 	}
@@ -133,6 +130,5 @@ func TestDecodeKey(t *testing.T) {
 
 func encodeKey(t *testing.T, key []byte) string {
 	t.Helper()
-	// Mirror what a shell pipeline produces.
 	return base64StdEncode(key)
 }

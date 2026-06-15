@@ -48,7 +48,6 @@ func computeStepRangeSkips(items map[string]*workItem, children map[string][]str
 	parents := make(map[string][]string, len(items))
 	for id, it := range items {
 		parents[id] = append(parents[id], it.deps...)
-		// Ensure every node has an entry so reachable() is uniform.
 		if _, ok := parents[id]; !ok {
 			parents[id] = nil
 		}
@@ -56,7 +55,7 @@ func computeStepRangeSkips(items map[string]*workItem, children map[string][]str
 
 	keep := make(map[string]bool, len(items))
 	for id := range items {
-		keep[id] = true // optimistic: only narrow when a bound applies
+		keep[id] = true
 	}
 
 	if _, ok := items[r.start]; ok {
@@ -83,11 +82,6 @@ func computeStepRangeSkips(items map[string]*workItem, children map[string][]str
 		if ok {
 			continue
 		}
-		// Hidden generator items (SpawnNodeForEach synthetics) take
-		// their skip from whatever step deps they share -- emitting
-		// "skipped" for them would surface internal scheduling ids
-		// in the dashboard. Mark them range-skipped so they don't
-		// dispatch, but leave isHidden semantics for the renderer.
 		skips[id] = stepRangeReasonString(r)
 	}
 	return skips
@@ -124,8 +118,6 @@ func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string {
 		add(g.ID(), g.DepIDs())
 	}
 	if _, hasStart := items[startAt]; startAt != "" && !hasStart {
-		// Bound names a step in another Work; locally-this is a no-op,
-		// matching RunWork's degrade-gracefully semantics.
 		if _, hasStop := items[stopAt]; stopAt == "" || !hasStop {
 			return nil
 		}
@@ -212,7 +204,6 @@ func (w *Work) TopologicalStepOrder() []string {
 		return nil
 	}
 
-	// Insertion order, mirroring RunWork's items map population.
 	regOrder := make([]string, 0, total)
 	deps := make(map[string][]string, total)
 	known := make(map[string]bool, total)
@@ -249,8 +240,6 @@ func (w *Work) TopologicalStepOrder() []string {
 		}
 	}
 
-	// Kahn's with FIFO over registration order: ties resolve to the
-	// step Step()'d earliest, so renderers see a stable layout.
 	pos := make(map[string]int, total)
 	for i, id := range regOrder {
 		pos[id] = i
@@ -259,7 +248,6 @@ func (w *Work) TopologicalStepOrder() []string {
 	out := make([]string, 0, total)
 	pending := append([]string(nil), regOrder...)
 	for len(out) < total {
-		// Pick the registration-earliest item with indeg 0.
 		picked := ""
 		pickedIdx := -1
 		for i, id := range pending {
@@ -274,8 +262,6 @@ func (w *Work) TopologicalStepOrder() []string {
 			}
 		}
 		if picked == "" {
-			// Cycle -- bail with what we have. RunWork surfaces the
-			// real error at dispatch time.
 			break
 		}
 		pending[pickedIdx] = ""

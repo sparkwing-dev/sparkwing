@@ -90,7 +90,6 @@ func TestStoreBackend_ReadNodeLog_DiskFallback(t *testing.T) {
 	b := backend.NewStoreBackend(st, paths, nil)
 	ctx := context.Background()
 
-	// Missing file: render as empty.
 	got, err := b.ReadNodeLog(ctx, "r1", "n1", backend.ReadOpts{})
 	if err != nil {
 		t.Fatalf("ReadNodeLog miss: %v", err)

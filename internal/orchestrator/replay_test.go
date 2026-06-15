@@ -89,7 +89,6 @@ func TestMintReplayRun(t *testing.T) {
 		t.Fatalf("args inheritance broken: %v", got.Args)
 	}
 
-	// Original run should be unchanged.
 	orig, err := st.GetRun(ctx, "orig-1")
 	if err != nil {
 		t.Fatalf("GetRun orig: %v", err)
@@ -98,7 +97,6 @@ func TestMintReplayRun(t *testing.T) {
 		t.Fatalf("original run mutated: replay_of_run_id=%q", orig.ReplayOfRunID)
 	}
 
-	// New run should have a single nodes row for the target.
 	node, err := st.GetNode(ctx, newRunID, "build")
 	if err != nil {
 		t.Fatalf("GetNode replay: %v", err)
@@ -152,8 +150,6 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 	ctx := context.Background()
 	paths := PathsAt(dir)
 
-	// Seed: original run + dispatch with a type that won't match any
-	// registered pipeline.
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "orig-1", Pipeline: "no-such-pipeline",
 		Status: "failed", StartedAt: time.Now(),
@@ -176,7 +172,6 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 		t.Fatalf("MintReplayRun: %v", err)
 	}
 
-	// RunReplayNode should fail because the pipeline isn't registered.
 	if _, err := RunReplayNode(ctx, paths, st, newRunID, "build", nil); err == nil {
 		t.Fatalf("expected failure when pipeline isn't registered")
 	}

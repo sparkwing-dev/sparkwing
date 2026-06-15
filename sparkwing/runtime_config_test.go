@@ -21,8 +21,6 @@ func TestDetectRuntime_IgnoresLegacyEnvSignals(t *testing.T) {
 	if rc.Git == nil {
 		t.Fatal("Git pre-populate failed: nil")
 	}
-	// WorkDir is whatever the cwd walk-up returns; the test only
-	// pins that it doesn't fall back to one of the env values.
 	for _, env := range []string{
 		"would-have-mattered-before-step-10",
 		os.Getenv("SPARKWING_RUN_ID"),

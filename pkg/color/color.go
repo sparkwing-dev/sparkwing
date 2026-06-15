@@ -15,16 +15,12 @@ import (
 var enabled = detectEnabled()
 
 func detectEnabled() bool {
-	// Force-on overrides everything; useful for rare "I'm piping but
-	// I want colors" cases (e.g. `sparkwing ... | less -R`).
 	if os.Getenv("CLICOLOR_FORCE") == "1" || os.Getenv("SPARKWING_FORCE_COLOR") == "1" {
 		return true
 	}
-	// no-color.org standard: any non-empty NO_COLOR disables.
 	if v, ok := os.LookupEnv("NO_COLOR"); ok && v != "" {
 		return false
 	}
-	// CI / agent runners: usually log-only, no terminal.
 	if os.Getenv("CI") != "" {
 		return false
 	}

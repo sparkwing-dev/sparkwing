@@ -64,7 +64,6 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
-	// Not-ready node: claim should miss.
 	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil)
 	if err == nil {
 		t.Fatalf("expected ErrNotFound, got node %v", n)
@@ -73,7 +72,6 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 		t.Fatalf("wrong err: %v", err)
 	}
 
-	// Mark ready -> claim succeeds.
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +89,6 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 		t.Fatalf("lease_expires_at not in future: %v", n.LeaseExpiresAt)
 	}
 
-	// Second claim -> empty queue.
 	_, err = s.ClaimNextReadyNode(ctx, "pod-2", 30*time.Second, nil)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after claim, got %v", err)
@@ -143,7 +140,6 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 		t.Fatalf("lease did not extend: %v -> %v", firstLease, *n2.LeaseExpiresAt)
 	}
 
-	// Wrong holder -> ErrLockHeld.
 	err = s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 10*time.Second)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
@@ -160,7 +156,6 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, "pod-dead", 1*time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
-	// Lease is already expired.
 	time.Sleep(5 * time.Millisecond)
 
 	pairs, err := s.ReapExpiredNodeClaims(ctx)
@@ -171,7 +166,6 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 		t.Fatalf("unexpected reap output: %v", pairs)
 	}
 
-	// Another pod can now claim.
 	n, err := s.ClaimNextReadyNode(ctx, "pod-live", 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("claim after reap: %v", err)
@@ -189,7 +183,6 @@ func TestNodeClaim_RevokeOnlyWhenUnclaimed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Unclaimed -> revoke succeeds, ready_at nulled.
 	ok, err := s.RevokeNodeReady(ctx, "run-1", "node-a")
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +195,6 @@ func TestNodeClaim_RevokeOnlyWhenUnclaimed(t *testing.T) {
 		t.Fatalf("ready_at still set after revoke: %v", *n.ReadyAt)
 	}
 
-	// Mark ready + claim -> revoke should now refuse.
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +267,6 @@ func TestNodeClaim_LabelsExactMatch(t *testing.T) {
 func TestNodeClaim_LabelsSupersetClaims(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
-	// Node needs arm64; runner advertises arm64 + laptop (superset).
 	seedNodeWithLabels(t, s, "run-1", "build", []string{"arm64"})
 
 	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
@@ -291,10 +282,8 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
 
-	// Older unmatchable node: needs gpu. Runner doesn't advertise gpu.
 	seedNodeWithLabels(t, s, "run-1", "gpu-only", []string{"gpu"})
 	time.Sleep(2 * time.Millisecond)
-	// Younger matchable node: needs arm64. Runner advertises arm64.
 	seedNodeWithLabels(t, s, "run-2", "build", []string{"arm64"})
 
 	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
@@ -305,7 +294,6 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 		t.Fatalf("expected 'build' after skipping gpu-only, got %+v", n)
 	}
 
-	// gpu-only is still claimable by a runner that advertises gpu.
 	n2, err := s.ClaimNextReadyNode(ctx, "pod-gpu", 30*time.Second, []string{"gpu"})
 	if err != nil {
 		t.Fatalf("gpu-only should still be claimable by a gpu runner: %v", err)
@@ -318,8 +306,6 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
-	// needs_labels not set -> a runner advertising any set of labels
-	// (including unrelated ones) can still claim.
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)

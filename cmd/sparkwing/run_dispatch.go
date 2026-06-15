@@ -123,7 +123,6 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 			i++
 			continue
 		}
-		// Following "--" token = next flag; treat current as bool.
 		if i+1 < len(passthrough) && !strings.HasPrefix(passthrough[i+1], "--") {
 			out[name] = passthrough[i+1]
 			i += 2
@@ -342,7 +341,6 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 	}
 
 	cleanup = func() {
-		// worktree remove (not just RemoveAll) so .git/worktrees stays clean.
 		_ = exec.Command("git", "-C", repoRoot,
 			"worktree", "remove", "--force", tmpDir).Run()
 		_ = os.RemoveAll(tmpDir)
@@ -372,8 +370,6 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		userName = u.Username
 	}
 
-	// Plumb repo via both env (warm-runner reads for clone+compile) and
-	// Git meta (dashboard reads for the repo pill).
 	branch, sha, repoSlug, repoURL := detectRemoteGit()
 	if repoSlug == "" {
 		return nil, fmt.Errorf("pipeline trigger %q: no github repository detected from cwd. "+
@@ -383,21 +379,12 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	envMap := map[string]string{
 		"GITHUB_REPOSITORY": repoSlug,
 	}
-	// --start-at / --stop-at are sparkwing-level on the local CLI; the
-	// remote runner reads them as SPARKWING_START_AT /
-	// SPARKWING_STOP_AT from trigger env. Same env-var protocol the
-	// laptop-local exec path uses, so behavior is identical across
-	// venues.
 	if wf.startAt != "" {
 		envMap["SPARKWING_START_AT"] = wf.startAt
 	}
 	if wf.stopAt != "" {
 		envMap["SPARKWING_STOP_AT"] = wf.stopAt
 	}
-	// Forward --dry-run to the remote runner via the same env-var
-	// protocol the local-exec path uses. Behavior is identical
-	// across venues so `sparkwing pipeline trigger X --profile prod --dry-run`
-	// previews the same way a local run does.
 	if wf.dryRun {
 		envMap["SPARKWING_DRY_RUN"] = "1"
 	}
@@ -436,12 +423,6 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		},
 	}
 
-	// Best-effort eager refresh closes the
-	// `git push && sparkwing pipeline trigger X --profile prod` race where
-	// the gitcache hasn't yet mirrored the just-pushed SHA. The retry in the
-	// runner's trigger loop catches the residual race; this just
-	// shrinks the window to ~zero on the happy path. 5s ceiling so a
-	// wedged or unreachable cache never blocks dispatch.
 	if repoURL != "" {
 		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())

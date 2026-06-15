@@ -30,13 +30,11 @@ func TestResolve_FlagBeatsDefault(t *testing.T) {
 		sb.Field("Replicas").Default(1)
 	})
 
-	// Default kicks in: no flag -> 1.
 	a, err := ResolveAs[argresArgs](s, ResolveInputs{})
 	if err != nil || a.Replicas != 1 {
 		t.Fatalf("default tier: got %+v err=%v", a, err)
 	}
 
-	// Flag beats default.
 	a, err = ResolveAs[argresArgs](s, ResolveInputs{
 		FlagValues: map[string]string{"replicas": "9"},
 	})
@@ -76,13 +74,11 @@ func TestResolve_RequiredWhenContextLocal(t *testing.T) {
 		sb.Field("Image").RequiredWhen(Local)
 	})
 
-	// Local profile + no image -> error.
 	_, err := ResolveAs[argresArgs](s, ResolveInputs{ProfileIsLocal: true})
 	if err == nil {
 		t.Fatal("RequiredWhen(Local) should fire under a local profile")
 	}
 
-	// Remote profile + no image -> ok.
 	_, err = ResolveAs[argresArgs](s, ResolveInputs{ProfileIsLocal: false})
 	if err != nil {
 		t.Errorf("RequiredWhen(Local) should NOT fire remotely; got %v", err)
@@ -95,13 +91,11 @@ func TestResolve_RequiredWhenPredicateReferencesAnotherArg(t *testing.T) {
 		sb.Field("Image").RequiredWhen(ArgEq("replicas", 3)).DependsOn("Replicas")
 	})
 
-	// replicas=3 -> image required.
 	_, err := ResolveAs[argresArgs](s, ResolveInputs{FlagValues: map[string]string{"replicas": "3"}})
 	if err == nil {
 		t.Fatal("should error when replicas=3 and image missing")
 	}
 
-	// replicas=1 -> image not required.
 	_, err = ResolveAs[argresArgs](s, ResolveInputs{FlagValues: map[string]string{"replicas": "1"}})
 	if err != nil {
 		t.Errorf("should pass when replicas=1; got %v", err)
@@ -129,19 +123,16 @@ func TestResolve_MinMaxEnforced(t *testing.T) {
 		sb.Field("Replicas").Range(1, 10)
 	})
 
-	// In range.
 	a, err := ResolveAs[argresArgs](s, ResolveInputs{FlagValues: map[string]string{"replicas": "5"}})
 	if err != nil || a.Replicas != 5 {
 		t.Fatalf("in-range value should pass; got %+v err=%v", a, err)
 	}
 
-	// Below Min.
 	_, err = ResolveAs[argresArgs](s, ResolveInputs{FlagValues: map[string]string{"replicas": "0"}})
 	if err == nil || !strings.Contains(err.Error(), "below Min") {
 		t.Fatalf("below-Min should error; got %v", err)
 	}
 
-	// Above Max.
 	_, err = ResolveAs[argresArgs](s, ResolveInputs{FlagValues: map[string]string{"replicas": "20"}})
 	if err == nil || !strings.Contains(err.Error(), "above Max") {
 		t.Fatalf("above-Max should error; got %v", err)
@@ -174,7 +165,6 @@ func TestResolve_GroupExactlyOne(t *testing.T) {
 		sb.Group("Image", "PoolSize").ExactlyOne()
 	})
 
-	// Both set -> fail.
 	_, err := ResolveAs[argresArgs](s, ResolveInputs{
 		FlagValues: map[string]string{"image": "x", "pool-size": "5"},
 	})
@@ -182,13 +172,11 @@ func TestResolve_GroupExactlyOne(t *testing.T) {
 		t.Fatal("ExactlyOne with two set should fail")
 	}
 
-	// One set -> pass.
 	_, err = ResolveAs[argresArgs](s, ResolveInputs{FlagValues: map[string]string{"image": "x"}})
 	if err != nil {
 		t.Errorf("ExactlyOne with one set should pass; got %v", err)
 	}
 
-	// None set -> fail.
 	_, err = ResolveAs[argresArgs](s, ResolveInputs{})
 	if err == nil {
 		t.Fatal("ExactlyOne with none set should fail")
@@ -212,7 +200,6 @@ func TestResolve_BoolFlagParsing(t *testing.T) {
 
 func TestResolve_FlagValuesApplyByFlagName(t *testing.T) {
 	s := mustBuild(t, func(sb *SchemaBuilder[argresArgs]) {
-		// no constraints; just verify flag-keyed values route by flag.
 	})
 	a, err := ResolveAs[argresArgs](s, ResolveInputs{
 		FlagValues: map[string]string{"pool-size": "12", "image": "foo"},

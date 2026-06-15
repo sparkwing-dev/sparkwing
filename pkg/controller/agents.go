@@ -25,9 +25,6 @@ type Agent struct {
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	windowStart := time.Now().Add(-1 * time.Hour)
 
-	// lease_expires_at is the freshness signal: every claim sets it,
-	// and a lease that expired over an hour ago means the runner has
-	// been silent long enough to drop from the list.
 	rows, err := s.store.DB().QueryContext(r.Context(), `
 SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
   FROM nodes

@@ -14,10 +14,6 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// Session ids stored plaintext in the `hash` column (historical
-// name); 256-bit entropy + 12h TTL bounds DB-dump risk. Hashing would
-// require server-secret HMAC or argon2-on-every-lookup.
-
 // Session is one row in the sessions table.
 type Session struct {
 	ID         string // raw id; also the primary key
@@ -151,8 +147,6 @@ func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Tim
 	return err
 }
 
-// --- User CRUD (password-authenticated principals) ---
-
 // CreateUser inserts a user with an argon2id-hashed password.
 func (s *Store) CreateUser(name, password string, now time.Time) (*User, error) {
 	if name == "" {
@@ -237,7 +231,6 @@ func (s *Store) CountUsers() (int, error) {
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error) {
 	u, err := s.lookupUser(name)
 	if err != nil {
-		// Dummy hash to avoid timing leak.
 		_, _ = hashPassword(password)
 		return nil, errors.New("invalid username or password")
 	}
@@ -299,8 +292,6 @@ func (s *Store) DeleteUser(name string) error {
 	}
 	return nil
 }
-
-// --- helpers ---
 
 func (s *Store) lookupUser(name string) (*User, error) {
 	row := s.queryRowNoCtx(`

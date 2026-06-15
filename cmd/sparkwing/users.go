@@ -56,17 +56,13 @@ func runUsersAdd(args []string) error {
 	}
 	password := *passwordFlag
 	if password == "" {
-		// term.ReadPassword disables terminal echo so the password
-		// doesn't appear on-screen or land in shell history via copy-
-		// paste. Only works when stdin is a TTY; when stdin is a pipe
-		// (CI feeding a password in), fall back to a raw read.
 		fmt.Fprintf(os.Stderr, "password for %q: ", *name)
 		if term.IsTerminal(int(os.Stdin.Fd())) {
 			buf, err := term.ReadPassword(int(os.Stdin.Fd()))
 			if err != nil {
 				return fmt.Errorf("read password: %w", err)
 			}
-			fmt.Fprintln(os.Stderr) // line break after the hidden entry
+			fmt.Fprintln(os.Stderr)
 			password = string(buf)
 		} else {
 			var line string

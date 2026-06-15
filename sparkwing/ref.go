@@ -261,9 +261,6 @@ func collectCrossPipelineRefs(job any) []RefTarget {
 		if !f.IsExported() {
 			continue
 		}
-		// Match Ref[T] structurally: a struct with NodeID + Pipeline
-		// string fields. (Generic types don't carry a comparable
-		// package-qualified name we can match against directly.)
 		ft := f.Type
 		if ft.Kind() != reflect.Struct {
 			continue

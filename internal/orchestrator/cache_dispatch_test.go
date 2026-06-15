@@ -13,11 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// End-to-end coverage through the in-process orchestrator. Exercises
-// Concurrency() with the policies most likely to surface wiring bugs
-// (Queue, Skip, Fail, CancelOthers) and Cache()'s content-memo short-
-// circuit.
-
 var cacheCounter struct {
 	inflight atomic.Int32
 	max      atomic.Int32
@@ -50,8 +45,6 @@ func (cacheQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 type cacheSkipLeaderPipe struct{ sparkwing.Base }
 
 func (cacheSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Slow leader holds the slot while the follower pipeline arrives
-	// under OnLimit:Skip in a separate goroutine.
 	g := sparkwing.NewConcurrencyGroup("cache-skip-key", sparkwing.ConcurrencyLimit{Capacity: 1})
 	sparkwing.Job(plan, "leader", held(cacheCounterBump)).Concurrency(g)
 	return nil
@@ -71,8 +64,6 @@ func (cacheSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 type cacheFailLeaderPipe struct{ sparkwing.Base }
 
 func (cacheFailLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Slow leader holds the slot long enough for the follower pipeline
-	// to arrive under OnLimit:Fail while the slot is full.
 	g := sparkwing.NewConcurrencyGroup("cache-fail-key", sparkwing.ConcurrencyLimit{Capacity: 1})
 	sparkwing.Job(plan, "leader", held(cacheCounterBump)).Concurrency(g)
 	return nil
@@ -92,9 +83,6 @@ func (cacheFailFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 type cacheCancelOthersLeaderPipe struct{ sparkwing.Base }
 
 func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Hold the slot for 5s but respect ctx cancellation: once the
-	// CancelOthers follower supersedes this holder, the heartbeat path
-	// cancels execCtx and the leader unwinds, freeing the slot.
 	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{Capacity: 1})
 	sparkwing.Job(plan, "leader", func(ctx context.Context) error {
 		select {
@@ -257,14 +245,12 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Leader holds the slot; follower arrives mid-hold under Skip and
-	// MUST resolve as skipped-concurrent without running its body.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-leader"})
 		leaderDone <- res
 	}()
-	waitForLeaderHolding(t) // leader holds the only slot
+	waitForLeaderHolding(t)
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
 	if err != nil {
@@ -274,8 +260,6 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		t.Fatalf("follower status = %q, want success (skipped-concurrent counts as OK)", followerRes.Status)
 	}
 
-	// Follower's node row must carry outcome=skipped-concurrent and
-	// the step body must NOT have incremented the counter.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	fnodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
@@ -286,13 +270,12 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		t.Fatalf("follower outcome = %q, want skipped-concurrent", fnodes[0].Outcome)
 	}
 
-	leaderRelease.Store(true) // let the leader finish
+	leaderRelease.Store(true)
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
 	}
 
-	// Sanity: only the leader's body ran.
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("peak concurrency = %d, want <= 1", peak)
 	}
@@ -302,23 +285,18 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Start leader in a goroutine; give it a head-start to claim the
-	// slot, then fire a follower under OnLimit:Fail that should
-	// reject immediately.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-leader"})
 		leaderDone <- res
 	}()
-	waitForLeaderHolding(t) // leader holds the only slot
+	waitForLeaderHolding(t)
 
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-follower"})
 	if followerRes.Status != "failed" {
 		t.Fatalf("follower status = %q, want failed (OnLimit:Fail under held slot)", followerRes.Status)
 	}
 
-	// Harden: follower's node row should carry a clear error message
-	// that an operator can read back.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
@@ -332,7 +310,7 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 		t.Fatalf("follower error = %q, want a message mentioning OnLimit:Fail", nodes[0].Error)
 	}
 
-	leaderRelease.Store(true) // let the leader finish
+	leaderRelease.Store(true)
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
@@ -343,7 +321,6 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// First run: miss, body runs, cache entry written on release.
 	res1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
 		t.Fatalf("run 1: %v", err)
@@ -355,7 +332,6 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 		t.Fatalf("run 1 body invocations = %d, want 1", ran)
 	}
 
-	// Second run: hit, body MUST NOT run. Node outcome = cached.
 	res2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
@@ -382,18 +358,15 @@ func TestConcurrency_DriftWarnEventEmitted(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// First run declares capacity 1.
 	r1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-a"})
 	if err != nil || r1.Status != "success" {
 		t.Fatalf("run 1: status=%q err=%v", r1.Status, err)
 	}
-	// Second run declares capacity 3 on the SAME group -> drift warn.
 	r2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-b"})
 	if err != nil || r2.Status != "success" {
 		t.Fatalf("run 2: status=%q err=%v", r2.Status, err)
 	}
 
-	// Scan the second run's events for concurrency_drift.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	events, _ := st.ListEventsAfter(context.Background(), r2.RunID, 0, 500)
@@ -424,9 +397,6 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Fire two plan invocations in goroutines; Plan.Concurrency at
-	// capacity 1 must serialize them. Peak concurrency across ALL nodes
-	// must not exceed 1.
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
@@ -446,16 +416,13 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Leader plan takes the slot; follower plan under Skip should
-	// return success immediately WITHOUT running any nodes.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-skip-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond) // leader acquires
+	time.Sleep(100 * time.Millisecond)
 
-	// Snapshot counter before follower.
 	snapshotBefore := cacheCounter.inflight.Load()
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-skip-follower"})
@@ -466,8 +433,6 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 		t.Fatalf("follower status = %q, want success (Skip treats plan-level full slot as OK)", followerRes.Status)
 	}
 
-	// The follower's 'work' node MUST NOT have run -- counter should
-	// only have incremented from the leader's node, not the follower.
 	<-leaderDone
 	finalCount := cacheCounter.inflight.Load()
 	if finalCount-snapshotBefore > 1 {
@@ -480,10 +445,6 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Leader arrives first and holds the slot for 5s but respects ctx.
-	// Follower arrives under CancelOthers; superseding the leader frees
-	// the slot (via the heartbeat-driven supersede path) so the
-	// follower runs well before the leader's natural 5s completion.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-cancel-others-leader"})
@@ -498,12 +459,9 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 	if followerRes.Status != "success" {
 		t.Fatalf("follower status = %q, want success (evicted leader, took slot)", followerRes.Status)
 	}
-	// Eviction should free the slot well before the leader's 5s hold.
 	if followerElapsed > 5*time.Second {
 		t.Fatalf("follower took %s; expected eviction well under 5s", followerElapsed)
 	}
 
-	// Drain the leader goroutine; its outcome is irrelevant (likely
-	// superseded or cancelled via ctx unwinds).
 	<-leaderDone
 }

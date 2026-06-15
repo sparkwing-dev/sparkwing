@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// --- Schema parsing: type recognition ---
-
 type allTypesInputs struct {
 	S    string            `flag:"s"`
 	B    bool              `flag:"b"`
@@ -49,8 +47,6 @@ func TestParseInputsSchema_AllTypes(t *testing.T) {
 		t.Errorf("type mapping mismatch:\nwant %v\ngot  %v", want, got)
 	}
 }
-
-// --- Schema parsing: registration-time validation rules ---
 
 type requiredWithDefault struct {
 	X string `flag:"x" required:"true" default:"foo"`
@@ -209,8 +205,6 @@ func TestParseInputsSchema_SkipsUntagged(t *testing.T) {
 	}
 }
 
-// --- populateInputs: parsing all types from the wire-format map ---
-
 type populateAllInputs struct {
 	S    string            `flag:"s"`
 	B    bool              `flag:"b"`
@@ -346,7 +340,6 @@ func TestPopulateInputs_EnumValidationAtParseTime(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "must be one of") {
 		t.Fatalf("expected enum violation error, got %v", err)
 	}
-	// Allowed values pass and propagate.
 	in = enumed{}
 	if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), map[string]string{"target": "prod"}); err != nil {
 		t.Fatalf("expected prod to be accepted, got %v", err)
@@ -380,8 +373,6 @@ func TestPopulateInputs_BadDurationErrors(t *testing.T) {
 	}
 }
 
-// --- flattenInputs: round-trip through wire format ---
-
 type roundTripInputs struct {
 	S    string            `flag:"s"`
 	B    bool              `flag:"b"`
@@ -409,8 +400,6 @@ func TestFlattenInputs_RoundTrip(t *testing.T) {
 	if err := populateInputs(schema, reflect.ValueOf(&back).Elem(), flat); err != nil {
 		t.Fatalf("repopulate: %v", err)
 	}
-	// Bag preservation only requires the extra entries to round-trip;
-	// the bag itself reflects the inverse-projection map identity.
 	if back.S != original.S || back.B != original.B || back.I != original.I || back.D != original.D {
 		t.Errorf("scalar round-trip mismatch: original=%+v back=%+v", original, back)
 	}
@@ -421,8 +410,6 @@ func TestFlattenInputs_RoundTrip(t *testing.T) {
 		t.Errorf("bag round-trip lost entry: %v", back.Bag)
 	}
 }
-
-// --- Pipeline registration end-to-end: the user-visible path ---
 
 type secretInputs struct {
 	Token string `flag:"token" secret:"true"`
@@ -462,7 +449,6 @@ func TestRegistration_SecretValues(t *testing.T) {
 	got := reg.SecretValues(map[string]string{
 		"token":   "from-args",
 		"visible": "not-secret",
-		// Backup unset → default applies; Empty stays "" → skipped.
 	})
 	want := map[string]bool{"from-args": true, "fallback-secret": true}
 	if len(got) != len(want) {
@@ -489,14 +475,6 @@ func TestRegister_SchemaCarriesSecretBit(t *testing.T) {
 		t.Errorf("secret bit lost in schema: %+v", reg.Schema.Fields[0])
 	}
 }
-
-// --- Anonymous embedded structs ---
-//
-// Pipelines that share a flag bundle via embedding should see the
-// embedded struct's flags surface as first-class CLI flags. The
-// schema walker must recurse into anonymous embedded fields, the
-// populator must reach the leaf field through the embed, and the
-// flattener must read it back the same way.
 
 type embeddedSkipFilter struct {
 	Skip string `flag:"skip" desc:"comma-separated job names to skip"`
@@ -669,8 +647,6 @@ func TestParseInputsSchema_NestedEmbedTransitive(t *testing.T) {
 		}
 	}
 }
-
-// --- Pipeline registration end-to-end with embedded args ---
 
 type embeddedRegPipe struct{ captured embedOuter }
 

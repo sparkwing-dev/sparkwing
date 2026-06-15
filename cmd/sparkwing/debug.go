@@ -59,10 +59,6 @@ func runDebugRun(args []string) error {
 		return nil
 	}
 
-	// Hand-parse debug-owned flags (--pipeline plus the three pause
-	// directives) and forward everything else to the pipeline binary.
-	// Rule: no positional args on sparkwing -- --pipeline names the
-	// pipeline to run under debug supervision.
 	var pauseBefore, pauseAfter []string
 	var pauseOnFailure bool
 	pipelineName := ""
@@ -348,10 +344,6 @@ func claimToPod(claim string) (pod, namespace string) {
 	case strings.HasPrefix(claim, "runner:"):
 		return strings.TrimPrefix(claim, "runner:"), namespace
 	case strings.HasPrefix(claim, "pod:"):
-		// pod:<runID>:<nodeID> -- the actual pod name is derived from
-		// the Job spec and isn't directly recoverable from the claim
-		// string. Fall back to the raw runID:nodeID value; operators
-		// can adjust via kubectl get pods + the printed namespace.
 		return strings.TrimPrefix(claim, "pod:"), namespace
 	}
 	return "", namespace

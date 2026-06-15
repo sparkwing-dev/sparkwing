@@ -342,8 +342,6 @@ func probeRecentRuns(ctx context.Context, prof *profile.Profile) profileProbeRes
 			other++
 		}
 	}
-	// other = running / cancelling etc. Don't count it against the
-	// success rate; just note it in detail when non-zero.
 	rate := 100.0
 	if total > 0 {
 		rate = float64(success) / float64(total) * 100.0

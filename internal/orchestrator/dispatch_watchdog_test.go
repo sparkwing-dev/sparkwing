@@ -20,9 +20,6 @@ var wedgeRelease = make(chan struct{})
 type wedgedNodePipe struct{ sparkwing.Base }
 
 func (wedgedNodePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// Body blocks on a test-owned channel that ignores ctx. That's
-	// exactly the failure shape the watchdog is for: a node whose
-	// goroutine never returns, so state.wg.Wait would hang forever.
 	sparkwing.Job(plan, "wedged", func(ctx context.Context) error {
 		<-wedgeRelease
 		return nil
@@ -43,10 +40,8 @@ func init() {
 // timeout (no hidden additional wait).
 func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 	t.Cleanup(func() {
-		// Drain the leaked goroutine so it doesn't outlive the test.
 		select {
 		case <-wedgeRelease:
-			// already closed
 		default:
 			close(wedgeRelease)
 		}
@@ -73,17 +68,10 @@ func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 	if !strings.Contains(runErr, "wedged") {
 		t.Errorf("res.Error %q must name the stuck node", runErr)
 	}
-	// Generous upper bound: timeout + scheduling + log emit. The
-	// historical hang was 41 minutes; anything under a few seconds
-	// here proves the watchdog short-circuited.
 	if elapsed > 5*time.Second {
 		t.Errorf("dispatcher returned after %s; watchdog should have fired near 300ms", elapsed)
 	}
 
-	// The state events table should carry the structured summary
-	// (timeout duration, stuck node list, stack size). The full stack
-	// dump lives in the envelope file -- this assertion is on the
-	// indexable record dashboards consume.
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
 	events, _ := st.ListEventsAfter(context.Background(), res.RunID, 0, 500)
@@ -116,7 +104,7 @@ func TestDispatchWatchdog_NegativeDisables(t *testing.T) {
 	p := newPaths(t)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:            "spawn-single", // a normal, well-behaved pipeline
+		Pipeline:            "spawn-single",
 		DispatchWaitTimeout: -1,
 	})
 	wg.Done()

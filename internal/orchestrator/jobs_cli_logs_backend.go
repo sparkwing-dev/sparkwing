@@ -141,7 +141,6 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 	}()
 
 	<-terminal
-	// Drain window so streams flush final lines.
 	select {
 	case <-time.After(600 * time.Millisecond):
 	case <-ctx.Done():
@@ -189,9 +188,6 @@ func streamNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID 
 		if ctx.Err() != nil {
 			return
 		}
-		// EOF without ctx-done usually means the stream closed for
-		// non-fatal reasons (TTL, paginated chunk boundary). Pause
-		// briefly so we don't tight-loop reconnect on a dead node.
 		select {
 		case <-ctx.Done():
 			return
@@ -219,8 +215,6 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 		if err == nil && len(data) > lastLen {
 			newBytes := data[lastLen:]
 			lines := bytes.Split(newBytes, []byte{'\n'})
-			// Last element is partial-or-empty; flush only complete
-			// lines this cycle, the rest catches up next poll.
 			complete := lines[:len(lines)-1]
 			emitted := 0
 			for _, line := range complete {
@@ -248,8 +242,6 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 // flips true mid-stream, each subsequent line gets a "[nodeID] "
 // prefix so the operator can attribute interleaved output.
 func copyNodeStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) {
-	// Naive line-buffered read so partial reads don't drop lines.
-	// 64KB buffer matches the storage layer's typical write chunking.
 	const bufSize = 64 * 1024
 	buf := make([]byte, bufSize)
 	var partial []byte

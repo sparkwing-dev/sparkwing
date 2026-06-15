@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// These tests cover the orchestrator's runtime fan-out machinery via
-// the JobFanOutDynamic surface.
-
 type discoverJob struct {
 	sparkwing.Base
 	sparkwing.Produces[[]string]
@@ -155,8 +152,6 @@ func init() {
 	register("expand-source-fails", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &expandSourceFails{} })
 	register("expand-gen-panics", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &expandGenPanics{} })
 }
-
-// --- Tests ---
 
 func TestJobFanOutDynamic_FansOutAndJoins(t *testing.T) {
 	items := []string{"alpha", "beta", "gamma"}

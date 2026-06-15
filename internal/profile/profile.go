@@ -198,10 +198,6 @@ func Load(path string) (*Config, error) {
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]*Profile{}
 	}
-	// Stamp .Name from the map key so Resolve returns a fully-formed
-	// Profile without a separate lookup. Inherit URL/Token defaults
-	// from the controller block onto any controller-typed surface
-	// that left them empty.
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			cfg.Profiles[name] = &Profile{Name: name}
@@ -220,7 +216,6 @@ func Save(path string, cfg *Config) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	// Strip .Name before marshal (duplicates the map key).
 	out := &Config{Profiles: map[string]*Profile{}}
 	for name, p := range cfg.Profiles {
 		if p == nil {

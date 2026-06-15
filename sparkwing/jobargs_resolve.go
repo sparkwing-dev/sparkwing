@@ -39,10 +39,6 @@ func resolveAndBindJobArgs(plan *Plan, in ResolveInputs) (map[string]any, error)
 			problems = append(problems, fmt.Errorf("job %q: %w", jobID, err))
 			continue
 		}
-		// Find the job's WithArgs holder and bind the resolved struct.
-		// JobArgSchemas only contains entries for jobs that embedded
-		// WithArgs[T]; the lookup should always succeed but a defensive
-		// check keeps a buggy registration from corrupting the bind.
 		node := plan.Job(jobID)
 		if node == nil {
 			problems = append(problems, fmt.Errorf("job %q: registered args but plan has no node by that id", jobID))
@@ -57,8 +53,6 @@ func resolveAndBindJobArgs(plan *Plan, in ResolveInputs) (map[string]any, error)
 			problems = append(problems, fmt.Errorf("job %q: bind resolved args: %w", jobID, err))
 			continue
 		}
-		// Merge into the cross-job resolved map. Same-flag collisions
-		// across jobs are impossible by plan-registration invariant.
 		for _, m := range schema.fields {
 			if m.Flag == "" {
 				continue

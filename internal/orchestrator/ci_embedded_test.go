@@ -56,7 +56,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 		t.Fatalf("status = %q, want success (err=%v)", res.Status, res.Error)
 	}
 
-	// The log line should be in the LogStore at (runID, hello).
 	got, err := logStore.Read(context.Background(), res.RunID, "hello", storage.ReadOpts{})
 	if err != nil {
 		t.Fatalf("LogStore.Read: %v", err)
@@ -65,7 +64,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 		t.Errorf("log read = %q, want hello-from-ci-embedded", got)
 	}
 
-	// State dump should be at runs/<runID>/state.ndjson.
 	rc, err := artStore.Get(context.Background(), "runs/"+res.RunID+"/state.ndjson")
 	if err != nil {
 		t.Fatalf("ArtifactStore.Get state.ndjson: %v", err)
@@ -75,7 +73,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 	if len(dump) == 0 {
 		t.Fatal("state.ndjson is empty")
 	}
-	// First line is the run record.
 	lines := strings.Split(strings.TrimSpace(string(dump)), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("state.ndjson should have run + node lines, got %d lines: %q", len(lines), dump)
@@ -87,7 +84,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 	if first["kind"] != "run" {
 		t.Errorf("line 0 kind = %v, want run", first["kind"])
 	}
-	// Node line should reference our node id.
 	var second map[string]any
 	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
 		t.Fatalf("decode line 1: %v", err)
@@ -98,8 +94,6 @@ func TestCIEmbedded_LogStore_AndStateDump(t *testing.T) {
 }
 
 func TestCIEmbedded_LogStore_OverridesLocalLogs(t *testing.T) {
-	// When LogStore is set, the local on-disk LogBackend is bypassed.
-	// The dispatcher's log lines never appear under paths.RunDir().
 	logStore, err := fs.NewLogStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewLogStore: %v", err)

@@ -28,7 +28,6 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 	defer srv.Close()
 	c := client.New(srv.URL, nil)
 
-	// Fire two triggers on different pipelines.
 	for _, pipeline := range []string{"alpha", "beta"} {
 		resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 			"pipeline": pipeline,
@@ -42,7 +41,6 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	// No filter: both triggers, status=pending.
 	all, err := c.ListTriggers(context.Background(), store.TriggerFilter{})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
@@ -56,7 +54,6 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 		}
 	}
 
-	// Pipeline filter narrows to one.
 	only, err := c.ListTriggers(context.Background(), store.TriggerFilter{
 		Pipelines: []string{"alpha"},
 	})
@@ -67,7 +64,6 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 		t.Fatalf("pipeline filter got %+v want one alpha", only)
 	}
 
-	// Claim one trigger so status=claimed is populated.
 	if _, err := st.ClaimNextTrigger(context.Background(), 0); err != nil {
 		t.Fatalf("ClaimNextTrigger: %v", err)
 	}

@@ -71,7 +71,6 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	if logger == nil {
 		logger = slog.Default()
 	}
-	// Uses ctx (not runCtx) so a mid-run shutdown still finalizes.
 	defer func() {
 		if ferr := stateClient.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger failed",
@@ -79,8 +78,6 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		}
 	}()
 
-	// Heartbeat keeps the claim alive and propagates operator cancel
-	// requests via runCtx.
 	runCtx, cancelRun := context.WithCancel(ctx)
 	cancelled := &atomic.Bool{}
 	go runHeartbeat(runCtx, stateClient, trigger.ID,
@@ -117,7 +114,6 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		return
 	}
 
-	// On operator cancel, overwrite state and sweep in-flight nodes.
 	finalStatus := res.Status
 	if cancelled.Load() {
 		finalStatus = "cancelled"
@@ -181,10 +177,8 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	case opts.LogsURL != "":
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, opts.HTTPClient, opts.Token, opts.Logger)
 	}
-	// Concurrency must go through the controller so cache hits, slot
-	// holders, and waiter resolution are shared across runner pods.
 	backends := RemoteBackends(stateClient, logsBackend, opts.HTTPClient, store.DefaultConcurrencyLease)
-	_ = local // local backends still useful for paths/logs fallback
+	_ = local
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)
 	if err != nil {
@@ -224,7 +218,6 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Short ctx so a wedged controller can't block the ticker.
 			hbCtx, cancel := context.WithTimeout(ctx, runHeartbeatTimeout)
 			status, err := c.HeartbeatTrigger(hbCtx, triggerID)
 			cancel()

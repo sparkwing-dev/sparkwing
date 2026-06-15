@@ -36,9 +36,6 @@ func main() {
 
 	var b strings.Builder
 	b.WriteString("<!-- GENERATED from the sparkwing.yaml schema structs (pkg/pipelines, pkg/projectconfig) by internal/configref. Do not edit by hand; regenerate with `bash bin/gen-config-docs.sh`. -->\n")
-	// Field godoc is authored as prose and may start a line with `#`
-	// or a list marker; disable the shape rules so schema wording never
-	// has to satisfy markdownlint in this derived file.
 	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
 	b.WriteString("# Config reference\n\n")
 	b.WriteString("The complete `.sparkwing/sparkwing.yaml` schema, generated from the " +

@@ -91,8 +91,6 @@ func argTypeString(t reflect.Type) string {
 	case reflect.Int:
 		return "int"
 	case reflect.Int64:
-		// time.Duration also lands here -- classifyKind disambiguates
-		// by type name, not kind, so mirror that here.
 		if t.PkgPath() == "time" && t.Name() == "Duration" {
 			return "duration"
 		}
@@ -155,9 +153,6 @@ func NewSchema[T any]() *SchemaBuilder[T] {
 	var zero T
 	t := reflect.TypeOf(zero)
 	if t == nil {
-		// T is an interface type; should never happen for a real Args
-		// struct, but guard so callers get a clear error rather than
-		// a nil-pointer panic later.
 		panic("sparkwing.NewSchema: T must be a concrete struct type (got nil reflect.Type)")
 	}
 	if t.Kind() != reflect.Struct {
@@ -213,7 +208,6 @@ func (sb *SchemaBuilder[T]) Build() (*Schema, error) {
 
 	structFields := reflectStructFields(sb.goType)
 
-	// 1. Every key in sb.fields must refer to a real struct field.
 	for name := range sb.fields {
 		if _, ok := structFields[name]; !ok {
 			problems = append(problems, fmt.Errorf(
@@ -223,8 +217,6 @@ func (sb *SchemaBuilder[T]) Build() (*Schema, error) {
 		}
 	}
 
-	// 2. Build a fieldMeta for every struct field. Apply tag-derived
-	//    Flag and Desc; overlay any constraint bundle from sb.fields.
 	for name, sf := range structFields {
 		var m *fieldMeta
 		if fb, ok := sb.fields[name]; ok {
@@ -242,17 +234,12 @@ func (sb *SchemaBuilder[T]) Build() (*Schema, error) {
 		s.fields[name] = m
 	}
 
-	// 3. Per-field constraint validation (types, signatures, etc).
 	for name, m := range s.fields {
 		if err := validateFieldMeta(m, sb.goType); err != nil {
 			problems = append(problems, fmt.Errorf("Schema field %q: %w", name, err))
 		}
 	}
 
-	// 4. DependsOn references must point at real fields, and the
-	//    inferred dependency DAG (DependsOn edges + Computed-inferred
-	//    edges from closure captures we can't introspect, so we trust
-	//    the explicit DependsOn declaration) must be acyclic.
 	for name, m := range s.fields {
 		for _, dep := range m.DependsOn {
 			if _, ok := s.fields[dep]; !ok {
@@ -269,7 +256,6 @@ func (sb *SchemaBuilder[T]) Build() (*Schema, error) {
 	}
 	s.order = order
 
-	// 5. Flag names must be unique.
 	seenFlag := make(map[string]string, len(s.fields))
 	for name, m := range s.fields {
 		if m.Flag == "" {
@@ -285,7 +271,6 @@ func (sb *SchemaBuilder[T]) Build() (*Schema, error) {
 		seenFlag[m.Flag] = name
 	}
 
-	// 6. Group kinds must be set, and group fields must exist.
 	for _, g := range sb.groups {
 		if g.meta.kind == groupKindUnset {
 			problems = append(problems, fmt.Errorf(
@@ -367,8 +352,6 @@ func (fb *FieldBuilder[T]) Positive() *FieldBuilder[T] { return fb.apply(Positiv
 // Custom is the escape-hatch validator (func(T) error).
 func (fb *FieldBuilder[T]) Custom(fn any) *FieldBuilder[T] { return fb.apply(Custom(fn)) }
 
-// --- helpers ---
-
 // reflectStructFields returns the exported fields of a struct type
 // keyed by Go field name. Unexported fields are skipped (they can't
 // be populated via reflection from CLI flags anyway). Anonymous
@@ -403,7 +386,6 @@ func kebabCaseFieldName(name string) string {
 		if i > 0 && isUpper {
 			prev := rune(name[i-1])
 			prevUpper := prev >= 'A' && prev <= 'Z'
-			// Break on Aa boundary, OR on AAa boundary (the last A starts a new word).
 			nextLower := false
 			if i+1 < len(name) {
 				next := rune(name[i+1])
@@ -515,7 +497,7 @@ func topoSortDependencies(fields map[string]*fieldMeta) ([]string, error) {
 	for n := range fields {
 		names = append(names, n)
 	}
-	sort.Strings(names) // stable iteration
+	sort.Strings(names)
 
 	indeg := make(map[string]int, len(names))
 	for _, n := range names {
@@ -524,8 +506,6 @@ func topoSortDependencies(fields map[string]*fieldMeta) ([]string, error) {
 	deps := make(map[string][]string, len(names))
 	for _, n := range names {
 		m := fields[n]
-		// Only known fields contribute edges; missing-field errors
-		// are reported separately by the caller.
 		for _, d := range m.DependsOn {
 			if _, ok := fields[d]; !ok {
 				continue
@@ -556,7 +536,6 @@ func topoSortDependencies(fields map[string]*fieldMeta) ([]string, error) {
 	}
 
 	if len(out) != len(names) {
-		// Surface the remaining (still-cyclic) nodes.
 		remaining := make([]string, 0, len(names)-len(out))
 		for _, n := range names {
 			if indeg[n] > 0 {

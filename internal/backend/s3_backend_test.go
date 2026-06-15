@@ -71,7 +71,6 @@ func TestS3Backend_ListRuns(t *testing.T) {
 	if len(runs) != 3 {
 		t.Fatalf("ListRuns = %d runs, want 3", len(runs))
 	}
-	// Newest-first
 	if runs[0].ID != "gamma" || runs[1].ID != "beta" || runs[2].ID != "alpha" {
 		t.Fatalf("ListRuns order = %s,%s,%s, want gamma,beta,alpha",
 			runs[0].ID, runs[1].ID, runs[2].ID)
@@ -144,7 +143,7 @@ func TestS3Backend_ListEventsAfter_ReadsEventEnvelopes(t *testing.T) {
 	t.Parallel()
 	st := mustFS(t)
 	b := backend.NewS3Backend(st, nil)
-	b.SetLiveTTL(0) // disable cache so each read is fresh
+	b.SetLiveTTL(0)
 	ctx := context.Background()
 
 	var buf strings.Builder

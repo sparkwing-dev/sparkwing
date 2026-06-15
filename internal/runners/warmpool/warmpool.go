@@ -87,9 +87,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	if err := r.ctrl.MarkNodeReady(ctx, req.RunID, req.NodeID); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("mark ready: %w", err)}
 	}
-	// Stamp pre-claim activity once; heartbeats from here on keep the
-	// dashboard's liveness dot green while we wait for a pool pod.
-	// Activity transitions when a claim is first observed.
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "waiting for warm runner")
 
 	hbCtx, stopHB := context.WithCancel(ctx)
@@ -101,9 +98,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	claimedSeen := false
 	waitDeadline := time.Now().Add(r.cfg.ClaimWaitTimeout)
-	// Throttle the "no matching runner" warning. Labeled nodes block
-	// indefinitely waiting for a matching runner; we log once per
-	// minute so a misconfigured Requires is visible without spamming.
 	const unmatchableLogEvery = time.Minute
 	var lastUnmatchableLog time.Time
 
@@ -114,9 +108,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		case <-poll.C:
 			n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
 			if err != nil {
-				// Transient controller hiccup. Keep polling; if the
-				// failure persists the outer run ctx will eventually
-				// cancel us.
 				r.logger.Warn("warmpool: GetNode failed",
 					"run_id", req.RunID, "node_id", req.NodeID, "err", err)
 				continue
@@ -126,19 +117,13 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			if n.ClaimedBy != "" {
 				if !claimedSeen {
-					// First observation of a claim; note the holder so
-					// operators can correlate with a specific warm runner.
 					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 						fmt.Sprintf("claimed by %s", n.ClaimedBy))
 				}
 				claimedSeen = true
 				continue
 			}
-			// Labeled jobs (Requires) skip the K8sRunner fallback:
-			// fallback Jobs don't advertise labels, so handing them a
-			// labeled node defeats the point. Block on the warm pool
-			// until a matching runner connects; periodically warn so
-			// an unmatchable Requires is visible to the operator.
+			// safety: labeled nodes must not fall back to K8sRunner; fallback Jobs don't advertise labels
 			if len(n.NeedsLabels) > 0 {
 				if time.Since(lastUnmatchableLog) >= unmatchableLogEvery {
 					r.logger.Warn("warmpool: labeled node unclaimed",
@@ -150,9 +135,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				continue
 			}
 			if !claimedSeen && time.Now().After(waitDeadline) {
-				// Pool was empty or unreachable for long enough to
-				// warrant fallback. Revoke atomically so we don't
-				// double-dispatch if a pod claims in the next tick.
 				revoked, rerr := r.ctrl.RevokeNodeReady(ctx, req.RunID, req.NodeID)
 				if rerr != nil {
 					r.logger.Warn("warmpool: revoke failed",
@@ -160,9 +142,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					continue
 				}
 				if !revoked {
-					// A pod claimed between our GetNode and
-					// RevokeNodeReady. Race lost; stay in the poll
-					// loop and let the pod finish the work.
+					// safety: pod claimed between GetNode and RevokeNodeReady; let it finish
 					claimedSeen = true
 					continue
 				}
@@ -214,9 +194,7 @@ func resultFromNode(n *store.Node) runner.Result {
 	if len(n.Output) > 0 {
 		res.Output = n.Output
 	}
-	// Defensive: if the pod wrote terminal state without an outcome,
-	// treat as Failed so the orchestrator sees something deterministic
-	// rather than an empty string.
+	// safety: empty outcome means the pod wrote done without an outcome; treat as Failed
 	if oc == "" {
 		res.Outcome = sparkwing.Failed
 		if res.Err == nil {

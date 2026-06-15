@@ -178,9 +178,6 @@ func TestDispatch_TruncationCap(t *testing.T) {
 	ctx := context.Background()
 	seedDispatchRun(t, s, "run-1")
 
-	// Build an envelope just over the cap. Use a JSON-shaped payload
-	// (so it's at least syntactically valid) but the content doesn't
-	// matter -- the store treats the BLOB as opaque.
 	big := make([]byte, store.MaxNodeDispatchEnvelope+1024)
 	for i := range big {
 		big[i] = 'A'

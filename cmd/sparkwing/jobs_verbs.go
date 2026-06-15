@@ -22,8 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// --- jobs failures -----------------------------------------------
-
 // failureRow is the normalized view a failure-clustering pass works
 // on. Controller-side failure_reason is empty for local runs (that's
 // a classification the controller performs), so default clustering
@@ -116,7 +114,7 @@ func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipelin
 	rows := make([]failureRow, 0, len(runs))
 	for _, r := range runs {
 		if r.ParentRunID != "" {
-			continue // only root-level runs
+			continue
 		}
 		row := failureRow{ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status}
 		nodes, err := st.ListNodes(ctx, r.ID)
@@ -257,8 +255,6 @@ func renderFailureClusters(rows []failureRow, groupBy string, asJSON bool) error
 	return tw.Flush()
 }
 
-// --- jobs stats --------------------------------------------------
-
 type pipelineStats struct {
 	Pipeline   string        `json:"pipeline"`
 	Runs       int           `json:"runs"`
@@ -397,8 +393,6 @@ func aggregateRuns(name string, runs []*store.Run) pipelineStats {
 	return s
 }
 
-// --- jobs last ---------------------------------------------------
-
 func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsLast.Path, flag.ContinueOnError)
 	on := fs.String("profile", "", "profile name (default: current default)")
@@ -503,8 +497,6 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 	}
 }
 
-// --- jobs tree ---------------------------------------------------
-
 func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsTree.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "root run identifier")
@@ -527,7 +519,6 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		Children []*runNode `json:"children,omitempty"`
 	}
 
-	// fetchChildren returns direct children of parentID.
 	var fetchChildren func(parentID string) ([]*store.Run, error)
 	var root *store.Run
 	if *on != "" {
@@ -620,8 +611,6 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 	return nil
 }
 
-// --- jobs get ----------------------------------------------------
-
 func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsGet.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
@@ -644,8 +633,6 @@ func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) er
 	}
 	return orchestrator.GetRunJSONLocal(ctx, paths, *runID, os.Stdout)
 }
-
-// --- jobs wait ---------------------------------------------------
 
 // runJobsWait blocks until the named run reaches a terminal state.
 // Exit codes (propagated via cliError):
@@ -670,8 +657,6 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		return fmt.Errorf("jobs wait: --poll must be > 0")
 	}
 
-	// fetch returns the run or a permanent/transient error. A nil run +
-	// nil err means "not yet visible, keep polling".
 	var fetch func() (*store.Run, error)
 	if *on != "" {
 		prof, perr := resolveProfile(*on)
@@ -699,14 +684,9 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 	ticker := time.NewTicker(*poll)
 	defer ticker.Stop()
 
-	// Prime once before the first tick so --timeout 0s-ish paths don't
-	// always exit 2 before the first fetch.
 	run, ferr := fetch()
 	for {
 		if ferr != nil {
-			// Treat "not found" permanently on the first fetch as a 3;
-			// on subsequent fetches, a transient 404 can happen during
-			// queue handoff, so we prefer 4 with the raw error.
 			return exitError(3, ferr)
 		}
 		if run != nil && isTerminalRunStatus(run.Status) {
@@ -748,8 +728,6 @@ func emitWaitResult(run *store.Run, format string) {
 	}
 }
 
-// --- jobs find ---------------------------------------------------
-
 // runJobsFind searches recent runs for a match against git SHA / repo
 // / pipeline / since filters. --wait polls until one appears.
 func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) error {
@@ -778,7 +756,6 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		return err
 	}
 
-	// searchOnce fetches a page of candidate runs and narrows them.
 	var searchOnce func() ([]*store.Run, error)
 	if *on != "" {
 		prof, perr := resolveProfile(*on)
@@ -966,8 +943,6 @@ func shortSHAOrDash(s string) string {
 	}
 	return s
 }
-
-// --- local helpers -----------------------------------------------
 
 func jsonEncode(w *os.File, v any) error {
 	enc := json.NewEncoder(w)

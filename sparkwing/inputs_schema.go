@@ -167,10 +167,6 @@ func walkInputFields(
 		f := t.Field(i)
 		idxPath := append(append([]int{}, parentIndex...), i)
 
-		// Anonymous embedded struct (or pointer-to-struct): recurse
-		// to collect the embedded type's flag-tagged fields. A flag
-		// tag on the anonymous field itself is unusual but allowed
-		// to fall through to normal handling below if present.
 		if f.Anonymous {
 			if _, hasFlag := f.Tag.Lookup("flag"); !hasFlag {
 				ft := f.Type
@@ -182,8 +178,6 @@ func walkInputFields(
 						return err
 					}
 				}
-				// Non-struct anonymous embeds (e.g. `type Foo string`)
-				// have nothing to contribute; skip.
 				continue
 			}
 		}
@@ -196,8 +190,6 @@ func walkInputFields(
 			continue
 		}
 
-		// `flag:",extra"` is the catch-all bag: map[string]string,
-		// no other tags, at most one per struct.
 		if flagTag == ",extra" {
 			if hasAnyOtherTag(f) {
 				return fmt.Errorf("field %s: flag:\",extra\" cannot combine with other tags on the same field", f.Name)
@@ -226,8 +218,6 @@ func walkInputFields(
 			return fmt.Errorf("field %s: flag:\"\" must be either a name or \",extra\"", f.Name)
 		}
 		if prev, dup := seenName[field.Name]; dup {
-			// Outer (shallower) declaration wins per Go embedding
-			// shadowing semantics; quietly skip the deeper one.
 			if depth > 0 {
 				continue
 			}
@@ -245,7 +235,6 @@ func walkInputFields(
 			}
 			if prev, dup := seenShort[short]; dup {
 				if depth > 0 {
-					// Shadowed by an outer short; skip silently.
 					continue
 				}
 				return fmt.Errorf("field %s: short %q already declared on %s", f.Name, short, prev)

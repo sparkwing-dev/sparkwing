@@ -29,7 +29,6 @@ func TestConcurrencyGuard_CanonicalSQLSitesOnly(t *testing.T) {
 			t.Errorf("%q appears %d times in pkg/store sources, want exactly 1 (inside %s)", needle, got, helper)
 		}
 	}
-	// txDeleteHolder (by id) plus CancelWaiter's by-participant reclaim.
 	if got := strings.Count(src, "DELETE FROM concurrency_holders"); got != 2 {
 		t.Errorf("%q appears %d times in pkg/store sources, want exactly 2 (txDeleteHolder + CancelWaiter)", "DELETE FROM concurrency_holders", got)
 	}

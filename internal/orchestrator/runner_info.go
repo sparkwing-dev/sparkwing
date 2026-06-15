@@ -38,8 +38,6 @@ func runnerInfoFor(r runner.Runner) *sparkwing.RunnerInfo {
 			info.Name = "local"
 		}
 	}
-	// Heuristic for non-InProcess runners with advertised labels:
-	// classify by the first label that looks like a runner type.
 	if info.Type == "" {
 		for _, l := range info.Labels {
 			switch l {
