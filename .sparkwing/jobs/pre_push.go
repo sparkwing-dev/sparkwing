@@ -13,8 +13,10 @@ import (
 
 // PrePush gates pushes to main with the slower checks that don't
 // belong in pre-commit: full golangci-lint, `go test -race`, the
-// version-freshness check against the sparkwing ecosystem, and a
-// hard ban on any `replace` directive in a committed `go.mod`.
+// version-freshness check against the sparkwing ecosystem, the
+// public API-surface drift gate (bin/check-api-snapshot.sh, which
+// covers the `pkg/` surfaces the generated-reference diffs miss),
+// and a hard ban on any `replace` directive in a committed `go.mod`.
 //
 // Push-to-main means this pipeline is the last gate before code is
 // shared, so it's stricter than a typical PR-time check.
@@ -25,7 +27,7 @@ import (
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Pre-push gate: lint, test -race, vuln, freshness, no replace + no go.work"
+	return "Pre-push gate: lint, test -race, vuln, freshness, api-snapshot, no replace + no go.work"
 }
 
 func (PrePush) Help() string {
@@ -33,10 +35,12 @@ func (PrePush) Help() string {
 		"`go test -race ./...`, `govulncheck ./...`, the " +
 		"sparkwing-ecosystem version-freshness check (deps must be at " +
 		"the latest released tag, or replaced with a not-behind local " +
-		"path), refuses to push if any committed go.mod contains a " +
-		"`replace` line, and refuses to push if `go.work` / `go.work.sum` " +
-		"have been committed (workspaces are local-iteration scaffolding " +
-		"and can't be resolved by the Go module proxy)."
+		"path), the public API-surface drift gate (the `pkg/` snapshot " +
+		"under .apidiff/ must match HEAD), refuses to push if any " +
+		"committed go.mod contains a `replace` line, and refuses to push " +
+		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
+		"local-iteration scaffolding and can't be resolved by the Go " +
+		"module proxy)."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
@@ -160,6 +164,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		failures = append(failures, "api-reference: stale -- run `bash bin/gen-api-docs.sh`")
 	} else {
 		sparkwing.Info(ctx, "api-reference: current")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+		failures = append(failures, "api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
+	} else {
+		sparkwing.Info(ctx, "api-snapshot: no drift")
 	}
 
 	if len(failures) > 0 {
