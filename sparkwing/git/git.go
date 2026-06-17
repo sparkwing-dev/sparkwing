@@ -103,7 +103,7 @@ func DefaultBranch(ctx context.Context, repoDir string) (string, error) {
 func RemoteOriginURL(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGit(ctx, repoDir, "remote", "get-url", "origin")
 	if err != nil {
-		// safety: rev-parse distinguishes "no origin" from "not a git repo" — both cause runGit to fail.
+		// safety: rev-parse distinguishes "no origin" from "not a git repo"; both cause runGit to fail.
 		if _, sErr := runGit(ctx, repoDir, "rev-parse", "--git-dir"); sErr != nil {
 			return "", sErr
 		}
