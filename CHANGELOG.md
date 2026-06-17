@@ -48,8 +48,35 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** Node artifacts move files between nodes. A producer declares
+  its output files by glob with `Outputs`; a consumer pulls a producer's
+  published files with `Consumes` (which implies `Needs`), and `Into`
+  relocates the staged set under a prefix. `JobGroup.Outputs` and
+  `JobGroup.Consumes` apply the same at group scope. Files stage into the
+  consumer's workspace before it runs; data values still travel as typed
+  `Ref[T]`. See the [node artifacts guide](docs/artifacts.md).
+- **cache + sdk:** Artifact capture and staging. A producer publishes its
+  declared files content-addressed every run, and a consumer stages an
+  immutable snapshot of them before running. Publishing and staging are
+  independent of memoization: a cache hit carries the producer's artifact
+  manifest forward, so a downstream `Consumes` stages the same files
+  whether the producer ran or hit. Artifacts flow identically in
+  in-process and distributed execution.
+- **controller:** Node artifact-manifest endpoint
+  (`POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest`) records a
+  node's published-artifact manifest digest, so distributed workers
+  persist artifact edges through the controller the way the local store
+  does.
+
 ### Changed
 
+- **storage (Breaking):** The exported `pkg/storage.StateStore` interface
+  gained `SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest
+  string) error`. The bundled backends implement it; a custom `StateStore`
+  implementation must add the method to satisfy the interface. See
+  [migration guide](docs/migrations/v0.11.0.md#statestore-implementers-add-setnodeartifactmanifest).
 - **cli:** Managed git hooks (pre-commit, pre-push, post-commit) now render
   quietly by default: one progress line and a one-line pass/fail status with
   the run id, instead of streaming every step into the commit or push. On
@@ -59,6 +86,14 @@ code change to unlock.
   `pretty` or `json` before the git command to restore the full stream.
   Existing hooks pick up the default after re-running
   `sparkwing pipeline hooks install`.
+
+### Docs
+
+- **docs:** New "Node artifacts" concept page covers producer `Outputs`,
+  consumer `Consumes` / `Into`, content-addressed edges, and both
+  execution modes. The caching guide drops the cache-hit file-output
+  limitation now that a cache hit carries a producer's artifact manifest
+  forward.
 
 ## [v0.10.0] - 2026-06-14
 
