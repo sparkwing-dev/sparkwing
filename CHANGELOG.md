@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-06-17
 ### Added
 
 - **sdk:** Node artifacts move files between nodes. A producer declares
