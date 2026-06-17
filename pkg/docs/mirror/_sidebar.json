@@ -11,6 +11,7 @@
         "config-reference",
         "sdk",
         "sdk-reference",
+        "artifacts",
         "local-execution",
         "ci-embedded",
         "native-mode"

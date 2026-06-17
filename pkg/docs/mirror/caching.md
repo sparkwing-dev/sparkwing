@@ -84,13 +84,16 @@ taken as already valid. The cached output is materialized into the
 node's row and into any downstream `Ref[T]` as if the node had just
 completed.
 
-Because a hit restores the *output* and nothing else, it does **not**
-reproduce filesystem side-effects. A node whose real product is files it
-wrote to disk (or any out-of-band state) will hit, return its typed
-output, and leave the run green -- with those files absent. Only put
-`.Cache()` on a node whose value is fully captured by its returned
-output; a node that exists to write files should return what downstream
-needs as typed output, or not memoize at all.
+A hit restores the typed *output* and nothing else, so by itself it does
+not recreate the files a node wrote to disk. Declare those files as
+artifacts and they travel with the cache: a node that lists
+[`Outputs`](artifacts.md) publishes its files content-addressed on every
+run, and a cache hit carries the producer's artifact manifest forward
+unchanged, so a downstream [`Consumes`](artifacts.md) stages the same
+files whether the producer ran or hit. Caching a file-producing node is
+supported -- pair `.Cache()` with `Outputs` so the cached node's files
+follow its replayed output to the nodes that need them. See
+[artifacts.md](artifacts.md) for the model.
 
 The restore is cross-run, not just in-flight: a `.Cache()` hit from a
 *previous* run writes the output onto the current run's node row, so a
