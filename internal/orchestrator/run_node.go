@@ -63,7 +63,11 @@ func RunNodeOnce(
 		logsBackend = localLogs{paths: paths}
 	}
 
-	backends := RemoteBackends(stateClient, logsBackend, nil, httpClient, store.DefaultConcurrencyLease)
+	art, err := resolveArtifactStoreFromEnv(ctx)
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("artifact store: %w", err)
+	}
+	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
 
 	run, err := stateClient.GetRun(ctx, runID)
 	if err != nil {

@@ -201,6 +201,18 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "dispatch_snapshot_failed", []byte(err.Error()))
 	}
 
+	if staged, serr := r.stageArtifacts(nodeCtx, runID, node); serr != nil {
+		wrapped := fmt.Errorf("stage consumed artifacts: %w", serr)
+		nlog.Log("error", wrapped.Error())
+		emitNodeEnd(sparkwing.Failed, wrapped.Error())
+		_ = r.backends.State.FinishNodeWithReason(ctx, runID, node.ID(), string(sparkwing.Failed), wrapped.Error(), nil, store.FailureUnknown, nil)
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_failed", []byte(wrapped.Error()))
+		return nil, wrapped
+	} else if staged > 0 {
+		payload, _ := json.Marshal(map[string]any{"files": staged})
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "artifacts_staged", payload)
+	}
+
 	for i, hook := range node.BeforeRunHooks() {
 		sparkwing.Debug(nodeCtx, "hook: BeforeRun[%d] firing", i)
 		if err := callBeforeRun(nodeCtx, hook); err != nil {
@@ -355,16 +367,40 @@ func (r *InProcessRunner) publishArtifacts(ctx context.Context, node *sparkwing.
 	if len(globs) == 0 || r.backends.Artifact == nil {
 		return "", nil
 	}
-	workspace := sparkwing.CurrentRuntime().WorkDir
-	if workspace == "" {
-		if d, err := os.Getwd(); err == nil {
-			workspace = d
-		}
-	}
+	workspace := nodeWorkspace()
 	if workspace == "" {
 		return "", fmt.Errorf("no workspace directory to resolve outputs against")
 	}
 	return captureArtifacts(ctx, r.backends.Artifact, workspace, globs)
+}
+
+// stageArtifacts materializes, before the node runs, the artifacts of
+// every producer the node consumes (see [sparkwing.JobNode.Consumes]).
+// Returns the number of files staged. A no-op when the node consumes
+// nothing or no artifact store is configured.
+func (r *InProcessRunner) stageArtifacts(ctx context.Context, runID string, node *sparkwing.JobNode) (int, error) {
+	edges := node.ConsumeEdges()
+	if len(edges) == 0 || r.backends.Artifact == nil {
+		return 0, nil
+	}
+	workspace := nodeWorkspace()
+	if workspace == "" {
+		return 0, fmt.Errorf("no workspace directory to stage consumed artifacts into")
+	}
+	return stageConsumedArtifacts(ctx, r.backends.Artifact, r.backends.State, runID, workspace, edges)
+}
+
+// nodeWorkspace resolves the directory a node's artifacts are captured
+// from and staged into: the runtime work dir, falling back to the
+// process cwd, or "" when neither resolves.
+func nodeWorkspace() string {
+	if ws := sparkwing.CurrentRuntime().WorkDir; ws != "" {
+		return ws
+	}
+	if d, err := os.Getwd(); err == nil {
+		return d
+	}
+	return ""
 }
 
 // nodeLogFatal returns the sticky auth error from a NodeLog that

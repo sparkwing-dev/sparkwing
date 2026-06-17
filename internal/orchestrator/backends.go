@@ -11,9 +11,29 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+// ArtifactStoreEnvVar names the artifact-store URL a cluster runner reads
+// to locate the content-addressed store node execution publishes outputs
+// to and stages inputs from. The worker stamps it onto each runner pod
+// from its --artifact-store URL; the in-cluster run-node entrypoint reads
+// it back. Empty means no cache surface (artifacts disabled).
+const ArtifactStoreEnvVar = "SPARKWING_CACHE_URL"
+
+// resolveArtifactStoreFromEnv opens the artifact store named by
+// ArtifactStoreEnvVar, resolved through dev.env like the controller and
+// logs URLs. Returns (nil, nil) when unset so callers treat artifacts as
+// off, matching a nil Backends.Artifact.
+func resolveArtifactStoreFromEnv(ctx context.Context) (storage.ArtifactStore, error) {
+	url := ResolveDevEnvURL(ArtifactStoreEnvVar)
+	if url == "" {
+		return nil, nil
+	}
+	return storeurl.OpenArtifactStore(ctx, url)
+}
 
 // Backends bundles the infrastructure interfaces the orchestrator
 // depends on.

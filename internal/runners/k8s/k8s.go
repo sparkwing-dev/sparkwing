@@ -63,6 +63,13 @@ type Config struct {
 	ControllerURL string
 	LogsURL       string
 
+	// ArtifactStoreURL, when set, is stamped on every Job pod as
+	// SPARKWING_CACHE_URL so the spawned runner opens the same
+	// content-addressed artifact store the rest of the run uses to
+	// publish node outputs and stage consumed inputs. Empty disables
+	// artifacts for the pod.
+	ArtifactStoreURL string
+
 	// NodeSelector + Tolerations let the caller pin runner pods to a
 	// specific pool (GPU nodes, spot nodes, etc.). v1 copies the same
 	// selector to every Job; Requires-style per-job routing lands in a
@@ -353,6 +360,9 @@ func (r *Runner) buildJob(name string, req runner.Request) *batchv1.Job {
 	}
 	if r.cfg.LogsURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: r.cfg.LogsURL})
+	}
+	if r.cfg.ArtifactStoreURL != "" {
+		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_URL", Value: r.cfg.ArtifactStoreURL})
 	}
 	if r.cfg.AgentToken != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})

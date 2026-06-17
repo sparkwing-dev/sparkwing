@@ -28,6 +28,13 @@ type WorkerOptions struct {
 	// LogStore, when non-nil, takes precedence over LogsURL.
 	LogStore storage.LogStore
 
+	// ArtifactStore is the content-addressed store node execution
+	// publishes outputs to and stages consumed inputs from when this
+	// worker runs nodes in-process. Nil disables artifacts. K8s and warm
+	// runners give their pods the store through ArtifactStoreEnvVar
+	// instead, so this field shapes only the in-process runner path.
+	ArtifactStore storage.ArtifactStore
+
 	// HTTPClient transport for controller calls. Nil = default 30s.
 	HTTPClient *http.Client
 
@@ -177,7 +184,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	case opts.LogsURL != "":
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, opts.HTTPClient, opts.Token, opts.Logger)
 	}
-	backends := RemoteBackends(stateClient, logsBackend, nil, opts.HTTPClient, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, opts.ArtifactStore, opts.HTTPClient, store.DefaultConcurrencyLease)
 	_ = local
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)

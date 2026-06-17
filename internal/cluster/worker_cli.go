@@ -97,11 +97,12 @@ func runWorkerCLI(args []string) error {
 		logger.Info("log store", "url", *logStoreURL)
 	}
 	if *artifactStoreURL != "" {
-		if _, err := storeurl.OpenArtifactStore(ctx, *artifactStoreURL); err != nil {
+		as, err := storeurl.OpenArtifactStore(ctx, *artifactStoreURL)
+		if err != nil {
 			return fmt.Errorf("--artifact-store: %w", err)
 		}
-		logger.Info("artifact store", "url", *artifactStoreURL,
-			"note", "validated; not yet consumed by worker")
+		opts.ArtifactStore = as
+		logger.Info("artifact store", "url", *artifactStoreURL)
 	}
 
 	switch *runnerKind {
@@ -111,6 +112,7 @@ func runWorkerCLI(args []string) error {
 			*k8sSA, *k8sPullSecret,
 			firstNonEmpty(*k8sCtrlURL, *controllerURL),
 			firstNonEmpty(*k8sLogsURL, *logsURL),
+			*artifactStoreURL,
 			*token)
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
@@ -123,6 +125,7 @@ func runWorkerCLI(args []string) error {
 				*k8sSA, *k8sPullSecret,
 				firstNonEmpty(*k8sCtrlURL, *controllerURL),
 				firstNonEmpty(*k8sLogsURL, *logsURL),
+				*artifactStoreURL,
 				*token)
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)
@@ -146,7 +149,7 @@ func runWorkerCLI(args []string) error {
 // runner bound to the same cluster / namespace / image. The agentToken
 // argument is stamped into each Job pod so the spawned runner's
 // controller + logs calls authenticate under FOLLOWUPS #2 auth.
-func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL, logsURL, agentToken string) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
+func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL, logsURL, artifactStoreURL, agentToken string) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
 	if image == "" {
 		return nil, fmt.Errorf("--image (or SPARKWING_RUNNER_IMAGE) is required with --runner k8s")
 	}
@@ -177,6 +180,7 @@ func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL
 		ServiceAccountName: sa,
 		ControllerURL:      ctrlURL,
 		LogsURL:            logsURL,
+		ArtifactStoreURL:   artifactStoreURL,
 		AgentToken:         agentToken,
 		CPURequest:         "100m",
 		MemoryRequest:      "128Mi",
