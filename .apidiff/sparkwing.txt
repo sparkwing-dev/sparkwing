@@ -98,6 +98,11 @@ type Constraint interface {
 	applyTo(*fieldMeta) error
 	isConstraint()
 }
+type ConsumeEdge struct {
+	Producer string
+	Into     string
+}
+type ConsumeOption func(*consumeEdge)
 func CurrentRuntime() RuntimeConfig
 func Custom(fn any) Constraint
 func Debug(ctx context.Context, format string, args ...any)
@@ -262,6 +267,7 @@ type InputSchema struct {
 }
 func Inputs[T any](ctx context.Context) T
 func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline) ([]SecretField, error)
+func Into(prefix string) ConsumeOption
 func IsDryRun(ctx context.Context) bool
 func Job(p *Plan, id string, x any) *JobNode
 func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate
@@ -273,6 +279,7 @@ func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup
 func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup
 func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup
+func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup
 func (g *JobGroup) ContinueOnError() *JobGroup
 func (g *JobGroup) Dynamic() bool
 func (g *JobGroup) Env(key, value string) *JobGroup
@@ -283,6 +290,7 @@ func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
 func (g *JobGroup) Optional() *JobGroup
+func (g *JobGroup) Outputs(globs ...string) *JobGroup
 func (g *JobGroup) Prefers(labels ...string) *JobGroup
 func (g *JobGroup) Ready() <-chan struct{}
 func (g *JobGroup) Requires(labels ...string) *JobGroup
@@ -303,6 +311,8 @@ func (n *JobNode) CacheConfig() *CacheConfig
 func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode
 func (n *JobNode) ConcurrencyCost() int
 func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup
+func (n *JobNode) ConsumeEdges() []ConsumeEdge
+func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode
 func (n *JobNode) ContinueOnError() *JobNode
 func (n *JobNode) DepIDs() []string
 func (n *JobNode) Env(key, value string) *JobNode
@@ -321,7 +331,9 @@ func (n *JobNode) OnFailure(id string, x any) *JobNode
 func (n *JobNode) OnFailureNode() *JobNode
 func (n *JobNode) Optional() *JobNode
 func (n *JobNode) OptionalDepIDs() []string
+func (n *JobNode) OutputGlobs() []string
 func (n *JobNode) OutputType() reflect.Type
+func (n *JobNode) Outputs(globs ...string) *JobNode
 func (n *JobNode) Prefers(labels ...string) *JobNode
 func (n *JobNode) PrefersLabels() []string
 func (n *JobNode) Requires(labels ...string) *JobNode

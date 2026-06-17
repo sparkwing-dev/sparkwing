@@ -233,6 +233,27 @@ func (g *JobGroup) Verify(fn VerifyFn) *JobGroup {
 	return g
 }
 
+// Outputs declares the same artifact output globs on every member.
+// Each member runs in its own workspace, so a fan-out group's members
+// each emit their own copy at the declared relative paths. See
+// Job.Outputs.
+func (g *JobGroup) Outputs(globs ...string) *JobGroup {
+	for _, m := range g.Members() {
+		m.Outputs(globs...)
+	}
+	return g
+}
+
+// Consumes stages the given producer's artifacts into every member's
+// workspace before it runs, and implies Needs(producer) on each. See
+// Job.Consumes.
+func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup {
+	for _, m := range g.Members() {
+		m.Consumes(producer, opts...)
+	}
+	return g
+}
+
 // Requires restricts every member to runners advertising the given labels.
 // See Job.Requires.
 func (g *JobGroup) Requires(labels ...string) *JobGroup {

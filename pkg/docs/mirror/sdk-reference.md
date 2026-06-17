@@ -313,6 +313,28 @@ type Constraint interface {
 - `func Required() Constraint` -- Required marks the field as unconditionally required: the resolution chain errors if no source (explicit flag, profile default-args, Default, or Computed) provides a value.
 - `func RequiredWhen(p Predicate) Constraint` -- RequiredWhen marks the field required only when the predicate evaluates true at resolution time.
 
+### type ConsumeEdge
+
+ConsumeEdge is a resolved consumer->producer artifact edge: the producer whose artifacts this node stages, and the staging prefix (empty stages at the producer's declared relative paths).
+
+```
+type ConsumeEdge struct {
+    Producer string
+    Into     string
+}
+```
+
+
+### type ConsumeOption
+
+ConsumeOption tunes a JobNode.Consumes declaration.
+
+```
+type ConsumeOption func(*consumeEdge)
+```
+
+- `func Into(prefix string) ConsumeOption` -- Into stages the consumed producer's artifacts under prefix, with the producer's internal structure preserved.
+
 ### type Dep
 
 Dep is the closed type set accepted by Plan-layer Needs and NeedsOptional.
@@ -660,6 +682,7 @@ type JobGroup struct {
 - `func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup` -- BeforeRun registers a pre-run hook on every member.
 - `func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup` -- Cache memoizes every member of the group on content.
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
+- `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
 - `func (g *JobGroup) ContinueOnError() *JobGroup` -- ContinueOnError marks every member so downstream dependents proceed even on failure.
 - `func (g *JobGroup) Dynamic() bool` -- Dynamic reports whether this group's membership is determined at dispatch-time (ExpandFrom) rather than plan-construction (GroupJobs).
 - `func (g *JobGroup) Env(key, value string) *JobGroup` -- Env sets a per-node environment variable on every member.
@@ -670,6 +693,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup` -- NeedsOptional declares optional upstream dependencies on every member; unknown IDs are silently dropped at finalize.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
+- `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
 - `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers biases runner selection for every member.
 - `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes (success or failure).
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires restricts every member to runners advertising the given labels.
@@ -701,6 +725,8 @@ type JobNode struct {
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) ConcurrencyCost() int` -- ConcurrencyCost returns the admission cost declared via JobNode.Concurrency, or 0 when the node has no membership.
 - `func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the group the node joined via JobNode.Concurrency, or nil when the node declared no membership.
+- `func (n *JobNode) ConsumeEdges() []ConsumeEdge` -- ConsumeEdges returns the artifact edges declared via Consumes, in declaration order, or nil if the node consumes nothing.
+- `func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode` -- Consumes declares that this node stages the artifacts produced by producer into its workspace before it runs, and implies Needs(producer).
 - `func (n *JobNode) ContinueOnError() *JobNode` -- ContinueOnError tells the orchestrator that downstream dependents should proceed even when this node fails.
 - `func (n *JobNode) DepIDs() []string` -- DepIDs returns the node IDs this node depends on.
 - `func (n *JobNode) Env(key, value string) *JobNode` -- Env sets a per-node environment variable.
@@ -719,7 +745,9 @@ type JobNode struct {
 - `func (n *JobNode) OnFailureNode() *JobNode` -- OnFailureNode returns the recovery node registered via OnFailure, or nil if none.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
 - `func (n *JobNode) OptionalDepIDs() []string` -- OptionalDepIDs returns the IDs declared via NeedsOptional.
+- `func (n *JobNode) OutputGlobs() []string` -- OutputGlobs returns the artifact output globs declared via Outputs (the union across calls), or nil if the node declared none.
 - `func (n *JobNode) OutputType() reflect.Type` -- OutputType returns the concrete Go type of the job's Run output, or nil if the job's Run returns no value beyond error.
+- `func (n *JobNode) Outputs(globs ...string) *JobNode` -- Outputs declares the files this node emits as artifacts, by glob, relative to its working directory.
 - `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers biases runner selection when more than one runner satisfies Requires.
 - `func (n *JobNode) PrefersLabels() []string` -- PrefersLabels returns the terms declared via Prefers.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires restricts this job to runners advertising every term in the given set.

@@ -485,6 +485,13 @@ type JobNode struct {
 	// approval is non-nil when the node's job is an approval gate; the
 	// orchestrator routes these through the approval waiter.
 	approval *ApprovalConfig
+
+	// outputGlobs are the artifact output globs declared via Outputs
+	// (the union across calls); empty for nodes that produce no
+	// artifacts. consumes are the artifact edges declared via Consumes,
+	// in declaration order.
+	outputGlobs []string
+	consumes    []consumeEdge
 }
 
 // ApprovalConfig describes a manual approval gate. Authors fill it
