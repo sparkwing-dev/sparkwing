@@ -63,7 +63,7 @@ func RunNodeOnce(
 		logsBackend = localLogs{paths: paths}
 	}
 
-	backends := RemoteBackends(stateClient, logsBackend, httpClient, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, nil, httpClient, store.DefaultConcurrencyLease)
 
 	run, err := stateClient.GetRun(ctx, runID)
 	if err != nil {

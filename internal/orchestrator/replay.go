@@ -131,7 +131,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		}
 	}
 
-	backends := LocalBackends(paths, st)
+	backends := LocalBackends(paths, st, nil)
 
 	originalRunID := run.ReplayOfRunID
 	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) {

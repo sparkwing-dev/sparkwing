@@ -46,7 +46,7 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 		return fmt.Errorf("open local store for logs fallback: %w", err)
 	}
 	defer func() { _ = dummyStore.Close() }()
-	local := orchestrator.LocalBackends(paths, dummyStore)
+	local := orchestrator.LocalBackends(paths, dummyStore, nil)
 
 	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
 

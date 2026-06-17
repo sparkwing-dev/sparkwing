@@ -111,7 +111,7 @@ func runWithSharedStore(t *testing.T, paths orchestrator.Paths, st *store.Store,
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
-	return orchestrator.Run(context.Background(), orchestrator.LocalBackends(paths, st), opts)
+	return orchestrator.Run(context.Background(), orchestrator.LocalBackends(paths, st, nil), opts)
 }
 
 func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {

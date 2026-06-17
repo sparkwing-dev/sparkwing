@@ -134,7 +134,7 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	local := orchestrator.LocalBackends(paths, st)
+	local := orchestrator.LocalBackends(paths, st, nil)
 	backends := orchestrator.Backends{
 		State:       client.New(ts.URL, nil),
 		Logs:        local.Logs,

@@ -52,7 +52,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		"parent_run_id", trigger.ParentRunID,
 	)
 
-	backends := LocalBackends(paths, st)
+	backends := LocalBackends(paths, st, nil)
 
 	defer func() {
 		if ferr := st.FinishTrigger(ctx, trigger.ID); ferr != nil {

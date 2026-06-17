@@ -21,6 +21,11 @@ type Backends struct {
 	State       StateBackend
 	Logs        LogBackend
 	Concurrency ConcurrencyBackend
+
+	// Artifact is the content-addressed blob store node execution
+	// publishes outputs to and stages inputs from. Nil when no cache
+	// surface is configured; callers must tolerate its absence.
+	Artifact storage.ArtifactStore
 }
 
 // StateBackend persists run/node/event/cache state. The orchestrator
@@ -77,25 +82,30 @@ type ConcurrencyBackend interface {
 }
 
 // LocalBackends builds a Backends bundle over a local SQLite store
-// and on-disk log files. Caller owns the Store lifecycle.
-func LocalBackends(paths Paths, st *store.Store) Backends {
+// and on-disk log files. art is the content-addressed artifact store
+// node execution publishes to and stages from; pass nil when no cache
+// surface is configured. Caller owns the Store lifecycle.
+func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Backends {
 	return Backends{
 		State:       localState{st: st},
 		Logs:        localLogs{paths: paths},
 		Concurrency: localConcurrency{st: st},
+		Artifact:    art,
 	}
 }
 
 // S3Backends builds a Backends bundle for Mode 2 (S3-only shared).
 // State is the NDJSON-over-object-store backend; Logs is the
 // supplied storage.LogStore wrapped as a LogBackend; Concurrency is
-// the no-op backend (no cross-runner cache reservation). Caller
-// owns the s3state.Backend lifecycle.
-func S3Backends(log storage.LogStore, state *s3state.Backend) Backends {
+// the no-op backend (no cross-runner cache reservation); art is the
+// content-addressed artifact store, nil when no cache surface is
+// configured. Caller owns the s3state.Backend lifecycle.
+func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.ArtifactStore) Backends {
 	return Backends{
 		State:       s3StateAdapter{Backend: state},
 		Logs:        NewLogStoreBackend(log, nil),
 		Concurrency: &noopConcurrency{},
+		Artifact:    art,
 	}
 }
 
@@ -132,8 +142,10 @@ var _ StateBackend = (*client.Client)(nil)
 // Use this when state-store creds are an HTTP profile, not direct
 // access to a database. The laptop path, the cluster worker, and the
 // single-node runner all assemble Mode 4 through this one constructor,
-// symmetric with LocalBackends + S3Backends.
-func RemoteBackends(c *client.Client, logs LogBackend, httpClient *http.Client, lease time.Duration) Backends {
+// symmetric with LocalBackends + S3Backends. art is the
+// content-addressed artifact store, nil when no cache surface is
+// configured.
+func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
 	if logs == nil {
 		logs = NewHTTPLogsWithToken(c.BaseURL(), nil, c.Token(), nil)
 	}
@@ -144,6 +156,7 @@ func RemoteBackends(c *client.Client, logs LogBackend, httpClient *http.Client, 
 		State:       c,
 		Logs:        logs,
 		Concurrency: NewHTTPConcurrency(c.BaseURL(), httpClient, c.Token(), lease),
+		Artifact:    art,
 	}
 }
 

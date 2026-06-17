@@ -80,17 +80,33 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 }
 
 // TestRemoteBackends_FromBaseURL exercises the constructor sanity:
-// State, Logs, Concurrency are all non-nil and the concurrency
+// State, Logs, Concurrency are all non-nil, the supplied artifact
+// store is threaded onto Backends.Artifact, and the concurrency
 // backend is HTTP-backed against the same controller. The pipeline
 // run above also covers this path implicitly; this is the cheap
 // asssertion when the run test breaks for unrelated reasons.
 func TestRemoteBackends_FromBaseURL(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "tok-abc")
-	b := orchestrator.RemoteBackends(c, nil, nil, 0)
+	art := &noListArtifact{}
+	b := orchestrator.RemoteBackends(c, nil, art, nil, 0)
 	if b.State == nil || b.Logs == nil || b.Concurrency == nil {
 		t.Fatalf("RemoteBackends = %+v", b)
 	}
+	if b.Artifact != art {
+		t.Errorf("Artifact = %v, want the supplied store", b.Artifact)
+	}
 	if c.Token() != "tok-abc" {
 		t.Errorf("Token() = %q, want tok-abc", c.Token())
+	}
+}
+
+// TestRemoteBackends_NilArtifact confirms a nil artifact store stays
+// nil rather than being replaced with a stub: node execution treats
+// nil as "no cache surface configured".
+func TestRemoteBackends_NilArtifact(t *testing.T) {
+	c := client.NewWithToken("https://controller.example", nil, "")
+	b := orchestrator.RemoteBackends(c, nil, nil, nil, 0)
+	if b.Artifact != nil {
+		t.Errorf("Artifact = %v, want nil", b.Artifact)
 	}
 }

@@ -166,7 +166,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 		return fmt.Errorf("open local store: %w", err)
 	}
 	defer func() { _ = dummyStore.Close() }()
-	local := LocalBackends(paths, dummyStore)
+	local := LocalBackends(paths, dummyStore, nil)
 
 	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
 
@@ -177,7 +177,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	case opts.LogsURL != "":
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, opts.HTTPClient, opts.Token, opts.Logger)
 	}
-	backends := RemoteBackends(stateClient, logsBackend, opts.HTTPClient, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, nil, opts.HTTPClient, store.DefaultConcurrencyLease)
 	_ = local
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)

@@ -35,7 +35,7 @@ func newPauseHarness(t *testing.T) *pauseTestHarness {
 		t:        t,
 		paths:    p,
 		st:       st,
-		backends: orchestrator.LocalBackends(p, st),
+		backends: orchestrator.LocalBackends(p, st, nil),
 	}
 }
 

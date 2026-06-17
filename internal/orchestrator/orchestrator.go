@@ -551,7 +551,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		if ownsState {
 			defer func() { _ = st.Close() }()
 		}
-		backends = LocalBackends(paths, st)
+		backends = LocalBackends(paths, st, opts.ArtifactStore)
 	case *s3state.Backend:
 		if opts.LogStore == nil {
 			return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
@@ -559,13 +559,13 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		if ownsState {
 			defer func() { _ = s.Close() }()
 		}
-		backends = S3Backends(opts.LogStore, s)
+		backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
 	case *client.Client:
 		var logsBackend LogBackend
 		if opts.LogStore != nil {
 			logsBackend = NewLogStoreBackend(opts.LogStore, nil)
 		}
-		backends = RemoteBackends(s, logsBackend, nil, 0)
+		backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
 	default:
 		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 	}

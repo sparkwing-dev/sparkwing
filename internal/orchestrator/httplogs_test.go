@@ -55,7 +55,7 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	local := orchestrator.LocalBackends(paths, st)
+	local := orchestrator.LocalBackends(paths, st, nil)
 	backends := orchestrator.Backends{
 		State:       local.State,
 		Logs:        orchestrator.NewHTTPLogs(logsSrv.URL, nil, nil),
