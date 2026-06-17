@@ -72,6 +72,15 @@ code change to unlock.
 
 ### Changed
 
+- **store (Breaking):** The runs-store schema moved from version 4 to 5 so
+  an existing schema-4 database gains the `nodes.artifact_manifest` column
+  on open. The column shipped with node artifacts, but the schema-version
+  constant stayed at 4, so a database already at schema 4 (anyone on v0.9.2,
+  v0.9.3, or v0.10.0) never ran the additive migration and every node read
+  failed with "no such column". The store auto-migrates on open, so a plain
+  CLI or controller upgrade needs no action; a module that pins an older
+  sparkwing and shares the same state database must bump the pin. See
+  [migration guide](docs/migrations/v0.11.0.md#runs-store-schema-4-to-5).
 - **storage (Breaking):** The exported `pkg/storage.StateStore` interface
   gained `SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest
   string) error`. The bundled backends implement it; a custom `StateStore`
