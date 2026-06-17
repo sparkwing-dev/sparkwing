@@ -1028,6 +1028,26 @@ func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSetNodeArtifactManifest records the content-addressed digest of
+// the node's published-artifact manifest. Body is
+// {"manifest_digest":"<string>"}. Last write wins.
+func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		ManifestDigest string `json:"manifest_digest"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.SetNodeArtifactManifest(r.Context(), runID, nodeID, body.ManifestDigest); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleStartNodeStep records the running transition for one inner
 // Work step. Server stamps started_at; idempotent so retried POSTs
 // don't reset the clock.

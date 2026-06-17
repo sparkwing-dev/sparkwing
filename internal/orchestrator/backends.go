@@ -289,6 +289,10 @@ func (l localState) GetNode(ctx context.Context, runID, nodeID string) (*store.N
 	return l.st.GetNode(ctx, runID, nodeID)
 }
 
+func (l localState) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	return l.st.SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest)
+}
+
 func (l localState) GetRun(ctx context.Context, runID string) (*store.Run, error) {
 	return l.st.GetRun(ctx, runID)
 }

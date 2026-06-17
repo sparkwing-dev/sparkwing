@@ -241,6 +241,10 @@ func (f *fakeState) GetNode(ctx context.Context, runID, nodeID string) (*store.N
 	return nil, store.ErrNotFound
 }
 
+func (f *fakeState) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	return nil
+}
+
 func (f *fakeState) GetRun(ctx context.Context, runID string) (*store.Run, error) {
 	return nil, store.ErrNotFound
 }

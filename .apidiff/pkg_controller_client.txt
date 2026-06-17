@@ -91,6 +91,7 @@ func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution,
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
+func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error

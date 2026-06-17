@@ -339,6 +339,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchNodeHeartbeat)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAppendNodeAnnotation)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetNodeSummary)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetNodeArtifactManifest)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleStartNodeStep)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleFinishNodeStep)))

@@ -85,6 +85,10 @@ func (b *captureBackend) GetNode(ctx context.Context, _, _ string) (*store.Node,
 	return nil, store.ErrNotFound
 }
 
+func (b *captureBackend) SetNodeArtifactManifest(ctx context.Context, _, _, _ string) error {
+	return nil
+}
+
 func (b *captureBackend) GetRun(ctx context.Context, _ string) (*store.Run, error) {
 	return &store.Run{GitSHA: b.gitSHA}, nil
 }

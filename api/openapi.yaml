@@ -525,6 +525,25 @@ paths:
       responses:
         "204": { description: Stored. }
 
+  /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest:
+    parameters:
+      - { $ref: "#/components/parameters/RunID" }
+      - { $ref: "#/components/parameters/NodeID" }
+    post:
+      tags: [nodes]
+      summary: Record the node's published-artifact manifest digest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest_digest]
+              properties:
+                manifest_digest: { type: string }
+      responses:
+        "204": { description: Stored. }
+
   /api/v1/runs/{id}/nodes/{nodeID}/metrics:
     parameters:
       - { $ref: "#/components/parameters/RunID" }

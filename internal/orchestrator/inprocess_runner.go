@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -321,11 +322,49 @@ done:
 			outBytes = b
 		}
 	}
+
+	if digest, perr := r.publishArtifacts(nodeCtx, node); perr != nil {
+		wrapped := fmt.Errorf("publish artifacts: %w", perr)
+		emitNodeEnd(sparkwing.Failed, wrapped.Error())
+		_ = r.backends.State.FinishNodeWithReason(ctx, runID, node.ID(), string(sparkwing.Failed), wrapped.Error(), nil, store.FailureUnknown, nil)
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_failed", []byte(wrapped.Error()))
+		return nil, wrapped
+	} else if digest != "" {
+		if serr := r.backends.State.SetNodeArtifactManifest(ctx, runID, node.ID(), digest); serr != nil {
+			sparkwing.Debug(nodeCtx, "set artifact manifest: %v", serr)
+		}
+		payload, _ := json.Marshal(map[string]any{"manifest_digest": digest})
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "artifacts_published", payload)
+	}
+
 	emitNodeEnd(sparkwing.Success, "")
 	_ = r.backends.State.FinishNode(ctx, runID, node.ID(), string(sparkwing.Success), "", outBytes)
 	_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_succeeded", nil)
 
 	return output, nil
+}
+
+// publishArtifacts captures the node's declared output globs from its
+// workspace into the artifact store and returns the resulting manifest
+// digest. Returns "" with no error when the node declares no outputs or
+// no artifact store is configured. A capture failure (an unreadable or
+// unresolvable declared file) fails the node: a producer that promised
+// outputs it cannot deliver has not succeeded.
+func (r *InProcessRunner) publishArtifacts(ctx context.Context, node *sparkwing.JobNode) (string, error) {
+	globs := node.OutputGlobs()
+	if len(globs) == 0 || r.backends.Artifact == nil {
+		return "", nil
+	}
+	workspace := sparkwing.CurrentRuntime().WorkDir
+	if workspace == "" {
+		if d, err := os.Getwd(); err == nil {
+			workspace = d
+		}
+	}
+	if workspace == "" {
+		return "", fmt.Errorf("no workspace directory to resolve outputs against")
+	}
+	return captureArtifacts(ctx, r.backends.Artifact, workspace, globs)
 }
 
 // nodeLogFatal returns the sticky auth error from a NodeLog that

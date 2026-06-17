@@ -160,6 +160,12 @@ func (m *mirrorStateBackend) SetNodeStatus(ctx context.Context, runID, nodeID, s
 		func() error { return m.local.SetNodeStatus(ctx, runID, nodeID, status) })
 }
 
+func (m *mirrorStateBackend) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	return m.tee("SetNodeArtifactManifest", runID,
+		func() error { return m.canonical.SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest) },
+		func() error { return m.local.SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest) })
+}
+
 func (m *mirrorStateBackend) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
 	return m.canonical.GetNode(ctx, runID, nodeID)
 }

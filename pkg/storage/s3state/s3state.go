@@ -603,6 +603,10 @@ func (b *Backend) SetNodeStatus(ctx context.Context, runID, nodeID, status strin
 	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) { n.Status = status })
 }
 
+func (b *Backend) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) { n.ArtifactManifest = manifestDigest })
+}
+
 func (b *Backend) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
 	rs, err := b.getRunState(ctx, runID, true)
 	if err != nil {

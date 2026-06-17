@@ -1066,6 +1066,17 @@ func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string
 		http.StatusNoContent, nil)
 }
 
+// SetNodeArtifactManifest records the content-addressed digest of the
+// node's published-artifact manifest. The server overwrites any prior
+// value.
+func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/artifact-manifest",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"manifest_digest": manifestDigest},
+		http.StatusNoContent, nil)
+}
+
 // CreateApproval requests a human decision on a gated node. The
 // controller inserts an approvals row and flips the node's status to
 // approval_pending atomically.

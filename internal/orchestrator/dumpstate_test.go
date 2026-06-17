@@ -101,7 +101,7 @@ UPDATE nodes SET
    claimed_by='runner-7', lease_expires_at=?,
    status_detail='compiling',
    last_heartbeat=?, failure_reason='exit_nonzero', exit_code=?,
-   annotations_json=?, summary=?
+   annotations_json=?, summary=?, artifact_manifest='sha-cafef00d'
  WHERE run_id=? AND node_id=?`,
 		[]byte(`{"out":"ok"}`),
 		time.Unix(1746335100, 0).UnixNano(),

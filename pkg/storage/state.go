@@ -40,6 +40,7 @@ type StateStore interface {
 	UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 	SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
+	SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error

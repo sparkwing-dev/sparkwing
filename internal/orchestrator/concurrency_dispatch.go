@@ -394,6 +394,7 @@ func (r *InProcessRunner) applyCacheHit(ctx context.Context, req runner.Request,
 		"origin_node_id": originNode,
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "cache_hit", payload)
+	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), originRun, originNode)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Cached), "", output)
 
 	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
@@ -701,6 +702,7 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 		"leader_outcome": leaderOutcome,
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "coalesced", payload)
+	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), leaderRunID, leaderNodeID)
 
 	outcome := followerOutcomeFromLeader(leaderOutcome)
 	if outcome == sparkwing.Failed {
@@ -728,6 +730,19 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 func (r *InProcessRunner) fetchCachedOutput(ctx context.Context, outputRef, originRun, originNode string) ([]byte, error) {
 	_ = outputRef
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
+}
+
+// copyArtifactManifest copies the origin/leader node's published-artifact
+// manifest reference onto the replayed node so a cache hit reproduces the
+// producer's file set without re-running it. No-op when the source
+// recorded no manifest. Written before the terminal FinishNode flip so a
+// consumer dispatched on completion always sees the reference.
+func (r *InProcessRunner) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {
+	src, err := r.backends.State.GetNode(ctx, srcRun, srcNode)
+	if err != nil || src == nil || src.ArtifactManifest == "" {
+		return
+	}
+	_ = r.backends.State.SetNodeArtifactManifest(ctx, dstRun, dstNode, src.ArtifactManifest)
 }
 
 // In-memory sidechannel so runHeldSlot's defer learns the outcome.

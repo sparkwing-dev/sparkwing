@@ -223,6 +223,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     failure_reason   TEXT NOT NULL DEFAULT '',
     -- exit_code: process exit; NULL when not tied to a process.
     exit_code        INTEGER,
+    -- artifact_manifest: content-addressed digest of the node's
+    -- published-artifact manifest; empty when it produced none.
+    artifact_manifest TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (run_id, node_id),
     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
@@ -747,16 +750,17 @@ var columnMigrations = []columnSpec{
 		"summary":          "TEXT NOT NULL DEFAULT ''",
 	}},
 	{"nodes", map[string]string{
-		"ready_at":         "INTEGER",
-		"claimed_by":       "TEXT",
-		"lease_expires_at": "INTEGER",
-		"needs_labels":     "BLOB",
-		"status_detail":    "TEXT NOT NULL DEFAULT ''",
-		"last_heartbeat":   "INTEGER",
-		"failure_reason":   "TEXT NOT NULL DEFAULT ''",
-		"exit_code":        "INTEGER",
-		"annotations_json": "BLOB",
-		"summary":          "TEXT NOT NULL DEFAULT ''",
+		"ready_at":          "INTEGER",
+		"claimed_by":        "TEXT",
+		"lease_expires_at":  "INTEGER",
+		"needs_labels":      "BLOB",
+		"status_detail":     "TEXT NOT NULL DEFAULT ''",
+		"last_heartbeat":    "INTEGER",
+		"failure_reason":    "TEXT NOT NULL DEFAULT ''",
+		"exit_code":         "INTEGER",
+		"annotations_json":  "BLOB",
+		"summary":           "TEXT NOT NULL DEFAULT ''",
+		"artifact_manifest": "TEXT NOT NULL DEFAULT ''",
 	}},
 	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
@@ -1459,6 +1463,14 @@ type Node struct {
 	// when no node-scoped summary was emitted; step-scoped summaries
 	// live on NodeStep.Summary instead.
 	Summary string `json:"summary,omitempty"`
+
+	// ArtifactManifest is the content-addressed digest of the manifest
+	// describing the files this node published as artifacts (see
+	// JobNode.Outputs). Empty when the node declared no outputs or no
+	// artifact store was configured. A cache replay copies this digest
+	// onto the replayed node so the producer's file set reproduces
+	// without re-running it.
+	ArtifactManifest string `json:"artifact_manifest,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -1521,12 +1533,23 @@ UPDATE nodes
 	return err
 }
 
+// SetNodeArtifactManifest records the content-addressed digest of a
+// node's published-artifact manifest. Written before the terminal
+// FinishNode flip so a consumer dispatched on completion always sees
+// the reference. Empty digest is a no-op-equivalent clear.
+func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	_, err := s.exec(ctx,
+		`UPDATE nodes SET artifact_manifest = ? WHERE run_id = ? AND node_id = ?`,
+		manifestDigest, runID, nodeID)
+	return err
+}
+
 // ListNodes returns the nodes for a run in insertion order.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.query(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest
   FROM nodes
  WHERE run_id = ?
  ORDER BY `+s.insertionOrderColumn(), runID)
@@ -1550,7 +1573,7 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 	row := s.queryRow(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -1570,7 +1593,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
 		&n.StatusDetail, &heartbeatNS,
-		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary)
+		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -1942,7 +1965,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 		err = scanNodeRow(tx.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
  ORDER BY ready_at ASC
