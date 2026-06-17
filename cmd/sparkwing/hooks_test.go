@@ -22,6 +22,15 @@ func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 	}
 }
 
+func TestRenderHookScript_QuietByDefault(t *testing.T) {
+	for _, hook := range []string{"pre-commit", "pre-push", "post-commit"} {
+		script := renderHookScript(hook, []string{"lint"})
+		if !strings.Contains(script, `export SPARKWING_LOG_FORMAT="${SPARKWING_LOG_FORMAT:-quiet}"`) {
+			t.Errorf("%s hook should default the log format to quiet while honoring an override:\n%s", hook, script)
+		}
+	}
+}
+
 func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
 	script := renderHookScript("post-commit", []string{"self-install", "notify"})
 	if strings.Contains(script, "set -e") {

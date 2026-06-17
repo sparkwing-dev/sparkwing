@@ -243,6 +243,12 @@ func renderHookScript(hookName string, pipes []string) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("# " + sparkwingHookMarker + " -- do not edit; use `sparkwing hooks (un)install`\n")
+	// Hook runs render a quiet summary by default -- one progress line,
+	// a pass/fail mark, and the run id -- so a commit or push doesn't
+	// stream every step into the foreground. Full output stays in
+	// `sparkwing runs logs`. Override per run by exporting a different
+	// SPARKWING_LOG_FORMAT before git invokes the hook.
+	b.WriteString("export SPARKWING_LOG_FORMAT=\"${SPARKWING_LOG_FORMAT:-quiet}\"\n")
 	if blocking {
 		b.WriteString("set -e\n")
 		for _, p := range pipes {

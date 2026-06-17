@@ -71,6 +71,13 @@ func NewPrettyRendererTo(w io.Writer, useColor bool) *PrettyRenderer {
 	return logpretty.NewPrettyRendererTo(w, useColor)
 }
 
+// QuietRenderer collapses a run to a progress line plus a one-line
+// final status, surfacing per-step detail only on failure.
+type QuietRenderer = logpretty.QuietRenderer
+
+// NewQuietRenderer writes to stdout/stderr with color unless NO_COLOR is set.
+func NewQuietRenderer() *QuietRenderer { return logpretty.NewQuietRenderer() }
+
 // StripANSI removes ANSI CSI/SGR escape sequences from s.
 func StripANSI(s string) string { return logpretty.StripANSI(s) }
 

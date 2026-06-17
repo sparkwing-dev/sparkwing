@@ -213,13 +213,16 @@ func Main() {
 }
 
 // selectLocalRenderer chooses the live delegate based on
-// SPARKWING_LOG_FORMAT (explicit) or stdout TTY (default).
+// SPARKWING_LOG_FORMAT (explicit: pretty | json | quiet) or stdout TTY
+// (default: pretty on a terminal, json otherwise).
 func selectLocalRenderer() sparkwing.Logger {
 	switch strings.ToLower(os.Getenv("SPARKWING_LOG_FORMAT")) {
 	case "json":
 		return NewJSONRenderer()
 	case "pretty":
 		return NewPrettyRenderer()
+	case "quiet":
+		return NewQuietRenderer()
 	}
 	if isInteractiveStdout() {
 		return NewPrettyRenderer()

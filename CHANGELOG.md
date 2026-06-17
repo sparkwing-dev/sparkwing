@@ -48,6 +48,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli:** Managed git hooks (pre-commit, pre-push, post-commit) now render
+  quietly by default: one progress line and a one-line pass/fail status with
+  the run id, instead of streaming every step into the commit or push. On
+  failure the hook surfaces the failing step's error; the full log stays
+  retrievable with `sparkwing runs logs --run <id>`. A new
+  `SPARKWING_LOG_FORMAT=quiet` selects this view for any run; export
+  `pretty` or `json` before the git command to restore the full stream.
+  Existing hooks pick up the default after re-running
+  `sparkwing pipeline hooks install`.
+
 ## [v0.10.0] - 2026-06-14
 
 This release re-versions the runs-store schema 3 → 4 change that first

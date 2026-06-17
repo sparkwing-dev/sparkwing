@@ -2746,8 +2746,11 @@ For remote execution on a profile's controller, use
 
 Output: a human-readable per-node summary when stdout is a
 terminal, line-delimited JSON otherwise (so piped/agent/CI
-consumers get a stable JSONL stream). Force either with
-SPARKWING_LOG_FORMAT=pretty|json.
+consumers get a stable JSONL stream). Force a format with
+SPARKWING_LOG_FORMAT=pretty|json|quiet. quiet collapses the
+run to a progress line plus a one-line pass/fail status with
+the run id, surfacing the failing step only on failure; it is
+the default for managed git hooks.
 
 ### Arguments
 
