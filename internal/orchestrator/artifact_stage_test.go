@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,6 +153,68 @@ func TestStageConsumedArtifacts_RejectsEscapingPath(t *testing.T) {
 		[]sparkwing.ConsumeEdge{{Producer: "build", Into: "../escape"}})
 	if err == nil {
 		t.Fatal("expected error for path escaping the workspace")
+	}
+}
+
+// publishMaliciousManifest stores a hand-crafted manifest whose single
+// entry carries badPath, bypassing the capture glob walk that can only
+// produce in-workspace relative paths. It models a producer manifest with
+// an untrusted, traversing or absolute Path.
+func publishMaliciousManifest(t *testing.T, art storage.ArtifactStore, producerID, badPath string) stubNodeReader {
+	t.Helper()
+	ctx := context.Background()
+	const blobDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+	if err := putBytes(ctx, art, artifactBlobKey(blobDigest), []byte("pwned")); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+	mb, err := json.Marshal(artifactManifest{Entries: []artifactEntry{
+		{Path: badPath, Digest: blobDigest, Mode: 0o644},
+	}})
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	const manifestDigest = "1111111111111111111111111111111111111111111111111111111111111111"
+	if err := putBytes(ctx, art, artifactManifestKey(manifestDigest), mb); err != nil {
+		t.Fatalf("put manifest: %v", err)
+	}
+	return stubNodeReader{nodes: map[string]*store.Node{
+		producerID: {NodeID: producerID, ArtifactManifest: manifestDigest},
+	}}
+}
+
+func TestStageConsumedArtifacts_RejectsEscapingManifestPath(t *testing.T) {
+	cases := []struct {
+		name string
+		path func(outer string) string
+	}{
+		{"parent traversal", func(string) string { return "../escape.txt" }},
+		{"deep traversal", func(string) string { return "../../../../escape.txt" }},
+		{"absolute path", func(outer string) string { return filepath.Join(outer, "escape.txt") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			art := newTestArtifactStore(t)
+			outer := t.TempDir()
+			consumerWS := filepath.Join(outer, "ws")
+			if err := os.MkdirAll(consumerWS, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			reader := publishMaliciousManifest(t, art, "build", tc.path(outer))
+
+			_, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
+				[]sparkwing.ConsumeEdge{{Producer: "build"}})
+			if err == nil {
+				t.Fatalf("expected error for manifest path %q escaping workspace", tc.path(outer))
+			}
+
+			entries, rerr := os.ReadDir(outer)
+			if rerr != nil {
+				t.Fatal(rerr)
+			}
+			if len(entries) != 1 || entries[0].Name() != "ws" {
+				t.Errorf("staging wrote outside the workspace: %v", entries)
+			}
+		})
 	}
 }
 

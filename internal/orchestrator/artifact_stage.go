@@ -111,9 +111,17 @@ func stageBlob(ctx context.Context, store storage.ArtifactStore, entry artifactE
 
 // stageDest joins workspace, the optional Into prefix, and the producer's
 // relative path into an absolute destination, and rejects a result that
-// escapes the workspace (a malformed Into prefix or manifest path).
+// escapes the workspace (a malformed Into prefix or manifest path). An
+// absolute Into or manifest path is rejected outright rather than silently
+// neutralized: filepath.Join would otherwise root it back under workspace,
+// hiding malformed input instead of surfacing it.
 func stageDest(workspace, into, relPath string) (string, error) {
-	rel := filepath.Join(filepath.FromSlash(into), filepath.FromSlash(relPath))
+	into = filepath.FromSlash(into)
+	relPath = filepath.FromSlash(relPath)
+	if filepath.IsAbs(into) || filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("staged path %q must be relative to the workspace", relPath)
+	}
+	rel := filepath.Join(into, relPath)
 	dest := filepath.Join(workspace, rel)
 	clean := filepath.Clean(workspace)
 	if dest != clean && !strings.HasPrefix(dest, clean+string(os.PathSeparator)) {

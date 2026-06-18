@@ -47,6 +47,15 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cache:** Artifact staging rejects a producer manifest whose entry path
+  escapes the consumer workspace (v0.11.1, patch). A `../` traversal already
+  errored; an absolute path now errors too instead of being silently rooted
+  back under the workspace. Staging writes nothing outside the consumer
+  workspace. Defense in depth: manifests are produced internally today, but
+  staging writes blobs to disk at manifest-declared paths, so an untrusted
+  path is the realistic vector. No schema change, no migration.
 
 ## [v0.11.0] - 2026-06-17
 ### Added
