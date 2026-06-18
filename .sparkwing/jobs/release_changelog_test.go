@@ -169,6 +169,52 @@ func TestValidateReleaseVersion_Pre1Lock(t *testing.T) {
 	}
 }
 
+func TestHighestReleaseTag(t *testing.T) {
+	cases := []struct {
+		name string
+		tags []string
+		want string
+	}{
+		{
+			name: "skips retracted v1.x tombstone and picks highest v0.x",
+			tags: []string{"v0.9.1", "v0.10.0", "v0.11.0", "v1.6.1"},
+			want: "v0.11.0",
+		},
+		{
+			name: "v1.0.0 ceiling is exclusive",
+			tags: []string{"v0.11.0", "v1.0.0"},
+			want: "v0.11.0",
+		},
+		{
+			name: "ignores pre-release and build metadata",
+			tags: []string{"v0.11.0", "v0.12.0-rc1", "v0.12.0+build"},
+			want: "v0.11.0",
+		},
+		{
+			name: "ignores non-semver refs",
+			tags: []string{"v0.11.0", "latest", "release", "v0.x"},
+			want: "v0.11.0",
+		},
+		{
+			name: "no eligible tag yields empty",
+			tags: []string{"v1.6.1", "v2.0.0"},
+			want: "",
+		},
+		{
+			name: "empty input yields empty",
+			tags: nil,
+			want: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := highestReleaseTag(c.tags); got != c.want {
+				t.Fatalf("highestReleaseTag(%v) = %q, want %q", c.tags, got, c.want)
+			}
+		})
+	}
+}
+
 func TestPlanChangelogRewrite(t *testing.T) {
 	const date = "2026-05-20"
 	cases := []struct {

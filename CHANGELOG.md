@@ -58,6 +58,13 @@ code change to unlock.
   workspace. Defense in depth: manifests are produced internally today, but
   staging writes blobs to disk at manifest-declared paths, so an untrusted
   path is the realistic vector. No schema change, no migration.
+- **release:** The schema-break gate and the `--bump` version baseline now
+  resolve the previous release from the highest `v0.x` tag, skipping the
+  retracted `v1.x` tombstone line. Previously they picked the highest semver
+  tag overall (the `v1.6.1` tombstone, kept only to hold the Go module
+  `@latest` pointer), so the gate saw a phantom schema change and demanded a
+  `(Breaking)` marker on every release even when the runs-store schema was
+  unchanged. No schema change, no migration.
 
 ## [v0.11.0] - 2026-06-17
 ### Added

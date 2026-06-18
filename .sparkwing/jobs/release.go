@@ -807,19 +807,52 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 	return res.Stdout, nil
 }
 
-// latestSemverTagIn returns the highest stable-semver tag visible on
-// origin. Reads via `ls-remote --tags` rather than `git tag --list` so
-// stale local tags (orphans from before an OSS scrub, force-deleted
-// upstream refs, etc.) can't bias the bump fallback. The release
-// pipeline's "what's the next version" decision is fundamentally a
-// statement about what the world has seen -- not what this checkout
-// happens to remember.
+// releaseTagCeiling is the exclusive upper bound on tags the release
+// resolver treats as real releases. sparkwing is locked to the v0.x line
+// (validateReleaseVersion refuses v1.0.0+), so any v1.0.0+ tag is a
+// retracted tombstone -- notably v1.6.1, kept only to hold the Go module
+// @latest pointer on the v0.x line -- never a real release. Picking one as
+// the prev/latest release gives the schema gate a phantom prevSchema and
+// the --bump baseline a wrong floor, so they are skipped here.
+const releaseTagCeiling = "v1.0.0"
+
+// highestReleaseTag returns the highest stable-semver release tag in tags,
+// skipping pre-release/build tags and any tag at or above releaseTagCeiling
+// (the retracted v1.x line). tags are bare tag names (e.g. "v0.11.0").
+// Returns "" when no eligible tag exists. Pure so the resolver can be tested
+// without git or a remote.
+func highestReleaseTag(tags []string) string {
+	var best string
+	for _, t := range tags {
+		if !semver.IsValid(t) {
+			continue
+		}
+		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
+			continue
+		}
+		if semver.Compare(t, releaseTagCeiling) >= 0 {
+			continue
+		}
+		if best == "" || semver.Compare(t, best) > 0 {
+			best = t
+		}
+	}
+	return best
+}
+
+// latestSemverTagIn returns the highest stable-semver release tag visible on
+// origin, excluding the retracted v1.x line (see highestReleaseTag). Reads
+// via `ls-remote --tags` rather than `git tag --list` so stale local tags
+// (orphans from before an OSS scrub, force-deleted upstream refs, etc.)
+// can't bias the bump fallback. The release pipeline's "what's the next
+// version" decision is fundamentally a statement about what the world has
+// seen -- not what this checkout happens to remember.
 func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
 	if err != nil {
 		return "", err
 	}
-	var best string
+	var tags []string
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
@@ -830,18 +863,9 @@ func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 		if !strings.HasPrefix(ref, prefix) {
 			continue
 		}
-		t := strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "^{}")
-		if !semver.IsValid(t) {
-			continue
-		}
-		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
-			continue
-		}
-		if best == "" || semver.Compare(t, best) > 0 {
-			best = t
-		}
+		tags = append(tags, strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "^{}"))
 	}
-	return best, nil
+	return highestReleaseTag(tags), nil
 }
 
 func bumpVersion(v, kind string) (string, error) {
