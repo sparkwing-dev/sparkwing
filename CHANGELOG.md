@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.11.1] - 2026-06-18
 ### Fixed
 
 - **cache:** Artifact staging rejects a producer manifest whose entry path
