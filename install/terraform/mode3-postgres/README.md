@@ -143,6 +143,22 @@ engine branch flipping correctly:
   `aws_rds_cluster.this[0]` and `aws_rds_cluster_instance.this[0]`. No
   `aws_db_instance`.
 
+The plan asserts the resource graph's shape. The security posture lives in
+attribute values, which `bin/check-terraform.sh` also asserts via
+`terraform test` (`tests/security.tftest.hcl`) with mocked providers, again
+with no AWS account or API call:
+
+- `publicly_accessible = false` on the RDS instance and the Aurora cluster
+  instance.
+- `storage_encrypted = true` on the RDS instance and the Aurora cluster.
+- Security-group ingress is restricted to the PostgreSQL port (5432) over
+  tcp, opens no CIDR when sourced from a security group, and never admits
+  `0.0.0.0/0` on the CIDR path.
+- The generated connection string requires TLS (`sslmode=require`).
+
+A regression that keeps the resource count but flips one of these (widens
+the ingress, exposes the database, drops encryption) fails the gate.
+
 ### Live apply/destroy smoke test
 
 Plan reaches no AWS API; a live apply confirms the resources actually

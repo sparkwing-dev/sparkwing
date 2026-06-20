@@ -9,6 +9,12 @@
 # + instance). The fixture uses mock AWS credentials and every provider
 # skip flag, so plan runs with no AWS account and reaches no API.
 #
+# Finally runs `terraform test` (tests/security.tftest.hcl) with mocked
+# providers to assert the security-critical attribute VALUES the resource
+# set cannot: publicly_accessible=false, storage_encrypted=true, ingress
+# restricted to the Postgres port with no 0.0.0.0/0, and sslmode=require in
+# the generated DSN. The mocks need no AWS account and reach no API.
+#
 # Exit 0 if clean; non-zero with detail on any failure. Requires
 # terraform on PATH (see install/terraform/mode3-postgres/README.md).
 set -euo pipefail
@@ -79,6 +85,12 @@ assert_plan aurora-serverless-v2 "${common[@]}" \
   "module.db.aws_rds_cluster.this[0]" \
   "module.db.aws_rds_cluster_instance.this[0]" \
   "!module.db.aws_db_instance.this[0]"
+
+echo "== test (security attribute values, offline) =="
+if ! terraform -chdir="$MODULE" test; then
+  echo "test: security attribute assertions failed (tests/security.tftest.hcl)"
+  fail=1
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "check-terraform: FAILED" >&2
