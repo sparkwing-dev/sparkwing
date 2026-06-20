@@ -58,7 +58,6 @@ func TestQuiet_SuccessShowsProgressAndStatusOnly(t *testing.T) {
 			t.Errorf("quiet output leaked per-step detail %q:\n%s", noise, out)
 		}
 	}
-	// A clean run is two lines: the progress line and the status line.
 	if got := strings.Count(strings.TrimSpace(out), "\n"); got != 1 {
 		t.Errorf("clean run should be exactly two lines, got %d:\n%s", got+1, out)
 	}

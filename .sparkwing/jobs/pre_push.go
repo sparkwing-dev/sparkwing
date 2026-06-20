@@ -108,9 +108,7 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "go test -race: passed")
 	}
 
-	// package scan, not the default symbol scan: symbol scan builds an SSA
-	// call graph whose type analysis panics on go1.26 generics (x/tools
-	// ForEachElement on a *types.TypeParam). Coarser, never less safe.
+	// hack: package scan not symbol scan -- symbol scan panics on go1.26 generics (x/tools TypeParam)
 	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && go run golang.org/x/vuln/cmd/govulncheck@v1.4.0 -scan package ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("govulncheck: %v", err))
 	} else {
