@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **controller:** Local orphan reconciliation now folds the run-level
+  heartbeat into its liveness check, so a live run parked waiting on a
+  plan concurrency slot (no nodes dispatched yet) is no longer falsely
+  reaped as `orphaned`. `started_at` stays the backstop, so a crashed
+  orchestrator that never heartbeats is still reaped exactly as before.
+  No schema change, no migration.
 
 ## [v0.11.1] - 2026-06-18
 ### Fixed
