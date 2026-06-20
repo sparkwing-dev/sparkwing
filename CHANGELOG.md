@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.11.2] - 2026-06-20
 ### Fixed
 
 - **controller:** Local orphan reconciliation now folds the run-level
