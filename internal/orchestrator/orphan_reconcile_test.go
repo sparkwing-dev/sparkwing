@@ -194,3 +194,137 @@ func TestReconcileOrphanedLocalRuns_RecentHeartbeatUntouched(t *testing.T) {
 		t.Errorf("reconciled count: got %d, want 0", n)
 	}
 }
+
+// TestReconcileOrphanedLocalRuns_RunHeartbeatKeepsNodelessRunAlive: a
+// run started long ago that has dispatched no nodes yet -- it is parked
+// waiting on a plan-level concurrency slot -- but whose orchestrator is
+// still stamping the run-level heartbeat must NOT be reaped. Without
+// folding last_heartbeat_at into the liveness check this run falls back
+// to started_at and is killed at the threshold despite being alive.
+func TestReconcileOrphanedLocalRuns_RunHeartbeatKeepsNodelessRunAlive(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	old := time.Now().Add(-10 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-parked", Pipeline: "p", Status: "running", StartedAt: old,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.TouchRunHeartbeat(ctx, "run-parked"); err != nil {
+		t.Fatalf("TouchRunHeartbeat: %v", err)
+	}
+
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("reconciled count: got %d, want 0", n)
+	}
+	got, err := st.GetRun(ctx, "run-parked")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Status != "running" {
+		t.Errorf("run status: got %q, want running", got.Status)
+	}
+}
+
+// TestReconcileOrphanedLocalRuns_StaleRunHeartbeatReaped guards that
+// the run heartbeat is compared against the cutoff, not merely checked
+// for presence: a nodeless run whose last_heartbeat_at is set but older
+// than the threshold (the orchestrator died after its last ping) must
+// still be reaped.
+func TestReconcileOrphanedLocalRuns_StaleRunHeartbeatReaped(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	old := time.Now().Add(-10 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-stalehb", Pipeline: "p", Status: "running", StartedAt: old,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+		old.UnixNano(), "run-stalehb"); err != nil {
+		t.Fatalf("stamp stale run heartbeat: %v", err)
+	}
+
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("reconciled count: got %d, want 1", n)
+	}
+}
+
+// TestReconcileOrphanedLocalRuns_FreshRunHeartbeatBeatsStaleNode pins
+// the three-way max(): a run with a stale node heartbeat but a fresh
+// run-level heartbeat survives. A regression collapsing the liveness
+// check to the node signal alone would reap it.
+func TestReconcileOrphanedLocalRuns_FreshRunHeartbeatBeatsStaleNode(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	old := time.Now().Add(-10 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-mixed", Pipeline: "p", Status: "running", StartedAt: old,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "run-mixed", NodeID: "build", Status: "running",
+	}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx,
+		`UPDATE nodes SET last_heartbeat = ? WHERE run_id = ?`,
+		old.UnixNano(), "run-mixed"); err != nil {
+		t.Fatalf("stamp stale node heartbeat: %v", err)
+	}
+	if err := st.TouchRunHeartbeat(ctx, "run-mixed"); err != nil {
+		t.Fatalf("TouchRunHeartbeat: %v", err)
+	}
+
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("reconciled count: got %d, want 0", n)
+	}
+}
+
+// TestReconcileOrphanedLocalRuns_NodelessRunWithoutHeartbeatReaped is
+// the backstop guard for the case above: the same nodeless, long-ago
+// run with NO run-level heartbeat (a crashed orchestrator that never
+// pinged) must still be reaped via the started_at fallback.
+func TestReconcileOrphanedLocalRuns_NodelessRunWithoutHeartbeatReaped(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	old := time.Now().Add(-10 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-dead", Pipeline: "p", Status: "running", StartedAt: old,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("reconciled count: got %d, want 1", n)
+	}
+	got, err := st.GetRun(ctx, "run-dead")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Errorf("run status: got %q, want failed", got.Status)
+	}
+}

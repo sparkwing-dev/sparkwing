@@ -187,11 +187,12 @@ CREATE TABLE IF NOT EXISTS runs (
     replay_of_run_id  TEXT NOT NULL DEFAULT '',
     replay_of_node_id TEXT NOT NULL DEFAULT '',
     -- last_heartbeat_at: orchestrator liveness ping for the run as a
-    -- whole. NULL for rows that predate the column or come from
-    -- backends that don't drive a run-level heartbeat (local + S3
-    -- modes reconcile orphans via per-node heartbeats instead). The
-    -- controller's reaper uses this to detect orchestrators that died
-    -- between node dispatches.
+    -- whole. NULL for rows that predate the column or come from a
+    -- backend whose TouchRunHeartbeat is a no-op (S3 mode, which
+    -- reconciles orphans via per-node heartbeats instead). The
+    -- controller's reaper and the local orphan reconciler both use it
+    -- to detect an orchestrator that died between node dispatches,
+    -- before any node-level heartbeat exists.
     last_heartbeat_at INTEGER
 );
 
@@ -3001,9 +3002,9 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 // in Mode 4 (hosted controller): the laptop died between node
 // dispatches with no active claim to expire via the node-claim
 // reaper. Rows with NULL last_heartbeat_at are ignored -- those
-// predate the column or come from backends that don't drive a
-// run-level heartbeat (local + S3 modes reconcile orphans via per-
-// node heartbeats elsewhere). Each reaped run also has its non-done
+// predate the column or come from a backend whose TouchRunHeartbeat is
+// a no-op (S3 mode, which reconciles orphans via per-node heartbeats
+// elsewhere). Each reaped run also has its non-done
 // nodes cascade-failed: running -> failed, pending -> cancelled, both
 // with failure_reason='orphaned', matching the local orphan
 // reconciler so downstream readers don't have to special-case the
@@ -3072,12 +3073,20 @@ UPDATE nodes
 	return err
 }
 
-// reconcileOrphanedLocalRuns sweeps 'running' runs whose newest node
-// heartbeat (or start time, when no node ever heartbeated) is older
-// than threshold and transitions them, and their nodes, to terminal
-// states via the shared orphan cascade. Cheap enough to run lazily on
-// every status / list read: it only scans status='running' rows over
-// indexes already in place. Returns the count reconciled.
+// reconcileOrphanedLocalRuns sweeps 'running' runs whose latest
+// liveness signal -- the newest of any node heartbeat, the run-level
+// orchestrator heartbeat, and the run's start time -- is older than
+// threshold, and transitions them, and their nodes, to terminal states
+// via the shared orphan cascade. Folding in the run-level heartbeat
+// keeps a run that is alive but between node dispatches (the
+// orchestrator keeps stamping last_heartbeat_at even when no node is
+// executing, e.g. while parked waiting on a plan-level concurrency
+// slot before its first node runs) from being reaped while it is
+// demonstrably still pinging; start time remains the backstop for a
+// run that predates the column or never heartbeated at all. Cheap
+// enough to run lazily on every status / list read: it only scans
+// status='running' rows over indexes already in place. Returns the
+// count reconciled.
 func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
 	cutoff := time.Now().Add(-threshold).UnixNano()
 
@@ -3086,8 +3095,9 @@ SELECT r.id
   FROM runs r
  WHERE r.status = ?
    AND r.started_at < ?
-   AND COALESCE(
-         (SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id),
+   AND max(
+         COALESCE((SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id), 0),
+         COALESCE(r.last_heartbeat_at, 0),
          r.started_at
        ) < ?`,
 		runStatusRunning, cutoff, cutoff)
