@@ -11,9 +11,21 @@ type ArtifactStore interface {
 
 	List(ctx context.Context, prefix string) ([]string, error)
 }
+func Conditional(store ArtifactStore) (ConditionalWriter, bool)
+type ConditionalWriter interface {
+	GetWithETag(ctx context.Context, key string) (io.ReadCloser, ETag, error)
+
+	PutIfAbsent(ctx context.Context, key string, r io.Reader) (ETag, error)
+
+	PutIfMatch(ctx context.Context, key string, r io.Reader, expect ETag) (ETag, error)
+
+	ConditionalWritesSupported(ctx context.Context) (bool, error)
+}
+type ETag string
 var ErrListNotSupported = errors.New("storage: list not supported")
 var ErrNotFound = errors.New("storage: not found")
 var ErrNotSupported = errors.New("storage: operation not supported")
+var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 type LogStore interface {
 	Append(ctx context.Context, runID, nodeID string, data []byte) error
 

@@ -47,6 +47,18 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **storage:** Mode 2 (S3-only) deployments now coordinate across runners
+  without a database -- dispatch claims, debug pauses, approval gates, and
+  pipeline-trigger enqueue with child-trigger idempotency -- as discrete
+  object-store records mutated under conditional-write compare-and-swap
+  (S3 If-None-Match/If-Match and the GCS/Azure equivalents). When the
+  configured endpoint does not enforce write preconditions, these
+  operations report not-supported so callers fall back to Postgres
+  (Mode 3) or a hosted controller (Mode 4) rather than coordinate
+  unsafely. Heavily contended coalesce keys see higher tail latency than
+  Postgres: each mutation is a read-modify-write retry against one object.
 
 ## [v0.11.2] - 2026-06-20
 ### Fixed

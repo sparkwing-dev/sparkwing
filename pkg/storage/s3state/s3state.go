@@ -5,11 +5,13 @@
 // serialize per-run state to runs/<runID>/state.ndjson with no
 // database and no controller.
 //
-// Methods that require cross-runner CAS (dispatch claims, debug
-// pauses, approvals, trigger enqueue, child-trigger lookup) return
-// the package-level ErrNotSupported. Callers that need those features
-// run against Mode 3 (Postgres) or Mode 4 (hosted controller)
-// instead.
+// Cross-runner coordination (dispatch claims, debug pauses, approvals,
+// trigger enqueue, child-trigger lookup) is implemented in cas.go as
+// discrete object-store records mutated through
+// storage.ConditionalWriter compare-and-swap. When the artifact store
+// does not support conditional writes, those methods return the
+// package-level ErrNotSupported and callers fall back to Mode 3
+// (Postgres) or Mode 4 (hosted controller).
 //
 // The on-disk format is line-delimited JSON envelopes of the shape
 // {"kind":"...","data":{...}}. Reads parse the current blob and
@@ -799,58 +801,6 @@ func (b *Backend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]by
 		return nil, err
 	}
 	return n.Output, nil
-}
-
-func notSupported(op string) error {
-	return fmt.Errorf("%w: %s requires Mode 3 (Postgres) or Mode 4 (hosted controller)", ErrNotSupported, op)
-}
-
-func (b *Backend) WriteNodeDispatch(_ context.Context, _ store.NodeDispatch) error {
-	return notSupported("dispatch tracking")
-}
-
-func (b *Backend) GetNodeDispatch(_ context.Context, _, _ string, _ int) (*store.NodeDispatch, error) {
-	return nil, notSupported("dispatch tracking")
-}
-
-func (b *Backend) ListNodeDispatches(_ context.Context, _, _ string) ([]*store.NodeDispatch, error) {
-	return nil, notSupported("dispatch tracking")
-}
-
-func (b *Backend) CreateDebugPause(_ context.Context, _ store.DebugPause) error {
-	return notSupported("interactive debug pauses")
-}
-
-func (b *Backend) GetActiveDebugPause(_ context.Context, _, _ string) (*store.DebugPause, error) {
-	return nil, notSupported("interactive debug pauses")
-}
-
-func (b *Backend) ReleaseDebugPause(_ context.Context, _, _, _, _ string) error {
-	return notSupported("interactive debug pauses")
-}
-
-func (b *Backend) ListDebugPauses(_ context.Context, _ string) ([]*store.DebugPause, error) {
-	return nil, notSupported("interactive debug pauses")
-}
-
-func (b *Backend) FindSpawnedChildTriggerID(_ context.Context, _, _, _ string) (string, error) {
-	return "", notSupported("pipeline triggers")
-}
-
-func (b *Backend) CreateApproval(_ context.Context, _ store.Approval) error {
-	return notSupported("approval gates")
-}
-
-func (b *Backend) GetApproval(_ context.Context, _, _ string) (*store.Approval, error) {
-	return nil, notSupported("approval gates")
-}
-
-func (b *Backend) ResolveApproval(_ context.Context, _, _, _, _, _ string) (*store.Approval, error) {
-	return nil, notSupported("approval gates")
-}
-
-func (b *Backend) ListPendingApprovals(_ context.Context) ([]*store.Approval, error) {
-	return nil, notSupported("approval gates")
 }
 
 // RunIDFromStateKey extracts "abc" from "runs/abc/state.ndjson",

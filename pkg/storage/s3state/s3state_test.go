@@ -206,6 +206,7 @@ func TestS3StateBackend_ErrNotSupported_OnControlPlane(t *testing.T) {
 		{"CreateDebugPause", func() error { return b.CreateDebugPause(ctx, store.DebugPause{RunID: "r", NodeID: "n"}) }},
 		{"CreateApproval", func() error { return b.CreateApproval(ctx, store.Approval{RunID: "r", NodeID: "n"}) }},
 		{"ListPendingApprovals", func() error { _, e := b.ListPendingApprovals(ctx); return e }},
+		{"EnqueueTrigger", func() error { _, e := b.EnqueueTrigger(ctx, "p", nil, "", "", "", "", "", "", ""); return e }},
 		{"FindSpawnedChildTriggerID", func() error { _, e := b.FindSpawnedChildTriggerID(ctx, "p", "n", "x"); return e }},
 	}
 	for _, tc := range cases {

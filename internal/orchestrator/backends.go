@@ -131,15 +131,12 @@ func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.Artifa
 }
 
 // s3StateAdapter wraps *s3state.Backend so it satisfies StateBackend.
-// AppendEvent + GetNodeOutput are real implementations on the
-// embedded backend; EnqueueTrigger surfaces ErrNotSupported because
-// triggers require a central rendezvous Mode 2 deliberately omits.
+// AppendEvent, GetNodeOutput, and EnqueueTrigger are real
+// implementations on the embedded backend; EnqueueTrigger records the
+// trigger as a discrete CAS object and returns ErrNotSupported only when
+// the artifact store cannot do conditional writes.
 type s3StateAdapter struct {
 	*s3state.Backend
-}
-
-func (s s3StateAdapter) EnqueueTrigger(_ context.Context, _ string, _ map[string]string, _, _, _, _, _, _, _ string) (string, error) {
-	return "", fmt.Errorf("%w: pipeline triggers require Mode 3 (Postgres) or Mode 4 (hosted controller)", s3state.ErrNotSupported)
 }
 
 // Compile-time check: *client.Client (the HTTP-backed state surface

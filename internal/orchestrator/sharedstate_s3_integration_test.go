@@ -2,8 +2,6 @@ package orchestrator_test
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -50,7 +48,9 @@ func (s3CachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 
 // s3TriggerPipe calls RunAndAwait to force the orchestrator to call
 // EnqueueTrigger on the configured state backend. In Mode 2 that
-// surfaces s3state.ErrNotSupported wrapped in the run's final error.
+// records a discrete child-trigger CAS record for a cross-runner to
+// claim; the single-process test has no such runner, so the await
+// times out.
 type s3TriggerPipe struct{ sparkwing.Base }
 
 func (s3TriggerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -170,15 +170,14 @@ func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
 	}
 }
 
-// TestS3Sharing_TriggerSurfacesErrNotSupported pins down the Mode 2
-// boundary: a pipeline that tries to spawn a child run via
-// RunAndAwait fails the run, with the failed node's error message
-// describing that triggers aren't supported in S3-only mode. The
-// orchestrator wraps individual node errors so the top-level
-// Result.Error is "nodes failed: [trigger]"; the precise sentinel
-// lives on the failed node's error column, readable via the same
-// S3Backend the dashboard uses.
-func TestS3Sharing_TriggerSurfacesErrNotSupported(t *testing.T) {
+// TestS3Sharing_TriggerEnqueuesChildRecord pins the reversed Mode 2
+// boundary: a pipeline that spawns a child run via RunAndAwait now
+// enqueues a discrete child-trigger CAS record instead of failing with
+// ErrNotSupported. The single-process harness has no second runner to
+// claim the child, so the await times out and the run fails; the
+// enqueued record -- resolvable via FindSpawnedChildTriggerID -- is the
+// cross-runner handoff a real Mode 2 deployment relies on.
+func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 	registerS3IntegPipelines(t)
 	art, logs := openIntegrationS3(t)
 	paths := newPaths(t)
@@ -190,43 +189,18 @@ func TestS3Sharing_TriggerSurfacesErrNotSupported(t *testing.T) {
 		LogStore:      logs,
 		ArtifactStore: art,
 	})
-	if err != nil {
-		if errors.Is(err, s3state.ErrNotSupported) || containsNotSupported(err) {
-			return
-		}
-		t.Fatalf("err = %v, want s3state.ErrNotSupported-shaped failure", err)
+	if err == nil && res != nil && res.Status == "success" {
+		t.Fatalf("trigger pipeline succeeded; expected the await to time out with no runner to claim the child")
 	}
-	if res.Status == "success" {
-		t.Fatalf("trigger pipeline succeeded; expected failure")
+	if res == nil || res.RunID == "" {
+		t.Fatalf("no run id from RunLocal (res=%v err=%v)", res, err)
 	}
 
-	b := backend.NewS3Backend(art, logs)
-	nodes, err := b.ListNodes(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("ListNodes: %v", err)
+	childID, ferr := state.FindSpawnedChildTriggerID(context.Background(), res.RunID, "trigger", "s3-integ-cache")
+	if ferr != nil {
+		t.Fatalf("FindSpawnedChildTriggerID: %v", ferr)
 	}
-	var triggerNode *store.Node
-	for _, n := range nodes {
-		if n.NodeID == "trigger" {
-			triggerNode = n
-			break
-		}
+	if childID == "" {
+		t.Fatalf("no child trigger enqueued for %s/trigger -> s3-integ-cache", res.RunID)
 	}
-	if triggerNode == nil {
-		t.Fatalf("no trigger node in nodes=%+v", nodes)
-	}
-	if triggerNode.Outcome == "" || triggerNode.Outcome == "success" {
-		t.Errorf("trigger node outcome = %q, want a failure", triggerNode.Outcome)
-	}
-	if !strings.Contains(strings.ToLower(triggerNode.Error), "not supported") &&
-		!strings.Contains(triggerNode.Error, "triggers require") {
-		t.Errorf("trigger node error = %q, want mention of unsupported / triggers", triggerNode.Error)
-	}
-}
-
-func containsNotSupported(e error) bool {
-	if e == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(e.Error()), "not supported")
 }

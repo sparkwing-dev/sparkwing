@@ -3,11 +3,15 @@
 type ArtifactStore struct {
 	Root string
 }
+func (s *ArtifactStore) ConditionalWritesSupported(context.Context) (bool, error)
 func (s *ArtifactStore) Delete(_ context.Context, key string) error
 func (s *ArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error)
+func (s *ArtifactStore) GetWithETag(_ context.Context, key string) (io.ReadCloser, storage.ETag, error)
 func (s *ArtifactStore) Has(_ context.Context, key string) (bool, error)
 func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 func (s *ArtifactStore) Put(_ context.Context, key string, r io.Reader) error
+func (s *ArtifactStore) PutIfAbsent(_ context.Context, key string, r io.Reader) (storage.ETag, error)
+func (s *ArtifactStore) PutIfMatch(_ context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error)
 type LogStore struct {
 	Root string
 }
