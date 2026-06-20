@@ -187,11 +187,12 @@ CREATE TABLE IF NOT EXISTS runs (
     replay_of_run_id  TEXT NOT NULL DEFAULT '',
     replay_of_node_id TEXT NOT NULL DEFAULT '',
     -- last_heartbeat_at: orchestrator liveness ping for the run as a
-    -- whole. NULL for rows that predate the column or come from
-    -- backends that don't drive a run-level heartbeat (local + S3
-    -- modes reconcile orphans via per-node heartbeats instead). The
-    -- controller's reaper uses this to detect orchestrators that died
-    -- between node dispatches.
+    -- whole. NULL for rows that predate the column or come from a
+    -- backend whose TouchRunHeartbeat is a no-op (S3 mode, which
+    -- reconciles orphans via per-node heartbeats instead). The
+    -- controller's reaper and the local orphan reconciler both use it
+    -- to detect an orchestrator that died between node dispatches,
+    -- before any node-level heartbeat exists.
     last_heartbeat_at INTEGER
 );
 
@@ -3001,9 +3002,9 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 // in Mode 4 (hosted controller): the laptop died between node
 // dispatches with no active claim to expire via the node-claim
 // reaper. Rows with NULL last_heartbeat_at are ignored -- those
-// predate the column or come from backends that don't drive a
-// run-level heartbeat (local + S3 modes reconcile orphans via per-
-// node heartbeats elsewhere). Each reaped run also has its non-done
+// predate the column or come from a backend whose TouchRunHeartbeat is
+// a no-op (S3 mode, which reconciles orphans via per-node heartbeats
+// elsewhere). Each reaped run also has its non-done
 // nodes cascade-failed: running -> failed, pending -> cancelled, both
 // with failure_reason='orphaned', matching the local orphan
 // reconciler so downstream readers don't have to special-case the
