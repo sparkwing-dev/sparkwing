@@ -23,7 +23,8 @@ import (
 //
 // Wire it to git: declare `pre_push:` in sparkwing.yaml and run
 // `sparkwing pipeline hooks install`. Tooling assumed on PATH:
-// golangci-lint, staticcheck (called by golangci-lint), govulncheck.
+// golangci-lint, staticcheck (called by golangci-lint), govulncheck,
+// terraform (for the Mode 3 module gate; .tool-versions pins it).
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
@@ -40,7 +41,8 @@ func (PrePush) Help() string {
 		"committed go.mod contains a `replace` line, and refuses to push " +
 		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
 		"local-iteration scaffolding and can't be resolved by the Go " +
-		"module proxy)."
+		"module proxy), and validates + offline-plans the Mode 3 Postgres " +
+		"Terraform module for both engine knobs (bin/check-terraform.sh)."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
@@ -119,6 +121,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
 	} else {
 		sparkwing.Info(ctx, "shellcheck: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-terraform.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("terraform: %v", err))
+	} else {
+		sparkwing.Info(ctx, "terraform: module valid + plans clean (both engines)")
 	}
 
 	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {

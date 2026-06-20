@@ -156,6 +156,18 @@ mixed-version fleets briefly during a rollout. Mode 4 (hosted
 controller) is the alternative that decouples client and schema
 versions.
 
+### One-click provisioning
+
+A Terraform module under `install/terraform/mode3-postgres` stands up the
+Postgres this mode needs in one `terraform apply`: the database (a single
+RDS instance or an Aurora Serverless v2 cluster, picked by one knob), its
+security group, and its subnet group across the private subnets you give
+it. It writes the connection string to AWS Secrets Manager, so each runner
+reads one secret into `SPARKWING_PG_URL` rather than hand-rolling a DSN.
+You supply the VPC and private subnets; the module places the database
+into networking you already run. Its README covers the variables and how
+to point a runner at the result.
+
 ## Mode 4: Hosted controller
 
 A central controller process owns Postgres + object-store credentials
