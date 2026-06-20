@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -27,6 +28,8 @@ import (
 // key, so 100K-blob trees don't blow up any one directory.
 type ArtifactStore struct {
 	Root string
+
+	casLocks sync.Map // map[string]*sync.Mutex, guards conditional writes per key
 }
 
 // NewArtifactStore returns an ArtifactStore rooted at root, creating

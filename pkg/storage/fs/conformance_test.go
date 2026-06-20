@@ -22,6 +22,18 @@ func TestConformance_ArtifactStore(t *testing.T) {
 	})
 }
 
+// TestConformance_ConditionalWriter runs the optional CAS-capability
+// suite against the fs backend.
+func TestConformance_ConditionalWriter(t *testing.T) {
+	conformance.TestConditionalWriter(t, func() storage.ArtifactStore {
+		s, err := fs.NewArtifactStore(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewArtifactStore: %v", err)
+		}
+		return s
+	})
+}
+
 // TestConformance_LogStore wires the LogStore suite against the fs
 // backend.
 func TestConformance_LogStore(t *testing.T) {

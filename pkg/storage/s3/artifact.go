@@ -46,6 +46,8 @@ type ArtifactStore struct {
 	Bucket string
 	Prefix string // optional namespace within bucket; "" means bucket root
 	Client API
+
+	casOnce casProbe // memoizes ConditionalWritesSupported
 }
 
 // NewArtifactStore wires an ArtifactStore around the provided client.
