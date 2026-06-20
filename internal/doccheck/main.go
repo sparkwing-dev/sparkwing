@@ -259,7 +259,10 @@ var (
 }
 
 func writeModule(tmp, repoRoot string) error {
-	gomod := fmt.Sprintf("module doccheck\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\n\nreplace github.com/sparkwing-dev/sparkwing => %s\n", repoRoot)
+	gomod, err := moduleGoMod(repoRoot)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte(gomod), 0o644); err != nil {
 		return err
 	}
@@ -274,6 +277,19 @@ func writeModule(tmp, repoRoot string) error {
 		return fmt.Errorf("go mod tidy: %v\n%s", err, out)
 	}
 	return nil
+}
+
+// moduleGoMod builds the synthetic go.mod that replaces the sparkwing SDK
+// with the in-repo copy. The replace target is absolutized: a replace path
+// is resolved relative to the go.mod that holds it, which lives in a temp
+// dir, so a relative repoRoot (e.g. ".") would point outside the repo and
+// send `go mod tidy` chasing sparkwing@latest instead.
+func moduleGoMod(repoRoot string) (string, error) {
+	abs, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve repo root %q: %w", repoRoot, err)
+	}
+	return fmt.Sprintf("module doccheck\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\n\nreplace github.com/sparkwing-dev/sparkwing => %s\n", abs), nil
 }
 
 func indent(s string) string {
