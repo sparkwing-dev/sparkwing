@@ -8,9 +8,16 @@ and what infrastructure you have to host.
 | Mode | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
 | --- | --- | --- | --- | --- | --- |
 | Local | none | -- | -- | -- | filesystem |
-| Shared object storage | object store | yes (read-only) | -- | -- | bucket IAM |
+| Shared object storage | object store | yes (read-only) | with CAS¹ | with CAS¹ | bucket IAM |
 | Postgres + object storage | object store + Postgres | yes | yes | yes | DB roles + bucket IAM |
 | Hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
+
+¹ Mode 2 coordinates cross-runner caching, triggers, approvals, and
+debug pauses over object-store conditional-write CAS where the bucket
+enforces write preconditions (S3 today). Where it does not, cache
+reservation degrades to last-write-wins, while triggers, approvals,
+and debug pauses report not-supported and need Mode 3. See
+[Mode 2](#mode-2-shared-object-storage).
 
 Pick the lowest row that meets your requirements. The selection lives in
 the profile you run under -- each profile in
@@ -36,20 +43,36 @@ No configuration needed. `sparkwing run hello` and
 ## Mode 2: Shared object storage
 
 Runners write their run state, cache blobs, and log streams to a
-shared object store (S3, GCS, or Azure Blob). The dashboard reads
-from the same bucket. No database, no controller, no shared
-coordination.
+shared object store. The dashboard reads from the same bucket. No
+database and no controller: cross-runner coordination runs over the
+object store itself, through conditional-write compare-and-swap.
 
 For: a small team that wants cross-runner visibility (laptops, CI,
 GitHub Actions) without hosting a database.
 
-Tradeoff: cross-runner cache *reservation* is skipped. If two
-runners arrive at the same uncached `.Cache()` key simultaneously,
-both compute and both upload to the same content-addressed key. The
-bytes are identical by construction, so last-write-wins is safe, but
-the dashboard sees two independent runs that each did the same work.
-Triggers, approvals, and debug pauses are unavailable in this mode --
-they require cross-runner CAS that this mode deliberately omits.
+Where the bucket enforces write preconditions, Mode 2 coordinates
+across runners with no database -- cache reservation, pipeline
+triggers, approvals, and debug pauses all work. Each is an
+object-store record mutated under compare-and-swap (S3
+`If-None-Match` / `If-Match`); a contended `.Cache()` key elects one
+leader and the rest coalesce onto its output, the same
+exactly-one-runs shape as Mode 3.
+
+S3 is the object store that enforces these preconditions today. The
+`gcs` and `azure-blob` state types are recognized in configuration
+but not yet implemented. Some S3-compatible gateways accept the
+precondition headers and silently ignore them; a runner probes the
+endpoint once and, when it finds the guarantee missing, falls back to
+last-write-wins -- cache reservation degrades to "every runner
+computes and uploads to the same content-addressed key" (safe by
+construction), and triggers, approvals, and debug pauses report
+not-supported, so reach for Mode 3 when you need them.
+
+Tradeoff: coordination over one object is slower at the tail than a
+database row lock. A heavily-contended key serializes its acquires
+and releases as compare-and-swap retries against a single object; an
+uncontended key touches it once. When that tail latency matters,
+Mode 3's Postgres row locks are the upgrade.
 
 If a runner's object store is briefly unreachable, state writes,
 cache PUTs, and log appends stage to a local SQLite outbox
@@ -98,9 +121,10 @@ properly: N runners arriving at the same key elect one leader, the
 rest coalesce and inherit the leader's output. Triggers, approvals,
 and debug pauses all work.
 
-For: a team that has outgrown Mode 2's "everyone computes" semantics
-on expensive cacheable steps, but doesn't want to host a controller
-process.
+For: a team that wants cross-runner reservation guaranteed by a
+database row lock -- rather than dependent on the bucket's CAS support
+and its tail latency under heavy contention -- but doesn't want to
+host a controller process.
 
 Tradeoff: every runner needs Postgres credentials. The trust model
 is "anyone with DB creds can write run state." Suitable for owned
@@ -155,6 +179,18 @@ upgrade every runner *before* you upgrade the database, or run
 mixed-version fleets briefly during a rollout. Mode 4 (hosted
 controller) is the alternative that decouples client and schema
 versions.
+
+### One-click provisioning
+
+A Terraform module under `install/terraform/mode3-postgres` stands up the
+Postgres this mode needs in one `terraform apply`: the database (a single
+RDS instance or an Aurora Serverless v2 cluster, picked by one knob), its
+security group, and its subnet group across the private subnets you give
+it. It writes the connection string to AWS Secrets Manager, so each runner
+reads one secret into `SPARKWING_PG_URL` rather than hand-rolling a DSN.
+You supply the VPC and private subnets; the module places the database
+into networking you already run. Its README covers the variables and how
+to point a runner at the result.
 
 ## Mode 4: Hosted controller
 
@@ -222,11 +258,12 @@ profile by passing `--profile` in the run command (see
 A practical decision order:
 
 1. **One person, one laptop?** Mode 1.
-2. **Multiple people, no expensive cacheable steps?** Mode 2 -- a
-   bucket and a shared profile is the entire setup.
-3. **Multiple people, expensive cacheable steps where you want
-   exactly-one-runs semantics?** Mode 3 -- add a Postgres on top of
-   Mode 2.
+2. **Multiple people on S3, fine with bucket-dependent
+   coordination?** Mode 2 -- a bucket and a shared profile is the
+   entire setup.
+3. **Expensive cacheable steps where you want reservation guaranteed
+   regardless of bucket CAS support, or low tail latency under heavy
+   contention?** Mode 3 -- add a Postgres on top of Mode 2.
 4. **Untrusted runners (public CI, customer pipelines) or you don't
    want every runner holding DB credentials?** Mode 4 -- host a
    controller.

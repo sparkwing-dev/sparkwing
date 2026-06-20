@@ -12,13 +12,17 @@ same codebase:
    logs. Zero shared infra. Used when `backends.yaml` is absent or
    the `--sw-local-only` flag is set.
 2. **S3-only shared** -- runners write their own run state, caches,
-   and logs to a shared object store (S3 / GCS / Azure Blob). No
-   database, no controller. The dashboard reads from the same
-   bucket. Lowest-friction self-hosted setup; works for 10 laptops
-   wanting cross-team visibility, GitHub Actions runners sharing a
-   cache bucket, etc. Cross-runner cache *reservation* is skipped
-   in this mode (see "Cache reservation across runners"); you keep
-   cross-runner cache *reuse via content-addressed S3 keys*.
+   and logs to a shared object store. No database, no controller.
+   The dashboard reads from the same bucket. Lowest-friction
+   self-hosted setup; works for 10 laptops wanting cross-team
+   visibility, GitHub Actions runners sharing a cache bucket, etc.
+   Cross-runner coordination -- cache reservation, triggers,
+   approvals, debug pauses -- runs over object-store conditional-write
+   CAS where the endpoint enforces write preconditions (see "Cache
+   reservation across runners"). Where it does not, cache reservation
+   degrades to last-write-wins (you keep cross-runner cache *reuse via
+   content-addressed keys*), while triggers, approvals, and debug
+   pauses are not-supported and need Mode 3 or Mode 4.
 3. **direct-DB** -- runners write straight to a shared Postgres for
    state and a shared object store for caches/logs. Adds proper
    cross-runner cache reservation (no thundering herd) and the
@@ -167,9 +171,9 @@ Selected when: no `backends.yaml`, no shared-backend env vars, OR
 sparkwing run (laptop or CI runner)
    └─ orchestrator
        └─ Backends{
-            State:       s3State{S3 bucket}      // live NDJSON writes
-            Logs:        s3LogBackend{S3 bucket}
-            Concurrency: noopConcurrency{}       // skip the lease
+            State:       s3State{bucket}         // live NDJSON + CAS records
+            Logs:        s3LogBackend{bucket}
+            Concurrency: s3Concurrency{bucket}   // If-Match CAS semaphore
           }
        └─ ArtifactStore: s3://shared-bucket/cache
        └─ LogStore:      s3://shared-bucket/logs
@@ -191,25 +195,50 @@ Notes:
   when connectivity returns. Safe because all keys are
   per-runner (`runs/<runID>/...`) or content-addressed; no
   conflicts on replay. No schema or API negotiation needed.
-- **`noopConcurrency`** satisfies `ConcurrencyBackend` but always
-  returns `AcquireGranted` -- no waiters, no leader election, no
-  shared cache memo. Two runners computing the same key both run
-  to completion and both upload to the same content-addressed
-  cache path in S3. Last write wins on bytes that are identical
-  by construction. Document this as the explicit tradeoff for
-  Mode 2.
-- **Cache reuse still works**: a runner checks
-  `art.Has(ctx, cacheKey)` before computing; if it's already in
-  S3, fetch and skip work. The mode you lose is *coordinated*
-  reservation -- N runners arriving simultaneously will all
-  compute. For cheap cacheable steps this is fine; for
-  expensive ones, upgrade to Mode 3.
-- **Triggers, debug pauses, approvals, runner pools** are not
-  available in this mode. They require CAS over a shared key
-  space, which we explicitly opted out of. The `StateBackend`
-  methods that drive them return `ErrNotSupported`. The S3-only
-  mode targets "run pipelines, see them in a dashboard" -- not
-  the full controller-driven workflow.
+- **`s3Concurrency`** coordinates cross-runner reservation over the
+  object store's conditional-write CAS, no database. It holds each
+  concurrency key's full state -- holders, waiters, memoized output --
+  in one versioned slot object and mutates it under a
+  read-modify-`PutIfMatch` retry loop, so N runners on one key elect
+  a leader and the rest coalesce onto its output. The deliberate
+  tradeoff is tail latency, not correctness: a heavily-contended key
+  serializes its acquires and releases as retries against a single
+  object, slower at the tail than a Postgres row lock; an uncontended
+  key touches the object once. When the endpoint does not enforce
+  preconditions the backend degrades to granting every slot, so two
+  runners may both compute and both upload to the same
+  content-addressed key -- safe because the bytes are identical by
+  construction.
+- **Cache reuse still works** unconditionally: a runner checks
+  `art.Has(ctx, cacheKey)` before computing and skips the work if the
+  blob is already in the store. On top of that, coordinated
+  *reservation* works wherever the endpoint enforces preconditions --
+  the `.Cache()` slot acquire coalesces followers onto one leader
+  instead of every runner computing. Where it cannot, you keep bare
+  content-addressed reuse and lose only the reservation; Mode 3 is the
+  upgrade when you need it guaranteed.
+- **Triggers, debug pauses, and approvals** work in this mode where
+  the endpoint enforces write preconditions. Each is a discrete
+  object-store record mutated under CAS -- `PutIfAbsent` for
+  create-once, a `GetWithETag`/`PutIfMatch` loop for resolve -- and
+  pipeline-trigger enqueue carries child-trigger idempotency so a
+  retried parent does not double-spawn. Where the endpoint ignores
+  preconditions the driving `StateBackend` methods return
+  `ErrNotSupported` and the caller falls back to Mode 3 or Mode 4
+  rather than coordinate unsafely.
+- **Provider support and capability detection**: S3 is the object
+  store that enforces these preconditions today (`If-None-Match: *`
+  for create-once, `If-Match: <etag>` for compare-and-swap); the
+  filesystem backend enforces them locally for single-host runs. The
+  `ConditionalWriter` contract is provider-agnostic and names the GCS
+  generation-match and Azure ETag equivalents, but those backends are
+  not yet implemented -- declaring `gcs` or `azure-blob` surfaces an
+  unimplemented error at run start. Two checks gate every coordinated
+  operation: a static type check that the backend exposes
+  `ConditionalWriter`, and a one-time live probe
+  (`ConditionalWritesSupported`) that catches S3-compatible gateways
+  which accept precondition headers and silently ignore them. Either
+  check failing routes the operation to the last-write-wins fallback.
 - **Dashboard live updates**: `S3Backend` polls
   `runs/<id>/state.ndjson` for changes. Refresh latency = poll
   interval (default 2-5s). The existing
@@ -389,23 +418,29 @@ and short-circuit. The Postgres row buys atomicity (no thundering
 herd) and dashboard visibility (provenance: "this run reused
 output from run X on date Y").
 
-**In Mode 2 (S3-only):** the Postgres-mediated reservation is
-deliberately omitted. The behavior degrades to:
+**In Mode 2 (S3-only):** reservation runs over the object store's
+conditional-write CAS instead of a Postgres row, wherever the
+endpoint enforces preconditions:
 
-1. Runners 1..N each `HEAD` the cache key in S3. If present,
-   fetch and skip computation. **This is the common case** and
-   is unchanged from Modes 3/4.
-2. If absent, *every* runner computes and uploads. The
-   content-addressed write target is identical, so last-write-
-   wins is safe.
-3. No leader election, no waiters, no shared "this run reused
-   X" provenance row. The dashboard sees N independent runs that
-   each happened to do the same work.
+1. Runners 1..N each `HEAD` the cache key. If present, fetch and
+   skip computation. **This is the common case** and is unchanged
+   from Modes 3/4.
+2. If absent, the runners contend on one versioned slot object via
+   `PutIfMatch`. One wins the leader role and computes; the rest
+   record waiter entries in the same object and coalesce, inheriting
+   the leader's output when it releases -- the same exactly-one-runs
+   shape as Modes 3/4, serialized through one object instead of a
+   row lock.
+3. The leader's terminal outcome lingers in the slot for a short
+   retention window so a slow follower can still inherit it.
 
-This is the explicit tradeoff for not needing a database. For
-cacheable work where computation is cheap or rare, it's the
-right call. For workloads where multiple runners regularly
-contend on expensive uncached steps, move to Mode 3.
+The tradeoff is tail latency, not correctness: a heavily-contended
+key serializes its acquires and releases as `PutIfMatch` retries
+against a single object, slower at the tail than a Postgres row lock.
+Where the endpoint does not enforce preconditions the backend
+degrades to the original "every runner computes" behavior (safe by
+content-addressing); Mode 3 is the upgrade when you need guaranteed
+reservation under heavy contention.
 
 ## --sw-local-only flag
 
@@ -830,12 +865,14 @@ C ────┘     └────────┘  (independent, ship any tim
    PUTs (cost) and lower dashboard latency; long window means
    fewer PUTs but staler dashboards. Default 500ms / 16KB feels
    right but should be configurable per environment.
-7. **What happens to in-process workflow features in Mode 2?**
-   Plan-level concurrency (`.Cache().Namespace()` at plan scope)
-   relies on a slot key shared across runs of the same pipeline.
-   Without CAS, two concurrent pipeline runs both succeed the
-   slot acquire. For most users this is invisible; for users
-   relying on the namespace as a mutual-exclusion gate it's a
-   silent semantics change. Document explicitly; consider a
-   startup warning when a pipeline declares namespace-level
-   concurrency and Mode 2 is selected.
+7. **In-process workflow features in Mode 2** -- resolved by the
+   conditional-write CAS semaphore. Plan-level concurrency
+   (`.Cache().Namespace()` at plan scope) relies on a slot key
+   shared across runs of the same pipeline; `s3Concurrency` holds
+   that slot in one versioned object, so concurrent runs serialize
+   on it where the endpoint enforces preconditions. The mutual-
+   exclusion gate holds in that case. Where the endpoint cannot
+   enforce them the backend degrades to granting every slot, and a
+   namespace used as a hard gate loses its guarantee -- warn at
+   startup when a pipeline declares namespace-level concurrency and
+   the selected Mode 2 endpoint fails the support probe.
