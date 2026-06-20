@@ -74,15 +74,15 @@ func registerS3IntegPipelines(t *testing.T) {
 	})
 }
 
-// TestS3Sharing_TwoRunsBothSucceed pins down the Mode 2 contract: N
-// runners hitting the same cache key against a shared bucket all
-// compute and all succeed. There is no orchestrator-managed cache
-// hit in Mode 2 (noopConcurrency never returns AcquireCached); the
-// design tradeoff is "both runs execute, both write the same
-// content-addressed bytes, last-write-wins is safe." Cross-runner
-// cache *coordination* is a Mode 3 / Mode 4 feature, asserted in the
-// pg-integration suite. Mode 2's claim is the absence of corruption,
-// which this test verifies.
+// TestS3Sharing_TwoRunsBothSucceed pins down the Mode 2 contract: two
+// runners hitting the same cache key against a shared bucket coordinate
+// through the conditional-write CAS semaphore, so the second run reuses
+// the first's memoized result instead of recomputing. The first run
+// computes and writes the cache memo under If-Match; the second run's
+// memo acquire sees the entry and replays it. Both runs succeed and the
+// cacheable step executes exactly once. This is the cross-runner cache
+// reservation BW-322 adds; the no-op fallback (no CAS) is exercised
+// separately in TestS3Concurrency_FallsBackWhenPreconditionsIgnored.
 func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 	registerS3IntegPipelines(t)
 	art, logs := openIntegrationS3(t)
@@ -90,7 +90,7 @@ func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 
 	s3CachedInvocations.Store(0)
 
-	for i, label := range []string{"A", "B"} {
+	for _, label := range []string{"A", "B"} {
 		state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
 		res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 			Pipeline:      "s3-integ-cache",
@@ -104,11 +104,10 @@ func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 		if res.Status != "success" {
 			t.Fatalf("Run %s status = %q (err=%v)", label, res.Status, res.Error)
 		}
-		_ = i
 	}
-	if got := s3CachedInvocations.Load(); got != 2 {
-		t.Errorf("invocations across two Mode 2 runs = %d, want 2 "+
-			"(Mode 2 has no orchestrator-managed cache hit; both runs compute)", got)
+	if got := s3CachedInvocations.Load(); got != 1 {
+		t.Errorf("invocations across two Mode 2 runs = %d, want 1 "+
+			"(second run reuses the cross-runner cache memo via CAS)", got)
 	}
 }
 

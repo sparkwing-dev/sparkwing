@@ -117,14 +117,15 @@ func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Back
 // S3Backends builds a Backends bundle for Mode 2 (S3-only shared).
 // State is the NDJSON-over-object-store backend; Logs is the
 // supplied storage.LogStore wrapped as a LogBackend; Concurrency is
-// the no-op backend (no cross-runner cache reservation); art is the
-// content-addressed artifact store, nil when no cache surface is
-// configured. Caller owns the s3state.Backend lifecycle.
+// the conditional-write CAS semaphore over the artifact store (it
+// degrades to no-op when the store can't enforce write preconditions);
+// art is the content-addressed artifact store, nil when no cache
+// surface is configured. Caller owns the s3state.Backend lifecycle.
 func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.ArtifactStore) Backends {
 	return Backends{
 		State:       s3StateAdapter{Backend: state},
 		Logs:        NewLogStoreBackend(log, nil),
-		Concurrency: &noopConcurrency{},
+		Concurrency: NewS3Concurrency(art),
 		Artifact:    art,
 	}
 }
