@@ -175,7 +175,7 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string) func(
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
+				ctx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, was, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, lease)
 				cancel()
 				if err != nil {

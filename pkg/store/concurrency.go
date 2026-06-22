@@ -79,8 +79,10 @@ const DefaultConcurrencyLease = DefaultLeaseDuration
 // ConcurrencyHeartbeatInterval.
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 
-// DefaultConcurrencyHeartbeatTimeout bounds one heartbeat attempt; it is
-// shorter than every interval so a wedged controller can't stack ticks.
+// DefaultConcurrencyHeartbeatTimeout bounds one heartbeat attempt on the
+// fast CancelOthers cadence; it is shorter than that 3s interval so a
+// wedged tick can't stack. The policy-correct bound is
+// ConcurrencyHeartbeatTimeout.
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 
 // ConcurrencyHeartbeatInterval is how often a slot holder under onLimit
@@ -95,6 +97,22 @@ func ConcurrencyHeartbeatInterval(onLimit string) time.Duration {
 		return DefaultConcurrencyHeartbeatInterval
 	}
 	return DefaultConcurrencyLease / 3
+}
+
+// ConcurrencyHeartbeatTimeout bounds one heartbeat attempt for a holder
+// under onLimit. The slow cadence pairs with a timeout long enough to wait
+// out the store's busy_timeout under write contention: a single
+// _txlock=immediate heartbeat can legitimately busy-wait seconds for the
+// write lock, so a short bound would abandon a winnable attempt and count
+// a false miss toward lease expiry — at lease/3 only three such misses
+// lapse a live holder's lease. The bound stays below the slow interval so
+// attempts still can't stack. CancelOthers keeps the short
+// DefaultConcurrencyHeartbeatTimeout against its 3s cadence.
+func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration {
+	if onLimit == OnLimitCancelOthers {
+		return DefaultConcurrencyHeartbeatTimeout
+	}
+	return DefaultConcurrencyLease / 4
 }
 
 // DefaultCancelTimeout bounds CancelOthers eviction.

@@ -493,7 +493,7 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				hbCtx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
+				hbCtx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, wasSuperseded, err := r.backends.Concurrency.HeartbeatSlot(hbCtx, key, holderID, lease)
 				cancel()
 				if err != nil {
