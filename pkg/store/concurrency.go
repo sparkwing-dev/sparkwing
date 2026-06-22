@@ -73,13 +73,29 @@ const (
 // for the full window to be reaped.
 const DefaultConcurrencyLease = DefaultLeaseDuration
 
-// DefaultConcurrencyHeartbeatInterval shares cadence with trigger and
-// run heartbeats so CancelOthers supersedes land within ~3s.
+// DefaultConcurrencyHeartbeatInterval is the fast holder-heartbeat cadence
+// for CancelOthers slots, where a superseding acquirer must be noticed
+// within ~3s. Other policies refresh at the slower cadence returned by
+// ConcurrencyHeartbeatInterval.
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 
-// DefaultConcurrencyHeartbeatTimeout is strictly less than the interval
-// so a wedged controller can't stack ticks.
+// DefaultConcurrencyHeartbeatTimeout bounds one heartbeat attempt; it is
+// shorter than every interval so a wedged controller can't stack ticks.
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
+
+// ConcurrencyHeartbeatInterval is how often a slot holder under onLimit
+// refreshes its lease. Only CancelOthers needs the fast
+// DefaultConcurrencyHeartbeatInterval cadence, which lets a superseding
+// acquirer be noticed within one tick. Every other policy has no supersede
+// to observe, so the holder refreshes at lease/3 — three refreshes per
+// lease, a fraction of the write load the fast cadence imposes when many
+// holders (one per in-flight memo node plus the plan slot) share one store.
+func ConcurrencyHeartbeatInterval(onLimit string) time.Duration {
+	if onLimit == OnLimitCancelOthers {
+		return DefaultConcurrencyHeartbeatInterval
+	}
+	return DefaultConcurrencyLease / 3
+}
 
 // DefaultCancelTimeout bounds CancelOthers eviction.
 const DefaultCancelTimeout = 60 * time.Second
