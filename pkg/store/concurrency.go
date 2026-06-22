@@ -85,13 +85,12 @@ const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 // ConcurrencyHeartbeatTimeout.
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 
-// ConcurrencyHeartbeatInterval is how often a slot holder under onLimit
-// refreshes its lease. Only CancelOthers needs the fast
-// DefaultConcurrencyHeartbeatInterval cadence, which lets a superseding
-// acquirer be noticed within one tick. Every other policy has no supersede
-// to observe, so the holder refreshes at lease/3 — three refreshes per
-// lease, a fraction of the write load the fast cadence imposes when many
-// holders (one per in-flight memo node plus the plan slot) share one store.
+// ConcurrencyHeartbeatInterval is how often a holder under onLimit refreshes
+// its lease. Only CancelOthers needs the fast 3s cadence, to notice a
+// superseding acquirer within one tick; other policies have no supersede to
+// observe and refresh at lease/3. With one holder per memo node plus the
+// plan slot sharing one store, the slower cadence is a fraction of the
+// write load.
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration {
 	if onLimit == OnLimitCancelOthers {
 		return DefaultConcurrencyHeartbeatInterval
@@ -99,14 +98,12 @@ func ConcurrencyHeartbeatInterval(onLimit string) time.Duration {
 	return DefaultConcurrencyLease / 3
 }
 
-// ConcurrencyHeartbeatTimeout bounds one heartbeat attempt for a holder
-// under onLimit. The slow cadence pairs with a timeout long enough to wait
-// out the store's busy_timeout under write contention: a single
-// _txlock=immediate heartbeat can legitimately busy-wait seconds for the
-// write lock, so a short bound would abandon a winnable attempt and count
-// a false miss toward lease expiry — at lease/3 only three such misses
-// lapse a live holder's lease. The bound stays below the slow interval so
-// attempts still can't stack. CancelOthers keeps the short
+// ConcurrencyHeartbeatTimeout bounds one heartbeat attempt under onLimit. An
+// _txlock=immediate heartbeat can busy-wait seconds for the write lock, so
+// the slow cadence needs a bound long enough to outwait that: a short bound
+// abandons a winnable attempt and counts a false miss, and at lease/3 only
+// three misses lapse a live holder's lease. The bound stays below the slow
+// interval so attempts can't stack; CancelOthers keeps the short
 // DefaultConcurrencyHeartbeatTimeout against its 3s cadence.
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration {
 	if onLimit == OnLimitCancelOthers {
