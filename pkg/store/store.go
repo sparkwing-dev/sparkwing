@@ -86,7 +86,7 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 //
 // synchronous=NORMAL is the WAL-recommended setting. Under the default
 // FULL every COMMIT fsyncs the WAL, and an _txlock=immediate transaction
-// holds the write lock until COMMIT — so that fsync serializes every
+// holds the write lock until COMMIT -- so that fsync serializes every
 // co-located writer and caps throughput. NORMAL fsyncs at checkpoint
 // instead. WAL stays crash-consistent either way; the cost is a few of
 // the most recent commits on an OS or power crash, which for orchestration

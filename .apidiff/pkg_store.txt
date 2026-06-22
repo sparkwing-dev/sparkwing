@@ -58,6 +58,8 @@ const ApprovalOnTimeoutFail = "fail"
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
+func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
+func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
 	Key            string
 	HolderID       string

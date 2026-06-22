@@ -30,10 +30,10 @@ func TestConcurrencyHeartbeatTimeout_SlowPathOutwaitsContentionUnderInterval(t *
 		timeout := store.ConcurrencyHeartbeatTimeout(onLimit)
 		interval := store.ConcurrencyHeartbeatInterval(onLimit)
 		if timeout >= interval {
-			t.Errorf("%q timeout %v >= interval %v — attempts can stack", onLimit, timeout, interval)
+			t.Errorf("%q timeout %v >= interval %v -- attempts can stack", onLimit, timeout, interval)
 		}
 		if timeout <= store.DefaultConcurrencyHeartbeatTimeout {
-			t.Errorf("%q timeout %v <= fast-path %v — too short to outwait a busy lock", onLimit, timeout, store.DefaultConcurrencyHeartbeatTimeout)
+			t.Errorf("%q timeout %v <= fast-path %v -- too short to outwait a busy lock", onLimit, timeout, store.DefaultConcurrencyHeartbeatTimeout)
 		}
 	}
 	if got := store.ConcurrencyHeartbeatTimeout(store.OnLimitCancelOthers); got != store.DefaultConcurrencyHeartbeatTimeout {
@@ -45,10 +45,10 @@ func TestConcurrencyHeartbeatInterval_NonCancelRefreshesWithinLease(t *testing.T
 	for _, onLimit := range []string{store.OnLimitQueue, store.OnLimitFail, store.OnLimitSkip, store.OnLimitCoalesce} {
 		interval := store.ConcurrencyHeartbeatInterval(onLimit)
 		if interval >= store.DefaultConcurrencyLease {
-			t.Errorf("%q interval %v >= lease %v — a live holder could lose its slot", onLimit, interval, store.DefaultConcurrencyLease)
+			t.Errorf("%q interval %v >= lease %v -- a live holder could lose its slot", onLimit, interval, store.DefaultConcurrencyLease)
 		}
 		if interval <= store.DefaultConcurrencyHeartbeatInterval {
-			t.Errorf("%q interval %v <= fast cadence %v — no write reduction", onLimit, interval, store.DefaultConcurrencyHeartbeatInterval)
+			t.Errorf("%q interval %v <= fast cadence %v -- no write reduction", onLimit, interval, store.DefaultConcurrencyHeartbeatInterval)
 		}
 	}
 }
