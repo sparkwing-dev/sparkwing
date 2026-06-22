@@ -59,6 +59,23 @@ code change to unlock.
   (Mode 3) or a hosted controller (Mode 4) rather than coordinate
   unsafely. Heavily contended coalesce keys see higher tail latency than
   Postgres: each mutation is a read-modify-write retry against one object.
+- **install:** A Mode 3 (Postgres) Terraform module
+  (`install/terraform/mode3-postgres`) provisions the managed-Postgres state
+  backend for cross-runner coordination, shipping with an offline `terraform
+  plan` test harness and a CI gate. Mode 3 is the database-backed path callers
+  fall back to when their object store does not enforce write preconditions.
+
+### Fixed
+
+- **store:** A shared `state.db` no longer fails live runs with `database is
+  locked (SQLITE_BUSY)` when many `sparkwing run` processes write
+  concurrently. The state DSN now sets `synchronous=NORMAL` (the
+  WAL-recommended setting: fsync at checkpoint, not on every commit), and the
+  concurrency lease heartbeat became policy-aware -- `CancelOthers` keeps a 3s
+  cadence so a supersede is observed within ~3s, while the other policies
+  refresh on `lease/3` with a `lease/4` busy-wait bound, cutting heartbeat
+  write volume ~20x without changing reclaim latency. No schema change, no
+  migration.
 
 ## [v0.11.2] - 2026-06-20
 ### Fixed
