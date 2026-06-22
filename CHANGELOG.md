@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.12.0] - 2026-06-22
 ### Added
 
 - **storage:** Mode 2 (S3-only) deployments now coordinate across runners
