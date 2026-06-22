@@ -343,7 +343,7 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 		execCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var lost atomic.Bool
-		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, &lost, cancel)
+		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, cancel)
 
 		result := r.acquireAndRun(execCtx, req, concParamsFor(node, group, req.RunID))
 
@@ -435,7 +435,7 @@ func (r *InProcessRunner) applySkippedConcurrent(ctx context.Context, req runner
 func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
-	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, &superseded, cancelExec)
+	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, cp.policy, &superseded, cancelExec)
 
 	defer func() {
 		stopHB()
@@ -476,14 +476,14 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 // Fail-closed: if no successful heartbeat in `lease`, the controller
 // has reaped us; we abort so a newer holder isn't racing the same
 // work. The returned stop is safe to call multiple times.
-func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID string, superseded *atomic.Bool, cancelExec context.CancelFunc) func() {
+func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, cancelExec context.CancelFunc) func() {
 	done := make(chan struct{})
 	var once sync.Once
 
 	lease := store.DefaultConcurrencyLease
 
 	go func() {
-		t := time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
+		t := time.NewTicker(store.ConcurrencyHeartbeatInterval(onLimit))
 		defer t.Stop()
 		lastOK := time.Now()
 		for {
@@ -493,7 +493,7 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID 
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				hbCtx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
+				hbCtx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, wasSuperseded, err := r.backends.Concurrency.HeartbeatSlot(hbCtx, key, holderID, lease)
 				cancel()
 				if err != nil {

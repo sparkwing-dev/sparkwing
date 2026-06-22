@@ -73,13 +73,44 @@ const (
 // for the full window to be reaped.
 const DefaultConcurrencyLease = DefaultLeaseDuration
 
-// DefaultConcurrencyHeartbeatInterval shares cadence with trigger and
-// run heartbeats so CancelOthers supersedes land within ~3s.
+// DefaultConcurrencyHeartbeatInterval is the fast holder-heartbeat cadence
+// for CancelOthers slots, where a superseding acquirer must be noticed
+// within ~3s. Other policies refresh at the slower cadence returned by
+// ConcurrencyHeartbeatInterval.
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 
-// DefaultConcurrencyHeartbeatTimeout is strictly less than the interval
-// so a wedged controller can't stack ticks.
+// DefaultConcurrencyHeartbeatTimeout bounds one heartbeat attempt on the
+// fast CancelOthers cadence; it is shorter than that 3s interval so a
+// wedged tick can't stack. The policy-correct bound is
+// ConcurrencyHeartbeatTimeout.
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
+
+// ConcurrencyHeartbeatInterval is how often a holder under onLimit refreshes
+// its lease. Only CancelOthers needs the fast 3s cadence, to notice a
+// superseding acquirer within one tick; other policies have no supersede to
+// observe and refresh at lease/3. With one holder per memo node plus the
+// plan slot sharing one store, the slower cadence is a fraction of the
+// write load.
+func ConcurrencyHeartbeatInterval(onLimit string) time.Duration {
+	if onLimit == OnLimitCancelOthers {
+		return DefaultConcurrencyHeartbeatInterval
+	}
+	return DefaultConcurrencyLease / 3
+}
+
+// ConcurrencyHeartbeatTimeout bounds one heartbeat attempt under onLimit. An
+// _txlock=immediate heartbeat can busy-wait seconds for the write lock, so
+// the slow cadence needs a bound long enough to outwait that: a short bound
+// abandons a winnable attempt and counts a false miss, and at lease/3 only
+// three misses lapse a live holder's lease. The bound stays below the slow
+// interval so attempts can't stack; CancelOthers keeps the short
+// DefaultConcurrencyHeartbeatTimeout against its 3s cadence.
+func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration {
+	if onLimit == OnLimitCancelOthers {
+		return DefaultConcurrencyHeartbeatTimeout
+	}
+	return DefaultConcurrencyLease / 4
+}
 
 // DefaultCancelTimeout bounds CancelOthers eviction.
 const DefaultCancelTimeout = 60 * time.Second

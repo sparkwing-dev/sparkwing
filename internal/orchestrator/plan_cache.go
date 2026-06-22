@@ -75,7 +75,7 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, key, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit)), planCacheProceed, nil
 
 	case store.AcquireSkipped:
 		_ = backends.State.AppendEvent(ctx, runID, "", "plan_skipped_concurrent", nil)
@@ -100,7 +100,7 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 		if !promoted {
 			return nil, planCacheEvicted, nil
 		}
-		return makePlanSlotRelease(backends, key, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit)), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
 		return nil, "", fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
@@ -159,7 +159,7 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 // a lease-refreshing heartbeat. On contact loss beyond the lease, we
 // log loudly but do NOT preempt running nodes (operator chose plan-
 // scope coordination, not best-effort).
-func makePlanSlotRelease(backends Backends, key, holderID string) func(outcome string) {
+func makePlanSlotRelease(backends Backends, key, holderID, onLimit string) func(outcome string) {
 	hbCtx, hbCancel := context.WithCancel(context.Background())
 	var superseded atomic.Bool
 	var wg sync.WaitGroup
@@ -167,7 +167,7 @@ func makePlanSlotRelease(backends Backends, key, holderID string) func(outcome s
 	go func() {
 		defer wg.Done()
 		lease := store.DefaultConcurrencyLease
-		t := time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
+		t := time.NewTicker(store.ConcurrencyHeartbeatInterval(onLimit))
 		defer t.Stop()
 		lastOK := time.Now()
 		for {
@@ -175,7 +175,7 @@ func makePlanSlotRelease(backends Backends, key, holderID string) func(outcome s
 			case <-hbCtx.Done():
 				return
 			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
+				ctx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, was, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, lease)
 				cancel()
 				if err != nil {
