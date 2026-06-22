@@ -83,8 +83,21 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 // once would otherwise have one fail the WAL switch with SQLITE_BUSY
 // before any timeout was active. With the timeout set first, that race
 // becomes a bounded wait.
+//
+// synchronous=NORMAL is the WAL-recommended setting. Under FULL (the
+// default) every COMMIT fsyncs the WAL, and since each `_txlock=immediate`
+// transaction holds the exclusive write lock until COMMIT, that fsync sits
+// on the critical path that every co-located writer process serializes
+// through — the throughput ceiling that lets a contended write queue back
+// up past a heartbeat's deadline under host load. NORMAL fsyncs only at
+// checkpoint, not per commit; WAL keeps the database consistent across a
+// crash either way, the bounded cost being a few of the most recent
+// committed transactions on an OS/power crash. For orchestration state
+// (leases, run rows, cache entries) that loss is self-healing — a lost
+// lease is reaped, a lost run row is reconciled — so the durability trade
+// is sound here.
 func Open(path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)", path)
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path)
 	return openSQL("sqlite", dsn, DialectSQLite)
 }
 
