@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.13.0] - 2026-06-23
 ### Changed
 
 - **run:** The host box-slot semaphore is on by default. With
