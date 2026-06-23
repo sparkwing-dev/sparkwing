@@ -984,11 +984,25 @@ func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expire
 
 // HeartbeatConcurrencySlot extends the lease and reports the
 // supersede signal; ErrLockHeld when caller no longer holds.
+//
+// The write is retried on a transient SQLITE_BUSY so a brief writer
+// stall under contention does not lapse a live holder's lease. Each
+// retry re-reads the clock and the lease-expiry check, so a retry can
+// never revive a lease that lapsed while waiting; the bounded retry
+// budget is a small fraction of the lease window.
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error) {
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
+	err = retryOnBusy(func() error {
+		var once error
+		expires, superseded, once = s.heartbeatConcurrencySlotOnce(ctx, key, holderID, lease)
+		return once
+	})
+	return expires, superseded, err
+}
 
+func (s *Store) heartbeatConcurrencySlotOnce(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return time.Time{}, false, err
