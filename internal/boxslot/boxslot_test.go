@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -234,9 +235,19 @@ func TestAcquire_ConcurrentRaceNeverExceedsMax(t *testing.T) {
 }
 
 func TestDefaultMaxSlots(t *testing.T) {
-	for _, workers := range []int{0, 1, 4, 1 << 20} {
-		if got := boxslot.DefaultMaxSlots(workers); got != 0 {
-			t.Errorf("DefaultMaxSlots(%d) = %d, want 0 (disabled)", workers, got)
+	ncpu := runtime.NumCPU()
+	cases := []struct {
+		workers int
+		want    int
+	}{
+		{0, ncpu},
+		{1, ncpu},
+		{ncpu, 1},
+		{1 << 20, 1},
+	}
+	for _, c := range cases {
+		if got := boxslot.DefaultMaxSlots(c.workers); got != c.want {
+			t.Errorf("DefaultMaxSlots(%d) = %d, want %d", c.workers, got, c.want)
 		}
 	}
 }

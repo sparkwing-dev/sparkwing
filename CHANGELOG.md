@@ -47,6 +47,18 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **run:** The host box-slot semaphore is on by default. With
+  `SPARKWING_BOX_SLOTS` unset, `sparkwing run` now caps concurrent
+  orchestrator processes on a host at `max(1, NumCPU/workers-per-run)`
+  instead of running uncapped. Overlapping local runs queue ("waiting
+  for box slot...") rather than all proceeding, which stops concurrent
+  runs against a shared local SQLite backend from saturating the single
+  writer and collapsing under lease-heartbeat failures. A single run
+  never blocks on itself and cluster mode does not use the semaphore.
+  Restore the previous behavior with `SPARKWING_BOX_SLOTS=off` (or
+  `--sw-box-slots off`).
 
 ## [v0.12.0] - 2026-06-22
 ### Added

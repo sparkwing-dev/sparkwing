@@ -131,23 +131,26 @@ sparkwing to block them.
 ## Per-host concurrency
 
 Two `sparkwing run` invocations on the same machine compete for the
-same CPU. By default there is **no per-host cap** -- overlapping runs
-all proceed. Most runs aren't CPU-pegged (Docker pulls and network I/O
-dominate), so a default cap would mostly add latency without helping.
+same CPU. By default the host admits at most `max(1, NumCPU /
+workers-per-run)` concurrent runs, so the admitted runs sum to about
+`NumCPU` worker goroutines instead of oversubscribing the box. A single
+run never blocks on itself. Overlapping runs against a shared local
+SQLite backend especially benefit: without the cap, enough overlap
+saturates the single SQLite writer until lease heartbeats fail and runs
+collapse; the host cap prevents that saturation at the source.
 
-Opt in to a cap when you launch several CPU-saturating pipelines on a
-small box:
+Tune or disable the cap:
 
 - `sparkwing run X --sw-box-slots N` (or `SPARKWING_BOX_SLOTS=N`) admits
   at most `N` concurrent runs per host; extra invocations queue FIFO
   with a periodic `waiting for box slot (N active, max M)` line on
   stderr. Ctrl-C cancels the wait cleanly.
-- A conservative heuristic for a CPU-bound mix is one slot per few
-  cores, e.g. `export SPARKWING_BOX_SLOTS=$(( $(sysctl -n hw.ncpu) / 4 ))`.
+- `sparkwing run X --sw-box-slots off` (or `SPARKWING_BOX_SLOTS=off`)
+  disables the cap entirely, restoring uncapped overlap.
 - `sparkwing run X --sw-no-wait` fails immediately with
   `box slots full (max=N)` instead of queueing -- the shape CI runners
-  want when they would rather decline overlap than block. With no cap
-  set, there is nothing to gate.
+  want when they would rather decline overlap than block. With the cap
+  disabled, there is nothing to gate.
 
 The gate is host-local. Two laptops pointed at the same shared state
 backend (Mode 2 / 3 / 4) each keep their own slot count; nothing

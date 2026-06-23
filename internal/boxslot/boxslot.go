@@ -45,6 +45,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -79,18 +80,26 @@ type Options struct {
 	PollMax      time.Duration
 }
 
-// DefaultMaxSlots returns 0 -- the box-slot semaphore is disabled by
-// default and opt-in via --sw-box-slots or SPARKWING_BOX_SLOTS. Most
-// runs aren't CPU-pegged (Docker pulls, network I/O dominate) and the
-// old SQLite-serialization rationale for a default cap is gone in S3
-// state mode. Users on a small box who launch concurrent
-// CPU-saturating pipelines should set SPARKWING_BOX_SLOTS=N
-// explicitly; e.g. `export SPARKWING_BOX_SLOTS=$(( $(sysctl -n hw.ncpu) / 4 ))`
-// matches the old conservative heuristic. workersPerRun is retained
-// in the signature so callers don't need to change; it's ignored.
-func DefaultMaxSlots(workersPerRun int) int { //nolint:revive // arg retained for caller compat
-	_ = workersPerRun
-	return 0
+// DefaultMaxSlots returns the default host box-slot cap: max(1,
+// NumCPU/workersPerRun). Sizing the cap so the admitted runs sum to
+// about NumCPU worker goroutines keeps overlapping `sparkwing run`
+// invocations from oversubscribing the host's CPU. On a shared local
+// SQLite backend this also prevents the lease-heartbeat dogpile that
+// collapses concurrent runs: without a host admission cap, enough
+// overlap saturates the single SQLite writer, heartbeats start failing
+// with SQLITE_BUSY, leases expire, and holders get superseded in a
+// feedback loop. The semaphore stays overridable via --sw-box-slots or
+// SPARKWING_BOX_SLOTS ("off"/"0" disables it). workersPerRun is the
+// per-run dispatcher worker cap; values below 1 are treated as 1.
+func DefaultMaxSlots(workersPerRun int) int {
+	if workersPerRun < 1 {
+		workersPerRun = 1
+	}
+	slots := runtime.NumCPU() / workersPerRun
+	if slots < 1 {
+		slots = 1
+	}
+	return slots
 }
 
 // Acquire blocks until a box slot is available, then returns a
