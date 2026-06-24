@@ -47,6 +47,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** `sparkwing update` no longer strands an unpublished build on an
+  unsupported version line. A CLI installed from a commit (a pseudo-version
+  such as `v1.6.2-0.<timestamp>-<hash>` left over from the pre-1.0 v1.x
+  tags) sorts above the published `v0.x` latest, so the downgrade guard
+  used to refuse the move to the real latest without `--force`. The guard
+  now protects only between two published releases; an unpublished
+  pseudo-version or `+dirty` build re-baselines to the published latest
+  with a clear note instead of being treated as newer.
 
 ## [v0.13.0] - 2026-06-23
 ### Changed

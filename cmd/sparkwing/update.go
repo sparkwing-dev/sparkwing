@@ -71,6 +71,41 @@ func runUpdateCheck() error {
 	}
 }
 
+// downgradeKind classifies a move from the installed version to a
+// resolved target.
+type downgradeKind int
+
+const (
+	// downgradeAllowed: the target is the same or newer, or the versions
+	// aren't comparable, so the move proceeds unremarked.
+	downgradeAllowed downgradeKind = iota
+	// downgradeRebaseline: the target sorts older, but the installed
+	// build is unpublished (a pseudo-version or dirty worktree) and so is
+	// not a release worth protecting. Moving to the published target is a
+	// re-baseline, not a downgrade, and proceeds without --force.
+	downgradeRebaseline
+	// downgradeNeedsForce: both versions are resolvable published
+	// releases and the target is older, so the move is a real downgrade
+	// gated behind --force.
+	downgradeNeedsForce
+)
+
+// classifyDowngrade decides how a move from current to resolved is
+// treated. The downgrade guard protects only between two published
+// releases: an unpublished build (pseudo-version such as
+// v1.6.2-0.<ts>-<hash>, or a +dirty worktree) that merely sorts above
+// the published latest must still re-baseline to it, not be mistaken
+// for a newer release the guard should defend.
+func classifyDowngrade(current, resolved string) downgradeKind {
+	if !isSemver(current) || !isSemver(resolved) || semver.Compare(resolved, current) >= 0 {
+		return downgradeAllowed
+	}
+	if isResolvableModuleVersion(current) {
+		return downgradeNeedsForce
+	}
+	return downgradeRebaseline
+}
+
 // runUpdateBinary downloads + verifies + atomically installs.
 // Falls back to `go install` when the download fails.
 func runUpdateBinary(version string, force bool) error {
@@ -91,13 +126,19 @@ func runUpdateBinary(version string, force bool) error {
 		return nil
 	}
 
-	if !force && isSemver(current) && isSemver(resolved) {
-		if semver.Compare(resolved, current) < 0 {
+	switch classifyDowngrade(current, resolved) {
+	case downgradeNeedsForce:
+		if !force {
 			return fmt.Errorf(
 				"update: %s is older than the installed %s\n  to downgrade, re-run with --force",
 				resolved, current,
 			)
 		}
+	case downgradeRebaseline:
+		fmt.Fprintf(os.Stdout,
+			"update: installed %s is an unpublished build; re-baselining to the published %s\n",
+			current, resolved,
+		)
 	}
 
 	currentBin, err := os.Executable()
