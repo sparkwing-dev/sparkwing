@@ -1020,6 +1020,20 @@ Built-in templates (registry templates are listed by 'pipeline templates'):
     The canonical CI shape; first 'sparkwing run <name>' surfaces three
     exec banners + three echoed lines so the structure is
     visible end-to-end.
+  - ci-pr-check: pull-request gate. lint and test run in parallel and
+    a final gate job depends on both, so the pipeline is green only
+    when every check passes. test Prefers a CI runner label.
+  - release: linear version-bump -> changelog -> publish flow. The
+    canonical release shape; publish Prefers a release runner label.
+  - scheduled-report: fan-out report. One collect job seeds three
+    parallel gatherers (metrics, errors, usage) and publish-report
+    converges them. Prints the sparkwing.yaml 'on:' schedule trigger
+    to add for cron runs.
+
+Each built-in template scaffolds a pipeline that compiles, renders
+clean under 'pipeline explain', and passes 'pipeline lint': pure
+Plan(), runner-label preferences over host branching, echo Run bodies
+so the first 'sparkwing run <name>' succeeds end-to-end.
 
 Refuses to clobber: if the name already exists in sparkwing.yaml
 the command fails before writing anything.
@@ -1035,7 +1049,7 @@ See also:
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
-		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | any registry name from `sparkwing pipeline templates`", Default: "minimal", Group: "Scaffold"},
+		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | ci-pr-check | release | scheduled-report | any registry name from `sparkwing pipeline templates`", Default: "minimal", Group: "Scaffold"},
 		{Name: "param", Argument: "K=V", Desc: "Registry template parameter (repeatable); see `sparkwing pipeline templates`", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
 		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line (built-in templates only)", Group: "Scaffold"},
@@ -1044,6 +1058,8 @@ See also:
 	Examples: []Example{
 		{"Single-node pipeline (default template)", "sparkwing pipeline new --name release"},
 		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name release-all --template build-test-deploy"},
+		{"Pull-request gate (lint + test -> gate)", "sparkwing pipeline new --name pr-check --template ci-pr-check"},
+		{"Scheduled fan-out report", "sparkwing pipeline new --name daily-report --template scheduled-report"},
 		{"From a registry template", `sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp --param namespace=myapp --param app-name=myapp --param health-url=http://myapp.myapp.svc:8080/health`},
 	},
 }
