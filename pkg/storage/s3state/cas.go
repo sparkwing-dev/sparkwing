@@ -17,24 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// This file implements the Mode 2 cross-runner coordination records that
-// the base NDJSON state plane (s3state.go) deliberately omits: dispatch
-// claims, debug pauses, approvals, and pipeline triggers. Each is a
-// discrete object-store record mutated through storage.ConditionalWriter
-// compare-and-swap (S3 If-None-Match/If-Match and the GCS/Azure
-// equivalents), so many runners serialize on one key with no database.
-//
-// The records live beside, not inside, runs/<id>/state.ndjson: a
-// coordination record is small, hot, and mutated under CAS, while the
-// state log is append-and-replace. Mixing them would force a full
-// state.ndjson re-PUT per approval resolve.
-//
-// Every method first probes the capability. When the artifact store does
-// not implement ConditionalWriter, or the live endpoint advertises but
-// ignores write preconditions, the method returns ErrNotSupported rather
-// than coordinate unsafely -- a CAS loop against an endpoint that ignores
-// preconditions would hand out unsafe locks.
-
 // casMaxRetries bounds a contended read-modify-CAS loop before giving up.
 const casMaxRetries = 16
 
@@ -163,8 +145,6 @@ func (b *Backend) listKeys(ctx context.Context, prefix, feature string) ([]strin
 	}
 	return keys, nil
 }
-
-// --- Dispatch claims -------------------------------------------------
 
 func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	cw, ok, err := b.cas(ctx)
@@ -303,8 +283,6 @@ func (b *Backend) ListNodeDispatches(ctx context.Context, runID, nodeID string) 
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out, nil
 }
-
-// --- Debug pauses ----------------------------------------------------
 
 func (b *Backend) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	cw, ok, err := b.cas(ctx)
@@ -468,8 +446,6 @@ func (b *Backend) releasePauseRecord(ctx context.Context, cw storage.Conditional
 	return false, fmt.Errorf("ReleaseDebugPause: contention on %s after %d attempts", key, casMaxRetries)
 }
 
-// --- Approvals -------------------------------------------------------
-
 func (b *Backend) CreateApproval(ctx context.Context, a store.Approval) error {
 	cw, ok, err := b.cas(ctx)
 	if err != nil {
@@ -603,8 +579,6 @@ func (b *Backend) ListPendingApprovals(ctx context.Context) ([]*store.Approval, 
 	sort.Slice(out, func(i, j int) bool { return out[i].RequestedAt.Before(out[j].RequestedAt) })
 	return out, nil
 }
-
-// --- Triggers --------------------------------------------------------
 
 func (b *Backend) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
 	if parentRunID == "" || parentNodeID == "" || pipeline == "" {
