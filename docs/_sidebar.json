@@ -8,6 +8,7 @@
       "label": "Pipelines",
       "slugs": [
         "pipelines",
+        "authoring-pipelines",
         "config-reference",
         "sdk",
         "sdk-reference",
