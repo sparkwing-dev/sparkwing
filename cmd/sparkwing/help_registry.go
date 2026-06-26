@@ -42,6 +42,7 @@ for agent-facing discovery.`,
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
 		{"dashboard", "Local dashboard server"},
+		{"box-slots", "Show or live-tune the host run-concurrency cap"},
 		{"cluster", "Cluster ops"},
 		{"secrets", "Manage secrets"},
 		{"configure", "Laptop-local config"},
@@ -1406,6 +1407,81 @@ expired rows, so it is safe to run alongside live runs.`,
 		{"Sweep now", "sparkwing maintenance"},
 		{"Machine-readable summary", "sparkwing maintenance -o json"},
 		{"Hourly from cron", "0 * * * * sparkwing maintenance"},
+	},
+}
+
+var cmdBoxSlots = Command{
+	Path:     "sparkwing box-slots",
+	Synopsis: "Show or live-tune the host run-concurrency cap",
+	Description: `The box-slot semaphore caps how many ` + "`sparkwing run`" + ` orchestrator
+processes run at once on this machine, so overlapping invocations
+don't oversubscribe the box's CPU. The cap used to be fixed when each
+run started; this command makes it a live host control runs re-read
+while they wait or hold.
+
+'show' reports the cap in force, where it came from (the live control,
+the SPARKWING_BOX_SLOTS env baseline, or the heuristic default), and how
+many runs currently hold a slot versus wait for one. 'set' writes the
+host control: raising it lets queued runs acquire on their next poll;
+lowering it drains as holders finish (running work is never evicted).
+
+An explicit per-run --sw-box-slots still pins that one run above the
+control. Reset to the env/heuristic default with 'set --to default'.`,
+	Subcommands: []SubcommandRef{
+		{"show", "Print the cap in force, its source, and live holders + waiters"},
+		{"set", "Write the live host cap (--to N | off | default)"},
+	},
+	Examples: []Example{
+		{"What's the cap and who's holding slots?", "sparkwing box-slots show"},
+		{"Machine-readable", "sparkwing box-slots show -o json"},
+		{"Raise the cap so queued runs unblock", "sparkwing box-slots set --to 4"},
+		{"Disable the semaphore on this host", "sparkwing box-slots set --to off"},
+		{"Revert to the heuristic default", "sparkwing box-slots set --to default"},
+	},
+}
+
+var cmdBoxSlotsShow = Command{
+	Path:     "sparkwing box-slots show",
+	Synopsis: "Print the cap in force, its source, and live holders + waiters",
+	Description: `Reports the host box-slot cap a new run would resolve to (with no
+per-run --sw-box-slots pin), where that value came from -- the live
+control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic default
+of max(1, NumCPU/workers) -- and the live semaphore state: how many runs
+hold a slot and how many are blocked waiting. A cap of 0 means the
+semaphore is disabled (unlimited concurrency).`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing box-slots show"},
+		{"Agent-readable", "sparkwing box-slots show -o json"},
+	},
+}
+
+var cmdBoxSlotsSet = Command{
+	Path:     "sparkwing box-slots set",
+	Synopsis: "Write the live host run-concurrency cap",
+	Description: `Writes the live host box-slot control. Waiting and running runs
+re-read it on their next acquire poll, so a change takes effect without
+restarting in-flight work: raising the cap lets queued runs acquire
+immediately; lowering it drains as current holders finish (they are
+never evicted).
+
+--to takes a positive integer (the new cap), 'off' (also 'none' / '0',
+disabling the semaphore so runs never queue), or 'default' (clear the
+control and fall back to SPARKWING_BOX_SLOTS or the heuristic). An
+explicit per-run --sw-box-slots still outranks this control for that
+run.`,
+	Flags: []FlagSpec{
+		{Name: "to", Argument: "VALUE", Desc: "New cap: a positive integer, 'off', or 'default'", Required: true, Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Raise the cap to 4", "sparkwing box-slots set --to 4"},
+		{"Disable the semaphore", "sparkwing box-slots set --to off"},
+		{"Revert to the heuristic default", "sparkwing box-slots set --to default"},
 	},
 }
 

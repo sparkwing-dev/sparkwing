@@ -86,7 +86,7 @@ func TestAcquire_BlocksUntilSlotFrees(t *testing.T) {
 			LockDir:      dir,
 			PollInterval: 20 * time.Millisecond,
 			PollMax:      40 * time.Millisecond,
-			OnWait:       func(active int) { waitCount.Add(1) },
+			OnWait:       func(active, max int) { waitCount.Add(1) },
 		})
 		if err != nil {
 			t.Errorf("second Acquire: %v", err)
@@ -249,6 +249,181 @@ func TestDefaultMaxSlots(t *testing.T) {
 		if got := boxslot.DefaultMaxSlots(c.workers); got != c.want {
 			t.Errorf("DefaultMaxSlots(%d) = %d, want %d", c.workers, got, c.want)
 		}
+	}
+}
+
+func TestAcquire_ResolverRaisesCapUnblocksWaiter(t *testing.T) {
+	dir := t.TempDir()
+	rel1, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1, LockDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	defer rel1()
+
+	var capVal atomic.Int64
+	capVal.Store(1)
+	acquired := make(chan error, 1)
+	go func() {
+		rel, err := boxslot.Acquire(context.Background(), boxslot.Options{
+			ResolveMaxSlots: func() int { return int(capVal.Load()) },
+			LockDir:         dir,
+			PollInterval:    10 * time.Millisecond,
+			PollMax:         20 * time.Millisecond,
+		})
+		if err == nil {
+			rel()
+		}
+		acquired <- err
+	}()
+
+	select {
+	case err := <-acquired:
+		t.Fatalf("second Acquire returned early (err=%v) while cap=1 and slot held", err)
+	case <-time.After(60 * time.Millisecond):
+	}
+
+	capVal.Store(2)
+	select {
+	case err := <-acquired:
+		if err != nil {
+			t.Fatalf("second Acquire after live cap raise: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Acquire never unblocked after the cap was raised in flight")
+	}
+}
+
+func TestAcquire_ResolverDisableMidWaitAdmits(t *testing.T) {
+	dir := t.TempDir()
+	rel1, err := boxslot.Acquire(context.Background(), boxslot.Options{MaxSlots: 1, LockDir: dir})
+	if err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	defer rel1()
+
+	var capVal atomic.Int64
+	capVal.Store(1)
+	done := make(chan error, 1)
+	go func() {
+		rel, err := boxslot.Acquire(context.Background(), boxslot.Options{
+			ResolveMaxSlots: func() int { return int(capVal.Load()) },
+			LockDir:         dir,
+			PollInterval:    10 * time.Millisecond,
+			PollMax:         20 * time.Millisecond,
+		})
+		if err == nil {
+			rel()
+		}
+		done <- err
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	capVal.Store(0)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Acquire after live disable: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Acquire did not admit after the semaphore was disabled mid-wait")
+	}
+}
+
+func TestStatus_ReportsHoldersAndWaiters(t *testing.T) {
+	dir := t.TempDir()
+	st, err := boxslot.Status(dir)
+	if err != nil {
+		t.Fatalf("Status empty: %v", err)
+	}
+	if st.ActiveHolders != 0 || st.Waiters != 0 {
+		t.Fatalf("empty Status = %+v, want zero", st)
+	}
+
+	rel1, err := boxslot.Acquire(context.Background(), boxslot.Options{MaxSlots: 1, LockDir: dir})
+	if err != nil {
+		t.Fatalf("Acquire holder: %v", err)
+	}
+	defer rel1()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waiterDone := make(chan struct{})
+	go func() {
+		defer close(waiterDone)
+		rel, err := boxslot.Acquire(ctx, boxslot.Options{
+			MaxSlots:     1,
+			LockDir:      dir,
+			PollInterval: 10 * time.Millisecond,
+			PollMax:      20 * time.Millisecond,
+		})
+		if err == nil {
+			rel()
+		}
+	}()
+
+	waitFor(t, 2*time.Second, func() bool {
+		st, err = boxslot.Status(dir)
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		return st.ActiveHolders == 1 && st.Waiters == 1
+	}, "Status never reached 1 holder + 1 waiter")
+
+	cancel()
+	<-waiterDone
+
+	waitFor(t, 2*time.Second, func() bool {
+		st, _ = boxslot.Status(dir)
+		return st.Waiters == 0
+	}, "waiter marker lingered after the waiter was canceled")
+}
+
+func TestControl_WriteReadClearRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok, err := boxslot.ReadControl(dir); err != nil || ok {
+		t.Fatalf("ReadControl unset = ok:%v err:%v, want ok:false", ok, err)
+	}
+	if err := boxslot.WriteControl(dir, "3"); err != nil {
+		t.Fatalf("WriteControl: %v", err)
+	}
+	v, ok, err := boxslot.ReadControl(dir)
+	if err != nil || !ok || v != "3" {
+		t.Fatalf("ReadControl = %q,%v,%v want 3,true,nil", v, ok, err)
+	}
+	if err := boxslot.ClearControl(dir); err != nil {
+		t.Fatalf("ClearControl: %v", err)
+	}
+	if _, ok, _ := boxslot.ReadControl(dir); ok {
+		t.Fatal("ReadControl after clear still reports set")
+	}
+	if err := boxslot.ClearControl(dir); err != nil {
+		t.Fatalf("ClearControl when absent should be a no-op: %v", err)
+	}
+}
+
+func TestWriteControl_CreatesLockDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "box-slots")
+	if err := boxslot.WriteControl(dir, "off"); err != nil {
+		t.Fatalf("WriteControl into a missing dir: %v", err)
+	}
+	v, ok, _ := boxslot.ReadControl(dir)
+	if !ok || v != "off" {
+		t.Fatalf("ReadControl = %q,%v want off,true", v, ok)
+	}
+}
+
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(msg)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

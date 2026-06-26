@@ -19,51 +19,71 @@ import (
 // uniformly) and independent of any `.Concurrency(...)` per-pipeline
 // declarations, which are a separate logical-reservation concern.
 //
-// Reads:
+// Cap precedence (highest first):
 //
-//   - SPARKWING_BOX_SLOTS    Override the slot count. Zero / negative /
-//     "off" disables the semaphore entirely.
-//   - SPARKWING_BOX_NO_WAIT  Fail with ErrSlotsFull instead of queuing
-//     when all slots are taken. CI runners use this to decline overlap.
+//   - SPARKWING_BOX_SLOTS_PIN  An explicit per-run --sw-box-slots pin.
+//     Fixed for the run; outranks the live host control so a deliberate
+//     per-run choice is honored even while the host cap is retuned.
+//   - the live host control       The value box-slots set writes, re-read
+//     on every acquire poll so a waiting or holding run retunes in place.
+//   - SPARKWING_BOX_SLOTS         Ambient env baseline.
+//   - the heuristic default       max(1, NumCPU / workersHint).
 //
-// Default heuristic: max(1, NumCPU / workersHint). workersHint is the
-// per-run dispatcher worker cap (Options.MaxParallel), so admitted
-// runs sum to approximately NumCPU worker goroutines.
+// "off" / "none" / "0" / negative at any level disables the semaphore.
+// SPARKWING_BOX_NO_WAIT makes a full host fail with ErrSlotsFull instead
+// of queuing -- CI runners use it to decline overlap. Unless the run is
+// pinned, the cap is resolved fresh on each poll, so box-slots set takes
+// effect on the next wait iteration of every queued run.
 //
 // Cluster paths (handle-trigger, run-node, replay-node) do not call
 // this -- pod CPU limits and the warm-runner pool's own concurrency
 // budget cover that surface.
 func acquireBoxSlot(ctx context.Context, paths Paths, workersHint int) (func(), error) {
-	maxSlots, ok := parseBoxSlots(os.Getenv("SPARKWING_BOX_SLOTS"))
-	if !ok {
-		maxSlots = boxslot.DefaultMaxSlots(workersHint)
-	}
-	if maxSlots <= 0 {
-		return func() {}, nil
-	}
 	noWait := envTruthy("SPARKWING_BOX_NO_WAIT")
 
+	resolve := func() int { cap, _ := BoxSlotCap(paths, workersHint); return cap }
+	if pin, ok := parseBoxSlots(os.Getenv("SPARKWING_BOX_SLOTS_PIN")); ok {
+		resolve = func() int { return pin }
+	}
+
 	release, err := boxslot.Acquire(ctx, boxslot.Options{
-		MaxSlots: maxSlots,
-		LockDir:  paths.BoxSlotDir(),
-		NoWait:   noWait,
-		OnWait: func(active int) {
+		ResolveMaxSlots: resolve,
+		LockDir:         paths.BoxSlotDir(),
+		NoWait:          noWait,
+		OnWait: func(active, max int) {
 			fmt.Fprintf(os.Stderr,
 				"waiting for box slot (%d active, max %d). "+
-					"Override with --sw-box-slots N or fail fast with --sw-no-wait.\n",
-				active, maxSlots)
+					"Raise the host cap live with `sparkwing box-slots set --to N`, "+
+					"or fail fast with --sw-no-wait.\n",
+				active, max)
 		},
 	})
 	if err != nil {
 		if errors.Is(err, boxslot.ErrSlotsFull) {
 			return nil, fmt.Errorf(
-				"box slots full (max=%d); pass --sw-box-slots N to raise, "+
-					"or drop --sw-no-wait to queue instead",
-				maxSlots)
+				"box slots full; raise the host cap with `sparkwing box-slots set --to N`, " +
+					"or drop --sw-no-wait to queue instead")
 		}
 		return nil, fmt.Errorf("acquire box slot: %w", err)
 	}
 	return release, nil
+}
+
+// BoxSlotCap reports the host box-slot cap a new run with no explicit
+// --sw-box-slots pin would resolve to, and where it came from
+// ("control", "env", or "default"). It is the host-level view
+// box-slots show renders and the resolver acquireBoxSlot re-reads on
+// each poll; per-run pins are deliberately not consulted here.
+func BoxSlotCap(paths Paths, workersHint int) (slots int, source string) {
+	if v, ok, err := boxslot.ReadControl(paths.BoxSlotDir()); err == nil && ok {
+		if n, parsed := parseBoxSlots(v); parsed {
+			return n, "control"
+		}
+	}
+	if n, ok := parseBoxSlots(os.Getenv("SPARKWING_BOX_SLOTS")); ok {
+		return n, "env"
+	}
+	return boxslot.DefaultMaxSlots(workersHint), "default"
 }
 
 // parseBoxSlots accepts "off" / "none" / "0" / negative as disabled,
@@ -91,6 +111,13 @@ func envTruthy(name string) bool {
 		return true
 	}
 	return false
+}
+
+// HostBoxSlotCap is BoxSlotCap with the standard workers hint applied,
+// for callers (the box-slots CLI) that want the host-level view without
+// re-deriving the heuristic input.
+func HostBoxSlotCap(paths Paths) (slots int, source string) {
+	return BoxSlotCap(paths, workersHintForBoxSlot())
 }
 
 // workersHintForBoxSlot reports the per-run dispatcher worker cap the

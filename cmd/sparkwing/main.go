@@ -221,6 +221,11 @@ func dispatchRun(args []string) error {
 	}
 
 	if wf.boxSlots != "" {
+		// The pin outranks the live host control: forwarded as
+		// SPARKWING_BOX_SLOTS_PIN for current binaries, and also as
+		// SPARKWING_BOX_SLOTS so older pinned SDKs (which only read that
+		// variable) still honor an explicit per-run --sw-box-slots.
+		env = setEnv(env, "SPARKWING_BOX_SLOTS_PIN", wf.boxSlots)
 		env = setEnv(env, "SPARKWING_BOX_SLOTS", wf.boxSlots)
 	}
 	if wf.boxNoWait {
@@ -255,6 +260,8 @@ func runSparkwing(args []string) error {
 		return runCluster(args[1:])
 	case "maintenance":
 		return runMaintenance(args[1:])
+	case "box-slots":
+		return runBoxSlots(args[1:])
 	case "secrets":
 		return runSecret(args[1:])
 

@@ -24,6 +24,7 @@ for agent-facing discovery.
 - `version` -- Show + update versions
 - `update` -- Self-update the CLI binary
 - `dashboard` -- Local dashboard server
+- `box-slots` -- Show or live-tune the host run-concurrency cap
 - `cluster` -- Cluster ops
 - `secrets` -- Manage secrets
 - `configure` -- Laptop-local config
@@ -52,6 +53,112 @@ sparkwing pipeline new --name release
 
 # Start the local dashboard
 sparkwing dashboard start
+```
+
+## `sparkwing box-slots`
+
+Show or live-tune the host run-concurrency cap
+
+The box-slot semaphore caps how many `sparkwing run` orchestrator
+processes run at once on this machine, so overlapping invocations
+don't oversubscribe the box's CPU. The cap used to be fixed when each
+run started; this command makes it a live host control runs re-read
+while they wait or hold.
+
+'show' reports the cap in force, where it came from (the live control,
+the SPARKWING_BOX_SLOTS env baseline, or the heuristic default), and how
+many runs currently hold a slot versus wait for one. 'set' writes the
+host control: raising it lets queued runs acquire on their next poll;
+lowering it drains as holders finish (running work is never evicted).
+
+An explicit per-run --sw-box-slots still pins that one run above the
+control. Reset to the env/heuristic default with 'set --to default'.
+
+### Subcommands
+
+- `show` -- Print the cap in force, its source, and live holders + waiters
+- `set` -- Write the live host cap (--to N \| off \| default)
+
+### Examples
+
+```sh
+# What's the cap and who's holding slots?
+sparkwing box-slots show
+
+# Machine-readable
+sparkwing box-slots show -o json
+
+# Raise the cap so queued runs unblock
+sparkwing box-slots set --to 4
+
+# Disable the semaphore on this host
+sparkwing box-slots set --to off
+
+# Revert to the heuristic default
+sparkwing box-slots set --to default
+```
+
+## `sparkwing box-slots set`
+
+Write the live host run-concurrency cap
+
+Writes the live host box-slot control. Waiting and running runs
+re-read it on their next acquire poll, so a change takes effect without
+restarting in-flight work: raising the cap lets queued runs acquire
+immediately; lowering it drains as current holders finish (they are
+never evicted).
+
+--to takes a positive integer (the new cap), 'off' (also 'none' / '0',
+disabling the semaphore so runs never queue), or 'default' (clear the
+control and fall back to SPARKWING_BOX_SLOTS or the heuristic). An
+explicit per-run --sw-box-slots still outranks this control for that
+run.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--to VALUE` | New cap: a positive integer, 'off', or 'default' (required) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+
+### Examples
+
+```sh
+# Raise the cap to 4
+sparkwing box-slots set --to 4
+
+# Disable the semaphore
+sparkwing box-slots set --to off
+
+# Revert to the heuristic default
+sparkwing box-slots set --to default
+```
+
+## `sparkwing box-slots show`
+
+Print the cap in force, its source, and live holders + waiters
+
+Reports the host box-slot cap a new run would resolve to (with no
+per-run --sw-box-slots pin), where that value came from -- the live
+control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic default
+of max(1, NumCPU/workers) -- and the live semaphore state: how many runs
+hold a slot and how many are blocked waiting. A cap of 0 means the
+semaphore is disabled (unlimited concurrency).
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+
+### Examples
+
+```sh
+# Human-readable
+sparkwing box-slots show
+
+# Agent-readable
+sparkwing box-slots show -o json
 ```
 
 ## `sparkwing cluster`
@@ -2359,7 +2466,7 @@ Args.
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
-| `--sw-box-slots N` | Max concurrent sparkwing run processes on this host (default: max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable) |
+| `--sw-box-slots N` | Pin this run's host concurrency cap, outranking the live `box-slots set` control (default: that control, else max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable) |
 | `--sw-no-wait` | Fail immediately when box slots are full instead of queueing |
 
 ### Examples
@@ -2772,7 +2879,7 @@ the default for managed git hooks.
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
-| `--sw-box-slots N` | Max concurrent sparkwing run processes on this host (default: max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable) |
+| `--sw-box-slots N` | Pin this run's host concurrency cap, outranking the live `box-slots set` control (default: that control, else max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable) |
 | `--sw-no-wait` | Fail immediately when box slots are full instead of queueing |
 
 ### Examples
