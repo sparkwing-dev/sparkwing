@@ -2060,6 +2060,7 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 - `new` -- Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)
 - `templates` -- List the sparks-core template registry (starters for `new --template`)
 - `explain` -- Render the pipeline's Plan DAG without running
+- `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
 - `plan` -- Render the runtime-resolved DAG (would-run/would-skip) without running
 - `run` -- Invoke a pipeline (canonical form of `sparkwing run <name>`)
 - `trigger` -- Submit a pipeline to a profile's controller (remote execution)
@@ -2279,6 +2280,60 @@ Deletes every file under .git/hooks/ that carries the "Installed by sparkwing" m
 ```sh
 # Uninstall in the current repo
 sparkwing pipeline hooks uninstall
+```
+
+## `sparkwing pipeline lint`
+
+Check pipeline source for idiomatic anti-patterns (enforced gate)
+
+Statically analyzes pipeline source for the anti-patterns
+that make a Plan() non-deterministic, impure, or misconfigured,
+and exits non-zero on any violation. Unlike 'explain' (which
+builds and runs Plan to validate the resulting DAG), 'lint' reads
+the Go source with go/ast -- it never compiles or runs anything,
+so it works against a pinned-SDK .sparkwing/ tree.
+
+Only the Plan() body is inspected; code inside job/step closures
+and SkipIf / BeforeRun bodies runs at dispatch, so I/O and
+environment reads there are idiomatic and never flagged.
+
+The rule set (see --rules for each rule's charter):
+  plan-io              I/O (shell, exec, file, http) in Plan()
+  plan-runtime-branch  os.Getenv / runtime.GOOS / IsLocal branching in Plan()
+  runner-label         blank runner labels; Inline + Requires on one job
+  unused-ref           a RefTo result discarded into _ or a bare statement
+  guard-misuse         pipeline guards that can never be satisfied together
+
+--all sweeps every pipeline in .sparkwing/sparkwing.yaml and exits
+non-zero if any violates a rule -- designed as a CI gate alongside
+'explain --all'. --name lints a single pipeline. Source defaults
+to <.sparkwing>/jobs; override with --dir.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--name NAME` | Pipeline to lint (one of --name or --all required) |
+| `--all` | Lint every pipeline in this repo's sparkwing.yaml; non-zero exit on any violation |
+| `--rules` | Print each rule's charter (what it forbids and why) and exit |
+| `--dir DIR` | Directory of pipeline source to scan (default: <.sparkwing>/jobs) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
+
+### Examples
+
+```sh
+# Lint one pipeline
+sparkwing pipeline lint --name release
+
+# Lint every pipeline (CI gate)
+sparkwing pipeline lint --all
+
+# Agent-readable findings
+sparkwing pipeline lint --all -o json
+
+# Show the rule set
+sparkwing pipeline lint --rules
 ```
 
 ## `sparkwing pipeline list`

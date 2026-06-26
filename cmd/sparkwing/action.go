@@ -70,6 +70,8 @@ func runPipeline(args []string) error {
 		return runPipelineTemplates(args[1:])
 	case "explain":
 		return runPipelineExplain(args[1:])
+	case "lint":
+		return runPipelineLint(args[1:])
 	case "plan":
 		return runPipelinePlan(args[1:])
 	case "run":

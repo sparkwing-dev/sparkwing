@@ -29,7 +29,7 @@ var allCommands = []*Command{
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe, &cmdPipelineDiscover,
-	&cmdPipelineNew, &cmdPipelineTemplates, &cmdPipelineExplain, &cmdPipelinePlan, &cmdPipelineRun,
+	&cmdPipelineNew, &cmdPipelineTemplates, &cmdPipelineExplain, &cmdPipelineLint, &cmdPipelinePlan, &cmdPipelineRun,
 	&cmdPipelineTrigger,
 	&cmdProfile,
 	&cmdDashboard, &cmdDashboardStart, &cmdDashboardKill, &cmdDashboardStatus,
