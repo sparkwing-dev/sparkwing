@@ -1,6 +1,52 @@
 package main
 
-import "testing"
+import (
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
+)
+
+// TestBuiltinTemplatesRenderLintClean renders every built-in scaffold
+// template and asserts it is valid Go and passes the pipeline linter
+// with zero findings -- the machine-checkable half of "idiomatic by
+// construction" promised by `sparkwing pipeline new`.
+func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
+	cases := []struct {
+		template string
+		src      string
+	}{
+		{"minimal", minimalTemplate},
+		{"build-test-deploy", buildTestDeployTemplate},
+		{"ci-pr-check", ciPRCheckTemplate},
+		{"release", releaseTemplate},
+		{"scheduled-report", scheduledReportTemplate},
+	}
+	for _, tc := range cases {
+		t.Run(tc.template, func(t *testing.T) {
+			rendered := renderBuiltinTemplate("sample-report", "", tc.src)
+
+			if _, err := parser.ParseFile(token.NewFileSet(), "job.go", rendered, parser.AllErrors); err != nil {
+				t.Fatalf("rendered template does not parse as Go: %v", err)
+			}
+
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "job.go"), []byte(rendered), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			findings, err := pipelinelint.AnalyzeSource(dir)
+			if err != nil {
+				t.Fatalf("AnalyzeSource: %v", err)
+			}
+			if len(findings) > 0 {
+				t.Fatalf("template %q is not lint-clean: %+v", tc.template, findings)
+			}
+		})
+	}
+}
 
 func TestGoJobFilename(t *testing.T) {
 	cases := []struct {
