@@ -147,10 +147,32 @@ Tune or disable the cap:
   stderr. Ctrl-C cancels the wait cleanly.
 - `sparkwing run X --sw-box-slots off` (or `SPARKWING_BOX_SLOTS=off`)
   disables the cap entirely, restoring uncapped overlap.
-- `sparkwing run X --sw-no-wait` fails immediately with
-  `box slots full (max=N)` instead of queueing -- the shape CI runners
-  want when they would rather decline overlap than block. With the cap
-  disabled, there is nothing to gate.
+- `sparkwing run X --sw-no-wait` fails immediately with `box slots full`
+  instead of queueing -- the shape CI runners want when they would
+  rather decline overlap than block. With the cap disabled, there is
+  nothing to gate.
+
+### Live tuning
+
+The cap is a host control that queued and running runs re-read on each
+acquire poll, so you can rebalance concurrency without restarting
+in-flight work:
+
+- `sparkwing box-slots show` reports the cap in force, where it came
+  from (the live control, the `SPARKWING_BOX_SLOTS` env baseline, or the
+  heuristic default), and how many runs currently hold a slot versus
+  wait for one.
+- `sparkwing box-slots set --to N` raises or lowers the cap live.
+  Raising it lets queued runs acquire on their next poll; lowering it
+  drains as current holders finish -- running work is never evicted.
+  `--to off` disables the semaphore; `--to default` reverts to the
+  env/heuristic.
+
+Precedence, highest first: an explicit per-run `--sw-box-slots` pins
+that one run above everything else; then the live `box-slots set`
+control; then `SPARKWING_BOX_SLOTS`; then the heuristic default. So an
+operator can retune the host with `box-slots set` while a run that
+deliberately pinned its own cap keeps it.
 
 The gate is host-local. Two laptops pointed at the same shared state
 backend (Mode 2 / 3 / 4) each keep their own slot count; nothing
