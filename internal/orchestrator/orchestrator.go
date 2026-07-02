@@ -579,6 +579,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
+	annotateBoxSlotHolder(paths, opts.RunID)
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
 		return nil, fmt.Errorf("ensure run dir: %w", err)
 	}

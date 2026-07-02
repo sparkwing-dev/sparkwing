@@ -69,6 +69,15 @@ func acquireBoxSlot(ctx context.Context, paths Paths, workersHint int) (func(), 
 	return release, nil
 }
 
+// annotateBoxSlotHolder ties this process's box-slot holder marker to
+// the run it admitted, so `box-slots list` can name the run behind a
+// wedged holder by reading the marker file. Best-effort: the run
+// proceeds identically when no marker exists (semaphore disabled,
+// cluster path) or the append fails -- failure only costs diagnostics.
+func annotateBoxSlotHolder(paths Paths, runID string) {
+	_ = boxslot.AnnotateHolder(paths.BoxSlotDir(), runID)
+}
+
 // BoxSlotCap reports the host box-slot cap a new run with no explicit
 // --sw-box-slots pin would resolve to, and where it came from
 // ("control", "env", or "default"). It is the host-level view
