@@ -66,9 +66,37 @@ code change to unlock.
   `busy_timeout` (default 30000 ms) for both read-write and read-only
   opens. A set-but-invalid value fails the open loudly instead of
   silently reverting to the default.
+- **cli:** `sparkwing box-slots sweep` reports *stalled* holders -- live
+  processes whose annotated run's envelope log has gone silent past a
+  threshold (default 30m, `SPARKWING_BOX_SLOT_STALL_TTL`), or that held
+  a slot that long without ever starting a run. The envelope's mtime is
+  the stall signal because a live-but-wedged process keeps heartbeating;
+  the envelope only moves when the run makes progress. Report-only by
+  default; `--reap` kills each stalled owner via SIGTERM, a 10s grace,
+  then SIGKILL, with every signal re-verified against the same lock
+  file, pid, and flock so a recycled pid is never killed. Reads only the
+  filesystem and flock state, so it works while `state.db` is wedged.
+  See [docs/box-slot-lockfile-contract.md](docs/box-slot-lockfile-contract.md).
+- **run:** a run queued for a box slot now names its blocker: while
+  waiting, it probes for stalled holders about every 30 seconds and
+  prints the pid and evidence, pointing at `box-slots sweep` /
+  `sweep --reap`. The wait path never kills anything itself.
 
 ### Fixed
 
+- **run:** store-polling loops (concurrency waiter resolve, slot and
+  run/node heartbeats, approval polls, child-run waits, trigger claims)
+  no longer spin invisibly against a state database wedged by another
+  live process. Each loop carries a wedge budget: once every store call
+  has failed continuously for longer than `SPARKWING_STORE_WEDGE_BUDGET`
+  (default 5m; an invalid value errors loudly at loop start), the loop
+  fails with an error naming the condition, the elapsed time, the last
+  store error, and the `box-slots list` command that locates the wedging
+  holder. A SQLite "locking protocol" error fails immediately -- that
+  state never clears by retrying. Waiter-resolve loops previously failed
+  a queued node on the first transient error; they now ride out a streak
+  up to the budget, so a one-off `SQLITE_BUSY` no longer kills a queued
+  node.
 - **cli:** `sparkwing update` no longer strands an unpublished build on an
   unsupported version line. A CLI installed from a commit (a pseudo-version
   such as `v1.6.2-0.<timestamp>-<hash>` left over from the pre-1.0 v1.x

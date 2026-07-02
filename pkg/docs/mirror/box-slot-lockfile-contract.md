@@ -81,3 +81,44 @@ before counting, and sweeps stale `waiter-` markers opportunistically.
 A stale file therefore disappears on the next run's admission; to
 remove one immediately (or to evict a live holder), use
 `sparkwing box-slots release`.
+
+## Stalled-holder sweep
+
+A *stale* holder is dead; a *stalled* holder is worse: the owner
+process is alive (its flock holds), but it stopped making progress --
+typically wedged against a locked state database. `sparkwing box-slots
+sweep` finds these, and a run waiting for a slot reports them so a
+queued run says who it is stuck behind.
+
+The stall signal is the run envelope's mtime, not a process heartbeat.
+A live process with frozen database work keeps beating, so a heartbeat
+cannot tell "alive and working" from "alive and wedged." The envelope
+log at `<runsDir>/<runID>/_envelope.ndjson` is append-per-event, so a
+healthy run touches it constantly and a wedged one goes silent -- the
+file's mtime tells the truth. The sweep resolves each live holder's
+run id from the marker's `run=` line and stats that envelope: silent
+longer than the stall threshold (default 30m, overridable via the
+`SPARKWING_BOX_SLOT_STALL_TTL` Go-duration environment variable; a
+set-but-unparseable value errors loudly) means stalled. A holder with
+no `run=` line is judged by the claim time in its filename instead: a
+slot held past the threshold without ever starting a run is equally
+stalled. Like everything else in this contract, the sweep reads only
+the filesystem and flock state, so it works while `state.db` is
+wedged.
+
+Reporting and killing are separate acts. The sweep itself never
+signals anything; `--reap` (or `ReapStalled` in code) climbs a safety
+ladder per stalled holder:
+
+1. Verify the marker still exists at the swept path, its filename
+   still parses to the swept pid, and a fresh flock probe still shows
+   the owner live. Any mismatch refuses -- a renamed or vanished
+   marker, or a recycled pid, is never signaled.
+2. SIGTERM the owner and wait a grace window (10s) for it to exit.
+3. If the owner still holds its flock after the grace window, re-run
+   the checks from step 1 and SIGKILL.
+
+The reaper never removes the marker file: the kernel drops the flock
+when the owner dies, and admission's stale-file GC (above) deletes the
+file on the next acquire. The wait path never reaps on its own --
+killing is always an explicit operator act.
