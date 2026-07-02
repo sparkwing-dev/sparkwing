@@ -38,14 +38,20 @@ func concWaitDetail(namespace string, r store.AcquireSlotResponse, leaderRun, le
 // concQueuedDetail renders the "queued in <ns>: N ahead, held by X"
 // summary for a queue-policy waiter.
 func concQueuedDetail(namespace string, position int, holders []store.ConcurrencyHolder) string {
-	held := "unknown"
-	if len(holders) > 0 {
-		held = holderLabel(holders[0].RunID, holders[0].NodeID)
-		if extra := len(holders) - 1; extra > 0 {
-			held = fmt.Sprintf("%s +%d", held, extra)
-		}
+	return fmt.Sprintf("queued in %s: %d ahead, held by %s", namespace, position, heldByLabel(holders))
+}
+
+// heldByLabel summarizes a holder list as its first holder's label
+// plus an overflow count; "unknown" when the list is empty.
+func heldByLabel(holders []store.ConcurrencyHolder) string {
+	if len(holders) == 0 {
+		return "unknown"
 	}
-	return fmt.Sprintf("queued in %s: %d ahead, held by %s", namespace, position, held)
+	held := holderLabel(holders[0].RunID, holders[0].NodeID)
+	if extra := len(holders) - 1; extra > 0 {
+		held = fmt.Sprintf("%s +%d", held, extra)
+	}
+	return held
 }
 
 // emitConcWaitLog mirrors a concurrency-wait line into the node log and,

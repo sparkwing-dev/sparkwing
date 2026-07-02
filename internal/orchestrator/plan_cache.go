@@ -35,16 +35,20 @@ func planConcurrencyName(plan *sparkwing.Plan) string {
 
 // acquirePlanSlot handles plan-level Concurrency() coordination. Caller
 // invokes release() at plan terminal. release uses a fresh context so
-// it survives a cancelled run.
+// it survives a cancelled run. The coordination key is scope-qualified
+// through the same scopedGroupKey the node-level path uses, so a
+// ScopeBox group and a global group sharing a name never alias, and a
+// plan group and a node group with the same name and scope share one
+// budget.
 func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan *sparkwing.Plan) (release func(outcome string), outcome planCacheOutcome, err error) {
 	group := plan.ConcurrencyGroupRef()
 	if group == nil {
 		return func(string) {}, planCacheProceed, nil
 	}
-	key := group.Name()
+	key := scopedGroupKey(group, runID)
 	limit := group.Limit()
 	if backends.Concurrency == nil {
-		return nil, "", fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", key)
+		return nil, "", fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", group.Name())
 	}
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {
@@ -97,7 +101,11 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait", payload)
 
-		promoted, err := waitForPlanSlot(ctx, backends, key, runID, holderID, 0, wedgeBudget)
+		queueTimeout := time.Duration(0)
+		if resp.Kind == store.AcquireQueued {
+			queueTimeout = limit.QueueTimeout
+		}
+		promoted, err := waitForPlanSlot(ctx, backends, key, group.Name(), runID, holderID, queueTimeout, wedgeBudget)
 		if err != nil {
 			return nil, "", err
 		}
@@ -116,17 +124,19 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 // waitForPlanSlot polls until promoted or cancelled. Plans never
 // inherit output, so only those two outcomes are meaningful. A
 // non-zero queueTimeout bounds the wait: once it elapses the parked
-// waiter is cancelled and the run fails with a queue_timeout error.
-// A transient ResolveWaiter error keeps polling; the wedge guard turns
-// a continuous failure streak past wedgeBudget (or one "locking
-// protocol" error) into a terminal error instead of a poll loop
-// spinning against a wedged store.
-func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderID string, queueTimeout, wedgeBudget time.Duration) (bool, error) {
+// waiter is cancelled and the run fails with a queue_timeout error
+// naming the group, the configured timeout, and the current holder;
+// zero waits indefinitely. A transient ResolveWaiter error keeps
+// polling; the wedge guard turns a continuous failure streak past
+// wedgeBudget (or one "locking protocol" error) into a terminal error
+// instead of a poll loop spinning against a wedged store.
+func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, runID, holderID string, queueTimeout, wedgeBudget time.Duration) (bool, error) {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	var deadline time.Time
 	if queueTimeout > 0 {
 		deadline = time.Now().Add(queueTimeout)
 	}
+	var lastHolders []store.ConcurrencyHolder
 	const pollInterval = 100 * time.Millisecond
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -138,7 +148,7 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 		}
 		res, err := backends.Concurrency.ResolveWaiter(ctx, key, runID, "", "", "", "", false)
 		if err != nil {
-			if terminal := wedge.fail(fmt.Sprintf("plan concurrency namespace %q: resolve waiter", key), err); terminal != nil {
+			if terminal := wedge.fail(fmt.Sprintf("plan concurrency group %q: resolve waiter", groupName), err); terminal != nil {
 				return false, terminal
 			}
 			continue
@@ -146,6 +156,9 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 		wedge.success()
 		switch res.Status {
 		case store.WaiterStillWaiting:
+			if len(res.Holders) > 0 {
+				lastHolders = res.Holders
+			}
 			if !deadline.IsZero() && time.Now().After(deadline) {
 				if _, cerr := backends.Concurrency.CancelWaiter(ctx, key, runID, ""); cerr != nil {
 					slog.Warn("cancel plan waiter after queue timeout failed; reaper will sweep it",
@@ -155,7 +168,7 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, runID, holderI
 					"scope": "plan", "key": key, "queue_timeout": queueTimeout.String(),
 				})
 				_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_queue_timeout", payload)
-				return false, fmt.Errorf("plan concurrency namespace %q: queued %s without a slot under OnLimit:Queue", key, queueTimeout)
+				return false, fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue (held by %s); a wedged holder shows in `sparkwing box-slots list`", groupName, queueTimeout, heldByLabel(lastHolders))
 			}
 			continue
 		case store.WaiterPromoted:

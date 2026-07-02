@@ -84,6 +84,16 @@ code change to unlock.
 
 ### Fixed
 
+- **run:** plan-level `Concurrency` now honors the group's `Scope` and
+  `QueueTimeout`; both were silently dropped. The whole-plan slot used
+  to coordinate on the bare group name, so a `ScopeBox` group and a
+  global group sharing a name aliased onto one budget; the plan key now
+  goes through the same scope-qualified scheme node-level groups use
+  (a plan group and a node group with the same name and scope now
+  correctly share one budget). A queued plan also waited forever
+  regardless of any configured `QueueTimeout`; a non-zero timeout now
+  bounds the wait and fails loud, naming the group, the timeout, and
+  the current holder. Zero keeps the wait-forever behavior.
 - **run:** store-polling loops (concurrency waiter resolve, slot and
   run/node heartbeats, approval polls, child-run waits, trigger claims)
   no longer spin invisibly against a state database wedged by another
