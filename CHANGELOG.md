@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.14.0] - 2026-07-02
 ### Added
 
 - **cli:** `sparkwing box-slots list` prints one row per box-slot holder
