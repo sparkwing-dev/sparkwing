@@ -3,8 +3,8 @@
 Pipelines are the core of sparkwing. They define what happens when you run
 `sparkwing run <name>` (or `sparkwing run <name>`). This page is the user-facing
 tour; for the full Go SDK reference see [sdk.md](sdk.md), and for the rules
-that keep a `Plan` pure and deterministic — enforced by `sparkwing pipeline
-lint` — see [authoring-pipelines.md](authoring-pipelines.md).
+that keep a `Plan` pure and deterministic -- enforced by `sparkwing pipeline
+lint` -- see [authoring-pipelines.md](authoring-pipelines.md).
 
 > **Host requirements.** Pipelines that call `sparkwing.Bash` shell
 > out to `bash` on the runner host. macOS and Linux have this by

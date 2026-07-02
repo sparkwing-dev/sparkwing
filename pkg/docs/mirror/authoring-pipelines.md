@@ -92,7 +92,7 @@ below).
 
 A blank runner label matches no runner, so the job strands forever. An
 `Inline()` job runs in-process on the dispatcher, so a `Requires` or
-`Prefers` label on it can never be honored — declaring both signals
+`Prefers` label on it can never be honored -- declaring both signals
 confused placement.
 
 Don't strand a job on a blank or unhonored label:
@@ -116,8 +116,8 @@ sparkwing.Job(plan, "setup", func(ctx context.Context) error { return nil }).Inl
 ## Discarded `Ref` results (`unused-ref`)
 
 A `Ref` is the typed handle a downstream job reads an upstream job's output
-through. Creating one with `RefTo` and discarding it — into `_` or as a
-bare statement — is dead code: either wire it into a job or drop the
+through. Creating one with `RefTo` and discarding it -- into `_` or as a
+bare statement -- is dead code: either wire it into a job or drop the
 producing edge.
 
 Don't throw the `Ref` away:
