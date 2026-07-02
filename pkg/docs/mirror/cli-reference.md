@@ -78,6 +78,8 @@ control. Reset to the env/heuristic default with 'set --to default'.
 
 - `show` -- Print the cap in force, its source, and live holders + waiters
 - `set` -- Write the live host cap (--to N \| off \| default)
+- `list` -- One row per holder: pid, claim time, run id, liveness, lock path
+- `release` -- Remove a holder's lock file (--force SIGKILLs a live owner)
 
 ### Examples
 
@@ -96,6 +98,81 @@ sparkwing box-slots set --to off
 
 # Revert to the heuristic default
 sparkwing box-slots set --to default
+
+# Who holds a slot right now, for which run?
+sparkwing box-slots list
+
+# Free a wedged holder's slot
+sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force
+```
+
+## `sparkwing box-slots list`
+
+List box-slot holders: pid, claim time, run id, liveness
+
+Prints one row per holder lock file in the box-slot directory: the
+owner pid and claim time (parsed from the filename), the run id the
+owner recorded after admission (empty until the run starts), whether
+the owner is live or stale (a non-blocking flock probe -- the kernel
+releases a dead owner's lock), and the lock file path.
+
+Reads only the filesystem and flock state, never the state database,
+so it works while state.db is wedged -- exactly when you need to know
+which run is sitting on a slot. Stale rows are left in place; admission
+sweeps them, or remove one explicitly with 'release'.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+
+### Examples
+
+```sh
+# Human-readable
+sparkwing box-slots list
+
+# Agent-readable
+sparkwing box-slots list -o json
+```
+
+## `sparkwing box-slots release`
+
+Remove a holder's lock file, freeing its box slot
+
+Removes one holder lock file named by its basename (as printed by
+'box-slots list'), freeing the slot it occupies. A stale file -- its
+owner already dead, flock released by the kernel -- is removed
+outright. A live holder is refused unless --force is given, in which
+case the owner process is SIGKILLed first and the file then removed;
+the kill only fires when the named file is still the owner pid's
+current holder file, so a recycled pid is never killed by mistake.
+
+Operates on the filesystem and flock state only, never the state
+database, so it works while state.db is wedged. Removal is serialized
+against run admission, and the freed slot admits the next waiter on
+its next poll.
+
+### Arguments
+
+- `<lockfile>` (required) -- Holder lock file basename, as printed by 'box-slots list'
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--force` | SIGKILL a live holder's owner before removing its lock file |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+
+### Examples
+
+```sh
+# Remove a stale holder file
+sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock
+
+# Evict a live holder (SIGKILL)
+sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force
 ```
 
 ## `sparkwing box-slots set`

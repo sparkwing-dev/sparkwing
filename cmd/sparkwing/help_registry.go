@@ -1489,6 +1489,8 @@ control. Reset to the env/heuristic default with 'set --to default'.`,
 	Subcommands: []SubcommandRef{
 		{"show", "Print the cap in force, its source, and live holders + waiters"},
 		{"set", "Write the live host cap (--to N | off | default)"},
+		{"list", "One row per holder: pid, claim time, run id, liveness, lock path"},
+		{"release", "Remove a holder's lock file (--force SIGKILLs a live owner)"},
 	},
 	Examples: []Example{
 		{"What's the cap and who's holding slots?", "sparkwing box-slots show"},
@@ -1496,6 +1498,60 @@ control. Reset to the env/heuristic default with 'set --to default'.`,
 		{"Raise the cap so queued runs unblock", "sparkwing box-slots set --to 4"},
 		{"Disable the semaphore on this host", "sparkwing box-slots set --to off"},
 		{"Revert to the heuristic default", "sparkwing box-slots set --to default"},
+		{"Who holds a slot right now, for which run?", "sparkwing box-slots list"},
+		{"Free a wedged holder's slot", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force"},
+	},
+}
+
+var cmdBoxSlotsList = Command{
+	Path:     "sparkwing box-slots list",
+	Synopsis: "List box-slot holders: pid, claim time, run id, liveness",
+	Description: `Prints one row per holder lock file in the box-slot directory: the
+owner pid and claim time (parsed from the filename), the run id the
+owner recorded after admission (empty until the run starts), whether
+the owner is live or stale (a non-blocking flock probe -- the kernel
+releases a dead owner's lock), and the lock file path.
+
+Reads only the filesystem and flock state, never the state database,
+so it works while state.db is wedged -- exactly when you need to know
+which run is sitting on a slot. Stale rows are left in place; admission
+sweeps them, or remove one explicitly with 'release'.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing box-slots list"},
+		{"Agent-readable", "sparkwing box-slots list -o json"},
+	},
+}
+
+var cmdBoxSlotsRelease = Command{
+	Path:     "sparkwing box-slots release",
+	Synopsis: "Remove a holder's lock file, freeing its box slot",
+	Description: `Removes one holder lock file named by its basename (as printed by
+'box-slots list'), freeing the slot it occupies. A stale file -- its
+owner already dead, flock released by the kernel -- is removed
+outright. A live holder is refused unless --force is given, in which
+case the owner process is SIGKILLed first and the file then removed;
+the kill only fires when the named file is still the owner pid's
+current holder file, so a recycled pid is never killed by mistake.
+
+Operates on the filesystem and flock state only, never the state
+database, so it works while state.db is wedged. Removal is serialized
+against run admission, and the freed slot admits the next waiter on
+its next poll.`,
+	PosArgs: []PosArg{
+		{Name: "<lockfile>", Desc: "Holder lock file basename, as printed by 'box-slots list'", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "force", Desc: "SIGKILL a live holder's owner before removing its lock file", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Remove a stale holder file", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock"},
+		{"Evict a live holder (SIGKILL)", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force"},
 	},
 }
 

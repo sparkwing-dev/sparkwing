@@ -34,7 +34,7 @@ var allCommands = []*Command{
 	&cmdProfile,
 	&cmdDashboard, &cmdDashboardStart, &cmdDashboardKill, &cmdDashboardStatus,
 	&cmdWorker, &cmdGC, &cmdMaintenance, &cmdCompletion,
-	&cmdBoxSlots, &cmdBoxSlotsShow, &cmdBoxSlotsSet,
+	&cmdBoxSlots, &cmdBoxSlotsShow, &cmdBoxSlotsSet, &cmdBoxSlotsList, &cmdBoxSlotsRelease,
 	&cmdProfiles, &cmdProfilesAdd, &cmdProfilesList, &cmdProfilesShow,
 	&cmdProfilesUse, &cmdProfilesRemove, &cmdProfilesDuplicate,
 	&cmdProfilesSet, &cmdProfilesTest,

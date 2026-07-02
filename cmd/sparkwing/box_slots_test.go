@@ -42,6 +42,45 @@ func TestApplyBoxSlotControl(t *testing.T) {
 	}
 }
 
+func TestRenderBoxSlotHolders_AllFormats(t *testing.T) {
+	rows := []boxSlotHolderRow{
+		{PID: 4242, ClaimedAt: "2026-07-01T00:00:00Z", RunID: "run-20260701-000000-cafe0001", Live: true, Lock: "/tmp/x/holder-pid4242-1-1.lock"},
+		{PID: 99999, Live: false, Lock: "/tmp/x/holder-pid99999-2-1.lock"},
+	}
+	for _, format := range []string{"json", "plain", "pretty"} {
+		if err := renderBoxSlotHolders(rows, format); err != nil {
+			t.Fatalf("render %s: %v", format, err)
+		}
+	}
+	if err := renderBoxSlotHolders(nil, "pretty"); err != nil {
+		t.Fatalf("render empty pretty: %v", err)
+	}
+}
+
+func TestRenderBoxSlotRelease_AllFormats(t *testing.T) {
+	r := boxSlotReleaseReport{Released: "holder-pid4242-1-1.lock", Forced: true}
+	for _, format := range []string{"json", "plain", "pretty"} {
+		if err := renderBoxSlotRelease(r, format); err != nil {
+			t.Fatalf("render %s: %v", format, err)
+		}
+	}
+}
+
+func TestBoxSlotHolderRowHelpers(t *testing.T) {
+	if got := orDash(""); got != "-" {
+		t.Errorf("orDash(\"\") = %q, want -", got)
+	}
+	if got := orDash("x"); got != "x" {
+		t.Errorf("orDash(x) = %q, want x", got)
+	}
+	if got := liveWord(true); got != "live" {
+		t.Errorf("liveWord(true) = %q, want live", got)
+	}
+	if got := liveWord(false); got != "stale" {
+		t.Errorf("liveWord(false) = %q, want stale", got)
+	}
+}
+
 func TestRenderBoxSlotReport_Disabled(t *testing.T) {
 	r := boxSlotReport{Cap: 0, Disabled: true, Source: "control"}
 	if err := renderBoxSlotReport(r, "json"); err != nil {
