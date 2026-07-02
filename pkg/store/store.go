@@ -10,13 +10,46 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
+
+// BusyTimeoutEnvVar names the environment override for the SQLite
+// busy_timeout Open and OpenReadOnly apply, in milliseconds. Unset or
+// empty keeps [DefaultBusyTimeoutMS]; anything else must be a positive
+// integer or Open fails loudly, naming the variable and value -- a
+// typo'd override silently reverting to the default would hide the
+// misconfiguration. The knob exists for hosts whose contention profile
+// makes 30s wrong in either direction: diagnostic tooling that wants
+// to fail fast on a wedged database, or a heavily shared host that
+// wants writers to wait longer before erroring with SQLITE_BUSY.
+const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+
+// DefaultBusyTimeoutMS is the SQLite busy_timeout applied when
+// [BusyTimeoutEnvVar] is unset. See Open for why 30s.
+const DefaultBusyTimeoutMS = 30000
+
+// busyTimeoutMS resolves the SQLite busy_timeout for this open:
+// [BusyTimeoutEnvVar] when set and valid, [DefaultBusyTimeoutMS]
+// otherwise. A set-but-invalid value is an error, never a silent
+// fallback.
+func busyTimeoutMS() (int, error) {
+	raw := os.Getenv(BusyTimeoutEnvVar)
+	if raw == "" {
+		return DefaultBusyTimeoutMS, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s=%q: want a positive integer of milliseconds", BusyTimeoutEnvVar, raw)
+	}
+	return n, nil
+}
 
 // Failure reason codes; empty = no structured reason.
 const (
@@ -60,7 +93,8 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 
 // Open initializes a SQLite database at path with WAL + foreign keys.
 //
-// busy_timeout is set high (30s) so that under N concurrent writers on
+// busy_timeout defaults high (30s; override via [BusyTimeoutEnvVar]) so
+// that under N concurrent writers on
 // one host -- multiple `sparkwing run` invocations plus the dashboard
 // daemon sharing one state.db -- a writer waits on a busy lock instead
 // of erroring immediately with SQLITE_BUSY and aborting the run. WAL
@@ -93,8 +127,31 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 // state (leases, runs, cache) is self-healing: a lost lease is reaped, a
 // lost run row reconciled.
 func Open(path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path)
+	dsn, err := sqliteDSN(path)
+	if err != nil {
+		return nil, err
+	}
 	return openSQL("sqlite", dsn, DialectSQLite)
+}
+
+// sqliteDSN builds Open's read-write DSN, resolving the busy_timeout
+// from [BusyTimeoutEnvVar] / [DefaultBusyTimeoutMS].
+func sqliteDSN(path string) (string, error) {
+	ms, err := busyTimeoutMS()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path, ms), nil
+}
+
+// sqliteReadOnlyDSN builds OpenReadOnly's DSN; the busy_timeout
+// resolves the same way as [sqliteDSN].
+func sqliteReadOnlyDSN(path string) (string, error) {
+	ms, err := busyTimeoutMS()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=query_only(true)", path, ms), nil
 }
 
 // OpenReadOnly opens an existing SQLite state database for reads only.
@@ -109,7 +166,10 @@ func Open(path string) (*Store, error) {
 // its own Open). Opening a database whose schema this binary doesn't
 // understand surfaces as query errors at read time, not here.
 func OpenReadOnly(path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(30000)&_pragma=query_only(true)", path)
+	dsn, err := sqliteReadOnlyDSN(path)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
