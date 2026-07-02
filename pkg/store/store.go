@@ -690,6 +690,22 @@ func isBusyErr(err error) bool {
 		strings.Contains(msg, "database table is locked")
 }
 
+// IsProtocolErr reports whether err is a SQLite "locking protocol" /
+// SQLITE_PROTOCOL condition: the WAL shared-memory lock range is
+// saturated by another live connection. Unlike SQLITE_BUSY it is not
+// resolved by retrying -- it clears only when the conflicting process
+// releases its locks or exits -- so pollers treat it as immediately
+// terminal instead of waiting out a busy budget. Matched on the stable
+// message text for the same reason as isBusyErr.
+func IsProtocolErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "locking protocol") ||
+		strings.Contains(msg, "sqlite_protocol")
+}
+
 func (s *Store) migrateSQLite(ctx context.Context) error {
 	var current int
 	if err := s.queryRow(ctx,

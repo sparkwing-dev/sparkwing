@@ -1292,6 +1292,10 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			defer cancel()
 		}
 
+		wedge, err := newStoreWedgeGuardFromEnv()
+		if err != nil {
+			return nil, err
+		}
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		heartbeat := time.NewTicker(30 * time.Second)
@@ -1299,7 +1303,13 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		lastStatus := "pending"
 		for {
 			run, err := s.backends.State.GetRun(pollCtx, childRunID)
-			if err == nil {
+			if err != nil {
+				if terminal := wedge.fail(fmt.Sprintf("waiting for child run %s", childRunID), err); terminal != nil {
+					emitChildFinish("failed", terminal.Error())
+					return nil, terminal
+				}
+			} else {
+				wedge.success()
 				lastStatus = run.Status
 				switch run.Status {
 				case "success":
@@ -2010,11 +2020,26 @@ type approvalResult struct {
 
 // pollApproval blocks until a resolution appears or deadline fires.
 // On deadline writes timed_out so a late human resolve becomes 409.
+// The wedge guard bounds a wedged store: a "locking protocol" error
+// or a GetApproval failure streak past the budget fails the gate
+// instead of polling forever against a database another process has
+// locked.
 func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeout string, ticker *time.Ticker) approvalResult {
+	wedge, err := newStoreWedgeGuardFromEnv()
+	if err != nil {
+		return approvalResult{outcome: sparkwing.Failed, errMsg: err.Error()}
+	}
 	for {
 		got, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
-		if err == nil && got.ResolvedAt != nil {
-			return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
+		if err != nil {
+			if terminal := wedge.fail(fmt.Sprintf("approval poll %s/%s", s.runID, nodeID), err); terminal != nil {
+				return approvalResult{outcome: sparkwing.Failed, errMsg: terminal.Error()}
+			}
+		} else {
+			wedge.success()
+			if got.ResolvedAt != nil {
+				return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
+			}
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			if _, err := s.backends.State.ResolveApproval(s.ctx, s.runID, nodeID,

@@ -29,6 +29,11 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 	if logger == nil {
 		logger = slog.Default()
 	}
+	wedge, err := newStoreWedgeGuardFromEnv()
+	if err != nil {
+		logger.Error("local trigger loop refusing to start", "parent_run_id", runID, "err", err)
+		return
+	}
 	cache := &localCompileCache{}
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -46,12 +51,19 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 		trig, err := claimChildTrigger(ctx, st, runID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
+				wedge.success()
 				continue
+			}
+			if terminal := wedge.fail("local trigger loop: claim trigger", err); terminal != nil {
+				logger.Error("local trigger loop stopping; store wedged",
+					"parent_run_id", runID, "err", terminal)
+				return
 			}
 			logger.Warn("local trigger loop: claim failed",
 				"parent_run_id", runID, "err", err)
 			continue
 		}
+		wedge.success()
 		if trig == nil {
 			continue
 		}
@@ -88,6 +100,11 @@ func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.
 	if logger == nil {
 		logger = slog.Default()
 	}
+	wedge, err := newStoreWedgeGuardFromEnv()
+	if err != nil {
+		logger.Error("local trigger consumer refusing to start", "err", err)
+		return
+	}
 	cache := &localCompileCache{}
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -105,11 +122,17 @@ func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.
 		trig, err := st.ClaimNextTrigger(ctx, store.DefaultLeaseDuration)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
+				wedge.success()
 				continue
+			}
+			if terminal := wedge.fail("local trigger consumer: claim trigger", err); terminal != nil {
+				logger.Error("local trigger consumer stopping; store wedged", "err", terminal)
+				return
 			}
 			logger.Warn("local trigger consumer: claim failed", "err", err)
 			continue
 		}
+		wedge.success()
 		if trig == nil {
 			continue
 		}

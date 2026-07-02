@@ -279,6 +279,11 @@ func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.
 func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
 	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
+	wedgeBudget, err := storeWedgeBudget()
+	if err != nil {
+		r.markFailed(ctx, req.RunID, node.ID(), err)
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}
+	}
 	resp, err := r.backends.Concurrency.AcquireSlot(ctx, cp.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
 	if err != nil {
 		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("concurrency acquire(%q): %w", cp.key, err))
@@ -306,9 +311,9 @@ func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request,
 		r.markFailed(ctx, req.RunID, node.ID(), err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	case store.AcquireGranted:
-		return r.runHeldSlot(ctx, req, cp, holderID)
+		return r.runHeldSlot(ctx, req, cp, holderID, wedgeBudget)
 	case store.AcquireQueued, store.AcquireCoalesced, store.AcquireCancellingOthers:
-		return r.waitThenRun(ctx, req, cp, resp)
+		return r.waitThenRun(ctx, req, cp, resp, wedgeBudget)
 	}
 
 	err = fmt.Errorf("concurrency acquire returned unknown kind %q", resp.Kind)
@@ -326,6 +331,11 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 	node := req.Node
 	memoCP := memoParamsFor(cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
+	wedgeBudget, err := storeWedgeBudget()
+	if err != nil {
+		r.markFailed(ctx, req.RunID, node.ID(), err)
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}
+	}
 	resp, err := r.backends.Concurrency.AcquireSlot(ctx, memoCP.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
 	if err != nil {
 		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("memo acquire(%q): %w", memoCP.key, err))
@@ -336,14 +346,14 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 	case store.AcquireCached:
 		return r.applyCacheHit(ctx, req, memoCP, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireCoalesced:
-		return r.waitThenRun(ctx, req, memoCP, resp)
+		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
 	case store.AcquireQueued:
-		return r.waitThenRun(ctx, req, memoCP, resp)
+		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
 	case store.AcquireGranted:
 		execCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var lost atomic.Bool
-		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, cancel)
+		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, cancel, wedgeBudget)
 
 		result := r.acquireAndRun(execCtx, req, concParamsFor(node, group, req.RunID))
 
@@ -432,10 +442,10 @@ func (r *InProcessRunner) applySkippedConcurrent(ctx context.Context, req runner
 // runHeldSlot executes the node while a heartbeat extends the lease
 // and watches for supersede; on supersede execCtx cancels and the
 // node finalizes as superseded.
-func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string) runner.Result {
+func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
-	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, cp.policy, &superseded, cancelExec)
+	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, cp.policy, &superseded, cancelExec, wedgeBudget)
 
 	defer func() {
 		stopHB()
@@ -475,14 +485,17 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 // startSlotHeartbeat extends the slot lease and watches for supersede.
 // Fail-closed: if no successful heartbeat in `lease`, the controller
 // has reaped us; we abort so a newer holder isn't racing the same
-// work. The returned stop is safe to call multiple times.
-func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, cancelExec context.CancelFunc) func() {
+// work. A wedged store also aborts: a "locking protocol" error or a
+// failure streak past wedgeBudget stops the loop instead of re-issuing
+// heartbeats forever. The returned stop is safe to call multiple times.
+func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, cancelExec context.CancelFunc, wedgeBudget time.Duration) func() {
 	done := make(chan struct{})
 	var once sync.Once
 
 	lease := store.DefaultConcurrencyLease
 
 	go func() {
+		wedge := newStoreWedgeGuard(wedgeBudget)
 		t := time.NewTicker(store.ConcurrencyHeartbeatInterval(onLimit))
 		defer t.Stop()
 		lastOK := time.Now()
@@ -498,6 +511,13 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 				cancel()
 				if err != nil {
 					sinceOK := time.Since(lastOK)
+					if terminal := wedge.fail(fmt.Sprintf("concurrency key %q: heartbeat", key), err); terminal != nil {
+						slog.Error("concurrency store wedged; aborting work",
+							"key", key, "holder", holderID, "err", terminal)
+						superseded.Store(true)
+						cancelExec()
+						return
+					}
 					slog.Warn("concurrency heartbeat failed",
 						"key", key, "holder", holderID,
 						"since_last_ok", sinceOK.Round(time.Second),
@@ -513,6 +533,7 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 					}
 					continue
 				}
+				wedge.success()
 				lastOK = time.Now()
 				if wasSuperseded {
 					superseded.Store(true)
@@ -527,7 +548,12 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 }
 
 // waitThenRun polls ResolveWaiter and transitions on first resolution.
-func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse) runner.Result {
+// A transient ResolveWaiter error keeps polling; the wedge guard turns
+// a continuous failure streak past wedgeBudget (or one "locking
+// protocol" error) into a terminal node failure instead of a poll
+// loop spinning against a wedged store.
+func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
+	wedge := newStoreWedgeGuard(wedgeBudget)
 	leaderRun, leaderNode := initial.LeaderRunID, initial.LeaderNodeID
 
 	holders := make([]map[string]string, 0, len(initial.Holders))
@@ -603,9 +629,14 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 
 		res, err := r.backends.Concurrency.ResolveWaiter(ctx, cp.key, req.RunID, req.Node.ID(), cp.cacheHash, leaderRun, leaderNode, noCacheFromContext(ctx))
 		if err != nil {
-			r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("resolve waiter: %w", err))
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+			terminal := wedge.fail(fmt.Sprintf("concurrency key %q: resolve waiter", cp.key), err)
+			if terminal == nil {
+				continue
+			}
+			r.markFailed(ctx, req.RunID, req.Node.ID(), terminal)
+			return runner.Result{Outcome: sparkwing.Failed, Err: terminal}
 		}
+		wedge.success()
 
 		switch res.Status {
 		case store.WaiterStillWaiting:
@@ -627,7 +658,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			}
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
 			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
-			return r.runHeldSlot(ctx, req, cp, res.HolderID)
+			return r.runHeldSlot(ctx, req, cp, res.HolderID, wedgeBudget)
 		case store.WaiterCached:
 			return r.applyCacheHit(ctx, req, cp, res.OutputRef, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:
