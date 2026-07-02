@@ -47,6 +47,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing box-slots list` prints one row per box-slot holder
+  lock file -- owner pid, claim time, run id, live/stale (a non-blocking
+  flock probe), and lock path -- and `sparkwing box-slots release
+  <lockfile>` frees a slot: a stale file is removed outright, a live
+  holder is refused unless `--force`, which SIGKILLs the owner (guarded
+  against pid recycling) before removing the file. Both verbs read only
+  the filesystem and flock state, never the state database, so they work
+  while `state.db` is wedged.
+- **run:** local runs annotate their box-slot holder lock file with a
+  `run=<runID>` line once the run id exists, so a wedged holder is traced
+  to its run by reading the file. The lock file layout is now a
+  documented, versioned contract -- see
+  [docs/box-slot-lockfile-contract.md](docs/box-slot-lockfile-contract.md).
+- **store:** `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` overrides the SQLite
+  `busy_timeout` (default 30000 ms) for both read-write and read-only
+  opens. A set-but-invalid value fails the open loudly instead of
+  silently reverting to the default.
+
 ### Fixed
 
 - **cli:** `sparkwing update` no longer strands an unpublished build on an

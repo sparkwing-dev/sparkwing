@@ -42,6 +42,7 @@
       "label": "Operations",
       "slugs": [
         "observability",
+        "box-slot-lockfile-contract",
         "security",
         "auth",
         "hooks",
