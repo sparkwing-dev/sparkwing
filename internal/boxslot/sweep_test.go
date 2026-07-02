@@ -2,6 +2,7 @@ package boxslot_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -120,6 +121,45 @@ func TestSweepStalled_EnvelopeMtimeDecides(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSweepStalled_NewestRunFileCorroboratesButNeverDecides(t *testing.T) {
+	lockDir, runsDir := t.TempDir(), t.TempDir()
+	release, err := boxslot.Acquire(context.Background(), boxslot.Options{MaxSlots: 1, LockDir: lockDir})
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer release()
+	if err := boxslot.AnnotateHolder(lockDir, sweepChildRunID); err != nil {
+		t.Fatalf("AnnotateHolder: %v", err)
+	}
+	seedEnvelope(t, runsDir, sweepChildRunID, time.Now().Add(-2*time.Hour))
+	nodeLog := filepath.Join(runsDir, sweepChildRunID, "nodes", "build.log")
+	if err := os.MkdirAll(filepath.Dir(nodeLog), 0o755); err != nil {
+		t.Fatalf("mkdir node dir: %v", err)
+	}
+	if err := os.WriteFile(nodeLog, []byte("tick\n"), 0o644); err != nil {
+		t.Fatalf("seed node log: %v", err)
+	}
+
+	stalled, err := boxslot.SweepStalled(lockDir, runsDir, 30*time.Minute)
+
+	if err != nil {
+		t.Fatalf("SweepStalled: %v", err)
+	}
+	if len(stalled) != 1 {
+		t.Fatalf("stalled = %+v, want one row (the verdict stays envelope-based)", stalled)
+	}
+	s := stalled[0]
+	if s.NewestFile != nodeLog {
+		t.Errorf("NewestFile = %q, want the fresh node log %q", s.NewestFile, nodeLog)
+	}
+	if s.NewestFileAge > time.Minute {
+		t.Errorf("NewestFileAge = %s, want the node log's fresh mtime age", s.NewestFileAge)
+	}
+	if s.Age < 30*time.Minute {
+		t.Errorf("Age = %s, want the envelope's silence age untouched by the node log", s.Age)
 	}
 }
 
@@ -372,5 +412,27 @@ func TestReapStalled_RefusesWhenMarkerRenamed(t *testing.T) {
 	}
 	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("child no longer signalable after refused reap: %v (must not have been killed)", err)
+	}
+}
+
+func TestReapStalled_RefusesWhenFlockReleasedBetweenSweepAndReap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal escalation semantics differ on windows")
+	}
+	lockDir, runsDir := t.TempDir(), t.TempDir()
+	cmd, s := sweepChildStalled(t, lockDir, runsDir, "obey-term")
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill child between sweep and reap: %v", err)
+	}
+	_ = cmd.Wait()
+
+	err := boxslot.ReapStalled(s, 200*time.Millisecond)
+
+	if !errors.Is(err, boxslot.ErrHolderReleased) {
+		t.Fatalf("reap after the owner released its flock = %v, want ErrHolderReleased before any signal", err)
+	}
+	if _, statErr := os.Stat(s.Path); statErr != nil {
+		t.Fatalf("marker vanished (%v); the refusal must come from the released flock, not a missing file", statErr)
 	}
 }

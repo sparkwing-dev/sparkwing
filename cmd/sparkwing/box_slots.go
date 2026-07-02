@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -267,16 +268,23 @@ func runBoxSlotsRelease(args []string) error {
 }
 
 // boxSlotStalledRow is the wire shape of one `box-slots sweep` row.
+// EnvelopeAge is the stall verdict's age: since the envelope's last
+// write when a run is annotated, since the slot claim otherwise.
+// NewestFileAge / NewestFile corroborate: the freshest write anywhere
+// under the run's directory, so a run inside one long output-quiet
+// node shows recent node-file writes despite a silent envelope.
 // reaped / reap_error appear only when --reap was given.
 type boxSlotStalledRow struct {
-	PID       int    `json:"pid"`
-	ClaimedAt string `json:"claimed_at"`
-	RunID     string `json:"run_id,omitempty"`
-	Age       string `json:"age"`
-	Evidence  string `json:"evidence"`
-	Lock      string `json:"lock"`
-	Reaped    *bool  `json:"reaped,omitempty"`
-	ReapError string `json:"reap_error,omitempty"`
+	PID           int    `json:"pid"`
+	ClaimedAt     string `json:"claimed_at"`
+	RunID         string `json:"run_id,omitempty"`
+	EnvelopeAge   string `json:"envelope_age"`
+	NewestFileAge string `json:"newest_file_age,omitempty"`
+	NewestFile    string `json:"newest_file,omitempty"`
+	Evidence      string `json:"evidence"`
+	Lock          string `json:"lock"`
+	Reaped        *bool  `json:"reaped,omitempty"`
+	ReapError     string `json:"reap_error,omitempty"`
 }
 
 func runBoxSlotsSweep(args []string) error {
@@ -308,26 +316,59 @@ func runBoxSlotsSweep(args []string) error {
 	rows := make([]boxSlotStalledRow, 0, len(stalled))
 	for _, s := range stalled {
 		row := boxSlotStalledRow{
-			PID:      s.PID,
-			RunID:    s.RunID,
-			Age:      s.Age.Round(time.Second).String(),
-			Evidence: s.Evidence,
-			Lock:     s.Path,
+			PID:         s.PID,
+			RunID:       s.RunID,
+			EnvelopeAge: s.Age.Round(time.Second).String(),
+			NewestFile:  s.NewestFile,
+			Evidence:    s.Evidence,
+			Lock:        s.Path,
+		}
+		if s.NewestFile != "" {
+			row.NewestFileAge = s.NewestFileAge.Round(time.Second).String()
 		}
 		if !s.ClaimedAt.IsZero() {
 			row.ClaimedAt = s.ClaimedAt.UTC().Format(time.RFC3339)
 		}
 		if *reap {
 			ok := true
-			if rerr := boxslot.ReapStalled(s, 0); rerr != nil {
+			rerr := boxslot.ReapStalled(s, 0)
+			if rerr != nil {
 				ok = false
 				row.ReapError = rerr.Error()
 			}
+			logReapAttempt(slog.Default(), s, rerr)
 			row.Reaped = &ok
 		}
 		rows = append(rows, row)
 	}
 	return renderBoxSlotStalled(rows, format, *reap)
+}
+
+// reapOutcome classifies one [boxslot.ReapStalled] result into the
+// stable outcome vocabulary telemetry consumers count.
+func reapOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "reaped"
+	case errors.Is(err, boxslot.ErrHolderReleased):
+		return "refused-released"
+	case errors.Is(err, boxslot.ErrHolderLive):
+		return "refused-live"
+	default:
+		return "error"
+	}
+}
+
+// logReapAttempt emits the one structured line per reap attempt that
+// soak dashboards count -- field names pid, run, lock, and outcome
+// are a stable interface.
+func logReapAttempt(logger *slog.Logger, s boxslot.StalledHolder, err error) {
+	attrs := []any{"pid", s.PID, "run", s.RunID, "lock", s.Path, "outcome", reapOutcome(err)}
+	if err != nil {
+		logger.Warn("box-slot reap attempt", append(attrs, "err", err)...)
+		return
+	}
+	logger.Info("box-slot reap attempt", attrs...)
 }
 
 func renderBoxSlotStalled(rows []boxSlotStalledRow, format string, reaped bool) error {
@@ -338,8 +379,9 @@ func renderBoxSlotStalled(rows []boxSlotStalledRow, format string, reaped bool) 
 		return enc.Encode(rows)
 	case "plain":
 		for _, r := range rows {
-			fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s%s\n",
-				r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.Age, r.Lock, r.Evidence, reapSuffix(r))
+			fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\t%s%s\n",
+				r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.EnvelopeAge, orDash(r.NewestFileAge),
+				r.Lock, r.Evidence, reapSuffix(r))
 		}
 		return nil
 	default:
@@ -349,16 +391,18 @@ func renderBoxSlotStalled(rows []boxSlotStalledRow, format string, reaped bool) 
 		}
 		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 		if reaped {
-			fmt.Fprintln(w, "PID\tCLAIMED\tRUN\tSILENT\tREAPED\tEVIDENCE")
+			fmt.Fprintln(w, "PID\tCLAIMED\tRUN\tENVELOPE-AGE\tNEWEST-WRITE\tREAPED\tEVIDENCE")
 			for _, r := range rows {
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
-					r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.Age, reapWord(r), r.Evidence)
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.EnvelopeAge, orDash(r.NewestFileAge),
+					reapWord(r), r.Evidence)
 			}
 		} else {
-			fmt.Fprintln(w, "PID\tCLAIMED\tRUN\tSILENT\tEVIDENCE")
+			fmt.Fprintln(w, "PID\tCLAIMED\tRUN\tENVELOPE-AGE\tNEWEST-WRITE\tEVIDENCE")
 			for _, r := range rows {
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
-					r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.Age, r.Evidence)
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+					r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.EnvelopeAge, orDash(r.NewestFileAge),
+					r.Evidence)
 			}
 		}
 		return w.Flush()

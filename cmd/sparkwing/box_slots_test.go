@@ -1,6 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
@@ -61,9 +66,10 @@ func TestRenderBoxSlotStalled_AllFormats(t *testing.T) {
 	reapedOK, reapedNo := true, false
 	rows := []boxSlotStalledRow{
 		{PID: 4242, ClaimedAt: "2026-07-01T00:00:00Z", RunID: "run-20260701-000000-cafe0001",
-			Age: "45m0s", Evidence: "run live but its envelope last written 45m0s ago", Lock: "/tmp/x/holder-pid4242-1-1.lock"},
-		{PID: 4243, Age: "31m0s", Evidence: "no run annotated", Lock: "/tmp/x/holder-pid4243-2-1.lock", Reaped: &reapedOK},
-		{PID: 4244, Age: "31m0s", Evidence: "no run annotated", Lock: "/tmp/x/holder-pid4244-3-1.lock",
+			EnvelopeAge: "45m0s", NewestFileAge: "12s", NewestFile: "/tmp/x/runs/run-20260701-000000-cafe0001/nodes/build.log",
+			Evidence: "run live but its envelope last written 45m0s ago", Lock: "/tmp/x/holder-pid4242-1-1.lock"},
+		{PID: 4243, EnvelopeAge: "31m0s", Evidence: "no run annotated", Lock: "/tmp/x/holder-pid4243-2-1.lock", Reaped: &reapedOK},
+		{PID: 4244, EnvelopeAge: "31m0s", Evidence: "no run annotated", Lock: "/tmp/x/holder-pid4244-3-1.lock",
 			Reaped: &reapedNo, ReapError: "refusing to signal"},
 	}
 	for _, format := range []string{"json", "plain", "pretty"} {
@@ -75,6 +81,57 @@ func TestRenderBoxSlotStalled_AllFormats(t *testing.T) {
 	}
 	if err := renderBoxSlotStalled(nil, "pretty", false); err != nil {
 		t.Fatalf("render empty pretty: %v", err)
+	}
+}
+
+func TestLogReapAttempt_EmitsOneCountableLinePerAttempt(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	s := boxslot.StalledHolder{Holder: boxslot.Holder{
+		PID: 4242, RunID: "run-20260701-000000-cafe0001", Path: "/tmp/x/holder-pid4242-1-1.lock",
+	}}
+
+	logReapAttempt(logger, s, nil)
+	logReapAttempt(logger, s, fmt.Errorf("wrap: %w", boxslot.ErrHolderReleased))
+	logReapAttempt(logger, s, errors.New("SIGTERM pid 4242: operation not permitted"))
+
+	got := buf.String()
+	wants := []string{
+		`msg="box-slot reap attempt"`,
+		"pid=4242",
+		"run=run-20260701-000000-cafe0001",
+		"lock=/tmp/x/holder-pid4242-1-1.lock",
+		"outcome=reaped",
+		"outcome=refused-released",
+		"outcome=error",
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("reap telemetry %q missing %q", got, want)
+		}
+	}
+	if n := strings.Count(got, "box-slot reap attempt"); n != 3 {
+		t.Errorf("emitted %d reap lines, want one per attempt (3)", n)
+	}
+}
+
+func TestReapOutcome_ClassifiesByErrorKey(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil is reaped", nil, "reaped"},
+		{"released flock refusal", fmt.Errorf("w: %w", boxslot.ErrHolderReleased), "refused-released"},
+		{"live holder refusal", fmt.Errorf("w: %w", boxslot.ErrHolderLive), "refused-live"},
+		{"anything else is error", errors.New("find pid 4242: no such process"), "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reapOutcome(tc.err); got != tc.want {
+				t.Errorf("reapOutcome = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

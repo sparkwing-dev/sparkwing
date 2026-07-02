@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -61,14 +62,17 @@ type storeWedgeGuard struct {
 	// began; zero when the last store call succeeded.
 	firstFailure time.Time
 	// failures counts the calls in the current streak, for the
-	// terminal error's evidence line.
+	// terminal error's evidence line and the telemetry event.
 	failures int
+	// logger receives the one structured event emitted when the guard
+	// goes terminal; injectable for tests.
+	logger *slog.Logger
 }
 
 // newStoreWedgeGuard builds a guard with an explicit budget, for loops
 // whose caller already resolved (and error-checked) the environment.
 func newStoreWedgeGuard(budget time.Duration) *storeWedgeGuard {
-	return &storeWedgeGuard{budget: budget, now: time.Now}
+	return &storeWedgeGuard{budget: budget, now: time.Now, logger: slog.Default()}
 }
 
 // newStoreWedgeGuardFromEnv resolves the budget from the environment
@@ -95,18 +99,31 @@ func (g *storeWedgeGuard) success() {
 // every call has failed continuously for longer than the budget. The
 // terminal error names the condition, the elapsed duration, the last
 // store error, and the box-slots command that locates the wedging
-// process.
+// process. Each terminal verdict also emits one "store wedged"
+// structured event -- fields op, kind (budget|protocol), elapsed, and
+// failures are a stable interface soak dashboards count.
 func (g *storeWedgeGuard) fail(op string, err error) error {
-	if store.IsProtocolErr(err) {
-		return fmt.Errorf("%s: %w -- SQLite's WAL lock range is saturated by another live process and retrying cannot clear it; run `sparkwing box-slots list` to find the conflicting holder", op, err)
-	}
 	if g.firstFailure.IsZero() {
 		g.firstFailure = g.now()
 	}
 	g.failures++
 	elapsed := g.now().Sub(g.firstFailure)
+	if store.IsProtocolErr(err) {
+		g.emitWedged(op, "protocol", elapsed)
+		return fmt.Errorf("%s: %w -- SQLite's WAL lock range is saturated by another live process and retrying cannot clear it; run `sparkwing box-slots list` to find the conflicting holder", op, err)
+	}
 	if g.budget > 0 && elapsed >= g.budget {
+		g.emitWedged(op, "budget", elapsed)
 		return fmt.Errorf("%s: every store call for %s has failed (%d consecutive failures, budget %s, last error: %w) -- the state database looks wedged by another live process; run `sparkwing box-slots list` to find the conflicting holder", op, elapsed.Round(time.Second), g.failures, g.budget, err)
 	}
 	return nil
+}
+
+// emitWedged writes the guard's terminal telemetry event.
+func (g *storeWedgeGuard) emitWedged(op, kind string, elapsed time.Duration) {
+	g.logger.Error("store wedged",
+		"op", op,
+		"kind", kind,
+		"elapsed", elapsed.Round(time.Second).String(),
+		"failures", g.failures)
 }

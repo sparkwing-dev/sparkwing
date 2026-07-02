@@ -81,6 +81,12 @@ code change to unlock.
   waiting, it probes for stalled holders about every 30 seconds and
   prints the pid and evidence, pointing at `box-slots sweep` /
   `sweep --reap`. The wait path never kills anything itself.
+- **cli:** `box-slots sweep` rows split the stall age into the
+  envelope-write age and a corroborating newest-file age under the run's
+  directory, so a healthy run inside one long output-quiet node shows
+  fresh node-file writes despite a silent envelope; and each `--reap`
+  attempt and store wedge verdict emits one structured log line with
+  stable `outcome` / `kind` fields for dashboards to count.
 
 ### Fixed
 

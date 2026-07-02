@@ -93,9 +93,17 @@ queued run says who it is stuck behind.
 The stall signal is the run envelope's mtime, not a process heartbeat.
 A live process with frozen database work keeps beating, so a heartbeat
 cannot tell "alive and working" from "alive and wedged." The envelope
-log at `<runsDir>/<runID>/_envelope.ndjson` is append-per-event, so a
-healthy run touches it constantly and a wedged one goes silent -- the
-file's mtime tells the truth. The sweep resolves each live holder's
+log at `<runsDir>/<runID>/_envelope.ndjson` moves on run-level events
+and stdout tees -- node starts and finishes, teed output lines -- so a
+wedged run goes silent. The signal has a known blind spot: a healthy
+run inside one long output-quiet node (a buffered subprocess, a silent
+computation past the threshold) also goes envelope-quiet and reads as
+stalled. The sweep therefore reports a corroborating column alongside
+the envelope age: the mtime age of the newest file under the run's
+directory. A run still writing node logs or artifacts while its
+envelope sits silent is visibly not dead -- check that column, and
+raise the stall threshold above your longest expected quiet node,
+before trusting `--reap`. The sweep resolves each live holder's
 run id from the marker's `run=` line and stats that envelope: silent
 longer than the stall threshold (default 30m, overridable via the
 `SPARKWING_BOX_SLOT_STALL_TTL` Go-duration environment variable; a
@@ -110,13 +118,16 @@ Reporting and killing are separate acts. The sweep itself never
 signals anything; `--reap` (or `ReapStalled` in code) climbs a safety
 ladder per stalled holder:
 
-1. Verify the marker still exists at the swept path, its filename
-   still parses to the swept pid, and a fresh flock probe still shows
-   the owner live. Any mismatch refuses -- a renamed or vanished
-   marker, or a recycled pid, is never signaled.
-2. SIGTERM the owner and wait a grace window (10s) for it to exit.
-3. If the owner still holds its flock after the grace window, re-run
-   the checks from step 1 and SIGKILL.
+1. Verify the marker still exists at the swept path and its filename
+   still parses to the swept pid. Any mismatch refuses -- a renamed or
+   vanished marker, or a recycled pid, is never signaled.
+2. Take a fresh flock probe immediately before SIGTERM. A released
+   flock refuses: the owner already exited between the sweep and the
+   reap, and its pid may already belong to someone else.
+3. SIGTERM the owner and wait a grace window (10s) for it to exit.
+4. If the owner still holds its flock after the grace window, take one
+   more fresh flock probe immediately before SIGKILL; a released flock
+   means the owner exited, otherwise SIGKILL.
 
 The reaper never removes the marker file: the kernel drops the flock
 when the owner dies, and admission's stale-file GC (above) deletes the

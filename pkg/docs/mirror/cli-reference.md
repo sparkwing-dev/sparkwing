@@ -252,21 +252,31 @@ Report stalled box-slot holders; --reap kills their owners
 Finds live holders that look wedged: the owner process still holds
 its lock file's flock, but its annotated run's envelope log has not
 been written for longer than the stall threshold (default 30m,
-overridable via the SPARKWING_BOX_SLOT_STALL_TTL duration). A healthy
-run appends an envelope event constantly, so a silent envelope from a
-live process marks a holder that is alive but stuck -- typically
-wedged against the state database. A holder that never annotated a
-run counts by its claim time instead. A process heartbeat could not
-tell these apart -- a live process with frozen database work keeps
-beating; the envelope tells the truth.
+overridable via the SPARKWING_BOX_SLOT_STALL_TTL duration). The
+envelope moves on run-level events and stdout tees, so a silent
+envelope from a live process usually marks a holder that is alive but
+stuck -- typically wedged against the state database. A holder that
+never annotated a run counts by its claim time instead. A process
+heartbeat could not tell these apart -- a live process with frozen
+database work keeps beating; the envelope moves only with progress.
 
-Without --reap this only reports: pid, run, silence age, and the
-evidence behind the verdict. With --reap each stalled owner gets
-SIGTERM, a grace window to exit, then SIGKILL if it still holds its
-flock; every signal re-verifies the same lock file is still held by
-the same pid, so a recycled pid is never killed. The lock file itself
-is left in place -- the kernel drops the flock with the process, and
-run admission garbage-collects the stale file.
+The envelope signal has a blind spot: a healthy run inside one long
+output-quiet node (a buffered subprocess, a silent computation past
+the threshold) also reads as stalled. Each row therefore carries a
+corroborating NEWEST-WRITE column -- the mtime age of the newest file
+under the run's directory. Recent node-file writes under a silent
+envelope mean the run is likely alive: check that column, and raise
+SPARKWING_BOX_SLOT_STALL_TTL above your longest expected quiet node,
+before trusting --reap.
+
+Without --reap this only reports: pid, run, envelope-write age, the
+newest-file age, and the evidence behind the verdict. With --reap each
+stalled owner gets SIGTERM, a grace window to exit, then SIGKILL if it
+still holds its flock; a fresh flock probe immediately before each
+signal re-verifies the same lock file is still held by the same pid,
+so a recycled pid is never killed. The lock file itself is left in
+place -- the kernel drops the flock with the process, and run
+admission garbage-collects the stale file.
 
 Reads only the filesystem and flock state, never the state database,
 so it works while state.db is wedged -- exactly when you need it.

@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +86,53 @@ func TestStoreWedgeGuard_NonPositiveBudgetDisablesTheTrip(t *testing.T) {
 
 	if err := g.fail("op", errors.New("locking protocol")); err == nil {
 		t.Fatal("locking protocol must stay terminal with the budget disabled")
+	}
+}
+
+func TestStoreWedgeGuard_BudgetTripEmitsOneStructuredEvent(t *testing.T) {
+	var buf bytes.Buffer
+	clock := time.Unix(1_700_000_000, 0)
+	g := newStoreWedgeGuard(5 * time.Minute)
+	g.now = func() time.Time { return clock }
+	g.logger = slog.New(slog.NewTextHandler(&buf, nil))
+
+	if err := g.fail("resolve waiter", errors.New("database is locked")); err != nil {
+		t.Fatalf("first failure tripped: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("event emitted before the trip: %q", buf.String())
+	}
+	clock = clock.Add(6 * time.Minute)
+
+	if err := g.fail("resolve waiter", errors.New("database is locked")); err == nil {
+		t.Fatal("failure past budget did not trip")
+	}
+
+	got := buf.String()
+	for _, want := range []string{`msg="store wedged"`, `op="resolve waiter"`, "kind=budget", "elapsed=6m0s", "failures=2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("budget event %q missing %q", got, want)
+		}
+	}
+	if n := strings.Count(got, "store wedged"); n != 1 {
+		t.Errorf("emitted %d wedge events, want exactly one", n)
+	}
+}
+
+func TestStoreWedgeGuard_ProtocolTerminalEmitsProtocolEvent(t *testing.T) {
+	var buf bytes.Buffer
+	g := newStoreWedgeGuard(5 * time.Minute)
+	g.logger = slog.New(slog.NewTextHandler(&buf, nil))
+
+	if err := g.fail("heartbeat", errors.New("SQLITE_PROTOCOL: locking protocol (15)")); err == nil {
+		t.Fatal("locking protocol error was not immediately terminal")
+	}
+
+	got := buf.String()
+	for _, want := range []string{`msg="store wedged"`, "op=heartbeat", "kind=protocol", "failures=1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("protocol event %q missing %q", got, want)
+		}
 	}
 }
 
