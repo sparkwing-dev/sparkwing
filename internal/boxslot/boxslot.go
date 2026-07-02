@@ -92,6 +92,23 @@ type Options struct {
 	// messages.
 	OnWait func(activeHolders, maxSlots int)
 
+	// RunsDir is the per-run artifacts root the stalled-holder probe
+	// reads envelope mtimes from. Required (with OnStalled and a
+	// positive StallTTL) for the probe to run.
+	RunsDir string
+
+	// StallTTL is the silence threshold the wait-path probe hands to
+	// SweepStalled. Zero or negative disables the probe.
+	StallTTL time.Duration
+
+	// OnStalled is called at most once per probe interval, while
+	// waiting for a slot, with the live holders that look stalled --
+	// so a queued run can say who it is stuck behind. Reporting only:
+	// the wait path never signals or removes a holder; reaping is the
+	// operator's explicit act via ReapStalled / box-slots sweep --reap.
+	// Nil disables the probe.
+	OnStalled func([]StalledHolder)
+
 	// PollInterval is the base wait between admission retries.
 	// Jittered up to PollMax. Zero uses sane defaults (1s base, 3s max).
 	PollInterval time.Duration
@@ -164,6 +181,7 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 		}
 	}()
 
+	var lastStallProbe time.Time
 	for {
 		max := resolveMax()
 		if max <= 0 {
@@ -186,6 +204,13 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 		}
 		if opts.OnWait != nil {
 			opts.OnWait(active, max)
+		}
+		if opts.OnStalled != nil && opts.RunsDir != "" && opts.StallTTL > 0 &&
+			time.Since(lastStallProbe) >= stallProbeInterval {
+			lastStallProbe = time.Now()
+			if stalled, err := SweepStalled(opts.LockDir, opts.RunsDir, opts.StallTTL); err == nil && len(stalled) > 0 {
+				opts.OnStalled(stalled)
+			}
 		}
 		wait := opts.PollInterval + time.Duration(rand.Int64N(int64(opts.PollInterval)))
 		if wait > opts.PollMax {

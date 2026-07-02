@@ -60,19 +60,14 @@ func Holders(lockDir string) ([]Holder, error) {
 		if b, err := os.ReadFile(path); err == nil {
 			h.RunID = lastRunLine(b)
 		}
-		f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+		live, err := probeHolderLive(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return nil, err
 		}
-		if err := flockExclusiveNonblock(f); err != nil {
-			h.Live = true
-		} else {
-			_ = flockUnlock(f)
-		}
-		_ = f.Close()
+		h.Live = live
 		holders = append(holders, h)
 	}
 	sort.Slice(holders, func(i, j int) bool {

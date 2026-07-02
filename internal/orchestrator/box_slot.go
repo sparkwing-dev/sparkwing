@@ -46,6 +46,11 @@ func acquireBoxSlot(ctx context.Context, paths Paths, workersHint int) (func(), 
 		resolve = func() int { return pin }
 	}
 
+	stallTTL, err := boxslot.StallTTL()
+	if err != nil {
+		return nil, err
+	}
+
 	release, err := boxslot.Acquire(ctx, boxslot.Options{
 		ResolveMaxSlots: resolve,
 		LockDir:         paths.BoxSlotDir(),
@@ -56,6 +61,17 @@ func acquireBoxSlot(ctx context.Context, paths Paths, workersHint int) (func(), 
 					"Raise the host cap live with `sparkwing box-slots set --to N`, "+
 					"or fail fast with --sw-no-wait.\n",
 				active, max)
+		},
+		RunsDir:  paths.RunsDir(),
+		StallTTL: stallTTL,
+		OnStalled: func(stalled []boxslot.StalledHolder) {
+			for _, s := range stalled {
+				fmt.Fprintf(os.Stderr,
+					"box slot held by a stalled process: pid %d (%s). "+
+						"Inspect with `sparkwing box-slots sweep`; clear with "+
+						"`sparkwing box-slots sweep --reap`.\n",
+					s.PID, s.Evidence)
+			}
 		},
 	})
 	if err != nil {

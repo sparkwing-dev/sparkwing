@@ -44,12 +44,14 @@ func runBoxSlots(args []string) error {
 		return runBoxSlotsList(args[1:])
 	case "release":
 		return runBoxSlotsRelease(args[1:])
+	case "sweep":
+		return runBoxSlotsSweep(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdBoxSlots, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdBoxSlots, os.Stderr)
-		return fmt.Errorf("box-slots: unknown verb %q (valid: show, set, list, release)", args[0])
+		return fmt.Errorf("box-slots: unknown verb %q (valid: show, set, list, release, sweep)", args[0])
 	}
 }
 
@@ -262,6 +264,125 @@ func runBoxSlotsRelease(args []string) error {
 		return fmt.Errorf("box-slots release: %w", err)
 	}
 	return renderBoxSlotRelease(boxSlotReleaseReport{Released: name, Forced: *force}, format)
+}
+
+// boxSlotStalledRow is the wire shape of one `box-slots sweep` row.
+// reaped / reap_error appear only when --reap was given.
+type boxSlotStalledRow struct {
+	PID       int    `json:"pid"`
+	ClaimedAt string `json:"claimed_at"`
+	RunID     string `json:"run_id,omitempty"`
+	Age       string `json:"age"`
+	Evidence  string `json:"evidence"`
+	Lock      string `json:"lock"`
+	Reaped    *bool  `json:"reaped,omitempty"`
+	ReapError string `json:"reap_error,omitempty"`
+}
+
+func runBoxSlotsSweep(args []string) error {
+	fs := flag.NewFlagSet(cmdBoxSlotsSweep.Path, flag.ContinueOnError)
+	reap := fs.Bool("reap", false, "SIGTERM each stalled holder's owner, then SIGKILL after a grace window")
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
+	if err := parseAndCheck(cmdBoxSlotsSweep, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	format, err := resolveOutputFormat(*outFmt, cmdBoxSlotsSweep.Path)
+	if err != nil {
+		return err
+	}
+	ttl, err := boxslot.StallTTL()
+	if err != nil {
+		return err
+	}
+	paths, err := orchestrator.DefaultPaths()
+	if err != nil {
+		return err
+	}
+	stalled, err := boxslot.SweepStalled(paths.BoxSlotDir(), paths.RunsDir(), ttl)
+	if err != nil {
+		return err
+	}
+	rows := make([]boxSlotStalledRow, 0, len(stalled))
+	for _, s := range stalled {
+		row := boxSlotStalledRow{
+			PID:      s.PID,
+			RunID:    s.RunID,
+			Age:      s.Age.Round(time.Second).String(),
+			Evidence: s.Evidence,
+			Lock:     s.Path,
+		}
+		if !s.ClaimedAt.IsZero() {
+			row.ClaimedAt = s.ClaimedAt.UTC().Format(time.RFC3339)
+		}
+		if *reap {
+			ok := true
+			if rerr := boxslot.ReapStalled(s, 0); rerr != nil {
+				ok = false
+				row.ReapError = rerr.Error()
+			}
+			row.Reaped = &ok
+		}
+		rows = append(rows, row)
+	}
+	return renderBoxSlotStalled(rows, format, *reap)
+}
+
+func renderBoxSlotStalled(rows []boxSlotStalledRow, format string, reaped bool) error {
+	switch format {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rows)
+	case "plain":
+		for _, r := range rows {
+			fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s%s\n",
+				r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.Age, r.Lock, r.Evidence, reapSuffix(r))
+		}
+		return nil
+	default:
+		if len(rows) == 0 {
+			fmt.Println("no stalled box-slot holders")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		if reaped {
+			fmt.Fprintln(w, "PID\tCLAIMED\tRUN\tSILENT\tREAPED\tEVIDENCE")
+			for _, r := range rows {
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+					r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.Age, reapWord(r), r.Evidence)
+			}
+		} else {
+			fmt.Fprintln(w, "PID\tCLAIMED\tRUN\tSILENT\tEVIDENCE")
+			for _, r := range rows {
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
+					r.PID, orDash(r.ClaimedAt), orDash(r.RunID), r.Age, r.Evidence)
+			}
+		}
+		return w.Flush()
+	}
+}
+
+func reapSuffix(r boxSlotStalledRow) string {
+	if r.Reaped == nil {
+		return ""
+	}
+	if *r.Reaped {
+		return "\treaped"
+	}
+	return "\treap-failed: " + r.ReapError
+}
+
+func reapWord(r boxSlotStalledRow) string {
+	if r.Reaped == nil {
+		return "-"
+	}
+	if *r.Reaped {
+		return "yes"
+	}
+	return "no: " + r.ReapError
 }
 
 func renderBoxSlotRelease(r boxSlotReleaseReport, format string) error {

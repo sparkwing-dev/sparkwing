@@ -57,6 +57,27 @@ func TestRenderBoxSlotHolders_AllFormats(t *testing.T) {
 	}
 }
 
+func TestRenderBoxSlotStalled_AllFormats(t *testing.T) {
+	reapedOK, reapedNo := true, false
+	rows := []boxSlotStalledRow{
+		{PID: 4242, ClaimedAt: "2026-07-01T00:00:00Z", RunID: "run-20260701-000000-cafe0001",
+			Age: "45m0s", Evidence: "run live but its envelope last written 45m0s ago", Lock: "/tmp/x/holder-pid4242-1-1.lock"},
+		{PID: 4243, Age: "31m0s", Evidence: "no run annotated", Lock: "/tmp/x/holder-pid4243-2-1.lock", Reaped: &reapedOK},
+		{PID: 4244, Age: "31m0s", Evidence: "no run annotated", Lock: "/tmp/x/holder-pid4244-3-1.lock",
+			Reaped: &reapedNo, ReapError: "refusing to signal"},
+	}
+	for _, format := range []string{"json", "plain", "pretty"} {
+		for _, reap := range []bool{false, true} {
+			if err := renderBoxSlotStalled(rows, format, reap); err != nil {
+				t.Fatalf("render %s reap=%t: %v", format, reap, err)
+			}
+		}
+	}
+	if err := renderBoxSlotStalled(nil, "pretty", false); err != nil {
+		t.Fatalf("render empty pretty: %v", err)
+	}
+}
+
 func TestRenderBoxSlotRelease_AllFormats(t *testing.T) {
 	r := boxSlotReleaseReport{Released: "holder-pid4242-1-1.lock", Forced: true}
 	for _, format := range []string{"json", "plain", "pretty"} {

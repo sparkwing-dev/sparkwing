@@ -1491,6 +1491,7 @@ control. Reset to the env/heuristic default with 'set --to default'.`,
 		{"set", "Write the live host cap (--to N | off | default)"},
 		{"list", "One row per holder: pid, claim time, run id, liveness, lock path"},
 		{"release", "Remove a holder's lock file (--force SIGKILLs a live owner)"},
+		{"sweep", "Report live holders whose run went silent (--reap kills them)"},
 	},
 	Examples: []Example{
 		{"What's the cap and who's holding slots?", "sparkwing box-slots show"},
@@ -1500,6 +1501,45 @@ control. Reset to the env/heuristic default with 'set --to default'.`,
 		{"Revert to the heuristic default", "sparkwing box-slots set --to default"},
 		{"Who holds a slot right now, for which run?", "sparkwing box-slots list"},
 		{"Free a wedged holder's slot", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force"},
+		{"Which live holders look wedged?", "sparkwing box-slots sweep"},
+		{"Kill the wedged holders", "sparkwing box-slots sweep --reap"},
+	},
+}
+
+var cmdBoxSlotsSweep = Command{
+	Path:     "sparkwing box-slots sweep",
+	Synopsis: "Report stalled box-slot holders; --reap kills their owners",
+	Description: `Finds live holders that look wedged: the owner process still holds
+its lock file's flock, but its annotated run's envelope log has not
+been written for longer than the stall threshold (default 30m,
+overridable via the SPARKWING_BOX_SLOT_STALL_TTL duration). A healthy
+run appends an envelope event constantly, so a silent envelope from a
+live process marks a holder that is alive but stuck -- typically
+wedged against the state database. A holder that never annotated a
+run counts by its claim time instead. A process heartbeat could not
+tell these apart -- a live process with frozen database work keeps
+beating; the envelope tells the truth.
+
+Without --reap this only reports: pid, run, silence age, and the
+evidence behind the verdict. With --reap each stalled owner gets
+SIGTERM, a grace window to exit, then SIGKILL if it still holds its
+flock; every signal re-verifies the same lock file is still held by
+the same pid, so a recycled pid is never killed. The lock file itself
+is left in place -- the kernel drops the flock with the process, and
+run admission garbage-collects the stale file.
+
+Reads only the filesystem and flock state, never the state database,
+so it works while state.db is wedged -- exactly when you need it.`,
+	Flags: []FlagSpec{
+		{Name: "reap", Desc: "SIGTERM each stalled holder's owner, then SIGKILL after a grace window", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Who looks wedged?", "sparkwing box-slots sweep"},
+		{"Machine-readable", "sparkwing box-slots sweep -o json"},
+		{"Kill the wedged holders", "sparkwing box-slots sweep --reap"},
+		{"Tighter threshold for this sweep", "SPARKWING_BOX_SLOT_STALL_TTL=10m sparkwing box-slots sweep"},
 	},
 }
 
