@@ -24,16 +24,14 @@ import (
 // profileName, when non-empty, is forwarded to each child as
 // --profile <name> so the child opens the same backends as the parent
 // -- critical when the parent is on postgres or another non-local
-// state, since the child handler defaults to sqlite otherwise.
-func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName string, logger *slog.Logger) {
+// state, since the child handler defaults to sqlite otherwise. The
+// caller resolves (and error-checks) wedgeBudget before spawning the
+// loop.
+func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName string, logger *slog.Logger, wedgeBudget time.Duration) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	wedge, err := newStoreWedgeGuardFromEnv()
-	if err != nil {
-		logger.Error("local trigger loop refusing to start", "parent_run_id", runID, "err", err)
-		return
-	}
+	wedge := newStoreWedgeGuard(wedgeBudget)
 	cache := &localCompileCache{}
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -95,16 +93,26 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 //
 // The compile cache is shared across the consumer's lifetime so
 // back-to-back triggers against the same .sparkwing/ skip the rebuild.
-// Returns when ctx is cancelled; in-flight dispatches finish first.
-func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.Logger) {
+// An unparseable [StoreWedgeBudgetEnvVar] is a startup error so the
+// misconfiguration fails the caller instead of silently leaving
+// queued triggers unconsumed; on success the consumer runs in its own
+// goroutine until ctx cancels, letting in-flight dispatches finish
+// first.
+func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	wedge, err := newStoreWedgeGuardFromEnv()
 	if err != nil {
-		logger.Error("local trigger consumer refusing to start", "err", err)
-		return
+		return fmt.Errorf("local trigger consumer: %w", err)
 	}
+	go consumeLocalTriggers(ctx, st, logger, wedge)
+	return nil
+}
+
+// consumeLocalTriggers is RunLocalTriggerConsumer's claim/dispatch
+// loop, split out so validation happens synchronously at startup.
+func consumeLocalTriggers(ctx context.Context, st *store.Store, logger *slog.Logger, wedge *storeWedgeGuard) {
 	cache := &localCompileCache{}
 	var wg sync.WaitGroup
 	defer wg.Wait()

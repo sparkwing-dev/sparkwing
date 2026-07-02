@@ -14,14 +14,11 @@ import (
 // expire. A missed ping just delays the orphan flip; correctness
 // lives in the reaper's grace window. The wedge guard still bounds a
 // wedged store: a "locking protocol" error or a failure streak past
-// the budget stops the loop instead of re-issuing statements forever
-// against a database another process has locked.
-func runRunHeartbeatLoop(ctx context.Context, interval time.Duration, state StateBackend, runID string) {
-	wedge, err := newStoreWedgeGuardFromEnv()
-	if err != nil {
-		slog.Error("run heartbeat loop refusing to start", "run", runID, "err", err)
-		return
-	}
+// wedgeBudget stops the loop instead of re-issuing statements forever
+// against a database another process has locked. The caller resolves
+// (and error-checks) the budget before spawning the loop.
+func runRunHeartbeatLoop(ctx context.Context, interval time.Duration, state StateBackend, runID string, wedgeBudget time.Duration) {
+	wedge := newStoreWedgeGuard(wedgeBudget)
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}

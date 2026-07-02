@@ -124,7 +124,9 @@ func Run(ctx context.Context, opts Options) error {
 				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
 				return err
 			})
-		go orchestrator.RunLocalTriggerConsumer(ctx, st, nil)
+		if err := orchestrator.RunLocalTriggerConsumer(ctx, st, nil); err != nil {
+			return err
+		}
 	}
 
 	var dashBackend backend.Backend

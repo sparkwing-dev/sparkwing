@@ -359,7 +359,8 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 		execCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var lost atomic.Bool
-		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, cancel, wedgeBudget)
+		var lostWedge atomic.Pointer[string]
+		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, &lostWedge, cancel, wedgeBudget)
 
 		result := r.acquireAndRun(execCtx, req, concParamsFor(node, group, req.RunID))
 
@@ -447,11 +448,15 @@ func (r *InProcessRunner) applySkippedConcurrent(ctx context.Context, req runner
 
 // runHeldSlot executes the node while a heartbeat extends the lease
 // and watches for supersede; on supersede execCtx cancels and the
-// node finalizes as superseded.
+// node finalizes as superseded. A store-wedge abort cancels the same
+// way but finalizes as failed, carrying the wedge verdict so the run
+// record names the true cause instead of a supersede that never
+// happened.
 func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
-	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, cp.policy, &superseded, cancelExec, wedgeBudget)
+	var wedgeAbort atomic.Pointer[string]
+	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, cp.policy, &superseded, &wedgeAbort, cancelExec, wedgeBudget)
 
 	defer func() {
 		stopHB()
@@ -473,6 +478,12 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 	}
 
 	output, err := r.executeNode(execCtx, req.RunID, req.Node, req.Delegate)
+	if reason := wedgeAbort.Load(); reason != nil {
+		werr := errors.New(*reason)
+		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_store_wedged", []byte(werr.Error()))
+		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Failed))
+		return runner.Result{Outcome: sparkwing.Failed, Err: werr}
+	}
 	if superseded.Load() {
 		err := fmt.Errorf("concurrency key %q: holder superseded by newer arrival", cp.key)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_superseded", []byte(err.Error()))
@@ -493,8 +504,10 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 // has reaped us; we abort so a newer holder isn't racing the same
 // work. A wedged store also aborts: a "locking protocol" error or a
 // failure streak past wedgeBudget stops the loop instead of re-issuing
-// heartbeats forever. The returned stop is safe to call multiple times.
-func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, cancelExec context.CancelFunc, wedgeBudget time.Duration) func() {
+// heartbeats forever, recording its verdict in wedgeAbort so the node
+// finalizes with the true cause rather than a supersede. The returned
+// stop is safe to call multiple times.
+func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, wedgeAbort *atomic.Pointer[string], cancelExec context.CancelFunc, wedgeBudget time.Duration) func() {
 	done := make(chan struct{})
 	var once sync.Once
 
@@ -520,7 +533,8 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 					if terminal := wedge.fail(fmt.Sprintf("concurrency key %q: heartbeat", key), err); terminal != nil {
 						slog.Error("concurrency store wedged; aborting work",
 							"key", key, "holder", holderID, "err", terminal)
-						superseded.Store(true)
+						msg := terminal.Error()
+						wedgeAbort.Store(&msg)
 						cancelExec()
 						return
 					}

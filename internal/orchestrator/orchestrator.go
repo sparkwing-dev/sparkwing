@@ -254,6 +254,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q is not registered", opts.Pipeline)
 	}
+	wedgeBudget, err := storeWedgeBudget()
+	if err != nil {
+		return nil, err
+	}
 
 	trigger := opts.Trigger
 	if trigger.Source == "" {
@@ -322,7 +326,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	hbCtx, cancelHeartbeat := context.WithCancel(ctx)
 	defer cancelHeartbeat()
-	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID)
+	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID, wedgeBudget)
 
 	masker := secrets.NewMasker()
 	for _, v := range reg.SecretValues(opts.Args) {
@@ -459,7 +463,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, nil)
+		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, nil, wedgeBudget)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -1304,7 +1308,13 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		for {
 			run, err := s.backends.State.GetRun(pollCtx, childRunID)
 			if err != nil {
-				if terminal := wedge.fail(fmt.Sprintf("waiting for child run %s", childRunID), err); terminal != nil {
+				// safety: ErrNotFound is a healthy store answer here -- the
+				// child's runs row appears only once a consumer claims and
+				// starts it, so a queued or still-compiling child must not
+				// count toward the wedge budget.
+				if errors.Is(err, store.ErrNotFound) {
+					wedge.success()
+				} else if terminal := wedge.fail(fmt.Sprintf("waiting for child run %s", childRunID), err); terminal != nil {
 					emitChildFinish("failed", terminal.Error())
 					return nil, terminal
 				}

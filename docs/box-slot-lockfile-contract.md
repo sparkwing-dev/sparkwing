@@ -110,7 +110,9 @@ longer than the stall threshold (default 30m, overridable via the
 set-but-unparseable value errors loudly) means stalled. A holder with
 no `run=` line is judged by the claim time in its filename instead: a
 slot held past the threshold without ever starting a run is equally
-stalled. Like everything else in this contract, the sweep reads only
+stalled. An annotated holder whose envelope file is missing falls back
+to the same claim-time judgment, with evidence naming the missing
+envelope. Like everything else in this contract, the sweep reads only
 the filesystem and flock state, so it works while `state.db` is
 wedged.
 

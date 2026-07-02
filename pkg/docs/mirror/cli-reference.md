@@ -269,8 +269,8 @@ envelope mean the run is likely alive: check that column, and raise
 SPARKWING_BOX_SLOT_STALL_TTL above your longest expected quiet node,
 before trusting --reap.
 
-Without --reap this only reports: pid, run, envelope-write age, the
-newest-file age, and the evidence behind the verdict. With --reap each
+Without --reap this only reports: pid, claim time, run, envelope-write
+age, the newest-file age, and the evidence behind the verdict. With --reap each
 stalled owner gets SIGTERM, a grace window to exit, then SIGKILL if it
 still holds its flock; a fresh flock probe immediately before each
 signal re-verifies the same lock file is still held by the same pid,

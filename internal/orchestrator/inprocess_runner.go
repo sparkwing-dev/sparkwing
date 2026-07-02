@@ -189,8 +189,12 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	})
 	defer stopSampler()
 
+	wedgeBudget, err := storeWedgeBudget()
+	if err != nil {
+		return nil, err
+	}
 	hbCtx, stopHB := context.WithCancel(ctx)
-	go runNodeHeartbeatLoop(hbCtx, 5*time.Second, r.backends.State, runID, node.ID())
+	go runNodeHeartbeatLoop(hbCtx, 5*time.Second, r.backends.State, runID, node.ID(), wedgeBudget)
 	defer stopHB()
 
 	nodeCtx := sparkwingruntime.WithLogger(ctx, nlog)

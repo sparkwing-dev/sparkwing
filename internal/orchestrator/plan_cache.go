@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -210,6 +211,16 @@ func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedge
 				cancel()
 				if err != nil {
 					sinceOK := time.Since(lastOK)
+					// safety: ErrLockHeld is the store answering fine -- the
+					// lease lapsed and another holder owns the slot -- so it
+					// feeds the lease-lost branch, never the wedge guard,
+					// keeping the "store wedged" telemetry honest.
+					if errors.Is(err, store.ErrLockHeld) {
+						wedge.success()
+						slog.Error("plan concurrency lease lost; slot held by another holder",
+							"key", key, "since_last_ok", sinceOK.Round(time.Second))
+						continue
+					}
 					if terminal := wedge.fail(fmt.Sprintf("plan concurrency namespace %q: heartbeat", key), err); terminal != nil {
 						slog.Error("plan concurrency heartbeat stopping; store wedged",
 							"key", key, "err", terminal)

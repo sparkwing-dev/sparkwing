@@ -125,16 +125,20 @@ func TestWaitThenRun_LockingProtocolIsImmediatelyTerminal(t *testing.T) {
 	}
 }
 
-func TestAcquireAndRun_InvalidWedgeBudgetEnvFailsLoudly(t *testing.T) {
+func TestRun_InvalidWedgeBudgetEnvFailsLoudly(t *testing.T) {
 	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "sometime")
-	conc := &wedgeConcurrency{failResolves: 0}
+	register("wedge-pipe", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &wedgePipe{} })
+	fakes := newFakeBackends()
+	state := &nodeErrRecordingState{fakeState: fakes.state, nodeErrs: map[string]string{}}
 
-	res, state := runWedgePipe(t, conc)
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: state, Logs: fakes.logs, Concurrency: &wedgeConcurrency{}},
+		orchestrator.Options{Pipeline: "wedge-pipe"})
 
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed on invalid %s", res.Status, orchestrator.StoreWedgeBudgetEnvVar)
+	if err == nil {
+		t.Fatalf("Run succeeded; want a startup error on invalid %s", orchestrator.StoreWedgeBudgetEnvVar)
 	}
-	if !strings.Contains(state.nodeErr("gated"), orchestrator.StoreWedgeBudgetEnvVar) {
-		t.Errorf("node error %q does not name %s", state.nodeErr("gated"), orchestrator.StoreWedgeBudgetEnvVar)
+	if !strings.Contains(err.Error(), orchestrator.StoreWedgeBudgetEnvVar) {
+		t.Errorf("error %q does not name %s", err, orchestrator.StoreWedgeBudgetEnvVar)
 	}
 }
