@@ -1990,6 +1990,11 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 	}
 
+	if res.Outcome == sparkwing.Failed && s.resolverCtx.Err() != nil && canceledByRun(res.Err) {
+		s.markRunCancelled(node.ID())
+		return
+	}
+
 	pauseReason := ""
 	if s.debug.pauseAfter(node.ID()) {
 		pauseReason = store.PauseReasonAfter
@@ -2483,6 +2488,38 @@ func (s *dispatchState) markCancelled(nodeID, reason string) {
 	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil)
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_cancelled", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Cancelled)
+}
+
+// markRunCancelled reclassifies a node the runner reported Failed whose
+// failure was the run context being cancelled (a sibling failed and the
+// run is tearing down), not a fault in the node's own work. Recording it
+// Cancelled lets the summary attribute it to the cascade instead of
+// listing it among the independent failures that a reader must sift
+// through to find the real cause. The store write detaches from the
+// cancelled run ctx so the terminal status still lands.
+func (s *dispatchState) markRunCancelled(nodeID string) {
+	ctx := context.WithoutCancel(s.ctx)
+	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), "cancelled: run failing", nil)
+	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_cancelled", []byte("cancelled: run failing"))
+	s.setOutcome(nodeID, sparkwing.Cancelled)
+}
+
+// canceledByRun reports whether a Failed node's error is the run tearing
+// the node down rather than a fault in the node's own work: the step
+// observed a cancelled context, or exec.CommandContext SIGKILLed the
+// child when the run context was cancelled. Only consulted once the run
+// context is already cancelled, so a genuine SIGKILL on a healthy run is
+// not misread as a cascade.
+func canceledByRun(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	// safety: a ctx-cancelled child is SIGKILLed; its ExitError carries
+	// no wrapped context error, only the "signal: killed" text.
+	return strings.Contains(err.Error(), "signal: killed")
 }
 
 func (s *dispatchState) markSkipped(nodeID, reason string) {
