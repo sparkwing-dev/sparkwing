@@ -307,6 +307,89 @@ func TestTrigger_PlanAdmissionAcceptsAncestorHolder(t *testing.T) {
 	}
 }
 
+func TestTrigger_PlanAdmissionAcceptsAdmissionSet(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for _, run := range []store.Run{
+		{ID: "ancestor-run", Pipeline: "ancestor", Status: "running", StartedAt: time.Now()},
+		{ID: "middle-run", Pipeline: "middle", Status: "running", ParentRunID: "ancestor-run", StartedAt: time.Now()},
+	} {
+		if err := st.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun(%s): %v", run.ID, err)
+		}
+	}
+	for _, req := range []store.AcquireSlotRequest{
+		{
+			Key:      "g:ancestor-key",
+			HolderID: "ancestor-run/-",
+			RunID:    "ancestor-run",
+			Capacity: 1,
+			Policy:   store.OnLimitQueue,
+		},
+		{
+			Key:      "g:middle-key",
+			HolderID: "middle-run/-",
+			RunID:    "middle-run",
+			Capacity: 1,
+			Policy:   store.OnLimitQueue,
+		},
+	} {
+		resp, err := st.AcquireConcurrencySlot(ctx, req)
+		if err != nil {
+			t.Fatalf("AcquireConcurrencySlot(%s): %v", req.Key, err)
+		}
+		if resp.Kind != store.AcquireGranted {
+			t.Fatalf("AcquireConcurrencySlot(%s) = %s, want granted", req.Key, resp.Kind)
+		}
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "grandchild",
+		"parent_run_id": "middle-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]any{
+			"key":       "g:middle-key",
+			"holder_id": "middle-run/-",
+			"admissions": map[string]string{
+				"g:ancestor-key": "ancestor-run/-",
+				"g:middle-key":   "middle-run/-",
+			},
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(ctx, body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	var admissions map[string]string
+	if err := json.Unmarshal([]byte(trigger.TriggerEnv["SPARKWING_PLAN_ADMISSIONS"]), &admissions); err != nil {
+		t.Fatalf("unmarshal plan admissions: %v", err)
+	}
+	if admissions["g:ancestor-key"] != "ancestor-run/-" {
+		t.Fatalf("ancestor admission = %q, want ancestor-run/-", admissions["g:ancestor-key"])
+	}
+	if admissions["g:middle-key"] != "middle-run/-" {
+		t.Fatalf("middle admission = %q, want middle-run/-", admissions["g:middle-key"])
+	}
+}
+
 func TestTrigger_PlanAdmissionRejectsNodeLevelHolder(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

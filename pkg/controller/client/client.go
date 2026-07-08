@@ -471,8 +471,9 @@ type TriggerMeta struct {
 }
 
 type TriggerPlanAdmission struct {
-	Key      string `json:"key,omitempty"`
-	HolderID string `json:"holder_id,omitempty"`
+	Key        string            `json:"key,omitempty"`
+	HolderID   string            `json:"holder_id,omitempty"`
+	Admissions map[string]string `json:"admissions,omitempty"`
 }
 
 // GitMeta is the optional git state attached to a trigger. Any field
@@ -778,15 +779,12 @@ func (c *Client) EnqueueTriggerWithEnv(
 	triggerEnv map[string]string,
 ) (string, error) {
 	req := TriggerRequest{
-		Pipeline: pipeline,
-		Args:     args,
-		PlanAdmission: TriggerPlanAdmission{
-			Key:      triggerEnv["SPARKWING_PLAN_ADMISSION_KEY"],
-			HolderID: triggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"],
-		},
-		ParentRunID:  parentRunID,
-		ParentNodeID: parentNodeID,
-		RetryOf:      retryOf,
+		Pipeline:      pipeline,
+		Args:          args,
+		PlanAdmission: triggerPlanAdmissionFromEnv(triggerEnv),
+		ParentRunID:   parentRunID,
+		ParentNodeID:  parentNodeID,
+		RetryOf:       retryOf,
 		Trigger: TriggerMeta{
 			Source: source,
 			User:   user,
@@ -807,6 +805,26 @@ func (c *Client) EnqueueTriggerWithEnv(
 		return "", err
 	}
 	return resp.RunID, nil
+}
+
+func triggerPlanAdmissionFromEnv(triggerEnv map[string]string) TriggerPlanAdmission {
+	if triggerEnv == nil {
+		return TriggerPlanAdmission{}
+	}
+	admission := TriggerPlanAdmission{
+		Key:      triggerEnv["SPARKWING_PLAN_ADMISSION_KEY"],
+		HolderID: triggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"],
+	}
+	if raw := triggerEnv["SPARKWING_PLAN_ADMISSIONS"]; raw != "" {
+		_ = json.Unmarshal([]byte(raw), &admission.Admissions)
+	}
+	if admission.Key != "" && admission.HolderID != "" {
+		if admission.Admissions == nil {
+			admission.Admissions = map[string]string{}
+		}
+		admission.Admissions[admission.Key] = admission.HolderID
+	}
+	return admission
 }
 
 func indexByte(s string, b byte) int {
