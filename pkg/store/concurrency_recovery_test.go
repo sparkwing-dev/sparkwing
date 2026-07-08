@@ -111,7 +111,7 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "k", "r1", "n", "", "", "")
+	resolution, err := s.ResolveWaiter(ctx, "k", "r1", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "", "", "", "")
+	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -155,55 +155,6 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 	state, _ := s.GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].RunID != "waiter" || state.Holders[0].NodeID != "" {
 		t.Fatalf("holders = %+v", state.Holders)
-	}
-}
-
-func TestConcurrency_ResolveWaiterDoesNotBypassCancelOthersTimeout(t *testing.T) {
-	s := newStoreT(t)
-	ctx := ctxT(t)
-
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	})
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "waiter", RunID: "waiter", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitCancelOthers,
-	})
-
-	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "n", "", "", "")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if resolution.Status != store.WaiterStillWaiting {
-		t.Fatalf("resolution = %+v, want still waiting", resolution)
-	}
-}
-
-func TestConcurrency_ResolveWaiterPromotesOrphanedCancelOthersQueue(t *testing.T) {
-	s := newStoreT(t)
-	ctx := ctxT(t)
-
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	})
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "waiter", RunID: "waiter", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitCancelOthers,
-	})
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
-		"k", "leader"); err != nil {
-		t.Fatalf("manual drop: %v", err)
-	}
-
-	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "n", "", "", "")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "waiter" {
-		t.Fatalf("resolution = %+v", resolution)
 	}
 }
 

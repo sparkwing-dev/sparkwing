@@ -470,7 +470,7 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 
-		resolution, err := s.store.ResolveWaiter(ctx, key, runID, nodeID, "", "", "")
+		resolution, err := s.store.ResolveWaiter(ctx, key, runID, nodeID, "", "", "", false)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				emit("stream_end", map[string]string{"reason": "key_not_found"})

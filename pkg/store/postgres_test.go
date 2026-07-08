@@ -283,7 +283,7 @@ func TestPostgresResolveWaiterPromotesOnceUnderConcurrentPoll(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			resolution, err := st.ResolveWaiter(ctx, "resolve-slot", fmt.Sprintf("waiter-%d", i), "n", "", "", "")
+			resolution, err := st.ResolveWaiter(ctx, "resolve-slot", fmt.Sprintf("waiter-%d", i), "n", "", "", "", false)
 			results[i] = result{resolution: resolution, err: err}
 		}(i)
 	}
