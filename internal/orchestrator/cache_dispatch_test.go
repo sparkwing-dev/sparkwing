@@ -24,6 +24,30 @@ var cacheCounter struct {
 	max      atomic.Int32
 }
 
+var inheritedLossStarted struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func setInheritedLossStarted(ch chan struct{}) {
+	inheritedLossStarted.mu.Lock()
+	defer inheritedLossStarted.mu.Unlock()
+	inheritedLossStarted.ch = ch
+}
+
+func signalInheritedLossStarted() {
+	inheritedLossStarted.mu.Lock()
+	ch := inheritedLossStarted.ch
+	inheritedLossStarted.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
 func cacheStep(hold time.Duration) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		cur := cacheCounter.inflight.Add(1)
@@ -213,12 +237,9 @@ func (planLevelInheritedSlowChildPipe) Plan(
 ) error {
 	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-inherited-loss-key", Max: 1})
 	sparkwing.Job(plan, "work", func(ctx context.Context) error {
-		select {
-		case <-time.After(10 * time.Second):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		signalInheritedLossStarted()
+		<-ctx.Done()
+		return ctx.Err()
 	})
 	return nil
 }
@@ -597,6 +618,9 @@ func TestCache_PlanLevelInheritedAdmissionLossFailsChild(t *testing.T) {
 		t.Fatalf("parent acquire = %s, want granted", resp.Kind)
 	}
 
+	childStarted := make(chan struct{}, 1)
+	setInheritedLossStarted(childStarted)
+	defer setInheritedLossStarted(nil)
 	childDone := make(chan *orchestrator.Result, 1)
 	runCtx, cancelRun := context.WithTimeout(ctx, 7*time.Second)
 	defer cancelRun()
@@ -612,7 +636,11 @@ func TestCache_PlanLevelInheritedAdmissionLossFailsChild(t *testing.T) {
 		childDone <- res
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-childStarted:
+	case <-runCtx.Done():
+		t.Fatalf("child did not start before test context ended: %v", runCtx.Err())
+	}
 	if _, err := st.ReleaseConcurrencySlot(ctx, "plan-level-inherited-loss-key", parentHolderID, "success", "", "", 0); err != nil {
 		t.Fatalf("release parent holder: %v", err)
 	}
@@ -628,8 +656,8 @@ func TestCache_PlanLevelInheritedAdmissionLossFailsChild(t *testing.T) {
 		if res.Error == nil || !strings.Contains(res.Error.Error(), "inherited admission lost") {
 			t.Fatalf("child error = %v, want inherited admission lost", res.Error)
 		}
-	case <-time.After(6 * time.Second):
-		t.Fatal("child did not stop after inherited admission was released")
+	case <-runCtx.Done():
+		t.Fatalf("child did not stop after inherited admission was released: %v", runCtx.Err())
 	}
 }
 
