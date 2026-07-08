@@ -306,6 +306,52 @@ func TestTrigger_PlanAdmissionAcceptsAncestorHolder(t *testing.T) {
 	}
 }
 
+func TestTrigger_PlanAdmissionRejectsNodeLevelHolder(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "parent-run",
+		Pipeline:  "parent",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/build",
+		RunID:    "parent-run",
+		NodeID:   "build",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "cache-key",
+			"holder_id": "parent-run/build",
+		},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 400 (body: %s)", resp.StatusCode, body)
+	}
+}
+
 // TestTrigger_InProcessDispatcher_FullLoop is the full vertical
 // slice: webhook arrives, controller dispatches, pipeline runs
 // against the same controller via HTTP, final state lands in the
