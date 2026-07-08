@@ -34,6 +34,7 @@ func acquirePlanSlot(
 	runID string,
 	plan *sparkwing.Plan,
 	inheritedAdmission planAdmission,
+	cancelRun context.CancelCauseFunc,
 ) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
 	opts := plan.CacheOpts()
 	if !opts.HasKey() {
@@ -57,7 +58,7 @@ func acquirePlanSlot(
 			if superseded {
 				return nil, planCacheEvicted, planAdmission{}, nil
 			}
-			return makeInheritedPlanSlotRelease(backends, opts.Key, inheritedAdmission.HolderID), planCacheProceed, inheritedAdmission, nil
+			return makeInheritedPlanSlotRelease(backends, opts.Key, inheritedAdmission.HolderID, cancelRun), planCacheProceed, inheritedAdmission, nil
 		}
 	}
 
@@ -140,7 +141,12 @@ func acquirePlanSlot(
 	return nil, "", planAdmission{}, fmt.Errorf("plan Cache acquire returned unknown kind %q", resp.Kind)
 }
 
-func makeInheritedPlanSlotRelease(backends Backends, key, holderID string) func(outcome string) {
+func makeInheritedPlanSlotRelease(
+	backends Backends,
+	key string,
+	holderID string,
+	cancelRun context.CancelCauseFunc,
+) func(outcome string) {
 	hbCtx, hbCancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -157,8 +163,10 @@ func makeInheritedPlanSlotRelease(backends Backends, key, holderID string) func(
 				_, _, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, store.DefaultConcurrencyLease)
 				cancel()
 				if err != nil {
+					err = fmt.Errorf("plan Cache inherited admission lost for key %q: %w", key, err)
 					slog.Warn("inherited plan concurrency heartbeat failed",
 						"key", key, "holder_id", holderID, "err", err)
+					cancelRun(err)
 					return
 				}
 			}

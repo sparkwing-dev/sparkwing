@@ -203,6 +203,26 @@ func (planLevelInheritedChildPipe) Plan(
 	return nil
 }
 
+type planLevelInheritedSlowChildPipe struct{ sparkwing.Base }
+
+func (planLevelInheritedSlowChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-inherited-loss-key", Max: 1})
+	sparkwing.Job(plan, "work", func(ctx context.Context) error {
+		select {
+		case <-time.After(10 * time.Second):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	return nil
+}
+
 type planLevelInheritedSpawnerPipe struct{ sparkwing.Base }
 
 func (planLevelInheritedSpawnerPipe) Plan(
@@ -238,6 +258,9 @@ func init() {
 	register("plan-level-skip-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelSkipFollowerPipe{} })
 	register("plan-level-inherited-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelInheritedChildPipe{}
+	})
+	register("plan-level-inherited-slow-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelInheritedSlowChildPipe{}
 	})
 	register("plan-level-inherited-spawner", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelInheritedSpawnerPipe{}
@@ -546,6 +569,67 @@ func TestCache_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T)
 	}
 	if res.Status != "success" {
 		t.Fatalf("child status = %q, want success", res.Status)
+	}
+}
+
+func TestCache_PlanLevelInheritedAdmissionLossFailsChild(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	parentHolderID := "parent-run/-"
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "plan-level-inherited-loss-key",
+		HolderID: parentHolderID,
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("parent acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("parent acquire = %s, want granted", resp.Kind)
+	}
+
+	childDone := make(chan *orchestrator.Result, 1)
+	runCtx, cancelRun := context.WithTimeout(ctx, 7*time.Second)
+	defer cancelRun()
+	go func() {
+		res, err := orchestrator.RunLocal(runCtx, p, orchestrator.Options{
+			Pipeline:                   "plan-level-inherited-slow-child",
+			InheritedPlanCacheKey:      "plan-level-inherited-loss-key",
+			InheritedPlanCacheHolderID: parentHolderID,
+		})
+		if err != nil {
+			t.Errorf("child run: %v", err)
+		}
+		childDone <- res
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	if _, err := st.ReleaseConcurrencySlot(ctx, "plan-level-inherited-loss-key", parentHolderID, "success", "", "", 0); err != nil {
+		t.Fatalf("release parent holder: %v", err)
+	}
+
+	select {
+	case res := <-childDone:
+		if res == nil {
+			t.Fatal("child returned nil result")
+		}
+		if res.Status != "failed" {
+			t.Fatalf("child status = %q, want failed", res.Status)
+		}
+		if res.Error == nil || !strings.Contains(res.Error.Error(), "inherited admission lost") {
+			t.Fatalf("child error = %v, want inherited admission lost", res.Error)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("child did not stop after inherited admission was released")
 	}
 }
 

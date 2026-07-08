@@ -662,10 +662,12 @@ func dispatch(
 	inheritedAdmission planAdmission,
 ) error {
 	runStart := time.Now()
+	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
+	defer cancelDispatch(nil)
 
 	// Plan-level .Cache() gates the whole run before any dispatch.
 	planRelease, planOutcome, activeAdmission, perr := acquirePlanSlot(
-		ctx, backends, runID, plan, inheritedAdmission,
+		dispatchCtx, backends, runID, plan, inheritedAdmission, cancelDispatch,
 	)
 	if perr != nil {
 		return perr
@@ -682,7 +684,7 @@ func dispatch(
 	defer func() { planRelease(planReleaseOutcome) }()
 
 	state := newDispatchState(
-		ctx, backends, r, runID, plan, delegate, debug, retryOf,
+		dispatchCtx, backends, r, runID, plan, delegate, debug, retryOf,
 		masker, maxParallel, activeAdmission,
 	)
 	state.snapMeta = snapMeta
@@ -692,7 +694,7 @@ func dispatch(
 	// Skip-passed: pre-seed succeeded nodes from the prior run so
 	// runOneNode short-circuits them.
 	if retryOf != "" && !full {
-		state.rehydrateFromRetry(ctx, retryOf)
+		state.rehydrateFromRetry(dispatchCtx, retryOf)
 	}
 
 	// Seed with the plan's static nodes.
@@ -725,6 +727,12 @@ func dispatch(
 	}
 
 	state.wg.Wait()
+	if cause := context.Cause(dispatchCtx); cause != nil &&
+		!errors.Is(cause, context.Canceled) &&
+		!errors.Is(cause, context.DeadlineExceeded) {
+		planReleaseOutcome = "failed"
+		return cause
+	}
 
 	// Optional nodes don't propagate failure to run-level.
 	var failed []string
