@@ -476,6 +476,10 @@ func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, 
 		}
 		return nil, fmt.Errorf("plan_admission validate holder: %w", err)
 	}
+	expectedHolderID := holder.RunID + "/-"
+	if holder.NodeID != "" || admission.HolderID != expectedHolderID {
+		return nil, fmt.Errorf("plan_admission holder %q is not a plan holder for run %q", admission.HolderID, holder.RunID)
+	}
 	if ok, err := s.runIsSelfOrAncestor(ctx, parentRunID, holder.RunID); err != nil {
 		return nil, err
 	} else if !ok {
