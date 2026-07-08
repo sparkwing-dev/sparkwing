@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// planCacheOutcome is the short-circuit state of a plan-level Cache
+// planCacheOutcome is the short-circuit state of a plan-level Concurrency
 // acquire. Non-zero means dispatch returns without scheduling.
 type planCacheOutcome string
 

@@ -299,11 +299,11 @@ func TestTrigger_PlanAdmissionAcceptsAncestorHolder(t *testing.T) {
 	capture.mu.Lock()
 	got := capture.last
 	capture.mu.Unlock()
-	if got.InheritedPlanCacheKey != "cache-key" {
-		t.Fatalf("dispatcher admission key = %q, want cache-key", got.InheritedPlanCacheKey)
+	if got.InheritedPlanConcurrencyKey != "cache-key" {
+		t.Fatalf("dispatcher admission key = %q, want cache-key", got.InheritedPlanConcurrencyKey)
 	}
-	if got.InheritedPlanCacheHolderID != "grandparent-run/-" {
-		t.Fatalf("dispatcher admission holder = %q, want grandparent-run/-", got.InheritedPlanCacheHolderID)
+	if got.InheritedPlanConcurrencyHolderID != "grandparent-run/-" {
+		t.Fatalf("dispatcher admission holder = %q, want grandparent-run/-", got.InheritedPlanConcurrencyHolderID)
 	}
 }
 

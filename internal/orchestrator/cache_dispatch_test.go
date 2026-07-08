@@ -483,9 +483,9 @@ func TestConcurrency_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *test
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	res, err := orchestrator.RunLocal(runCtx, p, orchestrator.Options{
-		Pipeline:                   "plan-level-inherited-child",
-		InheritedPlanCacheKey:      "g:plan-level-inherited-key",
-		InheritedPlanCacheHolderID: parentHolderID,
+		Pipeline:                         "plan-level-inherited-child",
+		InheritedPlanConcurrencyKey:      "g:plan-level-inherited-key",
+		InheritedPlanConcurrencyHolderID: parentHolderID,
 	})
 	if err != nil {
 		t.Fatalf("child run with inherited admission: %v", err)

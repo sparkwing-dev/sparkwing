@@ -68,15 +68,15 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
 	inheritedAdmission := planAdmissionFromTriggerEnv(trigger.TriggerEnv)
 	res, err := Run(ctx, backends, Options{
-		Pipeline:                   trigger.Pipeline,
-		RunID:                      trigger.ID,
-		Args:                       args,
-		ParentRunID:                trigger.ParentRunID,
-		InheritedPlanCacheKey:      inheritedAdmission.Key,
-		InheritedPlanCacheHolderID: inheritedAdmission.HolderID,
-		RetryOf:                    trigger.RetryOf,
-		RetrySource:                trigger.RetrySource,
-		Full:                       trigger.Full,
+		Pipeline:                         trigger.Pipeline,
+		RunID:                            trigger.ID,
+		Args:                             args,
+		ParentRunID:                      trigger.ParentRunID,
+		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
+		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
+		RetryOf:                          trigger.RetryOf,
+		RetrySource:                      trigger.RetrySource,
+		Full:                             trigger.Full,
 		Trigger: sparkwing.TriggerInfo{
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,

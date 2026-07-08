@@ -11,15 +11,15 @@ import (
 // arrives. The controller pre-assigns RunID so the HTTP caller can
 // learn it immediately, even when Dispatch runs async.
 type RunRequest struct {
-	RunID                      string
-	Pipeline                   string
-	Args                       map[string]string
-	Trigger                    sparkwing.TriggerInfo
-	Git                        *sparkwing.Git
-	ParentRunID                string
-	RetryOf                    string
-	InheritedPlanCacheKey      string
-	InheritedPlanCacheHolderID string
+	RunID                            string
+	Pipeline                         string
+	Args                             map[string]string
+	Trigger                          sparkwing.TriggerInfo
+	Git                              *sparkwing.Git
+	ParentRunID                      string
+	RetryOf                          string
+	InheritedPlanConcurrencyKey      string
+	InheritedPlanConcurrencyHolderID string
 }
 
 // Dispatcher decides what happens to a triggered run. Implementations

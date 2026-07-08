@@ -584,7 +584,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
-	var inheritedPlanCacheKey, inheritedPlanCacheHolderID string
+	var inheritedPlanConcurrencyKey, inheritedPlanConcurrencyHolderID string
 	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" {
 		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
 		if err != nil {
@@ -597,8 +597,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		for key, value := range admissionEnv {
 			triggerEnv[key] = value
 		}
-		inheritedPlanCacheKey = body.PlanAdmission.Key
-		inheritedPlanCacheHolderID = body.PlanAdmission.HolderID
+		inheritedPlanConcurrencyKey = body.PlanAdmission.Key
+		inheritedPlanConcurrencyHolderID = body.PlanAdmission.HolderID
 	}
 
 	// The trigger ID doubles as the eventual run ID.
@@ -660,9 +660,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			Repo:    body.Git.Repo,
 			RepoURL: body.Git.RepoURL,
 		},
-		ParentRunID:                body.ParentRunID,
-		InheritedPlanCacheKey:      inheritedPlanCacheKey,
-		InheritedPlanCacheHolderID: inheritedPlanCacheHolderID,
+		ParentRunID:                      body.ParentRunID,
+		InheritedPlanConcurrencyKey:      inheritedPlanConcurrencyKey,
+		InheritedPlanConcurrencyHolderID: inheritedPlanConcurrencyHolderID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

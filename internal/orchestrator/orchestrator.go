@@ -62,11 +62,11 @@ type Options struct {
 	// cross-pipeline cycle detection.
 	ParentRunID string
 
-	// InheritedPlanCacheKey / HolderID let child runs spawned from a
-	// plan-level Cache holder execute under the parent's admission
+	// InheritedPlanConcurrencyKey / HolderID let child runs spawned from a
+	// plan-level Concurrency holder execute under the parent's admission
 	// instead of queueing behind it.
-	InheritedPlanCacheKey      string
-	InheritedPlanCacheHolderID string
+	InheritedPlanConcurrencyKey      string
+	InheritedPlanConcurrencyHolderID string
 
 	// RetryOf is the run id this execution retries. Drives skip-passed
 	// rehydration unless Full is set.
@@ -477,8 +477,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		dispatchWaitTimeout = DefaultDispatchWaitTimeout
 	}
 	inheritedAdmission := planAdmission{
-		Key:      opts.InheritedPlanCacheKey,
-		HolderID: opts.InheritedPlanCacheHolderID,
+		Key:      opts.InheritedPlanConcurrencyKey,
+		HolderID: opts.InheritedPlanConcurrencyHolderID,
 	}
 	runErr := dispatch(
 		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
