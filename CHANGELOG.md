@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.14.1] - 2026-07-08
 ### Fixed
 
 - **orchestrator:** `RunAndAwait` child runs now inherit active
