@@ -444,10 +444,11 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 
 // TriggerRequest is the body of POST /api/v1/triggers.
 type TriggerRequest struct {
-	Pipeline string            `json:"pipeline"`
-	Args     map[string]string `json:"args,omitempty"`
-	Trigger  TriggerMeta       `json:"trigger"`
-	Git      GitMeta           `json:"git"`
+	Pipeline      string               `json:"pipeline"`
+	Args          map[string]string    `json:"args,omitempty"`
+	Trigger       TriggerMeta          `json:"trigger"`
+	Git           GitMeta              `json:"git"`
+	PlanAdmission TriggerPlanAdmission `json:"plan_admission,omitempty"`
 	// ParentRunID threads cross-pipeline ancestry so the controller
 	// can reject cycles.
 	ParentRunID string `json:"parent_run_id,omitempty"`
@@ -467,6 +468,11 @@ type TriggerMeta struct {
 	Source string            `json:"source,omitempty"`
 	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
+}
+
+type TriggerPlanAdmission struct {
+	Key      string `json:"key,omitempty"`
+	HolderID string `json:"holder_id,omitempty"`
 }
 
 // GitMeta is the optional git state attached to a trigger. Any field
@@ -740,16 +746,51 @@ func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, par
 // EnqueueTrigger matches orchestrator.StateBackend's shape for
 // spawning a new pipeline run from inside another. Cycle errors from
 // the controller pass through verbatim.
-func (c *Client) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
+func (c *Client) EnqueueTrigger(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+) (string, error) {
+	return c.EnqueueTriggerWithEnv(
+		ctx, pipeline, args, parentRunID, parentNodeID,
+		retryOf, source, user, repo, branch, nil,
+	)
+}
+
+func (c *Client) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
 	req := TriggerRequest{
-		Pipeline:     pipeline,
-		Args:         args,
+		Pipeline: pipeline,
+		Args:     args,
+		PlanAdmission: TriggerPlanAdmission{
+			Key:      triggerEnv["SPARKWING_PLAN_ADMISSION_KEY"],
+			HolderID: triggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"],
+		},
 		ParentRunID:  parentRunID,
 		ParentNodeID: parentNodeID,
 		RetryOf:      retryOf,
 		Trigger: TriggerMeta{
 			Source: source,
 			User:   user,
+			Env:    triggerEnv,
 		},
 	}
 	// hack: without explicit repo, the controller inherits the parent's repo+SHA and builds the wrong code for cross-repo awaits.

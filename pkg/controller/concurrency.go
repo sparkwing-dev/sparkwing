@@ -150,6 +150,25 @@ func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleObserveSlot(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	holderID := r.URL.Query().Get("holder_id")
+	if holderID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return
+	}
+	holder, err := s.store.ConcurrencyHolder(r.Context(), key, holderID, time.Now())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, holderResp(*holder))
+}
+
 type releaseSlotReq struct {
 	HolderID     string `json:"holder_id"`
 	Outcome      string `json:"outcome"`

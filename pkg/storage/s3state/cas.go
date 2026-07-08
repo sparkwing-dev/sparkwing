@@ -601,6 +601,27 @@ func (b *Backend) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, pa
 	return idx.TriggerID, nil
 }
 
+func (b *Backend) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error) {
+	if triggerID == "" {
+		return nil, store.ErrNotFound
+	}
+	cw, ok, err := b.cas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, notSupported("pipeline triggers")
+	}
+	var trigger store.Trigger
+	if _, err := getRecord(ctx, cw, triggerKey(triggerID), &trigger); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+	return &trigger, nil
+}
+
 // EnqueueTrigger records a pipeline trigger as a discrete object-store
 // record and returns its run ID. When parentRunID and parentNodeID are
 // set, the child trigger is idempotent on (parentRunID, parentNodeID,
@@ -609,6 +630,22 @@ func (b *Backend) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, pa
 // the SQL unique constraint. Cycles are rejected by walking the parent
 // run chain; the error wraps the word "cycle" for the await path.
 func (b *Backend) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
+	return b.EnqueueTriggerWithEnv(ctx, pipeline, args, parentRunID, parentNodeID, retryOf, source, user, repo, branch, nil)
+}
+
+func (b *Backend) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
 	if pipeline == "" {
 		return "", errors.New("EnqueueTrigger: pipeline required")
 	}
@@ -644,6 +681,7 @@ func (b *Backend) EnqueueTrigger(ctx context.Context, pipeline string, args map[
 		ParentRunID:   parentRunID,
 		ParentNodeID:  parentNodeID,
 		RetryOf:       retryOf,
+		TriggerEnv:    triggerEnv,
 	}
 	if repo != "" {
 		tg.Repo = repo

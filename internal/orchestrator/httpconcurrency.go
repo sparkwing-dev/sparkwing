@@ -91,6 +91,23 @@ func (h *HTTPConcurrency) HeartbeatSlot(ctx context.Context, key, holderID strin
 	return resp.LeaseExpiresAt, resp.CancelledByNewer, nil
 }
 
+func (h *HTTPConcurrency) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
+	resp, err := h.client.ObserveSlot(ctx, key, holderID)
+	if err != nil {
+		return nil, err
+	}
+	return &store.ConcurrencyHolder{
+		Key:            key,
+		HolderID:       resp.HolderID,
+		RunID:          resp.RunID,
+		NodeID:         resp.NodeID,
+		ClaimedAt:      resp.ClaimedAt,
+		LeaseExpiresAt: resp.LeaseExpiresAt,
+		Superseded:     resp.Superseded,
+		Cost:           resp.Cost,
+	}, nil
+}
+
 func (h *HTTPConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
 	return h.client.ReleaseSlot(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 }

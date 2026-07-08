@@ -344,6 +344,14 @@ func (f *fakeConcurrency) HeartbeatSlot(ctx context.Context, key, holderID strin
 	return time.Now().Add(lease), false, nil
 }
 
+func (f *fakeConcurrency) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
+	return &store.ConcurrencyHolder{
+		Key:            key,
+		HolderID:       holderID,
+		LeaseExpiresAt: time.Now().Add(30 * time.Second),
+	}, nil
+}
+
 func (f *fakeConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
 	f.mu.Lock()
 	f.releases++

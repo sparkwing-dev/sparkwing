@@ -321,3 +321,25 @@ func (m *mirrorStateBackend) GetNodeOutput(ctx context.Context, runID, nodeID st
 func (m *mirrorStateBackend) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
 	return m.canonical.EnqueueTrigger(ctx, pipeline, args, parentRunID, parentNodeID, retryOf, source, user, repo, branch)
 }
+
+// EnqueueTriggerWithEnv is NOT teed for the same reason as EnqueueTrigger:
+// the canonical backend owns child-trigger identity and rendezvous. The
+// trigger env is still part of that canonical enqueue contract.
+func (m *mirrorStateBackend) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
+	return enqueueTriggerWithEnv(
+		ctx, m.canonical, pipeline, args, parentRunID, parentNodeID,
+		retryOf, source, user, repo, branch, triggerEnv,
+	)
+}

@@ -68,6 +68,17 @@ func (*noopConcurrency) HeartbeatSlot(_ context.Context, _, _ string, lease time
 	return time.Now().Add(lease), false, nil
 }
 
+func (*noopConcurrency) ObserveSlot(_ context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
+	runID, nodeID := splitHolderID(holderID)
+	return &store.ConcurrencyHolder{
+		Key:            key,
+		HolderID:       holderID,
+		RunID:          runID,
+		NodeID:         nodeID,
+		LeaseExpiresAt: time.Now().Add(store.DefaultConcurrencyLease),
+	}, nil
+}
+
 func (*noopConcurrency) ReleaseSlot(_ context.Context, _, _, _, _, _ string, _ time.Duration) error {
 	return nil
 }
