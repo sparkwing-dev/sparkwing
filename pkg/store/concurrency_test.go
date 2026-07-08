@@ -42,6 +42,33 @@ func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {
 	}
 }
 
+func TestConcurrencyHolderPreservesCost(t *testing.T) {
+	s := newStoreT(t)
+	resp := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "k-cost",
+		HolderID: "r1/n1",
+		RunID:    "r1",
+		NodeID:   "n1",
+		Capacity: 4,
+		Cost:     3,
+		Policy:   store.OnLimitQueue,
+	})
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("expected Granted, got %s", resp.Kind)
+	}
+
+	holder, err := s.ConcurrencyHolder(ctxT(t), "k-cost", "r1/n1", time.Now())
+	if err != nil {
+		t.Fatalf("ConcurrencyHolder: %v", err)
+	}
+	if holder.Cost != 3 {
+		t.Fatalf("holder cost = %d, want 3", holder.Cost)
+	}
+	if holder.DeclaredCapacity != 4 {
+		t.Fatalf("holder declared capacity = %d, want 4", holder.DeclaredCapacity)
+	}
+}
+
 func TestConcurrency_QueueWhenFull(t *testing.T) {
 	s := newStoreT(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{

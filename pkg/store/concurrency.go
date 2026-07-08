@@ -256,24 +256,21 @@ func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now
 }
 
 func (s *Store) concurrencyHolder(ctx context.Context, key, holderID string, now time.Time, livePredicate string) (*ConcurrencyHolder, error) {
-	var holder ConcurrencyHolder
-	var claimedNS, expiresNS int64
-	err := s.db.QueryRowContext(ctx,
-		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+holderColumns+`
 		   FROM concurrency_holders
 		  WHERE key = ?
 		    AND holder_id = ?
 		    AND `+livePredicate,
 		key, holderID, now.UnixNano(),
-	).Scan(&holder.Key, &holder.HolderID, &holder.RunID, &holder.NodeID, &claimedNS, &expiresNS, &holder.Superseded)
+	)
+	holder, err := scanHolder(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	holder.ClaimedAt = time.Unix(0, claimedNS)
-	holder.LeaseExpiresAt = time.Unix(0, expiresNS)
 	return &holder, nil
 }
 
