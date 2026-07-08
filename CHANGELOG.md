@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.0] - 2026-07-08
 ### Fixed
 
 - **orchestrator:** Inherited plan-level `Concurrency` admissions now
