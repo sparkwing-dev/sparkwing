@@ -434,6 +434,22 @@ type triggerReqPlanAdmission struct {
 	Admissions map[string]string `json:"admissions,omitempty"`
 }
 
+func (admission triggerReqPlanAdmission) normalizedAdmissions() map[string]string {
+	admissions := make(map[string]string, len(admission.Admissions)+1)
+	for key, holderID := range admission.Admissions {
+		if key != "" && holderID != "" {
+			admissions[key] = holderID
+		}
+	}
+	if admission.Key != "" && admission.HolderID != "" {
+		admissions[admission.Key] = admission.HolderID
+	}
+	if len(admissions) == 0 {
+		return nil
+	}
+	return admissions
+}
+
 type triggerResp struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
@@ -471,15 +487,11 @@ func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, 
 	if (admission.Key == "") != (admission.HolderID == "") {
 		return nil, errors.New("plan_admission requires key and holder_id")
 	}
-	admissions := make(map[string]string, len(admission.Admissions)+1)
-	for key, holderID := range admission.Admissions {
+	admissions := admission.normalizedAdmissions()
+	for key, holderID := range admissions {
 		if key == "" || holderID == "" {
 			return nil, errors.New("plan_admission admissions require non-empty keys and holder ids")
 		}
-		admissions[key] = holderID
-	}
-	if admission.Key != "" {
-		admissions[admission.Key] = admission.HolderID
 	}
 	if len(admissions) == 0 {
 		return nil, errors.New("plan_admission requires key and holder_id")
@@ -623,6 +635,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
 	var inheritedPlanConcurrencyKey, inheritedPlanConcurrencyHolderID string
+	var inheritedPlanConcurrencyHolders map[string]string
 	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" || len(body.PlanAdmission.Admissions) > 0 {
 		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
 		if err != nil {
@@ -637,6 +650,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 		inheritedPlanConcurrencyKey = admissionEnv[triggerEnvPlanAdmissionKey]
 		inheritedPlanConcurrencyHolderID = admissionEnv[triggerEnvPlanAdmissionHolderID]
+		inheritedPlanConcurrencyHolders = body.PlanAdmission.normalizedAdmissions()
 	}
 
 	// The trigger ID doubles as the eventual run ID.
@@ -701,6 +715,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		ParentRunID:                      body.ParentRunID,
 		InheritedPlanConcurrencyKey:      inheritedPlanConcurrencyKey,
 		InheritedPlanConcurrencyHolderID: inheritedPlanConcurrencyHolderID,
+		InheritedPlanConcurrencyHolders:  inheritedPlanConcurrencyHolders,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

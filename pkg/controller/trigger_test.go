@@ -32,7 +32,10 @@ func TestTrigger_Validation(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]string{})
@@ -61,7 +64,10 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -85,7 +91,10 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -120,7 +129,10 @@ func TestTrigger_StripsClientSuppliedPlanAdmissionEnv(t *testing.T) {
 	}
 	defer st.Close()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -348,7 +360,10 @@ func TestTrigger_PlanAdmissionAcceptsAdmissionSet(t *testing.T) {
 		}
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -387,6 +402,17 @@ func TestTrigger_PlanAdmissionAcceptsAdmissionSet(t *testing.T) {
 	}
 	if admissions["g:middle-key"] != "middle-run/-" {
 		t.Fatalf("middle admission = %q, want middle-run/-", admissions["g:middle-key"])
+	}
+	capture.mu.Lock()
+	got := capture.last
+	capture.mu.Unlock()
+	if got.InheritedPlanConcurrencyHolders["g:ancestor-key"] != "ancestor-run/-" {
+		t.Fatalf("dispatcher ancestor admission = %q, want ancestor-run/-",
+			got.InheritedPlanConcurrencyHolders["g:ancestor-key"])
+	}
+	if got.InheritedPlanConcurrencyHolders["g:middle-key"] != "middle-run/-" {
+		t.Fatalf("dispatcher middle admission = %q, want middle-run/-",
+			got.InheritedPlanConcurrencyHolders["g:middle-key"])
 	}
 }
 

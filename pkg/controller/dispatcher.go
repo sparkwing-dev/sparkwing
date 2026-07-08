@@ -20,6 +20,7 @@ type RunRequest struct {
 	RetryOf                          string
 	InheritedPlanConcurrencyKey      string
 	InheritedPlanConcurrencyHolderID string
+	InheritedPlanConcurrencyHolders  map[string]string
 }
 
 // Dispatcher decides what happens to a triggered run. Implementations
