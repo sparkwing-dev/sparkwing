@@ -323,6 +323,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAcquireSlot)))
 	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeatSlot)))
 	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReleaseSlot)))
+	mux.Handle("GET /api/v1/concurrency/{key}/holder", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObserveSlot)))
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState)))
 	mux.Handle("GET /api/v1/concurrency/{key}/notify", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify)))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResolveWaiter)))

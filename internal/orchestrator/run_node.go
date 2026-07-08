@@ -73,15 +73,16 @@ func RunNodeOnce(
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}
-	if trigger, err := stateClient.GetTrigger(ctx, runID); err == nil && trigger != nil {
+	trigger, err := stateClient.GetTrigger(ctx, runID)
+	if err == nil && trigger != nil {
 		ctx = withPlanAdmission(ctx, planAdmissionFromTriggerEnv(trigger.TriggerEnv))
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
-	if shouldRunRemote(ctx, stateClient, runID) {
-		return runNodeRemote(ctx, stateClient, run, controllerURL, logsURL, runID, nodeID, token, logger)
+	if shouldRunRemote(trigger) {
+		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, runID, nodeID, token, logger)
 	}
 
 	reg, ok := sparkwing.Lookup(run.Pipeline)

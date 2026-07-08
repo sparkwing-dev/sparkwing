@@ -25,7 +25,7 @@ const (
 	planCacheEvicted planCacheOutcome = "evicted" // superseded mid-run
 )
 
-var inheritedPlanHeartbeatInterval = store.DefaultConcurrencyHeartbeatInterval
+var inheritedPlanObserveInterval = store.DefaultConcurrencyHeartbeatInterval
 
 // planConcurrencyName returns the plan's whole-run concurrency group
 // name, or "" when none was declared. Used for operator-facing errors.
@@ -70,11 +70,11 @@ func acquirePlanSlot(
 			return nil, "", planAdmission{}, errors.New("plan Concurrency inherited admission is incomplete")
 		}
 		if inheritedAdmission.Key == key {
-			_, superseded, err := backends.Concurrency.HeartbeatSlot(ctx, key, inheritedAdmission.HolderID, store.DefaultConcurrencyLease)
+			holder, err := backends.Concurrency.ObserveSlot(ctx, key, inheritedAdmission.HolderID)
 			if err != nil {
 				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission: %w", err)
 			}
-			if superseded {
+			if holder.Superseded {
 				return nil, planCacheEvicted, planAdmission{}, nil
 			}
 			return makeInheritedPlanSlotRelease(backends, key, inheritedAdmission.HolderID, cancelRun), planCacheProceed, inheritedAdmission, nil
@@ -159,7 +159,7 @@ func makeInheritedPlanSlotRelease(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		t := time.NewTicker(inheritedPlanHeartbeatInterval)
+		t := time.NewTicker(inheritedPlanObserveInterval)
 		defer t.Stop()
 		for {
 			select {
@@ -167,16 +167,16 @@ func makeInheritedPlanSlotRelease(
 				return
 			case <-t.C:
 				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
-				_, superseded, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, store.DefaultConcurrencyLease)
+				holder, err := backends.Concurrency.ObserveSlot(ctx, key, holderID)
 				cancel()
 				if err != nil {
 					err = fmt.Errorf("plan Concurrency inherited admission lost for key %q: %w", key, err)
-					slog.Warn("inherited plan concurrency heartbeat failed",
+					slog.Warn("inherited plan concurrency observe failed",
 						"key", key, "holder_id", holderID, "err", err)
 					cancelRun(err)
 					return
 				}
-				if superseded {
+				if holder.Superseded {
 					err := fmt.Errorf("plan Concurrency inherited admission superseded for key %q", key)
 					slog.Warn("inherited plan concurrency holder superseded",
 						"key", key, "holder_id", holderID)

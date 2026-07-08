@@ -22,12 +22,14 @@ func TestConcurrencyGuard_CanonicalSQLSitesOnly(t *testing.T) {
 		"INSERT INTO concurrency_cache":   "txReleaseHolder",
 		"DELETE FROM concurrency_waiters": "txDeleteWaiter",
 		"SET superseded = 1":              "txSupersede",
-		"lease_expires_at > ?":            "holderLiveSQL",
 		"superseded = 0 AND ":             "holderLiveSQL",
 	} {
 		if got := strings.Count(src, needle); got != 1 {
 			t.Errorf("%q appears %d times in pkg/store sources, want exactly 1 (inside %s)", needle, got, helper)
 		}
+	}
+	if got := strings.Count(src, "lease_expires_at > ?"); got != 2 {
+		t.Errorf("%q appears %d times in pkg/store sources, want exactly 2 (holderLiveSQL + holderLeaseLiveSQL)", "lease_expires_at > ?", got)
 	}
 	if got := strings.Count(src, "DELETE FROM concurrency_holders"); got != 2 {
 		t.Errorf("%q appears %d times in pkg/store sources, want exactly 2 (txDeleteHolder + CancelWaiter)", "DELETE FROM concurrency_holders", got)

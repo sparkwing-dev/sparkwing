@@ -116,6 +116,28 @@ type HeartbeatSlotResponse struct {
 	CancelledByNewer bool      `json:"cancelled_by_newer"`
 }
 
+func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error) {
+	u := fmt.Sprintf("%s/api/v1/concurrency/%s/holder?holder_id=%s",
+		c.baseURL, url.PathEscape(key), url.QueryEscape(holderID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readHTTPError(resp)
+	}
+	var out WaiterHolder
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // HeartbeatSlot extends the holder's lease. CancelledByNewer=true
 // indicates a CancelOthers arrival has superseded this holder.
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error) {
