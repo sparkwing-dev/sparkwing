@@ -51,6 +51,54 @@ func TestController_Health(t *testing.T) {
 	}
 }
 
+func TestController_WaiterNotifyPromotesOrphanedQueue(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "notify-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); err != nil {
+		t.Fatalf("acquire leader: %v", err)
+	}
+	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "notify-slot", HolderID: "waiter", RunID: "waiter", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); err != nil {
+		t.Fatalf("acquire waiter: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		"notify-slot", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(base + "/api/v1/concurrency/notify-slot/notify?run_id=waiter&node_id=n")
+	if err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("notify status=%d want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read notify: %v", err)
+	}
+	if !bytes.Contains(body, []byte("event: ready")) {
+		t.Fatalf("notify body = %q, want ready event", string(body))
+	}
+	state, err := st.GetConcurrencyState(ctx, "notify-slot")
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if len(state.Holders) != 1 || state.Holders[0].HolderID != "waiter" {
+		t.Fatalf("holders = %+v", state.Holders)
+	}
+}
+
 func TestController_RunLifecycle(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()

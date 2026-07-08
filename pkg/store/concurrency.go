@@ -545,10 +545,14 @@ func txPromoteNextWaiters(ctx context.Context, tx *storeTx, key string, lease ti
 		lease = DefaultConcurrencyLease
 	}
 
+	forUpdate := ""
+	if tx.dialect == DialectPostgres {
+		forUpdate = " FOR UPDATE"
+	}
 	var capacity int
 	err := tx.QueryRowContext(
 		ctx,
-		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
+		`SELECT capacity FROM concurrency_entries WHERE key = ?`+forUpdate, key,
 	).Scan(&capacity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1014,7 +1018,19 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		key, runID, nodeID,
 	).Scan(&waiterArrivedNS, &waiterPolicy)
 	if err == nil {
-		if waiterPolicy == OnLimitQueue {
+		shouldPromote := waiterPolicy == OnLimitQueue
+		if waiterPolicy == OnLimitCancelOthers {
+			var holderCount int
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM concurrency_holders WHERE key = ?`,
+				key,
+			).Scan(&holderCount); err != nil {
+				return WaiterResolution{}, err
+			}
+			shouldPromote = holderCount == 0
+		}
+		if shouldPromote {
 			promoted, err := txPromoteNextWaiters(ctx, tx, key, DefaultConcurrencyLease, now)
 			if err != nil {
 				return WaiterResolution{}, err

@@ -707,8 +707,12 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		writer := http.ResponseWriter(rw)
+		if _, ok := w.(http.Flusher); ok {
+			writer = &flushingStatusRecorder{statusRecorder: rw}
+		}
 		start := time.Now()
-		next.ServeHTTP(rw, r)
+		next.ServeHTTP(writer, r)
 		elapsed := time.Since(start)
 		route := normalizeRoute(r.URL.Path)
 		observeHTTPRequest(route, r.Method, rw.status, elapsed)
@@ -731,4 +735,12 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+type flushingStatusRecorder struct {
+	*statusRecorder
+}
+
+func (r *flushingStatusRecorder) Flush() {
+	r.ResponseWriter.(http.Flusher).Flush()
 }
