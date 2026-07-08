@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** `RunAndAwait` child runs now inherit active
+  plan-level `Concurrency` admissions from parent and ancestor runs, so
+  nested child workflows do not queue behind an ancestor-held plan gate
+  and stall until timeout. Admission sets are preserved across local,
+  controller, mirrored, and S3 trigger enqueue paths, and inherited
+  children observe holder state without extending the owning run's lease.
 
 ## [v0.14.0] - 2026-07-02
 ### Added
