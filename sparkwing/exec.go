@@ -93,6 +93,33 @@ type Cmd struct {
 	env  map[string]string
 }
 
+type commandEnvContextKey struct{}
+
+// WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
+// Explicit Cmd.Env/Cmd.EnvMap values still win for the same key.
+func WithCommandEnv(ctx context.Context, env map[string]string) context.Context {
+	if len(env) == 0 {
+		return ctx
+	}
+	merged := map[string]string{}
+	if existing, ok := ctx.Value(commandEnvContextKey{}).(map[string]string); ok {
+		for key, value := range existing {
+			merged[key] = value
+		}
+	}
+	for key, value := range env {
+		if key != "" {
+			merged[key] = value
+		}
+	}
+	return context.WithValue(ctx, commandEnvContextKey{}, merged)
+}
+
+func commandEnvFromContext(ctx context.Context) map[string]string {
+	env, _ := ctx.Value(commandEnvContextKey{}).(map[string]string)
+	return env
+}
+
 // Bash starts building a shell command (run via "bash -c"). The line
 // is the shell program verbatim -- there is no printf-style formatting,
 // so dynamic values must come through .Env() (the shell expands the
@@ -281,7 +308,21 @@ func (c *Cmd) execute(silent bool) (ExecResult, error) {
 	if silent {
 		ctx = withSilent(ctx)
 	}
-	return execCmd(ctx, name, args, dir, c.env)
+	return execCmd(ctx, name, args, dir, mergeCommandEnv(commandEnvFromContext(ctx), c.env))
+}
+
+func mergeCommandEnv(contextEnv, explicitEnv map[string]string) map[string]string {
+	if len(contextEnv) == 0 && len(explicitEnv) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(contextEnv)+len(explicitEnv))
+	for key, value := range contextEnv {
+		merged[key] = value
+	}
+	for key, value := range explicitEnv {
+		merged[key] = value
+	}
+	return merged
 }
 
 type silentKey struct{}

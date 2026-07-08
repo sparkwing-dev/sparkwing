@@ -90,7 +90,7 @@ func (f *inheritedPlanAcquireFake) CancelWaiter(ctx context.Context, key, runID,
 
 func TestAcquirePlanSlotInheritedAdmissionReturnsChildHolder(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}))
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}), 4)
 	key := scopedGroupKey(plan.ConcurrencyGroupRef(), "child")
 	fake := &inheritedPlanAcquireFake{}
 
@@ -115,8 +115,36 @@ func TestAcquirePlanSlotInheritedAdmissionReturnsChildHolder(t *testing.T) {
 	if fake.request.HolderID != "child/-" {
 		t.Fatalf("child holder request = %q, want child/-", fake.request.HolderID)
 	}
+	if fake.request.Cost != 4 {
+		t.Fatalf("child holder cost = %d, want plan cost 4", fake.request.Cost)
+	}
 	if holderID, ok := active.holderFor(key); !ok || holderID != "child/-" {
 		t.Fatalf("active admission holder = %q, %v; want child/-", holderID, ok)
+	}
+}
+
+func TestAcquirePlanSlotSendsPlanCost(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}), 6)
+	fake := &inheritedPlanAcquireFake{}
+
+	release, outcome, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"run-costed",
+		plan,
+		planAdmission{},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	defer release("success")
+	if outcome != planCacheProceed {
+		t.Fatalf("outcome = %q, want proceed", outcome)
+	}
+	if fake.request.Cost != 6 {
+		t.Fatalf("fresh holder cost = %d, want plan cost 6", fake.request.Cost)
 	}
 }
 

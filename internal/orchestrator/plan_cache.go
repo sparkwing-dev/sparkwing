@@ -57,6 +57,7 @@ func acquirePlanSlot(
 	}
 	key := scopedGroupKey(group, runID)
 	limit := group.Limit()
+	cost := plan.ConcurrencyCost()
 	if backends.Concurrency == nil {
 		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", group.Name())
 	}
@@ -78,6 +79,7 @@ func acquirePlanSlot(
 				RunID:             runID,
 				NodeID:            "",
 				Capacity:          limit.Capacity,
+				Cost:              cost,
 				Policy:            string(limit.OnLimit),
 			})
 			if err != nil {
@@ -102,6 +104,7 @@ func acquirePlanSlot(
 		RunID:    runID,
 		NodeID:   "",
 		Capacity: limit.Capacity,
+		Cost:     cost,
 		Policy:   string(limit.OnLimit),
 	}
 

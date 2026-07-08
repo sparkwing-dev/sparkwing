@@ -69,6 +69,24 @@ func TestCmd_EnvMapInjectsEnv(t *testing.T) {
 	}
 }
 
+func TestCmd_ContextEnvInheritedByExecAndOverriddenByExplicitEnv(t *testing.T) {
+	ctx := sparkwing.WithCommandEnv(context.Background(), map[string]string{
+		"SPARKWING_TEST_VAR":  "context-value",
+		"SPARKWING_OTHER_VAR": "other-value",
+		"SPARKWING_EMPTY_KEY": "kept",
+		"":                    "dropped",
+	})
+	res, err := sparkwing.Exec(ctx, "sh", "-c", "printf '%s/%s' \"$SPARKWING_TEST_VAR\" \"$SPARKWING_OTHER_VAR\"").
+		Env("SPARKWING_TEST_VAR", "explicit-value").
+		Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.TrimSpace(res.Stdout); got != "explicit-value/other-value" {
+		t.Fatalf("stdout = %q, want explicit override plus inherited context env", got)
+	}
+}
+
 func TestCmd_EnvSingle(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 	res, err := sparkwing.Bash(ctx, "echo $SPARKWING_TEST_VAR").

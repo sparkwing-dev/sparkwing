@@ -148,6 +148,11 @@ func Main() {
 		PipelineYAML:        pipelineYAML,
 		SparkwingDir:        sparkwingDir,
 	}
+	if inheritedAdmission := planAdmissionFromEnv(); len(inheritedAdmission.HolderIDs) > 0 {
+		opts.InheritedPlanConcurrencyKey = inheritedAdmission.Key
+		opts.InheritedPlanConcurrencyHolderID = inheritedAdmission.HolderID
+		opts.InheritedPlanConcurrencyHolders = inheritedAdmission.HolderIDs
+	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
 		if pipelineYAML != nil {
