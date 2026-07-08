@@ -53,7 +53,7 @@ func acquirePlanSlot(
 ) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
 	group := plan.ConcurrencyGroupRef()
 	if group == nil {
-		return func(string) {}, planCacheProceed, planAdmission{}, nil
+		return func(string) {}, planCacheProceed, inheritedAdmission, nil
 	}
 	key := scopedGroupKey(group, runID)
 	limit := group.Limit()
