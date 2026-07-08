@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -33,19 +34,23 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		req.Lease = h.lease
 	}
 	resp, err := h.client.AcquireSlot(ctx, req.Key, client.AcquireSlotRequest{
-		HolderID:      req.HolderID,
-		RunID:         req.RunID,
-		NodeID:        req.NodeID,
-		Max:           req.Capacity,
-		Cost:          req.Cost,
-		Policy:        req.Policy,
-		CacheKeyHash:  req.CacheKeyHash,
-		CacheTTL:      req.CacheTTL,
-		CancelTimeout: req.CancelTimeout,
-		Lease:         req.Lease,
-		BypassRead:    req.BypassRead,
+		HolderID:          req.HolderID,
+		InheritedHolderID: req.InheritedHolderID,
+		RunID:             req.RunID,
+		NodeID:            req.NodeID,
+		Max:               req.Capacity,
+		Cost:              req.Cost,
+		Policy:            req.Policy,
+		CacheKeyHash:      req.CacheKeyHash,
+		CacheTTL:          req.CacheTTL,
+		CancelTimeout:     req.CancelTimeout,
+		Lease:             req.Lease,
+		BypassRead:        req.BypassRead,
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), store.ErrConcurrencySuperseded.Error()) {
+			return store.AcquireSlotResponse{}, store.ErrConcurrencySuperseded
+		}
 		return store.AcquireSlotResponse{}, err
 	}
 	out := store.AcquireSlotResponse{

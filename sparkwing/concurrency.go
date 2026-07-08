@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -146,28 +147,7 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 		n.concurrency = nil
 		return n
 	}
-	c := 1
-	switch len(cost) {
-	case 0:
-	case 1:
-		c = cost[0]
-	default:
-		panic("sparkwing: Concurrency: at most one cost may be given")
-	}
-	if c < 1 {
-		c = 1
-	}
-	if eff := g.limit.Capacity; eff > 0 && c > eff {
-		panic(fmt.Sprintf(
-			"sparkwing: Concurrency: node %q cost %d exceeds group %q capacity %d -- it could never be admitted",
-			n.id, c, g.name, eff,
-		))
-	} else if eff <= 0 && c > 1 {
-		panic(fmt.Sprintf(
-			"sparkwing: Concurrency: node %q cost %d exceeds group %q capacity 1 (capacity unset defaults to 1) -- it could never be admitted",
-			n.id, c, g.name,
-		))
-	}
+	c := concurrencyCost(g, "node "+strconv.Quote(n.id), cost...)
 	n.concurrency = &concurrencyMembership{group: g, cost: c}
 	return n
 }
@@ -209,12 +189,21 @@ func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup {
 }
 
 // Concurrency gates the whole run on concurrency group g: the run
-// acquires one unit of g's budget before any node dispatches and
-// releases it when the run reaches a terminal status. A plan never
-// memoizes (it has side effects not captured in one output), so a plan
-// participates in concurrency only -- there is no plan-level Cache.
-func (p *Plan) Concurrency(g *ConcurrencyGroup) *Plan {
+// acquires g's budget before any node dispatches and releases it when
+// the run reaches a terminal status. Cost defaults to one. A plan
+// never memoizes (it has side effects not captured in one output), so
+// a plan participates in concurrency only -- there is no plan-level
+// Cache.
+func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if g == nil {
+		p.concurrency = nil
+		p.concurrencyCost = 0
+		return p
+	}
 	p.concurrency = g
+	p.concurrencyCost = concurrencyCost(g, "plan", cost...)
 	return p
 }
 
@@ -224,4 +213,39 @@ func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.concurrency
+}
+
+// ConcurrencyCost returns the plan-level admission cost declared via
+// [Plan.Concurrency], or 0 when the plan declared no whole-run
+// coordination.
+func (p *Plan) ConcurrencyCost() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.concurrencyCost
+}
+
+func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) int {
+	c := 1
+	switch len(cost) {
+	case 0:
+	case 1:
+		c = cost[0]
+	default:
+		panic("sparkwing: Concurrency: at most one cost may be given")
+	}
+	if c < 1 {
+		c = 1
+	}
+	if eff := g.limit.Capacity; eff > 0 && c > eff {
+		panic(fmt.Sprintf(
+			"sparkwing: Concurrency: %s cost %d exceeds group %q capacity %d -- it could never be admitted",
+			subject, c, g.name, eff,
+		))
+	} else if eff <= 0 && c > 1 {
+		panic(fmt.Sprintf(
+			"sparkwing: Concurrency: %s cost %d exceeds group %q capacity 1 (capacity unset defaults to 1) -- it could never be admitted",
+			subject, c, g.name,
+		))
+	}
+	return c
 }

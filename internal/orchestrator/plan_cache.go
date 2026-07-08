@@ -57,6 +57,7 @@ func acquirePlanSlot(
 	}
 	key := scopedGroupKey(group, runID)
 	limit := group.Limit()
+	cost := plan.ConcurrencyCost()
 	if backends.Concurrency == nil {
 		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", group.Name())
 	}
@@ -71,15 +72,27 @@ func acquirePlanSlot(
 			return nil, "", planAdmission{}, errors.New("plan Concurrency inherited admission is incomplete")
 		}
 		if inheritedHolderID, ok := inheritedAdmission.holderFor(key); ok {
-			holder, err := backends.Concurrency.ObserveSlot(ctx, key, inheritedHolderID)
+			resp, err := backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
+				Key:               key,
+				HolderID:          fmt.Sprintf("%s/-", runID),
+				InheritedHolderID: inheritedHolderID,
+				RunID:             runID,
+				NodeID:            "",
+				Capacity:          limit.Capacity,
+				Cost:              cost,
+				Policy:            string(limit.OnLimit),
+			})
 			if err != nil {
+				if errors.Is(err, store.ErrConcurrencySuperseded) {
+					return nil, planCacheEvicted, planAdmission{}, nil
+				}
 				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission: %w", err)
 			}
-			if holder.Superseded {
-				return nil, planCacheEvicted, planAdmission{}, nil
+			if resp.Kind != store.AcquireGranted {
+				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission got %q from acquire", resp.Kind)
 			}
-			return makeInheritedPlanSlotRelease(backends, key, inheritedHolderID, cancelRun),
-				planCacheProceed, inheritedAdmission.with(key, inheritedHolderID), nil
+			return makeInheritedPlanSlotRelease(backends, key, resp.HolderID, cancelRun),
+				planCacheProceed, inheritedAdmission.with(key, resp.HolderID), nil
 		}
 	}
 
@@ -91,6 +104,7 @@ func acquirePlanSlot(
 		RunID:    runID,
 		NodeID:   "",
 		Capacity: limit.Capacity,
+		Cost:     cost,
 		Policy:   string(limit.OnLimit),
 	}
 
@@ -169,16 +183,16 @@ func makeInheritedPlanSlotRelease(
 				return
 			case <-t.C:
 				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
-				holder, err := backends.Concurrency.ObserveSlot(ctx, key, holderID)
+				_, superseded, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, 0)
 				cancel()
 				if err != nil {
 					err = fmt.Errorf("plan Concurrency inherited admission lost for key %q: %w", key, err)
-					slog.Warn("inherited plan concurrency observe failed",
+					slog.Warn("inherited plan concurrency heartbeat failed",
 						"key", key, "holder_id", holderID, "err", err)
 					cancelRun(err)
 					return
 				}
-				if holder.Superseded {
+				if superseded {
 					err := fmt.Errorf("plan Concurrency inherited admission superseded for key %q", key)
 					slog.Warn("inherited plan concurrency holder superseded",
 						"key", key, "holder_id", holderID)

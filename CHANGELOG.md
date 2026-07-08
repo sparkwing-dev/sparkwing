@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** Inherited plan-level `Concurrency` admissions now
+  refresh the inherited holder lease while the child run is active, so a
+  child that outlives its parent keeps the shared budget reservation
+  visible instead of letting overlapping work enter the same gate.
 
 ## [v0.14.1] - 2026-07-08
 ### Fixed

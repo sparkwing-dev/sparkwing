@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type inheritedPlanObserveFake struct {
@@ -20,20 +21,14 @@ func (f *inheritedPlanObserveFake) AcquireSlot(ctx context.Context, req store.Ac
 }
 
 func (f *inheritedPlanObserveFake) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return &store.ConcurrencyHolder{
-		Key:            key,
-		HolderID:       holderID,
-		RunID:          "parent",
-		LeaseExpiresAt: time.Now().Add(store.DefaultConcurrencyLease),
-		Superseded:     f.supersede,
-	}, nil
+	return nil, errors.New("unexpected observe")
 }
 
 func (f *inheritedPlanObserveFake) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
-	return time.Time{}, false, errors.New("unexpected heartbeat")
+	if f.err != nil {
+		return time.Time{}, false, f.err
+	}
+	return time.Now().Add(store.DefaultConcurrencyLease), f.supersede, nil
 }
 
 func (f *inheritedPlanObserveFake) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
@@ -50,6 +45,135 @@ func (f *inheritedPlanObserveFake) ForceReleaseSuperseded(ctx context.Context, k
 
 func (f *inheritedPlanObserveFake) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
 	return false, errors.New("unexpected cancel waiter")
+}
+
+type inheritedPlanAcquireFake struct {
+	request store.AcquireSlotRequest
+	err     error
+}
+
+func (f *inheritedPlanAcquireFake) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	f.request = req
+	if f.err != nil {
+		return store.AcquireSlotResponse{}, f.err
+	}
+	return store.AcquireSlotResponse{
+		Kind:           store.AcquireGranted,
+		HolderID:       req.HolderID,
+		LeaseExpiresAt: time.Now().Add(store.DefaultConcurrencyLease),
+	}, nil
+}
+
+func (f *inheritedPlanAcquireFake) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
+	return nil, errors.New("unexpected observe")
+}
+
+func (f *inheritedPlanAcquireFake) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
+	return time.Now().Add(store.DefaultConcurrencyLease), false, nil
+}
+
+func (f *inheritedPlanAcquireFake) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
+	return nil
+}
+
+func (f *inheritedPlanAcquireFake) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
+	return store.WaiterResolution{}, errors.New("unexpected resolve waiter")
+}
+
+func (f *inheritedPlanAcquireFake) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
+	return nil, errors.New("unexpected force release")
+}
+
+func (f *inheritedPlanAcquireFake) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	return false, errors.New("unexpected cancel waiter")
+}
+
+func TestAcquirePlanSlotInheritedAdmissionReturnsChildHolder(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}), 4)
+	key := scopedGroupKey(plan.ConcurrencyGroupRef(), "child")
+	fake := &inheritedPlanAcquireFake{}
+
+	release, outcome, active, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"child",
+		plan,
+		planAdmission{Key: key, HolderID: "parent/-"},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	defer release("success")
+	if outcome != planCacheProceed {
+		t.Fatalf("outcome = %q, want proceed", outcome)
+	}
+	if fake.request.InheritedHolderID != "parent/-" {
+		t.Fatalf("inherited holder = %q, want parent/-", fake.request.InheritedHolderID)
+	}
+	if fake.request.HolderID != "child/-" {
+		t.Fatalf("child holder request = %q, want child/-", fake.request.HolderID)
+	}
+	if fake.request.Cost != 4 {
+		t.Fatalf("child holder cost = %d, want plan cost 4", fake.request.Cost)
+	}
+	if holderID, ok := active.holderFor(key); !ok || holderID != "child/-" {
+		t.Fatalf("active admission holder = %q, %v; want child/-", holderID, ok)
+	}
+}
+
+func TestAcquirePlanSlotSendsPlanCost(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}), 6)
+	fake := &inheritedPlanAcquireFake{}
+
+	release, outcome, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"run-costed",
+		plan,
+		planAdmission{},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	defer release("success")
+	if outcome != planCacheProceed {
+		t.Fatalf("outcome = %q, want proceed", outcome)
+	}
+	if fake.request.Cost != 6 {
+		t.Fatalf("fresh holder cost = %d, want plan cost 6", fake.request.Cost)
+	}
+}
+
+func TestAcquirePlanSlotInheritedSupersededReturnsEvicted(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}))
+	key := scopedGroupKey(plan.ConcurrencyGroupRef(), "child")
+	fake := &inheritedPlanAcquireFake{err: store.ErrConcurrencySuperseded}
+
+	release, outcome, active, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"child",
+		plan,
+		planAdmission{Key: key, HolderID: "parent/-"},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	if release != nil {
+		t.Fatal("release is non-nil on eviction")
+	}
+	if outcome != planCacheEvicted {
+		t.Fatalf("outcome = %q, want evicted", outcome)
+	}
+	if len(active.HolderIDs) != 0 {
+		t.Fatalf("active admission = %+v, want empty", active)
+	}
 }
 
 func TestInheritedPlanSlotReleaseCancelsOnAdmissionLoss(t *testing.T) {

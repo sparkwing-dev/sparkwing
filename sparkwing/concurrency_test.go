@@ -122,4 +122,52 @@ func TestPlanConcurrency_RecordsGroup(t *testing.T) {
 	if plan.ConcurrencyGroupRef() != g {
 		t.Fatalf("plan group not recorded")
 	}
+	if plan.ConcurrencyCost() != 1 {
+		t.Fatalf("plan cost = %d, want default 1", plan.ConcurrencyCost())
+	}
+}
+
+func TestPlanConcurrency_ExplicitCost(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("box-budget", sparkwing.ConcurrencyLimit{Capacity: 8})
+	plan.Concurrency(g, 4)
+	if plan.ConcurrencyGroupRef() != g {
+		t.Fatalf("plan group not recorded")
+	}
+	if plan.ConcurrencyCost() != 4 {
+		t.Fatalf("plan cost = %d, want 4", plan.ConcurrencyCost())
+	}
+}
+
+func TestPlanConcurrency_NonPositiveCostClampsToOne(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("box-budget", sparkwing.ConcurrencyLimit{Capacity: 2})
+	plan.Concurrency(g, 0)
+	if plan.ConcurrencyCost() != 1 {
+		t.Fatalf("plan cost = %d, want clamped 1", plan.ConcurrencyCost())
+	}
+}
+
+func TestPlanConcurrency_NilGroupClears(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("box-budget", sparkwing.ConcurrencyLimit{Capacity: 2})
+	plan.Concurrency(g)
+	plan.Concurrency(nil)
+	if plan.ConcurrencyGroupRef() != nil {
+		t.Fatalf("Concurrency(nil) should clear plan membership")
+	}
+	if plan.ConcurrencyCost() != 0 {
+		t.Fatalf("plan cost = %d, want 0 after clear", plan.ConcurrencyCost())
+	}
+}
+
+func TestPlanConcurrency_PanicsWhenCostExceedsCapacity(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("box-budget", sparkwing.ConcurrencyLimit{Capacity: 4})
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic on plan cost > capacity")
+		}
+	}()
+	plan.Concurrency(g, 5)
 }

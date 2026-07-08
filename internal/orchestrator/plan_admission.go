@@ -3,6 +3,9 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"os"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -24,7 +27,8 @@ func withPlanAdmission(ctx context.Context, admission planAdmission) context.Con
 	if len(admission.HolderIDs) == 0 {
 		return ctx
 	}
-	return context.WithValue(ctx, planAdmissionContextKey{}, admission)
+	ctx = context.WithValue(ctx, planAdmissionContextKey{}, admission)
+	return sparkwing.WithCommandEnv(ctx, admission.triggerEnv())
 }
 
 func planAdmissionFromContext(ctx context.Context) (planAdmission, bool) {
@@ -49,6 +53,14 @@ func planAdmissionFromTriggerEnv(env map[string]string) planAdmission {
 		env[triggerEnvPlanAdmissionHolderID],
 	)
 	return admission.normalized()
+}
+
+func planAdmissionFromEnv() planAdmission {
+	return planAdmissionFromTriggerEnv(map[string]string{
+		triggerEnvPlanAdmissionKey:      os.Getenv(triggerEnvPlanAdmissionKey),
+		triggerEnvPlanAdmissionHolderID: os.Getenv(triggerEnvPlanAdmissionHolderID),
+		triggerEnvPlanAdmissions:        os.Getenv(triggerEnvPlanAdmissions),
+	})
 }
 
 func (admission planAdmission) normalized() planAdmission {
@@ -103,6 +115,14 @@ func (admission planAdmission) with(key, holderID string) planAdmission {
 func planAdmissionTriggerEnv(ctx context.Context) map[string]string {
 	admission, ok := planAdmissionFromContext(ctx)
 	if !ok {
+		return nil
+	}
+	return admission.triggerEnv()
+}
+
+func (admission planAdmission) triggerEnv() map[string]string {
+	admission = admission.normalized()
+	if len(admission.HolderIDs) == 0 {
 		return nil
 	}
 	env := map[string]string{

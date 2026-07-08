@@ -13,17 +13,18 @@ import (
 // AcquireSlotRequest mirrors the controller's acquireSlotReq JSON
 // shape.
 type AcquireSlotRequest struct {
-	HolderID      string
-	RunID         string
-	NodeID        string
-	Max           int
-	Cost          int
-	Policy        string
-	CacheKeyHash  string
-	CacheTTL      time.Duration
-	CancelTimeout time.Duration
-	Lease         time.Duration
-	BypassRead    bool
+	HolderID          string
+	InheritedHolderID string
+	RunID             string
+	NodeID            string
+	Max               int
+	Cost              int
+	Policy            string
+	CacheKeyHash      string
+	CacheTTL          time.Duration
+	CancelTimeout     time.Duration
+	Lease             time.Duration
+	BypassRead        bool
 }
 
 // AcquireSlotResponse surfaces the controller response so the caller
@@ -55,6 +56,9 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 	body := map[string]any{
 		"holder_id": req.HolderID,
 		"run_id":    req.RunID,
+	}
+	if req.InheritedHolderID != "" {
+		body["inherited_holder_id"] = req.InheritedHolderID
 	}
 	if req.NodeID != "" {
 		body["node_id"] = req.NodeID
