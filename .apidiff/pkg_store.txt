@@ -9,17 +9,19 @@ type AcquireKind string
 const AcquireQueued AcquireKind = "queued"
 const AcquireSkipped AcquireKind = "skipped"
 type AcquireSlotRequest struct {
-	Key           string
-	HolderID      string
-	RunID         string
-	NodeID        string
-	Capacity      int
-	Policy        string
-	CacheKeyHash  string
-	CacheTTL      time.Duration
-	CancelTimeout time.Duration
-	Lease         time.Duration
-	BypassRead    bool
+	Key      string
+	HolderID string
+
+	InheritedHolderID string
+	RunID             string
+	NodeID            string
+	Capacity          int
+	Policy            string
+	CacheKeyHash      string
+	CacheTTL          time.Duration
+	CancelTimeout     time.Duration
+	Lease             time.Duration
+	BypassRead        bool
 
 	Cost int
 }
@@ -136,6 +138,7 @@ func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
+var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrLockHeld = errors.New("held by another holder")
 var ErrNotFound = errors.New("not found")
 type Event struct {

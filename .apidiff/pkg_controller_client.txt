@@ -1,17 +1,18 @@
 # pkg/controller/client
 
 type AcquireSlotRequest struct {
-	HolderID      string
-	RunID         string
-	NodeID        string
-	Max           int
-	Cost          int
-	Policy        string
-	CacheKeyHash  string
-	CacheTTL      time.Duration
-	CancelTimeout time.Duration
-	Lease         time.Duration
-	BypassRead    bool
+	HolderID          string
+	InheritedHolderID string
+	RunID             string
+	NodeID            string
+	Max               int
+	Cost              int
+	Policy            string
+	CacheKeyHash      string
+	CacheTTL          time.Duration
+	CancelTimeout     time.Duration
+	Lease             time.Duration
+	BypassRead        bool
 }
 type AcquireSlotResponse struct {
 	Granted          bool

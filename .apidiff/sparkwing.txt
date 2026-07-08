@@ -418,7 +418,8 @@ type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, max
 func PipelineSecrets[T any](ctx context.Context) *T
 type Plan struct {
 }
-func (p *Plan) Concurrency(g *ConcurrencyGroup) *Plan
+func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan
+func (p *Plan) ConcurrencyCost() int
 func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup
 func (p *Plan) Expansions() []Expansion
 func (p *Plan) GroupSourceIDs(id string) []string
@@ -714,6 +715,7 @@ type WithArgs[T any] struct {
 func (w *WithArgs[T]) Args(ctx context.Context) T
 func (w *WithArgs[T]) ArgsType() reflect.Type
 func (w *WithArgs[T]) BindFromAny(val any) error
+func WithCommandEnv(ctx context.Context, env map[string]string) context.Context
 func WithFailure(ctx context.Context, f Failure) context.Context
 func WithFreshArgs(args map[string]string) AwaitOption
 func WithFreshBranch(branch string) AwaitOption
