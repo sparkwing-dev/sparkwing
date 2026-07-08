@@ -694,7 +694,7 @@ func dispatch(
 	state.onlySkip = onlySkip
 
 	if retryOf != "" && !full {
-		state.rehydrateFromRetry(ctx, retryOf)
+		state.rehydrateFromRetry(dispatchCtx, retryOf)
 	}
 
 	seen := make(map[string]bool, len(plan.Nodes()))
