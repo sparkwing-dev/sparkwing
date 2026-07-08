@@ -66,14 +66,14 @@ func runTokensCreate(args []string) error {
 	}
 
 	body := map[string]any{
-		"kind":      *kind, // wire shape unchanged -- controller still reads `kind`
+		"kind":      *kind,
 		"principal": *principal,
 		"scopes":    splitCSV(*scopes),
 	}
 	if *ttl > 0 {
 		body["ttl_secs"] = int64((*ttl).Seconds())
 	}
-	resp, err := tokensPost(prof.Controller, prof.Token, "/api/v1/tokens", body)
+	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens", body)
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,6 @@ func runTokensList(args []string) error {
 	on := addProfileFlag(fs)
 	kind := fs.String("type", "", "filter by type (user|runner|service)")
 	includeRevoked := fs.Bool("include-revoked", false, "include revoked tokens")
-	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdTokensList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -131,7 +130,7 @@ func runTokensList(args []string) error {
 	if *includeRevoked {
 		q = q.with("include_revoked", "1")
 	}
-	resp, err := tokensGet(prof.Controller, prof.Token, "/api/v1/tokens"+q.encode())
+	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens"+q.encode())
 	if err != nil {
 		return err
 	}
@@ -142,7 +141,7 @@ func runTokensList(args []string) error {
 		return fmt.Errorf("decode: %w", err)
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		return renderTokensJSON(os.Stdout, out.Tokens)
 	}
 	return renderTokensTable(os.Stdout, out.Tokens)
@@ -213,7 +212,7 @@ func runTokensRevoke(args []string) error {
 	if err := requireController(prof, "tokens revoke"); err != nil {
 		return err
 	}
-	if _, err := tokensDelete(prof.Controller, prof.Token, "/api/v1/tokens/"+*prefix); err != nil {
+	if _, err := tokensDelete(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix); err != nil {
 		return err
 	}
 	fmt.Printf("revoked %s\n", *prefix)
@@ -237,7 +236,7 @@ func runTokensLookup(args []string) error {
 	if err := requireController(prof, "tokens lookup"); err != nil {
 		return err
 	}
-	resp, err := tokensGet(prof.Controller, prof.Token, "/api/v1/tokens/"+*prefix)
+	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix)
 	if err != nil {
 		return err
 	}
@@ -275,7 +274,7 @@ func runTokensRotate(args []string) error {
 	if *ttl > 0 {
 		body["ttl_secs"] = int64((*ttl).Seconds())
 	}
-	resp, err := tokensPost(prof.Controller, prof.Token, "/api/v1/tokens/"+*prefix+"/rotate", body)
+	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens/"+*prefix+"/rotate", body)
 	if err != nil {
 		return err
 	}
@@ -294,8 +293,6 @@ func runTokensRotate(args []string) error {
 		*prefix, out.OldRevoked, string(out.New))
 	return nil
 }
-
-// --- HTTP helpers ---
 
 func tokensPost(controller, token, path string, body any) ([]byte, error) {
 	buf, err := json.Marshal(body)
@@ -348,8 +345,6 @@ func doTokenReq(req *http.Request) ([]byte, error) {
 	}
 	return body, nil
 }
-
-// --- misc helpers ---
 
 type urlQuery struct {
 	parts []string

@@ -179,7 +179,6 @@ func buildCost(nodes []*store.Node, rate float64, rateSource string) Cost {
 		if n.StartedAt == nil || n.FinishedAt == nil {
 			continue
 		}
-		// Skip step outcomes that didn't consume runner time.
 		switch n.Outcome {
 		case "skipped", "cancelled":
 			continue

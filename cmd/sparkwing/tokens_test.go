@@ -7,12 +7,6 @@ import (
 	"testing"
 )
 
-// `cluster tokens list` surfaces token scopes (canonical diagnostic
-// for warm-runner-style failures where a mounted token is missing a
-// scope like `logs.write`). These tests pin the formatter +
-// table/JSON renderers so a future refactor can't silently drop the
-// SCOPES column or the admin "*" collapse.
-
 func TestFormatScopes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -39,7 +33,7 @@ func TestFormatScopes(t *testing.T) {
 // fixedTokens is the canonical fixture used across the renderer tests
 // so the table + JSON expectations stay aligned.
 func fixedTokens() []tokenListItem {
-	last := int64(1714867200) // 2024-05-05 00:00:00 UTC, stable across machines
+	last := int64(1714867200)
 	revoked := int64(1714953600)
 	return []tokenListItem{
 		{
@@ -80,7 +74,6 @@ func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 	}
 	out := buf.String()
 
-	// Header has the SCOPES column.
 	header := strings.SplitN(out, "\n", 2)[0]
 	for _, want := range []string{"PREFIX", "TYPE", "PRINCIPAL", "SCOPES", "LAST_USED"} {
 		if !strings.Contains(header, want) {
@@ -88,13 +81,9 @@ func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 		}
 	}
 
-	// Warm-runner row enumerates the diagnostic-relevant scopes
-	// in the order they came back from the controller.
 	if !strings.Contains(out, "nodes.claim,triggers.claim,logs.write") {
 		t.Errorf("table missing warm-runner scopes:\n%s", out)
 	}
-	// Admin token collapses to "*" rather than echoing the literal
-	// scope name.
 	if !strings.Contains(out, "user:admin") {
 		t.Errorf("table missing user:admin row:\n%s", out)
 	}
@@ -108,7 +97,6 @@ func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 			}
 		}
 	}
-	// Empty scope set renders as "-" not blank.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "scopeless-bot") {
 			if !strings.Contains(line, " - ") && !strings.Contains(line, "\t-\t") {
@@ -116,7 +104,6 @@ func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 			}
 		}
 	}
-	// Revoked tokens annotate LAST_USED so operators can spot them.
 	if !strings.Contains(out, "(revoked)") {
 		t.Errorf("revoked row missing (revoked) marker:\n%s", out)
 	}
@@ -163,8 +150,6 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 		}
 	}
 
-	// JSON keeps the literal "admin" scope so callers can do their
-	// own policy logic; only the table view collapses it to "*".
 	admin := got[1]
 	adminScopes, _ := admin["scopes"].([]any)
 	if len(adminScopes) != 1 || adminScopes[0] != "admin" {

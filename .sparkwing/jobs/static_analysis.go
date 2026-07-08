@@ -14,18 +14,19 @@ import (
 // signal.
 //
 // staticcheck is invoked via `go run honnef.co/go/tools/cmd/staticcheck`
-// so dev machines without a global install still pass; failure is
-// reported as a soft skip with a clear message, since pinning a
-// staticcheck version into go.sum would force every consumer of the
-// sparkwing module to also pull it.
+// so dev machines without a global install still pass. The version is
+// pinned (not `@latest`) so the lint baseline doesn't drift mid-release
+// when a new staticcheck minor lands and surfaces a fresh batch of
+// findings. Bump deliberately, alongside the cleanup that the new
+// version's added checks demand.
 type StaticAnalysis struct{ sparkwing.Base }
 
 func (StaticAnalysis) ShortHelp() string {
-	return "Heavier static checks: staticcheck + tidy drift"
+	return "Heavier static checks: staticcheck + tidy drift + pipeline lint"
 }
 
 func (StaticAnalysis) Help() string {
-	return "Runs staticcheck (via `go run`) and `go mod tidy -diff` against the public sparkwing module. Slower than `lint`; intended as a release gate."
+	return "Runs staticcheck (via `go run`), `go mod tidy -diff`, and `sparkwing pipeline lint --all` (the idiomatic-pipeline gate) against the public sparkwing module. Slower than `lint`; intended as a release gate."
 }
 
 func (StaticAnalysis) Examples() []sparkwing.Example {
@@ -37,16 +38,23 @@ func (StaticAnalysis) Examples() []sparkwing.Example {
 func (p *StaticAnalysis) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "staticcheck", p.staticcheck)
 	sparkwing.Job(plan, "tidy-drift", p.tidyDrift)
+	sparkwing.Job(plan, "pipeline-lint", p.pipelineLint)
 	return nil
 }
 
 func (p *StaticAnalysis) staticcheck(ctx context.Context) error {
-	// `go run` ensures the tool is available without a separate
-	// install step; the module proxy caches it after first use.
-	if _, err := sparkwing.Bash(ctx, "go run honnef.co/go/tools/cmd/staticcheck@latest ./...").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...").Run(); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "staticcheck: no issues")
+	return nil
+}
+
+func (p *StaticAnalysis) pipelineLint(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "go run ./cmd/sparkwing pipeline lint --all").Run(); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "pipeline lint: no idiomatic violations")
 	return nil
 }
 

@@ -1,8 +1,9 @@
 package pool
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 var (

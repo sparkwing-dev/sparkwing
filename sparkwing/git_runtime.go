@@ -17,10 +17,11 @@ import (
 // callers can't spoof "I'm running in repo X" without going through
 // NewGit / NewGitFromTree.
 type Git struct {
-	SHA     string `json:"sha,omitempty"`      // full 40-char commit
-	Branch  string `json:"branch,omitempty"`   // "main", "" when detached
-	Repo    string `json:"repo,omitempty"`     // "owner/name"
-	RepoURL string `json:"repo_url,omitempty"` // "git@github.com:owner/name.git"
+	SHA           string `json:"sha,omitempty"`            // full 40-char commit
+	Branch        string `json:"branch,omitempty"`         // "main", "" when detached
+	DefaultBranch string `json:"default_branch,omitempty"` // origin/HEAD target; "" when no remote
+	Repo          string `json:"repo,omitempty"`           // "owner/name"
+	RepoURL       string `json:"repo_url,omitempty"`       // "git@github.com:owner/name.git"
 
 	// workDir is the absolute path to the working tree. Unexported so
 	// the only legitimate constructors are NewGit / NewGitFromTree;
@@ -30,13 +31,14 @@ type Git struct {
 
 // NewGit constructs a Git with the supplied data fields and workDir.
 // Used by the orchestrator at dispatch time.
-func NewGit(workDir, sha, branch, repo, repoURL string) *Git {
+func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git {
 	return &Git{
-		SHA:     sha,
-		Branch:  branch,
-		Repo:    repo,
-		RepoURL: repoURL,
-		workDir: workDir,
+		SHA:           sha,
+		Branch:        branch,
+		DefaultBranch: defaultBranch,
+		Repo:          repo,
+		RepoURL:       repoURL,
+		workDir:       workDir,
 	}
 }
 
@@ -56,6 +58,11 @@ func NewGitFromTree(ctx context.Context, workDir string) (*Git, error) {
 		return nil, err
 	}
 	g.Branch = branch
+	defBranch, err := git.DefaultBranch(ctx, workDir)
+	if err != nil {
+		return nil, err
+	}
+	g.DefaultBranch = defBranch
 	repoURL, err := git.RemoteOriginURL(ctx, workDir)
 	if err != nil {
 		return nil, err

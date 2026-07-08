@@ -9,11 +9,9 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
-
-	// Side-effect imports: each jobs/ file's init() registers its
-	// pipeline with the sparkwing package's process-global registry.
 	_ "sparkwing-pipelines/jobs"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 )
 
 func main() { runner.Main() }

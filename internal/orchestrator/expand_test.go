@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// These tests cover the orchestrator's runtime fan-out machinery via
-// the JobFanOutDynamic surface.
-
 type discoverJob struct {
 	sparkwing.Base
 	sparkwing.Produces[[]string]
@@ -100,8 +97,10 @@ func (expandEmpty) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 // should cancel.
 type expandSourceFails struct{ sparkwing.Base }
 
-var failedFaninRan atomic.Bool
-var failedGenRan atomic.Bool
+var (
+	failedFaninRan atomic.Bool
+	failedGenRan   atomic.Bool
+)
 
 type failingDiscover struct {
 	sparkwing.Base
@@ -154,8 +153,6 @@ func init() {
 	register("expand-gen-panics", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &expandGenPanics{} })
 }
 
-// --- Tests ---
-
 func TestJobFanOutDynamic_FansOutAndJoins(t *testing.T) {
 	items := []string{"alpha", "beta", "gamma"}
 	discoverItems.Store(&items)
@@ -186,7 +183,7 @@ func TestJobFanOutDynamic_FansOutAndJoins(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	nodeIDs := map[string]string{}
 	for _, n := range nodes {
@@ -235,7 +232,7 @@ func TestJobFanOutDynamic_SourceFailsCancelsFanin(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {

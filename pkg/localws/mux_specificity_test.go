@@ -31,7 +31,6 @@ func TestMuxSpecificity_ApiV1Routing(t *testing.T) {
 		{"/api/v1/runs/abc/logs/web-ok/stream", "node-stream"},
 		{"/api/v1/runs/abc/events/stream", "events-stream"},
 		{"/api/v1/capabilities", "capabilities"},
-		// Run detail + cancel + paused fall through to the controller.
 		{"/api/v1/runs/abc", "controller-catchall"},
 		{"/api/v1/runs/abc/cancel", "controller-catchall"},
 		{"/api/v1/runs/abc/paused", "controller-catchall"},
@@ -63,7 +62,6 @@ func TestMuxSpecificity_S3OnlyMode(t *testing.T) {
 	mux.Handle("GET /api/v1/capabilities", marker("capabilities"))
 	mux.Handle("GET /api/v1/runs", marker("list-runs"))
 	mux.Handle("GET /api/v1/runs/{id}", marker("get-run"))
-	// No controller catch-all in s3-only mode.
 	mux.Handle("/", marker("spa"))
 
 	cases := []struct {
@@ -76,8 +74,6 @@ func TestMuxSpecificity_S3OnlyMode(t *testing.T) {
 		{"/api/v1/runs/abc/logs", "logs", http.StatusOK},
 		{"/api/v1/runs/abc/events/stream", "events-stream", http.StatusOK},
 		{"/api/v1/capabilities", "capabilities", http.StatusOK},
-		// Mutating routes have no handler in s3-only mode; they fall
-		// through to the SPA catch-all.
 	}
 
 	for _, tc := range cases {

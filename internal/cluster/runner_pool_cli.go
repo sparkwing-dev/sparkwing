@@ -112,7 +112,8 @@ func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
 // runPoolLoop is the testable core. cfg must already be normalized.
 // claimer + exec are injected so tests don't need an HTTP stack.
 func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, logger *slog.Logger) error {
-	logger.Info(cfg.SourceName+" started",
+	logger.Info(
+		cfg.SourceName+" started",
 		"controller", cfg.ControllerURL,
 		"logs", cfg.LogsURL,
 		"max_concurrent", cfg.MaxConcurrent,
@@ -133,19 +134,12 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
 			return nil
 		}
-		// MaxClaims bound: count only successful claims ("claimed"
-		// outcomes). Empty polls and transient claim errors don't
-		// tick the counter; otherwise an empty queue could churn
-		// the pod through kubelet backoff without having done any
-		// real work.
 		if cfg.MaxClaims > 0 && claimed >= cfg.MaxClaims {
 			logger.Info(cfg.SourceName+" max-claims reached; exiting for container restart",
 				"claimed", claimed, "max_claims", cfg.MaxClaims)
 			return nil
 		}
 
-		// Block until we have a free execution slot. Leaves work on
-		// the controller queue for another runner to claim under load.
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -231,7 +225,7 @@ func runRunnerCLI(args []string) error {
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	logger := slog.Default()
 	go func() {
@@ -240,16 +234,14 @@ func runRunnerCLI(args []string) error {
 		}
 	}()
 
-	// FOLLOWUPS #12: prune stale state from the warm PVC before the
-	// claim loop begins. Time-boxed inside GCWarmRoot; skip-on-timeout
-	// rather than fail-closed so a stuck sweep doesn't block claims.
 	if paths, perr := orchestrator.DefaultPaths(); perr == nil {
 		ctrl := client.NewWithToken(*controllerURL, nil, *token)
 		stats, err := orchestrator.GCWarmRoot(ctx, paths.Root, ctrl, logger)
 		if err != nil {
 			logger.Warn("gc: warm sweep returned error (continuing)", "err", err)
 		} else {
-			logger.Info("gc: warm sweep complete",
+			logger.Info(
+				"gc: warm sweep complete",
 				"git_dirs", stats.GitDirsRemoved,
 				"tmp_entries", stats.TmpEntriesRemoved,
 				"run_dirs", stats.RunDirsRemoved,
@@ -328,10 +320,6 @@ func executePooledNode(
 	hbWG.Wait()
 
 	if err != nil {
-		// Setup-level failure (pipeline missing, plan rebuild failed).
-		// InProcessRunner never ran, so no terminal state was written.
-		// Best effort: the orchestrator will time out on GetNode
-		// polling and either the reaper or an operator reconciles.
 		logger.Error(source+" setup failure",
 			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
 		return

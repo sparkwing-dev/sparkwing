@@ -61,8 +61,10 @@ type Service struct {
 	// collisions when the same pipeline runs concurrently.
 	Name string
 
-	// Port is the container port the service listens on. Informational
-	// only -- with --network=host we don't publish ports explicitly.
+	// Port is the container port the service listens on. When set, it is
+	// published to 127.0.0.1:<Port> so a host process (the test) reaches
+	// it at localhost:<Port> on every platform incl. Docker Desktop.
+	// When zero, the container uses host networking (Linux only).
 	Port int
 
 	// Env is the set of environment variables to pass to the container.
@@ -96,8 +98,6 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 		return ErrDockerUnavailable
 	}
 
-	// Resolve container names up front so cleanup can target them
-	// even if `docker run` fails mid-list.
 	resolved := make([]Service, len(services))
 	copy(resolved, services)
 	for i := range resolved {
@@ -110,12 +110,9 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 		}
 	}
 
-	// Track which containers we actually started so cleanup only
-	// touches real ones.
 	started := make([]string, 0, len(resolved))
 
-	// Uses context.Background() deliberately: even if ctx is
-	// cancelled, we still want to stop the containers we spawned.
+	// hack: cleanup uses context.Background() so cancellation of the caller's ctx does not abort container removal.
 	cleanup := func() {
 		for _, name := range started {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -127,7 +124,14 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 
 	for i := range resolved {
 		svc := &resolved[i]
-		args := []string{"run", "-d", "--network=host", "--name", svc.Name}
+		args := []string{"run", "-d", "--name", svc.Name}
+		if svc.Port > 0 {
+			// hack: bind to 127.0.0.1 so Docker Desktop (macOS/Windows) containers are reachable from the host.
+			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", svc.Port, svc.Port))
+		} else {
+			// hack: no port declared; host networking only works on Linux.
+			args = append(args, "--network=host")
+		}
 		for k, v := range svc.Env {
 			args = append(args, "-e", k+"="+v)
 		}
@@ -145,8 +149,7 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 		}
 	}
 
-	// On panic the defer cleanup fires during unwind; we want the
-	// panic to reach the caller with its original stack.
+	// safety: fn is the last statement so a panic unwinds through defer cleanup without re-wrapping the stack.
 	return fn(ctx)
 }
 
@@ -197,9 +200,7 @@ func deriveName(image string) string {
 	if i := strings.Index(name, "@"); i >= 0 {
 		name = name[:i]
 	}
-	// LastIndex so registry:port style (e.g. "localhost:5000/foo:tag")
-	// still trims correctly: only treat colon as a tag separator if
-	// it's past any /.
+	// hack: LastIndex so "registry:port/image:tag" only strips the image tag, not the registry port.
 	if i := strings.LastIndex(name, ":"); i >= 0 {
 		if slash := strings.LastIndex(name, "/"); slash < 0 || i > slash {
 			name = name[:i]

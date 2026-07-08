@@ -3,7 +3,6 @@ package s3
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -53,17 +53,15 @@ func (s *LogStore) nodePrefix(runID, nodeID string) string {
 }
 
 func (s *LogStore) appendKey(runID, nodeID string) string {
-	// 20-digit zero-padded ns + seq makes keys lex-sortable.
 	now := time.Now().UTC().UnixNano()
 	n := s.seq.Add(1)
 	return fmt.Sprintf("%s%020d-%010d.ndjson", s.nodePrefix(runID, nodeID), now, n)
 }
 
 func (s *LogStore) Append(ctx context.Context, runID, nodeID string, data []byte) error {
-	if runID == "" || nodeID == "" {
-		return errors.New("s3.LogStore.Append: runID and nodeID required")
+	if err := storage.SafeLogIDs(runID, nodeID); err != nil {
+		return fmt.Errorf("s3.LogStore.Append: %w", err)
 	}
-	// Ensure trailing newline so Read never glues records onto one line.
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		buf := make([]byte, len(data)+1)
 		copy(buf, data)
@@ -83,6 +81,9 @@ func (s *LogStore) Append(ctx context.Context, runID, nodeID string, data []byte
 }
 
 func (s *LogStore) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error) {
+	if err := storage.SafeLogIDs(runID, nodeID); err != nil {
+		return nil, fmt.Errorf("s3.LogStore.Read: %w", err)
+	}
 	parts, err := s.listAndConcat(ctx, s.nodePrefix(runID, nodeID))
 	if err != nil {
 		return nil, err
@@ -94,6 +95,9 @@ func (s *LogStore) Read(ctx context.Context, runID, nodeID string, opts storage.
 }
 
 func (s *LogStore) ReadRun(ctx context.Context, runID string) ([]byte, error) {
+	if err := storage.SafeSegment(runID); err != nil {
+		return nil, fmt.Errorf("s3.LogStore.ReadRun: %w", err)
+	}
 	prefix := s.runPrefix(runID)
 	keys, err := s.listKeys(ctx, prefix)
 	if err != nil {
@@ -112,7 +116,6 @@ func (s *LogStore) ReadRun(ctx context.Context, runID string) ([]byte, error) {
 		node := rest[:slash]
 		byNode[node] = append(byNode[node], k)
 	}
-	// Stable order so output doesn't reshuffle between calls.
 	nodes := make([]string, 0, len(byNode))
 	for n := range byNode {
 		nodes = append(nodes, n)
@@ -143,6 +146,9 @@ func (s *LogStore) Stream(context.Context, string, string) (io.ReadCloser, error
 }
 
 func (s *LogStore) DeleteRun(ctx context.Context, runID string) error {
+	if err := storage.SafeSegment(runID); err != nil {
+		return fmt.Errorf("s3.LogStore.DeleteRun: %w", err)
+	}
 	keys, err := s.listKeys(ctx, s.runPrefix(runID))
 	if err != nil {
 		return err
@@ -150,7 +156,6 @@ func (s *LogStore) DeleteRun(ctx context.Context, runID string) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	// DeleteObjects caps at 1000 keys per request.
 	for start := 0; start < len(keys); start += 1000 {
 		end := start + 1000
 		if end > len(keys) {
@@ -193,7 +198,6 @@ func (s *LogStore) listKeys(ctx context.Context, prefix string) ([]string, error
 		}
 		token = out.NextContinuationToken
 	}
-	// Lex order matches timestamp+seq key format -> chronological.
 	sort.Strings(keys)
 	return keys, nil
 }

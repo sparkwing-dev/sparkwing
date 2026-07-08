@@ -1,0 +1,56 @@
+{
+  "categories": [
+    {
+      "label": "Getting Started",
+      "slugs": ["getting-started", "architecture", "cli", "cli-reference"]
+    },
+    {
+      "label": "Pipelines",
+      "slugs": [
+        "pipelines",
+        "authoring-pipelines",
+        "config-reference",
+        "sdk",
+        "sdk-reference",
+        "artifacts",
+        "local-execution",
+        "ci-embedded",
+        "native-mode"
+      ]
+    },
+    {
+      "label": "Libraries",
+      "slugs": ["sparks", "sparks-core", "versioning"]
+    },
+    {
+      "label": "Infrastructure",
+      "slugs": [
+        "deployment",
+        "deployment-modes",
+        "self-hosting",
+        "backends",
+        "scheduling",
+        "warm-pool",
+        "gitcache"
+      ]
+    },
+    {
+      "label": "Performance",
+      "slugs": ["fast-builds", "build-caching", "caching"]
+    },
+    {
+      "label": "Operations",
+      "slugs": [
+        "observability",
+        "box-slot-lockfile-contract",
+        "security",
+        "auth",
+        "hooks",
+        "api",
+        "api-reference",
+        "mcp"
+      ]
+    }
+  ],
+  "excluded": ["design/", "proposals/", "migrations/", "changelog-style"]
+}

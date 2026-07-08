@@ -117,7 +117,7 @@ export default function LiveLogs({
       return (
         <div className="flex items-center gap-2 text-sm text-[var(--muted)] p-4">
           <div className="w-2 h-2 bg-amber-400 rounded-full" />
-          Waiting for logs — the runner may still be starting up.
+          Waiting for logs -- the runner may still be starting up.
         </div>
       );
     }

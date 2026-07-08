@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -73,20 +74,18 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	// Temp + rename so partial downloads never leave a half-written
-	// binary at the canonical path.
 	tmp := dest + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, dest)
@@ -155,7 +154,6 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return "", err
 	}
-	// git refuses to write into a non-empty dir; wipe stale state.
 	if err := os.RemoveAll(workTree); err != nil {
 		return "", fmt.Errorf("clear workTree: %w", err)
 	}
@@ -207,7 +205,8 @@ func fetchExactSHA(cloneURL, sha, dest string) error {
 // shallowCloneBranch runs `git clone --depth 1 --single-branch
 // --branch B URL DEST` for the no-SHA fallback path.
 func shallowCloneBranch(cloneURL, branch, dest string) error {
-	cmd := exec.Command("git", "clone",
+	cmd := exec.Command(
+		"git", "clone",
 		"--depth", "1",
 		"--single-branch",
 		"--branch", branch,
@@ -316,8 +315,6 @@ func RepoURLFromGitHub(fullName string) string {
 	return "git@github.com:" + fullName + ".git"
 }
 
-// --- compile helpers ---
-
 // SparkwingHome honors SPARKWING_HOME if set, otherwise ~/.sparkwing.
 func SparkwingHome() string {
 	if h := os.Getenv("SPARKWING_HOME"); h != "" {
@@ -357,6 +354,33 @@ type CompileError struct {
 func (e *CompileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
 func (e *CompileError) Unwrap() error { return e.Err }
 
+// lockedBuffer is a mutex-guarded bytes.Buffer. exec.Cmd drains
+// stdout and stderr from separate goroutines; when both target the
+// same buffer (as CompilePipeline does to interleave them in capture
+// order), the writes need serialization or the race detector trips.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (lb *lockedBuffer) Write(p []byte) (int, error) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return lb.buf.Write(p)
+}
+
+func (lb *lockedBuffer) String() string {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return lb.buf.String()
+}
+
+func (lb *lockedBuffer) Bytes() []byte {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return append([]byte(nil), lb.buf.Bytes()...)
+}
+
 // CompilePipeline `go build`s sparkwingDir -> dest. Stdout + stderr
 // stream to the parent's stderr (so pod logs still show progress);
 // both are also captured into a buffer so a failure returns a
@@ -366,30 +390,38 @@ func (e *CompileError) Unwrap() error { return e.Err }
 //
 // If `.sparkwing/.resolved.mod` exists, compile is invoked with
 // `-modfile=<path>` so the overlay's resolved versions take precedence
-// over the git-tracked go.mod.
+// over the git-tracked go.mod. When a `go.work` is in scope, the
+// overlay is skipped (the toolchain refuses `-modfile` in workspace
+// mode); the workspace's module resolution wins, and a single-line
+// warning is written to stderr so the operator knows sparks pinning
+// is dormant for this build.
 func CompilePipeline(sparkwingDir, dest string) error {
-	// Bare exec.Command("go", ...) with no Go on PATH surfaces a
-	// confusing message; preempt with a clearer one.
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
-				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.")
+				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
+		)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
 	args := []string{"build"}
 	if overlay := overlayModfilePath(sparkwingDir); overlay != "" {
-		args = append(args, "-modfile="+overlay)
+		if work, present := goWorkInScope(sparkwingDir); present {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s in effect; skipping sparks resolution. "+
+					"Modules resolve from go.mod + workspace, not .resolved.mod. "+
+					"To use local copies of sparks libs too, add them to go.work.\n",
+				work,
+			)
+		} else {
+			args = append(args, "-modfile="+overlay)
+		}
 	}
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
 	cmd.Dir = sparkwingDir
-	// Capture both streams: go-build splits diagnostics across stdout
-	// and stderr depending on flags / toolchain stage (e.g. the
-	// `go: go.mod requires go >= X` toolchain check writes to stderr,
-	// while compiler errors land on stdout). We surface both.
-	var captured bytes.Buffer
+	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = os.Environ()
@@ -397,7 +429,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
 		}
-		return &CompileError{Output: append([]byte(nil), captured.Bytes()...), Err: err}
+		return &CompileError{Output: captured.Bytes(), Err: err}
 	}
 	return nil
 }
@@ -411,6 +443,35 @@ func overlayModfilePath(sparkwingDir string) string {
 		return ""
 	}
 	return p
+}
+
+// goWorkInScope walks up from sparkwingDir looking for a `go.work`
+// file, the same way `go build` discovers workspace mode. Returns the
+// path + true on hit, "" + false otherwise. Honors GOWORK if set
+// ("off" disables; an explicit path is used as-is when readable).
+func goWorkInScope(sparkwingDir string) (string, bool) {
+	switch env := os.Getenv("GOWORK"); env {
+	case "off":
+		return "", false
+	case "":
+	default:
+		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
+			return env, true
+		}
+		return "", false
+	}
+	dir := sparkwingDir
+	for {
+		candidate := filepath.Join(dir, "go.work")
+		if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 // PipelineCacheKey returns a 16-char hex fingerprint of the pipeline
@@ -429,9 +490,6 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
 	h := sha256.New()
 
-	// Mix only major.minor of the Go runtime; patch releases don't
-	// change generated-code ABI but commonly differ between operator
-	// + CI installs.
 	fmt.Fprintf(h, "go:%s\n", goMajorMinor())
 	fmt.Fprintf(h, "arch:%s/%s\n", goos, goarch)
 
@@ -452,9 +510,6 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 		}
 	}
 
-	// Overlay modfile: when sparks are consumed via .resolved.mod
-	// instead of local replaces, the replace-target walk doesn't
-	// capture version bumps. Hash overlay contents directly.
 	for _, overlay := range []struct {
 		name   string
 		prefix string
@@ -497,6 +552,12 @@ func ExecReplace(bin string, args []string, dir string, env []string) error {
 
 // execChildWindows runs bin as a foreground subprocess and exits with
 // the child's status code. Returns only on spawn failure.
+//
+// The two os.Exit calls below are deliberate: this function is the
+// Windows half of ExecReplace, whose POSIX path uses syscall.Exec to
+// replace the current process. ExecReplace's contract is "this
+// process disappears, replaced by the child's exit status"; returning
+// here would violate that contract.
 func execChildWindows(bin string, args, env []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
@@ -506,11 +567,11 @@ func execChildWindows(bin string, args, env []string) error {
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			os.Exit(ee.ExitCode())
+			os.Exit(ee.ExitCode()) //nolint:forbidigo // mirrors syscall.Exec exit-with-child semantics on POSIX
 		}
 		return err
 	}
-	os.Exit(0)
+	os.Exit(0) //nolint:forbidigo // mirrors syscall.Exec exit-with-child semantics on POSIX
 	return nil
 }
 
@@ -525,7 +586,7 @@ func goSourceOnly(name string) bool {
 // goMajorMinor returns runtime.Version()'s "go1.26" prefix, stripping
 // the patch component.
 func goMajorMinor() string {
-	v := runtime.Version() // "go1.26.0", "go1.26.2", "devel ..."
+	v := runtime.Version()
 	dots := 0
 	for i, c := range v {
 		if c == '.' {
@@ -555,8 +616,6 @@ func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, path)
-		// Content-hash, not mtime+size: cross-machine cache requires
-		// a reproducible key (mtime diverges between checkouts).
 		f, err := os.Open(path)
 		if err != nil {
 			return err

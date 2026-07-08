@@ -1,18 +1,5 @@
 package main
 
-// Guardrail: every Command declared in help_registry.go MUST be
-// listed in allCommands (commands.go). Without this, `sparkwing
-// commands` -- the agent-facing self-discovery probe -- silently
-// skips verbs that exist in the binary, and `--help --json` on
-// those verbs only renders prose. Both failure modes are invisible
-// to the implementer.
-//
-// Mechanism: parse help_registry.go's source AST, find every
-// top-level `var cmdX = Command{...}` declaration, then verify each
-// is present in the in-memory allCommands slice. Source-driven so
-// adding a new var in the .go file without updating allCommands
-// fails CI -- no double-bookkeeping risk.
-
 import (
 	"go/ast"
 	"go/parser"
@@ -43,8 +30,6 @@ func TestAllCommandsAreRegistered(t *testing.T) {
 			strings.Join(names, "\n  "))
 	}
 
-	// Reverse check: a name in allCommands that isn't in the source
-	// means a stale entry left behind after a Command was renamed.
 	declaredSet := map[string]bool{}
 	for _, n := range declared {
 		declaredSet[n] = true
@@ -118,9 +103,6 @@ func commandVarsInSource(t *testing.T, path string) []string {
 // var-names; the registered set returns var names by deriving them
 // from the Path field via the same helper used at parse time.
 func registeredCommandPaths() map[string]bool {
-	// Parse the same file once more to map var-name -> Path so the
-	// guard compares like-for-like. Not the prettiest but it keeps
-	// the test self-contained.
 	fset := token.NewFileSet()
 	f, _ := parser.ParseFile(fset, "help_registry.go", nil, parser.SkipObjectResolution)
 	pathByName := map[string]string{}

@@ -22,11 +22,13 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // VersionReport is the JSON shape of `sparkwing version --json`.
 type VersionReport struct {
 	CLI            InfoVersion     `json:"cli"`
+	SchemaVersion  int             `json:"schema_version"`
 	LatestRelease  string          `json:"latest_release,omitempty"`
 	LatestFetchErr string          `json:"latest_fetch_error,omitempty"`
 	Behind         bool            `json:"behind"`
@@ -68,16 +70,12 @@ const versionFetchTimeout = 3 * time.Second
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 func runVersion(args []string) error {
-	// `sparkwing version update ...` is the unified updater verb. Any
-	// other arg is treated as flags for the show-version path; bare
-	// `sparkwing version` prints the composite report.
 	if len(args) > 0 && args[0] == "update" {
 		return runVersionUpdate(args[1:])
 	}
 	fs := flag.NewFlagSet(cmdVersion.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	offline := fs.Bool("offline", false, "skip the network fetch for latest release")
 	if err := parseAndCheck(cmdVersion, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -87,9 +85,6 @@ func runVersion(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("version: unexpected positional %q", fs.Arg(0))
-	}
-	if *asJSON {
-		output = "json"
 	}
 
 	report := gatherVersionReport(*offline)
@@ -108,8 +103,6 @@ func runVersion(args []string) error {
 			return enc.Encode(report)
 		}
 	case "plain":
-		// One semver per line. Useful as `$(sparkwing version -o
-		// plain | head -n1)` to grab the CLI version in scripts.
 		fmt.Println(report.CLI.Installed)
 		if report.LatestRelease != "" {
 			fmt.Println(report.LatestRelease)
@@ -122,7 +115,8 @@ func runVersion(args []string) error {
 
 func gatherVersionReport(offline bool) VersionReport {
 	r := VersionReport{
-		CLI: parseInfoVersion(installedVersion()),
+		CLI:           parseInfoVersion(installedVersion()),
+		SchemaVersion: store.ExpectedSchemaVersion(),
 	}
 	if !offline {
 		latest, err := fetchLatestRelease()
@@ -165,7 +159,6 @@ func gatherVersionProject(latest string) *VersionProject {
 	}
 
 	proj := &VersionProject{SparkwingDir: sparkwingDir}
-	// Pass 1: collect requires.
 	for _, req := range mf.Require {
 		mod := req.Mod.Path
 		ver := req.Mod.Version
@@ -176,10 +169,6 @@ func gatherVersionProject(latest string) *VersionProject {
 			proj.Sparks = append(proj.Sparks, SparkPin{Module: mod, Version: ver})
 		}
 	}
-	// Pass 2: replace directives. A replace on the SDK means the
-	// require version is meaningless ("v0.0.0" or similar); record
-	// the replace target so the user sees the truth instead of a
-	// fake "behind" indicator.
 	for _, rep := range mf.Replace {
 		if rep.Old.Path != sdkModulePath {
 			continue
@@ -189,8 +178,6 @@ func gatherVersionProject(latest string) *VersionProject {
 			target = target + "@" + rep.New.Version
 		}
 		proj.SDKReplace = target
-		// Don't flag behind when there's a replace; the pin is
-		// not what's being compiled.
 		break
 	}
 	if proj.SDKReplace == "" && proj.SDKPin != "" && latest != "" && isSemver(proj.SDKPin) {
@@ -211,8 +198,6 @@ func fetchLatestRelease() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// No-redirect client: we want the redirect target, not whatever
-	// the redirect lands on.
 	client := &http.Client{
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -261,24 +246,21 @@ func printVersionTable(r VersionReport) {
 	case r.LatestRelease == "":
 		fmt.Printf("  latest:   %s\n", color.Dim("not checked (--offline)"))
 	case r.Behind:
-		fmt.Printf("  latest:   %s %s\n",
+		fmt.Printf(
+			"  latest:   %s %s\n",
 			r.LatestRelease,
 			color.Yellow("behind"),
 		)
 	default:
 		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Green("up to date"))
 	}
-	// Always surface the upgrade command so it's discoverable. Loud
-	// when behind (default color, suggests action); dim when up-to-date
-	// (still readable, doesn't shout). A reader who sees "v0.45.6 is
-	// out, I'm on v0.45.3" can run the printed command without
-	// hunting through docs.
 	if r.Behind {
 		fmt.Printf("  upgrade:  %s\n", "sparkwing version update --cli")
 	} else {
 		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing version update --cli"))
 	}
 	fmt.Printf("  releases: https://github.com/sparkwing-dev/sparkwing/releases\n")
+	fmt.Printf("  schema:   %d %s\n", r.SchemaVersion, color.Dim("(embedded runs-store schema)"))
 	fmt.Println()
 
 	if r.Project == nil {
@@ -295,9 +277,6 @@ func printVersionTable(r VersionReport) {
 	fmt.Printf("Project at %s\n", p.SparkwingDir)
 	switch {
 	case p.SDKReplace != "":
-		// The require version is a placeholder; what's actually
-		// compiling is the replace target. Surface that and skip
-		// the behind check entirely.
 		fmt.Printf("  sdk:      %s\n", color.Dim("(replaced with "+p.SDKReplace+")"))
 	case p.SDKPin != "":
 		label := color.Green("up to date")

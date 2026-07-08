@@ -1,8 +1,6 @@
 package pipelines_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,15 +33,9 @@ pipelines:
     on:
       push:
         branches: [main]
-        values:
-          target: prod
       schedule: "0 */6 * * *"
       webhook:
         path: /hooks/btd
-    secrets:
-      - {name: SPARKWING_ARGOCD_SERVER, required: true}
-      - {name: SPARKWING_ARGOCD_TOKEN, required: true}
-    tags: [ci, deploy]
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -56,29 +48,42 @@ pipelines:
 	if p.On.Push == nil || len(p.On.Push.Branches) != 1 || p.On.Push.Branches[0] != "main" {
 		t.Fatalf("push branches mis-parsed: %+v", p.On.Push)
 	}
-	if got := p.On.Push.Values["target"]; got != "prod" {
-		t.Fatalf("push values[target] = %v, want prod", got)
-	}
 	if p.On.Schedule != "0 */6 * * *" {
 		t.Fatalf("schedule mis-parsed: %q", p.On.Schedule)
 	}
 	if p.On.Webhook == nil || p.On.Webhook.Path != "/hooks/btd" {
 		t.Fatalf("webhook mis-parsed: %+v", p.On.Webhook)
 	}
-	if len(p.Secrets) != 2 {
-		t.Fatalf("secrets count = %d", len(p.Secrets))
+}
+
+func TestParse_GitHookTriggers(t *testing.T) {
+	yaml := `
+pipelines:
+  - name: lint
+    entrypoint: Lint
+    on:
+      pre_commit: {}
+  - name: suite
+    entrypoint: Suite
+    on:
+      pre_push: {}
+  - name: self-install
+    entrypoint: SelfInstall
+    on:
+      post_commit: {}
+`
+	cfg, err := pipelines.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
 	}
-	// Legacy bare-string form maps to typed entries with Required=true.
-	for _, e := range p.Secrets {
-		if e.Name == "" {
-			t.Fatalf("legacy bare-string secret produced empty Name: %+v", e)
-		}
-		if !e.Required {
-			t.Fatalf("legacy bare-string secret should be Required, got %+v", e)
-		}
+	if p := cfg.Find("lint"); p == nil || p.On.PreHook == nil {
+		t.Fatalf("pre_commit mis-parsed: %+v", p)
 	}
-	if len(p.Tags) != 2 {
-		t.Fatalf("tags count = %d", len(p.Tags))
+	if p := cfg.Find("suite"); p == nil || p.On.PostHook == nil {
+		t.Fatalf("pre_push mis-parsed: %+v", p)
+	}
+	if p := cfg.Find("self-install"); p == nil || p.On.PostCommitHook == nil {
+		t.Fatalf("post_commit mis-parsed: %+v", p)
 	}
 }
 
@@ -141,41 +146,6 @@ func TestParse_Empty(t *testing.T) {
 	}
 	if len(cfg.Pipelines) != 0 {
 		t.Fatalf("expected empty config, got %d", len(cfg.Pipelines))
-	}
-}
-
-func TestDiscover_WalksUp(t *testing.T) {
-	// Repo-like layout: /tmp/repo/.sparkwing/pipelines.yaml, start from /tmp/repo/sub/dir
-	root := t.TempDir()
-	sw := filepath.Join(root, ".sparkwing")
-	if err := os.MkdirAll(sw, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	yamlPath := filepath.Join(sw, "pipelines.yaml")
-	if err := os.WriteFile(yamlPath, []byte("pipelines:\n  - name: a\n    entrypoint: A\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	deep := filepath.Join(root, "sub", "dir")
-	if err := os.MkdirAll(deep, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	path, cfg, err := pipelines.Discover(deep)
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if path != yamlPath {
-		t.Fatalf("path = %q, want %q", path, yamlPath)
-	}
-	if cfg.Find("a") == nil {
-		t.Fatal("pipeline a missing")
-	}
-}
-
-func TestDiscover_NotFound(t *testing.T) {
-	_, _, err := pipelines.Discover(t.TempDir())
-	if err == nil {
-		t.Fatal("expected not-found error")
 	}
 }
 

@@ -10,6 +10,10 @@ import (
 	"os/signal"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -18,9 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // runWorkerCLI implements `sparkwing-runner worker --controller URL [--poll DUR]`.
@@ -68,7 +69,7 @@ func runWorkerCLI(args []string) error {
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-worker"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	logger := slog.Default()
 	go func() {
@@ -87,8 +88,6 @@ func runWorkerCLI(args []string) error {
 		Sources:           splitCSV(*triggerSources),
 	}
 
-	// storage flags. Resolved here so a malformed URL fails
-	// fast at startup rather than the first node log.
 	if *logStoreURL != "" {
 		ls, err := storeurl.OpenLogStore(ctx, *logStoreURL)
 		if err != nil {
@@ -98,37 +97,35 @@ func runWorkerCLI(args []string) error {
 		logger.Info("log store", "url", *logStoreURL)
 	}
 	if *artifactStoreURL != "" {
-		if _, err := storeurl.OpenArtifactStore(ctx, *artifactStoreURL); err != nil {
+		as, err := storeurl.OpenArtifactStore(ctx, *artifactStoreURL)
+		if err != nil {
 			return fmt.Errorf("--artifact-store: %w", err)
 		}
-		logger.Info("artifact store", "url", *artifactStoreURL,
-			"note", "validated; not yet consumed by worker")
+		opts.ArtifactStore = as
+		logger.Info("artifact store", "url", *artifactStoreURL)
 	}
 
 	switch *runnerKind {
 	case "", "inprocess":
-		// Default: in-process. No factory needed.
 	case "k8s":
 		factory, err := buildK8sRunnerFactory(*kubeconfig, *k8sNamespace, *k8sImage,
 			*k8sSA, *k8sPullSecret,
 			firstNonEmpty(*k8sCtrlURL, *controllerURL),
 			firstNonEmpty(*k8sLogsURL, *logsURL),
+			*artifactStoreURL,
 			*token)
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
 		}
 		opts.RunnerFactory = factory
 	case "warm":
-		// Warm pool is primary, K8sRunner is fallback per session 3
-		// plan. Building the K8s factory eagerly means a broken
-		// kubeconfig fails startup rather than blowing up on the
-		// first node that needs fallback.
 		var k8sFactory func(orchestrator.Backends, *store.Trigger) runner.Runner
 		if *k8sImage != "" {
 			f, err := buildK8sRunnerFactory(*kubeconfig, *k8sNamespace, *k8sImage,
 				*k8sSA, *k8sPullSecret,
 				firstNonEmpty(*k8sCtrlURL, *controllerURL),
 				firstNonEmpty(*k8sLogsURL, *logsURL),
+				*artifactStoreURL,
 				*token)
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)
@@ -152,7 +149,7 @@ func runWorkerCLI(args []string) error {
 // runner bound to the same cluster / namespace / image. The agentToken
 // argument is stamped into each Job pod so the spawned runner's
 // controller + logs calls authenticate under FOLLOWUPS #2 auth.
-func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL, logsURL, agentToken string) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
+func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL, logsURL, artifactStoreURL, agentToken string) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
 	if image == "" {
 		return nil, fmt.Errorf("--image (or SPARKWING_RUNNER_IMAGE) is required with --runner k8s")
 	}
@@ -183,6 +180,7 @@ func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL
 		ServiceAccountName: sa,
 		ControllerURL:      ctrlURL,
 		LogsURL:            logsURL,
+		ArtifactStoreURL:   artifactStoreURL,
 		AgentToken:         agentToken,
 		CPURequest:         "100m",
 		MemoryRequest:      "128Mi",

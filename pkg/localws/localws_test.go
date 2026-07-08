@@ -35,7 +35,6 @@ func TestRun_LogStore_EndToEnd(t *testing.T) {
 		LogStoreLabel: "fs",
 	})
 
-	// Capabilities reports the configured backend.
 	resp := mustGet(t, "http://"+addr+"/api/v1/capabilities")
 	defer resp.Body.Close()
 	var caps backend.Capabilities
@@ -49,7 +48,6 @@ func TestRun_LogStore_EndToEnd(t *testing.T) {
 		t.Errorf("storage.runs = %q, want sqlite", caps.Storage.Runs)
 	}
 
-	// Dashboard log read goes through the LogStore.
 	resp = mustGet(t, "http://"+addr+"/api/v1/runs/run1/logs/node1")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -69,14 +67,12 @@ func TestRun_ReadOnly_BlocksWrites(t *testing.T) {
 		ReadOnly: true,
 	})
 
-	// GETs still work.
 	resp := mustGet(t, "http://"+addr+"/api/v1/health")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("health status = %d", resp.StatusCode)
 	}
 
-	// POST to a state-mutating endpoint -> 405.
 	req, _ := http.NewRequest(http.MethodPost,
 		"http://"+addr+"/api/v1/runs", strings.NewReader("{}"))
 	resp, err := http.DefaultClient.Do(req)
@@ -121,7 +117,6 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 		NoLocalStore:       true,
 	})
 
-	// Capabilities reports s3-only / runs:s3.
 	resp := mustGet(t, "http://"+addr+"/api/v1/capabilities")
 	defer resp.Body.Close()
 	var caps backend.Capabilities
@@ -138,7 +133,6 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 		t.Errorf("caps.ReadOnly = false, want true")
 	}
 
-	// Runs list comes from the bucket.
 	resp2 := mustGet(t, "http://"+addr+"/api/v1/runs")
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
@@ -157,7 +151,6 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 		t.Errorf("runs[0].id = %v", listed.Runs[0]["id"])
 	}
 
-	// Single-run detail with ?include=nodes.
 	resp3 := mustGet(t, "http://"+addr+"/api/v1/runs/abc?include=nodes")
 	defer resp3.Body.Close()
 	if resp3.StatusCode != http.StatusOK {
@@ -177,7 +170,6 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 		t.Errorf("got %d nodes, want 1", len(wrap.Nodes))
 	}
 
-	// Mutating routes have no controller behind them in s3-only mode.
 	cancelReq, _ := http.NewRequest(http.MethodPost,
 		"http://"+addr+"/api/v1/runs/abc/cancel", nil)
 	resp4, err := http.DefaultClient.Do(cancelReq)
@@ -237,7 +229,6 @@ func startLocalws(t *testing.T, opts Options) string {
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, opts) }()
 
-	// Wait for the server to come up.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get("http://" + addr + "/api/v1/health")

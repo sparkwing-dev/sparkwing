@@ -25,8 +25,6 @@ func helpExampleScratchDir(name string) string {
 	return "/tmp/" + name
 }
 
-// ---- top-level --------------------------------------------------
-
 var cmdSparkwing = Command{
 	Path:     "sparkwing",
 	Synopsis: "sparkwing -- CI/CD pipelines written in Go",
@@ -36,35 +34,32 @@ webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.`,
 	Subcommands: []SubcommandRef{
-		// Project flow (most-used)
 		{"info", "What is sparkwing, what's in this repo, what to run next"},
 		{"pipeline", "This repo's pipelines"},
 		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
 		{"runs", "Inspect or manage runs"},
+		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
-		// Local + remote ops
 		{"dashboard", "Local dashboard server"},
+		{"box-slots", "Show or live-tune the host run-concurrency cap"},
 		{"cluster", "Cluster ops"},
 		{"secrets", "Manage secrets"},
 		{"configure", "Laptop-local config"},
 		{"debug", "Interactive run debugging"},
-		// Docs + agent surface
 		{"docs", "Embedded user docs (offline)"},
 		{"commands", "Full CLI surface as JSON (agent self-discovery)"},
 		{"completion", "Shell completion script"},
 	},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run build-test-deploy"},
-		{"First command an agent should run", "sparkwing info --json"},
-		{"List every invocable (agents)", "sparkwing pipeline list --json"},
-		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release --json"},
+		{"First command an agent should run", "sparkwing info -o json"},
+		{"List every invocable (agents)", "sparkwing pipeline list -o json"},
+		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release -o json"},
 		{"Bootstrap + scaffold your first pipeline in a fresh repo", "sparkwing pipeline new --name release"},
 		{"Start the local dashboard", "sparkwing dashboard start"},
 	},
 }
-
-// ---- sparkwing info -------------------------------------------
 
 var cmdInfo = Command{
 	Path:     "sparkwing info",
@@ -77,25 +72,22 @@ toolchain is on PATH, a curated list of next-step commands, and
 the docs URL.
 
 This is the canonical first command an agent runs after install.
-Use --json for structured output that an agent can parse, or
+Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "for-agent", Desc: "Emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)", Group: "Output"},
 		{Name: "first-time", Desc: "Print the post-install onboarding card (used by install.sh; re-runnable any time)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Human-readable card", "sparkwing info"},
-		{"Agent-readable record", "sparkwing info --json"},
+		{"Agent-readable record", "sparkwing info -o json"},
 		{"Paste into CLAUDE.md / AGENTS.md", "sparkwing info --for-agent >> CLAUDE.md"},
 		{"Reprint the post-install onboarding card", "sparkwing info --first-time"},
 	},
 }
-
-// ---- sparkwing cluster ----------------------------------------
 
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
@@ -116,26 +108,24 @@ cluster. 'gc' sweeps stale warm-runner PVCs.
 For the laptop-local dashboard server, see
 'sparkwing dashboard start'.
 
-Profiles (via --on) pick which cluster these commands
+Profiles (via --profile) pick which cluster these commands
 address; set them up with 'sparkwing configure profiles'.`,
 	Subcommands: []SubcommandRef{
 		{"status", "Roll-up report: controller health + fleet + queue + recent runs"},
 		{"agents", "Fleet-view detail (GET /api/v1/agents)"},
 		{"worker", "Run a laptop-side worker against a remote cluster"},
 		{"gc", "Sweep stale warm-PVC state"},
-		{"push", "Publish the current repo's HEAD to the profile's gitcache"},
 		{"users", "Create / list / delete dashboard login users"},
 		{"tokens", "Create / list / revoke / rotate controller API tokens"},
 		{"image", "Image rollout helpers for gitops-managed deployments"},
 		{"webhooks", "Inspect / replay GitHub webhooks (wraps gh api)"},
+		{"concurrency", "Inspect a concurrency namespace: holders + queue"},
 	},
 	Examples: []Example{
-		{"Cluster health summary", "sparkwing cluster status --on prod"},
-		{"List fleet agents", "sparkwing cluster agents --on prod"},
+		{"Cluster health summary", "sparkwing cluster status --profile prod"},
+		{"List fleet agents", "sparkwing cluster agents --profile prod"},
 	},
 }
-
-// ---- sparkwing configure --------------------------------------
 
 var cmdConfigure = Command{
 	Path:     "sparkwing configure",
@@ -157,14 +147,12 @@ controller, not the local config. Secrets are top-level
 	},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
-		{"Status of laptop config", "sparkwing configure init --json"},
+		{"Status of laptop config", "sparkwing configure init -o json"},
 		{"List profiles", "sparkwing configure profiles list"},
 		{"Add a new profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
 		{"Register the current repo with the cross-repo registry", "sparkwing configure xrepo add"},
 	},
 }
-
-// ---- sparkwing configure init --------------------------------
 
 var cmdConfigureInit = Command{
 	Path:     "sparkwing configure init",
@@ -184,18 +172,15 @@ Re-running on an already-set-up laptop is a no-op status report.
 --dry-run skips the mkdir so the command pure-probes.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "dry-run", Desc: "Probe + report without creating ~/.config/sparkwing/", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
-		{"Status of laptop config (agent-readable)", "sparkwing configure init --json"},
+		{"Status of laptop config (agent-readable)", "sparkwing configure init -o json"},
 		{"Probe without writing anything", "sparkwing configure init --dry-run"},
 	},
 }
-
-// ---- sparkwing version ----------------------------------------
 
 var cmdVersion = Command{
 	Path:     "sparkwing version",
@@ -207,10 +192,10 @@ fetch -- bounded by ~3s, fail-soft when offline), and the
 alongside it.
 
 Behind-by-version is computed via semver compare for both the
-CLI itself and the SDK pin so an agent reading --json can
+CLI itself and the SDK pin so an agent reading -o json can
 trigger an upgrade without parsing prose.
 
---offline skips the network fetch entirely; --json emits the
+--offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
 	Subcommands: []SubcommandRef{
@@ -218,21 +203,18 @@ latest) for shell pipelines.`,
 	},
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
 	Examples: []Example{
 		{"Human-readable card", "sparkwing version"},
-		{"Agent-readable record", "sparkwing version --json"},
+		{"Agent-readable record", "sparkwing version -o json"},
 		{"CLI semver only (scripts)", "sparkwing version -o plain | head -n1"},
 		{"Local-only (no network)", "sparkwing version --offline"},
 		{"Update the CLI binary", "sparkwing version update --cli"},
 		{"Bump the SDK pin in this project", "sparkwing version update --sdk"},
 	},
 }
-
-// ---- sparkwing update ----------------------------------------
 
 // cmdUpdate is the top-level binary self-update verb. Binary-only
 // (no --cli/--sdk split); for SDK updates use `version update --sdk`.
@@ -311,8 +293,6 @@ applies to whichever target is selected.`,
 	},
 }
 
-// ---- sparkwing commands ---------------------------------------
-
 var cmdCommands = Command{
 	Path:             "sparkwing commands",
 	Synopsis:         "Emit the full CLI surface as structured data (agent self-discovery)",
@@ -340,8 +320,6 @@ plain emits one path per line for shell consumption.`,
 	},
 }
 
-// ---- sparkwing docs -------------------------------------------
-
 var cmdDocs = Command{
 	Path:     "sparkwing docs",
 	Synopsis: "Embedded user docs (offline)",
@@ -352,7 +330,7 @@ doc in one shot for an agent that wants the full corpus in
 context. The docs match the binary version exactly -- no risk of
 the website explaining a flag your CLI doesn't have.
 
-Discovery: ` + "`sparkwing docs list --json`" + ` returns slug + title +
+Discovery: ` + "`sparkwing docs list -o json`" + ` returns slug + title +
 summary for every topic. ` + "`sparkwing docs search --query \"warm pool\"`" + `
 substring-matches across slug + title + body.`,
 	Subcommands: []SubcommandRef{
@@ -360,32 +338,42 @@ substring-matches across slug + title + body.`,
 		{"read", "Print one doc's markdown to stdout (--topic NAME)"},
 		{"all", "Concatenate every doc to stdout (full corpus dump)"},
 		{"search", "Substring search across docs (--query TEXT)"},
+		{"migrations", "Per-version migration guides (list / read / between)"},
+		{"versions", "List doc versions known to this CLI (and sparkwing.dev with --web)"},
+		{"cache", "Inspect / clear the on-disk cache used by --web"},
 	},
 	Examples: []Example{
 		{"List all topics (table)", "sparkwing docs list"},
-		{"List all topics (agent-readable)", "sparkwing docs list --json"},
+		{"List all topics (agent-readable)", "sparkwing docs list -o json"},
 		{"Read one topic", "sparkwing docs read --topic pipelines"},
+		{"Read one topic at a specific version (online)", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
 		{"Slurp the whole corpus into context", "sparkwing docs all"},
 		{"Find docs that mention warm pool", "sparkwing docs search --query \"warm pool\""},
+		{"List migration guides this CLI knows", "sparkwing docs migrations list"},
+		{"Pipe every guide up to v0.4.0 into context", "sparkwing docs migrations between --to v0.4.0"},
+		{"List every version available online", "sparkwing docs versions --web"},
 	},
 }
 
 var cmdDocsList = Command{
 	Path:     "sparkwing docs list",
 	Synopsis: "Enumerate every doc topic",
-	Description: `Walks the embedded docs and prints one row per topic with its
-slug, first-H1 title, and first-paragraph summary. Use --json for
-agent-readable structured output, --output plain for one slug per
-line (pipe-friendly).`,
+	Description: `Walks the docs corpus and prints one row per topic with its
+slug, first-H1 title, and first-paragraph summary. By default reads
+the binary's embedded copy (hermetic, version-locked); pass --web
+to fetch from sparkwing.dev for another version.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
+		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Output", "Other"},
+	GroupOrder: []string{"Source", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing docs list"},
-		{"Agent-readable", "sparkwing docs list --json"},
+		{"Agent-readable", "sparkwing docs list -o json"},
 		{"Slug-per-line for shell loops", "sparkwing docs list -o plain"},
+		{"List the v0.3.0 corpus from sparkwing.dev", "sparkwing docs list --web --version v0.3.0"},
 	},
 }
 
@@ -395,14 +383,23 @@ var cmdDocsRead = Command{
 	Description: `Prints the raw markdown body for the named topic. The slug is
 the filename under /docs/ minus .md (run ` + "`sparkwing docs list`" + ` to
 see them all). Subdirs use slash-separated paths (e.g.
-design/remote-retry).`,
+design/remote-retry).
+
+Default source is the binary's embedded corpus. Use --web to fetch
+from sparkwing.dev, optionally pinned to --version vX.Y.Z or
+--version latest.`,
 	Flags: []FlagSpec{
 		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Required: true, Group: "Selection"},
+		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Selection", "Other"},
+	GroupOrder: []string{"Selection", "Source", "Other"},
 	Examples: []Example{
 		{"Read the getting-started page", "sparkwing docs read --topic getting-started"},
 		{"Pipe through a pager", "sparkwing docs read --topic pipelines | less"},
+		{"Read v0.3.0's pipelines page online", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
+		{"Always fetch the freshest version", "sparkwing docs read --topic pipelines --version latest --web"},
 	},
 }
 
@@ -423,20 +420,193 @@ var cmdDocsSearch = Command{
 	Description: `Returns every doc whose slug + title + body contains every
 space-separated token in --query (case-insensitive). Hits in
 title/slug rank above body-only matches. Output shape matches
-` + "`sparkwing docs list`" + ` so --json composes the same way.`,
+` + "`sparkwing docs list`" + ` so -o json composes the same way.`,
 	Flags: []FlagSpec{
 		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Search terms (every token must match)", Required: true, Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Selection", "Output", "Other"},
 	Examples: []Example{
 		{"Find docs about the warm pool", "sparkwing docs search --query \"warm pool\""},
-		{"JSON for agents", "sparkwing docs search -q approval --json"},
+		{"JSON for agents", "sparkwing docs search -q approval -o json"},
 	},
 }
 
-// ---- sparkwing debug ------------------------------------------
+var cmdDocsMigrations = Command{
+	Path:     "sparkwing docs migrations",
+	Synopsis: "Per-version migration guides (agent-friendly)",
+	Description: `Surface the migration guides shipped under docs/migrations/.
+Each released sparkwing version that introduces breaking changes
+gets a guide; ` + "`sparkwing docs migrations between`" + ` concatenates
+every guide in a version range into one blob you can pipe straight
+into an agent context.
+
+The same files are also reachable as regular docs (e.g.
+` + "`sparkwing docs read --topic migrations/v0.4.0`" + `); this
+subcommand is the ergonomics layer with semver-aware filtering and
+range output.`,
+	Subcommands: []SubcommandRef{
+		{"list", "Table of every migration guide this CLI knows about"},
+		{"read", "Print one migration guide to stdout (--version vX.Y.Z)"},
+		{"between", "Concatenate every guide in (--from, --to] into one blob"},
+	},
+	Examples: []Example{
+		{"List embedded migration guides", "sparkwing docs migrations list"},
+		{"Read one guide", "sparkwing docs migrations read --version v0.4.0"},
+		{"Every guide upgrading from v0.3.0 to v0.4.0", "sparkwing docs migrations between --from v0.3.0 --to v0.4.0"},
+		{"Every guide this CLI knows (one-shot agent context)", "sparkwing docs migrations between"},
+	},
+}
+
+var cmdDocsMigrationsList = Command{
+	Path:     "sparkwing docs migrations list",
+	Synopsis: "Table of every embedded migration guide",
+	Description: `Lists each migration guide bundled with this binary in
+descending semver order, with date and one-line summary parsed
+from docs/migrations/README.md. Use --output json for an
+agent-readable array of {version, date, summary, slug, bytes}.
+
+When the CLI's own version is older than the newest embedded
+guide a one-line stderr note suggests rebuilding.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "web", Desc: "Fetch the index from sparkwing.dev/migrations/index.json instead of the embed", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
+	},
+	GroupOrder: []string{"Source", "Output", "Other"},
+	Examples: []Example{
+		{"Human-readable table", "sparkwing docs migrations list"},
+		{"Agent-readable", "sparkwing docs migrations list -o json"},
+		{"Version-per-line for shell loops", "sparkwing docs migrations list -o plain"},
+		{"Online (every release on sparkwing.dev)", "sparkwing docs migrations list --web"},
+	},
+}
+
+var cmdDocsMigrationsRead = Command{
+	Path:     "sparkwing docs migrations read",
+	Synopsis: "Print one migration guide's markdown to stdout",
+	Description: `Outputs the markdown body for a single migration guide. Default
+output is the raw markdown so an agent can pipe straight into
+its context. Cross-doc markdown links to other topics are
+rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
+(same transform as ` + "`sparkwing docs read`" + `).`,
+	PosArgs: []PosArg{
+		{Name: "[vX.Y.Z]", Desc: "Migration guide version, when --version is not supplied"},
+	},
+	Flags: []FlagSpec{
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Migration guide version (e.g. v0.4.0). Positional fallback accepted.", Group: "Selection"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
+	},
+	GroupOrder: []string{"Selection", "Source", "Output", "Other"},
+	Examples: []Example{
+		{"Read the v0.4.0 guide", "sparkwing docs migrations read --version v0.4.0"},
+		{"Positional shortcut", "sparkwing docs migrations read v0.4.0"},
+		{"Read v0.5.0 from sparkwing.dev (not yet embedded)", "sparkwing docs migrations read --version v0.5.0 --web"},
+	},
+}
+
+var cmdDocsMigrationsBetween = Command{
+	Path:     "sparkwing docs migrations between",
+	Synopsis: "Concatenate every guide in a version range into one blob",
+	Description: `Returns every migration guide whose version is in (--from, --to],
+in ascending version order, separated by markdown horizontal rules.
+The output starts with a "Migration: vA -> vB" header so an agent
+knows the range up-front.
+
+This is the agent-killer command: one invocation produces the full
+migration context for an N-version jump in a form ready to pipe.
+
+--from defaults to v0.0.0 (every guide up through --to).
+--to defaults to the highest version this CLI knows about.`,
+	Flags: []FlagSpec{
+		{Name: "from", Argument: "vX.Y.Z", Desc: "Exclusive lower bound (default v0.0.0)", Group: "Selection"},
+		{Name: "to", Argument: "vA.B.C", Desc: "Inclusive upper bound (default = latest embedded version)", Group: "Selection"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+		{Name: "web", Desc: "Fetch every guide in the range from sparkwing.dev", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
+	},
+	GroupOrder: []string{"Selection", "Source", "Output", "Other"},
+	Examples: []Example{
+		{"Every guide for a v0.3.0 -> v0.4.0 jump", "sparkwing docs migrations between --from v0.3.0 --to v0.4.0"},
+		{"Every guide up to a target version", "sparkwing docs migrations between --to v0.4.0"},
+		{"Every guide this CLI knows (one-shot agent context)", "sparkwing docs migrations between"},
+		{"Full range from sparkwing.dev (includes versions not yet embedded)", "sparkwing docs migrations between --web"},
+	},
+}
+
+var cmdDocsVersions = Command{
+	Path:     "sparkwing docs versions",
+	Synopsis: "List doc versions known to this CLI (and sparkwing.dev with --web)",
+	Description: `Reports each doc version the source knows about. Default
+output is hermetic: only the binary's embedded version (plus every
+migration-guide version shipped in the embed) appears, with no
+network calls.
+
+With --web, fetches sparkwing.dev/versions.json and merges in every
+release available online -- useful for discovering newer versions
+this CLI can render via --web on the read / list verbs.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "web", Desc: "Merge in sparkwing.dev/versions.json (network)", Group: "Source"},
+		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
+	},
+	GroupOrder: []string{"Source", "Output", "Other"},
+	Examples: []Example{
+		{"Embedded only (default)", "sparkwing docs versions"},
+		{"Every version available online", "sparkwing docs versions --web"},
+		{"Agent-readable JSON", "sparkwing docs versions --web -o json"},
+	},
+}
+
+var cmdDocsCache = Command{
+	Path:     "sparkwing docs cache",
+	Synopsis: "Inspect or clear the on-disk cache used by --web",
+	Description: `--web fetches are cached to $XDG_CACHE_HOME/sparkwing/web/ (or
+~/.cache/sparkwing/web/). The cache mirrors the URL path, so you
+can ` + "`cat`" + ` the cached files directly when debugging.
+
+Use ` + "`cache info`" + ` to see size / counts; use ` + "`cache clear`" + ` to wipe it.`,
+	Subcommands: []SubcommandRef{
+		{"info", "Print cache dir, total size, per-resource breakdown"},
+		{"clear", "Remove every cached file (refuses to escape the cache dir)"},
+	},
+	Examples: []Example{
+		{"How big is the cache?", "sparkwing docs cache info"},
+		{"Force-refresh on next --web call", "sparkwing docs cache clear"},
+	},
+}
+
+var cmdDocsCacheInfo = Command{
+	Path:     "sparkwing docs cache info",
+	Synopsis: "Print cache dir, total size, per-resource breakdown",
+	Description: `Walks the cache and prints a summary: total size, file counts
+broken down by doc / migration / index, and the freshness state of
+the cached versions.json (24h TTL).`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing docs cache info"},
+		{"Agent-readable", "sparkwing docs cache info -o json"},
+	},
+}
+
+var cmdDocsCacheClear = Command{
+	Path:     "sparkwing docs cache clear",
+	Synopsis: "Remove every cached file",
+	Description: `Deletes every file under the cache directory. Safe: the
+implementation refuses to remove paths that don't resolve inside
+the cache dir, so a stray symlink in the cache can't escape.
+
+Useful when a cached versions.json or index.json has gone stale
+faster than the 24h TTL window, or when debugging --web behavior.`,
+	Examples: []Example{
+		{"Wipe the cache", "sparkwing docs cache clear"},
+	},
+}
 
 var cmdDebug = Command{
 	Path:     "sparkwing debug",
@@ -504,11 +674,11 @@ the pause point. Local and cluster modes share this surface.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the paused node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to release", Required: true, Group: "Target"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Release locally", "sparkwing debug release --run run-X --node tests"},
-		{"Release in prod", "sparkwing debug release --run run-X --node tests --on prod"},
+		{"Release in prod", "sparkwing debug release --run run-X --node tests --profile prod"},
 	},
 }
 
@@ -523,10 +693,10 @@ exits 0.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the paused node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to attach to", Required: true, Group: "Target"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Attach in prod", "sparkwing debug attach --run run-X --node tests --on prod"},
+		{"Attach in prod", "sparkwing debug attach --run run-X --node tests --profile prod"},
 	},
 }
 
@@ -553,13 +723,13 @@ Default --seq selects the most-recent attempt for the node; pass
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to reproduce", Required: true, Group: "Target"},
 		{Name: "seq", Argument: "N", Desc: "Attempt index; -1 selects most recent", Group: "Target"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 		{Name: "image", Argument: "REF", Desc: "Runner image for cluster-mode debug pod (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Rerun locally", "sparkwing debug rerun --run run-X --node tests"},
 		{"Rerun a specific attempt", "sparkwing debug rerun --run run-X --node tests --seq 1"},
-		{"Rerun in prod", "sparkwing debug rerun --run run-X --node tests --on prod --image ghcr.io/me/runner:v1"},
+		{"Rerun in prod", "sparkwing debug rerun --run run-X --node tests --profile prod --image ghcr.io/me/runner:v1"},
 	},
 }
 
@@ -579,7 +749,7 @@ re-fire, and any code drift in the registered job struct (renamed
 type, removed field) aborts loud rather than silently producing
 wrong results.
 
-With --on PROF, the original run + target node + dep outputs +
+With --profile PROF, the original run + target node + dep outputs +
 dispatch snapshot are first fetched from the named controller via
 HTTP and side-loaded into the local store. Replay execution itself
 always runs locally because the user's sparkwing binary owns the
@@ -587,11 +757,11 @@ registered pipeline factories.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the original node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to re-execute", Required: true, Group: "Target"},
-		{Name: "on", Argument: "PROF", Desc: "Sideload from this profile's controller before replaying locally", Group: "System"},
+		{Name: "profile", Argument: "PROF", Desc: "Sideload from this profile's controller before replaying locally", Group: "System"},
 	},
 	Examples: []Example{
 		{"Replay a node locally", "sparkwing debug replay --run run-X --node deploy"},
-		{"Replay a prod run on your laptop", "sparkwing debug replay --on prod --run run-X --node deploy"},
+		{"Replay a prod run on your laptop", "sparkwing debug replay --profile prod --run run-X --node deploy"},
 	},
 }
 
@@ -606,14 +776,12 @@ continuously.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to inspect", Required: true, Group: "Target"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Inspect locally", "sparkwing debug env --run run-X --node tests"},
 	},
 }
-
-// ---- sparkwing run flag specs ----------------------------------
 
 // runFlagSpecs is shared between cmdRun (the `sparkwing run` help
 // page) and cmdPipelineRun (the `sparkwing pipeline run` help page),
@@ -642,8 +810,6 @@ func runFlagSpecsFromDocs() []FlagSpec {
 	return out
 }
 
-// ---- sparkwing pipeline------------------------------------------
-
 var cmdPipeline = Command{
 	Path:     "sparkwing pipeline",
 	Synopsis: "This repo's pipelines",
@@ -654,12 +820,13 @@ Discovery (list / describe / discover / explain) shows what
 pipelines this repo defines. 'new' scaffolds a fresh pipeline
 (auto-bootstraps .sparkwing/ on first use). 'run' invokes one
 (positional name; same as 'sparkwing run <name>'). 'hooks' wires
-pipelines to git pre-commit / pre-push.
+pipelines to git pre-commit / pre-push / post-commit.
 'sparks' manages reusable spark libraries declared in
 .sparkwing/sparks.yaml.
 
-Every verb supports --json so an agent can parse output
-directly rather than scraping tab-complete.
+The discovery verbs (list / describe / discover / templates)
+support -o json so an agent can parse output directly rather
+than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
 'sparkwing version update --sdk'. To see the current pin, run
@@ -669,15 +836,18 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 		{"describe", "Print one pipeline's full metadata"},
 		{"discover", "Fuzzy search over names, descriptions, tags"},
 		{"new", "Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)"},
+		{"templates", "List the sparks-core template registry (starters for `new --template`)"},
 		{"explain", "Render the pipeline's Plan DAG without running"},
+		{"lint", "Check pipeline source for idiomatic anti-patterns (enforced gate)"},
 		{"plan", "Render the runtime-resolved DAG (would-run/would-skip) without running"},
 		{"run", "Invoke a pipeline (canonical form of `sparkwing run <name>`)"},
-		{"hooks", "Git pre-commit / pre-push hooks: install / uninstall / status"},
+		{"trigger", "Submit a pipeline to a profile's controller (remote execution)"},
+		{"hooks", "Git pre-commit / pre-push / post-commit hooks: install / uninstall / status"},
 		{"sparks", "Manage sparks libraries: list / add / remove / lint / resolve / update / warmup"},
 	},
 	Examples: []Example{
-		{"Machine-readable catalog", "sparkwing pipeline list --json"},
-		{"One pipeline's details", "sparkwing pipeline describe --name release --json"},
+		{"Machine-readable catalog", "sparkwing pipeline list -o json"},
+		{"One pipeline's details", "sparkwing pipeline describe --name release -o json"},
 		{"Search by intent", `sparkwing pipeline discover --query "tag a release"`},
 		{"First pipeline in a fresh repo (auto-bootstraps)", "sparkwing pipeline new --name release"},
 		{"Inspect the DAG before running", "sparkwing pipeline explain --name release-all"},
@@ -706,7 +876,7 @@ pipeline binary, e.g. 'sparkwing pipeline run release
 --version v1.2.3' passes --version through to the pipeline's
 Args.`,
 	PosArgs: []PosArg{
-		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
+		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
 	Flags:       runFlagSpecs,
 	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
@@ -714,8 +884,48 @@ Args.`,
 	Examples: []Example{
 		{"Run with no flags", "sparkwing pipeline run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing pipeline run release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing pipeline run build-test-deploy --from feature/xyz"},
-		{"Dispatch remotely", "sparkwing pipeline run deploy --on prod"},
+		{"Run from a different git ref", "sparkwing pipeline run build-test-deploy --sw-ref feature/xyz"},
+		{"Dispatch remotely", "sparkwing pipeline trigger deploy --profile prod"},
+	},
+}
+
+// cmdPipelineTrigger submits a trigger to a profile's controller for
+// remote execution -- the v0.5.0 successor to `sparkwing run
+// --sw-profile`. Positional pipeline name (mirrors `pipeline run`), a
+// required --profile naming the controller, and pass-through pipeline
+// args.
+var cmdPipelineTrigger = Command{
+	Path:     "sparkwing pipeline trigger",
+	Synopsis: "Submit a pipeline to a profile's controller (remote execution)",
+	Description: `Submits a trigger to the controller defined by --profile and
+follows the remote run until it reaches a terminal state.
+
+When the profile defines a logs URL, the follow streams full log
+output; otherwise it shows node-status updates from the
+controller. --detach skips the follow and prints the run id once
+the trigger is registered (the trigger POST itself always
+completes before the command exits, so the run is guaranteed
+queued).
+
+Any flag not recognized here is forwarded to the pipeline as a
+typed Arg, e.g. 'sparkwing pipeline trigger release --profile
+prod --version v1.2.3' passes --version through to the trigger
+payload -- same shape as 'sparkwing run'.
+
+Requires a profile with controller: set. For local execution
+against a profile's storage, use 'sparkwing run --profile X'.`,
+	PosArgs: []PosArg{
+		{Name: "<pipeline>", Desc: "Pipeline name registered on the controller", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline", Group: "System", Required: true},
+		{Name: "detach", Desc: "Return once the trigger is registered (print the run id); don't follow", Group: "System"},
+	},
+	GroupOrder:  []string{"System", "Other"},
+	UsageSuffix: "[-- pipeline-flags...]",
+	Examples: []Example{
+		{"Submit and follow", "sparkwing pipeline trigger release --profile prod --version v1.2.3"},
+		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger release --profile prod --detach"},
 	},
 }
 
@@ -723,23 +933,22 @@ var cmdPipelineList = Command{
 	Path:     "sparkwing pipeline list",
 	Synopsis: "Enumerate every pipeline with metadata",
 	Description: `Walks up from the current directory to locate .sparkwing/,
-merges pipelines.yaml entries with the describe cache's typed
+merges sparkwing.yaml entries with the describe cache's typed
 metadata, and prints a grouped aligned table.
 
---json emits structured records instead; agents should prefer
---json since tab-complete / table output is for human reading.
+-o json emits structured records instead; agents should prefer
+-o json since tab-complete / table output is for human reading.
 
 --all includes entries marked 'hidden: true'. By default they're
 omitted.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "all", Desc: "Include entries marked hidden", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing pipeline list"},
-		{"Agent-readable catalog", "sparkwing pipeline list --json"},
+		{"Agent-readable catalog", "sparkwing pipeline list -o json"},
 		{"Include hidden entries", "sparkwing pipeline list --all"},
 	},
 }
@@ -755,12 +964,11 @@ hidden flag shouldn't surprise you.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable", "sparkwing pipeline describe --name release"},
-		{"Agent-readable", "sparkwing pipeline describe --name release --json"},
+		{"Agent-readable", "sparkwing pipeline describe --name release -o json"},
 	},
 }
 
@@ -772,18 +980,17 @@ must match some haystack field (name / short / help / group /
 tags / triggers); matches in the name score higher than matches
 in prose so direct hits surface first.
 
---json emits {name, kind, group, ..., score} records sorted by
-score descending; agents should prefer --json for consumption.`,
+-o json emits {name, kind, group, ..., score} records sorted by
+score descending; agents should prefer -o json for consumption.`,
 	Flags: []FlagSpec{
 		{Name: "query", Argument: "TEXT", Desc: "Search query (one or more tokens, all must hit some field)", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json (ranked, with score field)", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
 		{"Find release-related pipelines", `sparkwing pipeline discover --query release`},
 		{"Multi-token, all must hit", `sparkwing pipeline discover --query "tag release"`},
-		{"Agent-readable ranked hits", `sparkwing pipeline discover --query deploy --json`},
+		{"Agent-readable ranked hits", `sparkwing pipeline discover --query deploy -o json`},
 	},
 }
 
@@ -791,22 +998,44 @@ var cmdPipelineNew = Command{
 	Path:     "sparkwing pipeline new",
 	Synopsis: "Scaffold a new Go pipeline",
 	Description: `Creates a stub pipeline in the nearest .sparkwing/:
-jobs/<snake>.go plus a pipelines.yaml entry. Auto-bootstraps
+jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
 .sparkwing/ on first use, so a fresh repo's first scaffold sets
 up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
-Templates:
+Before building by hand, browse the ready-made starters:
+'sparkwing pipeline templates' lists task-shaped registry templates
+(Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
+scaffold one with --template <name> [--param k=v ...].
+
+Pass --sw-cd/-C to scaffold into a repo other than the current
+directory (the .sparkwing search re-anchors there).
+
+Built-in templates (registry templates are listed by 'pipeline templates'):
   - minimal (default): single-node Plan with a stubbed Run.
     Smallest viable shape; the editor's first move is replacing
-    the Log("TODO") with real logic.
+    the placeholder Info() line with real logic.
   - build-test-deploy: three-node Plan (build -> test -> deploy)
-    with echo Run bodies that print a TODO line on each step.
+    with echo Run bodies that print a placeholder line on each step.
     The canonical CI shape; first 'sparkwing run <name>' surfaces three
     exec banners + three echoed lines so the structure is
     visible end-to-end.
+  - ci-pr-check: pull-request gate. lint and test run in parallel and
+    a final gate job depends on both, so the pipeline is green only
+    when every check passes. test Prefers a CI runner label.
+  - release: linear version-bump -> changelog -> publish flow. The
+    canonical release shape; publish Prefers a release runner label.
+  - scheduled-report: fan-out report. One collect job seeds three
+    parallel gatherers (metrics, errors, usage) and publish-report
+    converges them. Prints the sparkwing.yaml 'on:' schedule trigger
+    to add for cron runs.
 
-Refuses to clobber: if the name already exists in pipelines.yaml
+Each built-in template scaffolds a pipeline that compiles, renders
+clean under 'pipeline explain', and passes 'pipeline lint': pure
+Plan(), runner-label preferences over host branching, echo Run bodies
+so the first 'sparkwing run <name>' succeeds end-to-end.
+
+Refuses to clobber: if the name already exists in sparkwing.yaml
 the command fails before writing anything.
 
 Supply --hidden to hide from default listings; --short to pre-fill
@@ -819,15 +1048,45 @@ See also:
   better fit -- it skips the compile cycle.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
-		{Name: "template", Argument: "KIND", Desc: "minimal (one node, default) | build-test-deploy (three-node build->test->deploy DAG)", Default: "minimal", Group: "Scaffold"},
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
+		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | ci-pr-check | release | scheduled-report | any registry name from `sparkwing pipeline templates`", Default: "minimal", Group: "Scaffold"},
+		{Name: "param", Argument: "K=V", Desc: "Registry template parameter (repeatable); see `sparkwing pipeline templates`", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
-		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line", Group: "Scaffold"},
+		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line (built-in templates only)", Group: "Scaffold"},
 	},
 	GroupOrder: []string{"Target", "Scaffold", "Other"},
 	Examples: []Example{
 		{"Single-node pipeline (default template)", "sparkwing pipeline new --name release"},
 		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name release-all --template build-test-deploy"},
-		{"Pre-fill the ShortHelp", `sparkwing pipeline new --name release --short "Cut a release"`},
+		{"Pull-request gate (lint + test -> gate)", "sparkwing pipeline new --name pr-check --template ci-pr-check"},
+		{"Scheduled fan-out report", "sparkwing pipeline new --name daily-report --template scheduled-report"},
+		{"From a registry template", `sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp --param namespace=myapp --param app-name=myapp --param health-url=http://myapp.myapp.svc:8080/health`},
+	},
+}
+
+var cmdPipelineTemplates = Command{
+	Path:     "sparkwing pipeline templates",
+	Synopsis: "List the sparks-core template registry",
+	Description: `Lists the curated, parameterized pipeline starters in the
+sparks-core/templates registry -- the values usable as
+'sparkwing pipeline new --template <name>'. Each entry shows a
+"when to use" signal and its required / optional parameters.
+
+These are distinct from the two built-in stubs (minimal,
+build-test-deploy) that ship in the CLI itself: the registry
+templates are richer, real-world shapes (build-test-deploy to
+k8s, static-site, migrate+deploy, ...).
+
+-o json emits the manifests (name, description, whenToUse,
+parameters, applicability) -- prefer it for agent consumption.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Browse the registry", "sparkwing pipeline templates"},
+		{"Agent-readable manifests", "sparkwing pipeline templates -o json"},
+		{"Scaffold from one", "sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp"},
 	},
 }
 
@@ -839,13 +1098,13 @@ pipeline's Plan method, and prints the resulting DAG (nodes,
 dependencies, approval gates) without running a single job.
 
 Any --flag value tokens that are NOT recognized by explain itself
-(i.e. anything other than --name / --all / --json / --help) are
+(i.e. anything other than --name / --all / -o/--output / --help) are
 forwarded to the pipeline so Plans that branch on --env / --version
 / etc. can be previewed under realistic inputs. Missing required
 args are non-fatal here -- explain renders a best-effort plan so
 the shape is visible before every flag is provided.
 
---all sweeps every pipeline in .sparkwing/pipelines.yaml, runs
+--all sweeps every pipeline in .sparkwing/sparkwing.yaml, runs
 Plan() on each with no extra args, and exits non-zero if any
 pipeline fails. Designed as a CI gate: a Plan-time validation
 mismatch (sparkwing.RefTo[T] type drift, Produces[T] / SetResult
@@ -853,17 +1112,58 @@ asymmetry, duplicate node ID, etc.) blocks merges before the
 pipeline ever runs.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to explain (one of --name or --all required)", Group: "Target"},
-		{Name: "all", Desc: "Validate every pipeline in this repo's pipelines.yaml; non-zero exit on any failure", Group: "Target"},
+		{Name: "all", Desc: "Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json (emits raw plan-snapshot JSON, or per-pipeline result rows under --all)", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Inspect release-all's DAG", "sparkwing pipeline explain --name release-all"},
 		{"Preview with args (forwarded to the pipeline)", "sparkwing pipeline explain --name example-release --env prod"},
-		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all --json"},
+		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all -o json"},
 		{"Validate every pipeline (CI gate)", "sparkwing pipeline explain --all"},
+	},
+}
+
+var cmdPipelineLint = Command{
+	Path:     "sparkwing pipeline lint",
+	Synopsis: "Check pipeline source for idiomatic anti-patterns (enforced gate)",
+	Description: `Statically analyzes pipeline source for the anti-patterns
+that make a Plan() non-deterministic, impure, or misconfigured,
+and exits non-zero on any violation. Unlike 'explain' (which
+builds and runs Plan to validate the resulting DAG), 'lint' reads
+the Go source with go/ast -- it never compiles or runs anything,
+so it works against a pinned-SDK .sparkwing/ tree.
+
+Only the Plan() body is inspected; code inside job/step closures
+and SkipIf / BeforeRun bodies runs at dispatch, so I/O and
+environment reads there are idiomatic and never flagged.
+
+The rule set (see --rules for each rule's charter):
+  plan-io              I/O (shell, exec, file, http) in Plan()
+  plan-runtime-branch  os.Getenv / runtime.GOOS / IsLocal branching in Plan()
+  runner-label         blank runner labels; Inline + Requires on one job
+  unused-ref           a RefTo result discarded into _ or a bare statement
+  guard-misuse         pipeline guards that can never be satisfied together
+
+--all sweeps every pipeline in .sparkwing/sparkwing.yaml and exits
+non-zero if any violates a rule -- designed as a CI gate alongside
+'explain --all'. --name lints a single pipeline. Source defaults
+to <.sparkwing>/jobs; override with --dir.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Pipeline to lint (one of --name or --all required)", Group: "Target"},
+		{Name: "all", Desc: "Lint every pipeline in this repo's sparkwing.yaml; non-zero exit on any violation", Group: "Target"},
+		{Name: "rules", Desc: "Print each rule's charter (what it forbids and why) and exit", Group: "Target"},
+		{Name: "dir", Argument: "DIR", Desc: "Directory of pipeline source to scan (default: <.sparkwing>/jobs)", Group: "Target"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
+	},
+	GroupOrder: []string{"Target", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Lint one pipeline", "sparkwing pipeline lint --name release"},
+		{"Lint every pipeline (CI gate)", "sparkwing pipeline lint --all"},
+		{"Agent-readable findings", "sparkwing pipeline lint --all -o json"},
+		{"Show the rule set", "sparkwing pipeline lint --rules"},
 	},
 }
 
@@ -904,14 +1204,13 @@ with 'sparkwing run <name>' to actually dispatch.`,
 		{Name: "start-at", Argument: "STEP", Desc: "Skip every WorkStep upstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "stop-at", Argument: "STEP", Desc: "Skip every WorkStep downstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json (emits raw plan-preview JSON for agents)", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Range", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Resolve cluster-up's DAG with current args", "sparkwing pipeline plan --name cluster-up"},
 		{"Preview a resume-from-step", "sparkwing pipeline plan --name cluster-up --start-at install-argocd"},
-		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name release-all --json"},
+		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name release-all -o json"},
 	},
 }
 
@@ -924,7 +1223,7 @@ var cmdRunConfig = Command{
 	Synopsis: "Print the resolved Config struct + declared Secrets for a pipeline + target",
 	Description: `Pure inspection: resolves the pipeline's typed Config
 struct through the same layering ` + "`sparkwing run`" + ` uses
-(struct defaults < pipelines.yaml values.base < per-target values)
+(struct defaults < sparkwing.yaml values.base < per-target values)
 and prints each field's resolved value alongside which layer
 contributed it. Also lists every declared Secret with its source
 binding -- useful before driving destructive ` + "`--for prod`" + `
@@ -937,12 +1236,11 @@ Invocation: ` + "`sparkwing run <pipeline> config --for <target>`" + ` --
 the pipeline binary handles the subverb directly.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Inspect the staging config", "sparkwing run release config --for staging"},
-		{"Agent-readable form", "sparkwing run release config --for prod --json"},
+		{"Agent-readable form", "sparkwing run release config --for prod -o json"},
 	},
 	HideFromComplete: true,
 }
@@ -964,9 +1262,20 @@ typed many times a day. Every other input is a named flag.
 
 Any flag not recognized by run itself is forwarded to the
 pipeline binary, e.g. 'sparkwing run release --version
-v1.2.3' passes --version through to the pipeline's Args.`,
+v1.2.3' passes --version through to the pipeline's Args.
+
+For remote execution on a profile's controller, use
+'sparkwing pipeline trigger <name> --profile PROF'.
+
+Output: a human-readable per-node summary when stdout is a
+terminal, line-delimited JSON otherwise (so piped/agent/CI
+consumers get a stable JSONL stream). Force a format with
+SPARKWING_LOG_FORMAT=pretty|json|quiet. quiet collapses the
+run to a progress line plus a one-line pass/fail status with
+the run id, surfacing the failing step only on failure; it is
+the default for managed git hooks.`,
 	PosArgs: []PosArg{
-		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/pipelines.yaml", Required: true},
+		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
 	Flags:       runFlagSpecs,
 	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
@@ -974,13 +1283,38 @@ v1.2.3' passes --version through to the pipeline's Args.`,
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing run build-test-deploy --from feature/xyz"},
+		{"Run from a different git ref", "sparkwing run build-test-deploy --sw-ref feature/xyz"},
 		{"Retry a failed run", "sparkwing runs retry RUN_ID --failed"},
-		{"Dispatch remotely", "sparkwing run deploy --on prod --region us-west-2"},
+		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
 	},
 }
 
-// ---- sparkwing dashboard ---------------------------------------
+// cmdProfile is read-side introspection: which profile would sparkwing
+// pick right now, and why. No positional args; --profile NAME drives the
+// hypothetical "what if I passed --profile NAME" case.
+var cmdProfile = Command{
+	Path:     "sparkwing profile",
+	Synopsis: "Show which profile sparkwing would use right now, and why",
+	Description: `Reports the profile a sparkwing command would resolve to and
+the chain that picked it (flag > project hint > detect > default
+> builtin laptop), using the same resolver 'sparkwing run' and
+'sparkwing pipeline trigger' use -- so the answer matches what
+they would actually do.
+
+With no flag it shows the active no-flag resolution. With
+--profile NAME it shows the hypothetical: what adding that flag
+to your next command would select. Tokens are never printed.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Show the hypothetical resolution for `--profile NAME`", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Active profile with no flag", "sparkwing profile"},
+		{"What would --profile prod pick", "sparkwing profile --profile prod"},
+		{"Machine-readable", "sparkwing profile -o json"},
+	},
+}
 
 var cmdDashboard = Command{
 	Path:     "sparkwing dashboard",
@@ -1020,9 +1354,9 @@ and returns 0 without spawning a duplicate.`,
 	Flags: []FlagSpec{
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "on", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store)", Group: "Storage"},
-		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --on.", Group: "Storage"},
-		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --on.", Group: "Storage"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store)", Group: "Storage"},
+		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
+		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Storage"},
 		{Name: "no-local-store", Desc: "Skip local SQLite; list runs from --artifact-store. Requires --log-store + --artifact-store.", Group: "Storage"},
 	},
@@ -1031,7 +1365,7 @@ and returns 0 without spawning a duplicate.`,
 		{"Start with defaults", "sparkwing dashboard start"},
 		{"Use an alternate port", "sparkwing dashboard start --addr 127.0.0.1:5000"},
 		{"Isolate state under a scratch dir", "sparkwing dashboard start --home " + helpExampleScratchDir("sparkwing-x")},
-		{"Tail CI runs from S3 (no SQLite)", "sparkwing dashboard start --on ci-smoke --no-local-store --read-only"},
+		{"Tail CI runs from S3 (no SQLite)", "sparkwing dashboard start --profile ci-smoke --no-local-store --read-only"},
 	},
 }
 
@@ -1064,8 +1398,6 @@ running, 1 when not.`,
 	},
 }
 
-// ---- sparkwing worker ------------------------------------------
-
 var cmdWorker = Command{
 	Path:     "sparkwing cluster worker",
 	Synopsis: "Claim triggers from a profile's controller and run them in-process",
@@ -1075,23 +1407,21 @@ no K8s, no warm pool, no image dispatch. For the cluster-mode worker
 with --runner k8s|warm and image / service-account flags, use
 sparkwing-runner.
 
-Run against a remote controller via --on prod (or whichever profile),
-or against a local 'sparkwing dashboard start' via --on local. With
---on omitted, uses the default profile from profiles.yaml.`,
+Run against a remote controller via --profile prod (or whichever profile),
+or against a local 'sparkwing dashboard start' via --profile local. With
+--profile omitted, uses the default profile from profiles.yaml.`,
 	Flags: []FlagSpec{
-		{Name: "on", Argument: "PROFILE", Desc: "Profile name from profiles.yaml (default: default profile)", Group: "Connection"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile name from profiles.yaml (default: default profile)", Group: "Connection"},
 		{Name: "poll", Argument: "DUR", Desc: "Claim poll interval when the queue is empty", Default: "1s", Group: "Tuning"},
 		{Name: "heartbeat", Argument: "DUR", Desc: "Claim-lease heartbeat cadence", Default: "5s", Group: "Tuning"},
 	},
 	GroupOrder: []string{"Connection", "Tuning", "Other"},
 	Examples: []Example{
 		{"Run against the default profile", "sparkwing cluster worker"},
-		{"Run against a named profile", "sparkwing cluster worker --on local"},
-		{"Faster polling for tight dev loops", "sparkwing cluster worker --on local --poll 250ms"},
+		{"Run against a named profile", "sparkwing cluster worker --profile local"},
+		{"Faster polling for tight dev loops", "sparkwing cluster worker --profile local --poll 250ms"},
 	},
 }
-
-// ---- sparkwing gc ----------------------------------------------
 
 var cmdGC = Command{
 	Path:     "sparkwing cluster gc",
@@ -1101,21 +1431,224 @@ Normally fires at 'sparkwing cluster worker' startup; exposed as a subcommand
 so operators can trigger it against a running pod via kubectl
 exec during incident response.
 
-When --on is omitted, the run-directory sweep is skipped; the
+When --profile is omitted, the run-directory sweep is skipped; the
 mtime-based git/ and tmp/ sweeps still run and free disk. Supply
---on to enable the full sweep.`,
+--profile to enable the full sweep.`,
 	Flags: []FlagSpec{
 		{Name: "root", Argument: "DIR", Desc: "Warm-PVC root (default: $SPARKWING_HOME resolution)", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; without it run-dir sweep is skipped", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; without it run-dir sweep is skipped", Group: "System"},
 	},
 	Examples: []Example{
 		{"mtime-only sweep in-pod (no controller)", "sparkwing cluster gc"},
-		{"Full sweep against prod controller", "sparkwing cluster gc --on prod"},
-		{"Target a specific warm root", "sparkwing cluster gc --root /var/lib/sparkwing --on prod"},
+		{"Full sweep against prod controller", "sparkwing cluster gc --profile prod"},
+		{"Target a specific warm root", "sparkwing cluster gc --root /var/lib/sparkwing --profile prod"},
 	},
 }
 
-// ---- sparkwing completion --------------------------------------
+var cmdMaintenance = Command{
+	Path:     "sparkwing maintenance",
+	Synopsis: "Sweep the local concurrency tables without a controller",
+	Description: `Runs the janitorial pass the controller normally runs on a
+schedule, but against the local state database with no controller
+required. Reaps lease-expired concurrency holders and promotes the next
+queued waiters, deletes stale and orphaned waiters, sweeps expired and
+over-cap cache rows, and reconciles keys with idle capacity.
+
+Local runs trigger this pass inline, throttled to once every few minutes.
+Run this command to force a full pass now -- from cron, or to reclaim a
+database that grew while the box sat idle. It touches only finished or
+expired rows, so it is safe to run alongside live runs.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Sweep now", "sparkwing maintenance"},
+		{"Machine-readable summary", "sparkwing maintenance -o json"},
+		{"Hourly from cron", "0 * * * * sparkwing maintenance"},
+	},
+}
+
+var cmdBoxSlots = Command{
+	Path:     "sparkwing box-slots",
+	Synopsis: "Show or live-tune the host run-concurrency cap",
+	Description: `The box-slot semaphore caps how many ` + "`sparkwing run`" + ` orchestrator
+processes run at once on this machine, so overlapping invocations
+don't oversubscribe the box's CPU. The cap used to be fixed when each
+run started; this command makes it a live host control runs re-read
+while they wait or hold.
+
+'show' reports the cap in force, where it came from (the live control,
+the SPARKWING_BOX_SLOTS env baseline, or the heuristic default), and how
+many runs currently hold a slot versus wait for one. 'set' writes the
+host control: raising it lets queued runs acquire on their next poll;
+lowering it drains as holders finish (running work is never evicted).
+
+An explicit per-run --sw-box-slots still pins that one run above the
+control. Reset to the env/heuristic default with 'set --to default'.`,
+	Subcommands: []SubcommandRef{
+		{"show", "Print the cap in force, its source, and live holders + waiters"},
+		{"set", "Write the live host cap (--to N | off | default)"},
+		{"list", "One row per holder: pid, claim time, run id, liveness, lock path"},
+		{"release", "Remove a holder's lock file (--force SIGKILLs a live owner)"},
+		{"sweep", "Report live holders whose run went silent (--reap kills them)"},
+	},
+	Examples: []Example{
+		{"What's the cap and who's holding slots?", "sparkwing box-slots show"},
+		{"Machine-readable", "sparkwing box-slots show -o json"},
+		{"Raise the cap so queued runs unblock", "sparkwing box-slots set --to 4"},
+		{"Disable the semaphore on this host", "sparkwing box-slots set --to off"},
+		{"Revert to the heuristic default", "sparkwing box-slots set --to default"},
+		{"Who holds a slot right now, for which run?", "sparkwing box-slots list"},
+		{"Free a wedged holder's slot", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force"},
+		{"Which live holders look wedged?", "sparkwing box-slots sweep"},
+		{"Kill the wedged holders", "sparkwing box-slots sweep --reap"},
+	},
+}
+
+var cmdBoxSlotsSweep = Command{
+	Path:     "sparkwing box-slots sweep",
+	Synopsis: "Report stalled box-slot holders; --reap kills their owners",
+	Description: `Finds live holders that look wedged: the owner process still holds
+its lock file's flock, but its annotated run's envelope log has not
+been written for longer than the stall threshold (default 30m,
+overridable via the SPARKWING_BOX_SLOT_STALL_TTL duration). The
+envelope moves on run-level events and stdout tees, so a silent
+envelope from a live process usually marks a holder that is alive but
+stuck -- typically wedged against the state database. A holder that
+never annotated a run counts by its claim time instead. A process
+heartbeat could not tell these apart -- a live process with frozen
+database work keeps beating; the envelope moves only with progress.
+
+The envelope signal has a blind spot: a healthy run inside one long
+output-quiet node (a buffered subprocess, a silent computation past
+the threshold) also reads as stalled. Each row therefore carries a
+corroborating NEWEST-WRITE column -- the mtime age of the newest file
+under the run's directory. Recent node-file writes under a silent
+envelope mean the run is likely alive: check that column, and raise
+SPARKWING_BOX_SLOT_STALL_TTL above your longest expected quiet node,
+before trusting --reap.
+
+Without --reap this only reports: pid, claim time, run, envelope-write
+age, the newest-file age, and the evidence behind the verdict. With --reap each
+stalled owner gets SIGTERM, a grace window to exit, then SIGKILL if it
+still holds its flock; a fresh flock probe immediately before each
+signal re-verifies the same lock file is still held by the same pid,
+so a recycled pid is never killed. The lock file itself is left in
+place -- the kernel drops the flock with the process, and run
+admission garbage-collects the stale file.
+
+Reads only the filesystem and flock state, never the state database,
+so it works while state.db is wedged -- exactly when you need it.`,
+	Flags: []FlagSpec{
+		{Name: "reap", Desc: "SIGTERM each stalled holder's owner, then SIGKILL after a grace window", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Who looks wedged?", "sparkwing box-slots sweep"},
+		{"Machine-readable", "sparkwing box-slots sweep -o json"},
+		{"Kill the wedged holders", "sparkwing box-slots sweep --reap"},
+		{"Tighter threshold for this sweep", "SPARKWING_BOX_SLOT_STALL_TTL=10m sparkwing box-slots sweep"},
+	},
+}
+
+var cmdBoxSlotsList = Command{
+	Path:     "sparkwing box-slots list",
+	Synopsis: "List box-slot holders: pid, claim time, run id, liveness",
+	Description: `Prints one row per holder lock file in the box-slot directory: the
+owner pid and claim time (parsed from the filename), the run id the
+owner recorded after admission (empty until the run starts), whether
+the owner is live or stale (a non-blocking flock probe -- the kernel
+releases a dead owner's lock), and the lock file path.
+
+Reads only the filesystem and flock state, never the state database,
+so it works while state.db is wedged -- exactly when you need to know
+which run is sitting on a slot. Stale rows are left in place; admission
+sweeps them, or remove one explicitly with 'release'.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing box-slots list"},
+		{"Agent-readable", "sparkwing box-slots list -o json"},
+	},
+}
+
+var cmdBoxSlotsRelease = Command{
+	Path:     "sparkwing box-slots release",
+	Synopsis: "Remove a holder's lock file, freeing its box slot",
+	Description: `Removes one holder lock file named by its basename (as printed by
+'box-slots list'), freeing the slot it occupies. A stale file -- its
+owner already dead, flock released by the kernel -- is removed
+outright. A live holder is refused unless --force is given, in which
+case the owner process is SIGKILLed first and the file then removed;
+the kill only fires when the named file is still the owner pid's
+current holder file, so a recycled pid is never killed by mistake.
+
+Operates on the filesystem and flock state only, never the state
+database, so it works while state.db is wedged. Removal is serialized
+against run admission, and the freed slot admits the next waiter on
+its next poll.`,
+	PosArgs: []PosArg{
+		{Name: "<lockfile>", Desc: "Holder lock file basename, as printed by 'box-slots list'", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "force", Desc: "SIGKILL a live holder's owner before removing its lock file", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Remove a stale holder file", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock"},
+		{"Evict a live holder (SIGKILL)", "sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force"},
+	},
+}
+
+var cmdBoxSlotsShow = Command{
+	Path:     "sparkwing box-slots show",
+	Synopsis: "Print the cap in force, its source, and live holders + waiters",
+	Description: `Reports the host box-slot cap a new run would resolve to (with no
+per-run --sw-box-slots pin), where that value came from -- the live
+control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic default
+of max(1, NumCPU/workers) -- and the live semaphore state: how many runs
+hold a slot and how many are blocked waiting. A cap of 0 means the
+semaphore is disabled (unlimited concurrency).`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing box-slots show"},
+		{"Agent-readable", "sparkwing box-slots show -o json"},
+	},
+}
+
+var cmdBoxSlotsSet = Command{
+	Path:     "sparkwing box-slots set",
+	Synopsis: "Write the live host run-concurrency cap",
+	Description: `Writes the live host box-slot control. Waiting and running runs
+re-read it on their next acquire poll, so a change takes effect without
+restarting in-flight work: raising the cap lets queued runs acquire
+immediately; lowering it drains as current holders finish (they are
+never evicted).
+
+--to takes a positive integer (the new cap), 'off' (also 'none' / '0',
+disabling the semaphore so runs never queue), or 'default' (clear the
+control and fall back to SPARKWING_BOX_SLOTS or the heuristic). An
+explicit per-run --sw-box-slots still outranks this control for that
+run.`,
+	Flags: []FlagSpec{
+		{Name: "to", Argument: "VALUE", Desc: "New cap: a positive integer, 'off', or 'default'", Required: true, Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Raise the cap to 4", "sparkwing box-slots set --to 4"},
+		{"Disable the semaphore", "sparkwing box-slots set --to off"},
+		{"Revert to the heuristic default", "sparkwing box-slots set --to default"},
+	},
+}
 
 var cmdCompletion = Command{
 	Path:             "sparkwing completion",
@@ -1145,8 +1678,6 @@ compgen lacks the facility.`,
 	},
 }
 
-// ---- sparkwing profiles ---------------------------------------
-
 var cmdProfiles = Command{
 	Path:     "sparkwing configure profiles",
 	Synopsis: "Manage connection profiles for remote controllers",
@@ -1156,7 +1687,7 @@ $XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
 
 Every human-driven client command (tokens, users, jobs
 retry/cancel/prune/logs, gc) reads connection info from the
-selected profile via --on NAME. No --controller/--token flags
+selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.`,
 	Subcommands: []SubcommandRef{
 		{"add", "Register a new profile"},
@@ -1224,7 +1755,7 @@ the current default profile.`,
 var cmdProfilesUse = Command{
 	Path:     "sparkwing configure profiles use",
 	Synopsis: "Set the default profile",
-	Description: `Updates profiles.yaml so commands run without --on target this
+	Description: `Updates profiles.yaml so commands run without --profile target this
 profile. The previous default is untouched beyond losing its
 default status.`,
 	Flags: []FlagSpec{
@@ -1238,7 +1769,7 @@ default status.`,
 var cmdProfilesRemove = Command{
 	Path:        "sparkwing configure profiles remove",
 	Synopsis:    "Delete a profile",
-	Description: `Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --on on every call or set one via 'sparkwing profiles use --name <X>'.`,
+	Description: `Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing profiles use --name <X>'.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to remove", Required: true, Group: "Input"},
 	},
@@ -1282,13 +1813,11 @@ clears the token (empty value, not an omitted flag). Use
 	},
 }
 
-// ---- sparkwing tokens ------------------------------------------
-
 var cmdTokens = Command{
 	Path:     "sparkwing cluster tokens",
 	Synopsis: "Manage controller API tokens",
 	Description: `All subcommands resolve controller URL + admin bearer from the
-named profile (or the default profile when --on is omitted).
+named profile (or the default profile when --profile is omitted).
 Token creation prints the raw value to stdout exactly ONCE --
 stash it immediately.`,
 	Subcommands: []SubcommandRef{
@@ -1312,7 +1841,7 @@ this command exits it cannot be recovered.`,
 		{Name: "principal", Argument: "NAME", Desc: "Free-form label identifying the token holder", Required: true, Group: "Input"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes (e.g. jobs:read,jobs:write)", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (e.g. 30d, 720h). 0 = never expires", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope jobs:read,jobs:write"},
@@ -1332,19 +1861,18 @@ to each token. Tokens carrying the controller's "admin"
 superset render as "*" since admin short-circuits every other
 scope check. An empty scope set renders as "-".
 
-Use --json (or -o json) to get a structured array with explicit
+Use -o json to get a structured array with explicit
 scope arrays, suitable for piping into jq.`,
 	Flags: []FlagSpec{
 		{Name: "type", Argument: "KIND", Desc: "Filter by token type", Group: "Filter"},
 		{Name: "include-revoked", Desc: "Include revoked tokens in the output", Group: "Filter"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"List all active tokens", "sparkwing cluster tokens list"},
 		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked"},
-		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --on prod -o json | jq '.[] | select(.principal==\"agent:sparkwing-warm-runner\") | .scopes'"},
+		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal==\"agent:sparkwing-warm-runner\") | .scopes'"},
 	},
 }
 
@@ -1354,7 +1882,7 @@ var cmdTokensRevoke = Command{
 	Description: `Subsequent requests using the token receive HTTP 401. Revocation is immediate and irreversible.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Revoke a leaked token", "sparkwing cluster tokens revoke --prefix a1b2c3d4"},
@@ -1367,7 +1895,7 @@ var cmdTokensLookup = Command{
 	Description: `Prints the JSON metadata for a token given its non-secret prefix. Useful for confirming principal + scopes before revoking or rotating.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Inspect a token before revoking", "sparkwing cluster tokens lookup --prefix a1b2c3d4"},
@@ -1384,21 +1912,19 @@ lets callers cycle credentials without downtime.`,
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret prefix of the token to rotate", Required: true, Group: "Input"},
 		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates", Default: "24h", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "TTL of the new token (0 = preserve the old token's remaining TTL)", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Rotate a token with a 48h grace window", "sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h"},
 	},
 }
 
-// ---- sparkwing users -------------------------------------------
-
 var cmdUsers = Command{
 	Path:     "sparkwing cluster users",
 	Synopsis: "Manage dashboard login users",
 	Description: `Seeds admin credentials in the controller's users table, used
 by the web pod's login flow. Connection info comes from the
-selected profile; --on overrides the default.`,
+selected profile; --profile overrides the default.`,
 	Subcommands: []SubcommandRef{
 		{"add", "Create a user with a password (prompts hidden on stdin)"},
 		{"list", "Print every user + created_at + last_login_at"},
@@ -1417,7 +1943,7 @@ interactively.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
 		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Interactive add", "sparkwing cluster users add --name alice"},
@@ -1431,11 +1957,11 @@ var cmdUsersList = Command{
 	Description: `Prints name, created_at, and last_login_at for every user in
 the controller's users table.`,
 	Flags: []FlagSpec{
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"List users on the default profile", "sparkwing cluster users list"},
-		{"List users on prod", "sparkwing cluster users list --on prod"},
+		{"List users on prod", "sparkwing cluster users list --profile prod"},
 	},
 }
 
@@ -1447,14 +1973,12 @@ valid until their individual expiry -- sparkwing does not
 proactively invalidate active cookies on delete.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Delete a user", "sparkwing cluster users delete --name alice"},
 	},
 }
-
-// ---- sparkwing runs --------------------------------------------
 
 var cmdJobs = Command{
 	Path:     "sparkwing runs",
@@ -1494,7 +2018,7 @@ prune) require a profile; 'jobs logs' supports both.`,
 var cmdJobsList = Command{
 	Path:     "sparkwing runs list",
 	Synopsis: "List recent pipeline runs",
-	Description: `Without --on, reads from the local run directory. With --on NAME,
+	Description: `Without --profile, reads from the local run directory. With --profile NAME,
 fetches from the named profile's controller. Filters compose with
 AND semantics across flag types (pipeline=X AND status=Y), OR
 semantics within a repeated flag (pipeline=X OR pipeline=Y).
@@ -1502,12 +2026,12 @@ semantics within a repeated flag (pipeline=X OR pipeline=Y).
 With -q / --quiet the output is just run ids, one per line, for
 shell piping:
 
-  sparkwing runs list --pipeline X --limit 1 -q --on prod \
-      | xargs -I{} sparkwing runs logs --run {} --on prod --follow`,
+  sparkwing runs list --pipeline X --limit 1 -q --profile prod \
+      | xargs -I{} sparkwing runs logs --run {} --profile prod --follow`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "status", Argument: "STATUS", Desc: "Filter by status: running|success|failed|cancelled (repeatable; prefix `!` to exclude)", Group: "Filter"},
-		{Name: "tag", Argument: "TAG", Desc: "Filter by pipelines.yaml tag (repeatable)", Group: "Filter"},
+		{Name: "tag", Argument: "TAG", Desc: "Filter by sparkwing.yaml tag (repeatable)", Group: "Filter"},
 		{Name: "branch", Argument: "BRANCH", Desc: "Filter by git branch (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "sha", Argument: "PREFIX", Desc: "Filter by git sha prefix (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "error", Argument: "SUBSTR", Desc: "Substring match against the persisted failure reason", Group: "Filter"},
@@ -1523,7 +2047,7 @@ shell piping:
 		{Name: "by-pipeline", Desc: "Pivot into one row per pipeline with a status sparkline of the last N runs", Group: "Output"},
 		{Name: "sparkline", Argument: "N", Desc: "Sparkline length when --by-pipeline is set", Default: "30", Group: "Output"},
 		{Name: "style", Argument: "STYLE", Desc: "Sparkline glyph style: ascii|block|dot", Default: "ascii", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -1533,7 +2057,7 @@ shell piping:
 		{"Runs on main, excluding canary", "sparkwing runs list --branch main --search '-canary'"},
 		{"Runs that hit a specific failure", "sparkwing runs list --error 'permission denied'"},
 		{"Runs finished today", "sparkwing runs list --finished-after today"},
-		{"List prod runs", "sparkwing runs list --on prod --limit 50"},
+		{"List prod runs", "sparkwing runs list --profile prod --limit 50"},
 		{"By-pipeline rollup with sparkline", "sparkwing runs list --by-pipeline --since 7d"},
 		{"By-pipeline JSON for an agent", "sparkwing runs list --by-pipeline -o json --since 24h"},
 		{"Pipe the most recent run id into another verb", "sparkwing runs list --limit 1 -q | xargs -I{} sparkwing runs logs --run {}"},
@@ -1545,7 +2069,7 @@ var cmdJobsStatus = Command{
 	Synopsis: "Show one run's status (non-zero exit unless status=success)",
 	Description: `Prints a summary of the run (pipeline, status, node states).
 With --follow, polls until the run reaches a terminal status. Pass
---on NAME to read from a remote controller.
+--profile NAME to read from a remote controller.
 
 Exit code contract: after rendering, 'jobs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
@@ -1558,7 +2082,7 @@ without the shell redline. For a blocking wait, use 'jobs wait'.`,
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "steps", Desc: "Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too.", Group: "Output"},
 		{Name: "exit-zero", Desc: "Return exit code 0 even when the run failed/cancelled", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -1566,14 +2090,14 @@ without the shell redline. For a blocking wait, use 'jobs wait'.`,
 		{"Follow a running job to completion", "sparkwing runs status --run run-... --follow"},
 		{"Inspect a known-failed run without nonzero exit", "sparkwing runs status --run run-... --exit-zero"},
 		{"Expand every step on every node", "sparkwing runs status --run run-... --steps"},
-		{"Check a prod run", "sparkwing runs status --run run-... --on prod"},
+		{"Check a prod run", "sparkwing runs status --run run-... --profile prod"},
 	},
 }
 
 var cmdJobsLogs = Command{
 	Path:     "sparkwing runs logs",
 	Synopsis: "Print a run's logs",
-	Description: `Without --on, reads logs from the local run directory. Pass --on
+	Description: `Without --profile, reads logs from the local run directory. Pass --profile
 NAME to read from a remote controller's logs service (profile must
 carry both controller + logs URLs). Line-selection filters
 (--tail/--head/--lines/--grep) apply server-side in cluster mode so
@@ -1594,38 +2118,35 @@ timestamped on disk).`,
 		{Name: "tree", Desc: "Merge root + descendant runs into one stream (local only)", Group: "Filter"},
 		{Name: "follow", Short: "f", Desc: "Tail the log(s) until the run terminates", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (omit for local-only reads)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (omit for local-only reads)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Read local logs", "sparkwing runs logs --run run-20260422-142501-abcd"},
-		{"Last 20 lines of a remote run", "sparkwing runs logs --run run-... --on prod --tail 20"},
-		{"Only the most recent attempt's output", "sparkwing runs logs --run run-... --on prod --since 5m"},
+		{"Last 20 lines of a remote run", "sparkwing runs logs --run run-... --profile prod --tail 20"},
+		{"Only the most recent attempt's output", "sparkwing runs logs --run run-... --profile prod --since 5m"},
 		{"Search logs for an error substring", "sparkwing runs logs --run run-... --grep 'permission denied'"},
 		{"Merge a parent run with every descendant", "sparkwing runs logs --run run-... --tree"},
 		{"JSON stream for an agent", "sparkwing runs logs --run run-... -o json"},
 		{"Plain text with node/step prefix", "sparkwing runs logs --run run-... -o plain"},
-		{"Force the colored renderer when piping", "sparkwing runs logs --run run-... --pretty | less -R"},
+		{"Force the colored renderer when piping", "sparkwing runs logs --run run-... -o pretty | less -R"},
 	},
 }
 
 var cmdJobsErrors = Command{
 	Path:        "sparkwing runs errors",
 	Synopsis:    "Surface the error trail for a failed run",
-	Description: `Walks the run's node DAG and prints the error chain for any node that failed. Quicker than paging through full logs when you only care about the terminal failure. Pass --on NAME to read from a remote controller.`,
+	Description: `Walks the run's node DAG and prints the error chain for any node that failed. Quicker than paging through full logs when you only care about the terminal failure. Reads from the local run store.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Inspect a local failure", "sparkwing runs errors --run run-20260422-142501-abcd"},
-		{"Inspect a prod failure", "sparkwing runs errors --run run-... --on prod --json"},
+		{"As JSON", "sparkwing runs errors --run run-... -o json"},
 	},
 }
-
-// --- new verbs: failures / stats / last / tree / get -------------
 
 var cmdJobsFailures = Command{
 	Path:        "sparkwing runs failures",
@@ -1637,12 +2158,12 @@ var cmdJobsFailures = Command{
 		{Name: "limit", Argument: "N", Desc: "Max failures to analyze", Default: "20", Group: "Filter"},
 		{Name: "group-by", Argument: "KEY", Desc: "Cluster by: step | node", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Recent local failures", "sparkwing runs failures --since 24h"},
-		{"Prod failures clustered by step", "sparkwing runs failures --on prod --group-by step"},
+		{"Prod failures clustered by step", "sparkwing runs failures --profile prod --group-by step"},
 	},
 }
 
@@ -1654,12 +2175,12 @@ var cmdJobsStats = Command{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (e.g. 7d)", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"7-day local stats", "sparkwing runs stats --since 7d"},
-		{"Prod stats as JSON", "sparkwing runs stats --on prod -o json"},
+		{"Prod stats as JSON", "sparkwing runs stats --profile prod -o json"},
 	},
 }
 
@@ -1671,28 +2192,28 @@ var cmdJobsLast = Command{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
 		{Name: "watch", Short: "w", Desc: "Tail for new runs", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Local last run", "sparkwing runs last"},
-		{"Watch prod for new runs", "sparkwing runs last --on prod --watch"},
+		{"Watch prod for new runs", "sparkwing runs last --profile prod --watch"},
 	},
 }
 
 var cmdJobsTree = Command{
 	Path:        "sparkwing runs tree",
 	Synopsis:    "Show a run and every descendant run as an ASCII tree",
-	Description: `Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under their originating run. Local mode reads from SQLite; --on NAME reads from the profile's controller.`,
+	Description: `Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under their originating run. Local mode reads from SQLite; --profile NAME reads from the profile's controller.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Root run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Tree for a local run", "sparkwing runs tree --run run-20260422-142501-abcd"},
-		{"Tree for a prod run as JSON", "sparkwing runs tree --run run-... --on prod -o json"},
+		{"Tree for a prod run as JSON", "sparkwing runs tree --run run-... --profile prod -o json"},
 	},
 }
 
@@ -1702,12 +2223,12 @@ var cmdJobsGet = Command{
 	Description: `Prints a combined {run, nodes} JSON blob to stdout. Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
 		{"Fetch a local run as JSON", "sparkwing runs get --run run-..."},
-		{"Fetch a prod run", "sparkwing runs get --run run-... --on prod"},
+		{"Fetch a prod run", "sparkwing runs get --run run-... --profile prod"},
 	},
 }
 
@@ -1721,22 +2242,20 @@ outputs_hash), per-step observability (durations, outcomes), and
 runner-time × profile-rate compute cost.
 
 Local mode reads from the SQLite store and uses the local profile's
-cost_per_runner_hour for the cost calc. --on NAME reads from the
+cost_per_runner_hour for the cost calc. --profile NAME reads from the
 remote controller's receipt endpoint; in that case the controller's
 configured rate (not the local profile) supplies cost.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json (default)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Local receipt as JSON", "sparkwing runs receipt --run run-..."},
-		{"Prod receipt", "sparkwing runs receipt --run run-... --on prod"},
+		{"Prod receipt", "sparkwing runs receipt --run run-... --profile prod"},
 	},
 }
-
-// --- jobs wait / find -------------------------------------------
 
 var cmdJobsWait = Command{
 	Path:     "sparkwing runs wait",
@@ -1756,13 +2275,13 @@ described in the CLI wishlist.`,
 		{Name: "timeout", Argument: "DURATION", Desc: "Give up (exit 2) after this long", Default: "10m", Group: "Input"},
 		{Name: "poll", Argument: "DURATION", Desc: "Poll interval", Default: "3s", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to poll the local SQLite store.", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to poll the local SQLite store.", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Wait for a local run", "sparkwing runs wait --run run-20260422-142501-abcd"},
-		{"Wait with a custom timeout", "sparkwing runs wait --run run-... --timeout 30m --on prod"},
-		{"Tight polling on a fast run", "sparkwing runs wait --run run-... --poll 500ms --on prod"},
+		{"Wait with a custom timeout", "sparkwing runs wait --run run-... --timeout 30m --profile prod"},
+		{"Tight polling on a fast run", "sparkwing runs wait --run run-... --poll 500ms --profile prod"},
 	},
 }
 
@@ -1779,8 +2298,8 @@ With --wait, blocks until at least one match appears, up to
 --find-timeout. Pairs with 'jobs wait' for the push-and-follow loop:
 
   git push && \
-  sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline X --wait --on prod -q | \
-    xargs -n1 -I{} sparkwing runs wait --run {} --on prod
+  sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline X --wait --profile prod -q | \
+    xargs -n1 -I{} sparkwing runs wait --run {} --profile prod
 
 Exit code 0 on match, non-zero on timeout-without-match or
 infrastructure error.`,
@@ -1794,13 +2313,13 @@ infrastructure error.`,
 		{Name: "find-timeout", Argument: "DURATION", Desc: "Give up (nonzero exit) after this long when --wait is set", Default: "2m", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (or a JSON array of ids with -o json)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to search the local SQLite store.", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to search the local SQLite store.", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Find a run by SHA + pipeline on prod", "sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline build-test-deploy --on prod"},
-		{"Block until the matching run appears", "sparkwing runs find --git-sha abc123 --pipeline X --wait --on prod"},
-		{"Pipe matching ids into jobs wait", "sparkwing runs find --git-sha abc --wait -q --on prod | xargs -n1 -I{} sparkwing runs wait --run {} --on prod"},
+		{"Find a run by SHA + pipeline on prod", "sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline build-test-deploy --profile prod"},
+		{"Block until the matching run appears", "sparkwing runs find --git-sha abc123 --pipeline X --wait --profile prod"},
+		{"Pipe matching ids into jobs wait", "sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} sparkwing runs wait --run {} --profile prod"},
 	},
 }
 
@@ -1830,16 +2349,14 @@ Exit code 0 even when there are no matches.`,
 		{Name: "limit", Argument: "N", Desc: "Max candidate runs to scan", Default: "50", Group: "Output"},
 		{Name: "max-matches", Argument: "M", Desc: "Per-node match cap (0 = no cap)", Default: "5", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
-		{Name: "pretty", Desc: "Force pretty rendering even when piped (alias for -o pretty)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Find every run that hit a permission-denied line in the past week", "sparkwing runs grep --pattern 'permission denied' --since 7d"},
 		{"Pipe matching run ids into runs logs", "sparkwing runs grep --pattern OOMKilled --since 24h -q | xargs -I{} sparkwing runs logs --run {}"},
-		{"Search prod runs as JSON for an agent", "sparkwing runs grep --pattern 'connection refused' --on prod --since 24h --json"},
+		{"Search prod runs as JSON for an agent", "sparkwing runs grep --pattern 'connection refused' --profile prod --since 24h -o json"},
 	},
 }
 
@@ -1854,14 +2371,12 @@ in effect + any approval-gate state. Useful for the
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
-		{Name: "pretty", Desc: "Force pretty rendering even when piped (alias for -o pretty)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Quick run rollup", "sparkwing runs summary --run run-..."},
-		{"JSON for an agent", "sparkwing runs summary --run run-... --json"},
+		{"JSON for an agent", "sparkwing runs summary --run run-... -o json"},
 	},
 }
 
@@ -1878,15 +2393,13 @@ emits start/end offsets in milliseconds per row.`,
 		{Name: "steps", Desc: "Include per-step rows under each node", Group: "Output"},
 		{Name: "width", Argument: "N", Desc: "Bar width in characters", Default: "60", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (alias for -o json)", Group: "Output"},
-		{Name: "pretty", Desc: "Force the waterfall view even when piped (alias for -o pretty)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Default node waterfall", "sparkwing runs timeline --run run-..."},
 		{"Expand into per-step bars", "sparkwing runs timeline --run run-... --steps"},
-		{"JSON for an agent", "sparkwing runs timeline --run run-... --steps --json"},
+		{"JSON for an agent", "sparkwing runs timeline --run run-... --steps -o json"},
 	},
 }
 
@@ -1913,13 +2426,13 @@ only when at least one id failed.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Source run id (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "failed", Desc: "Rerun from failed: reuse passed nodes, re-execute only failed/unreached", ConflictsWith: []string{"all"}, Group: "Input"},
 		{Name: "all", Desc: "Rerun all: re-execute every node from scratch", ConflictsWith: []string{"failed"}, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
 		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-..."},
 		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-..."},
-		{"Rerun every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --on prod"},
+		{"Rerun every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --profile prod"},
 	},
 }
 
@@ -1935,12 +2448,12 @@ Pass --run once per id (repeatable). Use --run - to read ids
 from stdin, one per line.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Cancel one run", "sparkwing runs cancel --run run-... --on prod"},
-		{"Cancel every running prod run", "sparkwing runs list --status running --on prod -q | sparkwing runs cancel --run - --on prod"},
+		{"Cancel one run", "sparkwing runs cancel --run run-... --profile prod"},
+		{"Cancel every running prod run", "sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod"},
 	},
 }
 
@@ -1958,56 +2471,34 @@ Use --dry-run first to confirm the victim list.`,
 		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when no --run ids are supplied", ConflictsWith: []string{"run"}, Group: "Input"},
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; use --run - to read ids from stdin)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
 		{Name: "dry-run", Desc: "List matching runs without deleting", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --on prod"},
-		{"Delete a few specific runs", "sparkwing runs prune --run run-A --run run-B --on prod"},
-		{"Prune ids from another query", "sparkwing runs list --pipeline scratch -q | sparkwing runs prune --run - --on prod"},
+		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --profile prod"},
+		{"Delete a few specific runs", "sparkwing runs prune --run run-A --run run-B --profile prod"},
+		{"Prune ids from another query", "sparkwing runs list --pipeline scratch -q | sparkwing runs prune --run - --profile prod"},
 	},
 }
-
-// ---- sparkwing push --------------------------------------------
-
-var cmdPush = Command{
-	Path:     "sparkwing cluster push",
-	Synopsis: "Publish the current repo's HEAD to gitcache",
-	Description: `Pushes the current git HEAD to the selected profile's gitcache
-as a timestamped ref (local-YYYY-MM-DDTHH-MM-SSZ). Use the ref
-it prints with 'sparkwing run --on <profile> --from <ref>' to
-run a pipeline against uncommitted-to-upstream code without
-waiting for GitHub to have it.
-
-Only tracks committed work -- staged or unstaged changes are
-NOT uploaded. Commit first (a throwaway amend is fine), push,
-trigger.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Repo name registered with gitcache (default: basename of repo root)", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Push the current repo's HEAD to prod's gitcache", "sparkwing cluster push --on prod"},
-		{"Override the repo name (useful for forks)", "sparkwing cluster push --on prod --name my-fork"},
-	},
-}
-
-// ---- sparkwing hooks -------------------------------------------
 
 var cmdHooks = Command{
 	Path:     "sparkwing pipeline hooks",
-	Synopsis: "Install / uninstall git pre-commit + pre-push hooks",
+	Synopsis: "Install / uninstall git pre-commit + pre-push + post-commit hooks",
 	Description: `Writes small git hook scripts into the repo's .git/hooks/
 directory that call 'sparkwing run <pipeline>' for every pipeline that
-declares pre_commit: or pre_push: in its .sparkwing/pipelines.yaml
-triggers block.
+declares pre_commit:, pre_push:, or post_commit: in its
+.sparkwing/sparkwing.yaml triggers block.
+
+The post-commit hook is non-blocking: the commit has already
+landed, so it runs its pipelines, tolerates failures, and never
+aborts. pre-commit and pre-push abort the git action on the first
+failing pipeline.
 
 Managed hooks carry a "Installed by sparkwing" marker so
 uninstall and status can tell them apart from hand-written
 hooks. Existing unmanaged hooks are left alone; install skips
 them with a warning.`,
 	Subcommands: []SubcommandRef{
-		{"install", "Write pre-commit / pre-push hooks for the enclosing repo"},
+		{"install", "Write pre-commit / pre-push / post-commit hooks for the enclosing repo"},
 		{"uninstall", "Remove sparkwing-managed git hooks"},
 		{"status", "Report which sparkwing hooks are installed"},
 	},
@@ -2015,10 +2506,10 @@ them with a warning.`,
 
 var cmdHooksInstall = Command{
 	Path:     "sparkwing pipeline hooks install",
-	Synopsis: "Install pre-commit / pre-push git hooks from pipelines.yaml triggers",
-	Description: `Discovers the enclosing .sparkwing/pipelines.yaml, reads
-pre_commit / pre_push triggers, and writes one hook file per
-hook name that fans out to the matching pipelines. Existing
+	Synopsis: "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
+	Description: `Discovers the enclosing .sparkwing/sparkwing.yaml, reads
+pre_commit / pre_push / post_commit triggers, and writes one hook
+file per hook name that fans out to the matching pipelines. Existing
 non-sparkwing hooks are skipped so hand-written ones survive.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
@@ -2053,20 +2544,18 @@ var cmdHooksStatus = Command{
 	},
 }
 
-// ---- sparkwing secrets -----------------------------------------
-
 var cmdSecret = Command{
 	Path:     "sparkwing secrets",
 	Synopsis: "Manage secrets (local dotenv or controller-stored)",
-	Description: `Without --on, reads/writes the laptop dotenv at
+	Description: `Without --profile, reads/writes the laptop dotenv at
 ~/.config/sparkwing/secrets.env (masked) or
 ~/.config/sparkwing/config.env (--plain). Used by jobs invoked
 through 'sparkwing run <pipeline>' locally.
 
-With --on PROF, reads/writes the named profile's controller.
+With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
 time. Pipelines pull a secret by listing it in the
-pipelines.yaml 'secrets:' block. Raw values never transit the
+sparkwing.yaml 'secrets:' block. Raw values never transit the
 CLI except via 'secrets get'.`,
 	Subcommands: []SubcommandRef{
 		{"set", "Store (or replace) a secret value"},
@@ -2088,13 +2577,13 @@ does not land in shell history.`,
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
 		{Name: "plain", Type: FlagBool, Desc: "Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked.", Group: "Input"},
-		{Name: "on", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Set a masked secret (default)", "sparkwing secrets set --name API_TOKEN --value abc123 --on prod"},
-		{"Set from a file", "sparkwing secrets set --name TLS_CERT --file ./tls.crt --on prod"},
-		{"Set non-masked config", "sparkwing secrets set --name REGION --value us-east-1 --plain --on prod"},
+		{"Set a masked secret (default)", "sparkwing secrets set --name API_TOKEN --value abc123 --profile prod"},
+		{"Set from a file", "sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod"},
+		{"Set non-masked config", "sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod"},
 	},
 }
 
@@ -2105,11 +2594,11 @@ var cmdSecretGet = Command{
 piped into another command. Use 'secrets list' for metadata.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name", Required: true, Group: "Input"},
-		{Name: "on", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Fetch a secret", "sparkwing secrets get --name API_TOKEN --on prod"},
+		{"Fetch a secret", "sparkwing secrets get --name API_TOKEN --profile prod"},
 	},
 }
 
@@ -2119,12 +2608,12 @@ var cmdSecretList = Command{
 	Description: `Prints a table of name, created_at, and the principal that last updated each secret. Raw values are never printed by this command.`,
 	Flags: []FlagSpec{
 		{Name: "grep", Type: FlagString, Argument: "PATTERN", Desc: "Filter by name substring (case-sensitive)", Group: "Filter"},
-		{Name: "on", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "System", "Other"},
 	Examples: []Example{
-		{"List secrets on prod", "sparkwing secrets list --on prod"},
-		{"Filter to API-related names", "sparkwing secrets list --on prod --grep API"},
+		{"List secrets on prod", "sparkwing secrets list --profile prod"},
+		{"Filter to API-related names", "sparkwing secrets list --profile prod --grep API"},
 	},
 }
 
@@ -2134,22 +2623,20 @@ var cmdSecretDelete = Command{
 	Description: `Deletes the secret row from the controller. Pipelines that reference the name will fail to resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
-		{Name: "on", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Delete a secret", "sparkwing secrets delete --name API_TOKEN --on prod"},
+		{"Delete a secret", "sparkwing secrets delete --name API_TOKEN --profile prod"},
 	},
 }
-
-// ---- sparkwing triggers ----------------------------------------
 
 var cmdTriggers = Command{
 	Path:     "sparkwing runs triggers",
 	Synopsis: "Fire, list, or inspect controller triggers",
 	Description: `Triggers are the controller's queue of pending work. Every
 pipeline run starts as a trigger (from a webhook, hook, 'sparkwing
-run --on', or 'triggers fire') that a worker atomically claims and
+run --profile', or 'triggers fire') that a worker atomically claims and
 turns into a run.
 
 'fire' posts a synthetic trigger -- the sparkwing equivalent of
@@ -2157,16 +2644,16 @@ turns into a run.
 entries so operators can see what's stuck without diving into
 controller logs. 'get' inspects one trigger by id.
 
-Connection info comes from the selected profile (--on NAME);
+Connection info comes from the selected profile (--profile NAME);
 there are no --controller / --token flags on this command.`,
 	Subcommands: []SubcommandRef{
 		{"list", "List pending / claimed / done triggers"},
 		{"get", "Inspect one trigger's full metadata by id"},
 	},
 	Examples: []Example{
-		{"List pending triggers on prod", "sparkwing runs triggers list --on prod --status pending"},
-		{"Inspect one trigger", "sparkwing runs triggers get --id run-... --on prod"},
-		{"Fire a trigger (use pipeline run)", "sparkwing pipeline run --pipeline deploy --on prod"},
+		{"List pending triggers on prod", "sparkwing runs triggers list --profile prod --status pending"},
+		{"Inspect one trigger", "sparkwing runs triggers get --id run-... --profile prod"},
+		{"Fire a trigger (use pipeline run)", "sparkwing pipeline run --pipeline deploy --profile prod"},
 	},
 }
 
@@ -2189,14 +2676,13 @@ entries narrow cleanly.`,
 		{Name: "limit", Argument: "N", Desc: "Max triggers to show", Default: "20", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only trigger ids, newline-separated", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw triggers array", Group: "Output"},
-		{Name: "json", Desc: "Alias for -o json (hidden)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Recent triggers on prod", "sparkwing runs triggers list --on prod"},
-		{"Just pending", "sparkwing runs triggers list --on prod --status pending"},
-		{"Pipeline-specific, JSON", "sparkwing runs triggers list --on prod --pipeline build-test-deploy --limit 5 -o json"},
+		{"Recent triggers on prod", "sparkwing runs triggers list --profile prod"},
+		{"Just pending", "sparkwing runs triggers list --profile prod --status pending"},
+		{"Pipeline-specific, JSON", "sparkwing runs triggers list --profile prod --pipeline build-test-deploy --limit 5 -o json"},
 	},
 }
 
@@ -2207,17 +2693,14 @@ var cmdTriggersGet = Command{
 	Flags: []FlagSpec{
 		{Name: "id", Argument: "TRIGGER_ID", Desc: "Trigger / run identifier (same value 'fire' prints)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw response", Group: "Output"},
-		{Name: "json", Desc: "Alias for -o json (hidden)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Inspect one trigger", "sparkwing runs triggers get --id run-20260422-142501-abcd --on prod"},
-		{"Raw JSON for scripting", "sparkwing runs triggers get --id run-... --on prod -o json"},
+		{"Inspect one trigger", "sparkwing runs triggers get --id run-20260422-142501-abcd --profile prod"},
+		{"Raw JSON for scripting", "sparkwing runs triggers get --id run-... --profile prod -o json"},
 	},
 }
-
-// ---- sparkwing image -------------------------------------------
 
 var cmdImage = Command{
 	Path:     "sparkwing cluster image",
@@ -2231,7 +2714,7 @@ wait for rollout" path.`,
 		{"rollout", "Bump a kustomization newTag, commit+push, sync ArgoCD, wait for rollout"},
 	},
 	Examples: []Example{
-		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --on prod --wait"},
+		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait"},
 	},
 }
 
@@ -2263,7 +2746,7 @@ image to the registry before calling rollout.`,
 	Flags: []FlagSpec{
 		{Name: "image", Argument: "NAME", Desc: "Short image name (matches the suffix of the ECR URL)", Required: true, Group: "Input"},
 		{Name: "tag", Argument: "TAG", Desc: "New tag to write in kustomization.yaml", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name. Reserved for future per-profile gitops repo + argocd context discovery.", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name. Reserved for future per-profile gitops repo + argocd context discovery.", Required: true, Group: "System"},
 		{Name: "gitops-repo", Argument: "PATH", Desc: "Gitops repo path (default: ~/code/gitops)", Group: "Input"},
 		{Name: "namespace", Argument: "NS", Desc: "Kubernetes namespace for rollout status + logs", Default: "sparkwing", Group: "Input"},
 		{Name: "argocd-app", Argument: "NAME", Desc: "ArgoCD app name (default: derived from --image)", Group: "Input"},
@@ -2274,13 +2757,11 @@ image to the registry before calling rollout.`,
 	},
 	GroupOrder: []string{"Input", "Toggles", "System", "Other"},
 	Examples: []Example{
-		{"Dry-run against the sparkwing-runner image", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --on prod --dry-run"},
-		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --on prod --wait"},
-		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --on prod --wait --tail-logs"},
+		{"Dry-run against the sparkwing-runner image", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --dry-run"},
+		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait"},
+		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --profile prod --wait --tail-logs"},
 	},
 }
-
-// ---- sparkwing profiles test ----------------------------------
 
 var cmdProfilesTest = Command{
 	Path:     "sparkwing configure profiles test",
@@ -2295,20 +2776,17 @@ Exit code is non-zero when any probe fails. Missing optional
 services (logs, gitcache) count as warn, not fail, so a
 minimally-configured laptop profile can still exit 0.`,
 	Flags: []FlagSpec{
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
 		{"Probe the default profile", "sparkwing configure profiles test"},
-		{"Probe a named profile", "sparkwing configure profiles test --on prod"},
-		{"JSON for scripting", "sparkwing configure profiles test --on prod -o json"},
+		{"Probe a named profile", "sparkwing configure profiles test --profile prod"},
+		{"JSON for scripting", "sparkwing configure profiles test --profile prod -o json"},
 	},
 }
-
-// ---- sparkwing health -----------------------------------------
 
 var cmdHealth = Command{
 	Path:     "sparkwing cluster status",
@@ -2330,18 +2808,15 @@ informational -- low success rate, empty pool, stale agents --
 and don't change the exit code so scripts can still condition
 on "is the cluster reachable at all?".`,
 	Flags: []FlagSpec{
-		{Name: "on", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
-		{Name: "json", Desc: "Emit JSON (alias of -o json)", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
-		{"Quick-check prod", "sparkwing cluster status --on prod"},
-		{"Structured output for a status dashboard", "sparkwing cluster status --on prod -o json"},
+		{"Quick-check prod", "sparkwing cluster status --profile prod"},
+		{"Structured output for a status dashboard", "sparkwing cluster status --profile prod -o json"},
 	},
 }
-
-// ---- sparkwing webhooks ---------------------------------------
 
 var cmdWebhooks = Command{
 	Path:     "sparkwing cluster webhooks",
@@ -2360,8 +2835,8 @@ terminal status -- without two separate lookups.`,
 		{"replay", "Queue a redelivery of a specific delivery UUID"},
 	},
 	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --on prod"},
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --on prod"},
+		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --profile prod"},
+		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod"},
 	},
 }
 
@@ -2379,13 +2854,12 @@ hooks render as "(non-sparkwing)".`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (reserved for symmetry; unused by list)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (reserved for symmetry; unused by list)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --on prod"},
+		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --profile prod"},
 	},
 }
 
@@ -2404,13 +2878,12 @@ take a time filter). Default: 24h.`,
 		{Name: "hook", Argument: "N", Desc: "GitHub hook id from 'webhooks list'", Required: true, Group: "Input"},
 		{Name: "since", Argument: "DURATION", Desc: "Only deliveries newer than this", Default: "24h", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --on prod"},
+		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod"},
 	},
 }
 
@@ -2424,15 +2897,13 @@ appears in the hook's delivery log within seconds.`,
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
 		{Name: "hook", Argument: "N", Desc: "GitHub hook id", Required: true, Group: "Input"},
 		{Name: "delivery", Argument: "UUID", Desc: "Delivery GUID to redeliver", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name (reserved; unused by replay)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (reserved; unused by replay)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f --on prod"},
+		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f --profile prod"},
 	},
 }
-
-// ---- sparkwing agents -----------------------------------------
 
 var cmdAgents = Command{
 	Path:     "sparkwing cluster agents",
@@ -2445,7 +2916,7 @@ is no explicit registration table yet).`,
 		{"list", "Print agents (name, type, status, active jobs, last-seen, labels)"},
 	},
 	Examples: []Example{
-		{"List prod agents", "sparkwing cluster agents list --on prod"},
+		{"List prod agents", "sparkwing cluster agents list --profile prod"},
 	},
 }
 
@@ -2460,20 +2931,38 @@ show up -- a known limitation until we add explicit heartbeats.
 Use -q to print just names, one per line, for shell piping
 (e.g. looping over agents with xargs).`,
 	Flags: []FlagSpec{
-		{Name: "on", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "json", Desc: "Alias for --output json", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print just agent names, one per line", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
-		{"List agents on prod", "sparkwing cluster agents list --on prod"},
-		{"Just agent names for piping", "sparkwing cluster agents list --on prod -q"},
+		{"List agents on prod", "sparkwing cluster agents list --profile prod"},
+		{"Just agent names for piping", "sparkwing cluster agents list --profile prod -q"},
 	},
 }
 
-// ---- sparkwing pipeline sparks ------------------------------------------
+var cmdClusterConcurrency = Command{
+	Path:     "sparkwing cluster concurrency",
+	Synopsis: "Inspect a concurrency namespace: holders + queue",
+	Description: `Shows who currently holds a concurrency namespace's slots
+and the queue of waiters behind it, each with its position
+(0 == next in line). Use it to tell whether a node is wedged
+or simply waiting its turn for a full OnLimit:Queue slot.
+
+Hits GET /api/v1/concurrency/{namespace}/state on the
+selected profile's controller.`,
+	Flags: []FlagSpec{
+		{Name: "namespace", Argument: "NAME", Desc: "Concurrency namespace to inspect", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format (json|table)", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Who holds and who's queued", "sparkwing cluster concurrency --namespace deploy-prod --profile prod"},
+	},
+}
 
 var cmdSparks = Command{
 	Path:     "sparkwing pipeline sparks",
@@ -2516,7 +3005,6 @@ proxy calls when offline.`,
 	Flags: []FlagSpec{
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "json", Desc: "Emit JSON (hidden alias for -o json)", Group: "Output"},
 		{Name: "no-resolve", Desc: "Skip module-proxy lookups; print declared versions only", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
@@ -2640,15 +3128,13 @@ new sparks version is published.`,
 	},
 }
 
-// ---- sparkwing approvals / approve / deny ------------------------
-
 var cmdApprove = Command{
 	Path:     "sparkwing runs approvals approve",
 	Synopsis: "Approve a pending approval-gate node",
 	Description: `Resolves the named approval gate as 'approved'. The gate's
 downstream nodes begin dispatching on the next orchestrator
 poll (roughly 500ms). The approver is recorded from the
-authenticated principal when --on is set, or from $USER in
+authenticated principal when --profile is set, or from $USER in
 local mode.
 
 Exit code is 0 on success, non-zero if the gate doesn't exist
@@ -2657,12 +3143,12 @@ or was already resolved (409).`,
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the approval gate", Required: true, Group: "Target"},
 		{Name: "node", Argument: "ID", Desc: "Node ID of the approval gate", Required: true, Group: "Target"},
 		{Name: "comment", Argument: "STR", Desc: "Optional note recorded on the approval", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
-		{"Approve a local gate", "sparkwing approve --run run-20260423-143012-abcd --node approve-prod"},
-		{"Approve a prod gate with a comment", `sparkwing approve --run run-... --node approve-prod --on prod --comment "release notes ok"`},
+		{"Approve a local gate", "sparkwing runs approvals approve --run run-20260423-143012-abcd --node approve-prod"},
+		{"Approve a prod gate with a comment", `sparkwing runs approvals approve --run run-... --node approve-prod --profile prod --comment "release notes ok"`},
 	},
 }
 
@@ -2676,12 +3162,12 @@ their ContinueOnError / Optional settings.`,
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the approval gate", Required: true, Group: "Target"},
 		{Name: "node", Argument: "ID", Desc: "Node ID of the approval gate", Required: true, Group: "Target"},
 		{Name: "comment", Argument: "STR", Desc: "Optional note recorded on the approval", Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
-		{"Deny a local gate", "sparkwing deny --run run-20260423-143012-abcd --node approve-prod"},
-		{"Deny a prod gate with a reason", `sparkwing deny --run run-... --node approve-prod --on prod --comment "tests still red"`},
+		{"Deny a local gate", "sparkwing runs approvals deny --run run-20260423-143012-abcd --node approve-prod"},
+		{"Deny a prod gate with a reason", `sparkwing runs approvals deny --run run-... --node approve-prod --profile prod --comment "tests still red"`},
 	},
 }
 
@@ -2692,7 +3178,9 @@ var cmdApprovals = Command{
 gate across all runs; with --run returns one run's full history
 (pending + resolved).`,
 	Subcommands: []SubcommandRef{
-		{"list", "List pending approvals, or one run's history with --run"},
+		{"list", "List pending approvals, or one run's history with --run (the default verb)"},
+		{"approve", "Approve a pending gate: --run <id> --node <id> [--comment ...]"},
+		{"deny", "Deny a pending gate: --run <id> --node <id> [--comment ...]"},
 	},
 }
 
@@ -2700,23 +3188,21 @@ var cmdApprovalsList = Command{
 	Path:     "sparkwing runs approvals list",
 	Synopsis: "List pending approvals (or one run's history)",
 	Description: `Prints a table of approval rows. Without --run the list is the
-cross-run pending queue; with --run it's every approval (pending
-+ resolved) for that run.`,
+cross-run pending queue; with --run it's every approval for that
+run, both pending and resolved.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Restrict to one run's approvals", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Pending gates on the local store", "sparkwing runs approvals list"},
-		{"Pending gates on prod", "sparkwing runs approvals list --on prod"},
+		{"Pending gates on prod", "sparkwing runs approvals list --profile prod"},
 		{"Full history for one run", "sparkwing runs approvals list --run run-..."},
 		{"Emit JSON for an agent", "sparkwing runs approvals list -o json"},
 	},
 }
-
-// ---- sparkwing runs annotations --------------------------------
 
 var cmdAnnotations = Command{
 	Path:     "sparkwing runs annotations",
@@ -2744,7 +3230,7 @@ implies step-scope and limits to the matching step.`,
 		{Name: "step", Argument: "STEP_ID", Desc: "Limit to one step (implies step-scope reads)", Group: "Filter"},
 		{Name: "steps", Desc: "Include per-step annotations", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2766,7 +3252,7 @@ preserved as the dashboard renders them.`,
 		{Name: "node", Argument: "NODE_ID", Desc: "Node identifier", Required: true, Group: "Input"},
 		{Name: "step", Argument: "STEP_ID", Desc: "Step identifier (annotates the step instead of the node)", Group: "Input"},
 		{Name: "message", Short: "m", Argument: "TEXT", Desc: "Annotation text", Required: true, Group: "Input"},
-		{Name: "on", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{

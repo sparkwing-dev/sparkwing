@@ -134,7 +134,6 @@ func TestDecorateNodes_WireShape(t *testing.T) {
 	if err := json.Unmarshal(body, &roundtrip); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// build node carries decorations.modifiers and decorations.work.
 	if roundtrip[0]["id"] != "build" {
 		t.Errorf("first node id=%v want build", roundtrip[0]["id"])
 	}
@@ -148,7 +147,6 @@ func TestDecorateNodes_WireShape(t *testing.T) {
 	if _, ok := deco["work"].(map[string]any); !ok {
 		t.Errorf("build.decorations.work missing: %v", deco)
 	}
-	// plain node: store.Node fields only, no decorations key.
 	if roundtrip[1]["id"] != "plain" {
 		t.Errorf("second node id=%v want plain", roundtrip[1]["id"])
 	}

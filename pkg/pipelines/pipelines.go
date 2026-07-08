@@ -1,11 +1,9 @@
 package pipelines
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -15,177 +13,137 @@ type Config struct {
 	Pipelines []Pipeline `yaml:"pipelines"`
 }
 
-// Pipeline is one registry entry.
+// Pipeline is one registry entry. A pipeline binds a Go entrypoint
+// (declared via [sparkwing.RegisterEntrypoint]) to one named
+// deployment shape: defaults, guards, dispatch metadata, triggers,
+// secrets surface. One Go entrypoint can back many pipelines, each
+// with its own policy.
 type Pipeline struct {
-	Name       string   `yaml:"name"`
-	Entrypoint string   `yaml:"entrypoint"`
-	On         Triggers `yaml:"on"`
-	// Secrets is the declared secrets surface. Each entry is a
-	// typed SecretEntry with explicit required/optional. See
-	// SecretsField.
-	Secrets SecretsField `yaml:"secrets,omitempty"`
-	Tags    []string     `yaml:"tags,omitempty"`
-	// Hidden omits the entry from default `sparkwing run <TAB>` listings.
-	// It is still invocable by typing the exact name. Used for
-	// rarely-used tools (demos, scaffolding, one-shot utilities)
-	// that would otherwise clutter the completion menu.
+	// Name is the invocable name (`sparkwing run <name>`); must equal
+	// the string passed to the SDK's Register call.
+	Name string `yaml:"name"`
+
+	// Entrypoint is the Go pipeline struct type that implements this
+	// entry (equals the struct name). Required.
+	Entrypoint string `yaml:"entrypoint"`
+
+	// Description is the one-line summary surfaced by `pipeline list`.
+	Description string `yaml:"description,omitempty"`
+
+	// On declares the triggers that auto-fire this pipeline. Absent
+	// means manual-only (a command invoked by name).
+	On Triggers `yaml:"on,omitempty"`
+
+	// Hidden omits the entry from default `pipeline list` output; it
+	// stays invocable by exact name and shows under `list --all`.
 	Hidden bool `yaml:"hidden,omitempty"`
 
-	// Runners is the pipeline-level runner allowlist. Jobs default
-	// to this set; per-target Runners narrows it (intersection);
-	// per-job Requires narrows further. Empty means "any runner
-	// allowed."
-	Runners []string `yaml:"runners,omitempty"`
+	// Guards gate dispatch on the resolved profile + args. Reject
+	// fires before any step runs when any token matches; Require
+	// fires when not every token matches. Token vocabulary:
+	// `profile:local`, `profile:controller`, `profile:name=<name>`,
+	// `arg:<flag>=<value>`. See pkg/pipelines/guards.go.
+	Guards Guards `yaml:"guards,omitempty"`
 
-	// Targets enumerates the named environments this pipeline can
-	// act on. Zero targets means the pipeline has no target concept
-	// and the CLI rejects --for; one target auto-selects; two or
-	// more require --for to disambiguate.
-	Targets map[string]Target `yaml:"targets,omitempty"`
+	// Args supplies per-arg default values. Higher priority than
+	// schema Default and Computed; lower than an explicit operator
+	// CLI flag. Keyed by CLI flag name (kebab-case, matching what
+	// the SDK's WithArgs[T] field tags resolve to).
+	Args map[string]string `yaml:"args,omitempty"`
 
-	// Values is the layered config-value surface for this pipeline.
-	// See PipelineValues for the layering rule.
-	Values PipelineValues `yaml:"values,omitempty"`
+	// Profile names the project profile (from sparkwing.yaml's
+	// profiles map) this pipeline uses. Empty means "fall back to
+	// the project's defaults.profile selector". The CLI's --profile
+	// flag (which targets ~/.config/sparkwing/profiles.yaml)
+	// overrides this when present.
+	Profile string `yaml:"profile,omitempty"`
+
+	// Requires are runner-label requirements all jobs in this
+	// pipeline must satisfy in addition to their own Job.Requires().
+	// Wholesale replaces defaults.requires when non-empty. The
+	// reserved label "local" pins execution to the in-process
+	// runner (same effect as --sw-local-only).
+	Requires []string `yaml:"requires,omitempty"`
 }
 
-// Target is one named environment a pipeline can act on. Every field
-// is optional; omitted fields inherit from the pipeline level.
-type Target struct {
-	// Runners narrows the pipeline-level runner allowlist for runs
-	// against this target. Intersection with Pipeline.Runners. Empty
-	// means inherit the pipeline allowlist.
-	Runners []string `yaml:"runners,omitempty"`
-
-	// Source names an entry in sources.yaml that resolves Secret /
-	// Config calls for runs against this target. Empty means fall
-	// back to the pipeline's default source (or the global default
-	// declared in sources.yaml).
-	Source string `yaml:"source,omitempty"`
-
-	// Approvals, if non-empty, gates dispatch on a human response
-	// before any jobs run. Today only "required" is accepted.
-	Approvals string `yaml:"approvals,omitempty"`
-
-	// Protected refuses non-default-branch sources and surfaces a
-	// loud banner in the dashboard. Use on production-targeting
-	// entries to keep an ad-hoc branch run from reaching real infra.
-	Protected bool `yaml:"protected,omitempty"`
-
-	// Values overlays onto the pipeline's typed config struct for
-	// runs against this target. Keys are config field tags; values
-	// are typed by the pipeline's Config struct at consumption.
-	Values map[string]any `yaml:"values,omitempty"`
-
-	// Backend overrides cache / logs / state destinations for runs
-	// against this target. Per-surface shape is intentionally left
-	// as map[string]any here; the typed BackendSpec lands with
-	// backends.yaml in a later step.
-	Backend *TargetBackend `yaml:"backend,omitempty"`
+// Guards is the pipeline-level dispatch gate. Both fields are lists
+// of flat predicate tokens evaluated against the resolved profile +
+// args at run start. Require fires (rejecting dispatch) when not
+// every token matches; Reject fires when any token matches.
+//
+// See pkg/pipelines/guards.go for the token vocabulary and
+// evaluation rules.
+type Guards struct {
+	Require []string `yaml:"require,omitempty"`
+	Reject  []string `yaml:"reject,omitempty"`
 }
 
-// PipelineValues is the layered config-value surface declared on a
-// pipeline. Base applies to every run; Runners is a per-runner
-// overlay keyed by the runner name (matching runners.yaml). The
-// per-target Values overlay (Target.Values) sits between these two:
-// Base < Target.Values < Runners[chosen-runner].
-type PipelineValues struct {
-	// Base values applied to every run regardless of target or
-	// runner. Equivalent to a "default" key in earlier prototypes.
-	Base map[string]any `yaml:"base,omitempty"`
-
-	// Runners is a per-runner overlay, applied after the target's
-	// Values. Key is the runner name from runners.yaml.
-	Runners map[string]map[string]any `yaml:"runners,omitempty"`
-}
-
-// TargetBackend carries per-surface backend overrides for runs
-// against a target. Each surface stays untyped (map[string]any) so
-// callers can declare any shape backends.yaml will support without
-// requiring a parser update here.
-type TargetBackend struct {
-	Cache map[string]any `yaml:"cache,omitempty"`
-	Logs  map[string]any `yaml:"logs,omitempty"`
-	State map[string]any `yaml:"state,omitempty"`
-}
-
-// SecretEntry is one typed secret declaration. Name names the secret
-// in the pipeline's Secrets struct (and in the source backing it).
-// Required and Optional are mutually exclusive; the validator
-// enforces that. Neither set defaults to Required=true at parse time
-// to match the bare-string legacy semantics.
+// SecretEntry is one secret declaration. Required/Optional are
+// mutually exclusive; when neither is set the entry is treated as
+// required (see IsRequired).
 type SecretEntry struct {
-	Name     string `yaml:"name" json:"name"`
-	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
-	Optional bool   `yaml:"optional,omitempty" json:"optional,omitempty"`
+	Name     string `json:"name"`
+	Required bool   `json:"required,omitempty"`
+	Optional bool   `json:"optional,omitempty"`
 }
 
-// SecretsField is the typed list of secret declarations on a
-// pipeline. Each entry is a mapping with name + required/optional:
-//
-//	secrets:
-//	  - {name: DEPLOY_TOKEN, required: true}
-//	  - {name: SLACK_HOOK,   optional: true}
-//
-// The custom UnmarshalYAML rejects the legacy bare-string form
-// (`secrets: [FOO, BAR]`) with a clear migration message.
+// SecretsField is the orchestrator's snapshot/wire format for a
+// run's declared secret needs. Populated from a pipeline's
+// Secrets() provider via reflection; shipped to cluster pods in the
+// plan snapshot so they can re-resolve against their own backend.
 type SecretsField []SecretEntry
 
-// UnmarshalYAML implements yaml.Unmarshaler. The list must be a
-// sequence of mapping nodes; scalar nodes (the legacy bare-string
-// form) produce a clear migration error pointing at the typed
-// shape.
-func (s *SecretsField) UnmarshalYAML(node *yaml.Node) error {
+// UnmarshalYAML decodes a Pipeline mapping and rejects any field not
+// in pipelineKnownYAMLFields(). The strict check protects against
+// typos and silently-dropped renamed keys; node.Decode skips
+// decoder-level KnownFields strictness so we re-implement it here.
+func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil {
 		return nil
 	}
-	switch node.Kind {
-	case yaml.AliasNode:
-		if node.Alias != nil {
-			return s.UnmarshalYAML(node.Alias)
-		}
-		return nil
-	case yaml.SequenceNode:
-		// proceed
-	case 0:
-		return nil
-	default:
-		return fmt.Errorf("secrets: expected a sequence, got %s", nodeKindName(node.Kind))
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return p.UnmarshalYAML(node.Alias)
 	}
-	out := make(SecretsField, 0, len(node.Content))
-	for i, elem := range node.Content {
-		switch elem.Kind {
-		case yaml.MappingNode:
-			var entry SecretEntry
-			if err := elem.Decode(&entry); err != nil {
-				return fmt.Errorf("secrets[%d]: %w", i, err)
-			}
-			out = append(out, entry)
-		case yaml.ScalarNode:
-			var name string
-			if err := elem.Decode(&name); err != nil {
-				return fmt.Errorf("secrets[%d]: %w", i, err)
-			}
-			return fmt.Errorf("secrets[%d]: bare string %q is not allowed; use the typed form `- {name: %s, required: true}`",
-				i, name, name)
-		default:
-			return fmt.Errorf("secrets[%d]: expected a mapping, got %s", i, nodeKindName(elem.Kind))
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("pipeline: expected a mapping, got %s", nodeKindName(node.Kind))
+	}
+	var name string
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind == yaml.ScalarNode && key.Value == "name" {
+			_ = node.Content[i+1].Decode(&name)
+			break
 		}
 	}
-	*s = out
+	known := pipelineKnownYAMLFields()
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode {
+			continue
+		}
+		if _, ok := known[key.Value]; !ok {
+			return fmt.Errorf("pipeline %q: unknown field %q", name, key.Value)
+		}
+	}
+	type pipelineAlias Pipeline
+	var raw pipelineAlias
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	*p = Pipeline(raw)
 	return nil
 }
 
-// MarshalYAML emits the typed form. Round-tripping a parsed
-// SecretsField produces a normalized list of mappings rather than
-// the legacy bare-string shape; callers that need to preserve the
-// original literal form should keep the raw yaml bytes around.
-func (s SecretsField) MarshalYAML() (any, error) {
-	if len(s) == 0 {
-		return nil, nil
+// pipelineKnownYAMLFields returns the set of YAML keys Pipeline
+// declares. The custom UnmarshalYAML bypasses decoder-level
+// KnownFields strictness (node.Decode doesn't inherit it), so we
+// re-implement the check here against this canonical set.
+func pipelineKnownYAMLFields() map[string]struct{} {
+	return map[string]struct{}{
+		"name": {}, "entrypoint": {}, "description": {},
+		"on": {}, "hidden": {},
+		"guards": {}, "args": {}, "profile": {}, "requires": {},
 	}
-	out := make([]SecretEntry, len(s))
-	copy(out, s)
-	return out, nil
 }
 
 func nodeKindName(k yaml.Kind) string {
@@ -206,58 +164,42 @@ func nodeKindName(k yaml.Kind) string {
 }
 
 // Triggers groups the declared trigger rules. All fields are optional;
-// a pipeline with no triggers can still be invoked manually via
+// a pipeline with no triggers is manually invocable via
 // `sparkwing run <name>`.
 type Triggers struct {
-	Manual   *ManualTrigger   `yaml:"manual,omitempty"`
-	Push     *PushTrigger     `yaml:"push,omitempty"`
-	Schedule string           `yaml:"schedule,omitempty"`
-	Webhook  *WebhookTrigger  `yaml:"webhook,omitempty"`
-	Deploy   *DeployTrigger   `yaml:"deploy,omitempty"`
-	PreHook  *PreHookTrigger  `yaml:"pre_commit,omitempty"`
+	// Push fires on a git push the controller receives via webhook.
+	Push *PushTrigger `yaml:"push,omitempty"`
+	// Schedule is a cron expression the controller evaluates.
+	Schedule string `yaml:"schedule,omitempty"`
+	// Webhook exposes a custom HTTP path that fires the pipeline.
+	Webhook *WebhookTrigger `yaml:"webhook,omitempty"`
+	// PreHook fires from the installed git pre-commit hook.
+	PreHook *PreHookTrigger `yaml:"pre_commit,omitempty"`
+	// PostHook fires from the installed git pre-push hook.
 	PostHook *PostHookTrigger `yaml:"pre_push,omitempty"`
+	// PostCommitHook fires from the installed git post-commit hook,
+	// after the commit is recorded. It never blocks or aborts the
+	// commit.
+	PostCommitHook *PostCommitHookTrigger `yaml:"post_commit,omitempty"`
 }
-
-// ManualTrigger is the explicit opt-in for `sparkwing run <name>`. Pipelines
-// without any trigger declared are still manually invocable; this
-// exists so authors can tag a pipeline as manual-only for clarity.
-type ManualTrigger struct{}
 
 // PushTrigger fires on git push events matching the rules.
 type PushTrigger struct {
-	Branches []string `yaml:"branches"`
-	Paths    []string `yaml:"paths"`
-	// Values overlays onto the pipeline's typed Config struct for
-	// runs initiated by this trigger. Layered after the per-target
-	// values by sparkwing.ResolvePipelineConfig the same way
-	// values.base and targets.<name>.values are. Use this to flip
-	// typed Config fields per-trigger (e.g. push to main =>
-	// deploy_env: staging) and read them via
-	// sparkwing.PipelineConfig[T](ctx).
-	Values map[string]any `yaml:"values,omitempty"`
-	// Target defaults the run's --for selection when the trigger
-	// fires without an explicit override. Closes the "push to main
-	// with no --for skips every OnTarget job" gap: declare
-	// push: { branches: [main], target: prod } and the trigger
-	// dispatches release --for prod. A CLI --for still wins when
-	// both are set.
-	Target string `yaml:"target,omitempty"`
+	// Branches limits the trigger to pushes on these branches (glob
+	// patterns); empty matches any branch.
+	Branches []string `yaml:"branches,omitempty"`
+	// Paths limits the trigger to pushes touching these path globs;
+	// empty matches any path.
+	Paths []string `yaml:"paths,omitempty"`
 }
 
 // WebhookTrigger exposes an HTTP path that fires the pipeline. The
 // controller assembles a RunContext from the incoming request.
 type WebhookTrigger struct {
+	// Path is the HTTP path the controller exposes to fire the
+	// pipeline (e.g. /review).
 	Path string `yaml:"path"`
-	// Target defaults the run's --for selection for webhook-fired
-	// runs. Same precedence as PushTrigger.Target: CLI / payload
-	// override wins, this value is the fallback.
-	Target string `yaml:"target,omitempty"`
 }
-
-// DeployTrigger is the implicit trigger for deployment pipelines that
-// want to run when another pipeline reports a deployable artifact.
-// Kept as a typed placeholder until cluster mode lands.
-type DeployTrigger struct{}
 
 // PreHookTrigger fires from a pre-commit git hook. Scoped to fast
 // local checks.
@@ -267,23 +209,21 @@ type PreHookTrigger struct{}
 // checks like full test suites.
 type PostHookTrigger struct{}
 
-// Load reads and parses the pipelines.yaml at path.
-func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return Parse(f)
-}
+// PostCommitHookTrigger fires from a post-commit git hook. The commit
+// has already landed, so the pipeline runs but never aborts it: the
+// installed hook tolerates failures and always exits zero. Scoped to
+// fast, non-blocking follow-ups (self-install, notifications).
+type PostCommitHookTrigger struct{}
 
-// Parse decodes a pipelines.yaml from r.
+// Parse decodes a pipelines config from r (the pipelines: section of
+// sparkwing.yaml, as a standalone document). Retained for tests and
+// round-trip helpers; project config is read via pkg/projectconfig.
 func Parse(r io.Reader) (*Config, error) {
 	var cfg Config
 	dec := yaml.NewDecoder(r)
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return &cfg, nil
 		}
 		return nil, fmt.Errorf("parse pipelines.yaml: %w", err)
@@ -295,8 +235,7 @@ func Parse(r io.Reader) (*Config, error) {
 }
 
 // Validate returns an error describing any structural problem in the
-// config. Callers typically surface these as pipeline-definition
-// errors and halt.
+// config.
 func (c *Config) Validate() error {
 	seen := map[string]struct{}{}
 	for i, p := range c.Pipelines {
@@ -311,162 +250,17 @@ func (c *Config) Validate() error {
 		}
 		seen[p.Name] = struct{}{}
 
-		if err := p.Secrets.Validate(p.Name); err != nil {
+		if err := p.Guards.Validate(p.Name); err != nil {
 			return err
-		}
-		for tname, t := range p.Targets {
-			if err := t.Validate(p.Name, tname); err != nil {
-				return err
-			}
-		}
-		if err := p.validateTriggerTargets(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateTriggerTargets rejects trigger spec defaults that name an
-// undeclared target. Surfaces the misconfiguration at parse rather
-// than at the first push event.
-func (p *Pipeline) validateTriggerTargets() error {
-	checks := []struct {
-		trigger string
-		target  string
-	}{}
-	if p.On.Push != nil {
-		checks = append(checks, struct {
-			trigger string
-			target  string
-		}{"push", p.On.Push.Target})
-	}
-	if p.On.Webhook != nil {
-		checks = append(checks, struct {
-			trigger string
-			target  string
-		}{"webhook", p.On.Webhook.Target})
-	}
-	for _, c := range checks {
-		if c.target == "" {
-			continue
-		}
-		if len(p.Targets) == 0 {
-			return fmt.Errorf("pipeline %q: %s trigger declares target %q but pipeline declares no targets; declare a targets block or remove the trigger target",
-				p.Name, c.trigger, c.target)
-		}
-		if !p.HasTarget(c.target) {
-			return fmt.Errorf("pipeline %q: %s trigger target %q is not a declared target; declared: %v",
-				p.Name, c.trigger, c.target, p.TargetNames())
-		}
-	}
-	return nil
-}
-
-// Validate checks one Target's structural invariants. Today only the
-// Approvals value is constrained; future approvals types ("two-person",
-// etc.) extend the accepted set.
-func (t Target) Validate(pipeline, name string) error {
-	switch t.Approvals {
-	case "", "required":
-		// ok
-	default:
-		return fmt.Errorf("pipeline %q target %q: approvals = %q is not a recognized value (accepted: required)", pipeline, name, t.Approvals)
-	}
-	return nil
-}
-
-// Validate checks every secret entry under one pipeline.
-func (s SecretsField) Validate(pipeline string) error {
-	for i, e := range s {
-		if e.Name == "" {
-			return fmt.Errorf("pipeline %q secrets[%d]: name is required", pipeline, i)
-		}
-		if e.Required && e.Optional {
-			return fmt.Errorf("pipeline %q secret %q: required and optional are mutually exclusive", pipeline, e.Name)
 		}
 	}
 	return nil
 }
 
 // IsRequired reports whether the entry is treated as required at run
-// start. Defaults to true when neither field is set, matching the
-// fail-fast posture of the bare-string legacy form.
+// start. Defaults to true when neither field is set.
 func (e SecretEntry) IsRequired() bool {
-	if e.Optional {
-		return false
-	}
-	return true
-}
-
-// TargetNames returns the pipeline's declared target names in sorted
-// order. Empty when no targets are declared.
-func (p *Pipeline) TargetNames() []string {
-	if len(p.Targets) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(p.Targets))
-	for name := range p.Targets {
-		out = append(out, name)
-	}
-	sortStrings(out)
-	return out
-}
-
-// HasTarget reports whether the pipeline declares a target with the
-// given name.
-func (p *Pipeline) HasTarget(name string) bool {
-	_, ok := p.Targets[name]
-	return ok
-}
-
-// TriggerTarget returns the default --for selection declared on the
-// trigger spec whose source matches the run's TriggerInfo.Source
-// string ("push", "webhook"). Returns "" when no matching spec is
-// declared or the spec carries no Target.
-//
-// Used by the orchestrator at run start to apply a per-trigger
-// default when the CLI / payload didn't pass an explicit --for. CLI
-// --for overrides this value.
-func (p *Pipeline) TriggerTarget(source string) string {
-	if p == nil {
-		return ""
-	}
-	switch source {
-	case "push":
-		if p.On.Push != nil {
-			return p.On.Push.Target
-		}
-	case "webhook":
-		if p.On.Webhook != nil {
-			return p.On.Webhook.Target
-		}
-	}
-	return ""
-}
-
-// TriggerValues returns the values: block declared on the trigger
-// spec whose source matches the run's TriggerInfo.Source string
-// ("push", "webhook", "schedule", ...). Returns nil when no
-// matching spec is declared or the spec carries no Values.
-//
-// Used by sparkwing.ResolvePipelineConfig to layer per-trigger
-// typed values onto the Config struct.
-//
-// Trigger sources that don't carry a values block today (manual,
-// schedule, webhook, deploy, pre/post-hook) return nil. Adding
-// Values to those is a future addition once a concrete use case
-// lands.
-func (p *Pipeline) TriggerValues(source string) map[string]any {
-	if p == nil {
-		return nil
-	}
-	switch source {
-	case "push":
-		if p.On.Push != nil {
-			return p.On.Push.Values
-		}
-	}
-	return nil
+	return !e.Optional
 }
 
 // Find returns the pipeline with the given name, or nil if absent.
@@ -488,27 +282,6 @@ func (c *Config) Names() []string {
 	return out
 }
 
-// Discover walks up from startDir looking for a .sparkwing/pipelines.yaml.
-// Returns the absolute path and its loaded Config.
-func Discover(startDir string) (path string, cfg *Config, err error) {
-	dir := startDir
-	for {
-		candidate := filepath.Join(dir, ".sparkwing", "pipelines.yaml")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			loaded, lerr := Load(candidate)
-			if lerr != nil {
-				return candidate, nil, lerr
-			}
-			return candidate, loaded, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", nil, fmt.Errorf("no .sparkwing/pipelines.yaml found from %s up", startDir)
-		}
-		dir = parent
-	}
-}
-
 // EntrypointsByName returns a map of pipeline name -> entrypoint type
 // name. Convenient for matching against sparkwing.TypeName of
 // registered instances.
@@ -516,6 +289,32 @@ func (c *Config) EntrypointsByName() map[string]string {
 	out := make(map[string]string, len(c.Pipelines))
 	for _, p := range c.Pipelines {
 		out[p.Name] = p.Entrypoint
+	}
+	return out
+}
+
+// EachPipeline calls fn for every (pipeline name, entrypoint name)
+// pair in file order. Matches the iteration shape sparkwing's
+// BindPipelinesFromYAML expects, avoiding a hard import cycle from
+// pkg/pipelines into sparkwing.
+func (c *Config) EachPipeline(fn func(name, entrypoint string)) {
+	if c == nil {
+		return
+	}
+	for _, p := range c.Pipelines {
+		fn(p.Name, p.Entrypoint)
+	}
+}
+
+// PipelinesByEntrypoint returns every pipeline keyed by its entrypoint
+// type name. Multiple pipelines can share an entrypoint (the whole
+// point of the v0.6 redesign); the returned slice preserves file
+// order within each entrypoint bucket.
+func (c *Config) PipelinesByEntrypoint() map[string][]*Pipeline {
+	out := map[string][]*Pipeline{}
+	for i := range c.Pipelines {
+		p := &c.Pipelines[i]
+		out[p.Entrypoint] = append(out[p.Entrypoint], p)
 	}
 	return out
 }
@@ -539,24 +338,6 @@ func (c *Config) Equal(other *Config) bool {
 		if lp.Entrypoint != p.Entrypoint {
 			return false
 		}
-		if !strings.EqualFold(joinSorted(lp.Tags), joinSorted(p.Tags)) {
-			return false
-		}
 	}
 	return true
-}
-
-func joinSorted(s []string) string {
-	cp := append([]string(nil), s...)
-	sortStrings(cp)
-	return strings.Join(cp, ",")
-}
-
-func sortStrings(s []string) {
-	// Small list sort to avoid pulling sort just for test helpers.
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j-1] > s[j]; j-- {
-			s[j-1], s[j] = s[j], s[j-1]
-		}
-	}
 }

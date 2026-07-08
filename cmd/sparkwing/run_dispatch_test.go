@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,16 @@ func TestParseRunFlags_NoCache(t *testing.T) {
 	}
 }
 
+func TestParseRunFlags_LocalOnly(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-local-only"})
+	if !wf.localOnly {
+		t.Errorf("localOnly: want true got false")
+	}
+	if len(pass) != 0 {
+		t.Errorf("passthrough should be empty, got %v", pass)
+	}
+}
+
 func TestParseRunFlags_OnlyAndNoCacheCoexist(t *testing.T) {
 	wf, _ := parseRunFlags([]string{"--sw-only=lint-*", "--sw-no-cache"})
 	if wf.only != "lint-*" {
@@ -53,5 +64,53 @@ func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
 	wantPass := []string{"--user-flag", "v", "--other"}
 	if !slices.Equal(pass, wantPass) {
 		t.Errorf("passthrough = %v, want %v", pass, wantPass)
+	}
+}
+
+func TestParseRunFlags_Profile(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"space-separated", []string{"--profile", "prod"}, "prod"},
+		{"equals-form", []string{"--profile=prod"}, "prod"},
+		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, pass := parseRunFlags(tc.args)
+			if wf.profile != tc.want {
+				t.Errorf("profile = %q, want %q", wf.profile, tc.want)
+			}
+			if tc.want == "" && !slices.Contains(pass, "--profile") {
+				t.Errorf("incomplete --profile should pass through; got passthrough=%v", pass)
+			}
+		})
+	}
+}
+
+// --profile picks the storage profile; --target falls through to the
+// pipeline binary as a regular pass-through arg in v0.6 (no longer
+// framework-special).
+func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
+	if wf.profile != "local" {
+		t.Errorf("profile = %q, want local", wf.profile)
+	}
+	if !slices.Contains(pass, "--target") || !slices.Contains(pass, "prod") {
+		t.Errorf("--target should fall through to pipeline args; passthrough=%v", pass)
+	}
+}
+
+// The retired --sw-profile flag is no longer parsed; it falls through to
+// passthrough where checkRetiredWhereFlags catches it with a pointer.
+func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-profile", "remote"})
+	if wf.profile != "" {
+		t.Errorf("--sw-profile should not set profile; got %q", wf.profile)
+	}
+	if err := checkRetiredWhereFlags(pass); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
+		t.Errorf("checkRetiredWhereFlags: want --sw-profile pointer, got %v", err)
 	}
 }

@@ -852,7 +852,7 @@ function RunTimestampBlock({ run }: { run: Run }) {
             </span>
           )}
         <span className="text-[var(--foreground)]">
-          {run.finished_at ? fmtClock(run.finished_at) : "—"}
+          {run.finished_at ? fmtClock(run.finished_at) : "--"}
         </span>
         <span>· {fmtAgo(sinceTs)}</span>
       </span>

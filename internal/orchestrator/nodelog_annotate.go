@@ -60,12 +60,6 @@ func (l *annotatingNodeLog) Emit(rec sparkwing.LogRecord) {
 			}
 		}
 		if msg != "" {
-			// Step-scoped annotations land on the per-step row only;
-			// node-scoped ones (fired between steps / before any
-			// step starts) land on the node row. The two are disjoint
-			// so consumers can render them side-by-side without
-			// deduplication; the total for a node is node.annotations
-			// + sum of each step.annotations.
 			if rec.Step != "" {
 				l.persistStep(rec.Step, msg)
 			} else {

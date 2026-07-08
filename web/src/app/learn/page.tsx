@@ -21,7 +21,7 @@ sparkwing pipeline init
 sparkwing pipeline run --name your-project
 \`\`\`
 
-That's it. You now have a controller, listener, web dashboard, git cache, and Docker-in-Docker — all running locally in a kind cluster.
+That's it. You now have a controller, listener, web dashboard, git cache, and Docker-in-Docker -- all running locally in a kind cluster.
 
 ## What sparkwing pipeline init creates
 
@@ -247,7 +247,7 @@ sparkwing.RunConfig.Commit    // git commit SHA
 
 ## Conditional logic
 
-Jobs are plain Go — use normal \`if\` statements:
+Jobs are plain Go -- use normal \`if\` statements:
 
 \`\`\`go
 func JobDeploy() {
@@ -350,7 +350,7 @@ Children are independent jobs. Any listener can claim them. The parent waits for
 
 ## SpawnMatrix
 
-Cartesian product spawn — expands axis combinations automatically:
+Cartesian product spawn -- expands axis combinations automatically:
 
 \`\`\`go
 sparkwing.SpawnMatrix("test",
@@ -373,7 +373,7 @@ sparkwing.SpawnMatrix("test",
 
 ## Local spawn
 
-When running \`sparkwing pipeline run\` locally, spawn works without a controller — children run as subprocesses automatically.
+When running \`sparkwing pipeline run\` locally, spawn works without a controller -- children run as subprocesses automatically.
 `,
   },
   {
@@ -539,15 +539,15 @@ Master Runner (isolated pod, executes job function)
 Child Runners (via controller queue, any listener)
 \`\`\`
 
-**Controller** — central HTTP API. Queues jobs, routes to listeners, tracks results.
+**Controller** -- central HTTP API. Queues jobs, routes to listeners, tracks results.
 
-**Listener** — polls controller, manages concurrent job slots, creates master runner pods. Does NOT execute jobs itself.
+**Listener** -- polls controller, manages concurrent job slots, creates master runner pods. Does NOT execute jobs itself.
 
-**Master Runner** — isolated k8s pod. Downloads code from git cache, builds the .sparkwing/ binary, executes the registered job function.
+**Master Runner** -- isolated k8s pod. Downloads code from git cache, builds the .sparkwing/ binary, executes the registered job function.
 
-**Git Cache** — centralized service. Clones repos once, serves cached tarballs over HTTP. SSH key lives only here.
+**Git Cache** -- centralized service. Clones repos once, serves cached tarballs over HTTP. SSH key lives only here.
 
-**Local mode** — \`sparkwing pipeline run\` works without any cluster. Spawn creates subprocesses via an embedded mini-controller.
+**Local mode** -- \`sparkwing pipeline run\` works without any cluster. Spawn creates subprocesses via an embedded mini-controller.
 `,
   },
 ];

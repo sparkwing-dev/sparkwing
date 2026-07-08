@@ -38,9 +38,6 @@ func TestApproval_CreatesGateNode(t *testing.T) {
 func TestApproval_ZeroValueIsEmptyPolicy(t *testing.T) {
 	plan := NewPlan()
 	gate := JobApproval(plan, "g", ApprovalConfig{})
-	// The zero value of ApprovalTimeoutPolicy is "". The orchestrator
-	// treats it as ApprovalFail at dispatch time -- authors who want
-	// the default leave OnExpiry unset.
 	if got := gate.Job().ApprovalConfig().OnExpiry; got != "" {
 		t.Fatalf("default OnExpiry = %q, want zero value", got)
 	}
@@ -115,7 +112,6 @@ func TestApproval_GateNeedsAndChain(t *testing.T) {
 	if got := gate.Job().DepIDs(); len(got) != 1 || got[0] != "build" {
 		t.Fatalf("gate deps = %v, want [build]", got)
 	}
-	// Downstream nodes can take *ApprovalGate as a Needs target too.
 	deploy := Job(plan, "deploy", &fakeJob{}).Needs(gate)
 	if got := deploy.DepIDs(); len(got) != 1 || got[0] != "approve" {
 		t.Fatalf("deploy deps = %v, want [approve]", got)

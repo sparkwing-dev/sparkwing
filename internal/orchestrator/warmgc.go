@@ -47,7 +47,6 @@ func GCWarmRoot(ctx context.Context, root string, ctrl TerminalRunLister, logger
 	if root == "" {
 		return stats, errors.New("gc: root is required")
 	}
-	// Missing root is fine on a fresh pod.
 	if _, err := os.Stat(root); err != nil {
 		if os.IsNotExist(err) {
 			logger.Info("gc: root does not exist; nothing to sweep", "root", root)
@@ -131,7 +130,6 @@ func sweepTerminalRuns(ctx context.Context, runsDir string, ctrl TerminalRunList
 		logger.Warn("gc: stat runs dir failed", "dir", runsDir, "err", err)
 		return 0, 0
 	}
-	// Single page; ephemeral PVC + time-bounded sweep.
 	runs, err := ctrl.ListRuns(ctx, store.RunFilter{
 		Statuses: []string{"success", "failed", "cancelled"},
 		Limit:    500,

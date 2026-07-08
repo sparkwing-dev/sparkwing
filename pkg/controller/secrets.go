@@ -1,9 +1,5 @@
 package controller
 
-// Secrets CRUD HTTP handlers. All routes require ScopeAdmin. Raw
-// values never leave the server except via GET /api/v1/secrets/{name};
-// LIST blanks the value field on every response row.
-
 import (
 	"encoding/json"
 	"errors"
@@ -46,13 +42,10 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	// Attribute the write to the calling principal for audit. Falls
-	// back to "anonymous" when auth is disabled.
 	principal := "anonymous"
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		principal = p.Name
 	}
-	// Encrypt at rest when a cipher is configured.
 	stored := req.Value
 	if s.secretsCipher != nil {
 		sealed, sErr := s.secretsCipher.Seal(req.Value)
@@ -62,7 +55,6 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		}
 		stored = sealed
 	}
-	// Default masked=true when the caller didn't supply the field.
 	masked := true
 	if req.Masked != nil {
 		masked = *req.Masked
@@ -87,9 +79,6 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	// A row with an envelope but no cipher configured produces a 500 --
-	// the operator removed the key without a re-encrypt step, which is
-	// not silently recoverable.
 	plain := sec.Value
 	if s.secretsCipher != nil {
 		opened, oerr := s.secretsCipher.Open(plain)
@@ -120,7 +109,6 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]secretJSON, 0, len(secs))
 	for _, sec := range secs {
-		// Drop Value -- list must never leak secret material.
 		out = append(out, secretJSON{
 			Name:      sec.Name,
 			Principal: sec.Principal,

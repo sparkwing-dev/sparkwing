@@ -16,10 +16,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -58,11 +62,11 @@ type Options struct {
 	// cross-pipeline cycle detection.
 	ParentRunID string
 
-	// InheritedPlanCacheKey / HolderID let child runs spawned from a
-	// plan-level Cache holder execute under the parent's admission
+	// InheritedPlanConcurrencyKey / HolderID let child runs spawned from a
+	// plan-level Concurrency holder execute under the parent's admission
 	// instead of queueing behind it.
-	InheritedPlanCacheKey      string
-	InheritedPlanCacheHolderID string
+	InheritedPlanConcurrencyKey      string
+	InheritedPlanConcurrencyHolderID string
 
 	// RetryOf is the run id this execution retries. Drives skip-passed
 	// rehydration unless Full is set.
@@ -97,12 +101,20 @@ type Options struct {
 	// the keep-set.
 	Only string
 
-	// NoCacheRuns disables cache READS on this run's per-node Cache()
+	// NoCache disables cache READS on this run's per-node Cache()
 	// lookups. Cache WRITES still occur on success, so subsequent runs
 	// over the same content hit cache normally. Distinct from the
-	// SPARKWING_NO_CACHE / bincache flag that gates the compiled-
-	// pipeline-binary cache.
-	NoCacheRuns bool
+	// SPARKWING_NO_BINCACHE flag that gates the compiled-pipeline-binary
+	// (bincache) cache.
+	NoCache bool
+
+	// LocalOnly forces SQLite state, filesystem cache, and filesystem
+	// logs for this run regardless of backends.yaml, env-var shims, or
+	// any other shared-backend config. Used as the escape hatch from
+	// the shared-backends story: an operator hitting a stale or
+	// unreachable shared store can bypass the resolver entirely and
+	// run as if no shared infrastructure were configured.
+	LocalOnly bool
 
 	// DryRun selects the no-mutation dispatch path: every step's
 	// DryRunFn (or its apply Fn when the step is explicitly marked
@@ -129,25 +141,26 @@ type Options struct {
 	// Nil leaves both surfaces empty (existing pipelines unaffected).
 	PipelineYAML *pipelines.Pipeline
 
-	// Target is the --for selection. Empty means "no target", which
-	// layers values from PipelineYAML.Values.Base only. The CLI
-	// surface for --for lands in a later step; this field is the
-	// already-resolved value.
-	Target string
-
 	// SparkwingDir, when non-empty, is the resolved .sparkwing/
-	// directory the orchestrator consults for sources.yaml. When the
-	// chosen target binds to a named source (Target.Source) or the
-	// sources.yaml default applies, the orchestrator constructs the
-	// appropriate SecretResolver via sparkwing.NewSecretResolverFromSource
-	// and installs it. Empty leaves the existing SecretSource path
-	// untouched.
+	// directory. Used today for working-directory context; secret
+	// source binding now reads the inline spec on
+	// PipelineYAML.Dispatch.Source rather than a registry file.
 	SparkwingDir string
 
 	// MaxParallel caps concurrent node execution. Zero = unbounded
 	// (cluster default); local mode sets NumCPU. The cap applies only
 	// to active execution; dep-wait goroutines are uncapped.
 	MaxParallel int
+
+	// DispatchWaitTimeout bounds the dispatcher's post-DAG drain. If
+	// every per-node goroutine hasn't returned within the duration,
+	// the dispatcher emits a `dispatch_wait_timeout` event with a
+	// goroutine stack dump and returns -- which fires the deferred
+	// concurrency-slot release so a wedged run doesn't lock the rest
+	// of the fleet behind a process that will never complete. Zero
+	// uses DefaultDispatchWaitTimeout (30m). Negative disables the
+	// watchdog entirely (historical wait-forever behavior).
+	DispatchWaitTimeout time.Duration
 
 	// LogStore, when non-nil, replaces the default filesystem
 	// LogBackend used by RunLocal.
@@ -158,21 +171,15 @@ type Options struct {
 	ArtifactStore storage.ArtifactStore
 
 	// State, when non-nil, is the run-record store RunLocal wraps into
-	// LocalBackends. ApplyBackendsConfig populates this from
-	// backends.yaml (defaults / environment / target overlay) or
-	// synthesizes a sqlite spec at paths.StateDB() when nothing is
-	// configured. Pre-set values from the caller are preserved.
+	// LocalBackends. ApplyProfileBackends populates this from the resolved
+	// profile's surfaces (with the per-target backend overlay layered on
+	// top) or synthesizes a sqlite spec at paths.StateDB() when the
+	// profile declares no state. Pre-set values from the caller are
+	// preserved.
 	State storage.StateStore
 
-	// BackendsConfig, when non-empty, names an extra backends.yaml
-	// fragment to layer underneath repo+user defaults. The outer
-	// sparkwing CLI uses this to forward profile-derived storage
-	// settings to the child pipeline binary. The file is expected to be
-	// cleaned up by the caller.
-	BackendsConfig string
-
-	// DefaultStateDB names the SQLite file ApplyBackendsConfig falls
-	// back to when no state surface is configured in backends.yaml and
+	// DefaultStateDB names the SQLite file the profile resolver falls
+	// back to when the resolved profile declares no state surface and
 	// the caller didn't pre-set State. RunLocal sets this to
 	// paths.StateDB() so every code path opens the state store through
 	// the factory. Cluster boot paths leave it empty; they wire State
@@ -180,13 +187,40 @@ type Options struct {
 	DefaultStateDB string
 
 	// ProfileLookup resolves a profile name to (controller URL, token)
-	// for type=controller cache/logs specs. RunLocal installs the
-	// default profile.Load + profile.Resolve callback when this is
-	// nil. Tests inject a synthetic lookup pointing at an httptest
-	// server. Cluster boot paths leave it nil; controller-typed specs
-	// would error there, which is the right signal since those paths
-	// declare URL + token via CLI flags rather than profile names.
-	ProfileLookup sparkwing.ProfileLookup
+	// for type=controller cache/logs/state backend specs. RunLocal
+	// installs the active profile's controller as the default when
+	// this is nil; tests inject a synthetic lookup pointing at an
+	// httptest server. Cluster boot paths leave it nil and declare
+	// URL + token via CLI flags rather than profile names.
+	ProfileLookup storeurl.ProfileLookup
+
+	// Profile is the resolved storage profile RunLocal routes
+	// state/logs/cache through via ApplyProfileBackendsWithMirror. The
+	// laptop path always sets it (profileFromEnv resolves the chain down
+	// to the built-in laptop fallback); a nil Profile falls back to local
+	// SQLite. Cluster boot paths leave it nil and wire State directly.
+	Profile *profile.Profile
+
+	// ProfileChain is the resolution chain that picked Profile (which
+	// rule matched, and the alternatives considered). Set alongside
+	// Profile so run_start can record *why* this profile was chosen.
+	// Nil when Profile is nil; the run_start profile block is omitted
+	// unless both are set.
+	ProfileChain *profile.Chain
+
+	// DefaultArgs is the project's defaults.args block from
+	// sparkwing.yaml. Layers below PipelineYAML.Args (which layers
+	// below the explicit CLI flag). Nil when no project defaults
+	// apply.
+	DefaultArgs map[string]string
+
+	// MirrorLocal, when non-nil, is an opened local SQLite store that
+	// RunLocal tees state writes to alongside the canonical state
+	// backend (see mirrorStateBackend). ApplyProfileBackendsWithMirror
+	// opens it for `sparkwing run --profile <non-local>` from a laptop;
+	// RunLocal wraps Backends.State around it and owns closing it.
+	// Cluster boot paths leave it nil so pods never carry a mirror.
+	MirrorLocal *store.Store
 }
 
 // DebugDirectives is the ephemeral pause surface for one run.
@@ -226,28 +260,31 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q is not registered", opts.Pipeline)
 	}
+	wedgeBudget, err := storeWedgeBudget()
+	if err != nil {
+		return nil, err
+	}
 
 	trigger := opts.Trigger
 	if trigger.Source == "" {
 		trigger.Source = "manual"
 	}
 
-	// Trigger-supplied --for default. The CLI (and webhook payloads
-	// that name a target) populate opts.Target explicitly; this
-	// fallback only applies when neither did. A pipeline declaring
-	// push: { target: prod } therefore dispatches release --for prod
-	// on a push event without an explicit override. Applied before
-	// target validation so a misconfigured trigger.target surfaces
-	// the same "undeclared target" error a misconfigured --for does.
-	if opts.Target == "" && opts.PipelineYAML != nil {
-		opts.Target = opts.PipelineYAML.TriggerTarget(trigger.Source)
-	}
-
-	// Pre-flight validation that doesn't need the plan or run row.
-	// These errors fire before CreateRun so the failure mode is
-	// loud, fast, and leaves no orphan run state behind.
-	if err := validateTargetSelection(opts); err != nil {
-		return nil, err
+	if opts.PipelineYAML != nil {
+		guardCtx := pipelines.GuardContext{
+			Args: opts.Args,
+		}
+		if opts.Profile != nil {
+			guardCtx.ProfileName = opts.Profile.Name
+			guardCtx.ProfileIsLocal = opts.Profile.ControllerURL() == ""
+		}
+		if opts.Git != nil {
+			guardCtx.GitBranch = opts.Git.Branch
+			guardCtx.GitDefaultBranch = opts.Git.DefaultBranch
+		}
+		if err := opts.PipelineYAML.Guards.Evaluate(opts.Pipeline, guardCtx); err != nil {
+			return nil, err
+		}
 	}
 
 	runID := opts.RunID
@@ -255,8 +292,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		runID = newRunID()
 	}
 
-	// Untracked dispatches pass nil; ensure RunContext.Git is non-nil
-	// so rc.Git.IsDirty(ctx) errors instead of panicking.
+	// safety: opts.Git may be nil for untracked dispatches; non-nil gitOpt lets rc.Git.IsDirty error instead of panic.
 	gitOpt := opts.Git
 	if gitOpt == nil {
 		gitOpt = &sparkwing.Git{}
@@ -269,20 +305,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		Trigger:   trigger,
 		StartedAt: time.Now(),
 	}
-	// Same instance lives on CurrentRuntime().Git so SDK helpers
-	// (docker.ComputeTags, sparkwing.CurrentRuntime().Git.SHA in user code)
-	// see the trigger's view without re-shelling.
 	sparkwing.SetGit(gitOpt)
 
-	// Split Git.Repo "owner/name" so the run row keeps populating the
-	// historical github_owner / github_repo columns the dashboard
-	// reads. New code reads Git.Repo directly.
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
-	// Build the invocation snapshot once and use it for both the
-	// store row (so runs status / runs receipt / dashboards can show
-	// "how was this started" without scanning logs) and the
-	// run_start envelope event (so the live JSONL stream carries the
-	// same shape). Single source of truth.
 	invocation := buildRunInvocation(opts, runID)
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
@@ -305,73 +330,58 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
-	// Pre-register secret-marked Inputs values before any node runs.
-	// Same masker is reused for resolver + log redaction.
+	hbCtx, cancelHeartbeat := context.WithCancel(ctx)
+	defer cancelHeartbeat()
+	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID, wedgeBudget)
+
 	masker := secrets.NewMasker()
 	for _, v := range reg.SecretValues(opts.Args) {
 		masker.Register(v)
 	}
 
-	// Publish the resolved target on the run-wide ctx so pipeline
-	// Plan bodies and step bodies can read it via sparkwing.Target(ctx).
-	// OnTarget verbs on Job/WorkStep encode the same value at the
-	// scheduler level; this accessor is for diagnostics and the rare
-	// case where neither OnTarget nor a typed Config field is a clean
-	// fit.
-	ctx = sparkwingruntime.WithTarget(ctx, opts.Target)
-
-	// Resolve the typed Config struct before Plan runs so pipelines
-	// can read PipelineConfig[T](ctx) from their Plan() body. Secrets
-	// are resolved later, after the SecretResolver is installed; Plan
-	// is not expected to read PipelineSecrets (the plan-time guard
-	// blocks Secret/Config calls anyway).
-	pipeCfg, err := sparkwing.ResolvePipelineConfig(reg, opts.PipelineYAML, opts.Target, trigger.Source)
-	if err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	invokeArgs := opts.Args
+	pipelineArgs := map[string]string(nil)
+	if opts.PipelineYAML != nil {
+		pipelineArgs = opts.PipelineYAML.Args
 	}
-	if pipeCfg != nil {
-		ctx = sparkwing.WithPipelineConfig(ctx, pipeCfg)
+	if len(opts.DefaultArgs) > 0 || len(pipelineArgs) > 0 {
+		merged := make(map[string]string, len(opts.DefaultArgs)+len(pipelineArgs)+len(invokeArgs))
+		for k, v := range opts.DefaultArgs {
+			merged[k] = v
+		}
+		for k, v := range pipelineArgs {
+			merged[k] = v
+		}
+		for k, v := range invokeArgs {
+			merged[k] = v
+		}
+		invokeArgs = merged
 	}
 
-	// Plan build (parse Args -> typed Inputs -> Plan). Failures fail
-	// the run with no nodes dispatched.
-	plan, err := reg.Invoke(ctx, opts.Args, rc)
+	var profName string
+	var profIsLocal bool
+	if opts.Profile != nil {
+		profName = opts.Profile.Name
+		profIsLocal = opts.Profile.ControllerURL() == ""
+	}
+	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
+		Name:    profName,
+		IsLocal: profIsLocal,
+	})
+
+	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
-	// OnTarget validation: every Job/WorkStep OnTarget(...) value must
-	// name a declared target; a pipeline with no targets block can't
-	// carry OnTarget at all. Fails before dispatch so authoring
-	// mistakes (typos, leftover OnTarget after a targets-block
-	// removal) surface loudly.
-	if err := validateOnTargetSelection(opts, plan); err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-		return &Result{RunID: runID, Status: "failed", Error: err}, nil
-	}
-
-	// Pre-build the per-run snapshot metadata (target, resolved
-	// Config json, SecretsField) so the cluster pod can rehydrate
-	// PipelineConfig and re-resolve PipelineSecrets without re-
-	// reading pipelines.yaml on its end.
 	snapMeta := planSnapshotMeta{
-		Target: opts.Target,
-	}
-	if pipeCfg != nil {
-		raw, merr := json.Marshal(pipeCfg)
-		if merr != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("marshal pipeline config: %v", merr))
-			return &Result{RunID: runID, Status: "failed", Error: merr}, nil
-		}
-		snapMeta.PipelineConfig = raw
+		Secrets: sparkwingruntime.ReflectSecretsField(reg),
 	}
 	if opts.PipelineYAML != nil {
-		snapMeta.Secrets = opts.PipelineYAML.Secrets
+		snapMeta.PipelineRequires = opts.PipelineYAML.Requires
 	}
 
-	// Snapshot only the DAG; outputs stream into the nodes table.
 	snapshot, err := marshalPlanSnapshot(plan, rc, snapMeta)
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan snapshot: %v", err))
@@ -387,7 +397,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			NodeID:      n.ID(),
 			Status:      "pending",
 			Deps:        n.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(n),
+			NeedsLabels: effectiveClaimLabels(n, snapMeta.PipelineRequires),
 		}); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
@@ -396,11 +406,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	validatePlanModifiers(opts.Delegate, plan)
 
-	// --start-at / --stop-at must reference a real WorkStep id;
-	// reject with a Levenshtein-suggesting message before the
-	// orchestrator even emits run_start, so the operator's iteration
-	// loop is "save -> sparkwing run X -> see typo error" not "save -> dispatch
-	// -> watch run finish silently doing nothing useful."
 	if opts.StartAt != "" || opts.StopAt != "" {
 		if opts.Only != "" {
 			err := fmt.Errorf("--only is mutually exclusive with --start-at / --stop-at")
@@ -413,8 +418,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		ctx = sparkwingruntime.WithStepRange(ctx, opts.StartAt, opts.StopAt)
 	}
-	// --only fails fast on a malformed glob or a pattern that matches
-	// nothing. Computed skip set is plumbed into dispatch below.
 	var onlySkip map[string]string
 	if opts.Only != "" {
 		skip, err := computeOnlySkip(plan, opts.Only)
@@ -424,40 +427,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		onlySkip = skip
 	}
-	if opts.NoCacheRuns {
-		ctx = withNoCacheRuns(ctx)
+	if opts.NoCache {
+		ctx = withNoCache(ctx)
 	}
-	// Install the dry-run mode flag on the run-wide ctx so every
-	// Work executed under it routes through DryRunFn instead
-	// of the apply Fn. Steps without a dry-run body soft-skip with
-	// reason `no_dry_run_defined`.
 	if opts.DryRun {
 		ctx = sparkwingruntime.WithDryRun(ctx)
 	}
 
 	emitRunStart(opts.Delegate, invocation)
-	emitRunPlan(opts.Delegate, plan, opts.Target)
+	emitRunPlan(opts.Delegate, plan)
 
 	r := opts.Runner
 	if r == nil {
 		r = NewInProcessRunner(backends)
 	}
-	// Lazy resolver: cache + masker installed only when a source is
-	// available. Masker is also stashed on ctx so loggers can pull
-	// it without a signature change.
 	ctx = secrets.WithMasker(ctx, masker)
-	// Pick the SecretResolver for this run. The per-target source
-	// binding (Target.Source -> sources.yaml entry) wins when both
-	// SparkwingDir and a target-source name are available; otherwise
-	// fall back to Options.SecretSource (the pre-step-8 path).
-	//
-	// Cross-source-type guard: a laptop-only source bound to a
-	// target dispatched on a non-local runner is rejected loudly
-	// here so the run fails before any pod spins up.
-	if err := validateSourceRunnerPortability(opts, r); err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
-		return &Result{RunID: runID, Status: "failed", Error: err}, nil
-	}
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", rerr.Error())
 		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil
@@ -468,11 +452,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwing.WithSecretResolver(ctx,
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
 	}
-	// Fail-fast resolution of the pipeline's declared secrets union
-	// (yaml SecretsField + Secrets() struct fields). Required entries
-	// must resolve before any job dispatches; optional entries
-	// tolerate a missing source. Skipped when neither side declared
-	// anything.
 	pipeSec, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, opts.PipelineYAML)
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
@@ -483,21 +462,28 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
-	// Local-only RunAndAwait trigger consumer; cluster mode
-	// delegates this to the warm-runner pool.
-	if ls, ok := backends.State.(localState); ok {
+	if st := canonicalLocalStore(backends.State); st != nil {
+		profileName := ""
+		if opts.Profile != nil {
+			profileName = opts.Profile.Name
+		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, ls.st, runID, nil)
+		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, nil, wedgeBudget)
 	}
 
+	dispatchWaitTimeout := opts.DispatchWaitTimeout
+	if dispatchWaitTimeout == 0 {
+		dispatchWaitTimeout = DefaultDispatchWaitTimeout
+	}
 	inheritedAdmission := planAdmission{
-		Key:      opts.InheritedPlanCacheKey,
-		HolderID: opts.InheritedPlanCacheHolderID,
+		Key:      opts.InheritedPlanConcurrencyKey,
+		HolderID: opts.InheritedPlanConcurrencyHolderID,
 	}
 	runErr := dispatch(
 		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
-		opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip, inheritedAdmission,
+		opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
+		dispatchWaitTimeout, inheritedAdmission,
 	)
 
 	finalStatus := "success"
@@ -508,15 +494,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	_ = backends.State.FinishRun(ctx, runID, finalStatus, errMsg)
 
-	// Emit run_finish here so the envelope tee (installed by
-	// RunLocal around opts.Delegate) captures it. Previously the
-	// outer Main() in this package emitted run_finish AFTER RunLocal
-	// returned -- which meant the envelope log closed before the
-	// terminal event landed, and `runs logs --follow` could never
-	// surface a "run finished" line. The Main() emission becomes the
-	// one for callers that drove orchestrator.Run directly without
-	// the envelope tee; we keep it idempotent there by checking the
-	// presence of the EnvelopeLogger flag in the delegate chain.
 	if opts.Delegate != nil {
 		level := "info"
 		if finalStatus != "success" {
@@ -535,10 +512,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 				"logs":   "sparkwing runs logs --run " + runID,
 			}
 			if finalStatus == "failed" {
-				// --failed is the safe default (reuse passed nodes,
-				// re-execute only what broke). `runs retry` requires
-				// an explicit --failed or --all so the hint embeds
-				// the choice the user is most likely to want next.
 				hints["retry"] = "sparkwing runs retry --failed --run " + runID
 			}
 			attrs["hints"] = hints
@@ -554,6 +527,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	return &Result{RunID: runID, Status: finalStatus, Error: runErr}, nil
 }
 
+// localConcurrencyMaintenanceInterval throttles the inline janitorial
+// pass on the daemonless run path: a controllerless box has no reaper
+// goroutine, so each run opportunistically sweeps the concurrency tables,
+// but at most once per interval regardless of how often runs fire.
+const localConcurrencyMaintenanceInterval = 5 * time.Minute
+
+// maintainLocalConcurrency runs the throttled concurrency janitorial pass
+// against a local store. Best-effort: a sweep failure is logged and
+// swallowed so it never fails the run that triggered it.
+func maintainLocalConcurrency(ctx context.Context, st *store.Store) {
+	if _, _, err := st.MaintainConcurrencyThrottled(ctx, store.ConcurrencyMaintenanceOptions{}, localConcurrencyMaintenanceInterval); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: concurrency maintenance: %v\n", err)
+	}
+}
+
 // RunLocal opens the local store, wires LocalBackends, and runs.
 // Defaults SecretSource to the laptop dotenv when nil.
 func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
@@ -566,50 +554,64 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if opts.DefaultStateDB == "" {
 		opts.DefaultStateDB = paths.StateDB()
 	}
-	if opts.ProfileLookup == nil {
-		opts.ProfileLookup = profileLookupCallback()
-	}
 	ownsState := opts.State == nil
-	if err := ApplyBackendsConfig(ctx, &opts); err != nil {
-		return nil, fmt.Errorf("backends: %w", err)
+	if err := ApplyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths); err != nil {
+		return nil, fmt.Errorf("profile backends: %w", err)
 	}
 	if opts.State == nil {
 		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")
 	}
-	st := opts.State
-	if ownsState {
-		defer st.Close()
+	var backends Backends
+	var st *store.Store
+	switch s := opts.State.(type) {
+	case *store.Store:
+		st = s
+		if ownsState {
+			defer func() { _ = st.Close() }()
+		}
+		backends = LocalBackends(paths, st, opts.ArtifactStore)
+	case *s3state.Backend:
+		if opts.LogStore == nil {
+			return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
+		}
+		if ownsState {
+			defer func() { _ = s.Close() }()
+		}
+		backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
+	case *client.Client:
+		var logsBackend LogBackend
+		if opts.LogStore != nil {
+			logsBackend = NewLogStoreBackend(opts.LogStore, nil)
+		}
+		backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
+	default:
+		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 	}
-	backends := LocalBackends(paths, st)
+	if opts.MirrorLocal != nil {
+		backends.State = newMirrorStateBackend(backends.State, opts.MirrorLocal, nil)
+		defer func() { _ = opts.MirrorLocal.Close() }()
+	}
 	if opts.LogStore != nil {
 		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)
 	}
-	// Wrap the user-facing delegate with an envelope tee so every
-	// run-wide event (run_start, run_plan, node_start, node_end,
-	// run_summary, run_finish, plan_warn, exec_line, ...) is also
-	// persisted to <runDir>/_envelope.ndjson. The merged-stream reader
-	// in JobLogs replays this file alongside per-node body output so
-	// `runs logs --follow` reconstructs the full chronological event
-	// stream that today only the dispatcher's stdout sees.
-	//
-	// We need the run id to derive the envelope path, but RunLocal
-	// generates the id when opts.RunID is empty. Mint it here so the
-	// inner Run() honors it AND the envelope file lives at the right
-	// directory.
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
+	annotateBoxSlotHolder(paths, opts.RunID)
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
 		return nil, fmt.Errorf("ensure run dir: %w", err)
 	}
 	envLog, envErr := newEnvelopeLogger(paths.EnvelopeLog(opts.RunID), opts.Delegate)
 	if envErr == nil {
 		opts.Delegate = envLog
-		defer envLog.Close()
+		defer func() { _ = envLog.Close() }()
 	}
+	if ownsState && st != nil {
+		maintainLocalConcurrency(ctx, st)
+	}
+
 	res, runErr := Run(ctx, backends, opts)
-	// Dump on error too, for post-mortem of partial runs.
-	if opts.ArtifactStore != nil && res != nil && res.RunID != "" {
+	if st != nil && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
 		if err := DumpRunState(ctx, st, res.RunID, opts.ArtifactStore); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: state dump failed: %v\n", err)
 		}
@@ -659,13 +661,13 @@ func dispatch(
 	maxParallel int,
 	snapMeta planSnapshotMeta,
 	onlySkip map[string]string,
+	dispatchWaitTimeout time.Duration,
 	inheritedAdmission planAdmission,
 ) error {
 	runStart := time.Now()
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
 	defer cancelDispatch(nil)
 
-	// Plan-level .Cache() gates the whole run before any dispatch.
 	planRelease, planOutcome, activeAdmission, perr := acquirePlanSlot(
 		dispatchCtx, backends, runID, plan, inheritedAdmission, cancelDispatch,
 	)
@@ -674,11 +676,11 @@ func dispatch(
 	}
 	switch planOutcome {
 	case planCacheSkipped:
-		return nil // run-level success; no nodes ran
+		return nil
 	case planCacheFailed:
-		return fmt.Errorf("plan concurrency key %q: slot full under OnLimit:Fail", plan.CacheOpts().Key)
+		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", planConcurrencyName(plan))
 	case planCacheEvicted:
-		return fmt.Errorf("plan concurrency key %q: evicted before dispatch", plan.CacheOpts().Key)
+		return fmt.Errorf("plan concurrency group %q: evicted before dispatch", planConcurrencyName(plan))
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
@@ -687,25 +689,20 @@ func dispatch(
 		dispatchCtx, backends, r, runID, plan, delegate, debug, retryOf,
 		masker, maxParallel, activeAdmission,
 	)
+	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
-	state.onTargetSkip = computeOnTargetSkip(plan, snapMeta.Target)
 	state.onlySkip = onlySkip
 
-	// Skip-passed: pre-seed succeeded nodes from the prior run so
-	// runOneNode short-circuits them.
 	if retryOf != "" && !full {
 		state.rehydrateFromRetry(dispatchCtx, retryOf)
 	}
 
-	// Seed with the plan's static nodes.
 	seen := make(map[string]bool, len(plan.Nodes()))
 	for _, n := range plan.Nodes() {
 		state.scheduleNode(n)
 		seen[n.ID()] = true
 	}
 
-	// Detached OnFailure recoveries don't appear in plan.Nodes() but
-	// need a row + goroutine to wait on the parent's doneCh.
 	for _, n := range plan.Nodes() {
 		rec := n.OnFailureNode()
 		if rec == nil || seen[rec.ID()] {
@@ -716,7 +713,7 @@ func dispatch(
 			NodeID:      rec.ID(),
 			Status:      "pending",
 			Deps:        rec.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(rec),
+			NeedsLabels: effectiveClaimLabels(rec, state.pipelineRequires),
 		})
 		state.scheduleNode(rec)
 		seen[rec.ID()] = true
@@ -726,7 +723,31 @@ func dispatch(
 		state.scheduleExpansion(exp)
 	}
 
-	state.wg.Wait()
+	if waitForDispatch(&state.wg, dispatchWaitTimeout) == dispatchWaitTimedOut {
+		stuck := stuckNodeIDs(plan, state)
+		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
+		summary, _ := json.Marshal(map[string]any{
+			"timeout":     dispatchWaitTimeout.String(),
+			"stuck_nodes": stuck,
+			"stack_bytes": len(stack),
+		})
+		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_wait_timeout", summary)
+		if delegate != nil {
+			delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "error",
+				Event: "dispatch_wait_timeout",
+				Msg:   stack,
+				Attrs: map[string]any{
+					"timeout_ms":  dispatchWaitTimeout.Milliseconds(),
+					"stuck_nodes": stuck,
+				},
+			})
+		}
+		planReleaseOutcome = "failed"
+		return fmt.Errorf("dispatch_wait_timeout: %d node(s) did not terminate within %s: %v",
+			len(stuck), dispatchWaitTimeout, stuck)
+	}
 	if cause := context.Cause(dispatchCtx); cause != nil &&
 		!errors.Is(cause, context.Canceled) &&
 		!errors.Is(cause, context.DeadlineExceeded) {
@@ -734,7 +755,6 @@ func dispatch(
 		return cause
 	}
 
-	// Optional nodes don't propagate failure to run-level.
 	var failed []string
 	for _, n := range plan.Nodes() {
 		oc, ok := state.getOutcome(n.ID())
@@ -768,7 +788,7 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 				Level: "warn",
 				JobID: n.ID(),
 				Event: "plan_warn",
-				Msg:   "Inline() and Requires() are set on the same job — Requires labels are ignored for inline execution",
+				Msg:   "Inline() and Requires() are set on the same job -- Requires labels are ignored for inline execution",
 				Attrs: map[string]any{
 					"inline":      true,
 					"requires":    n.RequiresLabels(),
@@ -805,7 +825,9 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
 		inv["binary_source"] = src
 	}
-	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+	if wd := sparkwing.WorkDir(); wd != "" {
+		inv["cwd"] = wd
+	} else if cwd, err := os.Getwd(); err == nil && cwd != "" {
 		inv["cwd"] = cwd
 	}
 	if len(opts.Args) > 0 {
@@ -818,6 +840,19 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 	}
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
+	}
+	if opts.Profile != nil && opts.ProfileChain != nil {
+		state, logs, cache := opts.Profile.SurfaceStrings()
+		inv["profile"] = map[string]any{
+			"name":         opts.ProfileChain.Selected,
+			"source":       string(opts.ProfileChain.Source),
+			"mirror_local": opts.Profile.EffectiveMirrorLocal(),
+		}
+		inv["backends"] = map[string]any{
+			"state": state,
+			"logs":  logs,
+			"cache": cache,
+		}
 	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv
@@ -872,11 +907,6 @@ func buildRunFlags(opts Options) map[string]any {
 	if v := os.Getenv("SPARKWING_ALLOW"); v != "" {
 		flags["allow"] = v
 	}
-	// Sparkwing-dispatch flags forwarded only for the run-record breadcrumb.
-	// `from` / `no_update` are consumed by the sparkwing run dispatcher
-	// before exec, so the pipeline binary never lifts them onto
-	// Options -- but knowing they were set is still load-bearing for
-	// reproducibility.
 	if v := os.Getenv("SPARKWING_REF"); v != "" {
 		flags["ref"] = v
 	}
@@ -928,11 +958,6 @@ func buildReproducer(opts Options, _ string) string {
 	}
 	sort.Strings(flagKeys)
 	for _, k := range flagKeys {
-		// max_parallel maps to --workers (sparkwing flag name); skip
-		// when it equals NumCPU since that's the default and would
-		// make every reproducer noisy with the local machine's CPU
-		// count. Agents wanting a precise replay can read the
-		// structured attrs.flags map.
 		if k == "max_parallel" {
 			continue
 		}
@@ -961,11 +986,8 @@ func buildReproducer(opts Options, _ string) string {
 	return strings.Join(parts, " ")
 }
 
-// emitRunPlan sends a run_plan record carrying the DAG. The target
-// argument feeds OnTarget filtering metadata onto each node so
-// renderers can suppress (CLI) or label (dashboard) target-filtered
-// jobs without recomputing the effective-target walk.
-func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan, target string) {
+// emitRunPlan sends a run_plan record carrying the DAG.
+func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 	if delegate == nil {
 		return
 	}
@@ -973,7 +995,6 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan, target string)
 	if len(nodes) == 0 {
 		return
 	}
-	effective := sparkwingruntime.EffectiveJobTargets(plan)
 	rows := make([]any, 0, len(nodes))
 	for _, n := range nodes {
 		row := map[string]any{
@@ -992,33 +1013,11 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan, target string)
 		if gs := plan.JobGroupNames(n.ID()); len(gs) > 0 {
 			row["groups"] = gs
 		}
-		// ExpandFrom fan-in edges: expose the source so the plan
-		// preview draws the edge.
 		if srcs := plan.GroupSourceIDs(n.ID()); len(srcs) > 0 {
 			row["group_deps"] = srcs
 		}
-		// OnTarget metadata: explicit declaration plus the effective
-		// (post-inference) target-set lets the dashboard render a
-		// "[dev|staging|prod]" label on every job that participates
-		// in target filtering. skip_reason is set only when the
-		// active target excludes the job; the CLI renderer treats
-		// it as a hide signal so target-mismatched jobs don't clutter
-		// the log view, while the dashboard keeps showing them with
-		// a "skipped" badge.
-		if onT := n.OnTargets(); len(onT) > 0 {
-			row["on_target"] = onT
-		}
-		if eff, ok := effective[n.ID()]; ok && len(eff) > 0 {
-			row["effective_targets"] = eff
-			if !sparkwingruntime.JobAllowsTarget(eff, target) {
-				row["skip_reason"] = formatJobOnTargetSkip(eff, target)
-			}
-		}
 		if w := n.Work(); w != nil {
 			workSteps := w.Steps()
-			// Suppress the synthetic single "run" step that single-
-			// closure Jobs produce -- the node line already conveys
-			// everything in that case.
 			if !(len(workSteps) == 1 && workSteps[0].ID() == "run") {
 				groupByStep := map[string][]string{}
 				for _, g := range w.Groups() {
@@ -1080,12 +1079,8 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 	if delegate == nil {
 		return
 	}
-	// Pull sparkwing.Summary() markdown off the store so the renderer
-	// can fold it into the trailing Summary block alongside the per-
-	// node table. Best-effort: read errors drop the data, which
-	// already lives on the node/step rows for `runs status`.
-	nodeSummaries := map[string]string{}            // nodeID -> markdown
-	stepSummaries := map[string]map[string]string{} // nodeID -> stepID -> markdown
+	nodeSummaries := map[string]string{}
+	stepSummaries := map[string]map[string]string{}
 	if state.backends.State != nil {
 		if steps, err := state.backends.State.ListNodeSteps(state.ctx, state.runID); err == nil {
 			for _, s := range steps {
@@ -1108,7 +1103,7 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 	nodes := plan.Nodes()
 	rows := make([]any, 0, len(nodes))
 	seen := make(map[string]bool, len(nodes))
-	appendRow := func(id string, outcome string) {
+	appendRow := func(id, outcome string) {
 		state.mu.Lock()
 		dur := state.durations[id]
 		errMsg := state.errors[id]
@@ -1147,9 +1142,6 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 			outcome = string(oc)
 		}
 		appendRow(n.ID(), outcome)
-		// Include OnFailure recoveries adjacent to their parent only
-		// when they actually ran. Guard against duplicates from
-		// registering the recovery via both Plan.Add and .OnFailure.
 		if rec := n.OnFailureNode(); rec != nil && !seen[rec.ID()] {
 			if recOC, recHave := state.getOutcome(rec.ID()); recHave {
 				appendRow(rec.ID(), string(recOC))
@@ -1174,23 +1166,25 @@ func emitRunSummary(delegate sparkwing.Logger, plan *sparkwing.Plan, state *disp
 
 // dispatchState holds shared coordination state for one run.
 type dispatchState struct {
-	ctx         context.Context
-	resolverCtx context.Context
-	backends    Backends
-	runner      runner.Runner
-	runID       string
-	plan        *sparkwing.Plan
-	delegate    sparkwing.Logger
+	ctx              context.Context
+	resolverCtx      context.Context
+	backends         Backends
+	runner           runner.Runner
+	runID            string
+	plan             *sparkwing.Plan
+	delegate         sparkwing.Logger
+	pipelineRequires []string // pipeline-level label requirements unioned into every node's effective requires
 
 	mu        sync.Mutex
 	doneCh    map[string]chan struct{} // per-node completion signal
 	outputs   map[string]any           // per-node typed output (in-process runner)
 	outputsJS map[string][]byte        // per-node raw JSON output (cluster runner)
 	outcomes  map[string]sparkwing.Outcome
-	errors    map[string]string        // per-node error message, set when runner.Result.Err is non-nil
-	starts    map[string]time.Time     // per-node wall-clock start, stamped at runOneNode entry
-	durations map[string]time.Duration // per-node wall-clock duration, computed when outcome is recorded
-	claimedBy map[string]string        // recoveryID -> parentID (OnFailure)
+	errors    map[string]string            // per-node error message, set when runner.Result.Err is non-nil
+	failures  map[string]sparkwing.Failure // per-node failure (stage + err), set when a node fails
+	starts    map[string]time.Time         // per-node wall-clock start, stamped at runOneNode entry
+	durations map[string]time.Duration     // per-node wall-clock duration, computed when outcome is recorded
+	claimedBy map[string]string            // recoveryID -> parentID (OnFailure)
 
 	// inlineRunner routes Node.IsInline nodes regardless of the
 	// configured Options.Runner so glue work skips pod spin-up.
@@ -1208,18 +1202,16 @@ type dispatchState struct {
 	// nodes bypass the cap.
 	sem chan struct{}
 
-	// snapMeta carries the run-level Target / PipelineConfig /
-	// SecretsField that the cluster pod reads back to rehydrate
-	// PipelineConfig and re-resolve PipelineSecrets. Captured at run
-	// start so the mid-run snapshot re-marshal (after dynamic
-	// expansion) preserves these fields.
+	// snapMeta carries the run-level SecretsField and PipelineRequires
+	// that the cluster pod reads back to re-resolve PipelineSecrets.
+	// Captured at run start so the mid-run snapshot re-marshal (after
+	// dynamic expansion) preserves these fields.
 	snapMeta planSnapshotMeta
 
-	// onTargetSkip captures the plan-finalize OnTarget filter:
-	// nodes whose effective target-set does not contain the active
-	// target are recorded here with a human-readable reason. The
-	// dispatch loop short-circuits these nodes via markSkipped.
-	onTargetSkip map[string]string
+	// onlySkip captures the --only job-level filter. Nodes outside the
+	// matched set (plus their transitive Needs() ancestors) are skipped
+	// at dispatch entry. Empty map = no filter.
+	onlySkip map[string]string
 
 	// onlySkip captures the --only job-level filter. Nodes outside the
 	// matched set (plus their transitive Needs() ancestors) are skipped
@@ -1264,6 +1256,7 @@ func newDispatchState(
 		outputsJS: map[string][]byte{},
 		outcomes:  map[string]sparkwing.Outcome{},
 		errors:    map[string]string{},
+		failures:  map[string]sparkwing.Failure{},
 		starts:    map[string]time.Time{},
 		durations: map[string]time.Duration{},
 		claimedBy: map[string]string{},
@@ -1274,14 +1267,11 @@ func newDispatchState(
 	} else {
 		s.inlineRunner = NewInProcessRunner(backends)
 	}
-	// OnFailure claims only come from initial plan nodes.
 	for _, n := range plan.Nodes() {
 		if rec := n.OnFailureNode(); rec != nil {
 			s.claimedBy[rec.ID()] = n.ID()
 		}
 	}
-	// Outer fallback logger for SDK-internal Debug/Log calls that
-	// happen before the per-node nodeLogger opens.
 	if delegate != nil {
 		s.resolverCtx = sparkwingruntime.WithLogger(ctx, delegate)
 	} else {
@@ -1292,10 +1282,11 @@ func newDispatchState(
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
 	s.resolverCtx = sparkwingruntime.WithPipelineAwaiter(s.resolverCtx, s.pipelineAwaiter())
-	// Install the typed Inputs the registration parsed so step
-	// bodies can read the value via sparkwing.Inputs[T](ctx).
 	if in := plan.Inputs(); in != nil {
 		s.resolverCtx = sparkwingruntime.WithInputs(s.resolverCtx, in)
+	}
+	if ra := plan.ResolvedArgs(); ra != nil {
+		s.resolverCtx = sparkwingruntime.WithResolvedArgs(s.resolverCtx, ra)
 	}
 	return s
 }
@@ -1306,12 +1297,6 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
 		currentNode := sparkwing.NodeFromContext(ctx)
 
-		// Retry-lineage chain. When this run is itself a retry
-		// (s.retryOf != ""), look up the prior run's child trigger
-		// spawned at the same node + pipeline. If found, thread its
-		// id as the new child's retry_of so the child gets skip-
-		// passed treatment too. No match = the prior run never
-		// reached this spawn point; new child runs fresh.
 		var childRetryOf string
 		if s.retryOf != "" && currentNode != "" {
 			id, ferr := s.backends.State.FindSpawnedChildTriggerID(ctx, s.retryOf, currentNode, req.Pipeline)
@@ -1331,21 +1316,39 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			return nil, fmt.Errorf("enqueue trigger: %w", err)
 		}
 
-		// Otherwise long awaits look like dead air.
 		sparkwing.Info(ctx,
 			"spawned child run %s (pipeline=%s%s)",
 			childRunID, req.Pipeline, repoSuffix(req.Repo))
 
+		startedAt := time.Now()
+		emitChildFinish := func(status, errMsg string) {
+			if currentNode == "" {
+				return
+			}
+			attrs := map[string]any{
+				"child_run_id": childRunID,
+				"pipeline":     req.Pipeline,
+				"status":       status,
+				"duration_ms":  time.Since(startedAt).Milliseconds(),
+			}
+			if errMsg != "" {
+				attrs["error"] = errMsg
+			}
+			payload, _ := json.Marshal(attrs)
+			_ = s.backends.State.AppendEvent(context.WithoutCancel(ctx), s.runID, currentNode, "child_run_finish", payload)
+		}
+
 		if currentNode != "" {
 			payload, _ := json.Marshal(map[string]any{
+				"child_run_id":    childRunID,
 				"pipeline":        req.Pipeline,
 				"node_id":         req.NodeID,
-				"child_run_id":    childRunID,
+				"args":            req.Args,
 				"timeout_seconds": int64(req.Timeout.Seconds()),
 			})
 			if ev := s.backends.State.AppendEvent(ctx, s.runID, currentNode,
-				"pipeline_await_spawned", payload); ev != nil {
-				sparkwing.Warn(ctx, "pipeline_await audit event append failed: %v", ev)
+				"child_run_start", payload); ev != nil {
+				sparkwing.Warn(ctx, "child_run_start audit event append failed: %v", ev)
 			}
 		}
 
@@ -1356,21 +1359,34 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			defer cancel()
 		}
 
+		wedge, err := newStoreWedgeGuardFromEnv()
+		if err != nil {
+			return nil, err
+		}
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
-		// Heartbeat surfaces "still alive" so long awaits don't look
-		// wedged.
 		heartbeat := time.NewTicker(30 * time.Second)
 		defer heartbeat.Stop()
-		startedAt := time.Now()
 		lastStatus := "pending"
 		for {
 			run, err := s.backends.State.GetRun(pollCtx, childRunID)
-			if err == nil {
+			if err != nil {
+				// safety: ErrNotFound is a healthy store answer here -- the
+				// child's runs row appears only once a consumer claims and
+				// starts it, so a queued or still-compiling child must not
+				// count toward the wedge budget.
+				if errors.Is(err, store.ErrNotFound) {
+					wedge.success()
+				} else if terminal := wedge.fail(fmt.Sprintf("waiting for child run %s", childRunID), err); terminal != nil {
+					emitChildFinish("failed", terminal.Error())
+					return nil, terminal
+				}
+			} else {
+				wedge.success()
 				lastStatus = run.Status
 				switch run.Status {
 				case "success":
-					// Empty NodeID = caller wants only success, no output.
+					emitChildFinish("success", "")
 					if req.NodeID == "" {
 						return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
 					}
@@ -1380,13 +1396,16 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 					}
 					return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: data}, nil
 				case "failed":
+					emitChildFinish("failed", run.Error)
 					return nil, fmt.Errorf("child run %s failed: %s", childRunID, run.Error)
 				case "cancelled":
+					emitChildFinish("cancelled", "")
 					return nil, fmt.Errorf("child run %s was cancelled", childRunID)
 				}
 			}
 			select {
 			case <-pollCtx.Done():
+				emitChildFinish("timeout", pollCtx.Err().Error())
 				return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
 			case <-heartbeat.C:
 				sparkwing.Info(ctx,
@@ -1418,7 +1437,6 @@ func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
 		if err != nil {
 			return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, nodeID, err)
 		}
-		// Best-effort audit event.
 		currentNode := sparkwing.NodeFromContext(ctx)
 		if currentNode != "" {
 			payload, _ := json.Marshal(map[string]any{
@@ -1503,6 +1521,42 @@ func (s *dispatchState) setError(id, msg string) {
 	s.mu.Unlock()
 }
 
+// setFailure records a node's structured failure (stage + error), read
+// back when dispatching the node's OnFailure recovery.
+func (s *dispatchState) setFailure(id string, f sparkwing.Failure) {
+	s.mu.Lock()
+	s.failures[id] = f
+	s.mu.Unlock()
+}
+
+// getFailure returns the recorded failure for a node, or the zero
+// Failure if none was recorded.
+func (s *dispatchState) getFailure(id string) sparkwing.Failure {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failures[id]
+}
+
+// failureFrom attributes a node failure to its lifecycle stage using the
+// store's serializable failure reason rather than the Go error type. The
+// reason ([store.FailureVerify] etc.) is written by whichever runner ran
+// the node and survives a remote runner's process boundary, where the
+// typed *sparkwing.VerifyError does not. store.FailureVerify maps to
+// StageVerify; anything else is an action-stage failure. When the
+// in-process VerifyError wrapper is present it is unwrapped so recovery
+// sees the check's own error rather than the envelope.
+func failureFrom(reason string, err error) sparkwing.Failure {
+	stage := sparkwing.StageAction
+	if reason == store.FailureVerify {
+		stage = sparkwing.StageVerify
+	}
+	var ve *sparkwing.VerifyError
+	if errors.As(err, &ve) {
+		err = ve.Err
+	}
+	return sparkwing.Failure{Stage: stage, Err: err}
+}
+
 // markStarted stamps the wall-clock time runOneNode begins real work.
 func (s *dispatchState) markStarted(id string) {
 	s.mu.Lock()
@@ -1564,16 +1618,13 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 	select {
 	case <-sourceCh:
 	case <-s.resolverCtx.Done():
-		exp.Group.Finalize(nil, fmt.Errorf("ctx cancelled before expansion"))
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, fmt.Errorf("ctx cancelled before expansion"))
 		return
 	}
 
-	// Only proceed if the source actually succeeded. If it didn't,
-	// the expansion can't produce meaningful children; signal the
-	// group with an error and let downstream cancel cleanly.
 	oc, _ := s.getOutcome(exp.Source.ID())
 	if !oc.OK() {
-		exp.Group.Finalize(nil, fmt.Errorf("expansion source %q did not succeed (outcome=%s)", exp.Source.ID(), oc))
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, fmt.Errorf("expansion source %q did not succeed (outcome=%s)", exp.Source.ID(), oc))
 		return
 	}
 
@@ -1581,12 +1632,12 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 	if err != nil {
 		sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 			fmt.Sprintf("ExpandFrom(%s) failed: %v", exp.Source.ID(), err))
-		exp.Group.Finalize(nil, err)
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
 		return
 	}
 
-	if err := s.plan.InsertExpanded(exp.Source, children); err != nil {
-		exp.Group.Finalize(nil, err)
+	if err := sparkwing.RuntimePlumbing.Fns.PlanInsertExpanded(s.plan, exp.Source, children); err != nil {
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
 		return
 	}
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, exp.Source.ID(), "expansion_generated",
@@ -1598,23 +1649,17 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 			NodeID:      child.ID(),
 			Status:      "pending",
 			Deps:        child.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(child),
+			NeedsLabels: effectiveClaimLabels(child, s.pipelineRequires),
 		}); err != nil {
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 				fmt.Sprintf("ExpandFrom(%s): store child %s: %v", exp.Source.ID(), child.ID(), err))
 		}
 		s.scheduleNode(child)
 	}
-	// Snapshot now so dashboards see the expanded DAG. Preserve the
-	// run-level metadata (target / pipeline config / secrets) the
-	// initial snapshot carried so the cluster pod's rehydration path
-	// keeps working after dynamic expansion.
 	if snap, merr := marshalPlanSnapshot(s.plan, sparkwing.RunContext{Pipeline: "", RunID: s.runID}, s.snapMeta); merr == nil {
 		_ = s.backends.State.UpdatePlanSnapshot(s.ctx, s.runID, snap)
 	}
 
-	// Backfill downstream waiter deps_json so jobs status shows the
-	// dynamic membership.
 	childIDs := make([]string, len(children))
 	for i, c := range children {
 		childIDs[i] = c.ID()
@@ -1629,7 +1674,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		}
 	}
 
-	exp.Group.Finalize(children, nil)
+	sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, children, nil)
 }
 
 // invokeGenerator runs the user closure under panic recovery.
@@ -1646,18 +1691,11 @@ func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwi
 // runOneNode coordinates per-node dispatch: deps/groups/OnFailure
 // waits, dispatch decision, hand-off to the Runner.
 func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
-	// Skip-passed short-circuit; rehydrateFromRetry already seeded.
 	if _, prerendered := s.getOutcome(node.ID()); prerendered {
 		return
 	}
-	// OnTarget filter: nodes whose effective target-set does not
-	// include the active target are skipped immediately. Downstream
-	// Needs treats the skip as satisfied, mirroring the
-	// WhenRunner-skip path. Recovery nodes (handled below) are
-	// reached via their parent's claimedBy map and shouldn't be
-	// filtered here -- they participate via the parent's outcome.
 	if _, claimed := s.claimedBy[node.ID()]; !claimed {
-		if reason, ok := s.onTargetSkip[node.ID()]; ok {
+		if reason, ok := s.onlySkip[node.ID()]; ok {
 			s.markSkipped(node.ID(), reason)
 			return
 		}
@@ -1666,8 +1704,6 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			return
 		}
 	}
-	// Recovery nodes wait for parent failure and bypass cache/SkipIf/
-	// Exclusive — the runner gets the job-only path.
 	if parentID, claimed := s.claimedBy[node.ID()]; claimed {
 		parentCh, ok := s.lookupDoneCh(parentID)
 		if !ok {
@@ -1685,15 +1721,12 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			s.markSkipped(node.ID(), fmt.Sprintf("parent %q did not fail (outcome=%s)", parentID, parentOutcome))
 			return
 		}
-		// Recovery node about to invoke its runner -- this is the
-		// real "started doing work" point.
 		s.markStarted(node.ID())
-		res := s.invokeRecoveryRunner(node)
+		res := s.invokeRecoveryRunner(node, s.getFailure(parentID))
 		s.applyResult(node.ID(), res)
 		return
 	}
 
-	// Dynamic groups first; they resolve into extra deps.
 	var groupMemberIDs []string
 	for _, grp := range node.NeedsGroups() {
 		select {
@@ -1711,7 +1744,6 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 	}
 
-	// Optional deps absent from the plan are silently dropped.
 	hardDeps := node.DepIDs()
 	optDeps := []string{}
 	for _, id := range node.OptionalDepIDs() {
@@ -1755,15 +1787,11 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 	}
 
-	// Approval gate bypasses the Runner; CreateApproval flips status
-	// to approval_pending until human/timeout resolves.
 	if node.IsApproval() {
 		if reason, skip := evalSkipPredicates(s.resolverCtx, node); skip {
 			s.markSkipped(node.ID(), reason)
 			return
 		}
-		// Approval gate enters the wait state -- treat that as the
-		// node's start. Approval pause time IS the node's runtime.
 		s.markStarted(node.ID())
 		res := s.runApprovalGate(node)
 		s.applyResult(node.ID(), res)
@@ -1775,11 +1803,6 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		activeRunner = s.inlineRunner
 	}
 
-	// WhenRunner: skip the job when the active runner cannot satisfy
-	// the eligibility labels. Runners that do not implement
-	// LabelAdvertiser are treated as matching anything, preserving
-	// behavior for runners (cluster pool dispatchers, custom test
-	// runners) that have not opted in to advertisement.
 	if labels := node.WhenRunnerLabels(); len(labels) > 0 {
 		if adv, ok := activeRunner.(runner.LabelAdvertiser); ok {
 			if !sparkwingruntime.MatchLabels(labels, adv.AdvertisedLabels()) {
@@ -1791,18 +1814,10 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 	}
 
-	// Mark started just before the runner dispatch loop so cancelled-
-	// by-upstream and skipped-by-predicate nodes (handled above) don't
-	// inherit a duration from the time they spent waiting on deps.
 	s.markStarted(node.ID())
 	runnerCtx := sparkwingruntime.WithSpawnHandler(s.resolverCtx, s.newSpawnHandler(node.ID()))
-	// Install RunnerInfo so step bodies branching on
-	// sparkwing.Runner(ctx).HasLabel(...) see the runner the
-	// scheduler actually picked.
 	runnerCtx = sparkwingruntime.WithRunner(runnerCtx, runnerInfoFor(activeRunner))
 
-	// Node-level auto-retry: re-dispatch the whole runner on infra
-	// flakes. Only Failed outcomes with a non-nil err are eligible.
 	retryCfg := node.RetryConfig()
 	var autoAttempts int
 	var autoBackoff time.Duration
@@ -1832,12 +1847,14 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			}
 		}
 
-		res = s.runWithCap(node, func() runner.Result {
+		res = s.runWithCap(node, func(slot *workerSlot) runner.Result {
 			return activeRunner.RunNode(runnerCtx, runner.Request{
-				RunID:    s.runID,
-				NodeID:   node.ID(),
-				Node:     node,
-				Delegate: s.delegate,
+				RunID:               s.runID,
+				NodeID:              node.ID(),
+				Node:                node,
+				Delegate:            s.delegate,
+				ReleaseWorkerSlot:   slot.release,
+				ReacquireWorkerSlot: slot.reacquire,
 			})
 		})
 
@@ -1930,7 +1947,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 		case <-ticker.C:
 		}
 	}
-	// 'pending' is safe: StartNode promotes; FinishNode overwrites.
+	// safety: "pending" is safe here; StartNode promotes it and FinishNode overwrites it.
 	_ = s.backends.State.SetNodeStatus(s.ctx, s.runID, nodeID, "pending")
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_resumed", nil)
 	return false
@@ -1944,6 +1961,11 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 	}
 	if res.Err != nil {
 		s.setError(nodeID, res.Err.Error())
+		reason := store.FailureUnknown
+		if n, gerr := s.backends.State.GetNode(s.ctx, s.runID, nodeID); gerr == nil && n != nil {
+			reason = n.FailureReason
+		}
+		s.setFailure(nodeID, failureFrom(reason, res.Err))
 	}
 	s.setOutcome(nodeID, res.Outcome)
 }
@@ -1963,7 +1985,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	if err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	defer nlog.Close()
+	defer func() { _ = nlog.Close() }()
 
 	if err := s.backends.State.StartNode(s.ctx, s.runID, node.ID()); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -2015,10 +2037,6 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 
 	res := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
 
-	// Surface the resolution metadata as a structured event plus a
-	// persistent node annotation, so operators see WHO approved (or
-	// "auto-approved by timeout policy=approve") without diffing the
-	// approval row JSON. Skip when the runner was cancelled mid-poll.
 	if res.via != "" {
 		resAttrs := map[string]any{
 			"resolution":  res.resolution,
@@ -2038,12 +2056,6 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 			Msg:   res.summary,
 			Attrs: resAttrs,
 		})
-		// Persist the summary directly on the node row so the
-		// dashboard and `runs status` see "approved by alice" or
-		// "auto-approved (timeout policy=approve)" alongside outcome.
-		// Direct State call avoids a duplicate log line in the
-		// streaming view -- approval_resolved already carries the
-		// human-readable form above.
 		_ = s.backends.State.AppendNodeAnnotation(s.ctx, s.runID, node.ID(), res.summary)
 	}
 
@@ -2085,17 +2097,31 @@ type approvalResult struct {
 
 // pollApproval blocks until a resolution appears or deadline fires.
 // On deadline writes timed_out so a late human resolve becomes 409.
+// The wedge guard bounds a wedged store: a "locking protocol" error
+// or a GetApproval failure streak past the budget fails the gate
+// instead of polling forever against a database another process has
+// locked.
 func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeout string, ticker *time.Ticker) approvalResult {
+	wedge, err := newStoreWedgeGuardFromEnv()
+	if err != nil {
+		return approvalResult{outcome: sparkwing.Failed, errMsg: err.Error()}
+	}
 	for {
 		got, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
-		if err == nil && got.ResolvedAt != nil {
-			return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
+		if err != nil {
+			if terminal := wedge.fail(fmt.Sprintf("approval poll %s/%s", s.runID, nodeID), err); terminal != nil {
+				return approvalResult{outcome: sparkwing.Failed, errMsg: terminal.Error()}
+			}
+		} else {
+			wedge.success()
+			if got.ResolvedAt != nil {
+				return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
+			}
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			if _, err := s.backends.State.ResolveApproval(s.ctx, s.runID, nodeID,
 				store.ApprovalResolutionTimedOut, "sparkwing", "timeout"); err != nil {
 				if errors.Is(err, store.ErrLockHeld) {
-					// Human beat us; use their resolution.
 					if got, err2 := s.backends.State.GetApproval(s.ctx, s.runID, nodeID); err2 == nil && got.ResolvedAt != nil {
 						return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
 					}
@@ -2127,8 +2153,6 @@ func approvalResolutionToOutcome(resolution, approver, comment string) approvalR
 		via:        "human",
 	}
 	if approver == "sparkwing" {
-		// ResolveApproval written by the dispatcher on timeout fire
-		// uses "sparkwing" as the approver sentinel.
 		r.via = "timeout"
 	}
 	switch resolution {
@@ -2181,37 +2205,82 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 
 // invokeRecoveryRunner runs a recovery node via the in-process
 // job-only path; cluster runners fall back to full RunNode.
-func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode) runner.Result {
+func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
+	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
-		out, err := ipr.executeNode(s.resolverCtx, s.runID, node, s.delegate)
+		out, err := ipr.executeNode(ctx, s.runID, node, s.delegate)
 		if err != nil {
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
 		return runner.Result{Outcome: sparkwing.Success, Output: out}
 	}
-	return s.runWithCap(node, func() runner.Result {
-		return s.runner.RunNode(s.resolverCtx, runner.Request{
-			RunID:    s.runID,
-			NodeID:   node.ID(),
-			Node:     node,
-			Delegate: s.delegate,
+	return s.runWithCap(node, func(slot *workerSlot) runner.Result {
+		return s.runner.RunNode(ctx, runner.Request{
+			RunID:               s.runID,
+			NodeID:              node.ID(),
+			Node:                node,
+			Delegate:            s.delegate,
+			ReleaseWorkerSlot:   slot.release,
+			ReacquireWorkerSlot: slot.reacquire,
 		})
 	})
 }
 
+// workerSlot is the MaxParallel reservation held while a node runs. It
+// can be released and re-acquired so a node blocked on concurrency
+// admission gives the slot back for the duration of the wait. The zero
+// value (sem nil) is a no-op slot used when no cap is configured.
+type workerSlot struct {
+	sem  chan struct{}
+	ctx  context.Context
+	mu   sync.Mutex
+	held bool
+}
+
+// release gives the worker slot back if currently held. Safe to call
+// repeatedly.
+func (w *workerSlot) release() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sem != nil && w.held {
+		<-w.sem
+		w.held = false
+	}
+}
+
+// reacquire takes the worker slot again, blocking until one is free.
+// Returns false if the run was cancelled first. A no-op slot (no cap)
+// always reports true.
+func (w *workerSlot) reacquire() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sem == nil || w.held {
+		return true
+	}
+	select {
+	case w.sem <- struct{}{}:
+		w.held = true
+		return true
+	case <-w.ctx.Done():
+		return false
+	}
+}
+
 // runWithCap gates non-inline RunNode against the MaxParallel sem.
-// Nil sem or inline node = no cap.
-func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func() runner.Result) runner.Result {
+// Nil sem or inline node = no cap. The closure receives the held
+// workerSlot so the concurrency-wait path can release it while blocked.
+func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func(slot *workerSlot) runner.Result) runner.Result {
 	if s.sem == nil || node.IsInline() {
-		return fn()
+		return fn(&workerSlot{})
 	}
 	select {
 	case s.sem <- struct{}{}:
 	case <-s.resolverCtx.Done():
 		return runner.Result{Outcome: sparkwing.Cancelled}
 	}
-	defer func() { <-s.sem }()
-	return fn()
+	slot := &workerSlot{sem: s.sem, ctx: s.resolverCtx, held: true}
+	defer slot.release()
+	return fn(slot)
 }
 
 // safeCacheKey invokes the CacheKeyFn under the same budget rules as
@@ -2305,7 +2374,7 @@ func (s *dispatchState) markSkipped(nodeID, reason string) {
 const defaultPredicateTimeout = 30 * time.Second
 
 // evalSkipPredicates returns (reason, true) on the first true predicate.
-// Errors/panics/timeouts don't skip — run the work and let the job decide.
+// Errors/panics/timeouts don't skip -- run the work and let the job decide.
 func evalSkipPredicates(ctx context.Context, node *sparkwing.JobNode) (string, bool) {
 	preds := node.SkipPredicates()
 	if len(preds) == 0 {
@@ -2368,19 +2437,6 @@ type planSnapshot struct {
 	RunID    string         `json:"run_id"`
 	Nodes    []snapshotNode `json:"nodes"`
 
-	// Target is the --for selection that was resolved at run start.
-	// Empty when no target was selected. Carried in the snapshot so
-	// cluster pod-side replay (orchestrator/run_node.go) sees the
-	// same target the orchestrator used.
-	Target string `json:"target,omitempty"`
-
-	// PipelineConfig is the resolved Config struct (json-encoded)
-	// returned by sparkwing.ResolvePipelineConfig. The cluster pod
-	// re-installs this via WithPipelineConfig after decoding into
-	// the pipeline's typed struct via reg.instance().Config().
-	// Empty when the pipeline does not implement ConfigProvider.
-	PipelineConfig json.RawMessage `json:"pipeline_config,omitempty"`
-
 	// Secrets is the typed declaration the pipelines.yaml file
 	// shipped (name + required/optional). The cluster pod uses it
 	// to drive ResolvePipelineSecrets against the pod's existing
@@ -2417,24 +2473,35 @@ type snapshotApproval struct {
 
 // snapshotModifiers is the wire shape of a Node's Plan-layer modifiers.
 type snapshotModifiers struct {
-	Retry           int      `json:"retry,omitempty"`
-	RetryBackoffMS  int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto       bool     `json:"retry_auto,omitempty"`
-	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
-	RunsOn          []string `json:"runs_on,omitempty"`
-	Prefers         []string `json:"prefers,omitempty"`
-	WhenRunner      []string `json:"when_runner,omitempty"`
-	OnTarget        []string `json:"on_target,omitempty"`
-	CacheKey        string   `json:"cache_key,omitempty"`
-	CacheMax        int      `json:"cache_max,omitempty"`
-	CacheOnLimit    string   `json:"cache_on_limit,omitempty"`
-	Inline          bool     `json:"inline,omitempty"`
-	Optional        bool     `json:"optional,omitempty"`
-	ContinueOnError bool     `json:"continue_on_error,omitempty"`
-	OnFailure       string   `json:"on_failure,omitempty"`
-	HasBeforeRun    bool     `json:"has_before_run,omitempty"`
-	HasAfterRun     bool     `json:"has_after_run,omitempty"`
-	HasSkipIf       bool     `json:"has_skip_if,omitempty"`
+	Retry          int      `json:"retry,omitempty"`
+	RetryBackoffMS int64    `json:"retry_backoff_ms,omitempty"`
+	RetryAuto      bool     `json:"retry_auto,omitempty"`
+	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	RunsOn         []string `json:"runs_on,omitempty"`
+	Prefers        []string `json:"prefers,omitempty"`
+	WhenRunner     []string `json:"when_runner,omitempty"`
+	// Content cache (JobNode.Cache): independent of any concurrency
+	// group. Cache marks that the node memoizes on content; CacheTTLMS
+	// is the retention window.
+	Cache      bool  `json:"cache,omitempty"`
+	CacheTTLMS int64 `json:"cache_ttl_ms,omitempty"`
+	// Concurrency group membership (JobNode.Concurrency): name, the
+	// declared budget + this member's cost, scope, the at-limit policy,
+	// and the optional timeouts. All independent of the content cache.
+	ConcGroup           string `json:"conc_group,omitempty"`
+	ConcCapacity        int    `json:"conc_capacity,omitempty"`
+	ConcCost            int    `json:"conc_cost,omitempty"`
+	ConcScope           string `json:"conc_scope,omitempty"`
+	ConcOnLimit         string `json:"conc_on_limit,omitempty"`
+	ConcQueueTimeoutMS  int64  `json:"conc_queue_timeout_ms,omitempty"`
+	ConcCancelTimeoutMS int64  `json:"conc_cancel_timeout_ms,omitempty"`
+	Inline              bool   `json:"inline,omitempty"`
+	Optional            bool   `json:"optional,omitempty"`
+	ContinueOnError     bool   `json:"continue_on_error,omitempty"`
+	OnFailure           string `json:"on_failure,omitempty"`
+	HasBeforeRun        bool   `json:"has_before_run,omitempty"`
+	HasAfterRun         bool   `json:"has_after_run,omitempty"`
+	HasSkipIf           bool   `json:"has_skip_if,omitempty"`
 }
 
 // snapshotWork is the wire shape of a Job's inner DAG.
@@ -2486,27 +2553,20 @@ type snapshotSpawnEach struct {
 }
 
 // planSnapshotMeta carries the run-level fields the cluster pod
-// needs to rehydrate PipelineConfig and re-resolve PipelineSecrets
-// when it picks up a node. Zero-value omits the fields from the
-// emitted JSON.
+// needs to re-resolve PipelineSecrets when it picks up a node.
+// Zero-value omits the fields from the emitted JSON.
 type planSnapshotMeta struct {
-	Target         string
-	PipelineConfig json.RawMessage
-	Secrets        pipelines.SecretsField
+	Secrets          pipelines.SecretsField
+	PipelineRequires []string
 }
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
 	snap := planSnapshot{
-		Pipeline:       rc.Pipeline,
-		RunID:          rc.RunID,
-		Target:         meta.Target,
-		PipelineConfig: meta.PipelineConfig,
-		Secrets:        meta.Secrets,
+		Pipeline: rc.Pipeline,
+		RunID:    rc.RunID,
+		Secrets:  meta.Secrets,
 	}
-	// Cycle detection threads through the snapshot walk to catch
-	// A->B->A loops in one pass.
 	walker := newWorkWalker()
-	// Dedupe nodes that are both plan.Add'd and OnFailure-attached.
 	seen := make(map[string]bool)
 	for _, n := range p.Nodes() {
 		sn := snapshotNode{
@@ -2534,11 +2594,6 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		snap.Nodes = append(snap.Nodes, sn)
 		seen[n.ID()] = true
 	}
-	// OnFailure recovery nodes are attached via `.OnFailure(id, job)`
-	// and constructed detached, so they aren't in plan.Nodes(). Emit
-	// a snapshot entry for each unseen recovery so the dashboard can
-	// draw the failure-branch edge and the DAG layout can treat
-	// `on_failure_of` as a virtual dep for column placement.
 	for _, n := range p.Nodes() {
 		rec := n.OnFailureNode()
 		if rec == nil || seen[rec.ID()] {
@@ -2572,8 +2627,8 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 // claim path. The orchestrator separately gates WhenRunner up-front
 // (see runOneNode) against the active runner via LabelAdvertiser, so
 // the in-process path doesn't depend on the claim-time filter.
-func effectiveClaimLabels(n *sparkwing.JobNode) []string {
-	req := n.RequiresLabels()
+func effectiveClaimLabels(n *sparkwing.JobNode, pipelineRequires []string) []string {
+	req := effectiveJobRequires(n, pipelineRequires)
 	when := n.WhenRunnerLabels()
 	if len(when) == 0 {
 		return req
@@ -2585,6 +2640,40 @@ func effectiveClaimLabels(n *sparkwing.JobNode) []string {
 		seen[l] = struct{}{}
 	}
 	for _, l := range when {
+		if _, ok := seen[l]; ok {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	return out
+}
+
+// effectiveJobRequires unions the node's own RequiresLabels with the
+// pipeline-level requires list (from pipeline.requires or
+// defaults.requires, whichever resolved). Dedupes; preserves the
+// node's label order first, then appends new ones from the pipeline.
+// The reserved "local" label is dropped here -- it pins the run to
+// in-process via opts.LocalOnly elsewhere, so passing it through to
+// runner claim filtering would over-constrain.
+func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []string {
+	own := n.RequiresLabels()
+	if len(pipelineRequires) == 0 {
+		return own
+	}
+	out := make([]string, 0, len(own)+len(pipelineRequires))
+	seen := make(map[string]struct{}, len(own)+len(pipelineRequires))
+	for _, l := range own {
+		if _, ok := seen[l]; ok {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	for _, l := range pipelineRequires {
+		if l == "local" {
+			continue
+		}
 		if _, ok := seen[l]; ok {
 			continue
 		}
@@ -2607,7 +2696,6 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 		RunsOn:          n.RequiresLabels(),
 		Prefers:         n.PrefersLabels(),
 		WhenRunner:      n.WhenRunnerLabels(),
-		OnTarget:        n.OnTargets(),
 		Inline:          n.IsInline(),
 		Optional:        n.IsOptional(),
 		ContinueOnError: n.IsContinueOnError(),
@@ -2618,10 +2706,19 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
 	}
-	if c := n.CacheOpts(); c.HasKey() {
-		m.CacheKey = c.Key
-		m.CacheMax = c.Max
-		m.CacheOnLimit = string(c.OnLimit)
+	if cc := n.CacheConfig(); cc != nil {
+		m.Cache = true
+		m.CacheTTLMS = cc.TTL.Milliseconds()
+	}
+	if g := n.ConcurrencyGroupRef(); g != nil {
+		limit := g.Limit()
+		m.ConcGroup = g.Name()
+		m.ConcCapacity = limit.Capacity
+		m.ConcCost = n.ConcurrencyCost()
+		m.ConcScope = string(limit.Scope)
+		m.ConcOnLimit = string(limit.OnLimit)
+		m.ConcQueueTimeoutMS = limit.QueueTimeout.Milliseconds()
+		m.ConcCancelTimeoutMS = limit.CancelTimeout.Milliseconds()
 	}
 	if isZeroModifiers(m) {
 		return nil
@@ -2638,10 +2735,15 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		len(m.RunsOn) == 0 &&
 		len(m.Prefers) == 0 &&
 		len(m.WhenRunner) == 0 &&
-		len(m.OnTarget) == 0 &&
-		m.CacheKey == "" &&
-		m.CacheMax == 0 &&
-		m.CacheOnLimit == "" &&
+		!m.Cache &&
+		m.CacheTTLMS == 0 &&
+		m.ConcGroup == "" &&
+		m.ConcCapacity == 0 &&
+		m.ConcCost == 0 &&
+		m.ConcScope == "" &&
+		m.ConcOnLimit == "" &&
+		m.ConcQueueTimeoutMS == 0 &&
+		m.ConcCancelTimeoutMS == 0 &&
 		!m.Inline &&
 		!m.Optional &&
 		!m.ContinueOnError &&
@@ -2710,8 +2812,6 @@ func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) 
 			ID:    g.ID(),
 			Needs: g.DepIDs(),
 		}
-		// Render an item template by invoking fn with a zero-value
-		// input; closures that panic on zero fall back to a Note.
 		if id, job, err := materializeSpawnEachTemplate(g); err == nil && job != nil {
 			each.TargetJob = jobName(job)
 			tmpl, werr := w.walkJob(job)

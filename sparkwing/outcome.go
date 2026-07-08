@@ -39,7 +39,7 @@ func (o Outcome) Terminal() bool { return true }
 const Paused = "paused"
 
 // OK reports whether the outcome satisfies downstream dependencies.
-// Success, Satisfied, Cached, and Skipped all let downstream proceed —
+// Success, Satisfied, Cached, and Skipped all let downstream proceed --
 // Skipped is distinct from Failed (the node never ran for a reasoned
 // decision, not because of a fault). Failed and Cancelled do not
 // satisfy downstream.

@@ -1,19 +1,5 @@
 package sparkwing
 
-// Describe surfaces a pipeline's typed-flag schema as a stable JSON
-// shape so the sparkwing CLI can parse typed flags, render --help, drive
-// tab completion, and feed shells without re-importing the SDK's
-// reflect machinery.
-//
-// DescribePipeline is the wire-format projection of the schema parsed
-// by Register[T]: the compiled pipeline binary emits JSON; sparkwing
-// reads it.
-//
-// Pipelines opt into help / examples via the optional provider
-// interfaces below.
-
-// (no imports — types only)
-
 // HelpProvider is optionally implemented by pipelines to contribute
 // a short description to `sparkwing run <name> --help`. One or two sentences
 // explaining what the pipeline does and when to use it.
@@ -44,6 +30,29 @@ type Example struct {
 	Command string `json:"command"`
 }
 
+// EnvVarDocer is an optional interface a Pipeline can implement to
+// declare environment variables it reads as inputs. When implemented,
+// `sparkwing run <pipeline> --help` surfaces these alongside the typed
+// Inputs (declared via [Register]).
+//
+// Prefer typed Inputs for values the user controls -- they show up in
+// --help automatically and benefit from the type system.
+// EnvVarDocer is for the cases where env vars are genuinely the right
+// shape: process-wide config, integration with external systems that
+// already use env, or tunables the operator sets outside the
+// invocation.
+type EnvVarDocer interface {
+	EnvVars() []EnvVarDoc
+}
+
+// EnvVarDoc is one declared env var read by a pipeline. Default is
+// optional (empty when the pipeline has no default).
+type EnvVarDoc struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Default     string `json:"default,omitempty"`
+}
+
 // DescribePipeline is one pipeline's CLI-facing schema. Emitted as
 // JSON by `<pipeline-binary> --describe`; consumed by the sparkwing CLI
 // for flag parsing, tab completion, and per-pipeline help output.
@@ -53,6 +62,10 @@ type DescribePipeline struct {
 	Help     string        `json:"help,omitempty"`
 	Examples []Example     `json:"examples,omitempty"`
 	Args     []DescribeArg `json:"args"`
+	// EnvVars are environment variables the pipeline reads as inputs,
+	// declared via the optional [EnvVarDocer] interface. Empty unless
+	// the pipeline opts in.
+	EnvVars []EnvVarDoc `json:"env_vars,omitempty"`
 	// Extra is true when the pipeline's Inputs struct declares a
 	// `flag:",extra"` bag; in that mode unknown flags don't error.
 	Extra bool `json:"extra,omitempty"`
@@ -94,4 +107,10 @@ type DescribeArg struct {
 	Default  string   `json:"default,omitempty"`
 	Enum     []string `json:"enum,omitempty"`
 	Secret   bool     `json:"secret,omitempty"`
+	// JobID identifies the job that declared this arg when the arg
+	// came from a [WithArgs] embedding rather than the pipeline-level
+	// [Register] Inputs struct. Empty for pipeline-level args. Used by
+	// the help renderer to group "from job X" annotations and by
+	// tooling that needs to attribute flags to their source.
+	JobID string `json:"job_id,omitempty"`
 }

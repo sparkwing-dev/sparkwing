@@ -24,12 +24,17 @@ var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsAll, &cmdDocsSearch,
+	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
+	&cmdDocsVersions, &cmdDocsCache, &cmdDocsCacheInfo, &cmdDocsCacheClear,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe, &cmdPipelineDiscover,
-	&cmdPipelineNew, &cmdPipelineExplain, &cmdPipelinePlan, &cmdPipelineRun,
+	&cmdPipelineNew, &cmdPipelineTemplates, &cmdPipelineExplain, &cmdPipelineLint, &cmdPipelinePlan, &cmdPipelineRun,
+	&cmdPipelineTrigger,
+	&cmdProfile,
 	&cmdDashboard, &cmdDashboardStart, &cmdDashboardKill, &cmdDashboardStatus,
-	&cmdWorker, &cmdGC, &cmdCompletion,
+	&cmdWorker, &cmdGC, &cmdMaintenance, &cmdCompletion,
+	&cmdBoxSlots, &cmdBoxSlotsShow, &cmdBoxSlotsSet, &cmdBoxSlotsList, &cmdBoxSlotsRelease, &cmdBoxSlotsSweep,
 	&cmdProfiles, &cmdProfilesAdd, &cmdProfilesList, &cmdProfilesShow,
 	&cmdProfilesUse, &cmdProfilesRemove, &cmdProfilesDuplicate,
 	&cmdProfilesSet, &cmdProfilesTest,
@@ -40,14 +45,13 @@ var allCommands = []*Command{
 	&cmdJobsFailures, &cmdJobsStats, &cmdJobsLast, &cmdJobsTree,
 	&cmdJobsGet, &cmdJobsReceipt, &cmdJobsWait, &cmdJobsFind, &cmdJobsRetry,
 	&cmdJobsCancel, &cmdJobsPrune, &cmdJobsTimeline, &cmdJobsSummary, &cmdJobsGrep,
-	&cmdPush,
 	&cmdHooks, &cmdHooksInstall, &cmdHooksUninstall, &cmdHooksStatus,
 	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete,
 	&cmdTriggers, &cmdTriggersList, &cmdTriggersGet,
 	&cmdImage, &cmdImageRollout,
 	&cmdHealth,
 	&cmdWebhooks, &cmdWebhooksList, &cmdWebhooksDeliveries, &cmdWebhooksReplay,
-	&cmdAgents, &cmdAgentsList,
+	&cmdAgents, &cmdAgentsList, &cmdClusterConcurrency,
 	&cmdSparks, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup,
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
@@ -108,10 +112,10 @@ func toCommandJSON(c *Command) CommandJSON {
 		Hidden:      c.Hidden,
 	}
 	for _, s := range c.Subcommands {
-		out.Subcommands = append(out.Subcommands, SubcommandJSON{Name: s.Name, Synopsis: s.Synopsis})
+		out.Subcommands = append(out.Subcommands, SubcommandJSON(s))
 	}
 	for _, p := range c.PosArgs {
-		out.PosArgs = append(out.PosArgs, PosArgJSON{Name: p.Name, Desc: p.Desc, Required: p.Required})
+		out.PosArgs = append(out.PosArgs, PosArgJSON(p))
 	}
 	for _, f := range c.Flags {
 		if f.Hidden {
@@ -142,7 +146,7 @@ func toCommandJSON(c *Command) CommandJSON {
 func runCommands(args []string) error {
 	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
 	var output string
-	fs.StringVarP(&output, "output", "o", "json", "json | plain")
+	fs.StringVarP(&output, "output", "o", "json", "json | markdown | plain")
 	includeHidden := fs.Bool("include-hidden", false, "also emit Hidden:true commands (default: skip)")
 	pathPrefix := fs.String("path", "", "only emit commands whose Path starts with this prefix")
 	if err := parseAndCheck(cmdCommands, fs, args); err != nil {
@@ -155,8 +159,6 @@ func runCommands(args []string) error {
 		return fmt.Errorf("commands: unexpected positional %q", fs.Arg(0))
 	}
 
-	// Sort by Path so the output is reproducible and agents diffing
-	// successive emissions see meaningful changes.
 	sorted := make([]*Command, len(allCommands))
 	copy(sorted, allCommands)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
@@ -177,23 +179,21 @@ func runCommands(args []string) error {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(picked)
+	case "markdown", "md":
+		fmt.Print(renderCommandsMarkdown(picked))
+		return nil
 	case "plain":
 		for _, c := range picked {
 			fmt.Println(c.Path)
 		}
 		return nil
 	case "pretty", "table":
-		// Token effort -- a wide table of every verb is rarely the
-		// right view for humans; they should use sparkwing -h. Render
-		// a thin two-column table so the verb is at least usable.
 		w := 0
 		for _, c := range picked {
 			if n := len(c.Path); n > w {
 				w = n
 			}
 		}
-		// Pad before coloring so ANSI bytes in the header don't
-		// throw off %-*s width tracking.
 		fmt.Printf("%s  %s\n",
 			color.Bold(fmt.Sprintf("%-*s", w, "PATH")),
 			color.Bold("SYNOPSIS"))
@@ -202,6 +202,117 @@ func runCommands(args []string) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("unknown output format %q (valid: json, plain, table)", output)
+		return fmt.Errorf("unknown output format %q (valid: json, markdown, plain, table)", output)
 	}
+}
+
+// renderCommandsMarkdown renders the full CLI surface as a reference
+// page. It is the source for docs/cli-reference.md (regenerated via
+// bin/gen-cli-docs.sh), so the per-command/flag/arg reference is
+// derived from the same registry the --help renderer uses and cannot
+// drift from the binary.
+func renderCommandsMarkdown(cmds []CommandJSON) string {
+	var b strings.Builder
+	b.WriteString("<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n")
+	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
+	b.WriteString("# CLI reference\n\n")
+	b.WriteString("Complete listing of every `sparkwing` command, flag, and argument, " +
+		"generated from the CLI's own command registry. For the conceptual " +
+		"overview -- which binaries exist, the flag-naming rule, and what to " +
+		"reach for when -- see [cli.md](cli.md).\n\n")
+	for _, c := range cmds {
+		b.WriteString("## `" + c.Path + "`\n\n")
+		if s := strings.TrimSpace(c.Synopsis); s != "" {
+			b.WriteString(s + "\n\n")
+		}
+		if d := strings.TrimSpace(c.Description); d != "" {
+			b.WriteString(descBlock(d) + "\n\n")
+		}
+		if len(c.Subcommands) > 0 {
+			b.WriteString("### Subcommands\n\n")
+			for _, s := range c.Subcommands {
+				b.WriteString("- `" + s.Name + "` -- " + cell(s.Synopsis) + "\n")
+			}
+			b.WriteString("\n")
+		}
+		if len(c.PosArgs) > 0 {
+			b.WriteString("### Arguments\n\n")
+			for _, p := range c.PosArgs {
+				req := "optional"
+				if p.Required {
+					req = "required"
+				}
+				b.WriteString("- `" + p.Name + "` (" + req + ") -- " + cell(p.Desc) + "\n")
+			}
+			b.WriteString("\n")
+		}
+		if len(c.Flags) > 0 {
+			b.WriteString("### Flags\n\n")
+			b.WriteString("| Flag | Description |\n|---|---|\n")
+			for _, f := range c.Flags {
+				name := "--" + f.Name
+				if f.Short != "" {
+					name = "-" + f.Short + ", --" + f.Name
+				}
+				if f.Argument != "" {
+					name += " " + f.Argument
+				}
+				desc := f.Desc
+				var extra []string
+				if f.Required {
+					extra = append(extra, "required")
+				}
+				if f.Default != "" {
+					extra = append(extra, "default: "+f.Default)
+				}
+				if len(extra) > 0 {
+					desc += " (" + strings.Join(extra, "; ") + ")"
+				}
+				b.WriteString("| `" + name + "` | " + cell(desc) + " |\n")
+			}
+			b.WriteString("\n")
+		}
+		if len(c.Examples) > 0 {
+			b.WriteString("### Examples\n\n```sh\n")
+			for i, e := range c.Examples {
+				if i > 0 {
+					b.WriteString("\n")
+				}
+				if e.Description != "" {
+					b.WriteString("# " + e.Description + "\n")
+				}
+				b.WriteString(e.Command + "\n")
+			}
+			b.WriteString("```\n\n")
+		}
+	}
+	return b.String()
+}
+
+// descBlock makes a multi-line command description safe to emit as a
+// markdown block. Descriptions are authored for terminal help, so a
+// line may start with `#` (a shell-comment in an indented snippet) or
+// `>`; markdown would turn those into headings / blockquotes, breaking
+// the page structure and rendering huge on the docs site. Escaping the
+// leading marker renders the line as the literal text the terminal
+// shows. List markers are left alone (the file disables those rules).
+func descBlock(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		t := strings.TrimLeft(ln, " \t")
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, ">") {
+			indent := ln[:len(ln)-len(t)]
+			lines[i] = indent + "\\" + t
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// cell flattens a string for use inside a markdown table cell or list
+// item: newlines collapse to spaces and pipes are escaped so they
+// don't break table parsing.
+func cell(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return strings.TrimSpace(s)
 }

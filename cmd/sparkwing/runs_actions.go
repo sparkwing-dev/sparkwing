@@ -42,16 +42,14 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 		if perr := requireController(prof, cmd); perr != nil {
 			return nil, nil, perr
 		}
-		c = client.NewWithToken(prof.Controller, nil, prof.Token)
-		if prof.Logs != "" {
-			logc = sparkwinglogs.New(prof.Logs, nil, prof.Token)
-		}
+		c = client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+		logc = sparkwinglogs.New(prof.ControllerURL(), nil, prof.ControllerToken())
 		return c, logc, nil
 	}
 	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
 	if ctrlURL == "" {
-		return nil, nil, fmt.Errorf("%s: no --on profile and no local dashboard running "+
-			"(start it with `sparkwing dashboard start`, or pass --on <profile>)", cmd)
+		return nil, nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
+			"(start it with `sparkwing dashboard start`, or pass --profile <profile>)", cmd)
 	}
 	c = client.New(ctrlURL, nil)
 	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
@@ -133,12 +131,10 @@ func reportResults(out io.Writer, action string, results []runResult) error {
 	return nil
 }
 
-// ---- retry ---------------------------------------------------------
-
 func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
 	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
@@ -150,11 +146,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	if rest := fs.Args(); len(rest) > 0 {
 		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsRetry.Path, rest[0])
 	}
-	// Force callers to make the rerun-scope choice explicit: silent
-	// defaults caused operators to ship "rerun from failed" when they
-	// meant "rerun all" (and vice versa) because the two are visually
-	// indistinguishable in the trigger queue. Requiring one of the
-	// flags makes the intent show up in the shell history.
 	switch {
 	case *fromFailed && *all:
 		return fmt.Errorf("%s: --failed and --all are mutually exclusive", cmdJobsRetry.Path)
@@ -174,13 +165,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// Reruns dispatch asynchronously in the localws consumer, so the
-	// CLI returns as soon as the trigger lands. For each queued
-	// retry, print a single-line "submitted" confirmation followed
-	// by the matching `runs logs --follow` command so the operator
-	// can copy-paste straight into the same terminal. Failures keep
-	// the source id visible so the user can correlate which retry
-	// blew up when several were piped in at once.
 	failures := 0
 	for _, srcID := range ids {
 		newID, err := c.RetryRun(ctx, srcID, full)
@@ -199,45 +183,20 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	return nil
 }
 
-// profileSuffix renders the trailing ` --on <name>` segment for hint
+// profileSuffix renders the trailing ` --profile <name>` segment for hint
 // strings only when the caller used a non-local profile, so the
 // suggested command is copy-pasteable in either mode.
 func profileSuffix(on string) string {
 	if on == "" {
 		return ""
 	}
-	return " --on " + on
+	return " --profile " + on
 }
-
-func retryOne(ctx context.Context, c *client.Client, srcRunID string) runResult {
-	run, err := c.GetRun(ctx, srcRunID)
-	if err != nil {
-		return runResult{RunID: srcRunID, Error: fmt.Sprintf("lookup: %v", err)}
-	}
-	// Trigger source stays as the plain string "retry" so it never
-	// leaks the source run id into user-visible chips. The retry_of
-	// field carries the lineage cleanly.
-	resp, err := c.CreateTrigger(ctx, client.TriggerRequest{
-		Pipeline: run.Pipeline,
-		Args:     run.Args,
-		Trigger: client.TriggerMeta{
-			Source: "retry",
-		},
-		Git:     client.GitMeta{Branch: run.GitBranch, SHA: run.GitSHA},
-		RetryOf: srcRunID,
-	})
-	if err != nil {
-		return runResult{RunID: srcRunID, Error: fmt.Sprintf("trigger: %v", err)}
-	}
-	return runResult{RunID: srcRunID, OK: true, NewRunID: resp.RunID}
-}
-
-// ---- cancel --------------------------------------------------------
 
 func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -269,11 +228,9 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	return reportResults(os.Stdout, "cancel", results)
 }
 
-// ---- prune ---------------------------------------------------------
-
 func runRunsPrune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	olderThan := fs.Duration("older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
 	dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
 	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; use --run - to read ids from stdin)")

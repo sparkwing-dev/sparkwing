@@ -19,5 +19,5 @@
 // [Target]s, and [PipelineValues] (the layered config-value surface).
 // Triggers fan out by source: [ManualTrigger], [PushTrigger],
 // [WebhookTrigger], [DeployTrigger], [PreHookTrigger],
-// [PostHookTrigger].
+// [PostHookTrigger], [PostCommitHookTrigger].
 package pipelines

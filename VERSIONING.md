@@ -44,18 +44,20 @@ When a covered API is on its way out:
 4. Keep the deprecated symbol working for at least one minor release.
 5. Remove the symbol in a subsequent major release (or minor while pre-1.0).
 
-The runtime warning is important — it catches uses that the godoc comment misses (e.g., dynamic callers, generated code).
+The runtime warning is important -- it catches uses that the godoc comment misses (e.g., dynamic callers, generated code).
 
 ## Pre-1.0 caveat
 
-While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. The deprecation procedure still applies — breaking changes are announced with at least one release of warning before removal. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
+While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. The deprecation procedure still applies -- breaking changes are announced with at least one release of warning before removal. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
 
 ## Release process
 
 - Every user-visible change requires a `CHANGELOG.md` entry under the current `[Unreleased]` section.
-- Sections follow [Keep a Changelog](https://keepachangelog.com/): `Added`, `Changed`, `Fixed`, `Removed`, `Deprecated`, `Security`.
+- Sections follow [Keep a Changelog](https://keepachangelog.com/): `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Docs`. (`Deprecated` is omitted -- sparkwing is pre-1.0 and follows hard-cut semantics; removals go straight into `Removed` with a `(Breaking)` marker.)
+- Entry format: bold scope prefix, `(Breaking)` inline for breaks, link to migration guide. See [docs/changelog-style.md](./docs/changelog-style.md) for the rubric the pre-release manicuring agent applies.
+- Every breaking change in a release gets a corresponding section in `docs/migrations/v<X.Y.Z>.md`. Files are always created (even for single-break releases) so the migration-guide URL is consistent per release.
 - CI fails if a commit touches `pkg/`, `sparkwing/`, CLI flag definitions, or wire-format structs without including a `CHANGELOG.md` entry. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
-- Releases move entries from `[Unreleased]` to a new `[vX.Y.Z]` section in the same commit that cuts the tag.
+- The release pipeline (`sparkwing run release --version vX.Y.Z`) renames `[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD` and commits before tagging. The GH-Actions release workflow extracts that section verbatim as the GitHub Release body via `bin/extract-changelog-section.sh`.
 
 ## Wire protocol
 
@@ -65,7 +67,7 @@ changes follow the same semver discipline as Go API changes:
 
 - Renaming a JSON field, removing a field, or changing a field's
   type is a **breaking change**. The deprecation procedure above
-  applies — announce in a `Changed` / `Deprecated` CHANGELOG entry
+  applies -- announce in a `Changed` / `Deprecated` CHANGELOG entry
   one release ahead of removal.
 - Adding a new optional field, adding a new route, or adding a new
   status code is **non-breaking** when existing callers ignore it.
@@ -74,7 +76,7 @@ changes follow the same semver discipline as Go API changes:
 
 The OpenAPI spec is the source of truth for what the controller
 serves; if reality and the spec diverge, the spec is wrong (fix
-it). Keeping it in sync is human discipline today — there is no
+it). Keeping it in sync is human discipline today -- there is no
 automated drift gate for the HTTP surface yet (the snapshot gate
 below covers the Go surface only).
 
@@ -90,14 +92,14 @@ only contract-affecting changes.
 The lint pipeline (`sparkwing run lint`) regenerates the snapshots
 into a tempdir and diffs against the checked-in tree.
 **PRs that change the public surface without updating `.apidiff/`
-fail CI** — the snapshot must be regenerated and committed in the
+fail CI** -- the snapshot must be regenerated and committed in the
 same PR.
 
 Workflow when you change a covered API:
 
 1. Make the source change.
 2. Run `bash bin/regen-api-snapshot.sh`.
-3. Review the resulting `.apidiff/` diff — that's the surface change
+3. Review the resulting `.apidiff/` diff -- that's the surface change
    reviewers will see.
 4. Add a `CHANGELOG.md` entry under `[Unreleased]` (Added / Changed /
    Removed / Deprecated).
@@ -111,7 +113,7 @@ symbols moved, in what direction, with no other noise.
 
 The plug-in interfaces under `pkg/storage` and `pkg/controller`
 ship portable test suites so adopters writing custom implementations
-can verify they honour the contract:
+can verify they honor the contract:
 
 | Interface | Suite |
 |---|---|
@@ -131,10 +133,10 @@ follow the same deprecation procedure as Go-level API changes.
 
 ## Migration help
 
-When a breaking change ships, the CHANGELOG entry should include:
+When a breaking change ships:
 
-- The specific symbol/flag/field being removed or renamed
-- The replacement (with import path or example invocation)
-- A one-paragraph migration sketch if non-obvious
+- The CHANGELOG entry includes the scope, a `(Breaking)` marker, the symbol/flag/field being removed or renamed, and a link to the matching section of `docs/migrations/v<X.Y.Z>.md`.
+- The migration guide carries the longer-form before/after code, multi-step ordering, gotchas, and any sibling-repo impact. Adopters scanning the release page see the short summary; adopters actively migrating click through to the detailed steps.
+- Every release has a migration guide file, even for releases with one small break -- the URL shape `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` resolves predictably and lets downstream pages link reliably.
 
-The goal: an adopter reading the CHANGELOG can do the migration without reading any other doc.
+Full format conventions live in [docs/changelog-style.md](./docs/changelog-style.md).

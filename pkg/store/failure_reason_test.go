@@ -74,7 +74,7 @@ func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 
-	pairs, err := s.FailExpiredNodeClaims(ctx)
+	pairs, err := store.Maintenance.FailExpiredNodeClaims(s, ctx)
 	if err != nil {
 		t.Fatalf("FailExpiredNodeClaims: %v", err)
 	}
@@ -104,9 +104,6 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	// Back-date ready_at so the sweep sees a stale entry. The column
-	// is INTEGER unix-nanos; write directly since MarkNodeReady
-	// stamps "now".
 	past := time.Now().Add(-1 * time.Hour).UnixNano()
 	if _, err := s.DB().ExecContext(ctx,
 		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`,
@@ -114,7 +111,7 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pairs, err := s.FailStaleQueuedNodes(ctx, 15*time.Minute)
+	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("FailStaleQueuedNodes: %v", err)
 	}
@@ -160,7 +157,7 @@ func TestFailStaleQueuedNodes_SkipsClaimedAndFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pairs, err := s.FailStaleQueuedNodes(ctx, 15*time.Minute)
+	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("FailStaleQueuedNodes: %v", err)
 	}

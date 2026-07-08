@@ -8,10 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// These tests exercise the SDK's public shape. They do not run a
-// pipeline; the orchestrator that dispatches nodes lives in a separate
-// package. The point here is to catch API regressions early.
-
 type buildOut struct {
 	Tag    string
 	Digest string
@@ -145,13 +141,12 @@ func (simplePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 type plannerPipe struct{ sparkwing.Base }
 
 func (plannerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, run sparkwing.RunContext) error {
-	sparkwing.Job(plan, "one", jobFnNoop())
-	sparkwing.Job(plan, "two", jobFnNoop()).Needs("one")
+	one := sparkwing.Job(plan, "one", jobFnNoop())
+	sparkwing.Job(plan, "two", jobFnNoop()).Needs(one)
 	return nil
 }
 
 func TestRegisterAndInvoke_OneNodePlan(t *testing.T) {
-	plan := sparkwing.NewPlan()
 	name := "sanity-simple"
 	sparkwing.Register[sparkwing.NoInputs](name, func() sparkwing.Pipeline[sparkwing.NoInputs] { return simplePipe{} })
 
@@ -173,7 +168,6 @@ func TestRegisterAndInvoke_OneNodePlan(t *testing.T) {
 }
 
 func TestRegisterAndInvoke_Planner(t *testing.T) {
-	plan := sparkwing.NewPlan()
 	name := "sanity-planner"
 	sparkwing.Register[sparkwing.NoInputs](name, func() sparkwing.Pipeline[sparkwing.NoInputs] { return plannerPipe{} })
 	reg, _ := sparkwing.Lookup(name)
@@ -224,9 +218,8 @@ func TestNeeds_AcceptsVariedForms(t *testing.T) {
 	b := sparkwing.Job(plan, "b", jobFnNoop())
 	c := sparkwing.Job(plan, "c", jobFnNoop())
 	group := sparkwing.GroupJobs(plan, "", a, b)
-	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(c, group, "a")
+	d := sparkwing.Job(plan, "d", jobFnNoop()).Needs(c, group, a)
 	deps := d.DepIDs()
-	// "a" is also in the group but should dedupe.
 	if len(deps) != 3 {
 		t.Fatalf("Needs dedup failed: got deps %v, want 3 entries (a,b,c in some order)", deps)
 	}
@@ -234,7 +227,6 @@ func TestNeeds_AcceptsVariedForms(t *testing.T) {
 
 func TestLogger_NopWhenUnset(t *testing.T) {
 	ctx := context.Background()
-	// Should not panic on a bare ctx (no logger installed).
 	sparkwing.Info(ctx, "hello %s", "world")
 	sparkwing.Error(ctx, "oh no")
 }
@@ -270,6 +262,7 @@ type recordingEmitter struct {
 func (r *recordingEmitter) Log(level, msg string) {
 	r.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
+
 func (r *recordingEmitter) Emit(rec sparkwing.LogRecord) {
 	r.records = append(r.records, rec)
 }

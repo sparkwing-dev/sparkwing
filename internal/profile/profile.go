@@ -1,5 +1,7 @@
-// Package profile manages named bundles of controller connection info
-// (URL, logs URL, token, gitcache URL) used by `--on <name>`.
+// Package profile manages named storage/connection profiles selected by
+// `--profile <name>`. A profile describes where a run's state, cache, and
+// logs live (the backend triple) plus any controller URL / token needed
+// to reach a remote controller.
 //
 // Path resolution (first match wins):
 //
@@ -9,18 +11,18 @@
 //
 // On-disk shape:
 //
-//	default: local
 //	profiles:
-//	  local:
-//	    controller: http://127.0.0.1:4344
-//	    logs: http://127.0.0.1:4345
+//	  laptop:
+//	    state: { type: sqlite }
+//	    cache: { type: filesystem, path: ~/.cache/sparkwing }
+//	    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
 //	  prod:
-//	    controller: https://api.example.dev
-//	    logs: https://logs.example.dev
-//	    token: swu_...
-//	    gitcache: https://gitcache.example.dev
+//	    controller:
+//	      url: https://api.example.dev
+//	      token: swu_...
+//	    # state/cache/logs implied by the controller when omitted.
 //
-// Missing optional fields come back as empty strings.
+// Missing optional fields come back as nil specs / empty strings.
 package profile
 
 import (
@@ -31,59 +33,127 @@ import (
 	"sort"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
 // Profile is one named connection bundle.
 type Profile struct {
-	Name       string `yaml:"-"`
-	Controller string `yaml:"controller,omitempty"`
-	Logs       string `yaml:"logs,omitempty"`
-	Token      string `yaml:"token,omitempty"`
-	Gitcache   string `yaml:"gitcache,omitempty"`
+	Name string `yaml:"-"`
 
-	// Pluggable storage URLs. Accepts fs:///abs/path or
-	// s3://bucket/prefix.
-	LogStore      string `yaml:"log_store,omitempty"`
-	ArtifactStore string `yaml:"artifact_store,omitempty"`
+	// Controller bundles the remote controller's URL and bearer token.
+	// Nil = laptop-local profile (no remote dispatch). When set, the
+	// operator's CLI talks to this controller for triggers, run state,
+	// log streaming, and auxiliary-service discovery (the cache pod
+	// URL for `sparkwing push` etc.). The token authenticates every
+	// request; nil/empty token = no Authorization header sent.
+	Controller *ControllerSpec `yaml:"controller,omitempty"`
 
-	// CostPerRunnerHour feeds the simple compute-time × rate cost
-	// shown on `sparkwing runs receipt`. USD; default 0 reports
-	// compute_cents=0 instead of a misleading cost. Cloud-billing
-	// reconciliation layers on top.
-	CostPerRunnerHour float64 `yaml:"cost_per_runner_hour,omitempty"`
+	// Secrets, State, Cache, and Logs are the per-surface backends
+	// this profile uses. Consume as a unit via Surfaces. A nil pointer
+	// means "not declared at this layer." When --profile X is active,
+	// the orchestrator uses this Surfaces bundle wholesale, ignoring
+	// any project defaults or pipeline overrides.
+	Secrets *backends.Spec `yaml:"secrets,omitempty"`
+	State   *backends.Spec `yaml:"state,omitempty"`
+	Cache   *backends.Spec `yaml:"cache,omitempty"`
+	Logs    *backends.Spec `yaml:"logs,omitempty"`
 
-	// AutoAllow pre-authorizes risk labels for this profile. A
-	// low-stakes environment (laptop, kind cluster) can declare
-	// `auto_allow: [destructive]` so an operator running
-	// `sparkwing run destroy-cluster --on laptop` doesn't have to
-	// pass `--sw-allow destructive` every time. Production profiles
-	// should leave this empty so the gate stays loud.
-	AutoAllow []string `yaml:"auto_allow,omitempty"`
-
-	// DefaultRunner names the runner the scheduler picks when a
-	// job's Prefers produce no match and more than one runner
-	// satisfies its Requires. The name must resolve in runners.yaml
-	// at dispatch time -- this layer does no validation against it,
-	// because runners.yaml may not exist when a profile is being
-	// authored. Empty means "local"; consume via
-	// EffectiveDefaultRunner so the fallback lives in one place.
-	DefaultRunner string `yaml:"default_runner,omitempty"`
+	// MirrorLocal toggles whether local execution against this profile
+	// also writes state to the local SQLite store. Nil means the
+	// default (true); set false for automated workers that fire and
+	// forget. Consume via EffectiveMirrorLocal.
+	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
 }
 
-// EffectiveDefaultRunner returns the profile's declared
-// default_runner, or "local" when unset. Callers should reach for
-// this rather than the raw field so the unset-means-local rule lives
-// in one place. Nil-safe: a nil profile resolves to "local" too.
-func (p *Profile) EffectiveDefaultRunner() string {
-	if p == nil || p.DefaultRunner == "" {
-		return "local"
+// ControllerSpec is the nested controller block on a Profile.
+type ControllerSpec struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token,omitempty"`
+}
+
+// ControllerURL returns the profile's controller URL or "" when no
+// controller is configured. Nil-safe at every level so callers don't
+// need a Controller != nil check before reading.
+func (p *Profile) ControllerURL() string {
+	if p == nil || p.Controller == nil {
+		return ""
 	}
-	return p.DefaultRunner
+	return p.Controller.URL
+}
+
+// ControllerToken returns the profile's controller bearer token or
+// "" when none is configured. Nil-safe like ControllerURL.
+func (p *Profile) ControllerToken() string {
+	if p == nil || p.Controller == nil {
+		return ""
+	}
+	return p.Controller.Token
+}
+
+// HasController reports whether this profile dispatches to a remote
+// controller. Equivalent to ControllerURL() != "" but reads more
+// naturally at call sites.
+func (p *Profile) HasController() bool {
+	return p.ControllerURL() != ""
+}
+
+// InheritControllerDefaults fills empty URL/Token/TokenEnv/Controller
+// fields on any controller-typed surface from the profile's top-level
+// Controller block. A surface that's explicitly set keeps its own
+// values; this only fills gaps. Cuts boilerplate for the common case
+// where every surface routes through the same controller as the CLI
+// client connection -- a profiles.yaml that just declares
+// `controller: { url, token }` plus `state/cache/logs/secrets:
+// { type: controller }` becomes the complete spec, and surface specs
+// don't have to repeat `controller: <this-profile-name>` themselves.
+func (p *Profile) InheritControllerDefaults() {
+	if p == nil || p.Controller == nil {
+		return
+	}
+	for _, spec := range []*backends.Spec{p.Secrets, p.State, p.Cache, p.Logs} {
+		if spec == nil || spec.Type != backends.TypeController {
+			continue
+		}
+		if spec.URL == "" {
+			spec.URL = p.Controller.URL
+		}
+		if spec.Token == "" && spec.TokenEnv == "" {
+			spec.Token = p.Controller.Token
+		}
+		if spec.Controller == "" && p.Name != "" {
+			spec.Controller = p.Name
+		}
+	}
+}
+
+// Surfaces returns the profile's per-surface backends as a
+// backends.Surfaces. A nil profile yields a zero-valued Surfaces.
+func (p *Profile) Surfaces() backends.Surfaces {
+	if p == nil {
+		return backends.Surfaces{}
+	}
+	return backends.Surfaces{
+		Secrets: p.Secrets,
+		Cache:   p.Cache,
+		Logs:    p.Logs,
+		State:   p.State,
+	}
+}
+
+// EffectiveMirrorLocal reports whether local execution against this
+// profile should mirror state to the local SQLite store. Defaults to
+// true when unset, because laptop execution mirrors by default.
+// Nil-safe: a nil profile reports true.
+func (p *Profile) EffectiveMirrorLocal() bool {
+	if p == nil || p.MirrorLocal == nil {
+		return true
+	}
+	return *p.MirrorLocal
 }
 
 // Config is the on-disk profiles.yaml file.
 type Config struct {
-	Default  string              `yaml:"default,omitempty"`
 	Profiles map[string]*Profile `yaml:"profiles,omitempty"`
 }
 
@@ -128,13 +198,12 @@ func Load(path string) (*Config, error) {
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]*Profile{}
 	}
-	// Stamp .Name from the map key so Resolve returns a fully-formed
-	// Profile without a separate lookup.
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			cfg.Profiles[name] = &Profile{Name: name}
 		} else {
 			p.Name = name
+			p.InheritControllerDefaults()
 		}
 	}
 	return &cfg, nil
@@ -147,8 +216,7 @@ func Save(path string, cfg *Config) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	// Strip .Name before marshal (duplicates the map key).
-	out := &Config{Default: cfg.Default, Profiles: map[string]*Profile{}}
+	out := &Config{Profiles: map[string]*Profile{}}
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			continue
@@ -171,32 +239,11 @@ func Save(path string, cfg *Config) error {
 	return nil
 }
 
-// Resolve returns the profile matching the caller's intent:
-//
-//   - explicitName non-empty -> look up that profile.
-//   - else cfg.Default if set.
-//   - else ErrNoProfile.
-//
-// The returned pointer is owned by cfg.
-func Resolve(cfg *Config, explicitName string) (*Profile, error) {
-	if cfg == nil {
-		return nil, ErrNoProfile
-	}
-	name := explicitName
-	if name == "" {
-		name = cfg.Default
-	}
-	if name == "" {
-		return nil, ErrNoProfile
-	}
-	p, ok := cfg.Profiles[name]
-	if !ok || p == nil {
-		return nil, fmt.Errorf("%w: %q", ErrProfileNotFound, name)
-	}
-	return p, nil
-}
-
-// LoadAndResolve does DefaultPath + Load + Resolve in one call.
+// LoadAndResolve does DefaultPath + Load + Resolve in one call,
+// resolving explicitName through the chain (flag level; no project
+// hint). A nil profile is never returned for an empty name: the chain
+// returns (nil, nil) when explicitName is empty (the no-profile
+// path; project defaults apply at the orchestrator layer).
 func LoadAndResolve(explicitName string) (*Profile, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -206,7 +253,8 @@ func LoadAndResolve(explicitName string) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Resolve(cfg, explicitName)
+	p, _, err := Resolve(explicitName, cfg)
+	return p, err
 }
 
 // Names returns the profile names sorted alphabetically.
@@ -224,8 +272,8 @@ func (c *Config) Names() []string {
 func HintMissing(err error, cfg *Config) string {
 	base := err.Error()
 	if cfg != nil && len(cfg.Profiles) > 0 {
-		return fmt.Sprintf("%s\n\nAvailable profiles: %v\nPass --on <name>, or set a default via `sparkwing profiles use <name>`.",
+		return fmt.Sprintf("%s\n\nAvailable profiles: %v\nPass --profile <name>, or set a default via `sparkwing profiles use <name>`.",
 			base, cfg.Names())
 	}
-	return fmt.Sprintf("%s\n\nRegister a profile first:\n  sparkwing profiles add local --controller http://127.0.0.1:4344 --logs http://127.0.0.1:4345\nOr point at a remote controller:\n  sparkwing profiles add prod --controller https://api.example.dev --token swu_...", base)
+	return fmt.Sprintf("%s\n\nRegister a profile first:\n  sparkwing profiles add local --controller http://127.0.0.1:4344\nOr point at a remote controller:\n  sparkwing profiles add prod --controller https://api.example.dev --token swu_...", base)
 }

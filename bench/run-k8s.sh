@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Sparkwing Proxy Benchmark — In-Cluster (EKS)
+# Sparkwing Proxy Benchmark -- In-Cluster (EKS)
 #
 # Runs Docker builds inside a k8s pod with DinD to measure
 # the impact of sparkwing-cache on build times.

@@ -26,13 +26,10 @@ func TestSecretsCRUD(t *testing.T) {
 	s := secretStore(t)
 	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
 
-	// Missing secret returns ErrNotFound so the CLI can map to a
-	// clear error message.
 	if _, err := s.GetSecret("missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetSecret missing: want ErrNotFound, got %v", err)
 	}
 
-	// Initial create records both timestamps at `now`.
 	if err := s.CreateOrReplaceSecret("api_token", "abc123", "alice", true, now); err != nil {
 		t.Fatalf("CreateOrReplaceSecret: %v", err)
 	}
@@ -47,9 +44,6 @@ func TestSecretsCRUD(t *testing.T) {
 		t.Fatalf("GetSecret timestamps: created=%v updated=%v want=%v", got.CreatedAt, got.UpdatedAt, now)
 	}
 
-	// Replace updates value + principal + updated_at but keeps
-	// created_at so operators can still see when the name first
-	// appeared.
 	later := now.Add(5 * time.Minute)
 	if err := s.CreateOrReplaceSecret("api_token", "xyz789", "bot", true, later); err != nil {
 		t.Fatalf("replace: %v", err)
@@ -65,7 +59,6 @@ func TestSecretsCRUD(t *testing.T) {
 		t.Fatalf("replace timestamps: created=%v updated=%v", got.CreatedAt, got.UpdatedAt)
 	}
 
-	// List returns both rows (after adding a second) ordered by name.
 	if err := s.CreateOrReplaceSecret("db_password", "hunter2", "alice", true, now); err != nil {
 		t.Fatalf("second create: %v", err)
 	}
@@ -80,8 +73,6 @@ func TestSecretsCRUD(t *testing.T) {
 		t.Fatalf("ListSecrets order: %+v", secs)
 	}
 
-	// Delete removes the row; a follow-up delete of the same name
-	// returns ErrNotFound.
 	if err := s.DeleteSecret("api_token"); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}

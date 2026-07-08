@@ -68,7 +68,6 @@ func TestRealBucket_S3(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Rooted under "test/" so stray runs are easy to scrub.
 	keyPrefix := "test/" + randID(t)
 
 	artURL := "s3://" + bucket + "/" + keyPrefix + "/cache"

@@ -8,12 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// The Produces[T] marker is a hard plan-time contract: a typed job
-// MUST embed Produces[T] AND its Work() MUST call SetResult on a step
-// of type T. Either piece alone is a Plan-time panic so the contract
-// is visible at the type level AND honored at runtime. sw.RefTo[T]
-// then validates against the marker and never falls back to inference.
-
 type producedJob struct {
 	sparkwing.Base
 	sparkwing.Produces[buildOut]

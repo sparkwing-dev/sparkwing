@@ -36,7 +36,8 @@ func TestRunAndAwait_HappyPath(t *testing.T) {
 	aw := &stubAwaiter{runID: "child", data: payload}
 	ctx := context.WithValue(context.Background(), keyPipelineAwaiter, aw)
 
-	got, err := RunAndAwait[awaitOut, NoInputs](ctx, "upstream", "build",
+	got, err := RunAndAwait[awaitOut, NoInputs](
+		ctx, "upstream", "build",
 		WithFreshTimeout(30*time.Second),
 		WithFreshArgs(map[string]string{"env": "prod"}),
 	)

@@ -18,7 +18,7 @@ func TestResolveTriggerArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	backend := localState{st: st}
@@ -50,9 +50,7 @@ func TestResolveTriggerArgs(t *testing.T) {
 			ID:       "run-retry",
 			Pipeline: "release",
 			RetryOf:  "run-original",
-			// Retry invocation passes a different version on purpose
-			// to confirm it's *ignored* in favor of the original.
-			Args: map[string]string{"version": "v99"},
+			Args:     map[string]string{"version": "v99"},
 		}
 		got := resolveTriggerArgs(ctx, backend, trig, nil)
 		if got["version"] != "v1" {

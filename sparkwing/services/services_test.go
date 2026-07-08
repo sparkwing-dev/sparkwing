@@ -18,8 +18,6 @@ func requireDocker(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not on PATH; skipping container smoke test")
 	}
-	// Also verify the daemon is actually reachable. `docker version`
-	// against a down daemon exits non-zero; avoid flaky timeouts.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
@@ -69,8 +67,6 @@ func TestDeriveName(t *testing.T) {
 }
 
 func TestWithServices_Empty(t *testing.T) {
-	// No services -> no docker interaction at all. Should run fn and
-	// return its error verbatim.
 	calls := 0
 	err := WithServices(context.Background(), nil, func(ctx context.Context) error {
 		calls++
@@ -93,14 +89,10 @@ func TestWithServices_Empty(t *testing.T) {
 }
 
 func TestWithServices_DockerMissing(t *testing.T) {
-	// If docker isn't on PATH, WithServices should return
-	// ErrDockerUnavailable without calling fn. Simulate by shadowing
-	// PATH to an empty dir.
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker already missing; the real-docker path can't test this branch either")
 	}
 
-	// t.Setenv restores the original value on test end automatically.
 	t.Setenv("PATH", t.TempDir())
 
 	called := false
@@ -120,40 +112,13 @@ func TestWithServices_DockerMissing(t *testing.T) {
 func TestWithServices_StartAndCleanup(t *testing.T) {
 	requireDocker(t)
 
-	// alpine:latest sleeping forever: lightweight, widely cached in
-	// local docker installs, and doesn't hit the network if already
-	// pulled. The test tolerates a first-run pull.
 	svc := Service{
-		Image: "alpine:latest",
-		Name:  "", // let WithServices derive + suffix
-		Port:  0,
-		// Override entrypoint via env? No - alpine's default shell
-		// exits immediately. Use ReadyCmd that literally calls `true`
-		// so we don't rely on the container staying up beyond startup.
-		// Actually we DO need it to stay up during fn. Run `sleep 3600`
-		// via a docker arg. That's not expressible through our Service
-		// struct today. Workaround: use a real long-running image.
+		Image:    "nginx:alpine",
+		ReadyCmd: "wget -q -O /dev/null http://localhost/ || true",
 	}
-	// Use a minimal always-up image instead: `alpine:latest` with a
-	// cmd override isn't supported by our API, so use a service that
-	// stays up by itself. `alpine/socat` is heavy; a better choice is
-	// to run alpine with a sleep command by stuffing it in ReadyCmd?
-	// No - ReadyCmd runs INSIDE the container, so the container must
-	// already be up. Drop down to busybox+entry override... we don't
-	// have that either.
-	//
-	// Pragmatic fix: extend Service with Cmd later. For now, use
-	// `alpine:latest` and let docker immediately restart-less exit;
-	// ReadyCmd will fail and we'll test the cleanup path. Split the
-	// "stays up" test into one that uses nginx:alpine or similar -
-	// small, stays up, no config needed.
-	svc.Image = "nginx:alpine"
-	svc.ReadyCmd = "wget -q -O /dev/null http://localhost/ || true"
 
 	var capturedName string
 	err := WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
-		// Inspect currently-running containers to find ours. The
-		// derived name starts with "nginx" (from "nginx:alpine").
 		out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
 		if err != nil {
 			return err
@@ -185,8 +150,6 @@ func TestWithServices_StartAndCleanup(t *testing.T) {
 func TestWithServices_ReadyCmdSucceeds(t *testing.T) {
 	requireDocker(t)
 
-	// nginx:alpine serves :80 almost immediately. `nc` is not present
-	// in the minimal image; use wget which IS present.
 	svc := Service{
 		Image:        "nginx:alpine",
 		ReadyCmd:     "wget -q -O /dev/null http://localhost/",
@@ -199,7 +162,6 @@ func TestWithServices_ReadyCmdSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithServices: %v", err)
 	}
-	// Sanity: ReadyCmd path should finish well under its own timeout.
 	if elapsed := time.Since(start); elapsed > 20*time.Second {
 		t.Fatalf("ReadyCmd path took %s, suspiciously slow", elapsed)
 	}
@@ -208,7 +170,6 @@ func TestWithServices_ReadyCmdSucceeds(t *testing.T) {
 func TestWithServices_ReadyCmdTimesOut(t *testing.T) {
 	requireDocker(t)
 
-	// ReadyCmd that always fails. 1s timeout so the test returns fast.
 	svc := Service{
 		Image:        "nginx:alpine",
 		ReadyCmd:     "false",
@@ -260,8 +221,6 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured the container name")
 	}
-	// Give cleanup a brief moment; docker rm -f is synchronous but we
-	// may be racing docker's own state machine on slow runners.
 	for range 20 {
 		if !containerRunning(capturedName) {
 			return
@@ -295,8 +254,6 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 			}
 		}
 		cancel()
-		// Return fnCtx.Err to simulate a ctx-aware fn that exits on
-		// cancellation. WithServices must still run cleanup.
 		return fnCtx.Err()
 	})
 
@@ -319,9 +276,6 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 	requireDocker(t)
 
-	// Same image, two WithServices calls in parallel. Derived names
-	// must include distinct random suffixes; docker would reject the
-	// second `run` on a name collision.
 	svc := Service{
 		Image:    "nginx:alpine",
 		ReadyCmd: "wget -q -O /dev/null http://localhost/",
@@ -334,7 +288,6 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			errs <- WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
-				// Hold briefly so both containers overlap.
 				time.Sleep(500 * time.Millisecond)
 				return nil
 			})

@@ -91,7 +91,7 @@ import AttemptsDropdown from "@/components/AttemptsDropdown";
 
 // Runs-list still polls: the event stream is per-run, not global, so
 // the left sidebar can't subscribe to "anything new". The detail
-// view (middle + right columns) is event-driven — see the
+// view (middle + right columns) is event-driven -- see the
 // useRunEvents wiring in Pipelines() below.
 const POLL_MS = 2000;
 // Fallback detail refresh when the event stream is unavailable
@@ -270,7 +270,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const initialRun = searchParams.get("run");
   const [selectedRun, setSelectedRun] = useState<string | null>(initialRun);
-  // checkedRuns is the selection set — what rerun / delete operate
+  // checkedRuns is the selection set -- what rerun / delete operate
   // on. The detail pane (selectedRun) is a separate "viewing" state;
   // opening a detail also adds that run to the selection so the user
   // sees what's selected, but un-viewing doesn't drop it from the set.
@@ -399,7 +399,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   // Kick an initial detail fetch when a run is selected so the UI
   // has a baseline to mutate against. Subsequent updates come from
-  // the SSE event stream (see the useRunEvents block just below) —
+  // the SSE event stream (see the useRunEvents block just below) --
   // event-driven, ~sub-100ms latency, no 2s poll. A slow fallback
   // poll still fires while a run is selected in case the stream
   // can't open (auth drop, proxy cut, etc.).
@@ -511,11 +511,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   // every keystroke.
   const [focusedRun, setFocusedRun] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
-  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes" | "tabs">(
-    "runs",
-  );
+  const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes">("runs");
   const [tab, setTab] = useState<TabKey>("summary");
-  const [focusedTab, setFocusedTab] = useState<TabKey | null>(null);
   const topLevelRef = useRef(topLevel);
   topLevelRef.current = topLevel;
   const nodesRef = useRef(nodes);
@@ -526,8 +523,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   focusedNodeRef.current = focusedNode;
   const focusedColumnRef = useRef(focusedColumn);
   focusedColumnRef.current = focusedColumn;
-  const focusedTabRef = useRef(focusedTab);
-  focusedTabRef.current = focusedTab;
   const tabRef = useRef(tab);
   tabRef.current = tab;
   const visibleTabs = useMemo(() => buildVisibleTabs(nodes), [nodes]);
@@ -552,87 +547,60 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const ns = nodesRef.current;
       const col = focusedColumnRef.current;
       const tabs = visibleTabsRef.current;
+      // Tab / Shift+Tab cycles the active tab. Wraps in both
+      // directions so repeated presses keep moving.
+      if (e.key === "Tab") {
+        if (!selectedRunRef.current || tabs.length === 0) return;
+        e.preventDefault();
+        const cur = tabRef.current;
+        const idx = tabs.findIndex((t) => t.key === cur);
+        const base = idx < 0 ? 0 : idx;
+        const nextIdx = e.shiftKey
+          ? (base - 1 + tabs.length) % tabs.length
+          : (base + 1) % tabs.length;
+        const next = tabs[nextIdx];
+        if (next) setTab(next.key);
+        return;
+      }
       // ── Column transitions ──────────────────────────────────────
       if (e.key === "h" || e.key === "ArrowLeft") {
         e.preventDefault();
-        if (col === "tabs") {
-          const ft = focusedTabRef.current;
-          const idx = ft ? tabs.findIndex((t) => t.key === ft) : -1;
-          if (idx > 0) {
-            setFocusedTab(tabs[idx - 1].key);
-            return;
-          }
-          // At first tab → step left into nodes column.
-          setFocusedColumn(ns.length > 0 ? "nodes" : "runs");
-          setFocusedTab(null);
-          return;
-        }
-        if (col === "nodes") {
-          setFocusedColumn("runs");
-          return;
-        }
-        // Already in runs column — no-op.
+        if (col === "nodes") setFocusedColumn("runs");
         return;
       }
       if (e.key === "l" || e.key === "ArrowRight") {
         if (!selectedRunRef.current) return;
         e.preventDefault();
-        if (col === "tabs") {
-          const ft = focusedTabRef.current;
-          const idx = ft ? tabs.findIndex((t) => t.key === ft) : -1;
-          if (idx < tabs.length - 1)
-            setFocusedTab(tabs[idx + 1]?.key ?? tabs[0]?.key ?? null);
-          return;
-        }
-        if (col === "runs") {
-          if (ns.length > 0) {
-            setFocusedColumn("nodes");
-            if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
-          } else if (tabs.length > 0) {
-            setFocusedColumn("tabs");
-            setFocusedTab(tabs[0].key);
+        if (col === "runs" && ns.length > 0) {
+          setFocusedColumn("nodes");
+          if (!focusedNodeRef.current) {
+            const sel = selectedNodeRef.current;
+            const landing =
+              sel && ns.some((n) => n.id === sel) ? sel : ns[0].id;
+            setFocusedNode(landing);
           }
-          return;
         }
-        if (col === "nodes") {
-          if (tabs.length > 0) {
-            setFocusedColumn("tabs");
-            setFocusedTab(tabs[0].key);
-          }
-          return;
-        }
-      }
-      // ── Per-column j/k/Enter/Escape ─────────────────────────────
-      if (col === "tabs" && tabs.length > 0) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (focusedTabRef.current) setTab(focusedTabRef.current);
-          return;
-        }
-        if (e.key === "Escape") {
-          setFocusedColumn(ns.length > 0 ? "nodes" : "runs");
-          setFocusedTab(null);
-          return;
-        }
-        // j/k are no-ops in tabs column.
         return;
       }
+      // ── Per-column j/k/Enter/Escape ─────────────────────────────
       if (col === "nodes" && ns.length > 0) {
         const cur =
           focusedNodeRef.current ?? selectedNodeRef.current ?? ns[0].id;
         const idx = ns.findIndex((n) => n.id === cur);
         if (e.key === "j" || e.key === "ArrowDown") {
           e.preventDefault();
-          // Cycle: header → first → ... → last → header
-          if (!focusedNodeRef.current) setFocusedNode(ns[0].id);
-          else if (idx >= ns.length - 1) setFocusedNode(null);
-          else setFocusedNode(ns[idx + 1].id);
+          let next: string;
+          if (!focusedNodeRef.current) next = ns[0].id;
+          else next = ns[Math.min(idx + 1, ns.length - 1)].id;
+          setFocusedNode(next);
+          selectNode(next);
         } else if (e.key === "k" || e.key === "ArrowUp") {
           e.preventDefault();
-          // Cycle: header → last → ... → first → header
-          if (!focusedNodeRef.current) setFocusedNode(ns[ns.length - 1].id);
-          else if (idx <= 0) setFocusedNode(null);
-          else setFocusedNode(ns[idx - 1].id);
+          let next: string;
+          if (!focusedNodeRef.current) next = ns[0].id;
+          else next = ns[Math.max(idx - 1, 0)].id;
+          setFocusedNode(next);
+          selectNode(next);
         } else if (e.key === "Enter") {
           e.preventDefault();
           // Header parked (no node focus): Enter clears selection.
@@ -659,13 +627,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const idx = runs.findIndex((r) => r.id === cur);
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
-        const i = idx < 0 ? 0 : (idx + 1) % runs.length;
+        const i = idx < 0 ? 0 : Math.min(idx + 1, runs.length - 1);
         setFocusedRun(runs[i].id);
+        selectRunRef.current(runs[i].id);
       } else if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
-        const i =
-          idx < 0 ? runs.length - 1 : (idx - 1 + runs.length) % runs.length;
+        const i = idx < 0 ? 0 : Math.max(idx - 1, 0);
         setFocusedRun(runs[i].id);
+        selectRunRef.current(runs[i].id);
       } else if (e.key === "Enter") {
         e.preventDefault();
         const target = focusedRunRef.current ?? runs[0].id;
@@ -701,14 +670,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedNode]);
 
-  // Scroll focused tab into view.
+  // Scroll the active tab into view when it changes via Tab key.
   useEffect(() => {
-    if (!focusedTab) return;
     const el = document.querySelector(
-      `[data-tab-key="${focusedTab}"]`,
+      `[data-tab-key="${tab}"]`,
     ) as HTMLElement | null;
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [focusedTab]);
+  }, [tab]);
 
   // When a node selection clears, drop the keyboard focus off any
   // specific node so the cursor parks on the Nodes header instead of
@@ -1088,7 +1056,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               onSelectStep={selectStep}
               tab={tab}
               setTab={setTab}
-              focusedTab={focusedColumn === "tabs" ? focusedTab : null}
               onRefresh={() => {
                 refresh();
                 if (selectedRun) loadDetail(selectedRun);
@@ -1362,7 +1329,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     router.replace(`/runs?${params.toString()}`, { scroll: false });
     runGrep(query, since);
   }, [query, since, searchParams, router, runGrep]);
-  // Auto-run on mount when the URL arrived with a gq — e.g., direct
+  // Auto-run on mount when the URL arrived with a gq -- e.g., direct
   // link, refresh, or the user pressing Back from a run detail.
   const ranInitialRef = useRef(false);
   useEffect(() => {
@@ -1432,7 +1399,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               submit();
             }
           }}
-          placeholder="substring across log bodies — uses the filters above as the candidate set"
+          placeholder="substring across log bodies -- uses the filters above as the candidate set"
           className="flex-1 text-xs font-mono px-2 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)]"
         />
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
@@ -1628,7 +1595,7 @@ function NodesList({
     <>
       {groups.map(({ group, nodes: children }) => {
         if (!group) {
-          // Ungrouped nodes render flat at the top — preserves the
+          // Ungrouped nodes render flat at the top -- preserves the
           // pre-group look for pipelines that haven't opted in.
           return children.map((n) => (
             <NodeRow
@@ -2052,7 +2019,7 @@ const FullRunRow = memo(function FullRunRow({
           </>
         ) : (
           <Tooltip content="Finished">
-            <span className="text-[var(--foreground)] shrink-0">—</span>
+            <span className="text-[var(--foreground)] shrink-0">--</span>
           </Tooltip>
         )}
         {elapsedMs > 0 && (
@@ -2330,7 +2297,6 @@ function RunDetailPane({
   onRefresh,
   tab,
   setTab,
-  focusedTab,
   pendingLogFocus,
   onConsumePendingLogFocus,
   reusedNodeIDs,
@@ -2347,7 +2313,6 @@ function RunDetailPane({
   onRefresh: () => void;
   tab: TabKey;
   setTab: (k: TabKey) => void;
-  focusedTab: TabKey | null;
   // Cross-run grep deep link. When set, switches to the Logs tab and
   // focuses the matching line; consumed once via onConsumePendingLogFocus.
   pendingLogFocus?: {
@@ -2402,11 +2367,11 @@ function RunDetailPane({
   // Each find target is its own hit so the walker behaves like Ctrl-F
   // on the Summary view: cycle through every matching item, scrolling
   // each into view. Kinds correspond to distinct DOM targets:
-  //   node      — id (or group) match → Jobs row + DAG/Timeline ring
-  //   node-err  — error message match → Errors list row
-  //   node-anno — node-scoped annotation match → annotation row
-  //   step      — step id match → DAG/Timeline ring (no Summary row)
-  //   step-anno — step-scoped annotation match → annotation row
+  //   node      -- id (or group) match → Jobs row + DAG/Timeline ring
+  //   node-err  -- error message match → Errors list row
+  //   node-anno -- node-scoped annotation match → annotation row
+  //   step      -- step id match → DAG/Timeline ring (no Summary row)
+  //   step-anno -- step-scoped annotation match → annotation row
   // DAG/Timeline restrict to id-based kinds (node, step); Summary
   // walks all of them.
   type FindHit =
@@ -2490,7 +2455,7 @@ function RunDetailPane({
     }
     return set;
   }, [findStructuredHits]);
-  // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
+  // Keys: "<nodeID>::<stepID>" -- disambiguates step names reused across nodes.
   const findMatchedSteps = useMemo(() => {
     const set = new Set<string>();
     for (const h of findStructuredHits) {
@@ -2544,7 +2509,7 @@ function RunDetailPane({
     }
     return set;
   }, [findTimelineHits]);
-  // Resources tab matches on node ids only — that's the visible text.
+  // Resources tab matches on node ids only -- that's the visible text.
   type ResourceHit = { nodeID: string };
   const findResourceHits = useMemo<ResourceHit[]>(() => {
     const q = findQuery.trim().toLowerCase();
@@ -2640,7 +2605,7 @@ function RunDetailPane({
     }
     return out;
   }, [findLogResults]);
-  // Setup / Resources opt out — no per-node content to match against.
+  // Setup / Resources opt out -- no per-node content to match against.
   const findCounts: Partial<Record<TabKey, number>> = {
     summary: findStructuredHits.length,
     dag: findNameHits.length,
@@ -2790,7 +2755,7 @@ function RunDetailPane({
 
   // The previous-selection ref is kept so future routing decisions
   // could compare against it, but we intentionally do NOT auto-switch
-  // the tab on selection changes — the user's tab choice persists
+  // the tab on selection changes -- the user's tab choice persists
   // when flipping nodes or deselecting.
   useEffect(() => {
     prevSelectedRef.current = selectedId;
@@ -2886,10 +2851,6 @@ function RunDetailPane({
                 effectiveTab === t.key
                   ? "border-cyan-400 text-[var(--foreground)]"
                   : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
-              } ${
-                focusedTab === t.key
-                  ? "ring-2 ring-inset ring-cyan-300 bg-cyan-500/10"
-                  : ""
               }`}
             >
               <span className="font-semibold">{t.label}</span>
@@ -3609,7 +3570,7 @@ function AllNodesLogs({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Brief purple flash on collapse so the user can locate the now-
-  // collapsed header — handy when it isn't pinned at the top.
+  // collapsed header -- handy when it isn't pinned at the top.
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     const wasOpen = expanded.has(id);
@@ -3694,7 +3655,7 @@ function AllNodesLogs({
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 text-[10px] text-[var(--muted)] mb-1">
         <span className="shrink-0">
-          All nodes — expand a node to load its logs
+          All nodes -- expand a node to load its logs
         </span>
         <span className="flex-1" />
         <div className="flex items-center gap-2">
@@ -3865,7 +3826,7 @@ function AllNodesResources({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-[10px] text-[var(--muted)] mb-1">
-        <span>All nodes — expand to load CPU / memory over time</span>
+        <span>All nodes -- expand to load CPU / memory over time</span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setExpanded(new Set(nodes.map((n) => n.id)))}
@@ -3995,7 +3956,7 @@ function StreamingLogs({
     es.onmessage = (e) => {
       // SSE may bundle several JSONL records into one data chunk
       // (one-per-line). Split so each record becomes its own entry
-      // in state — parseLogLines wants line granularity to detect
+      // in state -- parseLogLines wants line granularity to detect
       // JSONL vs legacy text.
       const incoming = (e.data as string).split("\n").filter((s) => s !== "");
       setLines((prev) => [...prev, ...incoming]);
@@ -4452,7 +4413,7 @@ function DAG({
   }
 
   // Group frames: compute the bounding box around every node sharing
-  // the same `.Group("name")` tag so we can draw a labelled dashed
+  // the same `.Group("name")` tag so we can draw a labeled dashed
   // container behind them. Rendered before edges/nodes so it sits
   // visually beneath the DAG's active elements. Single-member groups
   // still get a frame so the visual grouping matches the nodes list
@@ -4597,7 +4558,7 @@ function DAG({
             // shifts to the group's frame so edges route to the card.
             // Group-frame endpoints (the to-group / from-group kinds)
             // resolve to the frame directly. Returned `key` is what
-            // we dedupe on — multiple parallel edges into one
+            // we dedupe on -- multiple parallel edges into one
             // collapsed group fold to one visual line.
             const resolveEnd = (
               kind: "node" | "group",
@@ -4769,7 +4730,7 @@ function DAG({
                   // Top-pill stack. Each pill type self-reports its
                   // width so the layout pass can lay them out side-by-
                   // side, centered as a group, instead of having every
-                  // pill self-center and clobber its neighbours. The
+                  // pill self-center and clobber its neighbors. The
                   // priority order below is also the left-to-right
                   // visual order on the node (most important read
                   // first): state markers (dynamic / approval) on the
@@ -5098,7 +5059,7 @@ function StepDag({
   onBack?: () => void;
   selectedStep?: string | null;
   onSelectStep?: (stepId: string | null) => void;
-  // Keys: "<nodeID>::<stepID>" — same shape as the run-level set.
+  // Keys: "<nodeID>::<stepID>" -- same shape as the run-level set.
   findMatchedSteps?: Set<string>;
 }) {
   // Auto-scroll selected step into view (mirrors the run-level DAG).
@@ -6152,7 +6113,7 @@ function CachedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
 // during its body. Sky-cyan to read as "outgoing connection." Label
 // is the generic "SPAWNS" (with a count when there are several) so
 // pill width is stable across pipeline names. Clicking the pill
-// jumps to the spawned run — for multi-spawn nodes it routes to the
+// jumps to the spawned run -- for multi-spawn nodes it routes to the
 // first child; the hover tooltip lists the full set.
 function crossPipelinePillWidth(pipelines: SpawnedPipelineRef[]): number {
   const label =
@@ -6469,8 +6430,8 @@ function ReuseSummary({
       <div className="text-[10px] text-[var(--muted)] py-1">
         ↻ Rerun of #{priorRunID}
         {mode === "full"
-          ? " — full rerun (re-executing every node)."
-          : " — no passed nodes were reused (re-executing everything)."}
+          ? " -- full rerun (re-executing every node)."
+          : " -- no passed nodes were reused (re-executing everything)."}
       </div>
     );
   }

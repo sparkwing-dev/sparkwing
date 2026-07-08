@@ -17,13 +17,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runApprove handles `sparkwing approve --run <id> --node <id>`.
+// runApprove handles `sparkwing runs approvals approve --run <id> --node <id>`.
 func runApprove(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	return resolveApprovalVerb(ctx, paths, args, cmdApprove,
 		store.ApprovalResolutionApproved, "approved")
 }
 
-// runDeny handles `sparkwing deny <run>/<node>`.
+// runDeny handles `sparkwing runs approvals deny --run <id> --node <id>`.
 func runDeny(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	return resolveApprovalVerb(ctx, paths, args, cmdDeny,
 		store.ApprovalResolutionDenied, "denied")
@@ -34,7 +34,7 @@ func runDeny(ctx context.Context, paths orchestrator.Paths, args []string) error
 // Exit codes:
 func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []string, cmd Command, resolution, pastTense string) error {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: local)")
+	on := fs.String("profile", "", "profile name (default: local)")
 	comment := fs.String("comment", "", "optional operator note recorded on the approval")
 	runIDFlag := fs.String("run", "", "run ID holding the approval gate")
 	nodeIDFlag := fs.String("node", "", "node ID of the approval gate")
@@ -70,7 +70,7 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 		if err := requireController(prof, cmd.Path); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		got, err = c.ResolveApproval(ctx, runID, nodeID, resolution, approver, *comment)
 	}
 	if err != nil {
@@ -91,25 +91,23 @@ func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, 
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
 }
 
 // runApprovalsList handles `sparkwing approvals list`.
 func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdApprovalsList.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: local)")
+	on := fs.String("profile", "", "profile name (default: local)")
 	runID := fs.String("run", "", "restrict to one run's approvals (pending + history)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdApprovalsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, cmdApprovalsList.Path)
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, cmdApprovalsList.Path)
 	if rerr != nil {
 		return rerr
 	}
@@ -127,7 +125,7 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 		if err := requireController(prof, cmdApprovalsList.Path); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		if *runID != "" {
 			rows, err = c.ListApprovalsForRun(ctx, *runID)
 		} else {
@@ -155,7 +153,7 @@ func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID str
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if runID != "" {
 		return st.ListApprovalsForRun(ctx, runID)
 	}
@@ -187,28 +185,4 @@ func orDashApproval(s string) string {
 		return "-"
 	}
 	return s
-}
-
-// runApprovals routes the top-level `sparkwing approvals` verb to
-// its subcommands. Parallels runJobs / runTokens / etc.
-func runApprovals(args []string) error {
-	if handleParentHelp(cmdApprovals, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdApprovals, os.Stderr)
-		return errors.New("approvals: subcommand required")
-	}
-	paths, err := orchestrator.DefaultPaths()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	switch args[0] {
-	case "list":
-		return runApprovalsList(ctx, paths, args[1:])
-	default:
-		PrintHelp(cmdApprovals, os.Stderr)
-		return fmt.Errorf("approvals: unknown command %q", args[0])
-	}
 }

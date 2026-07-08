@@ -1,0 +1,282 @@
+package jobs
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"golang.org/x/mod/modfile"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+// PrePush gates pushes to main with the slower checks that don't
+// belong in pre-commit: full golangci-lint, `go test -race`, the
+// version-freshness check against the sparkwing ecosystem, the
+// public API-surface drift gate (bin/check-api-snapshot.sh, which
+// covers the `pkg/` surfaces the generated-reference diffs miss),
+// and a hard ban on any `replace` directive in a committed `go.mod`.
+//
+// Push-to-main means this pipeline is the last gate before code is
+// shared, so it's stricter than a typical PR-time check.
+//
+// Wire it to git: declare `pre_push:` in sparkwing.yaml and run
+// `sparkwing pipeline hooks install`. Tooling assumed on PATH:
+// golangci-lint, staticcheck (called by golangci-lint), govulncheck,
+// terraform (for the Mode 3 module gate; .tool-versions pins it).
+type PrePush struct{ sparkwing.Base }
+
+func (PrePush) ShortHelp() string {
+	return "Pre-push gate: lint, test -race, vuln, freshness, api-snapshot, no replace + no go.work"
+}
+
+func (PrePush) Help() string {
+	return "Final gate before main. Runs the full golangci-lint set, " +
+		"`go test -race ./...`, `govulncheck ./...`, the " +
+		"sparkwing-ecosystem version-freshness check (deps must be at " +
+		"the latest released tag, or replaced with a not-behind local " +
+		"path), the public API-surface drift gate (the `pkg/` snapshot " +
+		"under .apidiff/ must match HEAD), refuses to push if any " +
+		"committed go.mod contains a `replace` line, and refuses to push " +
+		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
+		"local-iteration scaffolding and can't be resolved by the Go " +
+		"module proxy), and validates + offline-plans the Mode 3 Postgres " +
+		"Terraform module for both engine knobs (bin/check-terraform.sh)."
+}
+
+func (PrePush) Examples() []sparkwing.Example {
+	return []sparkwing.Example{
+		{Comment: "Manually invoke the pre-push gate", Command: "sparkwing run pre-push"},
+	}
+}
+
+func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, rc.Pipeline, p.run)
+	return nil
+}
+
+func (p *PrePush) run(ctx context.Context) error {
+	var failures []string
+
+	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		sparkwing.Info(ctx, "no-replace check: clean")
+	}
+
+	if err := checkNoCommittedGoWorkFiles(ctx); err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		sparkwing.Info(ctx, "no-go.work check: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx,
+		`go -C .sparkwing mod tidy 2>/dev/null || true; git diff --quiet -- .sparkwing/go.mod .sparkwing/go.sum`,
+	).Run(); err != nil {
+		failures = append(failures, "go mod tidy drift: run `go -C .sparkwing mod tidy` and commit the result")
+	} else {
+		sparkwing.Info(ctx, "go mod tidy: no drift")
+	}
+
+	if err := CheckVersionsFreshness(ctx, sparkwing.WorkDir()); err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		sparkwing.Info(ctx, "version freshness: current")
+	}
+
+	if err := CheckPreV1Policy(ctx, sparkwing.WorkDir()); err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		sparkwing.Info(ctx, "pre-v1 policy: clean")
+	}
+
+	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
+		MustBeEmpty("gofmt reported unformatted files"); err != nil {
+		failures = append(failures, fmt.Sprintf("gofmt: %v", err))
+	} else {
+		sparkwing.Info(ctx, "gofmt: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && golangci-lint run ./...").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("golangci-lint: %v", err))
+	} else {
+		sparkwing.Info(ctx, "golangci-lint: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "go -C .sparkwing test -race ./...").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("go test -race: %v", err))
+	} else {
+		sparkwing.Info(ctx, "go test -race: passed")
+	}
+
+	// hack: package scan not symbol scan -- symbol scan panics on go1.26 generics (x/tools TypeParam)
+	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && go run golang.org/x/vuln/cmd/govulncheck@v1.4.0 -scan package ./...").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("govulncheck: %v", err))
+	} else {
+		sparkwing.Info(ctx, "govulncheck: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
+	} else {
+		sparkwing.Info(ctx, "shellcheck: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-terraform.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("terraform: %v", err))
+	} else {
+		sparkwing.Info(ctx, "terraform: module valid + plans clean (both engines)")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
+	} else {
+		sparkwing.Info(ctx, "markdownlint: clean")
+	}
+
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("doc-examples: %v", err))
+	} else {
+		sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
+	}
+
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./cmd/sparkwing commands -o markdown | diff -u docs/cli-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "cli-reference: current")
+	}
+
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/configref "$ROOT" | diff -u docs/config-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "config-reference: stale -- run `bash bin/gen-config-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "config-reference: current")
+	}
+
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/sdkref "$ROOT" | diff -u docs/sdk-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "sdk-reference: current")
+	}
+
+	if _, err := sparkwing.Bash(ctx,
+		`cd "$ROOT" && go run ./internal/apiref "$ROOT" | diff -u docs/api-reference.md -`,
+	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+		failures = append(failures, "api-reference: stale -- run `bash bin/gen-api-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "api-reference: current")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+		failures = append(failures, "api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
+	} else {
+		sparkwing.Info(ctx, "api-snapshot: no drift")
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
+	}
+	return nil
+}
+
+// checkNoReplaceDirectivesInCommittedGoMods refuses to let any
+// committed go.mod ship with a `replace` line. Replace directives
+// are intended for local iteration; once they leak into main they
+// break every consumer of this repo (Go module proxy can't resolve
+// a local-path replace, so anyone cloning will fail to build).
+//
+// Carve-out: .sparkwing/go.mod's dogfood self-replace
+// (`github.com/sparkwing-dev/sparkwing => ..`) is allowed. The
+// .sparkwing/ directory is a separate Go module (declared
+// `module sparkwing-pipelines`) and is excluded from the parent
+// module's proxy archive, so the replace target `..` always
+// resolves to the parent checkout for anyone who could possibly
+// build it. See isSparkwingDogfoodReplace for the exact pattern.
+func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
+	// safety: git -C anchors paths to repo root regardless of process cwd.
+	out, err := sparkwing.Bash(ctx,
+		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
+	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
+	if err != nil {
+		return fmt.Errorf("list go.mod files: %w", err)
+	}
+	var offenders []string
+	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
+		if rel == "" {
+			continue
+		}
+		abs := sparkwing.Path(rel)
+		data, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			return fmt.Errorf("read %s: %w", rel, rerr)
+		}
+		mf, perr := modfile.Parse(rel, data, nil)
+		if perr != nil {
+			return fmt.Errorf("parse %s: %w", rel, perr)
+		}
+		for _, r := range mf.Replace {
+			if isSparkwingDogfoodReplace(rel, r) {
+				continue
+			}
+			offenders = append(offenders,
+				fmt.Sprintf("%s: %s => %s", rel, r.Old.Path, r.New.Path))
+		}
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to push: %d disallowed replace line(s) (remove and pin a released tag):\n    %s",
+		len(offenders), strings.Join(offenders, "\n    "),
+	)
+}
+
+// isSparkwingDogfoodReplace recognizes the one replace the sparkwing
+// repo ships in main: .sparkwing/go.mod redirects the sparkwing module
+// to the parent checkout (`..`) so the repo's own pipelines compile
+// against the in-flight SDK source rather than the last-published tag
+// via the module proxy. Anything else in .sparkwing/go.mod or any
+// replace in another go.mod still fails the check.
+func isSparkwingDogfoodReplace(path string, r *modfile.Replace) bool {
+	return path == ".sparkwing/go.mod" &&
+		r.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
+		r.Old.Version == "" &&
+		r.New.Path == ".." &&
+		r.New.Version == ""
+}
+
+// checkNoCommittedGoWorkFiles refuses to let a workspace file ship.
+// `go.work` and `go.work.sum` are local-iteration scaffolding (they
+// point at relative paths on the developer's machine) and break
+// builds for anyone who clones the repo. The matching gitignore
+// patterns should prevent these from ever being staged, but the
+// check is belt-and-suspenders.
+func checkNoCommittedGoWorkFiles(ctx context.Context) error {
+	out, err := sparkwing.Bash(ctx,
+		`git ls-files | grep -E '(^|/)go\.work(\.sum)?$' || true`,
+	).String()
+	if err != nil {
+		return fmt.Errorf("scan go.work files: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil
+	}
+	files := strings.Split(out, "\n")
+	return fmt.Errorf(
+		"refusing to push: %d committed go.work file(s) (remove + add to .gitignore):\n    %s",
+		len(files), strings.Join(files, "\n    "),
+	)
+}
+
+func init() {
+	sparkwing.Register("pre-push", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
+}

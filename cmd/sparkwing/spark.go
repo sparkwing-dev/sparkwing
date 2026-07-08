@@ -1,5 +1,5 @@
-// `sparkwing pipeline sparks` subcommand. Manages the consumer
-// manifest .sparkwing/sparks.yaml and drives the resolver in
+// `sparkwing pipeline sparks` subcommand. Manages the sparks: section
+// of .sparkwing/sparkwing.yaml and drives the resolver in
 // internal/sparks.
 package main
 
@@ -14,11 +14,10 @@ import (
 	"text/tabwriter"
 
 	flag "github.com/spf13/pflag"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // defaultSparkwingDir resolves the --sparkwing-dir flag's default:
@@ -61,8 +60,6 @@ func runSparks(args []string) error {
 	}
 }
 
-// ---- list ------------------------------------------------------
-
 // sparkListEntry is the per-library shape we render for `spark list`.
 // Kept separate from sparks.Library so we can add the resolved
 // version and keep JSON output stable even if the manifest shape
@@ -79,8 +76,6 @@ func runSparksList(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksList.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	noResolve := fs.Bool("no-resolve", false, "skip module-proxy lookups; only print declared versions")
 	if err := parseAndCheck(cmdSparksList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -88,7 +83,7 @@ func runSparksList(args []string) error {
 		}
 		return err
 	}
-	format, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "spark list")
+	format, err := resolveOutputFormat(*outFmt, "spark list")
 	if err != nil {
 		return err
 	}
@@ -96,7 +91,7 @@ func runSparksList(args []string) error {
 	if sparkwingDir == "" {
 		sparkwingDir = defaultSparkwingDir()
 	}
-	m, err := sparks.LoadManifest(sparkwingDir)
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -135,7 +130,7 @@ func runSparksList(args []string) error {
 		return nil
 	default:
 		if m == nil {
-			fmt.Fprintf(os.Stdout, "no %s in %s\n", sparks.ManifestFilename, sparkwingDir)
+			fmt.Fprintf(os.Stdout, "no sparks declared in %s/%s\n", sparkwingDir, projectconfig.Filename)
 			return nil
 		}
 		if len(entries) == 0 {
@@ -175,8 +170,6 @@ func shortErr(s string) string {
 	}
 	return s
 }
-
-// ---- lint ------------------------------------------------------
 
 // sparkManifest is the shape of spark.json. Kept inline rather than
 // imported from internal/sparks because that package is concerned
@@ -229,10 +222,6 @@ func runSparksLint(args []string) error {
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&m); err != nil {
-		// Re-try without DisallowUnknownFields so we can present a
-		// clearer "parse error" vs "unknown field" distinction. Unknown
-		// fields are a soft warning, not an error: spark.json may grow
-		// fields ahead of our lint rules.
 		if strings.Contains(err.Error(), "unknown field") {
 			if err2 := json.Unmarshal(raw, &m); err2 == nil {
 				fmt.Fprintf(os.Stderr, "warn: %s: %v\n", manifestPath, err)
@@ -260,13 +249,11 @@ func runSparksLint(args []string) error {
 		if strings.TrimSpace(p.Path) == "" {
 			problems = append(problems, fmt.Sprintf("packages[%d]: 'path' is required", i))
 		} else {
-			// Path is relative to the module root; verify the dir
-			// actually exists so the manifest doesn't advertise
-			// phantom packages.
 			abs := filepath.Join(libDir, p.Path)
 			if info, err := os.Stat(abs); err != nil || !info.IsDir() {
 				problems = append(problems, fmt.Sprintf(
-					"packages[%d] (%s): directory %s does not exist", i, p.Path, abs))
+					"packages[%d] (%s): directory %s does not exist", i, p.Path, abs,
+				))
 			}
 		}
 		if strings.TrimSpace(p.Description) == "" {
@@ -275,15 +262,15 @@ func runSparksLint(args []string) error {
 		if p.Stability != "" && !validStability(p.Stability) {
 			problems = append(problems, fmt.Sprintf(
 				"packages[%d] (%s): stability must be experimental|beta|stable, got %q",
-				i, p.Path, p.Stability))
+				i, p.Path, p.Stability,
+			))
 		}
 	}
 	if m.Stability != "" && !validStability(m.Stability) {
 		problems = append(problems, fmt.Sprintf(
-			"stability must be experimental|beta|stable, got %q", m.Stability))
+			"stability must be experimental|beta|stable, got %q", m.Stability,
+		))
 	}
-	// Check duplicate package paths -- surfaces authorship mistakes
-	// before a confused consumer does.
 	seen := map[string]int{}
 	for i, p := range m.Packages {
 		if p.Path == "" {
@@ -292,18 +279,19 @@ func runSparksLint(args []string) error {
 		if prev, ok := seen[p.Path]; ok {
 			problems = append(problems, fmt.Sprintf(
 				"packages[%d] (%s): duplicate path; first seen at packages[%d]",
-				i, p.Path, prev))
+				i, p.Path, prev,
+			))
 		}
 		seen[p.Path] = i
 	}
-	// Dependencies: informational but we can still sanity-check.
 	for i, d := range m.Dependencies {
 		if d.Source == "" {
 			problems = append(problems, fmt.Sprintf("dependencies[%d]: 'source' is required", i))
 		}
 		if d.Version == "" {
 			problems = append(problems, fmt.Sprintf(
-				"dependencies[%d] (%s): 'version' is required", i, d.Source))
+				"dependencies[%d] (%s): 'version' is required", i, d.Source,
+			))
 		}
 	}
 	if len(problems) > 0 {
@@ -351,8 +339,6 @@ func resolveSparkJSONPath(target string) (libDir, manifestPath string, err error
 	return filepath.Dir(target), target, nil
 }
 
-// ---- resolve ---------------------------------------------------
-
 func runSparksResolve(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksResolve.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
@@ -368,7 +354,7 @@ func runSparksResolve(args []string) error {
 		sparkwingDir = defaultSparkwingDir()
 	}
 	ctx := context.Background()
-	changed, err := sparks.ResolveAndWrite(ctx, sparkwingDir)
+	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -382,8 +368,6 @@ func runSparksResolve(args []string) error {
 	}
 	return nil
 }
-
-// ---- update ----------------------------------------------------
 
 func runSparksUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksUpdate.Path, flag.ContinueOnError)
@@ -411,10 +395,6 @@ func runSparksUpdate(args []string) error {
 		return fmt.Errorf("spark update: %s has no libraries", path)
 	}
 	if only != "" {
-		// Sanity-check that the named entry exists. Don't mutate
-		// yaml; update re-materializes the overlay against the
-		// declared versions, which already reflect any new 'latest'
-		// tags or range upper bounds.
 		found := false
 		for _, lib := range m.Libraries {
 			if lib.Name == only || lib.Source == only {
@@ -427,7 +407,7 @@ func runSparksUpdate(args []string) error {
 		}
 	}
 	ctx := context.Background()
-	changed, err := sparks.ResolveAndWrite(ctx, sparkwingDir)
+	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
 	if err != nil {
 		return err
 	}
@@ -439,8 +419,6 @@ func runSparksUpdate(args []string) error {
 	}
 	return nil
 }
-
-// ---- add -------------------------------------------------------
 
 func runSparksAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksAdd.Path, flag.ContinueOnError)
@@ -489,8 +467,6 @@ func runSparksAdd(args []string) error {
 	return nil
 }
 
-// ---- remove ----------------------------------------------------
-
 func runSparksRemove(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksRemove.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
@@ -535,8 +511,6 @@ func runSparksRemove(args []string) error {
 	return nil
 }
 
-// ---- warmup ----------------------------------------------------
-
 func runSparksWarmup(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksWarmup.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
@@ -552,17 +526,11 @@ func runSparksWarmup(args []string) error {
 		sparkwingDir = defaultSparkwingDir()
 	}
 
-	// Step 1: resolve + materialize overlay. No-op when sparks.yaml is
-	// absent; the rest of warmup is still worth running so a consumer
-	// with just a go.mod-pinned build can still pre-compile.
 	ctx := context.Background()
-	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir); err != nil {
+	if _, err := sparksResolveAndWrite(ctx, sparkwingDir); err != nil {
 		return fmt.Errorf("spark warmup: resolve: %w", err)
 	}
 
-	// Step 2: optionally clear the local pipeline binary cache so the
-	// warmup actually rebuilds. Without this flag, a prior matching
-	// build short-circuits the compile loop.
 	if *clearCache {
 		cacheRoot := filepath.Join(bincache.SparkwingHome(), "cache", "pipelines")
 		if err := os.RemoveAll(cacheRoot); err != nil && !os.IsNotExist(err) {
@@ -571,16 +539,8 @@ func runSparksWarmup(args []string) error {
 		fmt.Fprintf(os.Stdout, "cleared %s\n", cacheRoot)
 	}
 
-	// Step 3: discover pipelines. We compile the .sparkwing/ module
-	// once (one binary registers every pipeline) rather than per
-	// pipeline entry -- the binary dispatches internally on the
-	// pipeline name, and bincache keys the binary on the whole
-	// sparkwing dir, not per pipeline.
-	_, cfg, err := pipelines.Discover(sparkwingDir)
+	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)
 	if err != nil {
-		// Discover walks up from the start dir; a consumer repo with
-		// a sparks.yaml but no pipelines.yaml is still a valid warmup
-		// target if the user only cares about resolving.
 		fmt.Fprintf(os.Stderr, "warn: no pipelines discovered: %v\n", err)
 	} else {
 		fmt.Fprintf(os.Stdout, "warming up %d pipeline(s)\n", len(cfg.Pipelines))
@@ -592,9 +552,6 @@ func runSparksWarmup(args []string) error {
 	}
 	binPath := bincache.CachedBinaryPath(key)
 
-	// If the binary already exists at this cache key, short-circuit.
-	// This is the idempotent fast path: a second warmup with no
-	// manifest/source changes does nothing.
 	if _, err := os.Stat(binPath); err == nil {
 		fmt.Fprintf(os.Stdout, "binary already cached: %s\n", binPath)
 	} else {
@@ -604,9 +561,6 @@ func runSparksWarmup(args []string) error {
 		}
 	}
 
-	// Step 4: upload to gitcache when configured. No-op without
-	// SPARKWING_GITCACHE_URL; logged without failing so a warmup run
-	// on a laptop without cache config still succeeds.
 	if gcURL := bincache.CacheURL(); gcURL != "" {
 		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, binPath); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: gitcache upload failed: %v\n", err)
@@ -618,8 +572,6 @@ func runSparksWarmup(args []string) error {
 	}
 	return nil
 }
-
-// ---- helpers ---------------------------------------------------
 
 // loadManifestForWrite reads sparks.yaml for a mutation subcommand.
 // Absent file -> an empty Manifest (so `spark add` on a fresh repo
@@ -634,8 +586,8 @@ func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error)
 	} else if !info.IsDir() {
 		return nil, "", fmt.Errorf("sparkwing-dir %s is not a directory", sparkwingDir)
 	}
-	path := filepath.Join(sparkwingDir, sparks.ManifestFilename)
-	m, err := sparks.LoadManifest(sparkwingDir)
+	path := filepath.Join(sparkwingDir, projectconfig.Filename)
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
 	if err != nil {
 		return nil, path, err
 	}
@@ -645,31 +597,20 @@ func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error)
 	return m, path, nil
 }
 
-// writeSparksYAML serializes m to path with stable indent. Uses
-// go.yaml.in/yaml/v3 directly so the on-disk format stays close to
-// what the resolver reads. Library names/sources/versions are short
-// strings; no quoting concerns.
-func writeSparksYAML(path string, m *sparks.Manifest) error {
-	var buf strings.Builder
-	buf.WriteString("# Managed by `sparkwing pipeline sparks add|remove|update`. See docs/sparks.md.\n")
-	enc := yaml.NewEncoder(&writerAdapter{s: &buf})
-	enc.SetIndent(2)
-	if err := enc.Encode(m); err != nil {
-		_ = enc.Close()
-		return fmt.Errorf("encode %s: %w", path, err)
+// sparksResolveAndWrite loads the sparks manifest from the project's
+// sparkwing.yaml and resolves + writes the overlay modfile.
+func sparksResolveAndWrite(ctx context.Context, sparkwingDir string) (bool, error) {
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
+	if err != nil {
+		return false, err
 	}
-	if err := enc.Close(); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(buf.String()), 0o644)
+	return sparks.ResolveAndWrite(ctx, sparkwingDir, m)
 }
 
-// writerAdapter lets us feed a strings.Builder to yaml.Encoder, which
-// requires an io.Writer. Avoids pulling in a bytes.Buffer solely for
-// the interface satisfaction.
-type writerAdapter struct{ s *strings.Builder }
-
-func (w *writerAdapter) Write(p []byte) (int, error) { return w.s.Write(p) }
+// writeSparksYAML writes m's libraries into the sparks: section of the
+// project's sparkwing.yaml (path), preserving every other section. A
+// surgical yaml edit -- the unrelated pipeline/runner/source config is
+// never re-marshaled.
+func writeSparksYAML(path string, m *sparks.Manifest) error {
+	return projectconfig.WriteSparksSection(path, m.Libraries)
+}

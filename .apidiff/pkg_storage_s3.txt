@@ -13,11 +13,15 @@ type ArtifactStore struct {
 	Prefix string
 	Client API
 }
+func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, error)
 func (s *ArtifactStore) Delete(ctx context.Context, key string) error
 func (s *ArtifactStore) Get(ctx context.Context, key string) (io.ReadCloser, error)
+func (s *ArtifactStore) GetWithETag(ctx context.Context, key string) (io.ReadCloser, storage.ETag, error)
 func (s *ArtifactStore) Has(ctx context.Context, key string) (bool, error)
 func (s *ArtifactStore) List(ctx context.Context, prefix string) ([]string, error)
 func (s *ArtifactStore) Put(ctx context.Context, key string, r io.Reader) error
+func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) (storage.ETag, error)
+func (s *ArtifactStore) PutIfMatch(ctx context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error)
 type LogStore struct {
 	Bucket string
 	Prefix string

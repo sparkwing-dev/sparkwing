@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// --- Exclusive ---
-
 // exclusiveCounter tracks the number of in-flight nodes holding the
 // Exclusive lock; test code asserts it never exceeds 1.
 type exclusiveCounter struct {
@@ -26,7 +24,6 @@ func (e *exclusiveCounter) step(holdFor time.Duration) func(ctx context.Context)
 	return func(ctx context.Context) error {
 		cur := atomic.AddInt32(&e.inflight, 1)
 		defer atomic.AddInt32(&e.inflight, -1)
-		// Track the peak concurrency we observe while the lock is held.
 		for {
 			peak := atomic.LoadInt32(&e.maxSeen)
 			if cur <= peak || atomic.CompareAndSwapInt32(&e.maxSeen, peak, cur) {
@@ -42,14 +39,12 @@ type exclusivePipe struct{ sparkwing.Base }
 
 var exclusiveState = &exclusiveCounter{}
 
-func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Two peer nodes, both exclusive on the same key, both try to
-	// run concurrently. The lock should serialize them.
-	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
-	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "shared-resource"})
+func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("shared-resource", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Concurrency(g)
 	return nil
 }
-
-// --- NeedsOptional ---
 
 type optionalDepsPipe struct{ sparkwing.Base }
 
@@ -63,19 +58,15 @@ func (optionalDepsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 		optA.Store(true)
 		return nil
 	})
-	// b declares NeedsOptional("a", "missing-node"). Should wait on
-	// a (present) and silently skip the missing ID.
 	sparkwing.Job(plan, "b", func(ctx context.Context) error {
 		if !optA.Load() {
 			return errors.New("b ran before a")
 		}
 		optB.Store(true)
 		return nil
-	}).NeedsOptional(a, "missing-node")
+	}).NeedsOptional(a)
 	return nil
 }
-
-// --- ContinueOnError ---
 
 type continueOnErrorPipe struct{ sparkwing.Base }
 
@@ -95,8 +86,6 @@ func (continueOnErrorPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 	}).Needs(failer)
 	return nil
 }
-
-// --- Optional ---
 
 type optionalFailurePipe struct{ sparkwing.Base }
 
@@ -124,8 +113,6 @@ func init() {
 	register("optional-failure", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &optionalFailurePipe{} })
 }
 
-// --- Tests ---
-
 func TestExclusive_SerializesConcurrentHolders(t *testing.T) {
 	atomic.StoreInt32(&exclusiveState.inflight, 0)
 	atomic.StoreInt32(&exclusiveState.maxSeen, 0)
@@ -146,8 +133,6 @@ func TestExclusive_SerializesConcurrentHolders(t *testing.T) {
 }
 
 func TestExclusive_AcrossRuns(t *testing.T) {
-	// Two separate orchestrator.Run calls with Exclusive("k") should
-	// still serialize via the file lock.
 	atomic.StoreInt32(&exclusiveState.inflight, 0)
 	atomic.StoreInt32(&exclusiveState.maxSeen, 0)
 
@@ -200,7 +185,7 @@ func TestContinueOnError_DownstreamProceeds(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {

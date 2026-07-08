@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // pipelinesResponse mirrors the shape the dashboard's TriggerForm
@@ -19,7 +19,6 @@ type pipelinesResponse struct {
 
 type pipelineEntry struct {
 	Args []pipelineArg `json:"args"`
-	Tags []string      `json:"tags,omitempty"`
 }
 
 type pipelineArg struct {
@@ -57,26 +56,20 @@ func aggregatedPipelinesHandler() http.HandlerFunc {
 			return
 		}
 		for _, e := range cfg.Repos {
-			ymlPath := filepath.Join(e.Path, ".sparkwing", "pipelines.yaml")
-			loaded, lerr := pipelines.Load(ymlPath)
-			if lerr != nil {
+			ymlPath := filepath.Join(e.Path, ".sparkwing", projectconfig.Filename)
+			loaded, lerr := projectconfig.Load(ymlPath)
+			if lerr != nil || loaded == nil {
 				continue
 			}
 			for _, p := range loaded.Pipelines {
-				if p.Hidden {
-					continue
-				}
 				if _, dup := out.Pipelines[p.Name]; dup {
 					continue
 				}
 				out.Pipelines[p.Name] = pipelineEntry{
 					Args: []pipelineArg{},
-					Tags: p.Tags,
 				}
 			}
 		}
-		// TriggerForm sorts keys client-side, so the unordered map
-		// shape matches internal/web.pipelinesHandler over the wire.
 		writeJSON(w, out)
 	}
 }

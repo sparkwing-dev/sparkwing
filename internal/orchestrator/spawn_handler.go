@@ -38,7 +38,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 
 	child := sparkwing.NewDetachedNode(childID, job)
 
-	if err := h.state.plan.InsertChild(child); err != nil {
+	if err := sparkwing.RuntimePlumbing.Fns.PlanInsertChild(h.state.plan, child); err != nil {
 		return nil, fmt.Errorf("orchestrator: insert spawn child %q: %w", childID, err)
 	}
 	if err := h.state.backends.State.CreateNode(h.state.ctx, store.Node{
@@ -46,7 +46,7 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 		NodeID:      child.ID(),
 		Status:      "pending",
 		Deps:        child.DepIDs(),
-		NeedsLabels: effectiveClaimLabels(child),
+		NeedsLabels: effectiveClaimLabels(child, h.state.pipelineRequires),
 	}); err != nil {
 		return nil, fmt.Errorf("orchestrator: persist spawn child row %q: %w", childID, err)
 	}

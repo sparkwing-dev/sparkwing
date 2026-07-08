@@ -80,8 +80,6 @@ func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) 
 		}
 		buf.Write(prefix)
 		buf.Write(line)
-		// SplitAfter keeps the trailing '\n' on every full line; a final
-		// partial line gets one appended so the terminal flushes it.
 		if line[len(line)-1] != '\n' {
 			buf.WriteByte('\n')
 		}

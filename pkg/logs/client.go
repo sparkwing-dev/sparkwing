@@ -146,23 +146,18 @@ func parseMissingScope(body string) string {
 	if body == "" {
 		return ""
 	}
-	// JSON shape. Decode permissively: a body with
-	// `missing_scope` but unexpected siblings still parses.
 	if trimmed := strings.TrimLeft(body, " \t\n\r"); strings.HasPrefix(trimmed, "{") {
 		var b AuthErrorBody
 		if err := json.Unmarshal([]byte(body), &b); err == nil && b.MissingScope != "" {
 			return b.MissingScope
 		}
 	}
-	// Plain-text fallback.
 	const marker = "token lacks required scope:"
 	i := strings.Index(body, marker)
 	if i < 0 {
 		return ""
 	}
 	rest := strings.TrimSpace(body[i+len(marker):])
-	// Stop at the first whitespace so trailing punctuation doesn't
-	// leak into the scope name.
 	if j := strings.IndexAny(rest, " \t\n\r,;"); j >= 0 {
 		rest = rest[:j]
 	}
@@ -242,7 +237,6 @@ func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadClose
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	// Defeat any client-side buffering; streams are long-lived.
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

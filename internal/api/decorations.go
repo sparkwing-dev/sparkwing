@@ -78,21 +78,31 @@ type SpawnedPipelineRef struct {
 // Kept lossless so the dashboard sees every label the explain CLI
 // shows.
 type NodeModifiers struct {
-	Retry           int      `json:"retry,omitempty"`
-	RetryBackoffMS  int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto       bool     `json:"retry_auto,omitempty"`
-	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
-	RunsOn          []string `json:"runs_on,omitempty"`
-	CacheKey        string   `json:"cache_key,omitempty"`
-	CacheMax        int      `json:"cache_max,omitempty"`
-	CacheOnLimit    string   `json:"cache_on_limit,omitempty"`
-	Inline          bool     `json:"inline,omitempty"`
-	Optional        bool     `json:"optional,omitempty"`
-	ContinueOnError bool     `json:"continue_on_error,omitempty"`
-	OnFailure       string   `json:"on_failure,omitempty"`
-	HasBeforeRun    bool     `json:"has_before_run,omitempty"`
-	HasAfterRun     bool     `json:"has_after_run,omitempty"`
-	HasSkipIf       bool     `json:"has_skip_if,omitempty"`
+	Retry          int      `json:"retry,omitempty"`
+	RetryBackoffMS int64    `json:"retry_backoff_ms,omitempty"`
+	RetryAuto      bool     `json:"retry_auto,omitempty"`
+	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
+	RunsOn         []string `json:"runs_on,omitempty"`
+	// Content cache (JobNode.Cache): content-keyed memoization,
+	// independent of any concurrency group.
+	Cache      bool  `json:"cache,omitempty"`
+	CacheTTLMS int64 `json:"cache_ttl_ms,omitempty"`
+	// Concurrency group (JobNode.Concurrency): the shared budget this
+	// node draws on, its cost, scope, at-limit policy, and timeouts.
+	ConcGroup           string `json:"conc_group,omitempty"`
+	ConcCapacity        int    `json:"conc_capacity,omitempty"`
+	ConcCost            int    `json:"conc_cost,omitempty"`
+	ConcScope           string `json:"conc_scope,omitempty"`
+	ConcOnLimit         string `json:"conc_on_limit,omitempty"`
+	ConcQueueTimeoutMS  int64  `json:"conc_queue_timeout_ms,omitempty"`
+	ConcCancelTimeoutMS int64  `json:"conc_cancel_timeout_ms,omitempty"`
+	Inline              bool   `json:"inline,omitempty"`
+	Optional            bool   `json:"optional,omitempty"`
+	ContinueOnError     bool   `json:"continue_on_error,omitempty"`
+	OnFailure           string `json:"on_failure,omitempty"`
+	HasBeforeRun        bool   `json:"has_before_run,omitempty"`
+	HasAfterRun         bool   `json:"has_after_run,omitempty"`
+	HasSkipIf           bool   `json:"has_skip_if,omitempty"`
 }
 
 // NodeWork is the inner-Work tree (Step + Spawn + SpawnEach

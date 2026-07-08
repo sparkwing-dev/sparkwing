@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,20 +26,19 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	c := client.New(srv.URL, nil)
 
-	// Fire a trigger via HTTP (not via the store directly -- we want
-	// to verify the handler writes the row).
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "claim-demo",
 		"trigger":  map[string]string{"source": "test", "user": "alice"},
 		"git":      map[string]string{"branch": "main", "sha": "abc"},
 		"args":     map[string]string{"foo": "bar"},
 	})
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -48,7 +48,6 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&body)
 
-	// Direct DB peek: row is there, status=pending.
 	trig, err := st.GetTrigger(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger after POST: %v", err)
@@ -69,8 +68,6 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 		t.Errorf("args=%v want foo=bar", trig.Args)
 	}
 
-	// Claim via client. Must return the full row with status=claimed
-	// and claimed_at populated.
 	claimed, err := c.ClaimTrigger(context.Background())
 	if err != nil {
 		t.Fatalf("ClaimTrigger: %v", err)
@@ -88,7 +85,6 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 		t.Error("claimed_at is nil")
 	}
 
-	// Second claim: queue empty, client returns (nil, nil).
 	empty, err := c.ClaimTrigger(context.Background())
 	if err != nil {
 		t.Fatalf("ClaimTrigger empty: %v", err)
@@ -106,9 +102,8 @@ func TestClaim_FIFOOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	// Three triggers with monotonically-increasing timestamps.
 	for i, name := range []string{"first", "second", "third"} {
 		if err := st.CreateTrigger(context.Background(), store.Trigger{
 			ID:        "trig-" + name,
@@ -119,7 +114,6 @@ func TestClaim_FIFOOrdering(t *testing.T) {
 		}
 	}
 
-	// Claim three; order must be first, second, third.
 	for _, want := range []string{"first", "second", "third"} {
 		got, err := st.ClaimNextTrigger(context.Background(), 0)
 		if err != nil {
@@ -130,9 +124,8 @@ func TestClaim_FIFOOrdering(t *testing.T) {
 		}
 	}
 
-	// Fourth claim: empty.
 	_, err = st.ClaimNextTrigger(context.Background(), 0)
-	if err != store.ErrNotFound {
+	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("4th claim err=%v want ErrNotFound", err)
 	}
 }

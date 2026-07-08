@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and edit. See variables.tf for every knob.
+
+name       = "sparkwing"
+vpc_id     = "vpc-0abc123def456"
+subnet_ids = ["subnet-0aaa11122233", "subnet-0bbb44455566"]
+
+# Who may reach the database. Point at your runner hosts.
+allowed_security_group_ids = ["sg-0runner1112223"]
+# allowed_cidr_blocks      = ["10.0.0.0/16"]
+
+# Default is a single RDS instance, cheapest at idle:
+engine         = "rds"
+instance_class = "db.t4g.micro"
+
+# Or an Aurora Serverless v2 cluster that scales with load:
+# engine                  = "aurora-serverless-v2"
+# serverless_min_capacity = 0.5
+# serverless_max_capacity = 8

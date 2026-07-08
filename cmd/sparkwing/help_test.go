@@ -96,12 +96,10 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		{"sparkwing pipeline run", cmdPipelineRun},
 	}
 	allFlags := []string{
-		// Hot tier
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
-		"--sw-target", "--sw-profile",
-		// Advanced tier — also surface in --help
+		"--target", "--profile",
 		"--sw-cd", "--sw-verbose",
 		"--sw-allow",
 	}
@@ -120,14 +118,14 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 }
 
 // TestCompletionFlagsListsHotOnly pins that tab-completion filters to
-// the hot tier — `--sw-allow` and friends only surface in
+// the hot tier -- `--sw-allow` and friends only surface in
 // --help, not in the completion menu.
 func TestCompletionFlagsListsHotOnly(t *testing.T) {
 	hotFlags := []string{
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
-		"--sw-target", "--sw-profile",
+		"--target", "--profile",
 		"--help",
 	}
 	advancedFlags := []string{
@@ -170,7 +168,7 @@ func flagNames(fs []FlagSpec) []string {
 }
 
 // containsFlagRow returns true when out contains a help-formatted
-// flag row for f — i.e., a single line that includes both the flag
+// flag row for f -- i.e., a single line that includes both the flag
 // name and an [optional]/[required] tag. Excludes mentions of the
 // flag in DESCRIPTION prose where tags are absent.
 func containsFlagRow(out, flagName string) bool {
@@ -186,10 +184,6 @@ func containsFlagRow(out, flagName string) bool {
 }
 
 func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {
-	// Walk every parent in the registry; for each subcommand it
-	// lists, the corresponding child Command (if found) reports its
-	// Hidden state. A parent that lists a Hidden child must have it
-	// filtered out by visibleSubcommands.
 	parents := parentCommands()
 	leaves := leafCommands()
 	for parentKey, parent := range parents {

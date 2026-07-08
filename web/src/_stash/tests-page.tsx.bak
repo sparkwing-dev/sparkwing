@@ -232,11 +232,11 @@ export default function TestsPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2 font-mono">{j.pipeline}</td>
-                    <td className="px-3 py-2 font-mono text-[var(--muted)]">{j.env?.TEST_SHARD ?? "—"}</td>
+                    <td className="px-3 py-2 font-mono text-[var(--muted)]">{j.env?.TEST_SHARD ?? "--"}</td>
                     <td className="px-3 py-2 font-mono">
-                      {j.result?.duration ? `${(j.result.duration / 1e9).toFixed(1)}s` : "—"}
+                      {j.result?.duration ? `${(j.result.duration / 1e9).toFixed(1)}s` : "--"}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-[var(--muted)]">{j.agent_id || "—"}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-[var(--muted)]">{j.agent_id || "--"}</td>
                     <td className="px-3 py-2 text-xs text-[var(--muted)]">
                       {new Date(j.created_at).toLocaleTimeString()}
                     </td>

@@ -18,13 +18,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+func init() {
+	docs.Version = installedVersion()
+}
+
 func main() {
-	// Windows self-update defers deletion of the running binary; clean it up here.
 	cleanupStaleUpdate()
 
 	if err := runSparkwing(os.Args[1:]); err != nil {
@@ -58,6 +61,22 @@ func exitError(code int, err error) error {
 		return nil
 	}
 	return &cliError{code: code, err: err}
+}
+
+// setEnv returns env with key set to value, removing any prior
+// occurrence of the same key. Use instead of append when the flag
+// value must override a preexisting shell-environment value; bare
+// append leaves duplicates and POSIX getenv returns the first
+// match, so the shell var would silently shadow the flag.
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return append(out, prefix+value)
 }
 
 func exitCodeFor(err error) int {
@@ -98,7 +117,25 @@ func dispatchRun(args []string) error {
 	wf, passthrough := parseRunFlags(args[1:])
 	var err error
 
-	// `-C <path>` re-anchors discovery (same shape as `git -C`).
+	if err := checkRetiredWhereFlags(passthrough); err != nil {
+		return err
+	}
+	if wf.profile != "" {
+		if _, perr := resolveProfileFlag(wf.profile); perr != nil {
+			return perr
+		}
+	}
+
+	legacyStart := wf.changeDir
+	if legacyStart == "" {
+		if cwd, cerr := os.Getwd(); cerr == nil {
+			legacyStart = cwd
+		}
+	}
+	if err := projectconfig.CheckLegacy(legacyStart); err != nil {
+		return err
+	}
+
 	var dir string
 	if wf.changeDir != "" {
 		dir, err = findSparkwingDirFrom(wf.changeDir)
@@ -109,42 +146,19 @@ func dispatchRun(args []string) error {
 		return err
 	}
 
-	// Auto-register so cross-repo RunAndAwait can resolve names without
-	// a hardcoded WithFreshRepo. Errors dropped: read-only home shouldn't break dispatch.
+	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
-	// Pipeline-level dispatch gating now flows through the runner
-	// resolution rule: pipelines.yaml declares which runners a
-	// target accepts, the orchestrator picks one whose labels
-	// satisfy the job's Requires terms, and a mismatch produces a
-	// clear error at run start. No CLI-side venue check is needed.
-
-	// Risk-label gate. Walk per-step risk labels via the describe
-	// cache and refuse dispatch when any reachable step declares a
-	// label the operator hasn't authorized via --sw-allow (or
-	// --sw-dry-run, which bypasses every gate per the safe-mode
-	// contract). A profile-level auto_allow can pre-authorize
-	// specific labels for a low-stakes environment. A cold cache
-	// degrades to "no labels detected, no gate fires"; the next
-	// --describe refresh populates it.
 	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
 		var prof *profile.Profile
-		if wf.on != "" {
-			p, perr := resolveProfile(wf.on)
-			if perr == nil {
-				prof = p
-			}
+		if p, perr := resolveProfileFlag(wf.profile); perr == nil {
+			prof = p
 		}
 		if err := enforceRiskGate(pipelineName, findings, wf, prof); err != nil {
 			return err
 		}
 	}
 
-	if wf.on != "" {
-		return dispatchRemote(pipelineName, wf, passthrough)
-	}
-
-	// --sw-ref re-roots compilation on a git worktree; cleanup must run on both paths.
 	if wf.ref != "" {
 		_, sparkwingSub, cleanup, err := setupRefWorktree(dir, wf.ref)
 		if err != nil {
@@ -155,8 +169,6 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
-	// Decide renderer here so a CLI upgrade fixes TTY detection without
-	// needing per-project SDK pin bumps. User-set value always wins.
 	if os.Getenv("SPARKWING_LOG_FORMAT") == "" {
 		if color.IsInteractiveStdout() {
 			env = append(env, "SPARKWING_LOG_FORMAT=pretty")
@@ -167,17 +179,12 @@ func dispatchRun(args []string) error {
 	if wf.verbose {
 		env = append(env, "SPARKWING_LOG_LEVEL=debug")
 	}
-	// Forward --start-at / --stop-at via env so the pipeline binary's
-	// orchestrator/main.go can lift them onto Options.
 	if wf.startAt != "" {
 		env = append(env, "SPARKWING_START_AT="+wf.startAt)
 	}
 	if wf.stopAt != "" {
 		env = append(env, "SPARKWING_STOP_AT="+wf.stopAt)
 	}
-	// Same env-var protocol for --dry-run; the pipeline binary lifts
-	// SPARKWING_DRY_RUN onto Options.DryRun and the orchestrator
-	// installs WithDryRun(ctx) on the run.
 	if wf.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
@@ -185,32 +192,22 @@ func dispatchRun(args []string) error {
 		env = append(env, "SPARKWING_ONLY="+wf.only)
 	}
 	if wf.noCache {
-		env = append(env, "SPARKWING_NO_CACHE_RUNS=1")
+		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
-	// --sw-allow forwards the operator-authorized risk labels to the
-	// orchestrator. Surfaced on the run record (run_start.attrs.flags)
-	// so an agent re-invoking knows which labels were authorized.
+	if wf.localOnly {
+		env = append(env, "SPARKWING_LOCAL_ONLY=1")
+	}
 	if len(wf.allow) > 0 {
 		env = append(env, "SPARKWING_ALLOW="+strings.Join(wf.allow, ","))
 	}
-	// Forward pre-flight sparkwing flags as env vars purely so
-	// emitRunStart can surface them on run_start.attrs.flags. The
-	// pipeline binary itself doesn't read these (--sw-ref is
-	// consumed before exec via setupRefWorktree, --sw-no-update
-	// gates sparks resolve in compile.go) -- they appear only as
-	// reproducibility breadcrumbs in the run record.
 	if wf.ref != "" {
 		env = append(env, "SPARKWING_REF="+wf.ref)
 	}
 	if wf.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")
 	}
-	if wf.on != "" {
-		// --on routes to dispatchRemote() and we wouldn't reach the
-		// local exec path; this branch only fires when something
-		// upstream silently flipped that. Forward anyway so the run
-		// record reflects the intent.
-		env = append(env, "SPARKWING_PROFILE="+wf.on)
+	if wf.profile != "" {
+		env = setEnv(env, "SPARKWING_PROFILE", wf.profile)
 	}
 	if wf.secrets != "" {
 		env = append(env, "SPARKWING_SECRETS_PROFILE="+wf.secrets)
@@ -221,31 +218,18 @@ func dispatchRun(args []string) error {
 		if wf.workers > 0 {
 			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", wf.workers))
 		}
-		if wf.on != "" {
-			prof, err := resolveProfile(wf.on)
-			if err != nil {
-				return err
-			}
-			path, cleanup, err := writeProfileBackendsConfig(prof.LogStore, prof.ArtifactStore)
-			if err != nil {
-				return fmt.Errorf("--sw-profile %s: materialize backends config: %w", wf.on, err)
-			}
-			if path != "" {
-				defer cleanup()
-				if wf.backendsConfig == "" {
-					wf.backendsConfig = path
-				}
-			}
-		}
 	}
 
-	// Forward the new selection flags as env vars; the inner
-	// orchestrator/main.go lifts these onto Options at run start.
-	if wf.forTarget != "" {
-		env = append(env, "SPARKWING_TARGET="+wf.forTarget)
+	if wf.boxSlots != "" {
+		// The pin outranks the live host control: forwarded as
+		// SPARKWING_BOX_SLOTS_PIN for current binaries, and also as
+		// SPARKWING_BOX_SLOTS so older pinned SDKs (which only read that
+		// variable) still honor an explicit per-run --sw-box-slots.
+		env = setEnv(env, "SPARKWING_BOX_SLOTS_PIN", wf.boxSlots)
+		env = setEnv(env, "SPARKWING_BOX_SLOTS", wf.boxSlots)
 	}
-	if wf.backendsConfig != "" {
-		env = append(env, "SPARKWING_BACKENDS_CONFIG="+wf.backendsConfig)
+	if wf.boxNoWait {
+		env = setEnv(env, "SPARKWING_BOX_NO_WAIT", "1")
 	}
 
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
@@ -266,12 +250,18 @@ func runSparkwing(args []string) error {
 		return dispatchRun(args[1:])
 	case "runs":
 		return runJobs(args[1:])
+	case "profile":
+		return runProfileCmd(args[1:])
 
 	case "dashboard":
 		return runDashboard(args[1:])
 
 	case "cluster":
 		return runCluster(args[1:])
+	case "maintenance":
+		return runMaintenance(args[1:])
+	case "box-slots":
+		return runBoxSlots(args[1:])
 	case "secrets":
 		return runSecret(args[1:])
 
@@ -326,13 +316,12 @@ func runRunsApprovals(ctx context.Context, paths orchestrator.Paths, args []stri
 	if handleParentHelp(cmdApprovals, args) {
 		return nil
 	}
-	if len(args) == 0 {
-		PrintHelp(cmdApprovals, os.Stdout)
-		return nil
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runApprovalsList(ctx, paths, args)
 	}
 	switch args[0] {
 	case "list":
-		return runApprovals(args[1:])
+		return runApprovalsList(ctx, paths, args[1:])
 	case "approve":
 		return runApprove(ctx, paths, args[1:])
 	case "deny":
@@ -360,8 +349,6 @@ func runCluster(args []string) error {
 		return runWorker(args[1:])
 	case "gc":
 		return runGC(args[1:])
-	case "push":
-		return runPush(args[1:])
 	case "users":
 		return runUsers(args[1:])
 	case "tokens":
@@ -370,6 +357,8 @@ func runCluster(args []string) error {
 		return runImage(args[1:])
 	case "webhooks":
 		return runWebhooks(args[1:])
+	case "concurrency":
+		return runConcurrency(args[1:])
 	default:
 		PrintHelp(cmdCluster, os.Stderr)
 		return fmt.Errorf("cluster: unknown subcommand %q", args[0])
@@ -422,13 +411,10 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
 		limit := fs.Int("limit", 20, "max runs to show")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-		_ = fs.MarkHidden("json")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
 		since := fs.Duration("since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
 		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
 		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
-		tags := multiFlagVar(fs, "tag", "filter by pipelines.yaml tag (repeatable, OR semantics)")
 		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
 		shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
 		errorSubstr := fs.String("error", "", "substring match against the persisted failure reason")
@@ -440,14 +426,17 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
+		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs list")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs list")
 		if err != nil {
 			return err
 		}
@@ -458,22 +447,6 @@ func runJobs(args []string) error {
 		shaInc, shaExc := orchestrator.SplitExcludes(*shas)
 
 		pipelineSet := pipelineInc
-		if len(*tags) > 0 {
-			extra, err := pipelinesWithTags(*tags)
-			if err != nil {
-				return err
-			}
-			pipelineSet = append(pipelineSet, extra...)
-			if len(pipelineSet) == 0 {
-				// Tag filter matched nothing; don't degrade to "no filter".
-				if resolvedFmt == "json" {
-					fmt.Fprintln(os.Stdout, "[]")
-					return nil
-				}
-				fmt.Fprintln(os.Stdout, "no runs match the requested tags")
-				return nil
-			}
-		}
 
 		compiled := orchestrator.CompiledFilter{
 			Branches:       branchInc,
@@ -508,7 +481,7 @@ func runJobs(args []string) error {
 		var sparkStyle orchestrator.SparklineStyle
 		switch *style {
 		case "ascii", "":
-			sparkStyle = orchestrator.SparkAscii
+			sparkStyle = orchestrator.SparkASCII
 		case "block":
 			sparkStyle = orchestrator.SparkBlock
 		case "dot":
@@ -531,15 +504,12 @@ func runJobs(args []string) error {
 				Style:        sparkStyle,
 			},
 		}
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
+		if *profileName != "" {
+			p, perr := resolveProfileFlag(*profileName)
+			if perr != nil {
+				return perr
 			}
-			if err := requireController(prof, "jobs list"); err != nil {
-				return err
-			}
-			return orchestrator.ListJobsRemote(ctx, prof.Controller, prof.Token, listOpts, os.Stdout)
+			listOpts.Profile = p
 		}
 		return orchestrator.ListJobs(ctx, paths, listOpts, os.Stdout)
 
@@ -547,13 +517,14 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsStatus.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outFmt := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
-		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-		_ = fs.MarkHidden("json")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
+		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -561,27 +532,17 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs status")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs status")
 		if err != nil {
 			return err
 		}
 		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow, Steps: *steps}
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
+		if *profileName != "" {
+			p, perr := resolveProfileFlag(*profileName)
+			if perr != nil {
+				return perr
 			}
-			if err := requireController(prof, "jobs status"); err != nil {
-				return err
-			}
-			if err := orchestrator.JobStatusRemote(ctx, prof.Controller, prof.Token,
-				*runID, statusOpts, os.Stdout); err != nil {
-				return err
-			}
-			if *exitZero {
-				return nil
-			}
-			return remoteStatusExitCheck(ctx, prof.Controller, prof.Token, *runID)
+			statusOpts.Profile = p
 		}
 		if err := orchestrator.JobStatus(ctx, paths, *runID, statusOpts, os.Stdout); err != nil {
 			return err
@@ -596,11 +557,8 @@ func runJobs(args []string) error {
 		runID := fs.String("run", "", "run identifier")
 		node := fs.String("node", "", "limit output to one node id")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-		asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-		pretty := fs.Bool("pretty", false, "force the human-readable colored renderer even when stdout isn't a terminal (alias for -o pretty)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		on := fs.String("on", "",
-			"profile name (cluster mode). Omit to read logs from the local SQLite store.")
+		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
@@ -610,6 +568,9 @@ func runJobs(args []string) error {
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
 		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout")
 		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- useful when scripts depend on the legacy shape")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -617,27 +578,7 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		if *tree && *on != "" {
-			return errors.New("jobs logs: --tree is local-mode only (cannot combine with --on)")
-		}
-		effectiveOut := *outFmt
-		if *pretty {
-			if effectiveOut != "" && effectiveOut != "pretty" {
-				return fmt.Errorf("jobs logs: --pretty and -o %s disagree", effectiveOut)
-			}
-			effectiveOut = "pretty"
-		}
-		// Default to JSONL when piped so agents/CI get structured output without --json.
-		if effectiveOut == "" && !*asJSON && !color.IsInteractiveStdout() {
-			effectiveOut = "json"
-		}
-		// jobs logs has its own pre-resolution (--pretty + auto-JSONL when
-		// piped), so the explicit-set bit reflects whether anyone (user or
-		// pre-resolution) settled on a non-empty effectiveOut. Empty means
-		// "let resolveOutputFormat default to pretty"; non-empty means a
-		// concrete choice was made and should compete with --json on equal
-		// footing, matching the kubectl-style explicit-bit contract.
-		resolvedFmt, err := resolveOutputFormat(effectiveOut, effectiveOut != "", *asJSON, "jobs logs")
+		resolvedFmt, err := resolveTTYAwareOutput(*outFmt, "jobs logs")
 		if err != nil {
 			return err
 		}
@@ -658,16 +599,12 @@ func runJobs(args []string) error {
 			EventsOnly: *eventsOnly,
 			NoEvents:   *noEvents,
 		}
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
+		if *profileName != "" {
+			p, perr := resolveProfileFlag(*profileName)
+			if perr != nil {
+				return perr
 			}
-			if prof.Controller == "" || prof.Logs == "" {
-				return fmt.Errorf("jobs logs: profile %q must have both controller and logs URLs", prof.Name)
-			}
-			return orchestrator.JobLogsRemoteWithTokens(ctx, prof.Controller, prof.Logs, prof.Token,
-				*runID, opts, os.Stdout)
+			opts.Profile = p
 		}
 		return orchestrator.JobLogs(ctx, paths, *runID, opts, os.Stdout)
 
@@ -675,9 +612,9 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-		asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-		_ = fs.MarkHidden("json")
-		on := fs.String("on", "", "profile name (default: current default). Omit for local-only reads.")
+		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+			return err
+		}
 		if err := parseAndCheck(cmdJobsErrors, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
 				return nil
@@ -685,22 +622,11 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs errors")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs errors")
 		if err != nil {
 			return err
 		}
 		emitJSON := resolvedFmt == "json"
-		if *on != "" {
-			prof, err := resolveProfile(*on)
-			if err != nil {
-				return err
-			}
-			if err := requireController(prof, "jobs errors"); err != nil {
-				return err
-			}
-			return orchestrator.JobErrorsRemote(ctx, prof.Controller, prof.Token,
-				*runID, emitJSON, os.Stdout)
-		}
 		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
 
 	case "cancel":
@@ -737,30 +663,14 @@ func runJobs(args []string) error {
 	}
 }
 
-// resolveOutputFormat canonicalizes -o/--output + --json into one of
-// {"pretty","json","plain"}. Disagreeing values error rather than
-// silently winning.
-//
-// outputChanged distinguishes "user explicitly typed -o/--output" from
-// "the flag took its default value." Callers using pflag pass
-// fs.Changed("output"); hand-parsers pass `parsed.output != ""`. The
-// distinction matters because a default-shaped --output (e.g. the
-// "pretty" pflag default a leaf may register) must not collide with
-// a user-set --json: --json is documented as an alias for
-// --output=json and "default + --json" should resolve to JSON, not
-// error. Only when BOTH flags are user-set AND disagree do we surface
-// a conflict. Mirrors the kubectl / gh / aws CLI convention.
-func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdPath string) (string, error) {
+// resolveOutputFormat canonicalizes -o/--output into one of
+// {"pretty","json","plain"}. Empty string means "no value set" and
+// resolves to the default "pretty".
+func resolveOutputFormat(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
-	}
-	if jsonAlias {
-		if outputChanged && outFmt != "" && outFmt != "json" {
-			return "", fmt.Errorf("%s: --json and -o %s disagree", cmdPath, outFmt)
-		}
-		return "json", nil
 	}
 	if outFmt == "" {
 		return "pretty", nil
@@ -769,41 +679,19 @@ func resolveOutputFormat(outFmt string, outputChanged bool, jsonAlias bool, cmdP
 }
 
 // resolveTTYAwareOutput canonicalizes -o/--output for verbs that
-// want runs-logs-style behavior: TTY default + --json/--pretty
-// aliases that fold into the same canonical FORMAT.
+// want runs-logs-style behavior: TTY-derived default fallback when
+// no -o value is provided.
 //
 // Rules:
-//   - --pretty wins as a forced "pretty" (errors if -o disagrees).
-//   - --json wins as a forced "json" (errors if -o disagrees).
 //   - With an explicit -o value, that value passes through.
 //   - With nothing set: "pretty" when stdout is a TTY, "json" otherwise.
 //     The auto-default lets agents pipe `... | jq` without typing
-//     --json, while humans get the readable form by default.
-//
-// outputChanged should reflect whether the user actually typed
-// -o/--output (e.g. fs.Changed("output")). It distinguishes a
-// default-shaped --output from a user-set one, mirroring the
-// kubectl explicit-bit convention.
-func resolveTTYAwareOutput(outFmt string, outputChanged, jsonAlias, prettyAlias bool, cmdPath string) (string, error) {
-	if jsonAlias && prettyAlias {
-		return "", fmt.Errorf("%s: --json and --pretty cannot be combined", cmdPath)
-	}
+//     -o json, while humans get the readable form by default.
+func resolveTTYAwareOutput(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
-	}
-	if prettyAlias {
-		if outputChanged && outFmt != "" && outFmt != "pretty" {
-			return "", fmt.Errorf("%s: --pretty and -o %s disagree", cmdPath, outFmt)
-		}
-		return "pretty", nil
-	}
-	if jsonAlias {
-		if outputChanged && outFmt != "" && outFmt != "json" {
-			return "", fmt.Errorf("%s: --json and -o %s disagree", cmdPath, outFmt)
-		}
-		return "json", nil
 	}
 	if outFmt != "" {
 		return outFmt, nil
@@ -844,17 +732,8 @@ func localStatusExitCheck(ctx context.Context, paths orchestrator.Paths, runID s
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return statusExitCode(run.Status)
-}
-
-func remoteStatusExitCheck(ctx context.Context, controllerURL, token, runID string) error {
-	c := client.NewWithToken(controllerURL, nil, token)
-	run, err := c.GetRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -865,32 +744,6 @@ func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {
 	var dest []string
 	fs.StringSliceVar(&dest, name, nil, usage)
 	return &dest
-}
-
-func pipelinesWithTags(tags []string) ([]string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	_, cfg, err := pipelines.Discover(cwd)
-	if err != nil {
-		// Missing pipelines.yaml = no tag resolution possible; not a hard error.
-		return nil, nil
-	}
-	want := map[string]struct{}{}
-	for _, t := range tags {
-		want[t] = struct{}{}
-	}
-	var matched []string
-	for _, p := range cfg.Pipelines {
-		for _, t := range p.Tags {
-			if _, ok := want[t]; ok {
-				matched = append(matched, p.Name)
-				break
-			}
-		}
-	}
-	return matched, nil
 }
 
 // findSparkwingDir walks up from cwd looking for a .sparkwing/main.go.

@@ -143,7 +143,7 @@ export default function TriggerForm({
       {selectedPipeline && args.length === 0 && (
         <p className="text-xs text-[var(--muted)]">
           {Object.keys(pipelines).length === 0
-            ? "No pipeline metadata available yet — run a pipeline first to discover its args."
+            ? "No pipeline metadata available yet -- run a pipeline first to discover its args."
             : "This pipeline takes no arguments."}
         </p>
       )}
@@ -187,7 +187,7 @@ function ArgInput({
           className="rounded border-[var(--border)] bg-[var(--background)]"
         />
         <span className="font-mono text-[#c9d1d9]">{arg.name}</span>
-        {arg.desc && <span className="text-[var(--muted)]">— {arg.desc}</span>}
+        {arg.desc && <span className="text-[var(--muted)]">-- {arg.desc}</span>}
       </label>
     );
   }

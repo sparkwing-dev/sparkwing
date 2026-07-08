@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -95,8 +94,6 @@ type Command struct {
 	HideFromComplete bool
 }
 
-var defaultGroupOrder = []string{"Input", "Filter", "Output", "System", "Other"}
-
 var helpFlag = FlagSpec{
 	Name:  "help",
 	Short: "h",
@@ -111,6 +108,10 @@ var errHelpRequested = errors.New("help requested")
 // parseAndCheck injects --help, parses args, and validates flag deps.
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
+
+	if err := checkRetiredWhereFlags(args); err != nil {
+		return err
+	}
 
 	if fs.Lookup("help") == nil {
 		fs.BoolP("help", "h", false, helpFlag.Desc)
@@ -136,7 +137,6 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 	for _, spec := range cmd.Flags {
 		if fs.Lookup(spec.Name) == nil {
-			// Spec-only flag the handler didn't register; skip rather than panic.
 			continue
 		}
 		changed := fs.Changed(spec.Name)
@@ -150,14 +150,16 @@ func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 			if fs.Lookup(req) == nil || !fs.Changed(req) {
 				return fmt.Errorf(
 					"%s: --%s was set but --%s is required with it",
-					cmd.Path, spec.Name, req)
+					cmd.Path, spec.Name, req,
+				)
 			}
 		}
 		for _, c := range spec.ConflictsWith {
 			if fs.Lookup(c) != nil && fs.Changed(c) {
 				return fmt.Errorf(
 					"%s: --%s and --%s cannot be used together",
-					cmd.Path, spec.Name, c)
+					cmd.Path, spec.Name, c,
+				)
 			}
 		}
 	}
@@ -187,7 +189,6 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		fmt.Fprint(w, " <subcommand>")
 	}
 	if len(cmd.Flags) > 0 || len(cmd.Subcommands) == 0 {
-		// Always show "[flags]" on leaves; --help is auto-injected.
 		fmt.Fprint(w, " [flags]")
 	}
 	if cmd.UsageSuffix != "" {
@@ -231,9 +232,6 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		fmt.Fprintln(w)
 	}
 
-	// Flat flag list — no per-group section headers. With sw-prefix,
-	// pipeline-author flags (unprefixed) and sparkwing flags (--sw-*)
-	// distinguish themselves visually; section labels add noise.
 	if len(flags) > 0 {
 		fmt.Fprintln(w, "FLAGS")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -299,52 +297,6 @@ func formatFlagTags(f FlagSpec) string {
 	return strings.Join(parts, " ")
 }
 
-type flagGroup struct {
-	name  string
-	flags []FlagSpec
-}
-
-// groupFlagsForHelp buckets flags by Group; unknown groups land at the
-// end alphabetically so new groupings surface rather than vanish.
-func groupFlagsForHelp(flags []FlagSpec, order []string) []flagGroup {
-	if len(order) == 0 {
-		order = defaultGroupOrder
-	}
-
-	byName := map[string][]FlagSpec{}
-	var seenOrder []string
-	for _, f := range flags {
-		g := f.Group
-		if g == "" {
-			g = "Other"
-		}
-		if _, ok := byName[g]; !ok {
-			seenOrder = append(seenOrder, g)
-		}
-		byName[g] = append(byName[g], f)
-	}
-
-	used := map[string]bool{}
-	var out []flagGroup
-	for _, name := range order {
-		if flags, ok := byName[name]; ok {
-			out = append(out, flagGroup{name: name, flags: flags})
-			used[name] = true
-		}
-	}
-	var leftovers []string
-	for _, name := range seenOrder {
-		if !used[name] {
-			leftovers = append(leftovers, name)
-		}
-	}
-	sort.Strings(leftovers)
-	for _, name := range leftovers {
-		out = append(out, flagGroup{name: name, flags: byName[name]})
-	}
-	return out
-}
-
 func visibleSubcommands(parent Command) []SubcommandRef {
 	return filterSubcommands(parent, false)
 }
@@ -396,7 +348,7 @@ func hasFlagNamed(flags []FlagSpec, name string) bool {
 }
 
 // FlagValues holds typed pointers returned by bindFlags. Missing keys
-// panic — programmer error, not user error.
+// panic -- programmer error, not user error.
 type FlagValues map[string]any
 
 func (v FlagValues) String(name string) string {

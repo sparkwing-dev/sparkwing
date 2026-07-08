@@ -51,11 +51,9 @@ spawn_policy: return-to-queue
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	// Blank label gets stripped.
 	if len(norm.Labels) != 2 || norm.Labels[0] != "laptop" || norm.Labels[1] != "arch=arm64" {
 		t.Fatalf("labels normalization: %v", norm.Labels)
 	}
-	// Defaults applied for unspecified fields.
 	if norm.Poll <= 0 || norm.Lease <= 0 {
 		t.Fatalf("defaults missing: %+v", norm)
 	}
@@ -103,7 +101,7 @@ func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
 // agent loop with a cancelable ctx, and assert the claim call
 // carried both the bearer token and the configured labels.
 func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
-	var seen atomic.Value // *seenClaim
+	var seen atomic.Value
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/nodes/claim", func(w http.ResponseWriter, r *http.Request) {
 		if h := r.Header.Get("Authorization"); !strings.HasPrefix(h, "Bearer ") {
@@ -119,7 +117,7 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 			labels: body.Labels,
 			holder: body.HolderID,
 		})
-		w.WriteHeader(http.StatusNoContent) // queue empty -> loop sleeps
+		w.WriteHeader(http.StatusNoContent)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -138,7 +136,6 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	// Run the loop directly so we don't depend on signal.NotifyContext.
 	if err := RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL: cfg.Controller,
 		Token:         cfg.Token,

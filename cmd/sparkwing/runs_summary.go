@@ -16,9 +16,7 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 	fs := flag.NewFlagSet(cmdJobsSummary.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
-	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-	pretty := fs.Bool("pretty", false, "force the human-readable view even when piped (alias for -o pretty)")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsSummary, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -26,7 +24,7 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 		return err
 	}
 	*runID = normalizeRunID(*runID)
-	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, fs.Changed("output"), *asJSON, *pretty, cmdJobsSummary.Path)
+	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, cmdJobsSummary.Path)
 	if err != nil {
 		return err
 	}
@@ -41,5 +39,5 @@ func runJobsSummary(ctx context.Context, paths orchestrator.Paths, args []string
 	if err := requireController(prof, cmdJobsSummary.Path); err != nil {
 		return err
 	}
-	return orchestrator.RunSummaryRemote(ctx, prof.Controller, prof.Token, *runID, opts, os.Stdout)
+	return orchestrator.RunSummaryRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, opts, os.Stdout)
 }

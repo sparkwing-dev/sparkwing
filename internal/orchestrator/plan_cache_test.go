@@ -27,12 +27,16 @@ func (f *inheritedPlanHeartbeatFake) ReleaseSlot(ctx context.Context, key, holde
 	return errors.New("unexpected release")
 }
 
-func (f *inheritedPlanHeartbeatFake) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
+func (f *inheritedPlanHeartbeatFake) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
 	return store.WaiterResolution{}, errors.New("unexpected resolve waiter")
 }
 
 func (f *inheritedPlanHeartbeatFake) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
 	return nil, errors.New("unexpected force release")
+}
+
+func (f *inheritedPlanHeartbeatFake) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	return false, errors.New("unexpected cancel waiter")
 }
 
 func TestInheritedPlanSlotReleaseCancelsOnHeartbeatLoss(t *testing.T) {

@@ -37,7 +37,6 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Stand up the logs service.
 	logsRoot := filepath.Join(dir, "logs-root")
 	logsSrvObj, err := logs.New(logsRoot, nil)
 	if err != nil {
@@ -46,18 +45,17 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 	logsSrv := httptest.NewServer(logsSrvObj.Handler())
 	defer logsSrv.Close()
 
-	// Local store for State (this test focuses on logs, not State).
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	paths := orchestrator.PathsAt(dir)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
 
-	local := orchestrator.LocalBackends(paths, st)
+	local := orchestrator.LocalBackends(paths, st, nil)
 	backends := orchestrator.Backends{
 		State:       local.State,
 		Logs:        orchestrator.NewHTTPLogs(logsSrv.URL, nil, nil),
@@ -73,7 +71,6 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 		t.Fatalf("status=%q want success", res.Status)
 	}
 
-	// Fetch what the logs service has for each node.
 	client := logs.NewClient(logsSrv.URL, nil)
 
 	gotA, err := client.Read(context.Background(), res.RunID, "a")
@@ -93,7 +90,6 @@ func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 		t.Errorf("b logs missing content:\n%s", gotB)
 	}
 
-	// Also verify the concat endpoint.
 	run, err := client.ReadRun(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ReadRun: %v", err)

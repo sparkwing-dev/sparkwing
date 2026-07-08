@@ -35,7 +35,7 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	const runID = "run-rt-1"
 	const nodeID = "compile"
@@ -70,11 +70,11 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 	if err := st.FinishRun(ctx, runID, "succeeded", "non-fatal warning"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	// Populate the annotation rollup columns directly: live runs get
-	// these via AppendNodeAnnotation, but the dump-format bijection
-	// cares about the fields surviving the round-trip, not the mutation
-	// path that set them.
-	if _, err := st.DB().ExecContext(ctx, `
+	if err := st.TouchRunHeartbeat(ctx, runID); err != nil {
+		t.Fatalf("TouchRunHeartbeat: %v", err)
+	}
+	if _, err := st.DB().ExecContext(
+		ctx, `
 UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
  WHERE id = ?`,
 		2, "linked in 1.2s",
@@ -93,17 +93,15 @@ UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
 	}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	// Populate the rest of the node columns directly: the dump-format
-	// bijection cares about the fields, not the mutation sequence the
-	// orchestrator happens to use to set them.
-	if _, err := st.DB().ExecContext(ctx, `
+	if _, err := st.DB().ExecContext(
+		ctx, `
 UPDATE nodes SET
    status='done', outcome='success', error='warn',
    output_json=?, started_at=?, finished_at=?, ready_at=?,
    claimed_by='runner-7', lease_expires_at=?,
    status_detail='compiling',
    last_heartbeat=?, failure_reason='exit_nonzero', exit_code=?,
-   annotations_json=?, summary=?
+   annotations_json=?, summary=?, artifact_manifest='sha-cafef00d'
  WHERE run_id=? AND node_id=?`,
 		[]byte(`{"out":"ok"}`),
 		time.Unix(1746335100, 0).UnixNano(),
@@ -131,10 +129,6 @@ UPDATE nodes SET
 		t.Fatalf("ListNodes len = %d, want 1", len(wantNodes))
 	}
 
-	// Fixture-completeness gate: if a developer adds a new exported
-	// field to Run / Node without updating this fixture, the assertion
-	// trips before the round-trip even runs. Forces the question
-	// "should this round-trip?" to be answered explicitly.
 	assertAllExportedNonZero(t, "Run", *wantRun)
 	assertAllExportedNonZero(t, "Node", *wantNodes[0])
 
@@ -156,15 +150,8 @@ UPDATE nodes SET
 		t.Fatalf("S3Backend.ListNodes: %v", err)
 	}
 
-	// PlanSnapshot is intentionally json:"-" -- not part of the
-	// round-trip contract. Clear it on want before the diff so the
-	// comparison stays focused on fields that *should* survive.
 	wantRun.PlanSnapshot = nil
 
-	// JSON's RFC3339Nano time format preserves the instant but not the
-	// Location pointer (DB read produces Local; JSON unmarshal produces
-	// a fixed-offset *time.Location). Normalize both sides to UTC so
-	// reflect.DeepEqual compares wall time, not Location identity.
 	normalizeRunTimes(wantRun)
 	normalizeRunTimes(gotRun)
 	for _, n := range wantNodes {
@@ -202,6 +189,10 @@ func normalizeRunTimes(r *store.Run) {
 	if r.FinishedAt != nil {
 		t := r.FinishedAt.UTC()
 		r.FinishedAt = &t
+	}
+	if r.LastHeartbeatAt != nil {
+		t := r.LastHeartbeatAt.UTC()
+		r.LastHeartbeatAt = &t
 	}
 }
 

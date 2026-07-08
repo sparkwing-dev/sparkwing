@@ -86,7 +86,6 @@ func TestWaterfallBar_PlacesFillInRange(t *testing.T) {
 	if len(bar) != 20 {
 		t.Fatalf("bar len=%d", len(bar))
 	}
-	// columns 4..16 should be '#', the rest '.'
 	for i, c := range bar {
 		if i >= 4 && i < 16 {
 			if c != '#' {

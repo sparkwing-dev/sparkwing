@@ -93,12 +93,10 @@ func TestCompiledFilter_DateWindows(t *testing.T) {
 	if !f.Matches(&store.Run{StartedAt: pastStart, FinishedAt: &pastEnd}) {
 		t.Error("run within window should match")
 	}
-	// run StartedAt before window
 	earlier := now.Add(-3 * time.Hour)
 	if f.Matches(&store.Run{StartedAt: earlier, FinishedAt: &pastEnd}) {
 		t.Error("run started before window should be excluded")
 	}
-	// run not finished
 	if f.Matches(&store.Run{StartedAt: pastStart, FinishedAt: nil}) {
 		t.Error("unfinished run should be excluded by finished-before")
 	}

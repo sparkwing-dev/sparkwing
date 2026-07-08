@@ -46,14 +46,8 @@ var (
 func detectRuntime() RuntimeConfig {
 	rc := RuntimeConfig{}
 	if cwd, err := os.Getwd(); err == nil {
-		// Git-style auto-discovery: walk up from cwd looking for a
-		// `.sparkwing/` subdir. Empty result means no project here;
-		// helpers that need WorkDir fail loudly rather than fall
-		// back to cwd.
 		rc.WorkDir = walkUpToProject(cwd)
 	}
-	// Pre-populate Git so callers can do `runtime.Git.IsDirty(ctx)`
-	// from init time without nil-checking.
 	rc.Git = &Git{workDir: rc.WorkDir}
 	return rc
 }
@@ -112,7 +106,6 @@ func SetGit(g *Git) {
 	runtimeMu.Lock()
 	defer runtimeMu.Unlock()
 	if g == nil {
-		// Keep the field non-nil so callers don't panic.
 		runtime.Git = &Git{workDir: runtime.WorkDir}
 		return
 	}

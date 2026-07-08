@@ -15,8 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -40,26 +40,32 @@ func run(args []string) error {
 		"kubeconfig path when --pool is set (empty = in-cluster)")
 	secretsKeyFile := fs.String("secrets-key-file", "",
 		"path to a file containing 32 raw bytes for secret encryption (alternative to SPARKWING_SECRETS_KEY)")
+	cachePodURL := fs.String("cache-pod-url", os.Getenv("CACHE_POD_URL"),
+		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
+			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
+			"hardcoding it in profiles.yaml. Empty disables the announcement.")
 	_ = fs.Parse(args)
 
-	paths, err := orchestrator.DefaultPaths()
+	emitStartupProvenance(os.Stderr)
+
+	p, err := paths.DefaultPaths()
 	if err != nil {
 		return err
 	}
-	if err := paths.EnsureRoot(); err != nil {
+	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, err := store.Open(p.StateDB())
 	if err != nil {
-		return fmt.Errorf("open state db: %w", err)
+		return mapStoreOpenError(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
-	defer tel.Shutdown(context.Background())
+	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	cipher, cerr := loadSecretsCipher(*secretsKeyFile)
 	if cerr != nil {
@@ -74,10 +80,9 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		EnableAuthFromStore().
-		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET"))
-	// Wire the cipher only when one was configured; a typed-nil
-	// *secrets.Cipher passed through the Cipher interface would still
-	// register as non-nil at the handler's seam.
+		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
+		WithCachePodURL(*cachePodURL)
+	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
 	}
@@ -152,8 +157,6 @@ func loadSecretsCipher(filePath string) (*secrets.Cipher, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", filePath, err)
 		}
-		// Tolerate both raw 32 bytes and a base64-encoded blob in the
-		// file -- some operators prefer one or the other.
 		if len(data) == secrets.KeySize {
 			return secrets.NewCipher(data)
 		}

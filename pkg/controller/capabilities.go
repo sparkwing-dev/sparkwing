@@ -13,10 +13,7 @@ import (
 // Returns 404 for unknown keys.
 func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if s.artifactStore == nil {
-		// Defensive: the route is gated at register-time, so this
-		// branch is only reachable if a caller invoked the handler
-		// directly (a test, typically). Mirror the gated-route
-		// behavior so callers see one shape regardless.
+		// safety: handler registered only via route gate; direct calls mirror gated behavior
 		http.NotFound(w, r)
 		return
 	}

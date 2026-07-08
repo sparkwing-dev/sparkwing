@@ -13,12 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// End-to-end coverage through the in-process orchestrator. Exercises
-// .Cache(CacheOptions{...}) with the four policies most likely to
-// surface wiring bugs: Queue, Skip, Fail, and the cache-hit short-
-// circuit. CancelOthers is covered by the store-level unit tests
-// (signaling + cross-run timing is its own concern).
-
 var cacheCounter struct {
 	inflight atomic.Int32
 	max      atomic.Int32
@@ -42,50 +36,54 @@ func cacheStep(hold time.Duration) func(ctx context.Context) error {
 type cacheQueuePipe struct{ sparkwing.Base }
 
 func (cacheQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "a", cacheStep(120*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "cache-queue-key"})
-	sparkwing.Job(plan, "b", cacheStep(120*time.Millisecond)).Cache(sparkwing.CacheOptions{Key: "cache-queue-key"})
+	g := sparkwing.NewConcurrencyGroup("cache-queue-key", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "a", cacheStep(120*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "b", cacheStep(120*time.Millisecond)).Concurrency(g)
 	return nil
 }
 
 type cacheSkipLeaderPipe struct{ sparkwing.Base }
 
-func (cacheSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Slow leader holds the slot while the follower pipeline arrives
-	// under OnLimit:Skip in a separate goroutine.
-	sparkwing.Job(plan, "leader", cacheStep(400*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-skip-key"})
+func (cacheSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("cache-skip-key", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "leader", held(cacheCounterBump)).Concurrency(g)
 	return nil
 }
 
 type cacheSkipFollowerPipe struct{ sparkwing.Base }
 
 func (cacheSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-skip-key", OnLimit: sparkwing.Skip})
+	g := sparkwing.NewConcurrencyGroup("cache-skip-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Skip,
+	})
+	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
 	return nil
 }
 
 type cacheFailLeaderPipe struct{ sparkwing.Base }
 
-func (cacheFailLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Slow leader holds the slot long enough for the follower
-	// pipeline to arrive under OnLimit:Fail while the slot is full.
-	sparkwing.Job(plan, "leader", cacheStep(400*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-fail-key"})
+func (cacheFailLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("cache-fail-key", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "leader", held(cacheCounterBump)).Concurrency(g)
 	return nil
 }
 
 type cacheFailFollowerPipe struct{ sparkwing.Base }
 
 func (cacheFailFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-fail-key", OnLimit: sparkwing.Fail})
+	g := sparkwing.NewConcurrencyGroup("cache-fail-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Fail,
+	})
+	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
 	return nil
 }
 
 type cacheCancelOthersLeaderPipe struct{ sparkwing.Base }
 
-func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Hold the slot longer than the follower's CancelTimeout so the
-	// force-release path triggers. The step itself respects ctx
-	// cancellation via the inherited context.
+func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{Capacity: 1})
 	sparkwing.Job(plan, "leader", func(ctx context.Context) error {
 		select {
 		case <-time.After(5 * time.Second):
@@ -93,91 +91,75 @@ func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Pla
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}).Cache(sparkwing.CacheOptions{Key: "cache-cancel-others-key"})
+	}).Concurrency(g)
 	return nil
 }
 
 type cacheCancelOthersFollowerPipe struct{ sparkwing.Base }
 
 func (cacheCancelOthersFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{
-			Key:           "cache-cancel-others-key",
-			OnLimit:       sparkwing.CancelOthers,
-			CancelTimeout: 1500 * time.Millisecond,
-		})
+	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.CancelOthers,
+	})
+	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
 	return nil
 }
 
-// cacheKeyedPipe exercises CacheKey memoization across two sequential
-// runs. First run misses and writes to concurrency_cache; second run
-// hits and replays the output without invoking the job body.
+// cacheKeyedPipe exercises Cache() memoization across two sequential
+// runs. First run misses and writes a cache entry; second run hits and
+// replays the output without invoking the job body. Caching is keyed on
+// content alone -- no concurrency group involved.
 type cacheKeyedPipe struct{ sparkwing.Base }
 
 func (cacheKeyedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "build", func(ctx context.Context) error {
 		cacheCounter.inflight.Add(1)
 		return nil
-	}).Cache(sparkwing.CacheOptions{
-		Key:      "cache-memoize-key",
-		CacheKey: func(ctx context.Context) sparkwing.CacheKey { return "v-pinned" },
-		CacheTTL: time.Hour,
-	})
+	}).Cache(
+		func(ctx context.Context) sparkwing.CacheKey { return "v-pinned" },
+		sparkwing.TTL(time.Hour))
 	return nil
 }
 
-// cacheCoalescePipe: one leader + 2 followers on the same key with
-// OnLimit:Coalesce. All three must finish with the same outcome; only
-// the leader's body runs once.
-type cacheCoalescePipe struct{ sparkwing.Base }
-
-func (cacheCoalescePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error { // Three peer nodes, all on the same key under Coalesce. One will
-	// win the acquire, the others become followers.
-	sparkwing.Job(plan, "a", cacheStep(300*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
-	sparkwing.Job(plan, "b", cacheStep(300*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
-	sparkwing.Job(plan, "c", cacheStep(300*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-coalesce-key", OnLimit: sparkwing.Coalesce})
-	return nil
-}
-
-// cacheDriftPipe uses the key shared by cache-queue-serialize but with
-// Max=3 so the second run's acquire records a capacity drift. Kept
-// test-isolated by tying Key to a unique string per test.
+// cacheDriftPipe declares the same group name with different capacities
+// across two runs so the second run's acquire records a capacity drift.
 type cacheDriftPipeA struct{ sparkwing.Base }
 
 func (cacheDriftPipeA) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-drift-key", Max: 1})
+	g := sparkwing.NewConcurrencyGroup("cache-drift-key", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).Concurrency(g)
 	return nil
 }
 
 type cacheDriftPipeB struct{ sparkwing.Base }
 
 func (cacheDriftPipeB) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).
-		Cache(sparkwing.CacheOptions{Key: "cache-drift-key", Max: 3})
+	g := sparkwing.NewConcurrencyGroup("cache-drift-key", sparkwing.ConcurrencyLimit{Capacity: 3})
+	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).Concurrency(g)
 	return nil
 }
 
-// planLevelQueuePipe: single-node plan gated by Plan.Cache({Key, Max:1}).
-// Running two concurrently MUST serialize — peak concurrency across
-// both runs' nodes should stay at 1.
+// planLevelQueuePipe: single-node plan gated by Plan.Concurrency at
+// capacity 1. Running two concurrently MUST serialize -- peak
+// concurrency across both runs' nodes should stay at 1.
 type planLevelQueuePipe struct{ sparkwing.Base }
 
 func (planLevelQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-key", Max: 1})
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-key", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	sparkwing.Job(plan, "work", cacheStep(200*time.Millisecond))
 	return nil
 }
 
-// planLevelSkipFollowerPipe: Skip-policy plan-level arrival that
-// should no-op when a plan-level leader is already holding the key.
+// planLevelSkipFollowerPipe: Skip-policy plan-level arrival that should
+// no-op when a plan-level leader is already holding the key.
 type planLevelSkipFollowerPipe struct{ sparkwing.Base }
 
 func (planLevelSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-skip-key", OnLimit: sparkwing.Skip})
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-skip-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Skip,
+	}))
 	sparkwing.Job(plan, "work", cacheStep(100*time.Millisecond))
 	return nil
 }
@@ -185,7 +167,7 @@ func (planLevelSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan,
 type planLevelSkipLeaderPipe struct{ sparkwing.Base }
 
 func (planLevelSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-skip-key"})
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-skip-key", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	sparkwing.Job(plan, "work", cacheStep(500*time.Millisecond))
 	return nil
 }
@@ -198,7 +180,10 @@ func (planLevelInheritedChildPipe) Plan(
 	_ sparkwing.NoInputs,
 	rc sparkwing.RunContext,
 ) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-inherited-key", Max: 1})
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-inherited-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
 	sparkwing.Job(plan, "work", cacheStep(10*time.Millisecond))
 	return nil
 }
@@ -211,7 +196,10 @@ func (planLevelInheritedSpawnerPipe) Plan(
 	_ sparkwing.NoInputs,
 	rc sparkwing.RunContext,
 ) error {
-	plan.Cache(sparkwing.CacheOptions{Key: "plan-level-inherited-key", Max: 1})
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-inherited-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
 			ctx, "plan-level-inherited-child", "work",
@@ -230,7 +218,6 @@ func init() {
 	register("cache-cancel-others-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheCancelOthersLeaderPipe{} })
 	register("cache-cancel-others-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheCancelOthersFollowerPipe{} })
 	register("cache-memoize", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheKeyedPipe{} })
-	register("cache-coalesce", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheCoalescePipe{} })
 	register("cache-drift-a", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheDriftPipeA{} })
 	register("cache-drift-b", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheDriftPipeB{} })
 	register("plan-level-queue", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelQueuePipe{} })
@@ -247,9 +234,23 @@ func init() {
 func resetCacheCounter() {
 	cacheCounter.inflight.Store(0)
 	cacheCounter.max.Store(0)
+	resetLeaderBarrier()
 }
 
-func TestCache_QueueSerializesConcurrentHolders(t *testing.T) {
+// cacheCounterBump records one in-flight body against the peak gauge and
+// returns the matching decrement, for use as held()'s onStart.
+func cacheCounterBump() func() {
+	cur := cacheCounter.inflight.Add(1)
+	for {
+		peak := cacheCounter.max.Load()
+		if cur <= peak || cacheCounter.max.CompareAndSwap(peak, cur) {
+			break
+		}
+	}
+	return func() { cacheCounter.inflight.Add(-1) }
+}
+
+func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-queue-serialize"})
@@ -260,11 +261,11 @@ func TestCache_QueueSerializesConcurrentHolders(t *testing.T) {
 		t.Fatalf("status = %q err=%v", res.Status, res.Error)
 	}
 	if peak := cacheCounter.max.Load(); peak > 1 {
-		t.Fatalf(".Cache(Queue) peak concurrency = %d, want 1", peak)
+		t.Fatalf("Concurrency(Queue) peak concurrency = %d, want 1", peak)
 	}
 }
 
-func TestCache_QueueSerializesAcrossRuns(t *testing.T) {
+func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
@@ -279,22 +280,20 @@ func TestCache_QueueSerializesAcrossRuns(t *testing.T) {
 	wg.Wait()
 
 	if peak := cacheCounter.max.Load(); peak > 1 {
-		t.Fatalf(".Cache(Queue) cross-run peak concurrency = %d, want 1", peak)
+		t.Fatalf("Concurrency(Queue) cross-run peak concurrency = %d, want 1", peak)
 	}
 }
 
-func TestCache_SkipResolvesAsSkippedConcurrent(t *testing.T) {
+func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Leader holds the slot; follower arrives mid-hold under Skip and
-	// MUST resolve as skipped-concurrent without running its body.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond) // leader acquires
+	waitForLeaderHolding(t)
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
 	if err != nil {
@@ -304,10 +303,8 @@ func TestCache_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		t.Fatalf("follower status = %q, want success (skipped-concurrent counts as OK)", followerRes.Status)
 	}
 
-	// Follower's node row must carry outcome=skipped-concurrent and
-	// the step body must NOT have incremented the counter.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	fnodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
 	if len(fnodes) != 1 {
 		t.Fatalf("follower: expected 1 node, got %d", len(fnodes))
@@ -316,40 +313,35 @@ func TestCache_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		t.Fatalf("follower outcome = %q, want skipped-concurrent", fnodes[0].Outcome)
 	}
 
+	leaderRelease.Store(true)
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
 	}
 
-	// Sanity: only the leader's body ran.
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("peak concurrency = %d, want <= 1", peak)
 	}
 }
 
-func TestCache_FailResolvesFollowerAsFailed(t *testing.T) {
+func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Start leader in a goroutine; give it a head-start to claim the
-	// slot, then fire a follower under OnLimit:Fail that should
-	// reject immediately.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond) // leader acquires
+	waitForLeaderHolding(t)
 
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-follower"})
 	if followerRes.Status != "failed" {
 		t.Fatalf("follower status = %q, want failed (OnLimit:Fail under held slot)", followerRes.Status)
 	}
 
-	// Harden: follower's node row should carry a clear error message
-	// that an operator can read back.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("follower run: expected 1 node, got %d", len(nodes))
@@ -361,6 +353,7 @@ func TestCache_FailResolvesFollowerAsFailed(t *testing.T) {
 		t.Fatalf("follower error = %q, want a message mentioning OnLimit:Fail", nodes[0].Error)
 	}
 
+	leaderRelease.Store(true)
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
@@ -371,7 +364,6 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// First run: miss, body runs, cache entry written on release.
 	res1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
 		t.Fatalf("run 1: %v", err)
@@ -383,7 +375,6 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 		t.Fatalf("run 1 body invocations = %d, want 1", ran)
 	}
 
-	// Second run: hit, body MUST NOT run. Node outcome = cached.
 	res2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
@@ -396,7 +387,7 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res2.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("run 2: expected 1 node, got %d", len(nodes))
@@ -406,61 +397,21 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestCache_CoalesceFollowersInheritLeader(t *testing.T) {
+func TestConcurrency_DriftWarnEventEmitted(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-coalesce"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q", res.Status)
-	}
-
-	// Only one node body actually ran (the leader). Two followers
-	// inherited the outcome without invoking the job.
-	if peak := cacheCounter.max.Load(); peak != 1 {
-		t.Fatalf("peak concurrency = %d, want 1 (only leader should run)", peak)
-	}
-
-	// All three node rows should show a terminal success. Followers
-	// carry a "coalesced" event; verify via ListNodes.
-	st, _ := store.Open(p.StateDB())
-	defer st.Close()
-	nodes, _ := st.ListNodes(context.Background(), res.RunID)
-	if len(nodes) != 3 {
-		t.Fatalf("expected 3 nodes, got %d", len(nodes))
-	}
-	successes := 0
-	for _, n := range nodes {
-		if n.Outcome == string(sparkwing.Success) {
-			successes++
-		}
-	}
-	if successes != 3 {
-		t.Fatalf("expected 3 success outcomes, got %d (outcomes=%v)", successes, outcomeSummary(nodes))
-	}
-}
-
-func TestCache_DriftWarnEventEmitted(t *testing.T) {
-	resetCacheCounter()
-	p := newPaths(t)
-
-	// First run declares Max=1.
 	r1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-a"})
 	if err != nil || r1.Status != "success" {
 		t.Fatalf("run 1: status=%q err=%v", r1.Status, err)
 	}
-	// Second run declares Max=3 on the SAME key -> drift warn.
 	r2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-b"})
 	if err != nil || r2.Status != "success" {
 		t.Fatalf("run 2: status=%q err=%v", r2.Status, err)
 	}
 
-	// Scan the second run's events for concurrency_drift.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	events, _ := st.ListEventsAfter(context.Background(), r2.RunID, 0, 500)
 	found := false
 	for _, e := range events {
@@ -485,15 +436,10 @@ func outcomeSummary(nodes []*store.Node) map[string]int {
 	return m
 }
 
-func TestCache_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
+func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Fire two plan invocations in goroutines; Plan.Cache({Key,Max:1})
-	// must serialize them. With 2 nodes per plan at 100ms each, a
-	// fully serial schedule is ~400ms; a fully parallel schedule
-	// would be ~200ms. Peak concurrency across ALL nodes must not
-	// exceed 1 under plan-level Max:1.
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
@@ -509,7 +455,7 @@ func TestCache_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	}
 }
 
-func TestCache_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T) {
+func TestConcurrency_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 	ctx := context.Background()
@@ -521,7 +467,7 @@ func TestCache_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T)
 
 	parentHolderID := "parent-run/-"
 	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key:      "plan-level-inherited-key",
+		Key:      "g:plan-level-inherited-key",
 		HolderID: parentHolderID,
 		RunID:    "parent-run",
 		Capacity: 1,
@@ -537,9 +483,9 @@ func TestCache_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T)
 	runCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	res, err := orchestrator.RunLocal(runCtx, p, orchestrator.Options{
-		Pipeline:                   "plan-level-inherited-child",
-		InheritedPlanCacheKey:      "plan-level-inherited-key",
-		InheritedPlanCacheHolderID: parentHolderID,
+		Pipeline:                         "plan-level-inherited-child",
+		InheritedPlanConcurrencyKey:      "g:plan-level-inherited-key",
+		InheritedPlanConcurrencyHolderID: parentHolderID,
 	})
 	if err != nil {
 		t.Fatalf("child run with inherited admission: %v", err)
@@ -549,7 +495,7 @@ func TestCache_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T)
 	}
 }
 
-func TestCache_RunAndAwaitPropagatesPlanAdmissionToChildTrigger(t *testing.T) {
+func TestConcurrency_RunAndAwaitPropagatesPlanAdmissionToChildTrigger(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 	ctx := context.Background()
@@ -581,8 +527,8 @@ func TestCache_RunAndAwaitPropagatesPlanAdmissionToChildTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
-	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "plan-level-inherited-key" {
-		t.Fatalf("child admission key = %q, want plan-level-inherited-key",
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "g:plan-level-inherited-key" {
+		t.Fatalf("child admission key = %q, want g:plan-level-inherited-key",
 			trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
 	}
 	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "parent-with-plan-admission/-" {
@@ -591,20 +537,17 @@ func TestCache_RunAndAwaitPropagatesPlanAdmissionToChildTrigger(t *testing.T) {
 	}
 }
 
-func TestCache_PlanLevelSkipShortCircuits(t *testing.T) {
+func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Leader plan takes the slot; follower plan under Skip should
-	// return success immediately WITHOUT running any nodes.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-skip-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond) // leader acquires
+	time.Sleep(100 * time.Millisecond)
 
-	// Snapshot counter before follower.
 	snapshotBefore := cacheCounter.inflight.Load()
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
@@ -617,8 +560,6 @@ func TestCache_PlanLevelSkipShortCircuits(t *testing.T) {
 		t.Fatalf("follower status = %q, want success (Skip treats plan-level full slot as OK)", followerRes.Status)
 	}
 
-	// The follower's 'work' node MUST NOT have run — counter should
-	// only have incremented from the leader's node, not the follower.
 	<-leaderDone
 	finalCount := cacheCounter.inflight.Load()
 	if finalCount-snapshotBefore > 1 {
@@ -627,16 +568,10 @@ func TestCache_PlanLevelSkipShortCircuits(t *testing.T) {
 	}
 }
 
-func TestCache_CancelOthersTimeoutEvictsStubbornLeader(t *testing.T) {
+func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 
-	// Leader arrives first and holds the slot for 5s. Follower
-	// arrives with CancelOthers + CancelTimeout=1.5s; the evicted
-	// leader keeps running because its job doesn't cooperate with
-	// ctx.Done fast enough (or at all in the CancelOthers best-effort
-	// model). After the timeout the follower's force-release path
-	// drops the holder row and the follower runs.
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
@@ -655,17 +590,9 @@ func TestCache_CancelOthersTimeoutEvictsStubbornLeader(t *testing.T) {
 	if followerRes.Status != "success" {
 		t.Fatalf("follower status = %q, want success (evicted leader, took slot)", followerRes.Status)
 	}
-	// Should have waited at least the CancelTimeout (1.5s) but not
-	// much longer than leader + cleanup. Upper bound is loose to
-	// accommodate CI jitter.
-	if followerElapsed < time.Second {
-		t.Fatalf("follower completed in %s; expected to wait for CancelTimeout", followerElapsed)
-	}
 	if followerElapsed > 5*time.Second {
-		t.Fatalf("follower took %s; expected force-release well under 5s", followerElapsed)
+		t.Fatalf("follower took %s; expected eviction well under 5s", followerElapsed)
 	}
 
-	// Drain the leader goroutine; its outcome is irrelevant (likely
-	// superseded or cancelled via ctx unwinds).
 	<-leaderDone
 }

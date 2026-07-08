@@ -1,9 +1,5 @@
 package controller
 
-// HTTP handlers for the /api/v1/tokens CRUD surface. Raw tokens from
-// POST /api/v1/tokens are emitted in the response ONCE and never
-// echoed back; callers who lose the raw can only revoke and recreate.
-
 import (
 	"encoding/json"
 	"errors"
@@ -86,7 +82,8 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Info("token created",
+	s.logger.Info(
+		"token created",
 		"principal", tok.Principal,
 		"kind", tok.Kind,
 		"prefix", tok.Prefix,
@@ -158,8 +155,6 @@ type whoamiResp struct {
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
-		// Auth disabled: return a synthetic "unauthed" principal so
-		// callers don't have to special-case the empty response.
 		writeJSON(w, http.StatusOK, whoamiResp{
 			Principal: "unauthed",
 			Kind:      "none",

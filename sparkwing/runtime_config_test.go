@@ -21,8 +21,6 @@ func TestDetectRuntime_IgnoresLegacyEnvSignals(t *testing.T) {
 	if rc.Git == nil {
 		t.Fatal("Git pre-populate failed: nil")
 	}
-	// WorkDir is whatever the cwd walk-up returns; the test only
-	// pins that it doesn't fall back to one of the env values.
 	for _, env := range []string{
 		"would-have-mattered-before-step-10",
 		os.Getenv("SPARKWING_RUN_ID"),
@@ -78,7 +76,7 @@ func TestSetGit_AttachesPopulatedGit(t *testing.T) {
 	t.Cleanup(func() { runtimeMu.Lock(); runtime.Git = prev; runtimeMu.Unlock() })
 
 	g := NewGit("/work/repo", "abc123def456abc123def456abc123def456abcd",
-		"main", "owner/name", "git@github.com:owner/name.git")
+		"main", "main", "owner/name", "git@github.com:owner/name.git")
 	SetGit(g)
 	got := CurrentRuntime().Git
 	if got == nil {

@@ -60,7 +60,7 @@ func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []st
 	stepID := fs.String("step", "", "limit to one step id (implies node-scope or step-scope reads)")
 	includeSteps := fs.Bool("steps", false, "include per-step annotations as separate rows")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdAnnotationsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -70,7 +70,7 @@ func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []st
 	if *runID == "" {
 		return fmt.Errorf("%s: --run is required", cmdAnnotationsList.Path)
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), false, cmdAnnotationsList.Path)
+	resolvedFmt, err := resolveOutputFormat(*outFmt, cmdAnnotationsList.Path)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func listLocalAnnotations(ctx context.Context, paths orchestrator.Paths, runID, 
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
@@ -161,7 +161,7 @@ func listRemoteAnnotations(ctx context.Context, profileName, runID, nodeFilter, 
 	if err := requireController(prof, cmdAnnotationsList.Path); err != nil {
 		return nil, err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	var out []annotationEntry
 	if stepFilter == "" {
 		nodes, err := c.ListNodes(ctx, runID)
@@ -229,7 +229,7 @@ func runAnnotationsAdd(ctx context.Context, paths orchestrator.Paths, args []str
 	nodeID := fs.String("node", "", "node identifier (required)")
 	stepID := fs.String("step", "", "step identifier (optional; annotates the step instead of the node)")
 	msg := fs.StringP("message", "m", "", "annotation text (required)")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdAnnotationsAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -258,7 +258,7 @@ func addLocalAnnotation(ctx context.Context, paths orchestrator.Paths, runID, no
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if stepID != "" {
 		if err := st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
 			return err
@@ -281,7 +281,7 @@ func addRemoteAnnotation(ctx context.Context, profileName, runID, nodeID, stepID
 	if err := requireController(prof, cmdAnnotationsAdd.Path); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	if stepID != "" {
 		if err := c.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
 			return err

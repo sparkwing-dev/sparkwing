@@ -31,7 +31,7 @@ func TestJob_ClosureFormSingleStepWork(t *testing.T) {
 	if steps[0].ID() != "run" {
 		t.Fatalf("step id = %q, want %q", steps[0].ID(), "run")
 	}
-	if _, err := steps[0].Fn()(context.Background()); err != nil {
+	if _, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(steps[0])(context.Background()); err != nil {
 		t.Fatalf("step fn returned %v", err)
 	}
 	if !called {
@@ -178,12 +178,11 @@ func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 	if produced.OutputType() == nil {
 		t.Fatal("typed sw.Step should set OutputType from fn return")
 	}
-	// Drive the producing step's fn directly so we control timing.
-	out, err := produced.Fn()(context.Background())
+	out, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(produced)(context.Background())
 	if err != nil {
 		t.Fatalf("produce fn returned %v", err)
 	}
-	produced.MarkDone(out)
+	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(produced, out)
 
 	got := sparkwing.StepGet[fooOut](context.Background(), produced)
 	if got != want {
@@ -196,7 +195,7 @@ func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 func TestStepGet_PanicsOnUntypedStep(t *testing.T) {
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "plain", func(ctx context.Context) error { return nil })
-	s.MarkDone(nil)
+	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(s, nil)
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -217,8 +216,8 @@ func TestStepGet_PanicsOnTypeMismatch(t *testing.T) {
 	s := sparkwing.Step(w, "produce", func(ctx context.Context) (fooOut, error) {
 		return fooOut{Tag: "ok"}, nil
 	})
-	out, _ := s.Fn()(context.Background())
-	s.MarkDone(out)
+	out, _ := sparkwing.RuntimePlumbing.Fns.WorkStepFn(s)(context.Background())
+	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(s, out)
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -342,8 +341,6 @@ func TestJobFanOutDynamic_RegistersExpansion(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("fn should not run at registration; ran %d times", calls)
 	}
-	// Resolve via an in-process Ref resolver to exercise the
-	// reflection-driven slice traversal end-to-end.
 	ctx := sparkwingruntime.WithResolver(context.Background(), func(id string) (any, bool) {
 		if id == "discover" {
 			return []string{"a", "b", "c"}, true
@@ -387,16 +384,10 @@ func TestWork_StepFnReturnsError(t *testing.T) {
 	myErr := errors.New("boom")
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "x", func(ctx context.Context) error { return myErr })
-	if _, err := s.Fn()(context.Background()); !errors.Is(err, myErr) {
+	if _, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(s)(context.Background()); !errors.Is(err, myErr) {
 		t.Fatalf("step fn should propagate error, got %v", err)
 	}
 }
-
-// SpawnNodeForEach validates fn signature at Plan time so
-// a wrong-shaped fn panics during plan construction rather than
-// during dispatch (which previously surfaced as a runtime spawn
-// error after the parent's Needs cleared, much later than the
-// structural mistake actually happened).
 
 func TestSpawnNodeForEach_RejectsNonSliceItems(t *testing.T) {
 	expectSpawnEachPanic(t, "items must be a slice", func() {
@@ -426,8 +417,6 @@ func TestSpawnNodeForEach_RejectsWrongArgCount(t *testing.T) {
 func TestSpawnNodeForEach_RejectsWrongReturnCount(t *testing.T) {
 	expectSpawnEachPanic(t, "fn must return (string, sparkwing.Workable)", func() {
 		w := sparkwing.NewWork()
-		// The panic message lists both accepted shapes; we just need
-		// "(string, sparkwing.Workable)" to appear somewhere in it.
 		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) string { return "" })
 	})
 }
@@ -453,7 +442,6 @@ func TestSpawnNodeForEach_RejectsNonStringFirstReturn(t *testing.T) {
 func TestSpawnNodeForEach_RejectsNonWorkableSecondReturn(t *testing.T) {
 	expectSpawnEachPanic(t, "must be sparkwing.Workable or func", func() {
 		w := sparkwing.NewWork()
-		// int is neither Workable nor func(ctx) error.
 		sparkwing.JobSpawnEach(w, []string{"a"}, func(s string) (string, int) {
 			return "", 0
 		})

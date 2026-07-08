@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -35,7 +35,7 @@ var nextBundle embed.FS
 // VerifyBundleEmbedded reports an error when this binary was built
 // without the Next.js dashboard bundle. The bundle is generated and
 // gitignored, so a plain "go install" or "go build" produces a binary
-// that compiles cleanly but serves a 404 on every dashboard page —
+// that compiles cleanly but serves a 404 on every dashboard page --
 // this guard surfaces that condition at startup instead.
 func VerifyBundleEmbedded() error {
 	if _, err := fs.Stat(nextBundle, "next-out/index.html"); err != nil {
@@ -52,7 +52,7 @@ running bin/build-web.sh first produces a binary that compiles cleanly
 but serves a silent 404 on every dashboard page.
 
 To run the dashboard locally, install the sparkwing release binary and
-use the dashboard subcommand — not "go install":
+use the dashboard subcommand -- not "go install":
 
   curl -L -o sparkwing \
     https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-linux-amd64
@@ -64,7 +64,7 @@ Release binaries for every platform are listed at:
   https://github.com/sparkwing-dev/sparkwing/releases/latest
 
 To run sparkwing-web in a cluster, use the container image rather than a
-source build — it already has the dashboard bundle baked in.
+source build -- it already has the dashboard bundle baked in.
 
 If you are building from a sparkwing checkout, generate the dashboard
 bundle first, then reinstall:
@@ -76,13 +76,17 @@ bundle first, then reinstall:
 // Zero value is the local-mode default.
 type HandlerOptions struct {
 	Backend       backend.Backend
-	Paths         orchestrator.Paths
+	Paths         swpaths.Paths
 	ControllerURL string // if set, /api/v1/* proxies to this URL
 	LogsURL       string // sparkwing-logs base URL (for /api/v1/health/services probe)
 	Token         string // controller bearer token (cluster mode)
 	// APIURL is injected into the SPA HTML as window.__SPARKWING_API_URL__.
 	// Empty means same-origin.
-	APIURL        string
+	APIURL string
+	// Version is injected into the SPA HTML as window.__SPARKWING_VERSION__
+	// and rendered as a small pill in the nav. Operators use it to
+	// confirm which CLI build they're connected to. Empty renders no pill.
+	Version       string
 	ExtraServices []HealthService
 	// RequireLogin gates the browser-facing surface behind the
 	// session-cookie flow. Disabled in laptop-local dev where an empty
@@ -92,15 +96,27 @@ type HandlerOptions struct {
 
 // Serve starts the dashboard in local mode, reading state from the
 // SQLite store at paths.StateDB().
-func Serve(ctx context.Context, paths orchestrator.Paths, addr string) error {
+//
+// The dashboard never writes state, so it serves through a read-only
+// connection: it can't take a write lock and starve out the
+// `sparkwing run` processes that share the same state.db. A brief
+// read-write open first guarantees the schema exists (the runner that
+// populated the database may not have run yet on a fresh home) before
+// the long-lived read-only connection takes over.
+func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	if rw, err := store.Open(paths.StateDB()); err != nil {
+		return err
+	} else {
+		_ = rw.Close()
+	}
+	st, err := store.OpenReadOnly(paths.StateDB())
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return ServeWithOptions(ctx,
 		HandlerOptions{Backend: backend.NewStoreBackend(st, paths, nil), Paths: paths},
 		addr)
@@ -135,12 +151,8 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 
 // HandlerFromOptions returns the full dashboard HTTP handler.
 func HandlerFromOptions(opts HandlerOptions) http.Handler {
-	// Inner mux is authenticated; outer router exposes login/logout
-	// + /api/health unauthenticated to avoid a login catch-22.
 	authedMux := http.NewServeMux()
 
-	// Method+path-param routes register before the catch-all proxy so
-	// Go 1.22's ServeMux picks these over /api/v1/.
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs", runLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/search", runLogsSearchHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/grep", runsGrepHandler(opts.Backend))
@@ -148,8 +160,6 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
 
-	// Aggregate health probe lives on the dashboard because only the
-	// dashboard knows every sibling service URL in a deployment.
 	services := append(defaultServices(opts, opts.LogsURL), opts.ExtraServices...)
 	authedMux.HandleFunc("/api/v1/health/services", healthServicesHandler(services, opts.Token))
 
@@ -162,25 +172,25 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token))
 	} else {
+		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
+		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
 		authedMux.HandleFunc("/api/v1/", notImplementedHandler)
 	}
 
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
-		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err))
+		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
 	}
 	authedMux.Handle("/", spaHandler(subFS, opts))
 
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)
 	router.HandleFunc("GET /login", loginPageHandler(opts))
-	// Shared bucket across /login + /login/bootstrap so an attacker
-	// probing both endpoints can't spend its budget twice.
 	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		rateLimitMiddleware(loginLimiter, http.HandlerFunc(loginSubmitHandler(opts))))
+		rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts)))
 	router.Handle("POST /login/bootstrap",
-		rateLimitMiddleware(loginLimiter, http.HandlerFunc(bootstrapSubmitHandler(opts))))
+		rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts)))
 	router.HandleFunc("POST /logout", logoutHandler(opts))
 	router.Handle("/", sessionAuthMiddleware(opts, authedMux))
 	return router
@@ -205,9 +215,7 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 			return
 		}
 
-		// Stat <route>.html before the directory check: Next 16's export
-		// creates a same-named directory of Turbopack internals that
-		// http.FileServer would 301-redirect into a dead end.
+		// hack: stat <route>.html before the directory check; Next 16 emits a same-named Turbopack dir that http.FileServer 301s into a dead end.
 		if _, err := fs.Stat(bundleFS, p+".html"); err == nil {
 			serveTemplatedHTML(w, r, bundleFS, p+".html", opts)
 			return
@@ -239,15 +247,15 @@ func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, 
 		http.NotFound(w, nil)
 		return
 	}
-	// Escape values so quotes/backslashes in a token don't break the
-	// <script> literal. Markers are inside JSON strings in layout.tsx;
-	// only the inside is replaced.
 	body := bytes.ReplaceAll(raw,
 		[]byte("__SPARKWING_TOKEN_MARKER__"),
 		[]byte(jsStringEscape(opts.Token)))
 	body = bytes.ReplaceAll(body,
 		[]byte("__SPARKWING_API_URL_MARKER__"),
 		[]byte(jsStringEscape(opts.APIURL)))
+	body = bytes.ReplaceAll(body,
+		[]byte("__SPARKWING_VERSION_MARKER__"),
+		[]byte(jsStringEscape(opts.Version)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)
@@ -267,7 +275,7 @@ func jsStringEscape(s string) string {
 			b.WriteString(`\n`)
 		case '\r':
 			b.WriteString(`\r`)
-		case '<': // avoid breaking out of <script>
+		case '<': // safety: prevents injection that breaks out of the surrounding <script> tag
 			b.WriteString(`<`)
 		default:
 			b.WriteRune(r)
@@ -314,8 +322,6 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	if body == nil {
-		// Source doesn't support streaming (disk in local mode); 501
-		// lets the dashboard fall back to polling.
 		w.WriteHeader(http.StatusNotImplemented)
 		return
 	}
@@ -362,8 +368,6 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Verify up-front so a typo returns 404 instead of an open stream
-	// that never produces anything.
 	run, err := b.GetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -379,22 +383,16 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	// Disable nginx proxy buffering so events land within one poll tick.
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	// Open-comment keeps the connection alive while we wait on the
-	// first poll; EventSource tolerates leading comment lines.
 	_, _ = w.Write([]byte(": open\n\n"))
 	flusher.Flush()
 
 	ctx := r.Context()
 	const (
-		pollInterval = 250 * time.Millisecond
-		pageSize     = 500
-		// Re-read the run row every N event ticks so a long stream
-		// doesn't hammer the store for a single column we only need
-		// for termination detection.
+		pollInterval    = 250 * time.Millisecond
+		pageSize        = 500
 		runStatusEveryN = 8
 		heartbeatEvery  = 20 * time.Second
 	)
@@ -408,8 +406,6 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	for {
 		events, err := b.ListEventsAfter(ctx, runID, afterSeq, pageSize)
 		if err != nil {
-			// Closing is the cleanest signal in an already-open SSE
-			// stream; the client's onerror triggers fallback polling.
 			return
 		}
 		for _, ev := range events {
@@ -423,16 +419,12 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 			lastHB = time.Now()
 		}
 
-		// On terminal-and-drained, send an end-of-stream hint so the
-		// client closes cleanly without waiting for onerror.
 		if terminal && len(events) == 0 {
 			_, _ = w.Write([]byte("event: stream_end\ndata: {}\n\n"))
 			flusher.Flush()
 			return
 		}
 
-		// Some proxies (dev-mode Next.js included) reap idle SSE
-		// streams after ~30s without a keepalive.
 		if time.Since(lastHB) >= heartbeatEvery {
 			if _, werr := w.Write([]byte(": keepalive\n\n")); werr != nil {
 				return
@@ -650,10 +642,7 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		// Read + grep each node's log concurrently. ReadNodeLog is a
-		// per-node HTTP hop in cluster-mode (ClientBackend), so the
-		// difference between serial and parallel here is N round-trips
-		// vs. one round-trip wall-clock per search.
+		// perf: fan out per-node reads; each ReadNodeLog is a separate HTTP hop in cluster mode.
 		type nodeResult struct {
 			matches []match
 			count   int
@@ -726,7 +715,7 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 // slowest single read instead of summing all of them.
 //
 // Matching uses displayBodyForLogLine, so node id / step framing in
-// NDJSON metadata doesn't generate spurious hits — only what the
+// NDJSON metadata doesn't generate spurious hits -- only what the
 // dashboard's Logs tab would actually display.
 func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 	type match struct {
@@ -785,9 +774,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		if len(branches) > 0 || len(shaPrefixes) > 0 {
 			runs = filterRunsByBranchSHA(runs, branches, shaPrefixes)
 		}
-		// Build (run, node) work units up front so the worker pool can
-		// drain them with a single fanout cap rather than nested
-		// per-run goroutines.
 		type work struct {
 			run    *store.Run
 			nodeID string
@@ -863,9 +849,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		for _, run := range runs {
 			runIndex[run.ID] = run
 		}
-		// Return the full Run object for each matched run so the
-		// dashboard can render the same row layout the Activity view
-		// uses (status dot, branch/sha pills, error preview, etc.).
 		runsMeta := make(map[string]*store.Run, len(hitRuns))
 		for id := range hitRuns {
 			if run := runIndex[id]; run != nil {
@@ -880,20 +863,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 			"runs_scanned": len(runs),
 		})
 	}
-}
-
-func timeOrEmpty(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339Nano)
-}
-
-func timeOrEmptyPtr(t *time.Time) string {
-	if t == nil || t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339Nano)
 }
 
 type grepExcludes struct {

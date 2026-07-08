@@ -57,7 +57,6 @@ type agentsResp struct {
 
 func runAgentsList(args []string) error {
 	fs := flag.NewFlagSet(cmdAgentsList.Path, flag.ContinueOnError)
-	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	quiet := fs.BoolP("quiet", "q", false, "print just agent names, one per line")
 	on := addProfileFlag(fs)
@@ -68,7 +67,7 @@ func runAgentsList(args []string) error {
 		return err
 	}
 	if *on == "" {
-		return errors.New("agents list: --on is required")
+		return errors.New("agents list: --profile is required")
 	}
 	prof, err := resolveProfile(*on)
 	if err != nil {
@@ -80,12 +79,11 @@ func runAgentsList(args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	agents, err := fetchAgents(ctx, prof.Controller, prof.Token)
+	agents, err := fetchAgents(ctx, prof.ControllerURL(), prof.ControllerToken())
 	if err != nil {
 		return fmt.Errorf("agents list: %w", err)
 	}
 
-	// Stable order by name so repeated invocations diff cleanly.
 	sort.Slice(agents, func(i, j int) bool {
 		if agents[i].Type != agents[j].Type {
 			return agents[i].Type < agents[j].Type
@@ -100,7 +98,7 @@ func runAgentsList(args []string) error {
 		return nil
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(agents)

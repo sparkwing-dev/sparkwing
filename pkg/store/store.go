@@ -1,4 +1,7 @@
-// Package store persists pipeline-run state to SQLite.
+// Package store persists pipeline-run state to a SQL database. SQLite
+// (modernc.org/sqlite) and Postgres (jackc/pgx via the stdlib driver)
+// are both supported behind the same *Store type; the dialect is
+// chosen at Open time.
 package store
 
 import (
@@ -7,19 +10,57 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
+// BusyTimeoutEnvVar names the environment override for the SQLite
+// busy_timeout Open and OpenReadOnly apply, in milliseconds. Unset or
+// empty keeps [DefaultBusyTimeoutMS]; anything else must be a positive
+// integer or Open fails loudly, naming the variable and value -- a
+// typo'd override silently reverting to the default would hide the
+// misconfiguration. The knob exists for hosts whose contention profile
+// makes 30s wrong in either direction: diagnostic tooling that wants
+// to fail fast on a wedged database, or a heavily shared host that
+// wants writers to wait longer before erroring with SQLITE_BUSY.
+const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+
+// DefaultBusyTimeoutMS is the SQLite busy_timeout applied when
+// [BusyTimeoutEnvVar] is unset. See Open for why 30s.
+const DefaultBusyTimeoutMS = 30000
+
+// busyTimeoutMS resolves the SQLite busy_timeout for this open:
+// [BusyTimeoutEnvVar] when set and valid, [DefaultBusyTimeoutMS]
+// otherwise. A set-but-invalid value is an error, never a silent
+// fallback.
+func busyTimeoutMS() (int, error) {
+	raw := os.Getenv(BusyTimeoutEnvVar)
+	if raw == "" {
+		return DefaultBusyTimeoutMS, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s=%q: want a positive integer of milliseconds", BusyTimeoutEnvVar, raw)
+	}
+	return n, nil
+}
+
 // Failure reason codes; empty = no structured reason.
 const (
-	FailureUnknown            = ""
-	FailureOOMKilled          = "oom_killed"
-	FailureAgentLost          = "agent_lost"
-	FailureTimeout            = "timeout"
+	FailureUnknown   = ""
+	FailureOOMKilled = "oom_killed"
+	FailureAgentLost = "agent_lost"
+	FailureTimeout   = "timeout"
+	// FailureVerify: the node's action completed but its Verify
+	// postcondition returned an error. The failure is at the verify
+	// stage, not the action.
+	FailureVerify             = "verify"
 	FailureQueueTimeout       = "queue_timeout"
 	FailureRunnerLeaseExpired = "runner_lease_expired"
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403
@@ -36,23 +77,140 @@ const (
 )
 
 // Store is the persistent state layer. One instance per process; safe
-// for concurrent use by multiple orchestrator goroutines.
+// for concurrent use by multiple orchestrator goroutines. The
+// underlying database is SQLite or Postgres depending on which
+// constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect Dialect
 }
 
+// Dialect reports the SQL dialect this Store was opened against.
+// Useful for callers (tests, diagnostics) that need to know which
+// backend they're talking to; query methods on Store handle the
+// dialect difference internally.
+func (s *Store) Dialect() Dialect { return s.dialect }
+
 // Open initializes a SQLite database at path with WAL + foreign keys.
+//
+// busy_timeout defaults high (30s; override via [BusyTimeoutEnvVar]) so
+// that under N concurrent writers on
+// one host -- multiple `sparkwing run` invocations plus the dashboard
+// daemon sharing one state.db -- a writer waits on a busy lock instead
+// of erroring immediately with SQLITE_BUSY and aborting the run. WAL
+// lets readers proceed while a writer commits, so the wait is bounded
+// to the brief windows when two writers genuinely overlap.
+//
+// txlock=immediate makes every transaction take the write lock at BEGIN
+// rather than upgrading a read lock to a write lock mid-transaction.
+// Without it, two connections that each SELECT-then-INSERT (the shape
+// of AcquireConcurrencySlot and most state mutations) can both read the
+// same snapshot and then collide on the upgrade -- which surfaces as
+// SQLITE_BUSY_SNAPSHOT, a conflict busy_timeout does NOT retry. Taking
+// the lock up front turns that race into an ordinary busy-wait the
+// timeout absorbs. Single-statement reads outside a transaction are
+// unaffected, so read-only queries don't pay for the write lock.
+//
+// busy_timeout is listed FIRST so it is in force before journal_mode is
+// applied: switching a brand-new database to WAL needs a momentary
+// exclusive lock, and two processes cold-starting the same state.db at
+// once would otherwise have one fail the WAL switch with SQLITE_BUSY
+// before any timeout was active. With the timeout set first, that race
+// becomes a bounded wait.
+//
+// synchronous=NORMAL is the WAL-recommended setting. Under the default
+// FULL every COMMIT fsyncs the WAL, and an _txlock=immediate transaction
+// holds the write lock until COMMIT -- so that fsync serializes every
+// co-located writer and caps throughput. NORMAL fsyncs at checkpoint
+// instead. WAL stays crash-consistent either way; the cost is a few of
+// the most recent commits on an OS or power crash, which for orchestration
+// state (leases, runs, cache) is self-healing: a lost lease is reaped, a
+// lost run row reconciled.
 func Open(path string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)", path)
+	dsn, err := sqliteDSN(path)
+	if err != nil {
+		return nil, err
+	}
+	return openSQL("sqlite", dsn, DialectSQLite)
+}
+
+// sqliteDSN builds Open's read-write DSN, resolving the busy_timeout
+// from [BusyTimeoutEnvVar] / [DefaultBusyTimeoutMS].
+func sqliteDSN(path string) (string, error) {
+	ms, err := busyTimeoutMS()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path, ms), nil
+}
+
+// sqliteReadOnlyDSN builds OpenReadOnly's DSN; the busy_timeout
+// resolves the same way as [sqliteDSN].
+func sqliteReadOnlyDSN(path string) (string, error) {
+	ms, err := busyTimeoutMS()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=query_only(true)", path, ms), nil
+}
+
+// OpenReadOnly opens an existing SQLite state database for reads only.
+// The connection sets PRAGMA query_only so it can never take a write
+// lock; a read-mostly consumer like the dashboard daemon therefore
+// can't starve out the `sparkwing run` processes that actually mutate
+// the database. WAL readers don't block the writer either way, so this
+// is belt-and-suspenders on top of WAL.
+//
+// No migration runs: the caller is responsible for ensuring the schema
+// exists (the controller / runner that writes the database does this on
+// its own Open). Opening a database whose schema this binary doesn't
+// understand surfaces as query errors at read time, not here.
+func OpenReadOnly(path string) (*Store, error) {
+	dsn, err := sqliteReadOnlyDSN(path)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	// SQLite serializes writes; explicit single-connection avoids
-	// "database is locked" under load.
-	db.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
+	return &Store{db: db, dialect: DialectSQLite}, nil
+}
 
-	s := &Store{db: db}
+// OpenPostgres initializes a Store against the Postgres database
+// identified by dsn (`postgres://user:pass@host:port/db?sslmode=...`).
+// Migrations run on first connect; concurrent OpenPostgres calls
+// against the same fresh database are coordinated by a transactional
+// advisory lock so exactly one runner applies the schema.
+func OpenPostgres(_ context.Context, dsn string) (*Store, error) {
+	if dsn == "" {
+		return nil, errors.New("OpenPostgres: dsn is required")
+	}
+	return openSQL("pgx", dsn, DialectPostgres)
+}
+
+// openSQL is the shared constructor for both dialects. Pool sizing
+// differs: SQLite is single-writer by construction; Postgres uses a
+// modest connection pool to absorb orchestrator concurrency without
+// overwhelming the server. Migration runs immediately after Open so
+// callers observe a fully provisioned schema on success.
+func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		return nil, err
+	}
+	switch dialect {
+	case DialectSQLite:
+		db.SetMaxOpenConns(1)
+	case DialectPostgres:
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxIdleTime(5 * time.Minute)
+	}
+
+	s := &Store{db: db, dialect: dialect}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -66,7 +224,7 @@ func (s *Store) Close() error { return s.db.Close() }
 // DB returns the underlying handle for read-side aggregations only.
 func (s *Store) DB() *sql.DB { return s.db }
 
-const schema = `
+const schemaSQLite = `
 CREATE TABLE IF NOT EXISTS runs (
     id              TEXT PRIMARY KEY,
     pipeline        TEXT NOT NULL,
@@ -96,7 +254,15 @@ CREATE TABLE IF NOT EXISTS runs (
     retry_source    TEXT NOT NULL DEFAULT '',
     -- replay_of_*: single-node replay lineage.
     replay_of_run_id  TEXT NOT NULL DEFAULT '',
-    replay_of_node_id TEXT NOT NULL DEFAULT ''
+    replay_of_node_id TEXT NOT NULL DEFAULT '',
+    -- last_heartbeat_at: orchestrator liveness ping for the run as a
+    -- whole. NULL for rows that predate the column or come from a
+    -- backend whose TouchRunHeartbeat is a no-op (S3 mode, which
+    -- reconciles orphans via per-node heartbeats instead). The
+    -- controller's reaper and the local orphan reconciler both use it
+    -- to detect an orchestrator that died between node dispatches,
+    -- before any node-level heartbeat exists.
+    last_heartbeat_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
@@ -127,6 +293,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     failure_reason   TEXT NOT NULL DEFAULT '',
     -- exit_code: process exit; NULL when not tied to a process.
     exit_code        INTEGER,
+    -- artifact_manifest: content-addressed digest of the node's
+    -- published-artifact manifest; empty when it produced none.
+    artifact_manifest TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (run_id, node_id),
     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
@@ -204,13 +373,15 @@ CREATE TABLE IF NOT EXISTS concurrency_entries (
 );
 
 CREATE TABLE IF NOT EXISTS concurrency_holders (
-    key              TEXT NOT NULL,
-    holder_id        TEXT NOT NULL,
-    run_id           TEXT NOT NULL,
-    node_id          TEXT NOT NULL DEFAULT '',
-    claimed_at       INTEGER NOT NULL,
-    lease_expires_at INTEGER NOT NULL,
-    superseded       INTEGER NOT NULL DEFAULT 0,
+    key               TEXT NOT NULL,
+    holder_id         TEXT NOT NULL,
+    run_id            TEXT NOT NULL,
+    node_id           TEXT NOT NULL DEFAULT '',
+    claimed_at        INTEGER NOT NULL,
+    lease_expires_at  INTEGER NOT NULL,
+    superseded        INTEGER NOT NULL DEFAULT 0,
+    cost              INTEGER NOT NULL DEFAULT 1,
+    declared_capacity INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key, holder_id)
 );
 CREATE INDEX IF NOT EXISTS idx_concurrency_holders_key_claimed
@@ -229,6 +400,8 @@ CREATE TABLE IF NOT EXISTS concurrency_waiters (
     leader_run_id      TEXT NOT NULL DEFAULT '',
     leader_node_id     TEXT NOT NULL DEFAULT '',
     cancel_timeout_ns  INTEGER NOT NULL DEFAULT 0,
+    cost               INTEGER NOT NULL DEFAULT 1,
+    declared_capacity  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key, run_id, node_id)
 );
 CREATE INDEX IF NOT EXISTS idx_concurrency_waiters_arrived
@@ -386,33 +559,300 @@ CREATE INDEX IF NOT EXISTS idx_node_dispatches_lookup
     ON node_dispatches(run_id, node_id, seq DESC);
 `
 
+// schemaPostgres is derived from schemaSQLite by substituting the two
+// type names that differ. The full SQLite schema is otherwise valid
+// Postgres: partial indexes, RETURNING, ON CONFLICT, FK CASCADE,
+// composite PRIMARY KEY, and DEFAULT '<literal>' all carry over
+// unchanged. JSON-encoded columns stay as BYTEA so read paths can
+// remain dialect-agnostic; JSONB is a future optimization.
+var schemaPostgres = func() string {
+	r := strings.NewReplacer(
+		"INTEGER", "BIGINT",
+		"BLOB", "BYTEA",
+	)
+	return r.Replace(schemaSQLite)
+}()
+
+// expectedSchemaVersion is the schema version this binary understands.
+// Bumped each time a new migrateToVN step is appended below. On Open,
+// a database recording a higher version refuses; a database recording
+// a lower (or no) version is brought forward by running the missing
+// steps in order inside a single transaction (on Postgres, guarded by
+// pg_advisory_xact_lock so N runners coordinate cleanly).
+const expectedSchemaVersion = 5
+
+// ExpectedSchemaVersion returns the schema version this binary
+// understands. Useful for diagnostics, version-mismatch reporting,
+// and tests that need to assert what Open will write into the
+// sparkwing_schema_version table on a fresh database.
+func ExpectedSchemaVersion() int { return expectedSchemaVersion }
+
+// schemaVersionTable is created unconditionally on every Open before
+// the version check runs; the check needs the table to exist in order
+// to read from it. The same DDL is valid in both dialects (INTEGER +
+// BIGINT translate identically here).
+const schemaVersionTable = `CREATE TABLE IF NOT EXISTS sparkwing_schema_version (
+    version    INTEGER NOT NULL,
+    applied_at BIGINT NOT NULL,
+    PRIMARY KEY (version)
+);`
+
+// metaTableSQLite is the singleton key/value table backing throttle
+// stamps and other small operational state. Created in migration v4 so
+// existing databases gain it without a full reschema; written in SQLite
+// syntax and translated for Postgres at apply time.
+const metaTableSQLite = `CREATE TABLE IF NOT EXISTS sparkwing_meta (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);`
+
+var metaTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(metaTableSQLite)
+
+// SkewError is returned by Open when the database is at a schema
+// version newer than the binary understands. Callers can use
+// errors.As to detect the condition (e.g. for surfacing a custom
+// upgrade prompt in the CLI); the wrapped message is plain English
+// and suitable for direct display.
+type SkewError struct {
+	DBVersion     int
+	BinaryVersion int
+}
+
+func (e *SkewError) Error() string {
+	return fmt.Sprintf(
+		"sparkwing: database is at schema version %d; this binary expects %d. Upgrade sparkwing or restore the database to a matching version.",
+		e.DBVersion, e.BinaryVersion,
+	)
+}
+
+// migrate brings the database up to expectedSchemaVersion. The flow
+// is identical across dialects:
+//
+//  1. Ensure sparkwing_schema_version exists (idempotent CREATE TABLE
+//     IF NOT EXISTS).
+//  2. Read MAX(version). NULL → 0; treat a brand-new database the
+//     same as one stuck at the pre-history version 0.
+//  3. If current > expectedSchemaVersion: return SkewError. Do not
+//     touch the database.
+//  4. If current < expectedSchemaVersion: run migrateToVN(...) for
+//     each missing step in order. Each step ends by INSERTing its
+//     version row.
+//  5. If current == expectedSchemaVersion: no-op.
+//
+// On Postgres the version check and migration steps run inside one
+// transaction guarded by pg_advisory_xact_lock so concurrent opens
+// against a fresh database produce exactly one execution. SQLite
+// serializes writers at the database level; concurrent opens
+// converge via INSERT ... ON CONFLICT DO NOTHING on the version
+// row.
 func (s *Store) migrate() error {
-	if _, err := s.db.Exec(schema); err != nil {
+	ctx := context.Background()
+	if s.dialect == DialectPostgres {
+		return s.migratePostgres(ctx)
+	}
+	return retryOnBusy(func() error {
+		if _, err := s.exec(ctx, schemaVersionTable); err != nil {
+			return fmt.Errorf("create sparkwing_schema_version table: %w", err)
+		}
+		return s.migrateSQLite(ctx)
+	})
+}
+
+// retryOnBusy runs fn, retrying with a short backoff while it returns a
+// SQLite busy/locked error. The DSN's busy_timeout handles in-flight
+// contention; this covers the residual cold-start windows where the
+// lock is held across separate statements. Returns the last error if
+// every attempt is busy, or fn's first non-busy result.
+func retryOnBusy(fn func() error) error {
+	const attempts = 10
+	var err error
+	for i := range attempts {
+		err = fn()
+		if err == nil || !isBusyErr(err) {
+			return err
+		}
+		time.Sleep(time.Duration(i+1) * 50 * time.Millisecond)
+	}
+	return err
+}
+
+// isBusyErr reports whether err is a SQLite "database is locked" /
+// SQLITE_BUSY condition. modernc.org/sqlite surfaces these as a message
+// string rather than a typed sentinel, so match on the stable text.
+func isBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "sqlite_busy") ||
+		strings.Contains(msg, "database table is locked")
+}
+
+// IsProtocolErr reports whether err is a SQLite "locking protocol" /
+// SQLITE_PROTOCOL condition: the WAL shared-memory lock range is
+// saturated by another live connection. Unlike SQLITE_BUSY it is not
+// resolved by retrying -- it clears only when the conflicting process
+// releases its locks or exits -- so pollers treat it as immediately
+// terminal instead of waiting out a busy budget. Matched on the stable
+// message text for the same reason as isBusyErr.
+func IsProtocolErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "locking protocol") ||
+		strings.Contains(msg, "sqlite_protocol")
+}
+
+func (s *Store) migrateSQLite(ctx context.Context) error {
+	var current int
+	if err := s.queryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`,
+	).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if current > expectedSchemaVersion {
+		return &SkewError{DBVersion: current, BinaryVersion: expectedSchemaVersion}
+	}
+	for v := current + 1; v <= expectedSchemaVersion; v++ {
+		if err := s.applyMigrationSQLite(ctx, v); err != nil {
+			return fmt.Errorf("apply migration v%d: %w", v, err)
+		}
+		if _, err := s.exec(ctx,
+			`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)
+			 ON CONFLICT (version) DO NOTHING`,
+			v, time.Now().UnixNano()); err != nil {
+			return fmt.Errorf("record schema version v%d: %w", v, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) migratePostgres(ctx context.Context) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
 		return err
 	}
-	// SQLite lacks ADD COLUMN IF NOT EXISTS; probe table_info and add
-	// missing columns to keep laptop dev DBs moving.
-	if err := s.ensureColumns("node_steps", map[string]string{
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`); err != nil {
+		return fmt.Errorf("acquire migrate advisory lock: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, schemaVersionTable); err != nil {
+		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
+	}
+	var current int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`,
+	).Scan(&current); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if current > expectedSchemaVersion {
+		return &SkewError{DBVersion: current, BinaryVersion: expectedSchemaVersion}
+	}
+	if current == expectedSchemaVersion {
+		return tx.Commit()
+	}
+	for v := current + 1; v <= expectedSchemaVersion; v++ {
+		if err := s.applyMigrationPostgresTx(ctx, tx, v); err != nil {
+			return fmt.Errorf("apply migration v%d: %w", v, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)
+			 ON CONFLICT (version) DO NOTHING`,
+			v, time.Now().UnixNano()); err != nil {
+			return fmt.Errorf("record schema version v%d: %w", v, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.backfillRunAnnotationRollup()
+}
+
+// applyMigrationSQLite dispatches on version. Each case body is the
+// canonical SQLite-side migration step for that version; new
+// versions append a case here and bump expectedSchemaVersion.
+func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
+	switch version {
+	case 1:
+		if _, err := s.exec(ctx, schemaSQLite); err != nil {
+			return err
+		}
+		if err := s.ensureColumnsAll(); err != nil {
+			return err
+		}
+		return s.backfillRunAnnotationRollup()
+	case 2, 3:
+		return s.ensureColumnsAll()
+	case 4:
+		_, err := s.exec(ctx, metaTableSQLite)
+		return err
+	case 5:
+		return s.ensureColumnsAll()
+	default:
+		return fmt.Errorf("no migration registered for v%d", version)
+	}
+}
+
+// applyMigrationPostgresTx dispatches on version inside the open
+// migration transaction. Pairs with applyMigrationSQLite -- the same
+// version number maps to a semantically equivalent step on each
+// dialect.
+func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, version int) error {
+	switch version {
+	case 1:
+		if _, err := tx.ExecContext(ctx, schemaPostgres); err != nil {
+			return err
+		}
+		return s.ensureColumnsAllTx(ctx, tx)
+	case 2, 3:
+		return s.ensureColumnsAllTx(ctx, tx)
+	case 4:
+		_, err := tx.ExecContext(ctx, metaTablePostgres)
+		return err
+	case 5:
+		return s.ensureColumnsAllTx(ctx, tx)
+	default:
+		return fmt.Errorf("no migration registered for v%d", version)
+	}
+}
+
+// columnMigrations enumerates the additive column changes that have
+// landed since the canonical schema first shipped. Types are written
+// in SQLite syntax; the Postgres path translates them at apply time
+// via translateColumnType.
+//
+// New columns must keep the existing row default behavior compatible:
+// either NOT NULL DEFAULT <literal> or NULL-able. This list is part of
+// the schema contract; reorderings and deletions both count as
+// schema-version bumps.
+type columnSpec struct {
+	table string
+	cols  map[string]string
+}
+
+var columnMigrations = []columnSpec{
+	{"node_steps", map[string]string{
 		"annotations_json": "BLOB",
 		"summary":          "TEXT NOT NULL DEFAULT ''",
-	}); err != nil {
-		return err
-	}
-	if err := s.ensureColumns("nodes", map[string]string{
-		"ready_at":         "INTEGER",
-		"claimed_by":       "TEXT",
-		"lease_expires_at": "INTEGER",
-		"needs_labels":     "BLOB",
-		"status_detail":    "TEXT NOT NULL DEFAULT ''",
-		"last_heartbeat":   "INTEGER",
-		"failure_reason":   "TEXT NOT NULL DEFAULT ''",
-		"exit_code":        "INTEGER",
-		"annotations_json": "BLOB",
-		"summary":          "TEXT NOT NULL DEFAULT ''",
-	}); err != nil {
-		return err
-	}
-	if err := s.ensureColumns("runs", map[string]string{
+	}},
+	{"nodes", map[string]string{
+		"ready_at":          "INTEGER",
+		"claimed_by":        "TEXT",
+		"lease_expires_at":  "INTEGER",
+		"needs_labels":      "BLOB",
+		"status_detail":     "TEXT NOT NULL DEFAULT ''",
+		"last_heartbeat":    "INTEGER",
+		"failure_reason":    "TEXT NOT NULL DEFAULT ''",
+		"exit_code":         "INTEGER",
+		"annotations_json":  "BLOB",
+		"summary":           "TEXT NOT NULL DEFAULT ''",
+		"artifact_manifest": "TEXT NOT NULL DEFAULT ''",
+	}},
+	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
 		"repo":              "TEXT NOT NULL DEFAULT ''",
 		"repo_url":          "TEXT NOT NULL DEFAULT ''",
@@ -423,40 +863,18 @@ func (s *Store) migrate() error {
 		"retry_source":      "TEXT NOT NULL DEFAULT ''",
 		"replay_of_run_id":  "TEXT NOT NULL DEFAULT ''",
 		"replay_of_node_id": "TEXT NOT NULL DEFAULT ''",
-		// created_at lets pending (pre-orchestrator) runs carry a real
-		// timestamp without lying about started_at.
-		"created_at": "INTEGER NOT NULL DEFAULT 0",
-		// Receipt + cost queryable summary. Full receipt JSON is
-		// recomputed on demand from runs+nodes; only these queryable
-		// fields persist. cost_settled flips to 1 when cloud-billing
-		// reconciliation lands.
-		"receipt_sha":   "TEXT NOT NULL DEFAULT ''",
-		"cost_cents":    "INTEGER NOT NULL DEFAULT 0",
-		"cost_currency": "TEXT NOT NULL DEFAULT 'USD'",
-		"cost_settled":  "INTEGER NOT NULL DEFAULT 0",
-		// Annotation summary surfaced into list views. Bumped on each
-		// AppendNodeAnnotation / AppendStepAnnotation so the runs page
-		// can render a chip without a per-row aggregate query.
-		"annotation_count": "INTEGER NOT NULL DEFAULT 0",
-		"top_annotation":   "TEXT NOT NULL DEFAULT ''",
-		// JSON array of every annotation message on the run, in
-		// append order. Lets the dashboard show all of them in a
-		// hover tooltip without an extra per-row fetch.
-		"annotations_json": "BLOB",
-		// Invocation snapshot: a single BLOB captures the same
-		// shape that flows into run_start.attrs (binary_source, cwd,
-		// flags, args, reproducer, inputs_hash, hints, etc.) so the
-		// dashboard / runs status / runs receipt can show "how was
-		// this run started" without scanning the envelope log.
-		// Stored as a map blob rather than column-per-field so adding
-		// a new flag is a code-only change -- no migration. SQLite
-		// JSON1 (json_extract) handles the rare query case where a
-		// caller wants to filter by a specific key.
-		"invocation_json": "BLOB",
-	}); err != nil {
-		return err
-	}
-	if err := s.ensureColumns("triggers", map[string]string{
+		"created_at":        "INTEGER NOT NULL DEFAULT 0",
+		"receipt_sha":       "TEXT NOT NULL DEFAULT ''",
+		"cost_cents":        "INTEGER NOT NULL DEFAULT 0",
+		"cost_currency":     "TEXT NOT NULL DEFAULT 'USD'",
+		"cost_settled":      "INTEGER NOT NULL DEFAULT 0",
+		"annotation_count":  "INTEGER NOT NULL DEFAULT 0",
+		"top_annotation":    "TEXT NOT NULL DEFAULT ''",
+		"annotations_json":  "BLOB",
+		"invocation_json":   "BLOB",
+		"last_heartbeat_at": "INTEGER",
+	}},
+	{"triggers", map[string]string{
 		"parent_run_id":  "TEXT",
 		"repo":           "TEXT NOT NULL DEFAULT ''",
 		"repo_url":       "TEXT NOT NULL DEFAULT ''",
@@ -465,36 +883,56 @@ func (s *Store) migrate() error {
 		"retry_of":       "TEXT NOT NULL DEFAULT ''",
 		"retry_source":   "TEXT NOT NULL DEFAULT ''",
 		"parent_node_id": "TEXT NOT NULL DEFAULT ''",
-		// full=1 means "rerun all": ignore the skip-passed
-		// rehydration that Options.RetryOf would normally trigger
-		// and re-execute every node. Surfaced via the dashboard's
-		// "Rerun all" choice on the retry menu.
-		"full": "INTEGER NOT NULL DEFAULT 0",
-	}); err != nil {
-		return err
-	}
-	// concurrency_waiters gained a holder_id column after the
-	// initial landing so caller identity survives promotion. Old
-	// rows default to "" which the promotion path treats as
-	// "synthesize runID/nodeID" (the pre-fix behavior).
-	if err := s.ensureColumns("concurrency_waiters", map[string]string{
-		"holder_id": "TEXT NOT NULL DEFAULT ''",
-	}); err != nil {
-		return err
-	}
-	// Per-entry mask flag for secrets. Existing rows default to
-	// masked=1 so behavior matches the prior treat-every-entry-as-
-	// sensitive default. Newer writes can opt in to masked=0 for
-	// non-secret config values.
-	if err := s.ensureColumns("secrets", map[string]string{
+		"full":           "INTEGER NOT NULL DEFAULT 0",
+	}},
+	{"concurrency_waiters", map[string]string{
+		"holder_id":         "TEXT NOT NULL DEFAULT ''",
+		"cost":              "INTEGER NOT NULL DEFAULT 1",
+		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
+	}},
+	{"concurrency_holders", map[string]string{
+		"cost":              "INTEGER NOT NULL DEFAULT 1",
+		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
+	}},
+	{"secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",
-	}); err != nil {
-		return err
-	}
-	if err := s.backfillRunAnnotationRollup(); err != nil {
-		return err
+	}},
+}
+
+func (s *Store) ensureColumnsAll() error {
+	for _, spec := range columnMigrations {
+		if err := s.ensureColumns(spec.table, spec.cols); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (s *Store) ensureColumnsAllTx(ctx context.Context, tx *storeTx) error {
+	for _, spec := range columnMigrations {
+		for name, typ := range spec.cols {
+			stmt := fmt.Sprintf(
+				`ALTER TABLE %q ADD COLUMN IF NOT EXISTS %q %s`,
+				spec.table, name, translateColumnType(typ),
+			)
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("add column %s.%s: %w", spec.table, name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// translateColumnType rewrites a SQLite column-type fragment into its
+// Postgres equivalent. Only the two name substitutions used in the
+// canonical schema are handled; the rest of the SQL fragment
+// (NULL/NOT NULL, DEFAULT, etc.) is byte-identical between dialects.
+func translateColumnType(t string) string {
+	r := strings.NewReplacer(
+		"INTEGER", "BIGINT",
+		"BLOB", "BYTEA",
+	)
+	return r.Replace(t)
 }
 
 // backfillRunAnnotationRollup populates the runs annotation columns
@@ -504,7 +942,7 @@ func (s *Store) migrate() error {
 // the computation yields 0 for runs that genuinely have no
 // annotations, so this is a no-op the second time around.
 func (s *Store) backfillRunAnnotationRollup() error {
-	rows, err := s.db.Query(`SELECT id FROM runs WHERE annotation_count = 0`)
+	rows, err := s.queryNoCtx(`SELECT id FROM runs WHERE annotation_count = 0`)
 	if err != nil {
 		return err
 	}
@@ -512,12 +950,12 @@ func (s *Store) backfillRunAnnotationRollup() error {
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, id := range ids {
 		gathered, err := s.gatherRunAnnotations(id)
 		if err != nil {
@@ -527,7 +965,7 @@ func (s *Store) backfillRunAnnotationRollup() error {
 			continue
 		}
 		blob, _ := json.Marshal(gathered)
-		if _, err := s.db.Exec(`
+		if _, err := s.execNoCtx(`
 UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
 WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 			return err
@@ -538,10 +976,10 @@ WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 
 // gatherRunAnnotations reads every annotation across the run's nodes
 // and steps in append order. Order is by table then natural row
-// order — close to event order in practice.
+// order -- close to event order in practice.
 func (s *Store) gatherRunAnnotations(runID string) ([]string, error) {
 	var out []string
-	rows, err := s.db.Query(`
+	rows, err := s.queryNoCtx(`
 SELECT annotations_json FROM nodes WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''
 UNION ALL
 SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''`,
@@ -549,7 +987,7 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
@@ -568,7 +1006,7 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 // inside the supplied transaction. Caller is responsible for the
 // surrounding txn lifecycle so the per-node/per-step write and the
 // run-row rollup stay in sync.
-func appendRunAnnotation(tx *sql.Tx, runID, msg string) error {
+func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	var blob []byte
 	err := tx.QueryRow(`SELECT annotations_json FROM runs WHERE id = ?`, runID).Scan(&blob)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -592,7 +1030,7 @@ func appendRunAnnotation(tx *sql.Tx, runID, msg string) error {
 // Returning on the first error is safe because subsequent opens will
 // finish the job.
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
-	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
 		return err
 	}
@@ -603,25 +1041,33 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		var notnull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		have[name] = true
 	}
-	rows.Close()
+	_ = rows.Close()
 	for name, typ := range cols {
 		if have[name] {
 			continue
 		}
-		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %s %s`, table, name, typ)
-		if _, err := s.db.Exec(stmt); err != nil {
+		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, name, typ)
+		if _, err := s.execNoCtx(stmt); err != nil {
+			if isDuplicateColumnErr(err) {
+				continue
+			}
 			return fmt.Errorf("add column %s.%s: %w", table, name, err)
 		}
 	}
 	return nil
 }
 
-// --- Runs ---
+// isDuplicateColumnErr reports whether err is SQLite's "duplicate
+// column name" -- the benign outcome of two migrators racing the same
+// additive ALTER on a fresh database.
+func isDuplicateColumnErr(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
+}
 
 // Run is one row in the runs table.
 type Run struct {
@@ -671,6 +1117,11 @@ type Run struct {
 	AnnotationCount int      `json:"annotation_count,omitempty"`
 	TopAnnotation   string   `json:"top_annotation,omitempty"`
 	Annotations     []string `json:"annotations,omitempty"`
+	// LastHeartbeatAt is the most recent run-level liveness ping from
+	// the dispatching orchestrator. NULL for rows that predate the
+	// column or come from backends that don't ping it (local + S3
+	// modes use per-node heartbeats for orphan detection instead).
+	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
@@ -680,31 +1131,20 @@ type Run struct {
 // are left untouched so this stays a no-op on retry / replay paths.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	argsJSON, _ := json.Marshal(r.Args)
-	// Invocation snapshot is omitted (NULL) when nil/empty so the
-	// scanner can distinguish "no snapshot recorded" from "explicitly
-	// empty map". Existing rows from before the column landed will
-	// also read NULL.
 	var invocationJSON []byte
 	if len(r.Invocation) > 0 {
 		invocationJSON, _ = json.Marshal(r.Invocation)
 	}
-	// NULL parent so ancestor walks terminate via IS NULL.
 	var parent sql.NullString
 	if r.ParentRunID != "" {
 		parent = sql.NullString{String: r.ParentRunID, Valid: true}
 	}
 	created := r.CreatedAt
 	if created.IsZero() {
-		// Direct CreateRun (no controller pre-allocation): created_at
-		// = started_at so the column is never zero outside the migration.
 		created = r.StartedAt
 	}
-	// ON CONFLICT DO UPDATE WHERE existing.status = 'pending':
-	// the only legal transition for an existing row is the
-	// orchestrator promoting a controller-allocated pending run to
-	// running. We deliberately do NOT clobber created_at on the
-	// upsert so the trigger-intake timestamp survives.
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(
+		ctx, `
 INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
@@ -727,7 +1167,7 @@ ON CONFLICT(id) DO UPDATE SET
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json
-WHERE runs.status = 'pending'`,
+WHERE runs.status = '`+runStatusPending+`'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
@@ -739,7 +1179,7 @@ WHERE runs.status = 'pending'`,
 
 // FinishRun marks a run terminal with the given status and optional error.
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
  WHERE id = ?`,
@@ -747,15 +1187,27 @@ UPDATE runs
 	return err
 }
 
+// TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
+// dispatching orchestrator calls this on a ticker while the run is
+// active so the controller's reaper can detect a fully-orphaned run
+// (laptop closed, network gone, process killed) and flip it to
+// failed instead of leaving status='running' forever.
+func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	_, err := s.exec(ctx,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+		time.Now().UnixNano(), runID)
+	return err
+}
+
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
+	_, err := s.exec(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
 	return err
 }
 
 // SetRetriedAs stores the reverse retry pointer on runID. Idempotent.
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE runs SET retried_as = ? WHERE id = ?`, newID, runID)
 	return err
 }
@@ -777,11 +1229,10 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 	if runID == "" {
 		return nil, nil
 	}
-	// Walk up to the root.
 	const maxDepth = 256
 	rootID := runID
 	for range maxDepth {
-		row := s.db.QueryRowContext(ctx,
+		row := s.queryRow(ctx,
 			`SELECT retry_of FROM runs WHERE id = ?`, rootID)
 		var parent string
 		if err := row.Scan(&parent); err != nil {
@@ -795,7 +1246,6 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 		}
 		rootID = parent
 	}
-	// BFS down: collect every run whose retry_of chain reaches rootID.
 	collected := map[string]*Run{}
 	root, err := s.GetRun(ctx, rootID)
 	if err != nil {
@@ -809,8 +1259,8 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 	for len(frontier) > 0 {
 		next := frontier[:0:0]
 		for _, id := range frontier {
-			rows, err := s.db.QueryContext(ctx,
-				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+			rows, err := s.query(ctx,
+				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
 				   FROM runs WHERE retry_of = ?`, id)
 			if err != nil {
 				return nil, err
@@ -818,7 +1268,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 			for rows.Next() {
 				r, scanErr := scanRun(rows)
 				if scanErr != nil {
-					rows.Close()
+					_ = rows.Close()
 					return nil, scanErr
 				}
 				if _, dup := collected[r.ID]; dup {
@@ -827,7 +1277,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 				collected[r.ID] = r
 				next = append(next, r.ID)
 			}
-			rows.Close()
+			_ = rows.Close()
 		}
 		frontier = next
 	}
@@ -843,8 +1293,8 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
-	row := s.db.QueryRowContext(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+	row := s.queryRow(ctx, `
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -904,16 +1354,16 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*Run
 	for rows.Next() {
@@ -943,16 +1393,15 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		where += " AND status IN (" + strings.Join(ph, ",") + ")"
 	}
 	if maxAge > 0 {
-		// COALESCE so in-flight rows don't slip past the bound.
 		where += " AND COALESCE(finished_at, started_at) >= ?"
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
-	return scanRun(s.db.QueryRowContext(ctx, q, args...))
+	return scanRun(s.queryRow(ctx, q, args...))
 }
 
 // DeleteRun removes the run + its trigger; CASCADE handles children.
@@ -966,7 +1415,7 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 // the trigger row in that case (orphaned: child run is gone, edge
 // remains visible) so parent DAGs stay stable.
 func (s *Store) DeleteRun(ctx context.Context, runID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -984,10 +1433,10 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 // PruneRunsOlderThan deletes terminal runs older than cutoff and
 // returns their ids so callers can purge log files / cache blobs.
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.query(ctx,
 		`SELECT id FROM runs
 		   WHERE started_at < ?
-		     AND status IN ('success','failed','cancelled')`,
+		     AND `+runTerminalIn,
 		cutoff.UnixNano())
 	if err != nil {
 		return nil, err
@@ -996,12 +1445,12 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, id := range ids {
 		if err := s.DeleteRun(ctx, id); err != nil {
 			return ids, err
@@ -1018,7 +1467,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
-	var finishedNS sql.NullInt64
+	var finishedNS, heartbeatNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
@@ -1026,7 +1475,8 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
-		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON)
+		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
+		&heartbeatNS)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -1040,6 +1490,10 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t
+	}
+	if heartbeatNS.Valid {
+		t := time.Unix(0, heartbeatNS.Int64)
+		r.LastHeartbeatAt = &t
 	}
 	if parent.Valid {
 		r.ParentRunID = parent.String
@@ -1056,8 +1510,6 @@ func scanRun(rs rowScanner) (*Run, error) {
 	r.PlanSnapshot = planJSON
 	return &r, nil
 }
-
-// --- Nodes ---
 
 // Node is one row in the nodes table.
 type Node struct {
@@ -1101,6 +1553,14 @@ type Node struct {
 	// when no node-scoped summary was emitted; step-scoped summaries
 	// live on NodeStep.Summary instead.
 	Summary string `json:"summary,omitempty"`
+
+	// ArtifactManifest is the content-addressed digest of the manifest
+	// describing the files this node published as artifacts (see
+	// JobNode.Outputs). Empty when the node declared no outputs or no
+	// artifact store was configured. A cache replay copies this digest
+	// onto the replayed node so the producer's file set reproduces
+	// without re-running it.
+	ArtifactManifest string `json:"artifact_manifest,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -1110,7 +1570,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if len(n.NeedsLabels) > 0 {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels)
 VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
 	return err
@@ -1118,15 +1578,15 @@ VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
 
 // StartNode marks a node as running.
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
-	_, err := s.db.ExecContext(ctx, `
-UPDATE nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), runID, nodeID)
+	_, err := s.exec(ctx, `
+UPDATE nodes SET status = ?, started_at = ? WHERE run_id = ? AND node_id = ?`,
+		nodeStatusRunning, time.Now().UnixNano(), runID, nodeID)
 	return err
 }
 
 // SetNodeStatus updates only the status column.
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`,
 		status, runID, nodeID)
 	return err
@@ -1135,7 +1595,7 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 // UpdateNodeDeps rewrites a node's stored dependency list.
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	depsJSON, _ := json.Marshal(deps)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET deps_json = ? WHERE run_id = ? AND node_id = ?`,
 		depsJSON, runID, nodeID)
 	return err
@@ -1152,30 +1612,41 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	if exitCode != nil {
 		code = *exitCode
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = ?, error = ?, output_json = ?, finished_at = ?,
+   SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?,
        failure_reason = ?, exit_code = ?
  WHERE run_id = ? AND node_id = ?`,
-		outcome, errMsg, output, time.Now().UnixNano(),
+		nodeStatusDone, outcome, errMsg, output, time.Now().UnixNano(),
 		reason, code,
 		runID, nodeID)
 	return err
 }
 
+// SetNodeArtifactManifest records the content-addressed digest of a
+// node's published-artifact manifest. Written before the terminal
+// FinishNode flip so a consumer dispatched on completion always sees
+// the reference. Empty digest is a no-op-equivalent clear.
+func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	_, err := s.exec(ctx,
+		`UPDATE nodes SET artifact_manifest = ? WHERE run_id = ? AND node_id = ?`,
+		manifestDigest, runID, nodeID)
+	return err
+}
+
 // ListNodes returns the nodes for a run in insertion order.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest
   FROM nodes
  WHERE run_id = ?
- ORDER BY rowid`, runID)
+ ORDER BY `+s.insertionOrderColumn(), runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Node
 	for rows.Next() {
 		n := &Node{}
@@ -1189,10 +1660,10 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 // GetNode fetches a single node row; ErrNotFound when missing.
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -1212,7 +1683,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
 		&n.StatusDetail, &heartbeatNS,
-		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary)
+		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -1261,11 +1732,11 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 // annotations list. Implemented as read-modify-write inside a single
 // transaction so concurrent appenders don't lose entries.
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var current []byte
 	row := tx.QueryRowContext(ctx,
 		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`,
@@ -1308,7 +1779,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 // ErrNotFound if the node row doesn't exist. Driven by
 // sparkwing.Summary() emitted outside any step body.
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`UPDATE nodes SET summary = ? WHERE run_id = ? AND node_id = ?`,
 		md, runID, nodeID)
 	if err != nil {
@@ -1356,7 +1827,7 @@ type NodeStep struct {
 // step) is a no-op, leaving the original started_at intact so a
 // retry doesn't reset the clock.
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status, started_at)
 VALUES (?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
@@ -1370,7 +1841,7 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 // lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	now := time.Now().UnixNano()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
 VALUES (?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
@@ -1385,7 +1856,7 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // without special-casing nulls in the wire-shape serializer.
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	now := time.Now().UnixNano()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
 VALUES (?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
@@ -1399,7 +1870,7 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 // nodes. Returned in (node_id, started_at) order so callers can
 // stream-bucket by node without a second sort.
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
 FROM node_steps
 WHERE run_id = ?
@@ -1407,7 +1878,7 @@ ORDER BY node_id, started_at`, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*NodeStep
 	for rows.Next() {
 		ns := &NodeStep{RunID: runID}
@@ -1438,11 +1909,11 @@ ORDER BY node_id, started_at`, runID)
 // rare reorder case). Read-modify-write inside one txn to keep
 // concurrent appenders from losing entries.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
 VALUES (?,?,?,?)
@@ -1496,11 +1967,11 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 // pattern AppendStepAnnotation uses. Driven by sparkwing.Summary()
 // emitted inside a step body.
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
 VALUES (?,?,?,?)
@@ -1519,7 +1990,8 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 
 // MarkNodeReady stamps ready_at if unset. Idempotent.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(
+		ctx,
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?)
 		  WHERE run_id = ? AND node_id = ?`,
 		time.Now().UnixNano(), runID, nodeID,
@@ -1540,10 +2012,11 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 // RevokeNodeReady clears ready_at when unclaimed. Returns false when
 // a pod already claimed the node.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(
+		ctx,
 		`UPDATE nodes SET ready_at = NULL
 		  WHERE run_id = ? AND node_id = ?
-		    AND claimed_by IS NULL AND status != 'done'`,
+		    AND claimed_by IS NULL AND `+nodeNotDone,
 		runID, nodeID,
 	)
 	if err != nil {
@@ -1574,7 +2047,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 
 	const maxCandidates = 64
 	for range maxCandidates {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := s.beginTx(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1582,11 +2055,11 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 		err = scanNodeRow(tx.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest
   FROM nodes
- WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done'
+ WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
  ORDER BY ready_at ASC
- LIMIT 1`), n)
+ LIMIT 1`+s.forUpdateSkipLocked()), n)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -1598,7 +2071,8 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 				cand := n.ReadyAt.UnixNano() + int64(time.Microsecond)
 				bump = max(bump, cand)
 			}
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.ExecContext(
+				ctx,
 				`UPDATE nodes SET ready_at = ?
 				  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
 				bump, n.RunID, n.NodeID,
@@ -1614,7 +2088,8 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 		now := time.Now()
 		expires := now.Add(lease)
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`UPDATE nodes SET claimed_by = ?, lease_expires_at = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
 			holderID, expires.UnixNano(), n.RunID, n.NodeID,
@@ -1669,7 +2144,7 @@ func labelTermSatisfied(term string, have map[string]struct{}) bool {
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
 		  WHERE run_id = ? AND node_id = ?`,
 		detail, time.Now().UnixNano(), runID, nodeID)
@@ -1678,7 +2153,7 @@ func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail st
 
 // TouchNodeHeartbeat stamps last_heartbeat=now.
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.exec(ctx,
 		`UPDATE nodes SET last_heartbeat = ? WHERE run_id = ? AND node_id = ?`,
 		time.Now().UnixNano(), runID, nodeID)
 	return err
@@ -1691,7 +2166,8 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 		lease = DefaultLeaseDuration
 	}
 	expires := time.Now().Add(lease).UnixNano()
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(
+		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?`,
 		expires, runID, nodeID, holderID,
@@ -1713,16 +2189,16 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 // claims; ready_at is left intact. Returns reaped pairs.
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
 	now := time.Now().UnixNano()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`,
+		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -1731,12 +2207,12 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	for rows.Next() {
 		var rid, nid string
 		if err := rows.Scan(&rid, &nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1746,7 +2222,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`,
+		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
 		return nil, err
 	}
@@ -1756,19 +2232,19 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	return pairs, nil
 }
 
-// FailExpiredNodeClaims terminates expired claims with FailureAgentLost.
-func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
+// failExpiredNodeClaims terminates expired claims with FailureAgentLost.
+func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
 	now := time.Now().UnixNano()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND status != 'done'`,
+		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -1777,12 +2253,12 @@ func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	for rows.Next() {
 		var rid, nid string
 		if err := rows.Scan(&rid, &nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1792,11 +2268,11 @@ func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	for _, p := range pairs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = 'failed',
+   SET `+nodeFailSet+`,
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
        claimed_by = NULL, lease_expires_at = NULL
- WHERE run_id = ? AND node_id = ? AND status != 'done'`,
+ WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err
 		}
@@ -1807,17 +2283,17 @@ UPDATE nodes
 	return pairs, nil
 }
 
-// FailNodesInRun marks every non-terminal node in runID as failed.
+// failNodesInRun marks every non-terminal node in runID as failed.
 // Used by the reaper to avoid zombie nodes when a worker lease expires.
-func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT node_id FROM nodes WHERE run_id = ? AND status != 'done'`, runID)
+		`SELECT node_id FROM nodes WHERE run_id = ? AND `+nodeNotDone, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -1825,12 +2301,12 @@ func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason
 	for rows.Next() {
 		var nid string
 		if err := rows.Scan(&nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		nodeIDs = append(nodeIDs, nid)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1841,10 +2317,10 @@ func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason
 	for _, nid := range nodeIDs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = 'failed',
+   SET `+nodeFailSet+`,
        error = ?, failure_reason = ?, finished_at = ?,
        ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND status != 'done'`,
+ WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			errMsg, failureReason, now, runID, nid); err != nil {
 			return nil, err
 		}
@@ -1855,23 +2331,23 @@ UPDATE nodes
 	return nodeIDs, nil
 }
 
-// FailStaleQueuedNodes terminates unclaimed nodes whose ready_at is
+// failStaleQueuedNodes terminates unclaimed nodes whose ready_at is
 // older than olderThan with FailureQueueTimeout.
-func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error) {
+func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error) {
 	if olderThan <= 0 {
 		return nil, nil
 	}
 	threshold := time.Now().Add(-olderThan).UnixNano()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
 		  WHERE ready_at IS NOT NULL AND claimed_by IS NULL
-		    AND ready_at < ? AND status != 'done'`,
+		    AND ready_at < ? AND `+nodeNotDone,
 		threshold)
 	if err != nil {
 		return nil, err
@@ -1880,12 +2356,12 @@ func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	for rows.Next() {
 		var rid, nid string
 		if err := rows.Scan(&rid, &nid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -1896,11 +2372,11 @@ func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	for _, p := range pairs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET status = 'done', outcome = 'failed',
+   SET `+nodeFailSet+`,
        error = 'no runner claimed this node before the queue deadline',
        failure_reason = ?, finished_at = ?,
        ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND status != 'done'`,
+ WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
 			FailureQueueTimeout, now, p[0], p[1]); err != nil {
 			return nil, err
 		}
@@ -1910,8 +2386,6 @@ UPDATE nodes
 	}
 	return pairs, nil
 }
-
-// --- Events ---
 
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
@@ -1929,7 +2403,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int6
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, seq, node_id, kind, ts, payload
   FROM events
  WHERE run_id = ? AND seq > ?
@@ -1938,7 +2412,7 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Event
 	for rows.Next() {
 		var e Event
@@ -1949,14 +2423,6 @@ SELECT run_id, seq, node_id, kind, ts, payload
 		}
 		e.TS = time.Unix(0, tsNanos)
 		if len(payload) > 0 {
-			// Several AppendEvent callsites write plain strings (error
-			// reason text, "upstream-failed" markers) rather than JSON
-			// objects. json.RawMessage refuses to marshal anything that
-			// isn't valid JSON, so leaving the raw bytes in place would
-			// break the entire response any time one of those events is
-			// included. Wrap unparseable payloads as JSON strings so
-			// readers get the original text and the list response can
-			// always be encoded cleanly.
 			if json.Valid(payload) {
 				e.Payload = json.RawMessage(payload)
 			} else {
@@ -1971,11 +2437,11 @@ SELECT run_id, seq, node_id, kind, ts, payload
 
 // AppendEvent writes an ordered event; returns the assigned seq.
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var seq int64
 	err = tx.QueryRowContext(ctx,
@@ -1998,8 +2464,6 @@ VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, time.Now().UnixNano(), payload)
 
 // ErrNotFound is returned when a lookup misses.
 var ErrNotFound = errors.New("not found")
-
-// --- Debug pauses ---
 
 // Pause reasons; exported wire values.
 const (
@@ -2028,7 +2492,7 @@ type DebugPause struct {
 
 // CreateDebugPause inserts (or upserts) an open pause row.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, `
 INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at)
 VALUES (?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
@@ -2044,7 +2508,7 @@ ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
 
 // GetActiveDebugPause returns the open pause for a node, if any.
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
  WHERE run_id = ? AND node_id = ? AND released_at IS NULL
@@ -2055,7 +2519,7 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 
 // ListDebugPauses returns all pause rows for a run, newest first.
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by, release_kind
   FROM debug_pauses
  WHERE run_id = ?
@@ -2063,7 +2527,7 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*DebugPause
 	for rows.Next() {
 		p, err := scanDebugPause(rows)
@@ -2077,7 +2541,7 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 
 // ReleaseDebugPause closes the open pause; ErrNotFound when none.
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, `
 UPDATE debug_pauses
    SET released_at = ?, released_by = ?, release_kind = ?
  WHERE run_id = ? AND node_id = ? AND released_at IS NULL`,
@@ -2115,8 +2579,6 @@ func scanDebugPause(rs rowScanner) (*DebugPause, error) {
 	}
 	return &p, nil
 }
-
-// --- Triggers ---
 
 // Trigger is one row in the triggers table; ID becomes the run ID.
 type Trigger struct {
@@ -2164,7 +2626,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status
 	if status == "" {
-		status = "pending"
+		status = triggerStatusPending
 	}
 	var parent sql.NullString
 	if t.ParentRunID != "" {
@@ -2174,10 +2636,11 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if t.Full {
 		fullInt = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(
+		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full)
+                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full")
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
@@ -2203,7 +2666,7 @@ type SpawnedChild struct {
 // + pipeline so the caller can attribute the spawn back to its node.
 // Ordered by parent_node_id, created_at so callers can stream-bucket.
 func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT parent_node_id, pipeline, id
 FROM triggers
 WHERE parent_run_id = ? AND parent_node_id != ''
@@ -2211,7 +2674,7 @@ ORDER BY parent_node_id, created_at`, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SpawnedChild
 	for rows.Next() {
 		var c SpawnedChild
@@ -2233,11 +2696,12 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 	}
 	var out []string
 	cur := runID
-	const maxDepth = 64 // generous; real chains are <=5 in practice
+	const maxDepth = 64
 	for range maxDepth {
 		var parent sql.NullString
 		var pipeline string
-		err := s.db.QueryRowContext(ctx,
+		err := s.queryRow(
+			ctx,
 			`SELECT pipeline, parent_run_id FROM runs WHERE id = ?`, cur,
 		).Scan(&pipeline, &parent)
 		if err != nil {
@@ -2246,7 +2710,6 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 			}
 			return nil, err
 		}
-		// Skip the seed; callers want only ancestors.
 		if cur != runID {
 			out = append(out, pipeline)
 		}
@@ -2255,7 +2718,6 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 		}
 		cur = parent.String
 	}
-	// Max depth: data is cyclic; partial result still detects cycles.
 	return out, nil
 }
 
@@ -2266,23 +2728,23 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 }
 
 // ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics).
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines []string, sources []string) (*Trigger, error) {
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers
- WHERE status = 'pending'`
-	args := []any{}
+ WHERE status = ?`
+	args := []any{triggerStatusPending}
 	if len(pipelines) > 0 {
 		ph := make([]string, len(pipelines))
 		for i, p := range pipelines {
@@ -2301,7 +2763,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	}
 	sel += `
  ORDER BY created_at ASC
- LIMIT 1`
+ LIMIT 1` + s.forUpdateSkipLocked()
 
 	var t Trigger
 	var argsJSON, envJSON []byte
@@ -2311,7 +2773,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	err = tx.QueryRowContext(ctx, sel, args...).Scan(
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt)
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+	)
 	if parent.Valid {
 		t.ParentRunID = parent.String
 	}
@@ -2325,9 +2788,10 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 
 	now := time.Now()
 	expires := now.Add(lease)
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET status = 'claimed', claimed_at = ?, lease_expires_at = ? WHERE id = ?`,
-		now.UnixNano(), expires.UnixNano(), t.ID,
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ? WHERE id = ?`,
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), t.ID,
 	); err != nil {
 		return nil, err
 	}
@@ -2335,7 +2799,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		return nil, err
 	}
 
-	t.Status = "claimed"
+	t.Status = triggerStatusClaimed
 	t.CreatedAt = time.Unix(0, createdNS)
 	t.ClaimedAt = &now
 	t.LeaseExpiresAt = &expires
@@ -2356,17 +2820,17 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	}
 	expires := time.Now().Add(lease).UnixNano()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers
 		    SET lease_expires_at = ?
-		  WHERE id = ? AND status = 'claimed'`,
-		expires, id)
+		  WHERE id = ? AND status = ?`,
+		expires, id, triggerStatusClaimed)
 	if err != nil {
 		return false, err
 	}
@@ -2379,7 +2843,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	}
 
 	var cancelNS sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT cancel_requested_at FROM triggers WHERE id = ?`, id,
 	).Scan(&cancelNS); err != nil {
 		return false, err
@@ -2393,7 +2858,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 // RequestCancel flags a trigger for cancellation; idempotent.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
 	now := time.Now().UnixNano()
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`UPDATE triggers
 		    SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
 		  WHERE id = ?`,
@@ -2411,22 +2876,22 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 	return nil
 }
 
-// ReapExpiredTriggers flips lease-expired claimed triggers back to
+// reapExpiredTriggers flips lease-expired claimed triggers back to
 // pending. Returns reaped IDs; matching runs are caller-reconciled.
-func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
+func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	now := time.Now().UnixNano()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM triggers
-		  WHERE status = 'claimed' AND lease_expires_at IS NOT NULL
+		  WHERE status = ? AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ?`,
-		now)
+		triggerStatusClaimed, now)
 	if err != nil {
 		return nil, err
 	}
@@ -2434,12 +2899,12 @@ func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -2449,12 +2914,12 @@ func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE triggers
-		    SET status = 'pending',
+		    SET status = ?,
 		        claimed_at = NULL,
 		        lease_expires_at = NULL
-		  WHERE status = 'claimed' AND lease_expires_at IS NOT NULL
+		  WHERE status = ? AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ?`,
-		now); err != nil {
+		triggerStatusPending, triggerStatusClaimed, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2465,9 +2930,304 @@ func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error) {
 
 // FinishTrigger marks a trigger 'done'; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE triggers SET status = 'done', lease_expires_at = NULL WHERE id = ?`, id)
+	_, err := s.exec(ctx,
+		`UPDATE triggers SET status = ?, lease_expires_at = NULL WHERE id = ?`,
+		triggerStatusDone, id)
 	return err
+}
+
+// reapTimedOutApprovals resolves approvals whose timeout window has
+// elapsed without any human (or live orchestrator) acting first.
+// Writes ApprovalResolutionTimedOut + a sentinel approver so a
+// re-attached orchestrator can map the resolution to its
+// author-configured on_timeout policy via the usual code path. Idle
+// approver string ("controller-reaper") distinguishes
+// controller-initiated timeouts from orchestrator-initiated ones
+// ("sparkwing") in audit logs.
+//
+// Returns (run_id, node_id) pairs for the approvals that were
+// reaped. The caller logs them; no further cleanup is needed at the
+// store layer.
+//
+// Notes for future work: this only resolves the APPROVAL state. If
+// the dispatching orchestrator process is fully dead, the run row
+// will still sit at status='running' because no one drives the
+// downstream node dispatch. A run-level heartbeat reaper would
+// catch that case separately.
+func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
+	now := time.Now()
+	nowNS := now.UnixNano()
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT run_id, node_id FROM approvals
+		WHERE resolved_at IS NULL
+		  AND timeout_ms > 0
+		  AND requested_at + (timeout_ms * 1000000) < ?
+	`, nowNS)
+	if err != nil {
+		return nil, err
+	}
+	var pairs [][2]string
+	for rows.Next() {
+		var rid, nid string
+		if err := rows.Scan(&rid, &nid); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		pairs = append(pairs, [2]string{rid, nid})
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+
+	for _, p := range pairs {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE approvals
+			   SET resolved_at = ?,
+			       resolution  = ?,
+			       approver    = ?,
+			       comment     = ?
+			 WHERE run_id = ? AND node_id = ?
+			   AND resolved_at IS NULL
+		`,
+			nowNS,
+			ApprovalResolutionTimedOut,
+			"controller-reaper",
+			"timeout enforced by controller (orchestrator silent past timeout_ms)",
+			p[0], p[1],
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return pairs, nil
+}
+
+// reapStalePendingRuns marks runs failed whose trigger has already
+// transitioned to 'done' (terminal) but whose run row never moved
+// past 'pending'. This catches the gap a trigger consumer can leave
+// behind when it FinishTriggers a claim but crashes / errors before
+// (or instead of) calling FinishRun -- e.g. an older runner image
+// whose source-fetch path doesn't propagate failure to the run row,
+// or any future bug along that boundary. The threshold grace lets
+// the normal pending -> running transition complete without a race
+// against this sweep.
+//
+// Returns the run IDs that were reaped. Each reaped run gets
+// error="..." set to the supplied reason so operators see why it
+// flipped rather than a bare "failed" with no context.
+func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
+	cutoff := time.Now().Add(-grace).UnixNano()
+	now := time.Now().UnixNano()
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id FROM runs r
+		WHERE r.status = ?
+		  AND r.started_at > 0
+		  AND r.started_at < ?
+		  AND EXISTS (
+		      SELECT 1 FROM triggers t
+		       WHERE t.id = r.id AND t.status = ?
+		  )
+	`, runStatusPending, cutoff, triggerStatusDone)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE runs SET status = ?, error = ?, finished_at = ?
+			  WHERE id = ? AND status = ?`,
+			runStatusFailed, reason, now, id, runStatusPending); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// reapStaleRunningRuns marks runs failed whose last_heartbeat_at is
+// older than grace. Catches fully-orphaned dispatching orchestrators
+// in Mode 4 (hosted controller): the laptop died between node
+// dispatches with no active claim to expire via the node-claim
+// reaper. Rows with NULL last_heartbeat_at are ignored -- those
+// predate the column or come from a backend whose TouchRunHeartbeat is
+// a no-op (S3 mode, which reconciles orphans via per-node heartbeats
+// elsewhere). Each reaped run also has its non-done
+// nodes cascade-failed: running -> failed, pending -> cancelled, both
+// with failure_reason='orphaned', matching the local orphan
+// reconciler so downstream readers don't have to special-case the
+// controller-side sweep.
+func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
+	cutoff := time.Now().Add(-grace).UnixNano()
+	now := time.Now().UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT id FROM runs
+ WHERE status = ?
+   AND last_heartbeat_at IS NOT NULL
+   AND last_heartbeat_at < ?`, runStatusRunning, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range ids {
+		if err := s.cascadeOrphanedNodes(ctx, id, reason, now); err != nil {
+			return nil, err
+		}
+		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
+}
+
+// cascadeOrphanedNodes fails the running nodes and cancels the pending
+// nodes of an orphaned run -- the single definition of the orphan
+// cascade, shared by the controller-side stale-run reaper and the local
+// reconciler so the two sweeps cannot drift apart.
+func (s *Store) cascadeOrphanedNodes(ctx context.Context, runID, errMsg string, nowNS int64) error {
+	if _, err := s.exec(ctx, `
+UPDATE nodes
+   SET `+nodeFailSet+`,
+       error          = ?,
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = ?`,
+		errMsg, nowNS, runID, nodeStatusRunning); err != nil {
+		return err
+	}
+	_, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = ?,
+       outcome        = 'cancelled',
+       error          = 'orphaned: orchestrator process exited before this node ran',
+       failure_reason = 'orphaned',
+       finished_at    = ?
+ WHERE run_id = ? AND status = ?`,
+		nodeStatusDone, nowNS, runID, nodeStatusPending)
+	return err
+}
+
+// reconcileOrphanedLocalRuns sweeps 'running' runs whose latest
+// liveness signal -- the newest of any node heartbeat, the run-level
+// orchestrator heartbeat, and the run's start time -- is older than
+// threshold, and transitions them, and their nodes, to terminal states
+// via the shared orphan cascade. Folding in the run-level heartbeat
+// keeps a run that is alive but between node dispatches (the
+// orchestrator keeps stamping last_heartbeat_at even when no node is
+// executing, e.g. while parked waiting on a plan-level concurrency
+// slot before its first node runs) from being reaped while it is
+// demonstrably still pinging; start time remains the backstop for a
+// run that predates the column or never heartbeated at all. Cheap
+// enough to run lazily on every status / list read: it only scans
+// status='running' rows over indexes already in place. Returns the
+// count reconciled.
+func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	cutoff := time.Now().Add(-threshold).UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT r.id
+  FROM runs r
+ WHERE r.status = ?
+   AND r.started_at < ?
+   AND max(
+         COALESCE((SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id), 0),
+         COALESCE(r.last_heartbeat_at, 0),
+         r.started_at
+       ) < ?`,
+		runStatusRunning, cutoff, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	var orphanIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		orphanIDs = append(orphanIDs, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	for _, id := range orphanIDs {
+		now := time.Now().UnixNano()
+		errMsg := fmt.Sprintf("orphaned: no heartbeat for >%s; orchestrator process is no longer running", threshold)
+		if err := s.cascadeOrphanedNodes(ctx, id, errMsg, now); err != nil {
+			return 0, err
+		}
+		if err := s.FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
+			return 0, err
+		}
+	}
+
+	if _, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = ?,
+       outcome        = 'cancelled',
+       error          = COALESCE(NULLIF(error, ''), 'orphaned: run terminated before this node ran'),
+       failure_reason = COALESCE(NULLIF(failure_reason, ''), 'orphaned'),
+       finished_at    = ?
+ WHERE status = ?
+   AND run_id IN (SELECT id FROM runs WHERE `+runTerminalIn+`)`,
+		nodeStatusDone, time.Now().UnixNano(), nodeStatusPending); err != nil {
+		return len(orphanIDs), err
+	}
+
+	return len(orphanIDs), nil
 }
 
 // ListPendingTriggersForParent returns every pending trigger whose
@@ -2476,14 +3236,14 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 // that started it -- without the filter, two parallel local runs
 // would steal each other's children. Empty list when no candidates.
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT id FROM triggers
- WHERE status = 'pending' AND parent_run_id = ?
- ORDER BY created_at ASC`, parentRunID)
+ WHERE status = ? AND parent_run_id = ?
+ ORDER BY created_at ASC`, triggerStatusPending, parentRunID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -2501,18 +3261,18 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now()
 	expires := now.Add(lease)
 	res, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET status = 'claimed', claimed_at = ?, lease_expires_at = ?
-		  WHERE id = ? AND status = 'pending'`,
-		now.UnixNano(), expires.UnixNano(), id)
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?
+		  WHERE id = ? AND status = ?`,
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), id, triggerStatusPending)
 	if err != nil {
 		return nil, err
 	}
@@ -2529,10 +3289,11 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	var createdNS int64
 	var parent sql.NullString
 	var fullInt int
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(
+		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
@@ -2566,10 +3327,11 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
 	var fullInt int
-	err := s.db.QueryRowContext(ctx, `
+	err := s.queryRow(
+		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, "full"
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
@@ -2609,7 +3371,8 @@ func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, pare
 		return "", nil
 	}
 	var id string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.queryRow(
+		ctx, `
 SELECT id FROM triggers
  WHERE parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
  ORDER BY created_at DESC
@@ -2665,17 +3428,16 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, full
+       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
-	// Repo filter is client-side; trigger_env is an unindexed JSON blob.
 	var out []*Trigger
 	for rows.Next() {
 		var t Trigger
@@ -2722,15 +3484,14 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	return out, nil
 }
 
-// --- Locks ---
-
-// ErrLockHeld: caller is not the current slot holder. HTTP -> 409.
+// ErrLockHeld signals the caller is not the current slot holder. HTTP -> 409.
 var ErrLockHeld = errors.New("held by another holder")
 
 // CountPendingNodes returns the count of unclaimed ready nodes.
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	err := s.queryRow(
+		ctx,
 		`SELECT COUNT(*) FROM nodes
 		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')`,
 	).Scan(&n)
@@ -2741,7 +3502,8 @@ func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error) {
 	threshold := time.Now().Add(-window).UnixNano()
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	err := s.queryRow(
+		ctx,
 		`SELECT COUNT(DISTINCT claimed_by) FROM nodes
 		  WHERE claimed_by IS NOT NULL AND claimed_by != ''
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?`,
@@ -2749,8 +3511,6 @@ func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (i
 	).Scan(&n)
 	return n, err
 }
-
-// --- Approvals (approval-gate primitive) ---
 
 // NodeStatusApprovalPending = nodes.status while waiting on a human.
 const NodeStatusApprovalPending = "approval_pending"
@@ -2791,11 +3551,11 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 	if a.OnTimeout == "" {
 		a.OnTimeout = ApprovalOnTimeoutFail
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO approvals (run_id, node_id, requested_at, message, timeout_ms, on_timeout)
 VALUES (?,?,?,?,?,?)
@@ -2822,7 +3582,7 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
 
 // GetApproval returns the row, or ErrNotFound.
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.queryRow(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE run_id = ? AND node_id = ?`, runID, nodeID)
@@ -2832,15 +3592,16 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 // ResolveApproval stamps resolution on a pending row.
 // ErrNotFound when missing; ErrLockHeld when already resolved.
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var pkRun, pkNode string
 	var resolvedNS sql.NullInt64
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(
+		ctx,
 		`SELECT run_id, node_id, resolved_at FROM approvals
 		  WHERE run_id = ? AND node_id = ?`, runID, nodeID,
 	).Scan(&pkRun, &pkNode, &resolvedNS)
@@ -2870,7 +3631,7 @@ UPDATE approvals
 
 // ListApprovalsForRun returns all rows in request order.
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE run_id = ?
@@ -2878,7 +3639,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Approval
 	for rows.Next() {
 		a, err := scanApproval(rows)
@@ -2892,7 +3653,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 
 // ListPendingApprovals returns unresolved approvals oldest-first.
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE resolved_at IS NULL
@@ -2900,7 +3661,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*Approval
 	for rows.Next() {
 		a, err := scanApproval(rows)

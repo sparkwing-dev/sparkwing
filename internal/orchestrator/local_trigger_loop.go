@@ -21,10 +21,17 @@ import (
 
 // runLocalTriggerLoop polls for pending child triggers and dispatches
 // each. Compile cache is shared across triggers in the loop lifetime.
-func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, logger *slog.Logger) {
+// profileName, when non-empty, is forwarded to each child as
+// --profile <name> so the child opens the same backends as the parent
+// -- critical when the parent is on postgres or another non-local
+// state, since the child handler defaults to sqlite otherwise. The
+// caller resolves (and error-checks) wedgeBudget before spawning the
+// loop.
+func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName string, logger *slog.Logger, wedgeBudget time.Duration) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	wedge := newStoreWedgeGuard(wedgeBudget)
 	cache := &localCompileCache{}
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -42,12 +49,19 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, log
 		trig, err := claimChildTrigger(ctx, st, runID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
+				wedge.success()
 				continue
+			}
+			if terminal := wedge.fail("local trigger loop: claim trigger", err); terminal != nil {
+				logger.Error("local trigger loop stopping; store wedged",
+					"parent_run_id", runID, "err", terminal)
+				return
 			}
 			logger.Warn("local trigger loop: claim failed",
 				"parent_run_id", runID, "err", err)
 			continue
 		}
+		wedge.success()
 		if trig == nil {
 			continue
 		}
@@ -55,10 +69,9 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, log
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, profileName, cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
-				// Mark run failed so the parent's awaiter stops polling.
 				_ = st.CreateRun(ctx, store.Run{
 					ID:        t.ID,
 					Pipeline:  t.Pipeline,
@@ -80,11 +93,26 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID string, log
 //
 // The compile cache is shared across the consumer's lifetime so
 // back-to-back triggers against the same .sparkwing/ skip the rebuild.
-// Returns when ctx is cancelled; in-flight dispatches finish first.
-func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.Logger) {
+// An unparseable [StoreWedgeBudgetEnvVar] is a startup error so the
+// misconfiguration fails the caller instead of silently leaving
+// queued triggers unconsumed; on success the consumer runs in its own
+// goroutine until ctx cancels, letting in-flight dispatches finish
+// first.
+func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	wedge, err := newStoreWedgeGuardFromEnv()
+	if err != nil {
+		return fmt.Errorf("local trigger consumer: %w", err)
+	}
+	go consumeLocalTriggers(ctx, st, logger, wedge)
+	return nil
+}
+
+// consumeLocalTriggers is RunLocalTriggerConsumer's claim/dispatch
+// loop, split out so validation happens synchronously at startup.
+func consumeLocalTriggers(ctx context.Context, st *store.Store, logger *slog.Logger, wedge *storeWedgeGuard) {
 	cache := &localCompileCache{}
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -102,11 +130,17 @@ func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.
 		trig, err := st.ClaimNextTrigger(ctx, store.DefaultLeaseDuration)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
+				wedge.success()
 				continue
+			}
+			if terminal := wedge.fail("local trigger consumer: claim trigger", err); terminal != nil {
+				logger.Error("local trigger consumer stopping; store wedged", "err", terminal)
+				return
 			}
 			logger.Warn("local trigger consumer: claim failed", "err", err)
 			continue
 		}
+		wedge.success()
 		if trig == nil {
 			continue
 		}
@@ -114,7 +148,7 @@ func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, "", cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				_ = st.CreateRun(ctx, store.Run{
@@ -139,7 +173,6 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 		return nil, err
 	}
 	for _, id := range candidates {
-		// ErrNotFound = race lost; try next.
 		t, err := st.ClaimSpecificTrigger(ctx, id, store.DefaultLeaseDuration)
 		if err == nil {
 			return t, nil
@@ -153,19 +186,19 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 }
 
 // dispatchLocalTrigger compiles and execs a claimed trigger. The
-// child handles FinishTrigger/FinishRun.
+// child handles FinishTrigger/FinishRun. profileName, when non-empty,
+// is forwarded as --profile <name> so the child opens the same
+// backends as the parent (matters for postgres/non-local state).
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
-	cache *localCompileCache, logger *slog.Logger) error {
-
-	// Repo resolution: registry by pipeline name first, then slug
-	// fallback via LocalRepoDir.
+	profileName string, cache *localCompileCache, logger *slog.Logger,
+) error {
 	var repoDir string
 	if path, err := repos.ResolveRepoForPipeline(trig.Pipeline); err == nil {
 		repoDir = path
 	} else if trig.Repo != "" {
 		path, lerr := LocalRepoDir(trig.Repo)
 		if lerr != nil {
-			return fmt.Errorf("locate %q: registry miss + slug fallback failed: registry=%v slug=%w",
+			return fmt.Errorf("locate %q: registry miss + slug fallback failed: registry=%w slug=%w",
 				trig.Pipeline, err, lerr)
 		}
 		repoDir = path
@@ -184,19 +217,20 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		return fmt.Errorf("compile %s: %w", sparkwingDir, err)
 	}
 
-	logger.Info("local trigger: dispatching child",
+	logger.Info(
+		"local trigger: dispatching child",
 		"trigger_id", trig.ID,
 		"pipeline", trig.Pipeline,
 		"repo", trig.Repo,
 		"repo_dir", repoDir,
 	)
 
-	// --local MUST precede the positional trigger ID -- Go's flag
-	// package stops parsing at the first non-flag, so the reverse
-	// order silently falls back to cluster mode.
-	cmd := exec.CommandContext(ctx, binPath, "handle-trigger", "--local", trig.ID)
-	// cwd drives the SDK's walk-up to .sparkwing/; do NOT pass
-	// SPARKWING_WORK_DIR -- it leaks parent-repo paths into children.
+	args := []string{"handle-trigger", "--local"}
+	if profileName != "" {
+		args = append(args, "--profile", profileName)
+	}
+	args = append(args, trig.ID)
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

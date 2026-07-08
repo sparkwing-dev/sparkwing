@@ -19,6 +19,7 @@ import (
 // Client implements orchestrator.StateBackend over HTTP.
 type Client struct {
 	baseURL string
+	token   string
 	http    *http.Client
 }
 
@@ -57,8 +58,18 @@ func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 			Transport:     &bearerTransport{base: base, token: token},
 		}
 	}
-	return &Client{baseURL: baseURL, http: httpClient}
+	return &Client{baseURL: baseURL, token: token, http: httpClient}
 }
+
+// BaseURL returns the controller URL the client was constructed
+// against. Used by RemoteBackends to spin up sibling HTTP backends
+// (concurrency, logs) against the same controller.
+func (c *Client) BaseURL() string { return c.baseURL }
+
+// Token returns the bearer token the client was constructed with, or
+// "" when constructed without auth. Used by RemoteBackends to thread
+// the same auth to sibling HTTP backends.
+func (c *Client) Token() string { return c.token }
 
 // bearerTransport decorates outgoing requests with a fixed bearer
 // token.
@@ -73,7 +84,11 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
-// --- Runs ---
+// Close releases resources held by the client. The HTTP transport
+// runs idle connections under its own GC; Close is a no-op kept on
+// the type so a Client satisfies the storage.StateStore lifecycle
+// contract that *store.Store already does.
+func (c *Client) Close() error { return nil }
 
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error {
 	return c.post(ctx, "/api/v1/runs", r, http.StatusCreated, nil)
@@ -203,8 +218,6 @@ func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot 
 	return c.postRaw(ctx, path, snapshot, http.StatusNoContent)
 }
 
-// --- Nodes ---
-
 func (c *Client) CreateNode(ctx context.Context, n store.Node) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes", url.PathEscape(n.RunID))
 	return c.post(ctx, path, n, http.StatusCreated, nil)
@@ -261,6 +274,15 @@ func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/touch",
 		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path, nil, http.StatusNoContent, nil)
+}
+
+// TouchRunHeartbeat POSTs a run-level liveness ping. The orchestrator
+// calls this on a ticker while a run is active so the controller's
+// reaper can detect a fully-orphaned dispatcher (closed laptop, lost
+// network, killed process) and flip the run to failed.
+func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/heartbeat", url.PathEscape(runID))
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
@@ -365,16 +387,12 @@ func (c *Client) ListNodeSteps(ctx context.Context, runID string) ([]*store.Node
 	return body.Steps, nil
 }
 
-// --- Events ---
-
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/events", url.PathEscape(runID))
 	return c.post(ctx, path,
 		map[string]any{"node_id": nodeID, "kind": kind, "payload": payload},
 		http.StatusOK, nil)
 }
-
-// --- Metrics ---
 
 // AddNodeMetricSample POSTs a single resource sample for a node.
 func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
@@ -387,8 +405,6 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 	}
 	return c.post(ctx, path, body, http.StatusNoContent, nil)
 }
-
-// --- Triggers ---
 
 // HeartbeatStatus is the structured response from a heartbeat call.
 type HeartbeatStatus struct {
@@ -417,7 +433,7 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 		}
 		return &status, nil
 	case http.StatusNoContent:
-		// Older controllers without cancel support: treat as not-cancelled.
+		// hack: older controllers without cancel support return 204; treat as not-cancelled.
 		return &HeartbeatStatus{}, nil
 	case http.StatusNotFound:
 		return nil, store.ErrNotFound
@@ -653,7 +669,7 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error) {
 // ClaimTriggerFor is ClaimTrigger with optional pipeline and
 // trigger_source filters. The controller returns only triggers that
 // match both lists. Empty/nil on either axis means "accept any".
-func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines []string, sources []string) (*store.Trigger, error) {
+func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error) {
 	var body io.Reader
 	if len(pipelines) > 0 || len(sources) > 0 {
 		req := map[string]any{}
@@ -777,9 +793,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 			Env:    triggerEnv,
 		},
 	}
-	// Cross-repo await: without this the controller inherits parent's
-	// repo+SHA and builds the wrong code for awaited pipelines in
-	// different repos.
+	// hack: without explicit repo, the controller inherits the parent's repo+SHA and builds the wrong code for cross-repo awaits.
 	if repo != "" {
 		req.Git.Repo = repo
 		req.Git.Branch = branch
@@ -803,8 +817,6 @@ func indexByte(s string, b byte) int {
 	}
 	return -1
 }
-
-// --- Cross-pipeline refs ---
 
 // GetLatestRun returns the newest run of pipeline whose status is in
 // statuses (default "success" when nil) and whose finished_at is
@@ -847,8 +859,6 @@ func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 		return nil, readHTTPError(resp)
 	}
 }
-
-// --- Cluster-mode: node reads ---
 
 // GetNode fetches one node.
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
@@ -901,8 +911,6 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 		return nil, readHTTPError(resp)
 	}
 }
-
-// --- Cluster-mode: node claim for warm runner pool ---
 
 // ClaimNode atomically claims the oldest ready, unclaimed node for
 // holderID. Returns (nil, nil) when the queue is empty.
@@ -1005,8 +1013,6 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 	}
 }
 
-// --- Debug pauses ---
-
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/debug-pauses", url.PathEscape(p.RunID))
 	return c.post(ctx, path, p, http.StatusCreated, nil)
@@ -1101,7 +1107,16 @@ func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string
 		http.StatusNoContent, nil)
 }
 
-// --- Approvals ---
+// SetNodeArtifactManifest records the content-addressed digest of the
+// node's published-artifact manifest. The server overwrites any prior
+// value.
+func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/artifact-manifest",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path,
+		map[string]string{"manifest_digest": manifestDigest},
+		http.StatusNoContent, nil)
+}
 
 // CreateApproval requests a human decision on a gated node. The
 // controller inserts an approvals row and flips the node's status to
@@ -1233,8 +1248,6 @@ func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, e
 	}
 	return body.Approvals, nil
 }
-
-// --- low-level helpers ---
 
 // post marshals body as JSON, POSTs to path, and checks the status.
 // If out is non-nil, the response is JSON-decoded into it. body may

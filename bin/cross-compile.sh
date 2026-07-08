@@ -9,10 +9,9 @@ mkdir -p "$DIST"
 rm -f "$DIST"/*
 
 # Tester-relevant binaries:
-# - sparkwing: the operator/dev CLI (the main one)
-# - sparkwing-local-ws: laptop dashboard server (so 'sparkwing dashboard start'
-#   can spawn it as a subprocess if installed alongside)
-declare -a BINS=(sparkwing sparkwing-local-ws)
+# - sparkwing: the operator/dev CLI. Bundles the local dashboard via
+#   `sparkwing dashboard start`; no separate daemon binary needed.
+declare -a BINS=(sparkwing)
 
 # Platform matrix.
 declare -a PLATFORMS=(
@@ -23,7 +22,7 @@ declare -a PLATFORMS=(
 )
 
 # Module path-aware build using cli's go-modules.
-export GOPRIVATE=github.com/sparkwing-dev/*
+export GOPRIVATE='github.com/sparkwing-dev/*'
 
 for plat in "${PLATFORMS[@]}"; do
   goos="${plat%/*}"

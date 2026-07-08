@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func newTestStore(t *testing.T) (*store.Store, orchestrator.Paths) {
+func newTestStore(t *testing.T) (*store.Store, paths.Paths) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -20,7 +20,7 @@ func newTestStore(t *testing.T) (*store.Store, orchestrator.Paths) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return st, orchestrator.PathsAt(dir)
+	return st, paths.PathsAt(dir)
 }
 
 func TestStoreBackend_Capabilities(t *testing.T) {
@@ -90,7 +90,6 @@ func TestStoreBackend_ReadNodeLog_DiskFallback(t *testing.T) {
 	b := backend.NewStoreBackend(st, paths, nil)
 	ctx := context.Background()
 
-	// Missing file: render as empty.
 	got, err := b.ReadNodeLog(ctx, "r1", "n1", backend.ReadOpts{})
 	if err != nil {
 		t.Fatalf("ReadNodeLog miss: %v", err)

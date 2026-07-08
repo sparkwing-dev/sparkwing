@@ -127,7 +127,7 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
       nodeStart("build", "2026-04-23T00:00:00Z"),
       stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
       execLine("build", "compiling...", "2026-04-23T00:00:00.200Z"),
-      // Stream cut here — no step_end / node_end yet.
+      // Stream cut here -- no step_end / node_end yet.
     ];
     const result = parseLogLines(lines);
     assert.equal(result.sections.length, 1);
@@ -347,7 +347,7 @@ describe("parseLogSections", () => {
       `${cyan}────────────── STEP: init ──────────────${reset}`,
       "prepare    main@af1a99c",
       "compile    pipeline: release (yaml + jobs/)",
-      "compile    cache miss: 2787c952 — compiling",
+      "compile    cache miss: 2787c952 -- compiling",
       "compile    cached at: /Users/test/.sparkwing/cache/2787c952/sparkwing-pipeline",
       `${green}✓ init ${dim}─────────────────────────────────${reset}`,
       "current  v0.15.0",

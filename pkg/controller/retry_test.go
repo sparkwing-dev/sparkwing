@@ -20,7 +20,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	src := store.Run{
@@ -65,7 +65,6 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		t.Errorf("retry_of=%v want %s", body["retry_of"], src.ID)
 	}
 
-	// Confirm the trigger row landed with matching args / git.
 	trig, err := st.GetTrigger(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
@@ -93,7 +92,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	src := store.Run{
@@ -135,7 +134,6 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 		t.Fatal("empty id in response")
 	}
 
-	// Pre-allocated Run row visible immediately.
 	run, err := st.GetRun(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetRun(%s): %v", newID, err)
@@ -159,7 +157,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
@@ -203,7 +201,7 @@ func TestRetry_ListAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	t0 := time.Now().Add(-3 * time.Hour)
@@ -247,7 +245,7 @@ func TestRetry_ListAttempts(t *testing.T) {
 func TestRetry_UnknownRunReturns404(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := store.Open(filepath.Join(dir, "s.db"))
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	resp, err := http.Post(srv.URL+"/api/v1/runs/missing/retry", "application/json", nil)
@@ -255,7 +253,7 @@ func TestRetry_UnknownRunReturns404(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != 404 {
+	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status=%d want 404", resp.StatusCode)
 	}
 }

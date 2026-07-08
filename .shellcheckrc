@@ -1,0 +1,8 @@
+# shellcheck config for the repo. Disable rules that produce noise
+# without catching real bugs in this codebase.
+
+# SC2034: declared-but-unused variables. Common false-positive in bin/
+# scripts that declare a full color palette up-front but only use a
+# subset at any given time. Re-enable per-script with a comment if you
+# want it for a specific file.
+disable=SC2034

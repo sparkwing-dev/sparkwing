@@ -38,7 +38,7 @@ If all pods are Running and the controller returns healthy, you're good to go.
     content: `
 ## Trigger a build via API
 
-The most basic operation — trigger a job and watch it appear in the dashboard.
+The most basic operation -- trigger a job and watch it appear in the dashboard.
 
 \`\`\`bash
 # Trigger a job for myapp
@@ -225,7 +225,7 @@ done
 wait
 \`\`\`
 
-Watch the Agents page — the 4th and 5th jobs should queue until a slot opens.
+Watch the Agents page -- the 4th and 5th jobs should queue until a slot opens.
 
 ## Run a local agent
 
@@ -627,7 +627,7 @@ curl -s http://localhost:9001/jobs | jq '.[0].cache_key'
     content: `
 ## Branch-based conditions
 
-Jobs are plain Go — use normal control flow:
+Jobs are plain Go -- use normal control flow:
 
 \`\`\`go
 func JobConditional() {
@@ -827,8 +827,8 @@ curl -s http://localhost:9001/jobs/<JOB_ID> | jq '.result.pipeline_result'
 Sparkwing receives GitHub push/PR events and triggers builds automatically.
 
 **Required environment:**
-- \`GITHUB_WEBHOOK_SECRET\` — HMAC signing secret (must match GitHub)
-- \`GITHUB_TOKEN\` — for posting PR status checks (optional)
+- \`GITHUB_WEBHOOK_SECRET\` -- HMAC signing secret (must match GitHub)
+- \`GITHUB_TOKEN\` -- for posting PR status checks (optional)
 
 ## Test webhook delivery
 
@@ -874,12 +874,12 @@ Deploys only proceed if the build is on an allowed branch:
 \`\`\`
 
 This tests:
-1. **Auth middleware** — GET and POST endpoints reject unauthenticated requests
-2. **Webhook signatures** — unsigned payloads are rejected
-3. **Repo URL validation** — malicious URLs are blocked
-4. **Git ref sanitization** — injection attempts in branch names are blocked
-5. **YAML injection** — env var values can't inject YAML into K8s manifests
-6. **Path traversal** — script paths can't escape the work directory
+1. **Auth middleware** -- GET and POST endpoints reject unauthenticated requests
+2. **Webhook signatures** -- unsigned payloads are rejected
+3. **Repo URL validation** -- malicious URLs are blocked
+4. **Git ref sanitization** -- injection attempts in branch names are blocked
+5. **YAML injection** -- env var values can't inject YAML into K8s manifests
+6. **Path traversal** -- script paths can't escape the work directory
 
 ## Test API auth
 
@@ -1194,8 +1194,8 @@ Runs everything: unit, integration, E2E, security, and flaky detection.
 3. Verify pipeline visualization shows jobs
 4. Check Agents page shows connected listener
 5. Check Tests page for test results
-6. Trigger 5 builds rapidly — verify rate limiting at 20/min
-7. Test an approval gate — pause and continue
+6. Trigger 5 builds rapidly -- verify rate limiting at 20/min
+7. Test an approval gate -- pause and continue
 8. Test cancel on a running job
 9. Test retry on a failed job
 10. Verify the Home page stats update

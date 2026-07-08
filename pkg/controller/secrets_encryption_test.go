@@ -16,10 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// End-to-end check that the secret POST/GET round-trip with a
-// configured cipher stores ciphertext on disk but returns the
-// original value to authorized readers.
-
 func newSecretsTestServer(t *testing.T, c controller.Cipher) (*httptest.Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -51,7 +47,6 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	c, _ := secrets.NewCipher(key)
 	srv, st := newSecretsTestServer(t, c)
 
-	// Write
 	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
 		map[string]string{"name": "TOKEN", "value": "supersecret"})
 	if resp.StatusCode != http.StatusNoContent {
@@ -61,7 +56,6 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// Direct store read: must NOT contain the plaintext.
 	row, err := st.GetSecret("TOKEN")
 	if err != nil {
 		t.Fatalf("store.GetSecret: %v", err)
@@ -73,7 +67,6 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 		t.Fatalf("on-disk value leaks plaintext: %q", row.Value)
 	}
 
-	// HTTP read: must return the plaintext.
 	resp, err = http.Get(srv.URL + "/api/v1/secrets/TOKEN")
 	if err != nil {
 		t.Fatalf("GET: %v", err)

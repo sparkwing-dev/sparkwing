@@ -54,7 +54,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.logger.Info("login",
+	s.logger.Info(
+		"login",
 		"principal", u.Name,
 		"expires_at", sess.ExpiresAt.Unix(),
 	)
@@ -101,8 +102,7 @@ type sessionResp struct {
 // CSRF token bound to it. Unauthed: the caller presents the session
 // id itself, which is the same trust the cookie grants.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	// `Authorization: Session <raw>` keeps session lookup off the
-	// Bearer path so a session id never authenticates as a bearer.
+	// safety: Session header keeps session ids off the Bearer path so a session id never authenticates as a bearer token.
 	raw := extractSessionHeader(r)
 	if raw == "" {
 		writeError(w, http.StatusUnauthorized, errors.New("session header required"))
@@ -114,8 +114,6 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	// Sliding window: within sessionExtend of expiry, push expires_at
-	// out by another sessionTTL.
 	if sess.ExpiresAt.Sub(now) < sessionExtend {
 		_ = s.store.ExtendSession(sess.ID, sessionTTL, now)
 		sess.ExpiresAt = now.Add(sessionTTL)
@@ -139,8 +137,6 @@ func extractSessionHeader(r *http.Request) string {
 	}
 	return h[len(prefix):]
 }
-
-// --- users CRUD ---
 
 type createUserReq struct {
 	Name     string `json:"name"`
@@ -191,8 +187,6 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 	u, err := s.store.CreateFirstUser(req.Name, req.Password, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrBootstrapClosed) {
-			// Another request won the race; close the local cache and
-			// 409 so the web pod reloads /login.
 			s.markBootstrapClosed()
 			writeError(w, http.StatusConflict, err)
 			return
@@ -243,8 +237,6 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- token rotation ---
-
 type rotateReq struct {
 	GraceSecs int64 `json:"grace_secs,omitempty"` // default 24h
 	TTLSecs   int64 `json:"ttl_secs,omitempty"`   // 0 = use the old token's remaining TTL
@@ -277,7 +269,6 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	if req.TTLSecs > 0 {
 		ttl = time.Duration(req.TTLSecs) * time.Second
 	} else {
-		// Preserve the old token's remaining lifetime.
 		old, err := s.store.LookupTokenByPrefix(prefix)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err)
@@ -296,7 +287,8 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Info("token rotated",
+	s.logger.Info(
+		"token rotated",
 		"from_prefix", oldTok.Prefix,
 		"to_prefix", newTok.Prefix,
 		"principal", newTok.Principal,

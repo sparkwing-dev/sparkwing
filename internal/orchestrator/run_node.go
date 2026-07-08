@@ -63,13 +63,11 @@ func RunNodeOnce(
 		logsBackend = localLogs{paths: paths}
 	}
 
-	concurrencyBackend := NewHTTPConcurrency(controllerURL, httpClient, token, store.DefaultConcurrencyLease)
-
-	backends := Backends{
-		State:       stateClient,
-		Logs:        logsBackend,
-		Concurrency: concurrencyBackend,
+	art, err := resolveArtifactStoreFromEnv(ctx)
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("artifact store: %w", err)
 	}
+	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
 
 	run, err := stateClient.GetRun(ctx, runID)
 	if err != nil {
@@ -82,9 +80,6 @@ func RunNodeOnce(
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
-	// When the trigger carries GITHUB_REPOSITORY, that repo is the
-	// source of truth -- baked-in pipelines must NOT win, since
-	// they'd run against the runner pod's empty workdir.
 	if shouldRunRemote(ctx, stateClient, runID) {
 		return runNodeRemote(ctx, stateClient, run, controllerURL, logsURL, runID, nodeID, token, logger)
 	}
@@ -93,20 +88,19 @@ func RunNodeOnce(
 	if !ok {
 		return runner.Result{}, fmt.Errorf(
 			"pipeline %q not registered in this runner image and trigger has no GITHUB_REPOSITORY to clone from",
-			run.Pipeline)
+			run.Pipeline,
+		)
 	}
 
 	rc := sparkwing.RunContext{
 		RunID:    run.ID,
 		Pipeline: run.Pipeline,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, run.Repo, run.RepoURL),
+			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:   sparkwing.TriggerInfo{Source: run.TriggerSource},
 		StartedAt: run.StartedAt,
 	}
 	sparkwing.SetGit(rc.Git)
-	// Pre-populate from `secret:"true"` Inputs fields so their values
-	// are redacted in every log stream and resolver path.
 	masker := secrets.NewMasker()
 	for _, v := range reg.SecretValues(run.Args) {
 		masker.Register(v)
@@ -123,8 +117,6 @@ func RunNodeOnce(
 		return data, true
 	})
 
-	// Pod-side secret resolver. Cached memoizes per-name and registers
-	// values with the run's masker so they get redacted in logs.
 	httpSource := secrets.SourceFunc(func(name string) (string, bool, error) {
 		sec, gerr := stateClient.GetSecret(ctx, name)
 		if gerr != nil {
@@ -139,58 +131,20 @@ func RunNodeOnce(
 		secrets.NewCached(httpSource, masker).AsResolver())
 	_ = masker
 
-	// Pod-side install of the typed Inputs the registration parsed,
-	// so step bodies can read via sparkwing.Inputs[T](ctx) without
-	// per-job closure threading.
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}
 
-	// Pod-side install of the runner identity so adapters branching
-	// on sparkwing.Runner(ctx) see "kubernetes" (or whatever the
-	// cluster trigger loop stamped) instead of falling back to the
-	// in-process default. Env-driven so the per-pod overrides set by
-	// the trigger loop flow through without a fresh API.
 	if info := podRunnerInfo(); info != nil {
 		ctx = sparkwingruntime.WithRunner(ctx, info)
 	}
 
-	// Pod-side install of the PipelineConfig the orchestrator already
-	// resolved (Values.Base + Target.Values layering happened on the
-	// controller side). The snapshot carries the resolved struct as
-	// JSON; we decode it back into the typed struct produced by the
-	// pipeline's Config() factory. Failure leaves the accessor nil --
-	// step bodies that depend on it will hit the same nil they would
-	// have hit in the pre-step-7 world.
-	if cfg, cerr := rehydratePipelineConfig(run.PlanSnapshot, reg); cerr != nil {
-		logger.Warn("pod: rehydrate pipeline config", "err", cerr)
-	} else if cfg != nil {
-		ctx = sparkwing.WithPipelineConfig(ctx, cfg)
-	}
-
-	// Pod-side install of the run's active target so step bodies see
-	// the same sparkwing.Target(ctx) value as the orchestrator side.
-	// The snapshot carries the value; we read it back without
-	// re-resolving --for on the pod.
-	if t, terr := rehydrateTarget(run.PlanSnapshot); terr != nil {
-		logger.Warn("pod: rehydrate target", "err", terr)
-	} else if t != "" {
-		ctx = sparkwingruntime.WithTarget(ctx, t)
-	}
-
-	// Pod-side re-resolution of PipelineSecrets via the controller's
-	// HTTP secret store (the resolver installed above). Reads the
-	// SecretsField the orchestrator persisted in the snapshot; the
-	// resolver itself is the pod's existing controller-backed source,
-	// so secret values stay on the pod and never cross the wire as
-	// part of the snapshot.
 	if sec, serr := rehydratePipelineSecrets(ctx, run.PlanSnapshot, reg); serr != nil {
 		logger.Warn("pod: rehydrate pipeline secrets", "err", serr)
 	} else if sec != nil {
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, sec)
 	}
 
-	// Pod-side twin of dispatchState.pipelineRef.
 	ctx = sparkwingruntime.WithPipelineResolver(ctx, sparkwing.PipelineResolverFunc(
 		func(innerCtx context.Context, pipeline, refNode string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
 			run, err := stateClient.GetLatestRun(innerCtx, pipeline, []string{"success"}, maxAge)
@@ -201,7 +155,6 @@ func RunNodeOnce(
 			if err != nil {
 				return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, refNode, err)
 			}
-			// Best-effort audit event against the consuming node.
 			currentNode := sparkwing.NodeFromContext(innerCtx)
 			if currentNode != "" {
 				payload, _ := json.Marshal(map[string]any{
@@ -218,15 +171,13 @@ func RunNodeOnce(
 				}
 			}
 			return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: data}, nil
-		}))
+		},
+	))
 
-	// Cluster-mode equivalent of dispatchState.pipelineAwaiter.
 	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
 		func(innerCtx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
 			currentNode := sparkwing.NodeFromContext(innerCtx)
 
-			// Retry-lineage chain: thread the prior run's child
-			// trigger into retry_of for skip-passed treatment.
 			var childRetryOf string
 			if run.RetryOf != "" && currentNode != "" {
 				if id, ferr := stateClient.FindSpawnedChildTriggerID(innerCtx, run.RetryOf, currentNode, req.Pipeline); ferr != nil {
@@ -244,16 +195,39 @@ func RunNodeOnce(
 			if err != nil {
 				return nil, fmt.Errorf("enqueue trigger: %w", err)
 			}
+			startedAt := time.Now()
+			emitChildFinish := func(status, errMsg string) {
+				if currentNode == "" {
+					return
+				}
+				attrs := map[string]any{
+					"child_run_id": childRunID,
+					"pipeline":     req.Pipeline,
+					"status":       status,
+					"duration_ms":  time.Since(startedAt).Milliseconds(),
+				}
+				if errMsg != "" {
+					attrs["error"] = errMsg
+				}
+				payload, _ := json.Marshal(attrs)
+				if evErr := stateClient.AppendEvent(context.WithoutCancel(innerCtx), runID, currentNode,
+					"child_run_finish", payload); evErr != nil {
+					logger.Warn("child_run_finish audit event append failed",
+						"run_id", runID, "node", currentNode, "err", evErr)
+				}
+			}
+
 			if currentNode != "" {
 				payload, _ := json.Marshal(map[string]any{
+					"child_run_id":    childRunID,
 					"pipeline":        req.Pipeline,
 					"node_id":         req.NodeID,
-					"child_run_id":    childRunID,
+					"args":            req.Args,
 					"timeout_seconds": int64(req.Timeout.Seconds()),
 				})
 				if evErr := stateClient.AppendEvent(innerCtx, runID, currentNode,
-					"pipeline_await_spawned", payload); evErr != nil {
-					logger.Warn("pipeline_await audit event append failed",
+					"child_run_start", payload); evErr != nil {
+					logger.Warn("child_run_start audit event append failed",
 						"run_id", runID, "node", currentNode, "err", evErr)
 				}
 			}
@@ -270,7 +244,7 @@ func RunNodeOnce(
 				if err == nil {
 					switch run.Status {
 					case "success":
-						// Empty NodeID = caller doesn't need output.
+						emitChildFinish("success", "")
 						if req.NodeID == "" {
 							return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
 						}
@@ -280,18 +254,22 @@ func RunNodeOnce(
 						}
 						return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: data}, nil
 					case "failed":
+						emitChildFinish("failed", run.Error)
 						return nil, fmt.Errorf("child run %s failed: %s", childRunID, run.Error)
 					case "cancelled":
+						emitChildFinish("cancelled", "")
 						return nil, fmt.Errorf("child run %s was cancelled", childRunID)
 					}
 				}
 				select {
 				case <-pollCtx.Done():
+					emitChildFinish("timeout", pollCtx.Err().Error())
 					return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
 				case <-ticker.C:
 				}
 			}
-		}))
+		},
+	))
 
 	node := plan.Job(nodeID)
 	if node == nil {
@@ -320,7 +298,7 @@ func RunNodeOnce(
 		Pipeline: run.Pipeline,
 		Args:     run.Args,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, run.Repo, run.RepoURL),
+			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:  sparkwing.TriggerInfo{Source: run.TriggerSource},
 		Node:     node,
 		Delegate: delegate,

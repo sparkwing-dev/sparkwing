@@ -36,7 +36,7 @@ func parseRerunFlags(args []string) (rerunFlags, error) {
 	fs := flag.NewFlagSet(cmdDebugRerun.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
-	on := fs.String("on", "", "profile name (cluster mode)")
+	on := fs.String("profile", "", "profile name (cluster mode)")
 	seq := fs.Int("seq", -1, "attempt index; -1 selects most recent")
 	image := fs.String("image", "", "runner image for cluster-mode debug pod (overrides $SPARKWING_RERUN_IMAGE)")
 	if err := parseAndCheck(cmdDebugRerun, fs, args); err != nil {
@@ -84,7 +84,7 @@ func runDebugRerunLocal(ctx context.Context, t rerunFlags) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	snap, err := st.GetNodeDispatch(ctx, t.run, t.node, t.seq)
 	if err != nil {
@@ -135,7 +135,7 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	if err := requireController(prof, "debug rerun"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 
 	snap, err := c.GetNodeDispatch(ctx, t.run, t.node, t.seq)
 	if err != nil {
@@ -162,15 +162,11 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	if err != nil {
 		return fmt.Errorf("decode snapshot env: %w", err)
 	}
-	// Add the rerun marker but skip the refs scratch dir -- we'd need
-	// to copy outputs into the pod for that to work, which is
-	// out-of-scope for v1. Operators who need ref bodies in cluster
-	// mode can `sparkwing jobs status` then re-fetch from the
-	// controller via curl from inside the pod.
 	envMap["SPARKWING_RERUN"] = "1"
 
 	pod := podName(t.run, t.node)
-	args := []string{"kubectl", "run", pod, "--rm", "-it", "--restart=Never",
+	args := []string{
+		"kubectl", "run", pod, "--rm", "-it", "--restart=Never",
 		"--image=" + image,
 		"--labels=sparkwing.dev/rerun-of-run=" + t.run + ",sparkwing.dev/managed-by=sparkwing-debug",
 	}
@@ -246,8 +242,6 @@ func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID s
 		n, err := st.GetNode(ctx, runID, dep)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				// A dep that no longer exists is a soft warning, not
-				// a hard fail -- the operator may still want the shell.
 				fmt.Fprintf(os.Stderr, "warning: dep %s not found, skipping ref file\n", dep)
 				continue
 			}

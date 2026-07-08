@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
@@ -20,46 +21,30 @@ import (
 // `replace` target, then execs the cached binary with the given
 // args. Subsequent invocations with no source changes skip the
 // compile entirely.
-func compileAndExec(sparkwingDir string, args []string, env []string, opts compileOptions) error {
-	// Resolve sparks libraries before we compute the cache key so any
-	// overlay modfile change busts the hash (PipelineCacheKey already
-	// hashes.resolved.mod/.sum; see). Fast path: absent
-	// sparks.yaml is a single os.ReadFile that returns ErrNotExist --
-	// negligible latency for the common case.
+func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
 	if err := resolveSparks(context.Background(), sparkwingDir, opts); err != nil {
 		return err
 	}
 
-	if os.Getenv("SPARKWING_NO_CACHE") != "" {
+	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
-		// Treat hashing failures as a cache miss without caching.
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 
 	binPath := bincache.CachedBinaryPath(key)
 
-	// 1) Local disk cache. If present, skip compile and remote
-	// roundtrip entirely -- the tight laptop dev loop.
 	if _, err := os.Stat(binPath); err == nil {
 		ensureDescribeCache(sparkwingDir, binPath)
 		env = append(env, "SPARKWING_BINARY_SOURCE=cached")
 		return bincache.ExecReplace(binPath, args, sparkwingDir, env)
 	}
 
-	// 2a) Pluggable ArtifactStore cache: fetch bin/<hash> via the
-	// effective cache backend from .sparkwing/backends.yaml. This
-	// is the "ci-embedded runs without Go" path: a separate publish
-	// job pre-uploaded the binary, runners curl it back. Falls
-	// through to (2b) on miss or error. Per-target Backend overlays
-	// aren't available here -- compile runs before the pipeline-aware
-	// orchestrator init -- so only defaults and the auto-detected
-	// environment apply.
-	if cache := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
-		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache, nil); err == nil {
+	if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
+		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache, lookup); err == nil {
 			if err := bincache.FetchFromArtifactStore(context.Background(), as, key, binPath); err == nil {
 				ensureDescribeCache(sparkwingDir, binPath)
 				env = append(env, "SPARKWING_BINARY_SOURCE=artifact-store")
@@ -72,11 +57,6 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 		}
 	}
 
-	// 2b) Remote binary cache (sparkwing-cache /bin/<hash>). When
-	// SPARKWING_GITCACHE_URL is set, try to download a pre-built
-	// binary before falling back to `go build`. Every runner in the
-	// fleet shares the same cache, so a new commit's binary compiles
-	// exactly once across the cluster.
 	if gcURL := bincache.CacheURL(); gcURL != "" {
 		if err := bincache.TryBinary(gcURL, key, binPath); err == nil {
 			ensureDescribeCache(sparkwingDir, binPath)
@@ -85,15 +65,8 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 		}
 	}
 
-	// 3) Compile locally. Announce first so the user understands why
-	// this run is taking longer than the steady-state ~instant exec.
 	announceCompile(binPath)
 	if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-		// Common first-run case after `pipeline new`: go.mod lists
-		// deps but go.sum doesn't have hashes for all of them (post-
-		// scaffold tidy was skipped or failed). `go mod download`
-		// populates go.sum without modifying go.mod; safe + idempotent.
-		// Retry compile once after the recovery.
 		if errors.Is(err, bincache.ErrMissingGoSum) {
 			fmt.Fprintln(os.Stderr, color.Dim("==> populating go.sum (`go mod download`) and retrying compile..."))
 			if dlErr := runGo(sparkwingDir, []string{"mod", "download"}, env); dlErr != nil {
@@ -107,16 +80,12 @@ func compileAndExec(sparkwingDir string, args []string, env []string, opts compi
 		}
 	}
 
-	// 4) Upload so the next runner that wants this binary gets a
-	// cache hit. Failures here are non-fatal.
 	if gcURL := bincache.CacheURL(); gcURL != "" {
 		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, binPath); err != nil {
 			slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
 		}
 	}
 
-	// Warm the describe cache before exec so `sparkwing run <pipeline> --<TAB>`
-	// shows typed flags without waiting for a second run.
 	ensureDescribeCache(sparkwingDir, binPath)
 	env = append(env, "SPARKWING_BINARY_SOURCE=compiled")
 	return bincache.ExecReplace(binPath, args, sparkwingDir, env)
@@ -153,10 +122,6 @@ func announceCompile(binPath string) {
 	}
 	var msg string
 	if firstEver {
-		// "compile" understates what go build does on a cold module
-		// cache (it'll download every dep first; can take 30s+ on a
-		// fresh laptop even though the actual build is ~2s). Spell out
-		// both phases so the wait isn't a surprise.
 		msg = "==> compiling .sparkwing/ pipeline binary (first time on this machine; may download deps)"
 	} else {
 		msg = "==> recompiling .sparkwing/ binary (source changed since last run)"
@@ -185,14 +150,15 @@ func runExec(bin string, args []string, dir string, env []string) error {
 }
 
 // runGo shells out to the `go` toolchain. Mirrors the pre-flight
-// check in bincache.CompilePipeline so the SPARKWING_NO_CACHE
+// check in bincache.CompilePipeline so the SPARKWING_NO_BINCACHE
 // (`go run .`) escape hatch and the cache-miss compile path
 // produce the same actionable error message when Go is missing.
 func runGo(dir string, args, env []string) error {
 	if !goOnPath() {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via the `go` command.\n" +
-				"  Install Go 1.26+ from https://go.dev/dl/ and re-run.")
+				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
+		)
 	}
 	return runExec("go", args, dir, env)
 }
@@ -219,12 +185,13 @@ type compileOptions struct {
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {
 	noUpdate := opts.NoUpdate || os.Getenv("SPARKWING_NO_SPARKS_RESOLVE") != ""
 	if noUpdate {
-		// Offline / CI path: the user explicitly asked us not to hit
-		// the network. Skip entirely; any pre-existing overlay on disk
-		// is still honored by the compile step.
 		return nil
 	}
-	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir); err != nil {
+	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
+	if err != nil {
+		return fmt.Errorf("sparks resolve: %w", err)
+	}
+	if _, err := sparks.ResolveAndWrite(ctx, sparkwingDir, m); err != nil {
 		return fmt.Errorf("sparks resolve: %w (use --sw-no-update to compile against existing go.mod pins)", err)
 	}
 	return nil

@@ -146,7 +146,6 @@ func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 	srv := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(srv.Close)
 
-	// list-runs read
 	resp, err := http.Get(srv.URL + "/api/v1/runs")
 	if err != nil {
 		t.Fatal(err)
@@ -156,8 +155,6 @@ func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 		t.Errorf("after list: hook calls=%d want 1", got)
 	}
 
-	// get-run read (404 path still triggers the hook -- it's
-	// pre-read, not post-validation)
 	resp2, err := http.Get(srv.URL + "/api/v1/runs/nonexistent")
 	if err != nil {
 		t.Fatal(err)

@@ -68,7 +68,6 @@ func TestAncestor_ReturnsChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
-	// Direct parent's pipeline first, then root.
 	want := []string{"B", "A"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -88,7 +87,6 @@ func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 		{"root", "A"},
 		{"mid", "B"},
 	})
-	// Delete root to break the chain.
 	if err := s.DeleteRun(context.Background(), "root"); err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +94,6 @@ func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
-	// "mid"'s own pipeline is not returned; the walk hits missing
-	// "root" and stops cleanly.
 	if len(got) != 0 {
 		t.Fatalf("want empty after broken chain, got %v", got)
 	}

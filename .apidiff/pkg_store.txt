@@ -19,6 +19,9 @@ type AcquireSlotRequest struct {
 	CacheTTL      time.Duration
 	CancelTimeout time.Duration
 	Lease         time.Duration
+	BypassRead    bool
+
+	Cost int
 }
 type AcquireSlotResponse struct {
 	Kind             AcquireKind
@@ -32,6 +35,10 @@ type AcquireSlotResponse struct {
 	SupersededIDs    []string
 	PreviousCapacity int
 	DriftNote        string
+
+	Position    int
+	QueueLength int
+	Holders     []ConcurrencyHolder
 }
 type Approval struct {
 	RunID       string
@@ -51,6 +58,9 @@ const ApprovalOnTimeoutFail = "fail"
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
+const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
+func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
 	Key            string
 	HolderID       string
@@ -59,12 +69,32 @@ type ConcurrencyHolder struct {
 	ClaimedAt      time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
+
+	Cost             int
+	DeclaredCapacity int
+}
+type ConcurrencyMaintenanceOptions struct {
+	Lease time.Duration
+
+	WaiterMaxAge time.Duration
+
+	CacheCap int
+}
+type ConcurrencyMaintenanceResult struct {
+	Reconciled   int
+	StaleHolders []ConcurrencyHolder
+	Promoted     int
+	CacheExpired int64
+	StaleWaiters []ConcurrencyWaiter
+	CacheEvicted int64
 }
 type ConcurrencyState struct {
-	Key      string
-	Capacity int
-	Holders  []ConcurrencyHolder
-	Waiters  []ConcurrencyWaiter
+	Key               string
+	Capacity          int
+	EffectiveCapacity int
+	UsedCost          int
+	Holders           []ConcurrencyHolder
+	Waiters           []ConcurrencyWaiter
 }
 type ConcurrencyWaiter struct {
 	Key           string
@@ -77,6 +107,11 @@ type ConcurrencyWaiter struct {
 	LeaderRunID   string
 	LeaderNodeID  string
 	CancelTimeout time.Duration
+
+	Cost             int
+	DeclaredCapacity int
+
+	Position int
 }
 type DebugPause struct {
 	RunID       string
@@ -88,11 +123,18 @@ type DebugPause struct {
 	ReleasedBy  string
 	ReleaseKind string
 }
+const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
+const DefaultConcurrencyCacheCap = 10_000
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
-const DefaultConcurrencyLease = 3 * time.Minute
+const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultLeaseDuration = 3 * time.Minute
+func DetectDialect(dsn string) Dialect
+type Dialect int
+func (d Dialect) String() string
+const DialectPostgres
+const DialectSQLite Dialect = iota
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrLockHeld = errors.New("held by another holder")
 var ErrNotFound = errors.New("not found")
@@ -104,6 +146,7 @@ type Event struct {
 	TS      time.Time
 	Payload json.RawMessage
 }
+func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
 const FailureLogsAuth = "logs_auth"
 const FailureOOMKilled = "oom_killed"
@@ -111,6 +154,23 @@ const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
+const FailureVerify = "verify"
+func IsProtocolErr(err error) bool
+var Maintenance = storeMaintenanceFns{
+	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
+	ReapStalePendingRuns:         (*Store).reapStalePendingRuns,
+	ReapStaleRunningRuns:         (*Store).reapStaleRunningRuns,
+	ReapTimedOutApprovals:        (*Store).reapTimedOutApprovals,
+	FailNodesInRun:               (*Store).failNodesInRun,
+	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
+	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
+	ReconcileOrphanedLocalRuns:   (*Store).reconcileOrphanedLocalRuns,
+	ReapStaleConcurrencyHolders:  (*Store).reapStaleConcurrencyHolders,
+	ReapStaleConcurrencyWaiters:  (*Store).reapStaleConcurrencyWaiters,
+	SweepExpiredConcurrencyCache: (*Store).sweepExpiredConcurrencyCache,
+	SweepLRUConcurrencyCache:     (*Store).sweepLRUConcurrencyCache,
+	ReconcileConcurrencyKeys:     (*Store).reconcileConcurrencyKeys,
+}
 const MaxNodeDispatchEnvelope = 4 << 20
 type MetricSample struct {
 	TS            time.Time
@@ -145,6 +205,8 @@ type Node struct {
 	Annotations []string
 
 	Summary string
+
+	ArtifactManifest string
 }
 type NodeDispatch struct {
 	RunID            string
@@ -178,6 +240,8 @@ const OnLimitFail = "fail"
 const OnLimitQueue = "queue"
 const OnLimitSkip = "skip"
 func Open(path string) (*Store, error)
+func OpenPostgres(_ context.Context, dsn string) (*Store, error)
+func OpenReadOnly(path string) (*Store, error)
 func ParseRunFilter(q url.Values) RunFilter
 const PauseReasonAfter = "pause-after"
 const PauseReasonBefore = "pause-before"
@@ -224,6 +288,8 @@ type Run struct {
 	AnnotationCount int
 	TopAnnotation   string
 	Annotations     []string
+
+	LastHeartbeatAt *time.Time
 }
 type RunFilter struct {
 	Pipelines   []string
@@ -250,6 +316,11 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+type SkewError struct {
+	DBVersion     int
+	BinaryVersion int
+}
+func (e *SkewError) Error() string
 type SpawnedChild struct {
 	ParentNodeID string
 	Pipeline     string
@@ -269,7 +340,7 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines []string, sources []string) (*Trigger, error)
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) Close() error
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
@@ -291,11 +362,9 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name string) error
+func (s *Store) Dialect() Dialect
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
-func (s *Store) FailExpiredNodeClaims(ctx context.Context) ([][2]string, error)
-func (s *Store) FailNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error)
-func (s *Store) FailStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
@@ -335,24 +404,23 @@ func (s *Store) ListUsers() ([]User, error)
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
+func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
+func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error)
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
-func (s *Store) ReapExpiredTriggers(ctx context.Context) ([]string, error)
-func (s *Store) ReapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error)
-func (s *Store) ReapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error)
-func (s *Store) ReconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error)
-func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers []ConcurrencyWaiter, promoted []ConcurrencyWaiter, err error)
+func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
-func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (WaiterResolution, error)
+func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
+func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
@@ -360,9 +428,8 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (s *Store) SweepExpiredConcurrencyCache(ctx context.Context) (int64, error)
-func (s *Store) SweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
+func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
@@ -443,6 +510,23 @@ type WaiterResolution struct {
 	OriginNodeID       string
 	LeaderRunID        string
 	LeaderNodeID       string
+
+	LeaderOutcome string
+
+	LeaderFailureReason string
+
+	Position int
+	Holders  []ConcurrencyHolder
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
+
+# methods on un-declared receiver types (likely a bug)
+func (t *storeTx) Commit() error
+func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
+func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+func (t *storeTx) Query(q string, args ...any) (*sql.Rows, error)
+func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+func (t *storeTx) QueryRow(q string, args ...any) *sql.Row
+func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row
+func (t *storeTx) Rollback() error

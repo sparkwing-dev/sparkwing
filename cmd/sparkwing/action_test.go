@@ -71,14 +71,31 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 			{NodeID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}
-	a := Pipeline{Name: dp.Name}
-	a.Short = dp.Short
-	a.Help = dp.Help
-	a.Args = dp.Args
-	a.Examples = dp.Examples
-	a.Risks = dp.Risks
-	a.RisksBySteps = dp.RisksBySteps
+	a := Pipeline{
+		Name:         dp.Name,
+		Short:        dp.Short,
+		Help:         dp.Help,
+		Args:         dp.Args,
+		Examples:     dp.Examples,
+		Risks:        dp.Risks,
+		RisksBySteps: dp.RisksBySteps,
+	}
 
+	if a.Name != dp.Name {
+		t.Errorf("Name = %q, want %q", a.Name, dp.Name)
+	}
+	if a.Short != dp.Short {
+		t.Errorf("Short = %q, want %q", a.Short, dp.Short)
+	}
+	if a.Help != dp.Help {
+		t.Errorf("Help = %q, want %q", a.Help, dp.Help)
+	}
+	if len(a.Args) != len(dp.Args) {
+		t.Errorf("Args len = %d, want %d", len(a.Args), len(dp.Args))
+	}
+	if len(a.Examples) != len(dp.Examples) {
+		t.Errorf("Examples len = %d, want %d", len(a.Examples), len(dp.Examples))
+	}
 	if got, want := len(a.Risks), 2; got != want {
 		t.Errorf("Risks len = %d, want %d", got, want)
 	}
@@ -98,7 +115,6 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 // the suggestion-composition logic from action.go's
 // runPipelineDescribe.
 func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
-	// Mirror the catalog-search fragment in runPipelineDescribe.
 	catalog := []Pipeline{
 		{Name: "cluster-up"},
 		{Name: "cluster-down"},
@@ -115,7 +131,6 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 		t.Fatalf("SuggestClosest(%q) = %q, want %q", name, suggestion, "cluster-up")
 	}
 
-	// And the message shape we emit when a suggestion exists:
 	msg := fmt.Sprintf("no pipeline named %q; did you mean %q? (run `sparkwing pipeline list --all` to see every entry)", name, suggestion)
 	for _, want := range []string{
 		`no pipeline named "claster-up"`,

@@ -17,8 +17,6 @@ import (
 // register as skipped. Append + DeleteRun (no-op) are exercised.
 func TestConformance_LogStore(t *testing.T) {
 	conformance.TestLogStore(t, func() storage.LogStore {
-		// Route writes to /dev/null-equivalent so the test binary's
-		// stdout stays clean.
 		return stdoutlogs.NewWithWriter(&bytes.Buffer{})
 	})
 }

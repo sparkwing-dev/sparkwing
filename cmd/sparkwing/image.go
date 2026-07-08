@@ -38,7 +38,7 @@ func runImageRollout(args []string) error {
 	fs := flag.NewFlagSet(cmdImageRollout.Path, flag.ContinueOnError)
 	image := fs.String("image", "", "short image name (matches suffix of ECR URL)")
 	tag := fs.String("tag", "", "new tag to write")
-	on := fs.String("on", "", "profile name")
+	on := fs.String("profile", "", "profile name")
 	gitopsRepo := fs.String("gitops-repo", "", "gitops repo path (default: ~/code/gitops)")
 	namespace := fs.String("namespace", "sparkwing", "kubernetes namespace for rollout + logs")
 	argocdApp := fs.String("argocd-app", "", "argocd app name (default: derived from --image)")
@@ -285,7 +285,8 @@ func setScalarField(m *yaml.Node, key, value string) error {
 			return nil
 		}
 	}
-	m.Content = append(m.Content,
+	m.Content = append(
+		m.Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Value: key},
 		&yaml.Node{Kind: yaml.ScalarNode, Value: value, Tag: "!!str"},
 	)
@@ -314,7 +315,6 @@ func gitCommitAndPush(repoRoot, kustPath, message string) (sha string, committed
 	if _, aerr := runGit(repoRoot, "add", relPath); aerr != nil {
 		return "", false, fmt.Errorf("%w", aerr)
 	}
-	// `git diff --cached --quiet` exit 0 = nothing staged.
 	cmd := exec.Command("git", "-C", repoRoot, "diff", "--cached", "--quiet")
 	if cerr := cmd.Run(); cerr == nil {
 		out, herr := runGit(repoRoot, "rev-parse", "HEAD")

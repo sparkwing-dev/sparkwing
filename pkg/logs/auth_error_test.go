@@ -59,8 +59,6 @@ func TestAppend_401ReturnsAuthError(t *testing.T) {
 	if ae.Status != http.StatusUnauthorized {
 		t.Errorf("Status: got %d, want 401", ae.Status)
 	}
-	// No canonical "scope" body in this case; Error() should still
-	// say something useful.
 	if ae.Error() == "" {
 		t.Error("Error() should not be empty")
 	}
@@ -78,10 +76,7 @@ func TestAppend_403JSONBodyExtractsScope(t *testing.T) {
 			Error:        "missing_scope",
 			MissingScope: "logs.write",
 			Principal:    "runner:warm-runner-7",
-			// Deliberately reworded -- the parser must NOT depend on
-			// "token lacks required scope" phrasing when JSON is
-			// present.
-			Message: "your token cannot append logs (logs.write missing)",
+			Message:      "your token cannot append logs (logs.write missing)",
 		})
 	}))
 	defer srv.Close()

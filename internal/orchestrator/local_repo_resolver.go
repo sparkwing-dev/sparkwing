@@ -84,8 +84,6 @@ func assertGitDir(path string) error {
 	if err != nil {
 		return err
 	}
-	// .git is a directory for normal clones, regular file for
-	// worktrees/submodules.
 	if fi.IsDir() || fi.Mode().IsRegular() {
 		return nil
 	}

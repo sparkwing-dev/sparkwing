@@ -90,7 +90,7 @@ var (
 // SetTestHTTPNodeLogRetry overrides the per-line retry budget +
 // backoff for the duration of a test, restoring the originals on
 // cleanup. Production callers should not touch these knobs.
-func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts int, backoffMS int) {
+func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS int) {
 	oldA, oldB := httpNodeLogRetryAttempts, httpNodeLogRetryBackoff
 	httpNodeLogRetryAttempts = attempts
 	httpNodeLogRetryBackoff = time.Duration(backoffMS) * time.Millisecond
@@ -112,7 +112,6 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 		rec.JobID = l.nodeID
 	}
 
-	// Mirror first so a logs-service outage doesn't hide the line.
 	if l.delegate != nil {
 		l.delegate.Emit(rec)
 	}
@@ -122,9 +121,6 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	fatal := l.fatal
 	l.mu.Unlock()
 	if closed || fatal != nil {
-		// Once auth has latched fatal there's no point spamming the
-		// service with attempts that will all 401/403; we'll surface
-		// the latched error via Fatal() at node close.
 		return
 	}
 
@@ -145,9 +141,6 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 	var lastErr error
 	for attempt := 0; attempt < httpNodeLogRetryAttempts; attempt++ {
 		if attempt > 0 {
-			// Exponential-ish backoff (200ms, 400ms, 800ms by default).
-			// Cheap because we only spend it when the service is sick;
-			// the ctx timeout below caps total wall-clock per line.
 			time.Sleep(httpNodeLogRetryBackoff << (attempt - 1))
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -164,7 +157,8 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 				l.fatal = authErr
 			}
 			l.mu.Unlock()
-			l.logger.Error("logs append blocked by auth; failing run",
+			l.logger.Error(
+				"logs append blocked by auth; failing run",
 				"run_id", l.runID,
 				"node_id", l.nodeID,
 				"status", authErr.Status,
@@ -173,9 +167,6 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 			return
 		}
 	}
-	// Retries exhausted on a non-auth error: record the drop and
-	// keep the run going. The count surfaces on the Run record at
-	// node-close time so `runs status` shows it.
 	l.mu.Lock()
 	l.dropCount++
 	if l.dropReason == "" && lastErr != nil {
@@ -183,7 +174,8 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 	}
 	count := l.dropCount
 	l.mu.Unlock()
-	l.logger.Warn("logs append dropped after retries",
+	l.logger.Warn(
+		"logs append dropped after retries",
 		"run_id", l.runID,
 		"node_id", l.nodeID,
 		"err", lastErr,

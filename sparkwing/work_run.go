@@ -48,9 +48,6 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		return nil, fmt.Errorf("sparkwing: RunWork: Work declares %d Spawn(s) but no SpawnHandler is installed in ctx; spawn dispatch requires the orchestrator-provided handler", len(spawns)+len(gens))
 	}
 
-	// Steps, single SpawnNodes, and SpawnNodeForEach generators all
-	// schedule through the same dep-graph; the kind tag selects the
-	// executor.
 	items := make(map[string]*workItem, len(steps)+len(spawns)+len(gens))
 	addItem := func(it *workItem) {
 		if _, exists := items[it.id]; exists {
@@ -101,28 +98,6 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		}
 	}
 
-	// OnTarget filter: walk the step DAG once to resolve effective
-	// target sets (explicit + inferred from consumers), then mark
-	// every step that doesn't match the active target with a
-	// `step_skipped` reason. Downstream Needs treats the skip as
-	// satisfied. Empty active target skips every non-universal step.
-	target := Target(ctx)
-	stepEff := effectiveStepTargets(w)
-	for id, eff := range stepEff {
-		if jobAllowsTarget(eff, target) {
-			continue
-		}
-		if it, ok := items[id]; ok {
-			it.rangeSkipReason = formatOnTargetSkip(eff, target)
-		}
-	}
-
-	// Resolve --start-at / --stop-at against this Work's
-	// items. The orchestrator already validated the strings exist
-	// somewhere in the Plan; here we apply the range only if at least
-	// one bound matches a local item, so the same range plumbed
-	// through ctx for a multi-Job pipeline is a no-op for Works
-	// that don't contain the named step.
 	if r, ok := stepRangeFromContext(ctx); ok && (r.start != "" || r.stop != "") {
 		_, hasStart := items[r.start]
 		_, hasStop := items[r.stop]
@@ -149,22 +124,14 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 
 	var (
 		mu       sync.Mutex
-		firstErr error // returned by RunWork; Optional steps don't fill this
-		fatalErr error // halts further scheduling; non-ContinueOnError steps fill this
+		firstErr error
+		fatalErr error
 		running  int
 	)
-	// setErr records a failure and decides whether to cancel siblings.
-	// item is the failed workItem so we can read its WorkStep flags;
-	// nil item (spawn/spawnEach failure) follows the legacy fail-fast
-	// path -- only WorkSteps carry the Optional / ContinueOnError
-	// opt-outs.
 	setErr := func(it *workItem, err error) {
 		mu.Lock()
 		defer mu.Unlock()
 		step := stepOf(it)
-		// Optional masks the failure from the rollup. ContinueOnError
-		// (implied by Optional, also set on its own) skips the cancel
-		// + skips the schedule-halt so siblings keep running.
 		if step == nil || !step.IsOptional() {
 			if firstErr == nil {
 				firstErr = err
@@ -214,10 +181,6 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		if res.err != nil {
 			it := items[res.id]
 			setErr(it, res.err)
-			// ContinueOnError lets dependents that .Needs() this step
-			// still dispatch -- decrement the in-degree like a normal
-			// completion. Default behavior leaves indeg untouched so
-			// dependents stay blocked (cascade-skip).
 			step := stepOf(it)
 			if step != nil && step.IsContinueOnError() {
 				for _, c := range children[res.id] {
@@ -289,11 +252,6 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		}
 	}()
 
-	// Range skip wins over user-authored SkipIf predicates so
-	// `step_skipped` events carry the operator's intent ("outside
-	// --start-at..--stop-at range") rather than whatever predicate
-	// happened to match. Hidden synthetic items (SpawnNodeForEach
-	// fan-out) never emit step_skipped to keep the dashboard clean.
 	if it.rangeSkipReason != "" {
 		if !it.isHidden {
 			emitStepSkippedWithReason(ctx, it.id, it.rangeSkipReason)
@@ -314,12 +272,6 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		}
 	}
 
-	// Under --dry-run, a step that declared neither a
-	// dry-run body nor an explicit SafeWithoutDryRun marker is
-	// soft-skipped with reason `no_dry_run_defined`. The dispatch
-	// path below selects DryRunFn vs Fn for the cases that DO have
-	// a defined dispatch; this branch handles only the "missing
-	// contract" case so the run logs make the gap visible.
 	if it.kind == itemStep && IsDryRun(ctx) && it.step.dryRunFn == nil && !it.step.safeWithoutDryRun {
 		if !it.isHidden {
 			emitStepSkippedWithReason(ctx, it.id, "no_dry_run_defined")
@@ -334,11 +286,6 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 		emitStepEvent(ctx, it.id, "step_start", 0, nil)
 	}
 
-	// Push the step ID onto ctx for the body's duration so log records
-	// emitted *inside* the step (Info, Exec lines, etc.) carry it in
-	// their breadcrumb. step_start above and step_end below intentionally
-	// fire on the un-stepped ctx so the start/end lines render at the
-	// node level without duplicating the step name in their breadcrumb.
 	stepCtx := WithStep(ctx, it.id)
 	out, err := dispatchItem(stepCtx, it, parentNodeID, handler)
 	elapsed := time.Since(start)
@@ -360,15 +307,10 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 func dispatchItem(ctx context.Context, it *workItem, parentNodeID string, handler SpawnHandler) (any, error) {
 	switch it.kind {
 	case itemStep:
-		// Dispatch under --dry-run prefers DryRunFn over
-		// the apply Fn. The "step has neither" case is handled
-		// upstream in runOneItem before step_start fires; by the
-		// time we reach dispatchItem the step is guaranteed to
-		// have a runnable body for the current mode.
 		if IsDryRun(ctx) && it.step.dryRunFn != nil {
 			return nil, it.step.dryRunFn(ctx)
 		}
-		return it.step.Fn()(ctx)
+		return it.step.fn(ctx)
 	case itemSpawn:
 		return runOneSpawn(ctx, it.spawn, parentNodeID, handler)
 	case itemSpawnEach:
@@ -381,9 +323,9 @@ func dispatchItem(ctx context.Context, it *workItem, parentNodeID string, handle
 func (it *workItem) markDone(out any) {
 	switch it.kind {
 	case itemStep:
-		it.step.MarkDone(out)
+		it.step.markDone(out)
 	case itemSpawn:
-		it.spawn.MarkDone(out)
+		it.spawn.markDone(out)
 	}
 }
 

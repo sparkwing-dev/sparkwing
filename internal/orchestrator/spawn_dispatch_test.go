@@ -13,14 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestSpawnDispatch_* covers spawn dispatch: a node's Work declares
-// SpawnNode / SpawnNodeForEach; the orchestrator-side handler fires
-// each spawn as a fresh Plan node (namespaced "{parent}/{spawnID}"),
-// dispatches it through the regular scheduling loop, and blocks the
-// parent runner until the child terminates.
-
-// --- spawn-shape pipelines ---
-
 type spawnedChildJob struct {
 	sparkwing.Base
 	tag string
@@ -40,7 +32,7 @@ func (j *spawnedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 // spawnSingleParent declares one SpawnNode after a setup step. The
 // parent's third step waits on the spawn and reads through
-// SpawnHandle to confirm the suspended-runner round-trip.
+// the SpawnSpec to confirm the suspended-runner round-trip.
 type spawnSingleParent struct {
 	sparkwing.Base
 	childRan *atomic.Bool
@@ -124,8 +116,6 @@ func (sp *spawnEachPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwi
 	return nil
 }
 
-// --- shared test pipeline factory ---
-
 var (
 	spawnSingleChildRan atomic.Bool
 	spawnEachCount      atomic.Int32
@@ -140,8 +130,6 @@ func init() {
 		return &spawnEachPipe{count: &spawnEachCount}
 	})
 }
-
-// --- tests ---
 
 func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
 	spawnSingleChildRan.Store(false)
@@ -158,7 +146,7 @@ func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	want := map[string]bool{"parent": false, "parent/scan": false}
 	for _, n := range nodes {
@@ -186,7 +174,7 @@ func TestSpawnDispatch_ChildFailureFailsParent(t *testing.T) {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 
 	parent, child := find(nodes, "parent"), find(nodes, "parent/doomed-child")
@@ -216,7 +204,7 @@ func TestSpawnDispatch_ForEachFansOut(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	wantIDs := map[string]bool{
 		"parent":         false,
@@ -238,8 +226,6 @@ func TestSpawnDispatch_ForEachFansOut(t *testing.T) {
 		}
 	}
 }
-
-// --- helpers ---
 
 func find(nodes []*store.Node, id string) *store.Node {
 	for _, n := range nodes {

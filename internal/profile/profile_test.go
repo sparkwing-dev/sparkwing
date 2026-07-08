@@ -1,185 +1,147 @@
 package profile_test
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
+
+func TestInheritControllerDefaults(t *testing.T) {
+	prefilledTokenEnv := "PREFILLED"
+	p := &profile.Profile{
+		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
+		Secrets:    &backends.Spec{Type: backends.TypeController},
+		State:      &backends.Spec{Type: backends.TypeController, URL: "https://state.override", Token: "tok-state"},
+		Cache:      &backends.Spec{Type: backends.TypeController, TokenEnv: prefilledTokenEnv},
+		Logs:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/sw.db"},
+	}
+	p.InheritControllerDefaults()
+	if p.Secrets.URL != "https://ctrl.example" || p.Secrets.Token != "tok-from-ctrl" {
+		t.Errorf("Secrets not filled from controller: %+v", p.Secrets)
+	}
+	if p.State.URL != "https://state.override" || p.State.Token != "tok-state" {
+		t.Errorf("State (explicit) was overwritten: %+v", p.State)
+	}
+	if p.Cache.URL != "https://ctrl.example" || p.Cache.TokenEnv != prefilledTokenEnv || p.Cache.Token != "" {
+		t.Errorf("Cache: URL should fill but Token must stay empty when TokenEnv is set: %+v", p.Cache)
+	}
+	if p.Logs.URL != "/var/sw.db"[:0]+"" || p.Logs.Path != "/var/sw.db" {
+		t.Errorf("Logs (non-controller type) must not be touched: %+v", p.Logs)
+	}
+}
 
 func TestLoad_MissingFile(t *testing.T) {
 	cfg, err := profile.Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
-		t.Fatalf("missing file should not error: %v", err)
+		t.Fatalf("Load missing: %v", err)
 	}
-	if len(cfg.Profiles) != 0 {
-		t.Fatalf("expected 0 profiles, got %d", len(cfg.Profiles))
+	if cfg == nil || cfg.Profiles == nil {
+		t.Fatalf("expected non-nil cfg with empty Profiles map; got %+v", cfg)
 	}
 }
 
 func TestLoadSaveRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
-	in := &profile.Config{
-		Default: "local",
+	mirror := false
+	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
-			"local": {Controller: "http://127.0.0.1:4344"},
 			"prod": {
-				Controller:    "https://api.example.dev",
-				Token:         "swu_test",
-				Gitcache:      "https://gitcache.example.com",
-				LogStore:      "s3://your-team-sparkwing-store/logs",
-				ArtifactStore: "s3://your-team-sparkwing-store/cache",
+				Controller:  &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
+				State:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
+				MirrorLocal: &mirror,
 			},
 		},
 	}
-	if err := profile.Save(path, in); err != nil {
-		t.Fatal(err)
+	if err := profile.Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 	out, err := profile.Load(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Load: %v", err)
 	}
-	if out.Default != "local" {
-		t.Fatalf("default: %q", out.Default)
+	prod := out.Profiles["prod"]
+	if prod == nil {
+		t.Fatal("prod profile missing on reload")
 	}
-	if out.Profiles["local"].Controller != "http://127.0.0.1:4344" {
-		t.Fatalf("local profile roundtrip: %+v", out.Profiles["local"])
+	if prod.ControllerURL() != "https://api.example.dev" || prod.ControllerToken() != "swu_x" {
+		t.Errorf("controller/token: %+v", prod)
 	}
-	if out.Profiles["prod"].Token != "swu_test" {
-		t.Fatalf("prod token roundtrip: %+v", out.Profiles["prod"])
+	if prod.State == nil || prod.State.Type != backends.TypeSQLite {
+		t.Errorf("state: %+v", prod.State)
 	}
-	if out.Profiles["prod"].LogStore != "s3://your-team-sparkwing-store/logs" ||
-		out.Profiles["prod"].ArtifactStore != "s3://your-team-sparkwing-store/cache" {
-		t.Fatalf("storage URL roundtrip: %+v", out.Profiles["prod"])
-	}
-	if out.Profiles["local"].Name != "local" {
-		t.Fatalf("Name not stamped on load: %+v", out.Profiles["local"])
+	if prod.MirrorLocal == nil || *prod.MirrorLocal != false {
+		t.Errorf("mirror_local: %+v", prod.MirrorLocal)
 	}
 }
 
 func TestSave_0600Mode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
-	if err := profile.Save(path, &profile.Config{
-		Profiles: map[string]*profile.Profile{
-			"local": {Controller: "http://x"},
-		},
-	}); err != nil {
-		t.Fatal(err)
+	if err := profile.Save(path, &profile.Config{}); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Fatalf("mode: got %o, want 0600", mode)
-	}
-}
-
-func TestResolve_ExplicitWins(t *testing.T) {
-	cfg := &profile.Config{
-		Default: "local",
-		Profiles: map[string]*profile.Profile{
-			"local": {Name: "local", Controller: "http://127.0.0.1:4344"},
-			"prod":  {Name: "prod", Controller: "https://api.example.dev"},
-		},
-	}
-	p, err := profile.Resolve(cfg, "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.Name != "prod" {
-		t.Fatalf("resolved %q, want prod", p.Name)
-	}
-}
-
-func TestResolve_DefaultFallback(t *testing.T) {
-	cfg := &profile.Config{
-		Default: "local",
-		Profiles: map[string]*profile.Profile{
-			"local": {Name: "local", Controller: "http://127.0.0.1:4344"},
-		},
-	}
-	p, err := profile.Resolve(cfg, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.Name != "local" {
-		t.Fatalf("default: got %q, want local", p.Name)
-	}
-}
-
-func TestResolve_NoProfile(t *testing.T) {
-	cfg := &profile.Config{Profiles: map[string]*profile.Profile{}}
-	_, err := profile.Resolve(cfg, "")
-	if !errors.Is(err, profile.ErrNoProfile) {
-		t.Fatalf("want ErrNoProfile, got %v", err)
-	}
-}
-
-func TestResolve_ProfileNotFound(t *testing.T) {
-	cfg := &profile.Config{
-		Profiles: map[string]*profile.Profile{
-			"local": {Name: "local"},
-		},
-	}
-	_, err := profile.Resolve(cfg, "staging")
-	if !errors.Is(err, profile.ErrProfileNotFound) {
-		t.Fatalf("want ErrProfileNotFound, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "staging") {
-		t.Fatalf("error should name the requested profile: %v", err)
-	}
-}
-
-// TestResolve_DefaultMissing covers the case where the default points
-// at a deleted profile.
-func TestResolve_DefaultMissing(t *testing.T) {
-	cfg := &profile.Config{
-		Default:  "gone",
-		Profiles: map[string]*profile.Profile{},
-	}
-	_, err := profile.Resolve(cfg, "")
-	if !errors.Is(err, profile.ErrProfileNotFound) {
-		t.Fatalf("want ErrProfileNotFound, got %v", err)
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600 (file carries tokens)", info.Mode().Perm())
 	}
 }
 
 func TestNames_Sorted(t *testing.T) {
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
-			"zulu":  {},
-			"alpha": {},
-			"mike":  {},
+			"zebra": {}, "alpha": {}, "mango": {},
 		},
 	}
-	names := cfg.Names()
-	if got := strings.Join(names, ","); got != "alpha,mike,zulu" {
-		t.Fatalf("got %q, want alpha,mike,zulu", got)
+	got := cfg.Names()
+	want := []string{"alpha", "mango", "zebra"}
+	for i, n := range want {
+		if got[i] != n {
+			t.Errorf("Names()[%d] = %q, want %q", i, got[i], n)
+		}
 	}
 }
 
 func TestDefaultPath_RespectsEnv(t *testing.T) {
-	t.Setenv("SPARKWING_PROFILES", "/explicit/path.yaml")
-	p, err := profile.DefaultPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p != "/explicit/path.yaml" {
-		t.Fatalf("got %q", p)
+	t.Setenv("SPARKWING_PROFILES", "/tmp/custom.yaml")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	got, err := profile.DefaultPath()
+	if err != nil || got != "/tmp/custom.yaml" {
+		t.Errorf("got (%q, %v), want /tmp/custom.yaml", got, err)
 	}
 }
 
 func TestDefaultPath_XDG(t *testing.T) {
 	t.Setenv("SPARKWING_PROFILES", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
-	p, err := profile.DefaultPath()
-	if err != nil {
-		t.Fatal(err)
+	got, err := profile.DefaultPath()
+	if err != nil || got != "/tmp/xdg/sparkwing/profiles.yaml" {
+		t.Errorf("got (%q, %v), want /tmp/xdg/sparkwing/profiles.yaml", got, err)
 	}
-	if p != "/tmp/xdg/sparkwing/profiles.yaml" {
-		t.Fatalf("got %q", p)
+}
+
+func TestEffectiveMirrorLocal_DefaultsTrue(t *testing.T) {
+	if !(*profile.Profile)(nil).EffectiveMirrorLocal() {
+		t.Error("nil profile should report MirrorLocal=true (laptop default)")
+	}
+	p := &profile.Profile{}
+	if !p.EffectiveMirrorLocal() {
+		t.Error("unset MirrorLocal should default to true")
+	}
+	f := false
+	p.MirrorLocal = &f
+	if p.EffectiveMirrorLocal() {
+		t.Error("MirrorLocal=false should report false")
+	}
+}
+
+func TestSurfaces_NilSafe(t *testing.T) {
+	got := (*profile.Profile)(nil).Surfaces()
+	if got.State != nil || got.Cache != nil || got.Logs != nil {
+		t.Errorf("nil profile should yield zero Surfaces; got %+v", got)
 	}
 }

@@ -11,10 +11,12 @@ import (
 	"runtime"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"golang.org/x/term"
 )
 
 // Main is the entry point for .sparkwing/main.go. Subcommands:
@@ -68,12 +70,6 @@ func Main() {
 	pipeline := args[0]
 	rest := args[1:]
 
-	// `<pipeline> config` is a pure inspection subverb: print the
-	// layered Config + declared Secrets for the selected target,
-	// no Plan, no dispatch. Honors SPARKWING_TARGET (the --sw-target
-	// value the outer CLI forwarded). Recognized before --help so
-	// `sparkwing run X config --help` is a future extension point
-	// if needed.
 	if len(rest) > 0 && rest[0] == "config" {
 		if err := runPipelineConfigInspect(pipeline, rest[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, pipeline+":", err)
@@ -82,7 +78,6 @@ func Main() {
 		return
 	}
 
-	// --help short-circuits before typed-flag parsing.
 	for _, tok := range rest {
 		if tok == "-h" || tok == "--help" {
 			if err := printPipelineHelp(pipeline); err != nil {
@@ -93,7 +88,6 @@ func Main() {
 		}
 	}
 
-	// --explain emits the plan snapshot without dispatching.
 	for _, tok := range rest {
 		if tok == "--explain" {
 			if err := printPipelinePlan(pipeline, filterTok(rest, "--explain")); err != nil {
@@ -104,10 +98,6 @@ func Main() {
 		}
 	}
 
-	// --plan emits the runtime-resolved plan preview -- same DAG as
-	// --explain plus per-step would-run / would-skip decisions
-	// evaluated against the supplied args + --start-at / --stop-at
-	// bounds. NO step bodies execute.
 	for _, tok := range rest {
 		if tok == "--plan" {
 			if err := printPipelineRuntimePlan(pipeline, filterTok(rest, "--plan")); err != nil {
@@ -115,6 +105,14 @@ func Main() {
 				os.Exit(1)
 			}
 			return
+		}
+	}
+
+	var projectCfg *projectconfig.Config
+	if cwd, err := os.Getwd(); err == nil {
+		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
+			sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
+			projectCfg = cfg
 		}
 	}
 
@@ -130,36 +128,56 @@ func Main() {
 		os.Exit(1)
 	}
 
-	// Load the on-disk pipelines.yaml entry (if any) so target /
-	// source / backend overlays resolve at run start. A missing
-	// pipelines.yaml is not an error -- pipelines that don't declare
-	// targets or values still work the same way they did before
-	// step 6 landed.
 	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
 
 	delegate := selectLocalRenderer()
 	opts := Options{
-		Pipeline:       pipeline,
-		Args:           argsMap,
-		Git:            detectGit(),
-		Delegate:       delegate,
-		Debug:          readDebugDirectivesFromEnv(),
-		StartAt:        os.Getenv("SPARKWING_START_AT"),
-		StopAt:         os.Getenv("SPARKWING_STOP_AT"),
-		Only:           os.Getenv("SPARKWING_ONLY"),
-		NoCacheRuns:    os.Getenv("SPARKWING_NO_CACHE_RUNS") == "1",
-		DryRun:         os.Getenv("SPARKWING_DRY_RUN") == "1",
-		MaxParallel:    runtime.NumCPU(),
-		Target:         os.Getenv("SPARKWING_TARGET"),
-		BackendsConfig: os.Getenv("SPARKWING_BACKENDS_CONFIG"),
-		PipelineYAML:   pipelineYAML,
-		SparkwingDir:   sparkwingDir,
+		Pipeline:            pipeline,
+		Args:                argsMap,
+		Git:                 detectGit(),
+		Delegate:            delegate,
+		Debug:               readDebugDirectivesFromEnv(),
+		StartAt:             os.Getenv("SPARKWING_START_AT"),
+		StopAt:              os.Getenv("SPARKWING_STOP_AT"),
+		Only:                os.Getenv("SPARKWING_ONLY"),
+		NoCache:             os.Getenv("SPARKWING_NO_CACHE") == "1",
+		DryRun:              os.Getenv("SPARKWING_DRY_RUN") == "1",
+		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
+		MaxParallel:         runtime.NumCPU(),
+		DispatchWaitTimeout: parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
+		PipelineYAML:        pipelineYAML,
+		SparkwingDir:        sparkwingDir,
 	}
+	if projectCfg != nil {
+		opts.DefaultArgs = projectCfg.Defaults.Args
+		if pipelineYAML != nil {
+			if pipelineYAML.Guards.IsEmpty() {
+				pipelineYAML.Guards = projectCfg.Defaults.Guards
+			}
+			if len(pipelineYAML.Requires) == 0 {
+				pipelineYAML.Requires = projectCfg.Defaults.Requires
+			}
+		}
+	}
+	if pipelineYAML != nil {
+		for _, r := range pipelineYAML.Requires {
+			if r == "local" {
+				opts.LocalOnly = true
+				break
+			}
+		}
+	}
+	prof, profChain, profErr := resolveActiveProfile(pipelineYAML, projectCfg)
+	if profErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
+		os.Exit(1)
+	}
+	opts.Profile = prof
+	opts.ProfileChain = profChain
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
 		os.Exit(1)
 	}
-	// --secrets PROF: resolve via SPARKWING_SECRETS_PROFILE.
 	if prof := os.Getenv("SPARKWING_SECRETS_PROFILE"); prof != "" {
 		src, perr := remoteSecretSource(prof)
 		if perr != nil {
@@ -169,37 +187,42 @@ func Main() {
 		opts.SecretSource = src
 	}
 
-	res, err := RunLocal(context.Background(), paths, opts)
+	ctx, stopBoxWait := context.WithCancel(context.Background())
+	defer stopBoxWait()
+	release, err := acquireBoxSlot(ctx, paths, workersHintForBoxSlot())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)
 	}
-	// run_finish is emitted inside Run() so the envelope tee
-	// captures it. The previous outer emission here happened
-	// after RunLocal had already closed the envelope file, leaving
-	// `runs logs --follow` without a terminal event. Keep the
-	// non-zero exit so wrapper scripts still see the failure.
+	defer release()
+
+	res, err := RunLocal(ctx, paths, opts)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run:", err)
+		release()
+		os.Exit(1)
+	}
 	_ = delegate
 	if res != nil && res.Error != nil {
-		// Run-lifecycle failures (validator rejections, FinishRun-recorded
-		// errors) come back as Result.Error with a nil Go error from
-		// RunLocal. Surface them so the operator isn't left with a
-		// silent exit-1.
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}
 	if res != nil && res.Status != "success" {
+		release()
 		os.Exit(1)
 	}
 }
 
 // selectLocalRenderer chooses the live delegate based on
-// SPARKWING_LOG_FORMAT (explicit) or stdout TTY (default).
+// SPARKWING_LOG_FORMAT (explicit: pretty | json | quiet) or stdout TTY
+// (default: pretty on a terminal, json otherwise).
 func selectLocalRenderer() sparkwing.Logger {
 	switch strings.ToLower(os.Getenv("SPARKWING_LOG_FORMAT")) {
 	case "json":
 		return NewJSONRenderer()
 	case "pretty":
 		return NewPrettyRenderer()
+	case "quiet":
+		return NewQuietRenderer()
 	}
 	if isInteractiveStdout() {
 		return NewPrettyRenderer()
@@ -292,6 +315,9 @@ func printPipelineHelp(pipeline string) error {
 			if a.Secret {
 				suffix += " [secret]"
 			}
+			if a.JobID != "" {
+				suffix += fmt.Sprintf(" [from job %s]", a.JobID)
+			}
 			fmt.Fprintf(w, "  %-30s %s %s  %s%s\n",
 				head, tag, a.Type, a.Desc, suffix)
 		}
@@ -316,10 +342,6 @@ func printPipelineHelp(pipeline string) error {
 		}
 		fmt.Fprintln(w)
 	}
-	// Enumerate sparkwing-owned flags from
-	// sparkwing.SparkwingFlagDocs() so this footer stays in lockstep
-	// with `sparkwing run --help`. Sourcing from one list future-
-	// proofs additions.
 	printSparkwingFlagsSection(w)
 	return nil
 }
@@ -384,7 +406,7 @@ func printPipelinePlan(pipeline string, rest []string) error {
 	if err != nil {
 		return fmt.Errorf("marshal plan: %w", err)
 	}
-	os.Stdout.Write(snap)
+	_, _ = os.Stdout.Write(snap)
 	fmt.Println()
 	return nil
 }
@@ -401,8 +423,8 @@ func filterTok(args []string, drop string) []string {
 }
 
 // stripExplainOutputFlags removes explain-output formatting flags
-// (`-o` / `--output` / `--json`) from args. The pipeline binary
-// always emits a JSON plan snapshot for `--explain`; the surrounding
+// (`-o` / `--output`) from args. The pipeline binary always emits a
+// JSON plan snapshot for `--explain`; the surrounding
 // `sparkwing pipeline explain` / `sparkwing run` wrapper is responsible for
 // any pretty-printing, so these flags are noise to the inner Plan-
 // builder. Stripping them keeps parseTypedFlags from rejecting them
@@ -414,18 +436,12 @@ func stripExplainOutputFlags(args []string) []string {
 	for i := 0; i < len(args); i++ {
 		tok := args[i]
 		switch {
-		case tok == "--json", tok == "--json=true", tok == "--json=false":
-			// Boolean toggle; consumed.
 		case tok == "-o", tok == "--output":
-			// Two-token flag; consume the value too if present and
-			// not itself a flag (defensive against malformed input).
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 			}
 		case strings.HasPrefix(tok, "-o="),
-			strings.HasPrefix(tok, "--output="),
-			strings.HasPrefix(tok, "--json="):
-			// Single-token =value form; consumed.
+			strings.HasPrefix(tok, "--output="):
 		default:
 			out = append(out, tok)
 		}
@@ -487,7 +503,6 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 		}
 		if !found {
 			if schema.Extra {
-				// Forward to the bag field; treated as scalar string.
 				if !hasEq {
 					if i+1 >= len(args) {
 						return nil, fmt.Errorf("flag --%s expects a value (extra-bag forwarding)", name)
@@ -568,17 +583,17 @@ func readDebugDirectivesFromEnv() DebugDirectives {
 }
 
 // loadPipelineYAML walks up from cwd looking for
-// .sparkwing/pipelines.yaml and returns the entry for the named
-// pipeline (nil when there's no pipelines.yaml or the pipeline isn't
+// .sparkwing/sparkwing.yaml and returns the entry for the named
+// pipeline (nil when there's no sparkwing.yaml or the pipeline isn't
 // listed). Also returns the resolved .sparkwing/ directory so the
-// orchestrator can consult sources.yaml / backends.yaml from the
+// orchestrator can consult the same file's sources section from the
 // same root.
 func loadPipelineYAML(pipeline string) (*pipelines.Pipeline, string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, ""
 	}
-	yamlPath, cfg, err := pipelines.Discover(cwd)
+	yamlPath, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil || cfg == nil {
 		return nil, ""
 	}
@@ -603,16 +618,20 @@ func splitCommaClean(s string) []string {
 func detectGit() *sparkwing.Git {
 	g := &sparkwing.Git{}
 	if cwd, err := os.Getwd(); err == nil {
-		g = sparkwing.NewGit(cwd, "", "", "", "")
+		g = sparkwing.NewGit(cwd, "", "", "", "", "")
 	}
 	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
 		g.SHA = strings.TrimSpace(string(out))
 	}
 	if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		branch := strings.TrimSpace(string(out))
-		if branch != "HEAD" { // detached -> empty
+		if branch != "HEAD" {
 			g.Branch = branch
 		}
+	}
+	if out, err := exec.Command("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
+		name := strings.TrimSpace(string(out))
+		g.DefaultBranch = strings.TrimPrefix(name, "origin/")
 	}
 	if out, err := exec.Command("git", "remote", "get-url", "origin").Output(); err == nil {
 		g.RepoURL = strings.TrimSpace(string(out))

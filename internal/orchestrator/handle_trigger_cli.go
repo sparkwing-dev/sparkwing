@@ -25,10 +25,14 @@ func runHandleTriggerCLI(args []string) error {
 		"heartbeat cadence for the claim lease (cluster mode only)")
 	local := fs.Bool("local", false,
 		"run against the laptop SQLite store; no controller required")
+	profileName := fs.String("profile", "",
+		"profile to resolve backends from (local mode only). Forwarded by "+
+			"the parent's local trigger dispatcher so the child opens the "+
+			"same state backend the parent enqueued the trigger in.")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
-		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local]")
+		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local [--profile NAME]]")
 	}
 	triggerID := fs.Arg(0)
 
@@ -36,7 +40,7 @@ func runHandleTriggerCLI(args []string) error {
 	defer stop()
 
 	if *local {
-		if err := HandleClaimedTriggerLocal(ctx, triggerID); err != nil {
+		if err := HandleClaimedTriggerLocal(ctx, triggerID, *profileName); err != nil {
 			return fmt.Errorf("handle %s (local): %w", triggerID, err)
 		}
 		return nil

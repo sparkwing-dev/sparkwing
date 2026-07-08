@@ -32,43 +32,61 @@ func runDocs(args []string) error {
 		return runDocsAll(args[1:])
 	case "search":
 		return runDocsSearch(args[1:])
+	case "migrations":
+		return runDocsMigrations(args[1:])
+	case "versions":
+		return runDocsVersions(args[1:])
+	case "cache":
+		return runDocsCache(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdDocs, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdDocs, os.Stderr)
-		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search)", args[0])
+		return fmt.Errorf("docs: unknown verb %q (valid: list, read, all, search, migrations, versions, cache)", args[0])
 	}
 }
 
 func runDocsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
 	var output string
+	var wf docsWebFlags
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
+	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	if *asJSON {
-		output = "json"
+	ctx, cancel := newWebContext()
+	defer cancel()
+	resolution, err := resolveSource(ctx, wf)
+	if err != nil {
+		return err
 	}
-	entries := docs.List()
+	printDiscoveryWarning(resolution)
+	if !resolution.useWeb {
+		return renderDocsList(docs.List(), output)
+	}
+	entries, err := resolution.client.DocIndex(ctx, resolution.version)
+	if err != nil {
+		return fmt.Errorf("docs list --web %s: %w", resolution.version, err)
+	}
 	return renderDocsList(entries, output)
 }
 
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
 	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
+	var wf docsWebFlags
+	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	// Allow a positional fallback for ergonomics: `sparkwing docs read pipelines`.
 	if *topic == "" && fs.NArg() > 0 {
 		*topic = fs.Arg(0)
 	}
@@ -76,16 +94,32 @@ func runDocsRead(args []string) error {
 		PrintHelp(cmdDocsRead, os.Stderr)
 		return errors.New("docs read: --topic is required (e.g. --topic getting-started)")
 	}
-	body, err := docs.Read(*topic)
+	ctx, cancel := newWebContext()
+	defer cancel()
+	resolution, err := resolveSource(ctx, wf)
 	if err != nil {
-		// Suggest available slugs so the user can correct typos
-		// without a second command.
-		var b strings.Builder
-		fmt.Fprintf(&b, "%v\n\navailable topics:\n", err)
-		for _, e := range docs.List() {
-			fmt.Fprintf(&b, "  %s\n", e.Slug)
+		return err
+	}
+	printDiscoveryWarning(resolution)
+	if !resolution.useWeb {
+		body, err := docs.Read(*topic)
+		if err != nil {
+			var b strings.Builder
+			fmt.Fprintf(&b, "%v\n\navailable topics:\n", err)
+			for _, e := range docs.List() {
+				fmt.Fprintf(&b, "  %s\n", e.Slug)
+			}
+			return errors.New(strings.TrimRight(b.String(), "\n"))
 		}
-		return errors.New(strings.TrimRight(b.String(), "\n"))
+		fmt.Print(body)
+		if !strings.HasSuffix(body, "\n") {
+			fmt.Println()
+		}
+		return nil
+	}
+	body, err := fetchDocWeb(ctx, resolution, *topic)
+	if err != nil {
+		return err
 	}
 	fmt.Print(body)
 	if !strings.HasSuffix(body, "\n") {
@@ -115,24 +149,18 @@ func runDocsSearch(args []string) error {
 	var output string
 	fs.StringVarP(&query, "query", "q", "", "search terms (every token must match somewhere)")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := parseAndCheck(cmdDocsSearch, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	// Positional fallback so `sparkwing docs search "warm pool"` works
-	// without --query.
 	if query == "" && fs.NArg() > 0 {
 		query = strings.Join(fs.Args(), " ")
 	}
 	if query == "" {
 		PrintHelp(cmdDocsSearch, os.Stderr)
 		return errors.New("docs search: --query is required (e.g. --query \"warm pool\")")
-	}
-	if *asJSON {
-		output = "json"
 	}
 	hits := docs.Search(query)
 	return renderDocsList(hits, output)
@@ -145,8 +173,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(entries)
 	case "plain":
-		// One slug per line. Useful for shell loops:
-		// `for s in $(sparkwing docs list -o plain); do ...`
 		for _, e := range entries {
 			fmt.Println(e.Slug)
 		}
@@ -156,7 +182,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 			fmt.Println(color.Dim("(no docs match)"))
 			return nil
 		}
-		// Compute column widths for human-readable alignment.
 		slugW := len("SLUG")
 		titleW := len("TITLE")
 		for _, e := range entries {
@@ -167,14 +192,8 @@ func renderDocsList(entries []docs.Entry, output string) error {
 				titleW = n
 			}
 		}
-		// Cap title width so a long title doesn't push the summary
-		// off-screen on a typical 120-col terminal.
 		const titleCap = 40
 		titleW = min(titleW, titleCap)
-		// Pad the headers BEFORE wrapping in color.Bold -- the bold
-		// escapes contain invisible ANSI bytes that %-*s would
-		// count toward the column width, shifting the header row
-		// out of alignment with the data rows below it.
 		fmt.Printf("%s  %s  %s\n",
 			color.Bold(fmt.Sprintf("%-*s", slugW, "SLUG")),
 			color.Bold(fmt.Sprintf("%-*s", titleW, "TITLE")),
@@ -185,7 +204,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 				title = title[:titleW-1] + "…"
 			}
 			summary := e.Summary
-			// Trim summary to leave room on a typical 120-col term.
 			const summaryCap = 70
 			if len(summary) > summaryCap {
 				summary = summary[:summaryCap-1] + "…"

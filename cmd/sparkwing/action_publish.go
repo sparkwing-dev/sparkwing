@@ -36,35 +36,32 @@ type publishedBinary struct {
 
 func runPipelinePublish(args []string) error {
 	fs := flag.NewFlagSet("pipeline publish", flag.ContinueOnError)
-	on := fs.String("on", "",
+	on := fs.String("profile", "",
 		"profile name; uses its artifact_store field as the upload target")
 	artifactStore := fs.String("artifact-store", "",
-		"artifact-store URL (fs:///path or s3://bucket/prefix). Overrides --on.")
+		"artifact-store URL (fs:///path or s3://bucket/prefix). Overrides --profile.")
 	platforms := fs.String("platform", "",
 		"comma-separated GOOS/GOARCH pairs to cross-compile + publish "+
 			"(e.g. linux/amd64,linux/arm64,darwin/arm64). Default: current platform.")
 	sparkwingDirFlag := fs.String("dir", "",
 		"path to .sparkwing/ (default: walk up from cwd)")
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	// Resolve the artifact-store target. URL flag wins over profile.
 	storeURL, err := resolveArtifactStoreURL(*on, *artifactStore)
 	if err != nil {
 		return err
 	}
 	if storeURL == "" {
-		return errors.New("pipeline publish: no artifact-store configured. Pass --on PROFILE (with artifact_store set) or --artifact-store URL")
+		return errors.New("pipeline publish: no artifact-store configured. Pass --profile PROFILE (with artifact_store set) or --artifact-store URL")
 	}
 	store, err := storeurl.OpenArtifactStore(context.Background(), storeURL)
 	if err != nil {
 		return fmt.Errorf("open artifact-store: %w", err)
 	}
 
-	// Resolve .sparkwing/ -- explicit --dir wins, fallback to walk-up.
 	dir := *sparkwingDirFlag
 	if dir == "" {
 		d, err := findSparkwingDir()
@@ -74,15 +71,13 @@ func runPipelinePublish(args []string) error {
 		dir = d
 	}
 
-	// Parse --platform list. Empty = current platform only, matches
-	// what `sparkwing run` would compile for.
-	platforms_list, err := parsePlatforms(*platforms)
+	platformsList, err := parsePlatforms(*platforms)
 	if err != nil {
 		return err
 	}
 
-	results := make([]publishedBinary, 0, len(platforms_list))
-	for _, p := range platforms_list {
+	results := make([]publishedBinary, 0, len(platformsList))
+	for _, p := range platformsList {
 		row, err := compileAndPublishOne(context.Background(), dir, p, store, storeURL)
 		if err != nil {
 			return fmt.Errorf("publish %s: %w", p.label(), err)
@@ -90,15 +85,9 @@ func runPipelinePublish(args []string) error {
 		results = append(results, row)
 	}
 
-	format := "pretty"
-	switch {
-	case *asJSON:
-		format = "json"
-	case *output != "":
-		format = *output
-		if format == "table" {
-			format = "pretty"
-		}
+	format := *output
+	if format == "" || format == "table" {
+		format = "pretty"
 	}
 	return renderPublishResults(results, format)
 }
@@ -142,14 +131,8 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 	if err != nil {
 		return publishedBinary{}, fmt.Errorf("hash: %w", err)
 	}
-	// Per-platform local cache path so a cross-compile doesn't stomp
-	// the operator's host-platform binary (which lives at the same
-	// hash if not for the platform mix-in).
 	binPath := bincache.CachedBinaryPath(key)
 
-	// Compile if not already cached locally for this hash. The local
-	// cache is keyed on hash, which mixes platform, so cross-compiles
-	// don't collide with the operator's native build.
 	if _, err := os.Stat(binPath); err != nil {
 		if err := compileForPlatform(sparkwingDir, binPath, p); err != nil {
 			return publishedBinary{}, fmt.Errorf("compile: %w", err)
@@ -184,7 +167,14 @@ func compileForPlatform(sparkwingDir, dest string, p platform) error {
 	}
 	args := []string{"build"}
 	if overlay := overlayModfilePath(sparkwingDir); overlay != "" {
-		args = append(args, "-modfile="+overlay)
+		if work, present := goWorkInScope(sparkwingDir); present {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s in effect; skipping sparks resolution for %s/%s.\n",
+				work, p.OS, p.Arch,
+			)
+		} else {
+			args = append(args, "-modfile="+overlay)
+		}
 	}
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
@@ -209,21 +199,40 @@ func overlayModfilePath(sparkwingDir string) string {
 	return ""
 }
 
+// goWorkInScope mirrors the bincache helper. Returns the path to a
+// go.work in sparkwingDir or an ancestor + true on hit, "" + false
+// otherwise. Honors GOWORK ("off" disables; an explicit path wins
+// when readable).
+func goWorkInScope(sparkwingDir string) (string, bool) {
+	switch env := os.Getenv("GOWORK"); env {
+	case "off":
+		return "", false
+	case "":
+	default:
+		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
+			return env, true
+		}
+		return "", false
+	}
+	dir := sparkwingDir
+	for {
+		candidate := filepath.Join(dir, "go.work")
+		if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
+			return candidate, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
 // resolveArtifactStoreURL picks the storage URL to publish to.
-// Explicit --artifact-store URL beats --on profile's field;
-// returning "" means neither was provided.
-func resolveArtifactStoreURL(on, urlFlag string) (string, error) {
-	if urlFlag != "" {
-		return urlFlag, nil
-	}
-	if on == "" {
-		return "", nil
-	}
-	prof, err := resolveProfile(on)
-	if err != nil {
-		return "", err
-	}
-	return prof.ArtifactStore, nil
+// Operators pass --artifact-store URL explicitly; returning "" means
+// the flag was not provided.
+func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
+	return urlFlag, nil
 }
 
 func renderPublishResults(rows []publishedBinary, format string) error {
@@ -238,8 +247,6 @@ func renderPublishResults(rows []publishedBinary, format string) error {
 		}
 		return nil
 	default:
-		// table: stable column order so agents that grep for fields
-		// don't break across releases.
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Platform < rows[j].Platform })
 		fmt.Printf("%-20s  %-8s  %s\n", "PLATFORM", "SIZE", "URL")
 		for _, r := range rows {

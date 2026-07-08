@@ -1,17 +1,5 @@
 package color_test
 
-// Guardrail: agents (Claude Code, Cursor, etc.) and CI logs see
-// stdout as a non-TTY pipe. The pkg/color helpers auto-disable ANSI
-// emission in that case, so anything that goes through them is safe
-// to add freely. This test fails if anyone reintroduces raw ANSI
-// escape codes outside the sanctioned spots, since those bypass the
-// TTY check and would dump literal `\x1b[31m...` into agent logs.
-//
-// To unblock: route the new color through pkg/color (color.Green,
-// color.Bold, ...). If the new code is genuinely outside the color
-// system (cursor control, etc.) and you're sure it's gated on a TTY,
-// extend `allowed` below.
-
 import (
 	"os"
 	"path/filepath"
@@ -24,10 +12,10 @@ import (
 // sequences. Each entry is a path relative to the module root.
 //
 //   - pkg/color/color.go: the sanctioned helper itself.
-//   - orchestrator/logger.go: PrettyRenderer's internal palette;
-//     the renderer is only selected when stdout is a TTY (see
-//     orchestrator/main.go selectLocalRenderer), so its raw
-//     codes never reach an agent.
+//   - internal/logpretty/pretty.go: PrettyRenderer's internal palette
+//     (extracted from internal/orchestrator/logger.go). The renderer
+//     is only selected when stdout is a TTY (see orchestrator's
+//     selectLocalRenderer), so its raw codes never reach an agent.
 //   - orchestrator/jobs_cli.go,
 //     orchestrator/jobs_cli_remote.go: cursor-control escapes
 //     (\x1b[H, \x1b[J) for live-status redraws; only run in
@@ -35,7 +23,7 @@ import (
 var allowed = map[string]bool{
 	"pkg/color/color.go":                       true,
 	"pkg/color/guard_test.go":                  true,
-	"internal/orchestrator/logger.go":          true,
+	"internal/logpretty/pretty.go":             true,
 	"internal/orchestrator/jobs_cli.go":        true,
 	"internal/orchestrator/jobs_cli_remote.go": true,
 }
@@ -60,9 +48,6 @@ func TestNoRawANSIOutsideAllowed(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
-			// Skip vendored / generated / scratch trees that aren't
-			// part of the production codebase. These can be noisy and
-			// aren't compiled into the shipped binary.
 			name := info.Name()
 			if name == "node_modules" || name == "vendor" || name == ".git" ||
 				name == ".claude" || name == ".sparkwing" || name == "out" ||
@@ -74,8 +59,6 @@ func TestNoRawANSIOutsideAllowed(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-		// _test.go files can hold ANSI in test fixtures (asserting
-		// on rendered output, etc.). Keep them out of the guard.
 		if strings.HasSuffix(path, "_test.go") {
 			return nil
 		}

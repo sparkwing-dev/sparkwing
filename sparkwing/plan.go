@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,7 +25,10 @@ type Plan struct {
 	// no name to membership output.
 	groups []*JobGroup
 
-	cache CacheOptions
+	// concurrency is the whole-run coordination group set via
+	// Plan.Concurrency, or nil. Plans never memoize, so there is no
+	// plan-level content cache.
+	concurrency *ConcurrencyGroup
 
 	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
@@ -35,6 +39,20 @@ type Plan struct {
 	// bodies can call sparkwing.Inputs[T](ctx) instead of threading
 	// the value through closures.
 	inputs any
+
+	// jobArgs holds the resolved arg [Schema] per node id, populated
+	// by registerJobArgs whenever a job embedding WithArgs[T] is
+	// added to the plan. Used by the CLI flag registrar to compute
+	// the pipeline's transitive arg surface. Absent entries mean the
+	// job declared no typed args.
+	jobArgs map[string]*Schema
+
+	// resolvedArgs is the merged map of every job's typed-args
+	// resolution result, keyed by CLI flag name. Populated by
+	// resolveAndBindJobArgs in the pipeline-registration invoke
+	// flow; the orchestrator installs it on per-step contexts so
+	// sparkwing.Arg[T] can read across jobs.
+	resolvedArgs map[string]any
 }
 
 // LintWarning is a non-fatal Plan-time advisory attached to a node.
@@ -120,6 +138,32 @@ type Expansion struct {
 // dispatch path -- every caller that needs a node before it has a
 // home in p.nodes / p.byID.
 //
+// validateNodeID rejects identifiers that cannot safely travel
+// everywhere a node id goes: log file paths, object-store key
+// segments, and the runID/nodeID holder convention. Slashes are
+// allowed as hierarchy separators (spawned children are
+// "parent/child") but every segment must stand on its own -- no
+// traversal references, empty segments, backslashes, or control
+// characters. The storage backends enforce the same rule at their
+// boundary; this check fails at the author's call site instead of
+// deep inside a run.
+func validateNodeID(id string) error {
+	for _, seg := range strings.Split(id, "/") {
+		if seg == "" {
+			return fmt.Errorf("id must not contain empty path segments")
+		}
+		if seg == "." || seg == ".." {
+			return fmt.Errorf("id segment %q is a path reference", seg)
+		}
+		for _, r := range seg {
+			if r == '\\' || r < 0x20 || r == 0x7f {
+				return fmt.Errorf("id must not contain backslashes or control characters")
+			}
+		}
+	}
+	return nil
+}
+
 // Runs the same validation Job does so a Produces/SetResult typo or
 // an invalid Approval timeout panics at the same point regardless of
 // where the node is destined to live.
@@ -131,23 +175,22 @@ func newNode(caller, id string, job Workable) *JobNode {
 	if id == "" {
 		panic(fmt.Sprintf("sparkwing: %s: id must not be empty", caller))
 	}
+	if err := validateNodeID(id); err != nil {
+		panic(fmt.Sprintf("sparkwing: %s(%q): %v", caller, id, err))
+	}
 	if job == nil {
 		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))
 	}
 
-	// Approval gates: the *approvalJob Workable is a marker -- Work()
-	// is empty and never executes; the orchestrator routes via
-	// n.approval. Pipeline authors construct via sw.JobApproval,
-	// never build *approvalJob directly.
 	if app, ok := job.(*approvalJob); ok {
 		switch app.cfg.OnExpiry {
 		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
-			// ok
 		default:
 			panic(fmt.Sprintf(
 				"sparkwing: %s(%q): ApprovalConfig.OnExpiry = %q is not one of "+
 					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
-				caller, id, app.cfg.OnExpiry))
+				caller, id, app.cfg.OnExpiry,
+			))
 		}
 		cfg := app.cfg
 		return &JobNode{
@@ -163,8 +206,6 @@ func newNode(caller, id string, job Workable) *JobNode {
 		workType = resultStep.outType
 	}
 
-	// Strict Produces / Work-return contract: typed jobs must declare
-	// both. Either alone is a Plan-time error.
 	var outType reflect.Type
 	pr, hasMarker := job.(producer)
 	switch {
@@ -172,18 +213,21 @@ func newNode(caller, id string, job Workable) *JobNode {
 		panic(fmt.Sprintf(
 			"sparkwing: node %q: declares Produces[%v] but Work() returned no typed step "+
 				"(return a typed *WorkStep matching Produces[%v], or drop the marker)",
-			id, pr.producedType(), pr.producedType()))
+			id, pr.producedType(), pr.producedType(),
+		))
 	case !hasMarker && workType != nil:
 		panic(fmt.Sprintf(
 			"sparkwing: node %q: Work returned a typed step of type %v but the job struct does not embed "+
 				"sparkwing.Produces[%v] (add the marker so the contract is visible at the type level)",
-			id, workType, workType))
+			id, workType, workType,
+		))
 	case hasMarker && workType != nil:
 		declared := pr.producedType()
 		if declared != workType {
 			panic(fmt.Sprintf(
 				"sparkwing: node %q: Produces[%v] but Work returned a step of type %v (align them)",
-				id, declared, workType))
+				id, declared, workType,
+			))
 		}
 		outType = declared
 	}
@@ -203,34 +247,36 @@ func newNode(caller, id string, job Workable) *JobNode {
 // but does not register it on a Plan. Pipeline authors should not
 // reach for this -- it exists for the orchestrator's SpawnNode
 // dispatch path, where the child node is created at runtime and
-// spliced in via Plan.InsertChild after the parent suspends. Use
+// spliced in via the orchestrator's plan-insert plumbing after the
+// parent suspends. Use
 // sparkwing.Job from pipeline code.
 func NewDetachedNode(id string, job Workable) *JobNode {
 	return newNode("NewDetachedNode", id, job)
 }
 
-// InsertChild splices a fresh node into the running plan WITHOUT
+// insertChild splices a fresh node into the running plan WITHOUT
 // wiring any dependency. Used by the SpawnNode dispatch path: the
 // spawning runner is suspended waiting on the child's outcome, so
-// adding child.Needs(parent) would deadlock.
-func (p *Plan) InsertChild(child *JobNode) error {
+// adding child.Needs(parent) would deadlock. Exposed to the orchestrator
+// via RuntimePlumbing.Fns.PlanInsertChild.
+func (p *Plan) insertChild(child *JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if child == nil {
-		return fmt.Errorf("InsertChild: nil child node")
+		return fmt.Errorf("insertChild: nil child node")
 	}
 	if _, exists := p.byID[child.id]; exists {
-		return fmt.Errorf("InsertChild: duplicate id %q", child.id)
+		return fmt.Errorf("insertChild: duplicate id %q", child.id)
 	}
 	p.byID[child.id] = child
 	p.nodes = append(p.nodes, child)
 	return nil
 }
 
-// InsertExpanded splices dynamically generated children into the plan.
-// Each child automatically gets Needs(source). Called by the
-// orchestrator.
-func (p *Plan) InsertExpanded(source *JobNode, children []*JobNode) error {
+// insertExpanded splices dynamically generated children into the plan.
+// Each child automatically gets Needs(source). Exposed to the
+// orchestrator via RuntimePlumbing.Fns.PlanInsertExpanded.
+func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, child := range children {
@@ -293,6 +339,7 @@ func Job(p *Plan, id string, x any) *JobNode {
 	n := newNode("Job", id, job)
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
+	registerJobArgs(p, id, x)
 	return n
 }
 
@@ -312,7 +359,22 @@ func coerceJobArg(caller, id string, x any) Workable {
 		panic(fmt.Sprintf(
 			"sparkwing: %s(%q): third argument must be sparkwing.Workable or "+
 				"func(ctx context.Context) error, got %T",
-			caller, id, x))
+			caller, id, x,
+		))
+	}
+}
+
+// coerceRecoveryArg accepts everything coerceJobArg does, plus a
+// failure-aware FailureRecoveryFn (func(ctx, Failure) error) that
+// receives the parent's Failure at run time. Used by OnFailure.
+func coerceRecoveryArg(caller, id string, x any) Workable {
+	switch v := x.(type) {
+	case FailureRecoveryFn:
+		return &recoveryFn{fn: v}
+	case func(ctx context.Context, f Failure) error:
+		return &recoveryFn{fn: v}
+	default:
+		return coerceJobArg(caller, id, x)
 	}
 }
 
@@ -375,10 +437,18 @@ type JobNode struct {
 	skipIf        []SkipPredicate
 	skipIfTimeout time.Duration
 
-	cache CacheOptions
+	// contentCache memoizes the node's result on content (JobNode.Cache);
+	// concurrency enrolls it in a shared budget (JobNode.Concurrency).
+	// The two are independent: a node may set either, both, or neither.
+	contentCache *CacheConfig
+	concurrency  *concurrencyMembership
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
+
+	// verify is the postcondition checked after the action succeeds; a
+	// non-nil return fails the node at StageVerify. Nil = no check.
+	verify VerifyFn
 
 	// requires restricts the job to runners advertising every listed
 	// term (AND across terms, OR within a term -- see MatchLabels).
@@ -398,14 +468,6 @@ type JobNode struct {
 	// labels behave as an additional requires term for that job.
 	whenRunner []string
 
-	// onTarget restricts the job to runs against the listed targets.
-	// Empty = universal (no constraint, may be narrowed by an
-	// inferred-OnTarget walk from downstream consumers). The
-	// orchestrator filters non-matching nodes at plan-finalize and
-	// treats the skip as satisfying downstream Needs, mirroring the
-	// WhenRunner-skip path.
-	onTarget []string
-
 	// inline marks lightweight nodes for in-process execution on the
 	// dispatcher, bypassing the configured Runner. Opt-in via
 	// .Inline(); a CPU-bound or blocking inline node stalls the
@@ -423,6 +485,13 @@ type JobNode struct {
 	// approval is non-nil when the node's job is an approval gate; the
 	// orchestrator routes these through the approval waiter.
 	approval *ApprovalConfig
+
+	// outputGlobs are the artifact output globs declared via Outputs
+	// (the union across calls); empty for nodes that produce no
+	// artifacts. consumes are the artifact edges declared via Consumes,
+	// in declaration order.
+	outputGlobs []string
+	consumes    []consumeEdge
 }
 
 // ApprovalConfig describes a manual approval gate. Authors fill it
@@ -538,17 +607,16 @@ func (g *ApprovalGate) Job() *JobNode { return g.n }
 // ID returns the gate's node id.
 func (g *ApprovalGate) ID() string { return g.n.id }
 
-// Needs declares hard upstream dependencies on the gate. Accepts the
-// same shapes as Job.Needs (*JobNode, *JobGroup, *ApprovalGate, string
-// IDs, []*JobNode).
-func (g *ApprovalGate) Needs(deps ...any) *ApprovalGate {
+// Needs declares hard upstream dependencies on the gate. Accepts any
+// [Dep].
+func (g *ApprovalGate) Needs(deps ...Dep) *ApprovalGate {
 	g.n.Needs(deps...)
 	return g
 }
 
 // NeedsOptional declares soft upstream dependencies; missing IDs are
 // silently dropped instead of failing the run.
-func (g *ApprovalGate) NeedsOptional(deps ...any) *ApprovalGate {
+func (g *ApprovalGate) NeedsOptional(deps ...Dep) *ApprovalGate {
 	g.n.NeedsOptional(deps...)
 	return g
 }
@@ -614,8 +682,14 @@ type SkipPredicate func(ctx context.Context) bool
 type CacheKey string
 
 // CacheKeyFn computes a cache key after upstream dependencies
-// complete. May read typed upstream output via Ref.Get(ctx). Return
-// "" to opt out of caching for this invocation.
+// complete. May read typed upstream output via Ref.Get(ctx).
+//
+// Return [NoCache] to explicitly opt this invocation out of
+// memoization; the run is logged as an explicit opt-out and proceeds
+// uncached. Returning the zero CacheKey ("") also bypasses caching
+// but is logged as a missing-key warning -- callers that intend to
+// skip caching should prefer NoCache so the operator-facing signal
+// is unambiguous.
 type CacheKeyFn func(ctx context.Context) CacheKey
 
 // BeforeRunFn runs once before the first Run attempt. A non-nil error
@@ -627,6 +701,32 @@ type BeforeRunFn func(ctx context.Context) error
 // err is the final Run error, or nil on success. The hook's return
 // value is logged but does not change the node's outcome.
 type AfterRunFn func(ctx context.Context, err error)
+
+// Dep is the closed type set accepted by Plan-layer Needs and
+// NeedsOptional. The unexported marker method depID() means only
+// sparkwing-defined types can satisfy the interface, so passing an
+// arbitrary value (an int, a string, a Work-layer *WorkStep) is a
+// compile-time error.
+//
+// Implementations: [*JobNode], [*ApprovalGate], [*JobGroup]. By-name
+// references via a typed-string sentinel are intentionally not
+// supported -- store and pass the upstream's handle.
+type Dep interface {
+	depID() string
+}
+
+func (n *JobNode) depID() string      { return n.id }
+func (g *ApprovalGate) depID() string { return g.n.id }
+func (g *JobGroup) depID() string     { return g.name }
+
+// Compile-time conformance assertions: every Plan-layer dep type
+// satisfies [Dep]. A regression here surfaces as a build break,
+// not a runtime panic.
+var (
+	_ Dep = (*JobNode)(nil)
+	_ Dep = (*ApprovalGate)(nil)
+	_ Dep = (*JobGroup)(nil)
+)
 
 // ID returns the node's identifier.
 func (n *JobNode) ID() string { return n.id }
@@ -645,42 +745,27 @@ func (n *JobNode) ResultStep() *WorkStep { return n.resultStep }
 // Needs declares hard upstream dependencies. The orchestrator will not
 // dispatch this node until every named dependency is satisfied.
 //
-// Accepts *JobNode, *JobGroup, []*JobNode, or string IDs.
-func (n *JobNode) Needs(deps ...any) *JobNode {
+// Accepts any [Dep]: [*JobNode], [*ApprovalGate], or [*JobGroup]. For
+// multiple typed nodes from a slice, splat the slice:
+//
+//	n.Needs(upstreams...)
+func (n *JobNode) Needs(deps ...Dep) *JobNode {
 	for _, d := range deps {
-		switch v := d.(type) {
-		case *JobNode:
-			if v != nil {
-				n.addNeed(v.id)
+		if d == nil {
+			continue
+		}
+		if g, ok := d.(*JobGroup); ok && g != nil {
+			if g.dynamic {
+				n.needsGroups = append(n.needsGroups, g)
+				continue
 			}
-		case *ApprovalGate:
-			if v != nil && v.n != nil {
-				n.addNeed(v.n.id)
+			for _, m := range g.members {
+				n.addNeed(m.id)
 			}
-		case *JobGroup:
-			if v != nil {
-				if v.dynamic {
-					// Resolve membership at dispatch, after the
-					// expansion generator runs.
-					n.needsGroups = append(n.needsGroups, v)
-				} else {
-					for _, m := range v.members {
-						n.addNeed(m.id)
-					}
-				}
-			}
-		case string:
-			if v != "" {
-				n.addNeed(v)
-			}
-		case []*JobNode:
-			for _, vv := range v {
-				if vv != nil {
-					n.addNeed(vv.id)
-				}
-			}
-		default:
-			panic(fmt.Sprintf("sparkwing: Job.Needs: unsupported dep type %T", d))
+			continue
+		}
+		if id := d.depID(); id != "" {
+			n.addNeed(id)
 		}
 	}
 	return n
@@ -789,9 +874,20 @@ func (n *JobNode) Timeout(d time.Duration) *JobNode {
 // rollback, alerting, and cleanup hooks.
 //
 // Accepts the same argument shapes as sparkwing.Job (a Workable struct
-// or a bare func(ctx) error closure).
+// or a bare func(ctx) error closure), plus a failure-aware
+// [FailureRecoveryFn] -- func(ctx context.Context, f sparkwing.Failure)
+// error -- which receives the [Failure] describing how this node
+// terminated. Branch on f.Stage to recover differently for an action
+// failure versus a [Verify] failure:
+//
+//	deploy.OnFailure("recover", func(ctx context.Context, f sparkwing.Failure) error {
+//	    if f.Stage != sparkwing.StageVerify {
+//	        return convergeForward(ctx) // action failed: state unknown
+//	    }
+//	    return rollback(ctx)            // verify failed: prior artifact is safe
+//	})
 func (n *JobNode) OnFailure(id string, x any) *JobNode {
-	job := coerceJobArg("OnFailure", id, x)
+	job := coerceRecoveryArg("OnFailure", id, x)
 	n.onFailure = newNode("OnFailure", id, job)
 	return n
 }
@@ -889,6 +985,33 @@ func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 	return n
 }
 
+// Verify registers a postcondition checked after the node's action
+// succeeds. The action exited 0, but if fn returns a non-nil error the
+// node fails at [StageVerify] -- eligible for Retry (the action and the
+// check re-run together) and routed to OnFailure, exactly as an action
+// failure would be. Verify runs once per attempt.
+//
+// A failed Verify makes the node's own outcome Failed, so downstream
+// Needs() is correctly blocked and the dashboard shows the node red:
+// "the command succeeded but the result is bad" is a first-class outcome
+// on the node, not a hidden state encoded elsewhere.
+//
+//	sw.Job(plan, "deploy", &Deploy{}).
+//	    Verify(probe.HTTP(url).ExpectJSON("status", "ok").Check).
+//	    OnFailure("recover", recoverFn)
+//
+// On a node that also declares .Cache(): a cache hit skips the action,
+// and the Verify with it -- the check is part of the cached unit. For a
+// health check that must run on every invocation, model it as its own
+// uncached node.
+func (n *JobNode) Verify(fn VerifyFn) *JobNode {
+	n.verify = fn
+	return n
+}
+
+// Verifier returns the node's Verify postcondition, or nil if none.
+func (n *JobNode) Verifier() VerifyFn { return n.verify }
+
 // BeforeRunHooks returns the node's registered pre-run hooks.
 func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
 
@@ -985,42 +1108,6 @@ func (n *JobNode) WhenRunner(labels ...string) *JobNode {
 // WhenRunnerLabels returns the terms declared via WhenRunner.
 func (n *JobNode) WhenRunnerLabels() []string {
 	return copyLabels(n.whenRunner)
-}
-
-// OnTarget restricts this job to runs against the named targets. When
-// the active target (the resolved --for selection) is not in the
-// list, the orchestrator filters the job out at plan-finalize and
-// treats it as skipped; downstream Needs sees the skip marker as
-// satisfied, mirroring the WhenRunner-skip path.
-//
-// OnTarget is the topology-axis equivalent of WhenRunner on the
-// runner axis. It expresses "this job is only meaningful when the
-// run is acting on these environments" without scattering
-// branch-on-target logic across Plan() bodies.
-//
-// Calling OnTarget with no arguments clears the constraint. Order of
-// the listed values is not significant. The plan-finalize walk
-// additionally propagates the constraint upstream: a job with no
-// explicit OnTarget but whose only consumers are all OnTarget("X")
-// inherits that filter; a node feeding any universal-effective
-// consumer stays universal. The explicit list returned by
-// OnTargets reflects only what the author declared -- the
-// inferred set is not surfaced through this method.
-//
-//	deploy := sw.Job(plan, "deploy-prod", &Deploy{}).OnTarget("prod")
-//	sw.Job(plan, "publish", &Publish{}).OnTarget("staging", "prod")
-func (n *JobNode) OnTarget(targets ...string) *JobNode {
-	n.onTarget = normalizeLabels(targets)
-	return n
-}
-
-// OnTargets returns the explicit OnTarget list as declared at
-// registration time. The inferred target set computed during the
-// plan-finalize walk is NOT reflected here -- "what the author wrote"
-// and "what the scheduler resolved" are deliberately separate
-// questions.
-func (n *JobNode) OnTargets() []string {
-	return copyLabels(n.onTarget)
 }
 
 // normalizeLabels strips empty entries from a label list. Returns
@@ -1169,34 +1256,22 @@ func (n *JobNode) IsOptional() bool { return n.optional }
 
 // NeedsOptional declares upstream dependencies that may or may not be
 // present in the plan. Unknown IDs are silently dropped; known IDs
-// behave like Needs. Accepts the same shapes as Needs.
-func (n *JobNode) NeedsOptional(deps ...any) *JobNode {
+// behave like Needs. Accepts the same [Dep] types as [JobNode.Needs];
+// unlike Needs, dynamic *JobGroup membership is NOT special-cased --
+// optional deps are resolved at finalize time only.
+func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode {
 	for _, d := range deps {
-		switch v := d.(type) {
-		case *JobNode:
-			if v != nil {
-				n.needsOptional = append(n.needsOptional, v.id)
+		if d == nil {
+			continue
+		}
+		if g, ok := d.(*JobGroup); ok && g != nil {
+			for _, m := range g.members {
+				n.needsOptional = append(n.needsOptional, m.id)
 			}
-		case *ApprovalGate:
-			if v != nil && v.n != nil {
-				n.needsOptional = append(n.needsOptional, v.n.id)
-			}
-		case *JobGroup:
-			if v != nil {
-				for _, m := range v.members {
-					n.needsOptional = append(n.needsOptional, m.id)
-				}
-			}
-		case string:
-			if v != "" {
-				n.needsOptional = append(n.needsOptional, v)
-			}
-		case []*JobNode:
-			for _, vv := range v {
-				if vv != nil {
-					n.needsOptional = append(n.needsOptional, vv.id)
-				}
-			}
+			continue
+		}
+		if id := d.depID(); id != "" {
+			n.needsOptional = append(n.needsOptional, id)
 		}
 	}
 	return n

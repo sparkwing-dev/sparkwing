@@ -73,13 +73,17 @@ func TestRenderNodesWithSteps_AnnotationsPrintedWithAtPrefix(t *testing.T) {
 	start := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	end := start.Add(time.Second)
 	nodes := []*store.Node{
-		{NodeID: "build", Status: "done", Outcome: "success", StartedAt: &start, FinishedAt: &end,
-			Annotations: []string{"cache hit on layer 2"}},
+		{
+			NodeID: "build", Status: "done", Outcome: "success", StartedAt: &start, FinishedAt: &end,
+			Annotations: []string{"cache hit on layer 2"},
+		},
 	}
 	steps := map[string][]*store.NodeStep{
-		"build": {{NodeID: "build", StepID: "compile", Status: store.StepPassed,
+		"build": {{
+			NodeID: "build", StepID: "compile", Status: store.StepPassed,
 			StartedAt: &start, FinishedAt: &end,
-			Annotations: []string{"linked 12 objects"}}},
+			Annotations: []string{"linked 12 objects"},
+		}},
 	}
 	var buf bytes.Buffer
 	renderNodesWithSteps(&buf, nodes, steps, false)
@@ -127,7 +131,7 @@ func TestFormatStepDuration_TerminalShowsDuration(t *testing.T) {
 	start := time.Now().Add(-2 * time.Second)
 	end := start.Add(time.Second)
 	got := formatStepDuration(&store.NodeStep{StartedAt: &start, FinishedAt: &end})
-	if got == "running" || got == "—" {
+	if got == "running" || got == "--" {
 		t.Errorf("expected duration, got %q", got)
 	}
 }

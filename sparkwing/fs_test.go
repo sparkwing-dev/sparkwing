@@ -75,9 +75,6 @@ func TestWriteFile_RelativeResolvesAgainstWorkDir(t *testing.T) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
 
 	if err := sparkwing.WriteFile("dist/version.txt", []byte("v1.2.3")); err != nil {
-		// Parent dir doesn't exist by default; WriteFile docs don't
-		// promise mkdir, so we only test the resolution path.
-		// Retry into a known directory:
 		_ = err
 	}
 	if err := sparkwing.WriteFile("version.txt", []byte("v1.2.3")); err != nil {
@@ -128,7 +125,6 @@ func TestCapture_DoesNotStreamButFails(t *testing.T) {
 	if !strings.Contains(res.Stdout, "hi-from-capture") {
 		t.Fatalf("captured stdout = %q, want to contain output", res.Stdout)
 	}
-	// Banner ($ ...) should still be there; per-line records should not.
 	var bannerCount, lineCount int
 	for _, rec := range logger.records {
 		switch rec.Event {
@@ -229,7 +225,6 @@ func TestHelpers_AbsolutePathsWorkWithoutProject(t *testing.T) {
 	if string(data) != "hi" {
 		t.Fatalf("contents = %q", data)
 	}
-	// Path with an absolute first part likewise needs no project.
 	got := sparkwing.Path(abs)
 	if got != abs {
 		t.Fatalf("Path(abs) = %q, want %q", got, abs)

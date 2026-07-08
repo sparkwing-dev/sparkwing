@@ -78,12 +78,6 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return
 	}
-	// Pre-allocate the Run row at retry-intake -- mirror handleTrigger
-	// so the dashboard's runs list shows the new attempt instantly,
-	// instead of waiting the ~500ms+compile delay until the consumer
-	// claims the trigger and the orchestrator emits its own CreateRun.
-	// Status starts as "pending"; the orchestrator's CreateRun upsert
-	// promotes it to "running" once the subprocess actually starts.
 	now := time.Now()
 	if err := s.store.CreateRun(r.Context(), store.Run{
 		ID:            newID,
@@ -105,8 +99,6 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
 		return
 	}
-	// Reverse pointer on the source row so older runs render a
-	// "retried as #newID" pill. Best-effort.
 	_ = s.store.SetRetriedAs(r.Context(), srcID, newID)
 
 	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
@@ -126,8 +118,6 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return a Run-shaped body the dashboard's api.ts consumes
-	// directly, so the caller doesn't need a round-trip to GetRun.
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"id":             newID,

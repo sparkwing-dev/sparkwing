@@ -13,18 +13,38 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // ListOpts configures `sparkwing jobs list`.
+// readBackendFor opens the read backend a `runs` command should consult:
+// the profile-resolved backend when --profile was passed, otherwise the
+// legacy cwd-backends.yaml flow. Centralizes the branch so list/status/
+// logs stay consistent. Mirror is never engaged here -- reads are
+// single-source (the mirror is a write-side concern).
+func readBackendFor(ctx context.Context, paths Paths, p *profile.Profile) (backend.Backend, io.Closer, error) {
+	if p != nil {
+		return OpenReadBackendForProfile(ctx, paths, p)
+	}
+	return OpenReadBackend(ctx, paths)
+}
+
 type ListOpts struct {
 	Limit     int
 	Pipelines []string
 	Statuses  []string
 	Since     time.Duration
 	JSON      bool
+
+	// Profile, when non-nil, routes the read through the resolved
+	// storage profile's backend (--profile NAME) instead of the legacy
+	// cwd backends.yaml.
+	Profile *profile.Profile
 
 	// Quiet prints only ids (or a JSON id array with JSON).
 	Quiet bool
@@ -48,17 +68,15 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	b, closer, err := readBackendFor(ctx, paths, opts.Profile)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = closer.Close() }()
 
-	// Lazy orphan reconciliation: any "running" rows whose orchestrator
-	// process is dead get transitioned to "failed" before we read.
-	// Errors are swallowed -- a stale-heartbeat sweep failing mustn't
-	// break the list itself.
-	_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	if st := localStore(b); st != nil {
+		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	}
 
 	filter := store.RunFilter{
 		Limit:     listFetchLimit(opts),
@@ -68,7 +86,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)
 	}
-	runs, err := st.ListRuns(ctx, filter)
+	runs, err := b.ListRuns(ctx, filter)
 	if err != nil {
 		return err
 	}
@@ -123,13 +141,14 @@ func renderRunList(runs []*store.Run, opts ListOpts, out io.Writer) error {
 	}
 
 	if len(runs) == 0 {
-		fmt.Fprintln(out, "no runs yet — invoke one via `sparkwing run <pipeline>`")
+		fmt.Fprintln(out, "no runs yet -- invoke one via `sparkwing run <pipeline>`")
 		return nil
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tPIPELINE\tSTATUS\tSTARTED\tDURATION")
 	for _, r := range runs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(
+			tw, "%s\t%s\t%s\t%s\t%s\n",
 			r.ID, r.Pipeline, r.Status,
 			formatStartedAt(r.StartedAt),
 			formatRunDuration(r),
@@ -147,6 +166,10 @@ type StatusOpts struct {
 	// JSON output always carries steps when the run has them; this
 	// flag is for human-readable mode only.
 	Steps bool
+
+	// Profile, when non-nil, routes the read through the resolved
+	// storage profile's backend (--profile NAME).
+	Profile *profile.Profile
 }
 
 // nodeWithSteps wraps store.Node with its per-step state for the
@@ -184,21 +207,33 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	b, closer, err := readBackendFor(ctx, paths, opts.Profile)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = closer.Close() }()
 
-	// Lazy orphan reconciliation -- see ListJobs.
-	_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	if st := localStore(b); st != nil {
+		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
+	}
 
 	if opts.JSON {
-		return writeRunDetailJSON(ctx, st, runID, out)
+		if st := localStore(b); st != nil {
+			return writeRunDetailJSON(ctx, st, runID, out)
+		}
+		run, err := b.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		nodes, err := b.ListNodes(ctx, runID)
+		if err != nil {
+			return err
+		}
+		return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
 	}
 
 	if !opts.Follow {
-		return renderStatus(ctx, st, runID, out, false, opts.Steps)
+		return renderStatus(ctx, b, runID, out, false, opts.Steps)
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -209,10 +244,10 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 			fmt.Fprint(out, "\033[H\033[J")
 		}
 		first = false
-		if err := renderStatus(ctx, st, runID, out, true, opts.Steps); err != nil {
+		if err := renderStatus(ctx, b, runID, out, true, opts.Steps); err != nil {
 			return err
 		}
-		run, err := st.GetRun(ctx, runID)
+		run, err := b.GetRun(ctx, runID)
 		if err != nil {
 			return err
 		}
@@ -227,16 +262,19 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 }
 
-func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Writer, followBanner, includeSteps bool) error {
-	run, err := st.GetRun(ctx, runID)
+func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.Writer, followBanner, includeSteps bool) error {
+	run, err := b.GetRun(ctx, runID)
 	if err != nil {
 		return err
 	}
-	nodes, err := st.ListNodes(ctx, runID)
+	nodes, err := b.ListNodes(ctx, runID)
 	if err != nil {
 		return err
 	}
-	steps, _ := st.ListNodeSteps(ctx, runID)
+	var steps []*store.NodeStep
+	if st := localStore(b); st != nil {
+		steps, _ = st.ListNodeSteps(ctx, runID)
+	}
 	stepsByNode := groupStepsByNode(steps)
 
 	if followBanner {
@@ -248,7 +286,8 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 	fmt.Fprintf(out, "%s %s\n", label("pipeline: "), run.Pipeline)
 	fmt.Fprintf(out, "%s %s\n", label("status:   "), colorStatus(run.Status))
 	fmt.Fprintf(out, "%s %s\n", label("trigger:  "), orDash(run.TriggerSource))
-	fmt.Fprintf(out, "%s %s  %s\n", label("started:  "),
+	fmt.Fprintf(
+		out, "%s %s  %s\n", label("started:  "),
 		run.StartedAt.Local().Format("2006-01-02 15:04:05"),
 		color.Dim("("+relativeAge(run.StartedAt)+")"),
 	)
@@ -280,16 +319,17 @@ func renderStatus(ctx context.Context, st *store.Store, runID string, out io.Wri
 		}
 	}
 
-	// Skip "upstream-failed" — root cause is already printed.
 	for _, n := range nodes {
 		if n.Error != "" && n.Error != "upstream-failed" {
 			fmt.Fprintf(out, "\n%s error:\n  %s\n", n.NodeID, indent(n.Error, "  "))
 		}
 	}
 
-	approvals, err := st.ListApprovalsForRun(ctx, runID)
-	if err == nil {
-		renderApprovalsSection(out, approvals)
+	if st := localStore(b); st != nil {
+		approvals, err := st.ListApprovalsForRun(ctx, runID)
+		if err == nil {
+			renderApprovalsSection(out, approvals)
+		}
 	}
 	return nil
 }
@@ -316,21 +356,21 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	for _, n := range nodes {
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
-		// Skip detail block for vanilla success nodes unless forced.
-		shouldRender := force || len(annotations) > 0 || n.Summary != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
+		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
 		fmt.Fprintf(out, "    %s\n", color.Bold(n.NodeID+":"))
+		if n.StatusDetail != "" {
+			fmt.Fprintf(out, "      %s %s\n", color.Dim("↳"), n.StatusDetail)
+		}
 		for _, a := range annotations {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("@"), a)
 		}
 		if n.Summary != "" {
 			writeIndentedSummary(out, "      ", n.Summary)
 		}
-		// Compute column widths so step rows align even though
-		// annotations/summaries interleave (a single tabwriter can't
-		// flush across the intervening rows).
+		// hack: tabwriter can't flush across interleaved annotation/summary rows, so we compute column widths manually
 		idWidth := 0
 		for _, s := range steps {
 			if n := len(s.StepID); n > idWidth {
@@ -358,7 +398,7 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 // lines are trimmed so the block doesn't pad the table out.
 func writeIndentedSummary(out io.Writer, prefix, md string) {
 	fmt.Fprintf(out, "%s%s\n", prefix, color.Dim("summary:"))
-	renderMarkdownSummary(out, prefix+"  ", md)
+	logpretty.RenderMarkdownSummary(out, prefix+"  ", md)
 }
 
 func hasStepSummary(steps []*store.NodeStep) bool {
@@ -401,7 +441,7 @@ func formatStepDuration(s *store.NodeStep) string {
 	if s.StartedAt != nil {
 		return "running " + time.Since(*s.StartedAt).Round(100*time.Millisecond).String()
 	}
-	return "—"
+	return "--"
 }
 
 // renderApprovalsSection prints a compact block of approval-gate
@@ -421,7 +461,7 @@ func renderApprovalsSection(out io.Writer, approvals []*store.Approval) {
 		if a.ResolvedAt != nil {
 			status = a.Resolution
 		}
-		waited := "—"
+		var waited string
 		if a.ResolvedAt != nil {
 			waited = a.ResolvedAt.Sub(a.RequestedAt).Round(time.Second).String()
 		} else {
@@ -482,6 +522,10 @@ type LogsOpts struct {
 	// legacy behavior of `runs logs`. Useful as an explicit opt-out
 	// when scripts depend on the legacy shape.
 	NoEvents bool
+
+	// Profile, when non-nil, routes the read through the resolved
+	// storage profile's backend (--profile NAME).
+	Profile *profile.Profile
 }
 
 // applyClientFilters is the local-mode equivalent of pkg/logs filters.
@@ -566,6 +610,18 @@ func parseInt(s string) (int, error) {
 }
 
 // JobLogs streams a run's logs. Empty Node = all nodes in sequence.
+//
+// Dispatches by backend kind:
+//
+//   - Local SQLite: reads the tee'd _envelope.ndjson plus per-node
+//     body files under paths.RunDir. Includes merged lifecycle +
+//     exec_line stream and --tree descendant-run merging.
+//   - S3 / controller (any non-local Backend): reads per-node body
+//     output via Backend.ReadNodeLog and lifecycle events via
+//     Backend.ListEventsAfter. The merged envelope-style stream that
+//     the local path produces is not synthesized -- run-level events
+//     are available via `runs logs --events-only` or via `runs
+//     status`; per-node bodies are the default. --tree is local-only.
 func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -573,11 +629,49 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	if opts.EventsOnly && opts.NoEvents {
 		return fmt.Errorf("jobs logs: --events-only and --no-events are mutually exclusive")
 	}
+	b, closer, berr := readBackendFor(ctx, paths, opts.Profile)
+	if berr != nil {
+		return berr
+	}
+	defer func() { _ = closer.Close() }()
+
+	if st := localStore(b); st == nil {
+		if opts.Tree {
+			return fmt.Errorf("--tree is only supported against local SQLite state; " +
+				"unset --tree to read this run from the configured remote backend")
+		}
+		if opts.EventsOnly {
+			return writeEventsViaBackend(ctx, b, runID, opts, out)
+		}
+		nodes, err := b.ListNodes(ctx, runID)
+		if err != nil {
+			return err
+		}
+		target := nodes
+		if opts.Node != "" {
+			target = nil
+			for _, n := range nodes {
+				if n.NodeID == opts.Node {
+					target = append(target, n)
+					break
+				}
+			}
+			if len(target) == 0 {
+				return fmt.Errorf("node %q not found in run %s", opts.Node, runID)
+			}
+		}
+		target = filterNodesBySince(target, opts.Since)
+		if opts.Follow {
+			return followLogsViaBackend(ctx, b, runID, opts.Node, out)
+		}
+		return writeLogsViaBackend(ctx, b, runID, target, opts, out)
+	}
+
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
@@ -603,13 +697,6 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return writeLogsTreeLocal(paths, runID, opts, out)
 	}
 
-	// When the envelope file exists (post-rewrite runs) and the user
-	// hasn't asked for the legacy body-only view or pinned to a
-	// single node, the envelope file IS the merged stream -- the
-	// dispatcher tees every run-wide event into it, including
-	// exec_line body lines. Read it directly. Older runs without an
-	// envelope file fall back to the per-node path so historical runs
-	// stay readable.
 	if !opts.NoEvents && opts.Node == "" && envelopeExists(paths, runID) {
 		if !opts.Follow {
 			return writeLogsFromEnvelope(paths, runID, opts, out)
@@ -617,7 +704,6 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return followFromEnvelope(ctx, st, paths, runID, opts, out)
 	}
 	if opts.EventsOnly {
-		// Envelope file missing on an older run; nothing to show.
 		return nil
 	}
 
@@ -647,10 +733,6 @@ func writeLogsFromEnvelope(paths Paths, runID string, opts LogsOpts, out io.Writ
 	}
 	defer f.Close()
 
-	// Apply filters (grep / tail / head / lines + events-only) by
-	// buffering; envelope files are bounded by run duration and tend
-	// to be small relative to body output. For very large runs the
-	// follow path is the right tool anyway.
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return err
@@ -679,7 +761,6 @@ func filterEventsOnly(data []byte) []byte {
 		line := sc.Bytes()
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			// Unparseable; preserve so debugging stays possible.
 			out = append(out, line...)
 			out = append(out, '\n')
 			continue
@@ -747,9 +828,6 @@ func followFromEnvelope(ctx context.Context, st *store.Store, paths Paths, runID
 			return err
 		}
 		if isTerminalStatus(run.Status) {
-			// One final drain pass after terminal: file may still
-			// have a trailing run_finish that landed between the last
-			// read and FinishRun's commit. Re-open and drain to EOF.
 			return drainEnvelopeAfterTerminal(path, offset, partial, opts, out)
 		}
 		select {
@@ -787,8 +865,6 @@ func drainEnvelopeAfterTerminal(path string, offset int64, partial []byte, opts 
 	combined := append(partial, rest...)
 	lastNL := bytes.LastIndexByte(combined, '\n')
 	if lastNL < 0 {
-		// No complete line; emit what we have so the operator at
-		// least sees the partial.
 		if len(combined) == 0 {
 			return nil
 		}
@@ -806,7 +882,6 @@ func drainEnvelopeAfterTerminal(path string, offset int64, partial []byte, opts 
 }
 
 func writeLogsText(paths Paths, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {
-	// JSON = flat JSONL; no banner lines, no wrapper.
 	jsonOut := opts.JSON || opts.Format == "json"
 	for i, n := range target {
 		if len(target) > 1 && !jsonOut {
@@ -816,7 +891,6 @@ func writeLogsText(paths Paths, runID string, target []*store.Node, opts LogsOpt
 			fmt.Fprintf(out, "=== %s (%s) ===\n", n.NodeID, orDash(n.Outcome))
 		}
 		if n.StartedAt == nil {
-			// Skip read entirely; silent in JSONL.
 			if len(target) > 1 && !jsonOut {
 				fmt.Fprintln(out, "(did not execute)")
 			}
@@ -840,9 +914,6 @@ func writeFile(path string, opts LogsOpts, out io.Writer) error {
 	}
 	defer f.Close()
 
-	// Sniff: JSONL canonical log files start with `{`. Old pre-JSONL
-	// text files start with a digit (timestamp) -- fall back to the
-	// plain-text printer so pre-rewrite runs stay readable.
 	hdr := make([]byte, 1)
 	_, _ = f.Read(hdr)
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -850,11 +921,6 @@ func writeFile(path string, opts LogsOpts, out io.Writer) error {
 	}
 	isJSONL := len(hdr) == 1 && hdr[0] == '{'
 
-	// When no filters are active we stream through the scanner to keep
-	// memory flat on large logs. With filters active we must buffer
-	// the whole file because grep / tail / lines windows are line-set
-	// operations. The buffer cap matches the scanner's (4 MiB) so the
-	// two paths handle the same maximum line length.
 	if opts.Tail == 0 && opts.Head == 0 && opts.Lines == "" && opts.Grep == "" {
 		if isJSONL {
 			return renderJSONLStream(f, opts, out)
@@ -893,14 +959,14 @@ func renderJSONLStream(r io.Reader, opts LogsOpts, out io.Writer) error {
 	for sc.Scan() {
 		line := sc.Bytes()
 		if wantJSON {
-			out.Write(line)
-			out.Write([]byte{'\n'})
+			_, _ = out.Write(line)
+			_, _ = out.Write([]byte{'\n'})
 			continue
 		}
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			out.Write(line)
-			out.Write([]byte{'\n'})
+			_, _ = out.Write(line)
+			_, _ = out.Write([]byte{'\n'})
 			continue
 		}
 		if wantPlain {
@@ -919,7 +985,6 @@ func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error
 		_, err := out.Write(data)
 		return err
 	}
-	// Pre-JSONL legacy logs (no `{` prefix) pass through verbatim.
 	trimmed := bytes.TrimLeft(data, " \t\r\n")
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		_, err := out.Write(data)
@@ -935,8 +1000,8 @@ func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error
 		}
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			out.Write(line)
-			out.Write([]byte{'\n'})
+			_, _ = out.Write(line)
+			_, _ = out.Write([]byte{'\n'})
 			continue
 		}
 		if wantPlain {
@@ -993,7 +1058,7 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 			path := paths.NodeLog(runID, n.NodeID)
 			f, err := os.Open(path)
 			if err != nil {
-				continue // file may not exist yet
+				continue
 			}
 			if _, err := f.Seek(offsets[n.NodeID], io.SeekStart); err != nil {
 				f.Close()
@@ -1004,8 +1069,6 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 				banners[n.NodeID] = true
 			}
 			buf := make([]byte, 32*1024)
-			// Drain available bytes; split on \n; hold trailing
-			// partial for the next tick.
 			var chunk []byte
 			for {
 				n2, rerr := f.Read(buf)
@@ -1060,7 +1123,7 @@ func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	ids, err := descendantRunIDs(ctx, st, rootID)
@@ -1085,7 +1148,6 @@ func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer
 			if err != nil {
 				continue
 			}
-			// Grep per node; tail/head once at the end.
 			if opts.Grep != "" {
 				filtered := LogsOpts{Grep: opts.Grep}.applyClientFilters(data)
 				data = filtered
@@ -1164,7 +1226,7 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
@@ -1214,8 +1276,6 @@ func filterNodesBySince(nodes []*store.Node, since time.Duration) []*store.Node 
 	}
 	return out
 }
-
-// --- helpers ---
 
 // sparkwingFailedStr mirrors sparkwing.Failed.
 const sparkwingFailedStr = "failed"
@@ -1276,9 +1336,6 @@ func formatNodeDuration(n *store.Node) string {
 	}
 	if n.StartedAt != nil {
 		base := "running " + time.Since(*n.StartedAt).Round(100*time.Millisecond).String()
-		// Surface staleness for "running" nodes whose last heartbeat
-		// is older than the threshold. Matches the dashboard's
-		// liveness indicator so CLI and UI report the same orphan.
 		if n.LastHeartbeat != nil {
 			since := time.Since(*n.LastHeartbeat)
 			if since > staleHeartbeatThreshold {
@@ -1288,7 +1345,7 @@ func formatNodeDuration(n *store.Node) string {
 		return base
 	}
 	if n.Status == "done" {
-		return "—"
+		return "--"
 	}
 	return "pending"
 }

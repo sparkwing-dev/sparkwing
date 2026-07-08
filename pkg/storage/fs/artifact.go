@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -27,6 +28,8 @@ import (
 // key, so 100K-blob trees don't blow up any one directory.
 type ArtifactStore struct {
 	Root string
+
+	casLocks sync.Map // map[string]*sync.Mutex, guards conditional writes per key
 }
 
 // NewArtifactStore returns an ArtifactStore rooted at root, creating
@@ -44,7 +47,6 @@ func NewArtifactStore(root string) (*ArtifactStore, error) {
 var _ storage.ArtifactStore = (*ArtifactStore)(nil)
 
 func (s *ArtifactStore) path(key string) string {
-	// Keys shorter than 2 chars share an "_" shard.
 	if len(key) >= 2 {
 		return filepath.Join(s.Root, key[:2], key)
 	}
@@ -72,12 +74,12 @@ func (s *ArtifactStore) Put(_ context.Context, key string, r io.Reader) error {
 		return err
 	}
 	if _, err := io.Copy(tmp, r); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return err
 	}
 	return os.Rename(tmp.Name(), dst)
@@ -117,7 +119,6 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 		if d.IsDir() {
 			return nil
 		}
-		// Skip in-flight tempfiles from atomic Put.
 		name := filepath.Base(path)
 		if strings.HasPrefix(name, ".put-") {
 			return nil

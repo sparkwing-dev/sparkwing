@@ -14,13 +14,13 @@ import (
 func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
 	s := &Server{}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTeapot) // must not be reached
+		w.WriteHeader(http.StatusTeapot)
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/logs/run-1/step-a", nil)
 	p := &logsPrincipal{
 		Name:   "warm-runner-3",
 		Kind:   "runner",
-		Scopes: []string{scopeLogsRead}, // missing logs.write
+		Scopes: []string{scopeLogsRead},
 	}
 	req = req.WithContext(contextWithLogsPrincipal(req.Context(), p))
 	rec := httptest.NewRecorder()

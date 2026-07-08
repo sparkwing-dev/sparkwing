@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
@@ -59,8 +61,10 @@ func (r *InProcessRunner) SetLabels(labels []string) {
 	}
 }
 
-var _ runner.Runner = (*InProcessRunner)(nil)
-var _ runner.LabelAdvertiser = (*InProcessRunner)(nil)
+var (
+	_ runner.Runner          = (*InProcessRunner)(nil)
+	_ runner.LabelAdvertiser = (*InProcessRunner)(nil)
+)
 
 // runJobBody executes the node's materialized Work as a step DAG.
 // Returns the typed output of the *WorkStep the Job's Work returned
@@ -71,12 +75,28 @@ func runJobBody(ctx context.Context, node *sparkwing.JobNode) (any, error) {
 		return nil, fmt.Errorf("sparkwing: node %q has no Work; non-approval nodes must be registered via plan.Job", node.ID())
 	}
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
-		return nil, err
+		return nil, wrapNodeError(node.ID(), err)
 	}
 	if rs := node.ResultStep(); rs != nil {
 		return rs.Output(), nil
 	}
 	return nil, nil
+}
+
+// wrapNodeError prefixes err with the node ID so dispatch-level
+// failure messages identify the failing node by default. Authors who
+// already include the node ID (or any "<id>:" prefix) keep their
+// richer message intact -- the check is a literal prefix match, which
+// favors false-negatives (double-wraps for unusual prefixes) over
+// false-positives.
+func wrapNodeError(nodeID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.HasPrefix(err.Error(), nodeID+":") {
+		return err
+	}
+	return fmt.Errorf("%s: %w", nodeID, err)
 }
 
 // stateMetricsSink adapts StateBackend to nodemetrics.Sink. Errors
@@ -106,7 +126,6 @@ func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runne
 		}
 	}
 
-	// .Cache() delegates the full acquire/run/release cycle.
 	if result, handled := r.runNodeWithCache(ctx, req); handled {
 		return result
 	}
@@ -129,15 +148,11 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	if err != nil {
 		return nil, err
 	}
-	// Redact secrets before persist + delegate.
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
-	// Persist sparkwing.Annotate() messages onto the node row.
 	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
-	// Persist sparkwing.Summary() markdown onto the node / step row.
 	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
-	// Persist step_start / step_end / step_skipped to node_steps rows.
 	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
-	defer nlog.Close()
+	defer func() { _ = nlog.Close() }()
 
 	if err := r.backends.State.StartNode(ctx, runID, node.ID()); err != nil {
 		return nil, err
@@ -166,7 +181,6 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		})
 	}
 
-	// Per-node attribution is approximate when nodes share a process.
 	samplerCtx, stopSampler := context.WithCancel(ctx)
 	go nodemetrics.Run(samplerCtx, 2*time.Second, stateMetricsSink{
 		backend: r.backends.State,
@@ -175,18 +189,32 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	})
 	defer stopSampler()
 
+	wedgeBudget, err := storeWedgeBudget()
+	if err != nil {
+		return nil, err
+	}
 	hbCtx, stopHB := context.WithCancel(ctx)
-	go runNodeHeartbeatLoop(hbCtx, 5*time.Second, r.backends.State, runID, node.ID())
+	go runNodeHeartbeatLoop(hbCtx, 5*time.Second, r.backends.State, runID, node.ID(), wedgeBudget)
 	defer stopHB()
 
 	nodeCtx := sparkwingruntime.WithLogger(ctx, nlog)
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
 
-	// Snapshot before BeforeRun so replay re-runs hooks fresh.
-	// Best-effort: snapshot failures don't fail the node.
 	if err := r.writeDispatchSnapshot(nodeCtx, runID, node); err != nil {
 		sparkwing.Debug(nodeCtx, "dispatch snapshot: %v", err)
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "dispatch_snapshot_failed", []byte(err.Error()))
+	}
+
+	if staged, serr := r.stageArtifacts(nodeCtx, runID, node); serr != nil {
+		wrapped := fmt.Errorf("stage consumed artifacts: %w", serr)
+		nlog.Log("error", wrapped.Error())
+		emitNodeEnd(sparkwing.Failed, wrapped.Error())
+		_ = r.backends.State.FinishNodeWithReason(ctx, runID, node.ID(), string(sparkwing.Failed), wrapped.Error(), nil, store.FailureUnknown, nil)
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_failed", []byte(wrapped.Error()))
+		return nil, wrapped
+	} else if staged > 0 {
+		payload, _ := json.Marshal(map[string]any{"files": staged})
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "artifacts_staged", payload)
 	}
 
 	for i, hook := range node.BeforeRunHooks() {
@@ -201,8 +229,6 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		}
 	}
 
-	// When RetryConfig.Auto is set, dispatch owns retry; the in-runner
-	// step loop must not also retry or budgets multiply.
 	retryCfg := node.RetryConfig()
 	attempts := retryCfg.Attempts
 	backoff := retryCfg.Backoff
@@ -247,6 +273,14 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 			attemptCtx, cancel = context.WithTimeout(nodeCtx, timeout)
 		}
 		out, aerr := runJobBody(attemptCtx, node)
+		if aerr == nil {
+			if vfn := node.Verifier(); vfn != nil {
+				if verr := runVerify(attemptCtx, vfn); verr != nil {
+					aerr = &sparkwing.VerifyError{Err: verr}
+					nlog.Log("error", aerr.Error())
+				}
+			}
+		}
 		if cancel != nil {
 			cancel()
 		}
@@ -258,19 +292,10 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		lastErr = aerr
 		timedOut := false
 		if timeout > 0 && errors.Is(aerr, context.DeadlineExceeded) && nodeCtx.Err() == nil {
-			// Attempt ctx fired but parent is live: Timeout modifier,
-			// not operator cancel.
 			lastErr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
 			timedOut = true
 		}
 		lastTimeout = timedOut
-		// IMP-NOTE: we used to also emit a `level=error` log line
-		// here re-stating lastErr.Error(). That duplicated the
-		// structured error already on step_end.attrs.error, doubling
-		// every failure record an agent had to dedupe. The pretty
-		// renderer now surfaces the error message directly under the
-		// merged step_end/node_end line by reading attrs.error from
-		// step_end -- single source of truth, no duplicates.
 	}
 
 done:
@@ -279,10 +304,6 @@ done:
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
 
-	// A sticky logs-append auth failure must fail the node even if
-	// the user job body returned success, since the run's observable
-	// logs are gone. Auth wins over a transient timeout/error since
-	// fixing the user code can't unblock it.
 	if fatal := nodeLogFatal(nlog); fatal != nil {
 		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
 		emitNodeEnd(sparkwing.Failed, wrapped.Error())
@@ -293,7 +314,11 @@ done:
 
 	if lastErr != nil {
 		reason := store.FailureUnknown
-		if lastTimeout {
+		var ve *sparkwing.VerifyError
+		switch {
+		case errors.As(lastErr, &ve):
+			reason = store.FailureVerify
+		case lastTimeout:
 			reason = store.FailureTimeout
 		}
 		emitNodeEnd(sparkwing.Failed, lastErr.Error())
@@ -302,9 +327,6 @@ done:
 		return nil, lastErr
 	}
 
-	// Surface soft drops on the run summary so 5xx-driven log loss
-	// stops being a silent observability hole. Best-effort event;
-	// renderers can also aggregate from `logs_drop` events later.
 	if count, reason := nodeLogDrops(nlog); count > 0 {
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
@@ -316,12 +338,73 @@ done:
 			outBytes = b
 		}
 	}
+
+	if digest, perr := r.publishArtifacts(nodeCtx, node); perr != nil {
+		wrapped := fmt.Errorf("publish artifacts: %w", perr)
+		emitNodeEnd(sparkwing.Failed, wrapped.Error())
+		_ = r.backends.State.FinishNodeWithReason(ctx, runID, node.ID(), string(sparkwing.Failed), wrapped.Error(), nil, store.FailureUnknown, nil)
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_failed", []byte(wrapped.Error()))
+		return nil, wrapped
+	} else if digest != "" {
+		if serr := r.backends.State.SetNodeArtifactManifest(ctx, runID, node.ID(), digest); serr != nil {
+			sparkwing.Debug(nodeCtx, "set artifact manifest: %v", serr)
+		}
+		payload, _ := json.Marshal(map[string]any{"manifest_digest": digest})
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "artifacts_published", payload)
+	}
+
 	emitNodeEnd(sparkwing.Success, "")
 	_ = r.backends.State.FinishNode(ctx, runID, node.ID(), string(sparkwing.Success), "", outBytes)
 	_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "node_succeeded", nil)
 
-	// Memoization runs in the concurrency primitive's release path.
 	return output, nil
+}
+
+// publishArtifacts captures the node's declared output globs from its
+// workspace into the artifact store and returns the resulting manifest
+// digest. Returns "" with no error when the node declares no outputs or
+// no artifact store is configured. A capture failure (an unreadable or
+// unresolvable declared file) fails the node: a producer that promised
+// outputs it cannot deliver has not succeeded.
+func (r *InProcessRunner) publishArtifacts(ctx context.Context, node *sparkwing.JobNode) (string, error) {
+	globs := node.OutputGlobs()
+	if len(globs) == 0 || r.backends.Artifact == nil {
+		return "", nil
+	}
+	workspace := nodeWorkspace()
+	if workspace == "" {
+		return "", fmt.Errorf("no workspace directory to resolve outputs against")
+	}
+	return captureArtifacts(ctx, r.backends.Artifact, workspace, globs)
+}
+
+// stageArtifacts materializes, before the node runs, the artifacts of
+// every producer the node consumes (see [sparkwing.JobNode.Consumes]).
+// Returns the number of files staged. A no-op when the node consumes
+// nothing or no artifact store is configured.
+func (r *InProcessRunner) stageArtifacts(ctx context.Context, runID string, node *sparkwing.JobNode) (int, error) {
+	edges := node.ConsumeEdges()
+	if len(edges) == 0 || r.backends.Artifact == nil {
+		return 0, nil
+	}
+	workspace := nodeWorkspace()
+	if workspace == "" {
+		return 0, fmt.Errorf("no workspace directory to stage consumed artifacts into")
+	}
+	return stageConsumedArtifacts(ctx, r.backends.Artifact, r.backends.State, runID, workspace, edges)
+}
+
+// nodeWorkspace resolves the directory a node's artifacts are captured
+// from and staged into: the runtime work dir, falling back to the
+// process cwd, or "" when neither resolves.
+func nodeWorkspace() string {
+	if ws := sparkwing.CurrentRuntime().WorkDir; ws != "" {
+		return ws
+	}
+	if d, err := os.Getwd(); err == nil {
+		return d
+	}
+	return ""
 }
 
 // nodeLogFatal returns the sticky auth error from a NodeLog that
@@ -342,6 +425,17 @@ func nodeLogDrops(nlog NodeLog) (int, string) {
 		return d.Drops()
 	}
 	return 0, ""
+}
+
+// runVerify runs a node's Verify postcondition with panic recovery. A
+// panic is reported as a verify failure, not a runner crash.
+func runVerify(ctx context.Context, fn sparkwing.VerifyFn) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return fn(ctx)
 }
 
 func (r *InProcessRunner) markSkipped(ctx context.Context, runID, nodeID, reason string) {

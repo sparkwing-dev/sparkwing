@@ -13,7 +13,6 @@ import (
 // when adding/removing a cmd entry.
 var publicBinaries = []string{
 	"sparkwing",
-	"sparkwing-local-ws",
 	"sparkwing-cache",
 	"sparkwing-controller",
 	"sparkwing-runner",
@@ -49,7 +48,6 @@ func (Build) Examples() []sparkwing.Example {
 
 func (p *Build) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	for _, bin := range publicBinaries {
-		bin := bin
 		sparkwing.Job(plan, "build-"+bin, func(ctx context.Context) error {
 			cmd := fmt.Sprintf("go build -o /dev/null ./cmd/%s", bin)
 			if _, err := sparkwing.Bash(ctx, cmd).Run(); err != nil {

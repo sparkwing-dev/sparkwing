@@ -1,5 +1,5 @@
 // `sparkwing runs grep PATTERN` -- substring search across recent
-// runs' log bodies. Walks the IMP-048 filter-narrowed candidate set
+// runs' log bodies. Walks the filter-narrowed candidate set
 // and emits one row per matching line. Fills the gap between
 // `runs logs --grep` (one known run) and `runs list --error`
 // (structured failure reason only) by surfacing free-form log body
@@ -81,7 +81,7 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	runs, err := st.ListRuns(ctx, store.RunFilter{
 		Limit:     grepFetchLimit(opts),
 		Pipelines: opts.Pipelines,
@@ -200,9 +200,6 @@ func scanRemoteRuns(ctx context.Context, c *client.Client, logc storage.LogStore
 			sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 			for sc.Scan() {
 				lineNo++
-				// The service-side grep guarantees every line matched;
-				// still defensively re-check so a future no-op service
-				// doesn't quietly turn this into a full-log dump.
 				line := sc.Text()
 				if !strings.Contains(line, opts.Pattern) {
 					continue

@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -57,7 +56,8 @@ func (p *poolBinding) run(ctx context.Context, logger *slog.Logger) {
 	p.pcfg = pool.LoadConfig(ctx, p.cfg.Client, p.cfg.Namespace)
 	p.pool = pool.NewPool(p.cfg.Client, p.cfg.Namespace, p.pcfg.PoolSize, p.pcfg.PVCSize)
 	pool.InitMetrics()
-	logger.Info("controller pool: starting",
+	logger.Info(
+		"controller pool: starting",
 		"namespace", p.cfg.Namespace,
 		"pool_size", p.pcfg.PoolSize,
 		"pvc_size", p.pcfg.PVCSize,
@@ -90,8 +90,6 @@ func (p *poolBinding) reconcileLoop(ctx context.Context, logger *slog.Logger) {
 func (p *poolBinding) ready() bool {
 	return p != nil && p.pool != nil
 }
-
-// --- HTTP handlers ---
 
 func (s *Server) handlePoolList(w http.ResponseWriter, r *http.Request) {
 	if !s.pool.ready() {
@@ -143,8 +141,6 @@ func (s *Server) handlePoolCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	name, err := s.pool.pool.Checkout(r.Context(), jobID)
 	if err != nil {
-		// No clean PVC available -> 409 so the caller falls back to a
-		// cache-less build instead of erroring.
 		writeError(w, http.StatusConflict, err)
 		return
 	}
@@ -184,15 +180,6 @@ func (s *Server) handlePoolHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// PoolListForTesting returns the raw PVC list. For tests asserting
-// pool state without going through HTTP.
-func (s *Server) PoolListForTesting(ctx context.Context) ([]corev1.PersistentVolumeClaim, error) {
-	if !s.pool.ready() {
-		return nil, errors.New("pool not attached")
-	}
-	return s.pool.pool.List(ctx)
 }
 
 // Compile-time confirmation that json.Marshal stays in scope for any

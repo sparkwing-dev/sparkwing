@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,13 +65,15 @@ func proxyKeyLock(key string) *sync.RWMutex {
 	return proxyKeyLocks[key]
 }
 
-// initProxy materialises the per-registry subdirectories under
+// initProxy materializes the per-registry subdirectories under
 // proxyDir. New() calls this after Config has seeded proxyDir /
 // proxyCacheTTL / proxyMaxAge so all directory creation is
 // deterministically post-config.
 func initProxy() {
 	for name := range defaultRegistries {
-		os.MkdirAll(filepath.Join(proxyDir, name), 0o755)
+		if err := os.MkdirAll(filepath.Join(proxyDir, name), 0o755); err != nil {
+			log.Printf("warning: proxy init mkdir %s: %v", name, err)
+		}
 	}
 }
 
@@ -81,7 +84,6 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse /proxy/{registry}/{path...}
 	trimmed := strings.TrimPrefix(r.URL.Path, "/proxy/")
 	parts := strings.SplitN(trimmed, "/", 2)
 	if len(parts) == 0 || parts[0] == "" {
@@ -97,11 +99,10 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	reg, ok := defaultRegistries[registryName]
 	if !ok {
-		http.Error(w, fmt.Sprintf("unknown registry %q — supported: %s", registryName, registryList()), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("unknown registry %q -- supported: %s", registryName, registryList()), http.StatusBadRequest)
 		return
 	}
 
-	// Sanitize: reject path traversal
 	if strings.Contains(remotePath, "..") {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
@@ -110,7 +111,6 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	key := proxyCacheKey(registryName, remotePath)
 	lock := proxyKeyLock(key)
 
-	// Try read lock first (concurrent cache hits)
 	lock.RLock()
 	if served := proxyServeFromCache(w, r, registryName, key); served {
 		lock.RUnlock()
@@ -122,11 +122,10 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	lock.RUnlock()
 
-	// Cache miss — take write lock to fetch and store
 	lock.Lock()
 	defer lock.Unlock()
 
-	// Double-check: another goroutine may have populated the cache while we waited
+	// safety: double-checked locking -- another goroutine may have populated the cache while we waited.
 	if served := proxyServeFromCache(w, r, registryName, key); served {
 		if proxyCacheHitsCounter != nil {
 			proxyCacheHitsCounter.Add(r.Context(), 1,
@@ -152,7 +151,7 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 		regDir := filepath.Join(proxyDir, name)
 		var size int64
 		var count int
-		filepath.Walk(regDir, func(_ string, info os.FileInfo, err error) error {
+		if err := filepath.Walk(regDir, func(_ string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
 				return err
 			}
@@ -161,7 +160,9 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 				count++
 			}
 			return nil
-		})
+		}); err != nil {
+			log.Printf("warning: proxy stats walk %s: %v", name, err)
+		}
 		stats[name] = map[string]any{"files": count, "size_bytes": size}
 		totalSize += size
 		totalFiles += count
@@ -169,11 +170,18 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 
 	stats["total"] = map[string]any{"files": totalFiles, "size_bytes": totalSize}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("warning: proxy stats encode: %v", err)
+	}
 }
 
+// proxyCacheKey hashes a length-prefixed (registry, path) pair so the
+// encoding stays injective: without the prefix, ("npm/scoped",
+// "pkg") and ("npm", "scoped/pkg") hash the same bytes and could
+// serve each other's cached responses. Existing entries keyed by the
+// older unprefixed form simply miss and re-fetch once.
 func proxyCacheKey(registry, path string) string {
-	h := sha256.Sum256([]byte(registry + "/" + path))
+	h := sha256.Sum256([]byte(strconv.Itoa(len(registry)) + ":" + registry + "/" + path))
 	return fmt.Sprintf("%x", h)[:16]
 }
 
@@ -193,7 +201,6 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 		return false
 	}
 
-	// Check TTL for mutable content
 	if !meta.Immutable {
 		age := time.Since(time.Unix(meta.CachedAt, 0))
 		if age > proxyCacheTTL {
@@ -201,7 +208,6 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 		}
 	}
 
-	// Serve the cached body
 	if _, err := os.Stat(bodyPath); err != nil {
 		return false
 	}
@@ -227,7 +233,6 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		http.Error(w, fmt.Sprintf("bad upstream URL: %v", err), http.StatusInternalServerError)
 		return
 	}
-	// Forward Accept header so registries return the right content type
 	if accept := r.Header.Get("Accept"); accept != "" {
 		req.Header.Set("Accept", accept)
 	}
@@ -236,7 +241,6 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	fetchStart := time.Now()
 	resp, err := proxyClient.Do(req)
 	if err != nil {
-		// Try serving stale cache on upstream failure
 		if served := proxyServeStale(w, r, reg.Name, key); served {
 			return
 		}
@@ -253,17 +257,16 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	if resp.StatusCode >= 400 {
 		w.Header().Set("X-Proxy-Cache", "MISS")
 		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		_, _ = io.Copy(w, resp.Body)
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 500<<20)) // 500MB max
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 500<<20))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("reading upstream: %v", err), http.StatusBadGateway)
 		return
 	}
 
-	// URL rewriting for npm/pip
 	if reg.RewriteBody && len(body) > 0 {
 		body = proxyRewriteBody(body, reg, r)
 	}
@@ -274,7 +277,6 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		contentType = "application/octet-stream"
 	}
 
-	// Write cache files
 	bodyPath := filepath.Join(proxyDir, reg.Name, key+".body")
 	metaPath := filepath.Join(proxyDir, reg.Name, key+".meta")
 
@@ -288,18 +290,20 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	}
 	metaJSON, _ := json.Marshal(meta)
 
-	// Write atomically via temp files
 	tmpBody := bodyPath + ".tmp"
 	if err := os.WriteFile(tmpBody, body, 0o644); err != nil {
 		log.Printf("warning: proxy cache write error: %v", err)
 	} else {
-		os.Rename(tmpBody, bodyPath)
-		os.WriteFile(metaPath, metaJSON, 0o644)
+		if err := os.Rename(tmpBody, bodyPath); err != nil {
+			log.Printf("warning: proxy cache rename: %v", err)
+		}
+		if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
+			log.Printf("warning: proxy cache meta write: %v", err)
+		}
 	}
 
 	log.Printf("proxy: MISS %s/%s (%d bytes, immutable=%v)", reg.Name, truncatePath(remotePath), len(body), immutable)
 
-	// Write response
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Proxy-Cache", "MISS")
 	w.Write(body)
@@ -337,7 +341,6 @@ func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key strin
 // For npm: rewrites tarball URLs in metadata JSON.
 // For pypi: rewrites file download URLs in simple index HTML.
 func proxyRewriteBody(body []byte, reg Registry, r *http.Request) []byte {
-	// Build the proxy base URL from the incoming request
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -352,15 +355,9 @@ func proxyRewriteBody(body []byte, reg Registry, r *http.Request) []byte {
 
 	switch reg.Name {
 	case "npm":
-		// npm metadata contains tarball URLs like:
-		//   "tarball": "https://registry.npmjs.org/<pkg>/-/<pkg>-<ver>.tgz"
-		// Rewrite to: "tarball": "http://<host>/proxy/npm/<pkg>/-/<pkg>-<ver>.tgz"
 		s = strings.ReplaceAll(s, reg.Upstream, proxyBase+"/npm")
 
 	case "pypi":
-		// pip simple index HTML contains links like:
-		//   href="https://files.pythonhosted.org/packages/..."
-		// Rewrite to: href="http://<host>/proxy/pythonhosted/packages/..."
 		s = strings.ReplaceAll(s, "https://files.pythonhosted.org", proxyBase+"/pythonhosted")
 	}
 
@@ -415,7 +412,6 @@ func proxyCleanupLoop(ctx context.Context) {
 
 				age := time.Since(time.Unix(meta.CachedAt, 0))
 
-				// Remove mutable entries past 10x TTL, immutable past max age
 				var expired bool
 				if meta.Immutable {
 					expired = age > proxyMaxAge
@@ -425,8 +421,8 @@ func proxyCleanupLoop(ctx context.Context) {
 
 				if expired {
 					key := strings.TrimSuffix(e.Name(), ".meta")
-					os.Remove(metaPath)
-					os.Remove(filepath.Join(regDir, key+".body"))
+					_ = os.Remove(metaPath)
+					_ = os.Remove(filepath.Join(regDir, key+".body"))
 					removed++
 				}
 			}

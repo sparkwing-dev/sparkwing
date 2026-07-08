@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
@@ -80,31 +81,20 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	// Append bytes to a node's log file. Body is treated as opaque
-	// text; no parsing or structure enforcement.
 	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleAppend)))
-	// Read the current contents of a node's log.
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleRead)))
-	// Read every node's log for a run, concatenated with banners.
 	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleReadRun)))
-	// Delete every log file for a run. Idempotent.
 	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleDeleteRun)))
-	// Live tail: SSE stream of appended bytes.
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleStream)))
 
-	// Session G: full-text search across every run's log files.
 	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleSearch)))
 
-	// Wrap the authenticated routes with the auth middleware, then
-	// compose with the unauthed health + metrics routes + request log.
 	authed := s.authMiddleware(mux)
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	router.Handle("GET /metrics", promhttp.Handler())
 	router.Handle("/", authed)
-	// otelhttp wraps outermost; see pkg/controller/server.go for the
-	// same pattern rationale.
 	return otelutil.WrapHandler("sparkwing-logs", withRequestLog(router, s.logger))
 }
 
@@ -192,7 +182,6 @@ func (s *Server) requireScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := logsPrincipalFromContext(r.Context())
 		if !ok {
-			// Auth disabled -- pass through.
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -250,7 +239,6 @@ func (s *Server) authenticate(ctx context.Context, raw string) (*logsPrincipal, 
 		return nil, errors.New("missing bearer token")
 	}
 
-	// Cache hit.
 	if s.authCacheTTL > 0 {
 		if v, ok := s.authCache.Load(raw); ok {
 			e := v.(*logsAuthCacheEntry)
@@ -326,7 +314,7 @@ func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error {
 // ServeWithTokens starts the HTTP listener with whoami-based auth
 // wired against the given controller URL. Empty controllerURL = auth
 // fully disabled (laptop-local).
-func ServeWithTokens(ctx context.Context, root, addr string, controllerURL string, logger *slog.Logger) error {
+func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
 	s, err := New(root, logger)
 	if err != nil {
 		return err
@@ -338,13 +326,14 @@ func ServeWithTokens(ctx context.Context, root, addr string, controllerURL strin
 		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       2 * time.Minute, // POST bodies can grow
+		ReadTimeout:       2 * time.Minute,
 		WriteTimeout:      2 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		s.logger.Info("logs service listening",
+		s.logger.Info(
+			"logs service listening",
 			"addr", addr, "root", root,
 			"auth_controller", controllerURL != "",
 		)
@@ -364,8 +353,6 @@ func ServeWithTokens(ctx context.Context, root, addr string, controllerURL strin
 	}
 }
 
-// --- handlers ---
-
 // handleHealth reports log-service self-health as a degraded-list:
 //
 //	{"status": "ok" | "degraded", "problems": ["comp: detail", ...]}
@@ -378,8 +365,6 @@ func ServeWithTokens(ctx context.Context, root, addr string, controllerURL strin
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	var problems []string
 
-	// 1. Writability canary. Write + delete a small file under root.
-	// A failure here flips to 503 -- log writes would fail too.
 	canary := filepath.Join(s.root, ".health-check")
 	if err := os.WriteFile(canary, []byte("ok"), 0o644); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -390,27 +375,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	_ = os.Remove(canary)
 
-	// 2. Disk-free headroom on the root filesystem. <10% free or
-	// <1GiB free surfaces as degraded so operators see it before
-	// the log volume actually saturates. Uses syscall.Statfs; if
-	// that fails (e.g. non-POSIX tmpfs in a test), we silently skip.
 	if free, total, ok := diskSpace(s.root); ok && total > 0 {
 		pctFree := float64(free) / float64(total) * 100.0
 		const minGiB = 1 << 30
 		switch {
 		case free < minGiB:
 			problems = append(problems, fmt.Sprintf(
-				"root: disk free %s (<1GiB) on %s", formatBytes(free), s.root))
+				"root: disk free %s (<1GiB) on %s", formatBytes(free), s.root,
+			))
 		case pctFree < 10.0:
 			problems = append(problems, fmt.Sprintf(
-				"root: %.1f%% free on %s (<10%%)", pctFree, s.root))
+				"root: %.1f%% free on %s (<10%%)", pctFree, s.root,
+			))
 		}
 	}
 
 	resp := `{"status":"ok"}`
 	if len(problems) > 0 {
-		// Hand-build the JSON: problems is user-facing text with
-		// arbitrary characters. json.Marshal keeps quoting correct.
 		buf, _ := json.Marshal(map[string]any{
 			"status":   "degraded",
 			"problems": problems,
@@ -421,12 +402,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, resp)
 }
-
-// diskSpace returns (free, total, ok) bytes for the filesystem containing
-// path. ok=false when the host syscall fails -- caller should treat that as
-// "couldn't check, move on" rather than degraded. Implementations live in
-// diskspace_unix.go and diskspace_windows.go because the underlying syscalls
-// don't share an API.
 
 // formatBytes prints a compact GiB/MiB/KiB string for one number.
 // Precision is coarse on purpose -- health output is for skimming,
@@ -465,9 +440,6 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cap body size to avoid a pathological client filling disk with
-	// a single request. Bulk of append traffic is tiny lines; 4 MiB
-	// per POST is generous.
 	body := http.MaxBytesReader(w, r.Body, 4<<20)
 	defer r.Body.Close()
 
@@ -477,8 +449,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serialize per-file opens so concurrent POSTs don't interleave
-	// partial writes. Most of the cost is fsync; mu is fine for v1.
+	// safety: mu serializes concurrent POSTs to the same file so writes don't interleave.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -512,8 +483,6 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Empty, not 404 -- a node with zero log lines still
-			// "exists" as far as the run is concerned.
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			return
@@ -742,16 +711,11 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	// Opening comment keeps the connection "alive" for browsers that
-	// buffer until first output.
 	fmt.Fprintln(w, ": open")
 	flusher.Flush()
 
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
-	// Heartbeat keeps intermediaries (reverse proxies, SSE polyfills)
-	// from timing out idle streams. 15s is safely inside every common
-	// LB default.
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
@@ -767,9 +731,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-ticker.C:
-			// Open + stat + read may fail because the file is
-			// created lazily on first append. That's expected before
-			// the node has logged anything; keep polling.
 			f, err := os.Open(path)
 			if err != nil {
 				continue
@@ -792,8 +753,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			f.Close()
 			offset += int64(n)
 
-			// Split into complete lines; hold any trailing partial
-			// until the next poll so we never emit half a line.
 			chunk := pending + string(buf[:n])
 			parts := splitKeepPartial(chunk)
 			pending = parts.trailing
@@ -818,9 +777,6 @@ type splitResult struct {
 func splitKeepPartial(s string) splitResult {
 	out := splitResult{}
 	lines := strings.Split(s, "\n")
-	// After Split, the last element is the text following the last
-	// "\n" (or the whole string if no "\n" was present). That tail
-	// is the partial.
 	for i := 0; i < len(lines)-1; i++ {
 		out.complete = append(out.complete, lines[i])
 	}
@@ -837,8 +793,6 @@ func sseEscape(s string) string {
 	s = strings.ReplaceAll(s, "\r", "")
 	return s
 }
-
-// --- helpers ---
 
 // pathFor computes and validates the filesystem path for a node's
 // log file. Returns an error on any component that could escape the
@@ -875,7 +829,8 @@ func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rw, r)
-		logger.Info("http",
+		logger.Info(
+			"http",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rw.status,

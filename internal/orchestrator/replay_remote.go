@@ -46,8 +46,6 @@ func sideloadRun(ctx context.Context, st *store.Store, c *client.Client, runID s
 		return fmt.Errorf("sideload run %s: %w", runID, err)
 	}
 	if remote.Status != "running" && remote.Status != "" {
-		// Stamp finished_at so list/status views don't show this as
-		// forever-running locally.
 		_ = st.FinishRun(ctx, remote.ID, remote.Status, remote.Error)
 	}
 	return nil
@@ -66,8 +64,6 @@ func sideloadNode(ctx context.Context, st *store.Store, c *client.Client, runID,
 	if err := st.CreateNode(ctx, *remote); err != nil {
 		return nil, fmt.Errorf("sideload node row: %w", err)
 	}
-	// CreateNode writes pending fields; only terminalize when there's
-	// real output (resolver fallback needs Output bytes).
 	if remote.Status == "done" || remote.Outcome != "" || len(remote.Output) > 0 {
 		outcome := remote.Outcome
 		if outcome == "" {

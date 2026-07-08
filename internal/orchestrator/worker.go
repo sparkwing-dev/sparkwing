@@ -28,6 +28,13 @@ type WorkerOptions struct {
 	// LogStore, when non-nil, takes precedence over LogsURL.
 	LogStore storage.LogStore
 
+	// ArtifactStore is the content-addressed store node execution
+	// publishes outputs to and stages consumed inputs from when this
+	// worker runs nodes in-process. Nil disables artifacts. K8s and warm
+	// runners give their pods the store through ArtifactStoreEnvVar
+	// instead, so this field shapes only the in-process runner path.
+	ArtifactStore storage.ArtifactStore
+
 	// HTTPClient transport for controller calls. Nil = default 30s.
 	HTTPClient *http.Client
 
@@ -71,7 +78,6 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	if logger == nil {
 		logger = slog.Default()
 	}
-	// Uses ctx (not runCtx) so a mid-run shutdown still finalizes.
 	defer func() {
 		if ferr := stateClient.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger failed",
@@ -79,8 +85,6 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		}
 	}()
 
-	// Heartbeat keeps the claim alive and propagates operator cancel
-	// requests via runCtx.
 	runCtx, cancelRun := context.WithCancel(ctx)
 	cancelled := &atomic.Bool{}
 	go runHeartbeat(runCtx, stateClient, trigger.ID,
@@ -93,33 +97,33 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
 	inheritedAdmission := planAdmissionFromTriggerEnv(trigger.TriggerEnv)
 	res, err := Run(runCtx, backends, Options{
-		Pipeline:                   trigger.Pipeline,
-		RunID:                      trigger.ID,
-		Args:                       args,
-		ParentRunID:                trigger.ParentRunID,
-		InheritedPlanCacheKey:      inheritedAdmission.Key,
-		InheritedPlanCacheHolderID: inheritedAdmission.HolderID,
-		RetryOf:                    trigger.RetryOf,
-		RetrySource:                trigger.RetrySource,
+		Pipeline:                         trigger.Pipeline,
+		RunID:                            trigger.ID,
+		Args:                             args,
+		ParentRunID:                      trigger.ParentRunID,
+		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
+		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
+		RetryOf:                          trigger.RetryOf,
+		RetrySource:                      trigger.RetrySource,
 		Trigger: sparkwing.TriggerInfo{
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,
 		},
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			trigger.GitSHA, trigger.GitBranch, trigger.Repo, trigger.RepoURL),
+			trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL),
 		Delegate: opts.Delegate,
 		Runner:   r,
 	})
 	cancelRun()
 	if err != nil {
-		logger.Error("run failed setup",
+		logger.Error(
+			"run failed setup",
 			"run_id", trigger.ID,
 			"err", err,
 		)
 		return
 	}
 
-	// On operator cancel, overwrite state and sweep in-flight nodes.
 	finalStatus := res.Status
 	if cancelled.Load() {
 		finalStatus = "cancelled"
@@ -137,7 +141,8 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		}
 	}
 
-	logger.Info("run finished",
+	logger.Info(
+		"run finished",
 		"run_id", res.RunID,
 		"pipeline", trigger.Pipeline,
 		"status", finalStatus,
@@ -170,32 +175,27 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if err != nil {
 		return fmt.Errorf("open local store: %w", err)
 	}
-	defer dummyStore.Close()
-	local := LocalBackends(paths, dummyStore)
+	defer func() { _ = dummyStore.Close() }()
+	local := LocalBackends(paths, dummyStore, nil)
 
 	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
 
-	var logsBackend LogBackend = local.Logs
+	logsBackend := local.Logs
 	switch {
 	case opts.LogStore != nil:
 		logsBackend = NewLogStoreBackend(opts.LogStore, opts.Logger)
 	case opts.LogsURL != "":
 		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, opts.HTTPClient, opts.Token, opts.Logger)
 	}
-	// Concurrency must go through the controller so cache hits, slot
-	// holders, and waiter resolution are shared across runner pods.
-	backends := Backends{
-		State:       stateClient,
-		Logs:        logsBackend,
-		Concurrency: NewHTTPConcurrency(opts.ControllerURL, opts.HTTPClient, opts.Token, store.DefaultConcurrencyLease),
-	}
-	_ = local // local backends still useful for paths/logs fallback
+	backends := RemoteBackends(stateClient, logsBackend, opts.ArtifactStore, opts.HTTPClient, store.DefaultConcurrencyLease)
+	_ = local
 
 	trigger, err := stateClient.GetTrigger(ctx, triggerID)
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
-	opts.Logger.Info("handling claimed trigger",
+	opts.Logger.Info(
+		"handling claimed trigger",
 		"run_id", trigger.ID,
 		"pipeline", trigger.Pipeline,
 		"source", trigger.TriggerSource,
@@ -228,7 +228,6 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Short ctx so a wedged controller can't block the ticker.
 			hbCtx, cancel := context.WithTimeout(ctx, runHeartbeatTimeout)
 			status, err := c.HeartbeatTrigger(hbCtx, triggerID)
 			cancel()

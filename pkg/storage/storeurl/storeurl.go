@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -119,7 +120,6 @@ func fsPath(rest string) (string, error) {
 // s3BucketPrefix splits "bucket" or "bucket/prefix..." into its parts.
 // Bucket is required; prefix may be empty (root of bucket).
 func s3BucketPrefix(rest string) (bucket, prefix string, err error) {
-	// net/url validates shape so stray query strings or fragments fail loudly.
 	u, err := url.Parse("s3://" + rest)
 	if err != nil {
 		return "", "", fmt.Errorf("storeurl: parse s3 url: %w", err)

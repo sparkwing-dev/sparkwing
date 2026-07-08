@@ -13,12 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Retry(n, RetryAuto(), ...) re-dispatches the whole runner up to n
-// additional times on Failed outcomes. Without RetryAuto() the same
-// Retry(n) loops the step body in a single runner invocation. The two
-// modes share one verb but exercise different code paths in the
-// orchestrator.
-
 var autoRetryCount atomic.Int32
 
 type autoRetryFlakyJob struct {
@@ -76,11 +70,8 @@ func TestAutoRetry_RecoversAfterTransientFailures(t *testing.T) {
 		t.Fatalf("dispatch count = %d, want 3 (initial + 2 auto-retries)", got)
 	}
 
-	// Confirm the orchestrator emitted node_auto_retry events (one per
-	// re-dispatch beyond the first) so the dashboard can surface the
-	// retry count.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	events, err := st.ListEventsAfter(context.Background(), res.RunID, 0, 1000)
 	if err != nil {
 		t.Fatalf("ListEventsAfter: %v", err)
@@ -113,10 +104,8 @@ func TestAutoRetry_FailsAfterExhaustingAttempts(t *testing.T) {
 		t.Fatalf("dispatch count = %d, want 3 (initial + 2 auto-retries before giving up)", got)
 	}
 
-	// Final node row should be Failed with the final attempt's error
-	// preserved (not buried under the auto-retry plumbing).
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 1 || nodes[0].NodeID != "always-fails" {
 		t.Fatalf("expected one always-fails node, got %+v", nodes)

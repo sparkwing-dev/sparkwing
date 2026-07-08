@@ -45,7 +45,7 @@ func TestRun_AnnotatePersistsToStepRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	steps, err := st.ListNodeSteps(context.Background(), res.RunID)
 	if err != nil {

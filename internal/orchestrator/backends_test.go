@@ -32,7 +32,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Fatalf("status=%q want success; err=%v", res.Status, res.Error)
 	}
 
-	// CreateRun + FinishRun -- must cover the lifecycle.
 	if fakes.state.createRuns != 1 {
 		t.Errorf("CreateRun called %d times; want 1", fakes.state.createRuns)
 	}
@@ -40,7 +39,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("FinishRun called %d times; want 1", fakes.state.finishRuns)
 	}
 
-	// Two nodes -> two CreateNode, two StartNode, two FinishNode.
 	if fakes.state.createNodes != 2 {
 		t.Errorf("CreateNode called %d times; want 2", fakes.state.createNodes)
 	}
@@ -51,7 +49,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("FinishNode called %d times; want 2", fakes.state.finishNodes)
 	}
 
-	// Node events: _started + _succeeded for each of two nodes.
 	if got := fakes.state.eventKinds["node_started"]; got != 2 {
 		t.Errorf("node_started events=%d; want 2", got)
 	}
@@ -59,12 +56,10 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 		t.Errorf("node_succeeded events=%d; want 2", got)
 	}
 
-	// Each node gets its own log sink.
 	if fakes.logs.opened != 2 {
 		t.Errorf("OpenNodeLog called %d times; want 2", fakes.logs.opened)
 	}
 
-	// The .Cache()-declared node -- exactly one -- acquires a slot.
 	if fakes.concurrency.acquires != 1 {
 		t.Errorf("Concurrency.AcquireSlot called %d times; want 1", fakes.concurrency.acquires)
 	}
@@ -89,18 +84,14 @@ func TestBackendsSeam_StateErrorPropagates(t *testing.T) {
 	}
 }
 
-// --- fixture pipeline ---
-
 type seamOK struct{ sparkwing.Base }
 
 func (seamOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
 	sparkwing.Job(plan, "b", func(ctx context.Context) error { return nil }).
-		Needs(a).Cache(sparkwing.CacheOptions{Key: "seam-lock"})
+		Needs(a).Concurrency(sparkwing.NewConcurrencyGroup("seam-lock", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	return nil
 }
-
-// --- fake backends ---
 
 type fakeBackends struct {
 	state       *fakeState
@@ -128,6 +119,8 @@ type fakeState struct {
 	createRunErr error
 }
 
+func (f *fakeState) Close() error { return nil }
+
 func (f *fakeState) CreateRun(ctx context.Context, r store.Run) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -137,132 +130,177 @@ func (f *fakeState) CreateRun(ctx context.Context, r store.Run) error {
 	f.createRuns++
 	return nil
 }
+
 func (f *fakeState) FinishRun(ctx context.Context, runID, status, errMsg string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishRuns++
 	return nil
 }
+
 func (f *fakeState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	return nil
 }
+
 func (f *fakeState) CreateNode(ctx context.Context, n store.Node) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createNodes++
 	return nil
 }
+
 func (f *fakeState) StartNode(ctx context.Context, runID, nodeID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startNodes++
 	return nil
 }
+
 func (f *fakeState) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishNodes++
 	return nil
 }
+
 func (f *fakeState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishNodes++
 	return nil
 }
+
 func (f *fakeState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	return nil
 }
+
 func (f *fakeState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
 	return nil
 }
+
 func (f *fakeState) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	return nil
 }
+
 func (f *fakeState) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
 	return nil
 }
+
 func (f *fakeState) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
 	return nil
 }
+
 func (f *fakeState) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return nil
 }
+
 func (f *fakeState) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	return nil
 }
+
 func (f *fakeState) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
 	return nil
 }
+
 func (f *fakeState) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	return nil
 }
+
 func (f *fakeState) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
 	return nil, nil
 }
+
 func (f *fakeState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
 	return nil
 }
+
+func (f *fakeState) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	return nil
+}
+
 func (f *fakeState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.eventKinds[kind]++
 	return nil
 }
+
 func (f *fakeState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return nil
 }
+
 func (f *fakeState) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
 	return nil, store.ErrNotFound
 }
+
+func (f *fakeState) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
+	return nil
+}
+
 func (f *fakeState) GetRun(ctx context.Context, runID string) (*store.Run, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
 	return "", nil
 }
+
 func (f *fakeState) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
 	return "", nil
 }
+
 func (f *fakeState) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	return nil
 }
+
 func (f *fakeState) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
 	return nil
 }
+
 func (f *fakeState) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error) {
 	return nil, nil
 }
+
 func (f *fakeState) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
 	return nil
 }
+
 func (f *fakeState) CreateApproval(ctx context.Context, a store.Approval) error {
 	return nil
 }
+
 func (f *fakeState) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
 	return nil, nil
 }
+
 func (f *fakeState) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
 	return nil
 }
+
 func (f *fakeState) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error) {
 	return nil, store.ErrNotFound
 }
+
 func (f *fakeState) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error) {
 	return nil, nil
 }
@@ -313,12 +351,16 @@ func (f *fakeConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 	return nil
 }
 
-func (f *fakeConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
+func (f *fakeConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
 	return store.WaiterResolution{Status: store.WaiterStillWaiting}, nil
 }
 
 func (f *fakeConcurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
 	return nil, nil
+}
+
+func (f *fakeConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	return false, nil
 }
 
 func errIs(err error, substr string) bool {

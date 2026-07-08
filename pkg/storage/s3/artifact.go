@@ -25,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -45,6 +46,8 @@ type ArtifactStore struct {
 	Bucket string
 	Prefix string // optional namespace within bucket; "" means bucket root
 	Client API
+
+	casOnce casProbe // memoizes ConditionalWritesSupported
 }
 
 // NewArtifactStore wires an ArtifactStore around the provided client.

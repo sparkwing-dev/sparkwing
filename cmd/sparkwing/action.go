@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -29,12 +30,14 @@ type Pipeline struct {
 	Name       string                  `json:"name"`
 	Short      string                  `json:"short,omitempty"`
 	Help       string                  `json:"help,omitempty"`
-	Hidden     bool                    `json:"hidden,omitempty"`
-	Tags       []string                `json:"tags,omitempty"`
 	Triggers   []string                `json:"triggers,omitempty"`
 	Entrypoint string                  `json:"entrypoint,omitempty"`
 	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
 	Examples   []sparkwing.Example     `json:"examples,omitempty"`
+	// EnvVars are env vars the pipeline reads as inputs, surfaced via
+	// the optional sparkwing.EnvVarDocer interface. Empty unless the
+	// pipeline opts in.
+	EnvVars []sparkwing.EnvVarDoc `json:"env_vars,omitempty"`
 	// Risks is the sorted, deduplicated union of per-step risk
 	// labels declared anywhere in the pipeline's plan. Mirrors
 	// sparkwing.DescribePipeline.Risks. omitempty keeps the wire
@@ -63,21 +66,21 @@ func runPipeline(args []string) error {
 		return runPipelineDiscover(args[1:])
 	case "new":
 		return runPipelineNew(args[1:])
+	case "templates":
+		return runPipelineTemplates(args[1:])
 	case "explain":
 		return runPipelineExplain(args[1:])
+	case "lint":
+		return runPipelineLint(args[1:])
 	case "plan":
 		return runPipelinePlan(args[1:])
 	case "run":
-		// Canonical run path. `sparkwing run <name>` is an alias for
-		// this; both end up at the same dispatch entrypoint.
 		return dispatchRun(args[1:])
+	case "trigger":
+		return runPipelineTrigger(args[1:])
 	case "publish":
-		// : compile + upload pipeline binary to the
-		// configured ArtifactStore. Explicit operator action -- the
-		// run path never auto-uploads.
 		return runPipelinePublish(args[1:])
 	case "hooks":
-		// Git hooks fire pipelines on pre-commit / pre-push.
 		return runHooks(args[1:])
 	case "sparks":
 		return runSparks(args[1:])
@@ -87,18 +90,39 @@ func runPipeline(args []string) error {
 	}
 }
 
+// chdirFlag registers the shared -C/--sw-cd working-directory flag so a
+// repo-scoped discovery verb can target a repo other than the cwd,
+// matching `run` and `new`. applyChdir re-anchors before the verb
+// resolves the project.
+func chdirFlag(fs *flag.FlagSet) *string {
+	return fs.StringP("sw-cd", "C", "", "operate as if started in this directory (re-anchors the .sparkwing search)")
+}
+
+func applyChdir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if err := os.Chdir(dir); err != nil {
+		return fmt.Errorf("--sw-cd %q: %w", dir, err)
+	}
+	return nil
+}
+
 func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
+	cd := chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineList.Path)
+	if err := applyChdir(*cd); err != nil {
+		return err
+	}
+	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
 	if err != nil {
 		return err
 	}
@@ -125,12 +149,15 @@ func runPipelineList(args []string) error {
 func runPipelineDiscover(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDiscover.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	queryFlag := fs.String("query", "", "search query (one or more tokens; all must match some field)")
+	cd := chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineDiscover, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return err
+	}
+	if err := applyChdir(*cd); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
@@ -141,7 +168,7 @@ func runPipelineDiscover(args []string) error {
 		PrintHelp(cmdPipelineDiscover, os.Stderr)
 		return errors.New("discover: --query is required")
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineDiscover.Path)
+	format, err := resolveOutputFormat(*output, cmdPipelineDiscover.Path)
 	if err != nil {
 		return err
 	}
@@ -182,8 +209,6 @@ func runPipelineDiscover(args []string) error {
 		fmt.Printf("no pipelines matched %q (try `sparkwing pipeline list` to see everything)\n", query)
 		return nil
 	}
-	// Name column width capped at longest hit, 24 max -- one global
-	// width keeps the score column aligned.
 	const widthCap = 24
 	nameWidth := 0
 	for _, r := range results {
@@ -215,7 +240,6 @@ func scorePipeline(a Pipeline, tokens []string) int {
 	}{
 		{100, a.Name},
 		{40, a.Short},
-		{25, strings.Join(a.Tags, " ")},
 		{20, a.Help},
 		{20, strings.Join(a.Triggers, " ")},
 	}
@@ -228,8 +252,6 @@ func scorePipeline(a Pipeline, tokens []string) int {
 			}
 		}
 		if best == 0 {
-			// Every token must match something; a token with no hit
-			// means the overall match fails.
 			return 0
 		}
 		score += best
@@ -247,12 +269,15 @@ func plural(n int) string {
 func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
+	cd := chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return err
+	}
+	if err := applyChdir(*cd); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
@@ -263,14 +288,11 @@ func runPipelineDescribe(args []string) error {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
 		return errors.New("describe: --name is required")
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdPipelineDescribe.Path)
+	format, err := resolveOutputFormat(*output, cmdPipelineDescribe.Path)
 	if err != nil {
 		return err
 	}
 	name := *pipelineName
-	// Describe always considers hidden entries -- the operator is
-	// asking for a specific name, so opacity is a worse failure mode
-	// than surface area.
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
 		return err
@@ -283,13 +305,6 @@ func runPipelineDescribe(args []string) error {
 		}
 	}
 	if found == nil {
-		// Surface a "did you mean X?" suggestion when the typo is
-		// close to a registered name. Source the candidate set from
-		// the catalog we just gathered
-		// (rather than sparkwing.Registered() — this CLI verb runs in
-		// the sparkwing process, not the inner pipeline binary, so the
-		// in-process registry is empty here). Far typos fall through
-		// to the existing "list --all" hint.
 		candidates := make([]string, 0, len(pipelines))
 		for _, p := range pipelines {
 			candidates = append(candidates, p.Name)
@@ -324,7 +339,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, cfg, err := pipelines.Discover(cwd)
+	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -345,8 +360,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 			}
 			a := Pipeline{
 				Name:       p.Name,
-				Hidden:     p.Hidden,
-				Tags:       p.Tags,
 				Entrypoint: p.Entrypoint,
 				Triggers:   summarizeTriggerList(p.On),
 			}
@@ -355,8 +368,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Help = dp.Help
 				a.Args = dp.Args
 				a.Examples = dp.Examples
-				// Surface risk labels in
-				// `pipeline list / describe -o json`.
+				a.EnvVars = dp.EnvVars
 				a.Risks = dp.Risks
 				a.RisksBySteps = dp.RisksBySteps
 			}
@@ -387,14 +399,14 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 	if t.Schedule != "" {
 		out = append(out, "schedule:"+t.Schedule)
 	}
-	if t.Deploy != nil {
-		out = append(out, "deploy")
-	}
 	if t.PreHook != nil {
 		out = append(out, "pre-commit")
 	}
 	if t.PostHook != nil {
 		out = append(out, "pre-push")
+	}
+	if t.PostCommitHook != nil {
+		out = append(out, "post-commit")
 	}
 	return out
 }
@@ -432,17 +444,11 @@ func printPipelineDetail(a *Pipeline) {
 	if a.Entrypoint != "" {
 		fmt.Printf("entrypoint: %s\n", a.Entrypoint)
 	}
-	if len(a.Tags) > 0 {
-		fmt.Printf("tags:  %s\n", strings.Join(a.Tags, ", "))
-	}
 	if len(a.Risks) > 0 {
 		fmt.Printf("risks: %s\n", strings.Join(a.Risks, ", "))
 	}
 	if len(a.Triggers) > 0 {
 		fmt.Printf("triggers: %s\n", strings.Join(a.Triggers, ", "))
-	}
-	if a.Hidden {
-		fmt.Println("hidden: true")
 	}
 	if a.Short != "" {
 		fmt.Printf("\nshort: %s\n", a.Short)
@@ -463,6 +469,19 @@ func printPipelineDetail(a *Pipeline) {
 			}
 			fmt.Printf("  --%-20s %s %s  %s%s\n",
 				x.Name+" <"+x.Type+">", tag, x.Type, x.Desc, dflt)
+		}
+	}
+	if len(a.EnvVars) > 0 {
+		fmt.Println("\nenvironment variables:")
+		for _, e := range a.EnvVars {
+			line := "  " + e.Name
+			if e.Description != "" {
+				line += "  " + e.Description
+			}
+			if e.Default != "" {
+				line += "  (default: " + e.Default + ")"
+			}
+			fmt.Println(line)
 		}
 	}
 	if len(a.Examples) > 0 {

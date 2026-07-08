@@ -59,8 +59,6 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 			"semaphore may be over-restricting)", peak.Load())
 	}
 	if !observedAtZero.Load() {
-		// Sanity: at the start of the very first job, active should be 1.
-		// If we never saw active==1 before incrementing, the counter wiring is wrong.
 		t.Fatal("active counter never observed at the post-acquire baseline; test is faulty")
 	}
 }
@@ -87,10 +85,6 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 					break
 				}
 			}
-			// Hold the slot long enough that the dispatcher saturates
-			// the cap. 50ms * cap is well under test budgets but long
-			// enough that 30 jobs at cap=4 take ~400ms instead of
-			// ~50ms.
 			time.Sleep(50 * time.Millisecond)
 			p.active.Add(-1)
 			return nil

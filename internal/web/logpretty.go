@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -69,9 +69,9 @@ func contentTypeFor(f logFormat) string {
 // ANSI in plain mode) so a misconfigured pipeline still surfaces.
 func renderJSONL(src []byte, w io.Writer, f logFormat) {
 	useColor := f == formatANSI
-	pr := orchestrator.NewPrettyRendererTo(w, useColor)
+	pr := logpretty.NewPrettyRendererTo(w, useColor)
 	scanner := bufio.NewScanner(bytes.NewReader(src))
-	// 1 MiB matches the largest single-line payload observed in CI.
+	// perf: 1 MiB cap matches the largest single-line payload seen in CI; default 64 KiB drops lines silently.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -82,20 +82,18 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 		var rec sparkwing.LogRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			if f == formatPlain {
-				w.Write([]byte(orchestrator.StripANSI(string(line))))
+				_, _ = w.Write([]byte(logpretty.StripANSI(string(line))))
 			} else {
-				w.Write(line)
+				_, _ = w.Write(line)
 			}
 			fmt.Fprintln(w)
 			continue
 		}
 		if f == formatPlain {
-			rec.Msg = orchestrator.StripANSI(rec.Msg)
+			rec.Msg = logpretty.StripANSI(rec.Msg)
 		}
 		pr.Emit(rec)
 	}
-	// End-of-stream: drain any buffered node_start / step_end so a
-	// log fetched without a follow-up event still surfaces them.
 	pr.Flush()
 }
 
@@ -140,20 +138,16 @@ func renderSSELogLine(payload []byte, f logFormat) []string {
 	var rec sparkwing.LogRecord
 	if err := json.Unmarshal(payload, &rec); err != nil {
 		if f == formatPlain {
-			return []string{orchestrator.StripANSI(string(payload))}
+			return []string{logpretty.StripANSI(string(payload))}
 		}
 		return []string{string(payload)}
 	}
 	if f == formatPlain {
-		rec.Msg = orchestrator.StripANSI(rec.Msg)
+		rec.Msg = logpretty.StripANSI(rec.Msg)
 	}
 	var buf bytes.Buffer
-	pr := orchestrator.NewPrettyRendererTo(&buf, f == formatANSI)
+	pr := logpretty.NewPrettyRendererTo(&buf, f == formatANSI)
 	pr.Emit(rec)
-	// SSE renders one record per call with a fresh renderer, so the
-	// buffer-and-collapse logic in Emit has no follow-up event to
-	// merge with. Flush immediately so each record produces its
-	// stand-alone line.
 	pr.Flush()
 	return strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 }

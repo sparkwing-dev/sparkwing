@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
 # Stop the dashboard dev loop started by bin/dev-start.sh.
 #
-# Idempotent: missing/stale pidfiles are silently ignored so this
-# can be the first thing dev-start.sh runs to clean up leftover
-# state from a previous crash.
+# Idempotent: missing/stale pidfiles are silently ignored so this can
+# be the first thing dev-start.sh runs to clean up leftover state from
+# a previous crash.
 
 set -uo pipefail
 
 RUN_DIR="/tmp/sparkwing-dev"
-pid_local_ws="$RUN_DIR/local-ws.pid"
 pid_web="$RUN_DIR/web.pid"
 
-stop_one() {
-  local pidfile="$1"
-  local label="$2"
+# Sparkwing dashboard manages its own pid file; defer to its kill verb,
+# which is idempotent ("dashboard not running" is a clean exit 0).
+if command -v sparkwing >/dev/null 2>&1; then
+  echo "==> sparkwing dashboard: stopping"
+  sparkwing dashboard kill || true
+else
+  echo "==> sparkwing not on PATH; skipping dashboard kill"
+fi
+
+stop_next_dev() {
+  local pidfile="$pid_web"
+  local label="next dev"
   [ -f "$pidfile" ] || { echo "==> $label: not running"; return 0; }
   local pid
   pid=$(cat "$pidfile" 2>/dev/null) || true
@@ -32,7 +40,7 @@ stop_one() {
   # SIGKILL after 3s if it ignores us. We also kill the process group
   # so child processes (next dev's worker procs) are cleaned up.
   if kill -- -"$pid" 2>/dev/null; then
-    : # group kill worked
+    :
   else
     kill "$pid" 2>/dev/null || true
   fi
@@ -47,5 +55,4 @@ stop_one() {
   rm -f "$pidfile"
 }
 
-stop_one "$pid_local_ws" "sparkwing-local-ws"
-stop_one "$pid_web"      "next dev"
+stop_next_dev

@@ -66,7 +66,7 @@ function groupJobs(jobs: PipelineJobResult[]): JobGroup[] {
 }
 
 function formatDuration(ns: number): string {
-  if (ns === 0) return "—";
+  if (ns === 0) return "--";
   const s = ns / 1e9;
   if (s < 1) return `${Math.round(s * 1000)}ms`;
   return `${s.toFixed(1)}s`;

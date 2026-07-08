@@ -22,7 +22,7 @@ func runGC(args []string) error {
 	fs := flag.NewFlagSet(cmdGC.Path, flag.ContinueOnError)
 	root := fs.String("root", "",
 		"warm-PVC root (default: SPARKWING_HOME resolution via DefaultPaths)")
-	on := fs.String("on", "",
+	on := fs.String("profile", "",
 		"profile name (optional; without it the run-dir sweep is skipped)")
 	if err := parseAndCheck(cmdGC, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -43,9 +43,6 @@ func runGC(args []string) error {
 	defer stop()
 
 	var ctrl orchestrator.TerminalRunLister
-	// Only attempt profile resolution when the operator asked for it.
-	// A completely profile-less gc run is legitimate for mtime-only
-	// sweeps (git/, tmp/); the run-dir sweep just skips quietly.
 	if *on != "" {
 		prof, err := resolveProfile(*on)
 		if err != nil {
@@ -54,7 +51,7 @@ func runGC(args []string) error {
 		if err := requireController(prof, "gc"); err != nil {
 			return err
 		}
-		ctrl = client.NewWithToken(prof.Controller, nil, prof.Token)
+		ctrl = client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	}
 
 	logger := slog.Default()

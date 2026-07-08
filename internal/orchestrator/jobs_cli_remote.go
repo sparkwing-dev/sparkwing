@@ -113,7 +113,8 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 	fmt.Fprintf(out, "pipeline:  %s\n", run.Pipeline)
 	fmt.Fprintf(out, "status:    %s\n", run.Status)
 	fmt.Fprintf(out, "trigger:   %s\n", orDash(run.TriggerSource))
-	fmt.Fprintf(out, "started:   %s  (%s)\n",
+	fmt.Fprintf(
+		out, "started:   %s  (%s)\n",
 		run.StartedAt.Local().Format("2006-01-02 15:04:05"),
 		relativeAge(run.StartedAt),
 	)
@@ -204,7 +205,7 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return writeRunDetailJSON(ctx, st, runID, out)
 }
 
@@ -225,16 +226,11 @@ func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, op
 // JobLogsRemoteWithTokens adds a bearer token to JobLogsRemote.
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	if opts.EventsOnly {
-		// Envelope-event persistence + reader is local-mode only; the
-		// remote logs service ingests per-node body output today, not
-		// run-level envelope events. Failing loudly here is better
-		// than silently returning an empty stream.
 		return errors.New("--events-only is local-mode only today (remote envelope ingestion is a follow-up)")
 	}
 	ctrl := client.NewWithToken(controllerURL, nil, token)
 	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token)
 
-	// Follow discovers nodes over time so ExpandFrom children appear.
 	if !opts.Follow {
 		nodes, err := ctrl.ListNodes(ctx, runID)
 		if err != nil {
@@ -269,7 +265,6 @@ func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID strin
 		Lines: opts.Lines,
 		Grep:  opts.Grep,
 	}
-	// JSON = flat JSONL; no banners.
 	jsonOut := opts.JSON || opts.Format == "json"
 	for i, n := range target {
 		if len(target) > 1 && !jsonOut {
@@ -310,12 +305,9 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// One writer mutex so interleaved node lines don't corrupt output.
 	var writeMu sync.Mutex
 	seen := map[string]struct{}{}
 	var wg sync.WaitGroup
-	// multi flips on the second-node discovery; promotes earlier
-	// single-node output to prefixed mode retroactively.
 	var multi atomic.Bool
 
 	spawn := func(nodeID string) {
@@ -362,7 +354,6 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	}()
 
 	<-terminal
-	// Drain window so streams flush final lines.
 	select {
 	case <-time.After(600 * time.Millisecond):
 	case <-ctx.Done():
@@ -382,7 +373,6 @@ func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string
 		}
 		body, err := logc.Stream(ctx, runID, nodeID)
 		if err != nil {
-			// File may not exist yet; back off.
 			select {
 			case <-ctx.Done():
 				return

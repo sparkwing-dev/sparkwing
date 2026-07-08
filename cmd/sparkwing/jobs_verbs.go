@@ -1,7 +1,7 @@
 // Handlers for the restored jobs verbs: failures, stats, last, tree,
 // get. Each one follows the handler skeleton spelled out in
-// help_registry.go: parseAndCheck, resolve --on (optional, defaults
-// to local), dispatch.
+// help_registry.go: parseAndCheck, resolve --profile (optional,
+// defaults to local), dispatch.
 package main
 
 import (
@@ -21,8 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// --- jobs failures -----------------------------------------------
 
 // failureRow is the normalized view a failure-clustering pass works
 // on. Controller-side failure_reason is empty for local runs (that's
@@ -54,21 +52,19 @@ func (f failureRow) clusterKey(groupBy string) string {
 
 func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsFailures.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	limit := fs.Int("limit", 20, "max failures to analyze")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only failures newer than this (e.g. 24h, 7d)")
 	groupBy := fs.String("group-by", "", "cluster failures by: step | node (default: flat list)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsFailures, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs failures")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs failures")
 	if rerr != nil {
 		return rerr
 	}
@@ -84,7 +80,7 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		if err := requireController(prof, "jobs failures"); err != nil {
 			return err
 		}
-		rows, err = collectRemoteFailures(ctx, prof.Controller, prof.Token, *pipeline, *since, *limit)
+		rows, err = collectRemoteFailures(ctx, prof.ControllerURL(), prof.ControllerToken(), *pipeline, *since, *limit)
 	} else {
 		rows, err = collectLocalFailures(ctx, paths, *pipeline, *since, *limit)
 	}
@@ -102,7 +98,7 @@ func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipelin
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	filter := store.RunFilter{Statuses: []string{"failed"}, Limit: limit * 4}
 	if pipeline != "" {
@@ -118,7 +114,7 @@ func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipelin
 	rows := make([]failureRow, 0, len(runs))
 	for _, r := range runs {
 		if r.ParentRunID != "" {
-			continue // only root-level runs
+			continue
 		}
 		row := failureRow{ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status}
 		nodes, err := st.ListNodes(ctx, r.ID)
@@ -259,8 +255,6 @@ func renderFailureClusters(rows []failureRow, groupBy string, asJSON bool) error
 	return tw.Flush()
 }
 
-// --- jobs stats --------------------------------------------------
-
 type pipelineStats struct {
 	Pipeline   string        `json:"pipeline"`
 	Runs       int           `json:"runs"`
@@ -274,19 +268,17 @@ type pipelineStats struct {
 
 func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsStats.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only runs newer than this (e.g. 7d)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsStats, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs stats")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs stats")
 	if rerr != nil {
 		return rerr
 	}
@@ -301,7 +293,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		if err := requireController(prof, "jobs stats"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		filter := store.RunFilter{Limit: 500}
 		if *pipeline != "" {
 			filter.Pipelines = []string{*pipeline}
@@ -318,7 +310,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		if oerr != nil {
 			return oerr
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		filter := store.RunFilter{Limit: 500}
 		if *pipeline != "" {
 			filter.Pipelines = []string{*pipeline}
@@ -401,15 +393,11 @@ func aggregateRuns(name string, runs []*store.Run) pipelineStats {
 	return s
 }
 
-// --- jobs last ---------------------------------------------------
-
 func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsLast.Path, flag.ContinueOnError)
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	watch := fs.BoolP("watch", "w", false, "tail for new runs (reprints whenever a newer run appears)")
 	if err := parseAndCheck(cmdJobsLast, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -417,7 +405,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs last")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs last")
 	if rerr != nil {
 		return rerr
 	}
@@ -436,7 +424,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 			if err := requireController(prof, "jobs last"); err != nil {
 				return nil, err
 			}
-			c := client.NewWithToken(prof.Controller, nil, prof.Token)
+			c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 			runs, err := c.ListRuns(ctx, filter)
 			if err != nil {
 				return nil, err
@@ -453,7 +441,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err != nil {
 			return nil, err
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		runs, err := st.ListRuns(ctx, filter)
 		if err != nil {
 			return nil, err
@@ -509,22 +497,18 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 	}
 }
 
-// --- jobs tree ---------------------------------------------------
-
 func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsTree.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "root run identifier")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsTree, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs tree")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs tree")
 	if rerr != nil {
 		return rerr
 	}
@@ -535,7 +519,6 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		Children []*runNode `json:"children,omitempty"`
 	}
 
-	// fetchChildren returns direct children of parentID.
 	var fetchChildren func(parentID string) ([]*store.Run, error)
 	var root *store.Run
 	if *on != "" {
@@ -546,7 +529,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := requireController(prof, "jobs tree"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		r, err := c.GetRun(ctx, *runID)
 		if err != nil {
 			return err
@@ -563,7 +546,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err != nil {
 			return err
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		r, err := st.GetRun(ctx, *runID)
 		if err != nil {
 			return err
@@ -612,12 +595,13 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 				prefix, connector, n.Run.ID, n.Run.Pipeline, n.Run.Status, relTime(n.Run.StartedAt))
 		}
 		for i, c := range n.Children {
-			next := prefix
-			if prefix == "" {
+			var next string
+			switch {
+			case prefix == "":
 				next = "    "
-			} else if last {
+			case last:
 				next = prefix + "    "
-			} else {
+			default:
 				next = prefix + "│   "
 			}
 			render(c, next, i == len(n.Children)-1)
@@ -627,12 +611,10 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 	return nil
 }
 
-// --- jobs get ----------------------------------------------------
-
 func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsGet.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	if err := parseAndCheck(cmdJobsGet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -647,12 +629,10 @@ func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) er
 		if err := requireController(prof, "jobs get"); err != nil {
 			return err
 		}
-		return orchestrator.GetRunJSONRemote(ctx, prof.Controller, prof.Token, *runID, os.Stdout)
+		return orchestrator.GetRunJSONRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, os.Stdout)
 	}
 	return orchestrator.GetRunJSONLocal(ctx, paths, *runID, os.Stdout)
 }
-
-// --- jobs wait ---------------------------------------------------
 
 // runJobsWait blocks until the named run reaches a terminal state.
 // Exit codes (propagated via cliError):
@@ -662,16 +642,14 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 	timeout := fs.Duration("timeout", 10*time.Minute, "give up (exit 2) after this long")
 	poll := fs.Duration("poll", 3*time.Second, "poll interval")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
-	on := fs.String("on", "", "profile name (cluster mode). Omit to poll the local store.")
+	on := fs.String("profile", "", "profile name (cluster mode). Omit to poll the local store.")
 	if err := parseAndCheck(cmdJobsWait, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs wait")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs wait")
 	if err != nil {
 		return err
 	}
@@ -679,8 +657,6 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		return fmt.Errorf("jobs wait: --poll must be > 0")
 	}
 
-	// fetch returns the run or a permanent/transient error. A nil run +
-	// nil err means "not yet visible, keep polling".
 	var fetch func() (*store.Run, error)
 	if *on != "" {
 		prof, perr := resolveProfile(*on)
@@ -690,7 +666,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := requireController(prof, "jobs wait"); err != nil {
 			return exitError(4, err)
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		fetch = func() (*store.Run, error) { return c.GetRun(ctx, *runID) }
 	} else {
 		if err := paths.EnsureRoot(); err != nil {
@@ -700,7 +676,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if oerr != nil {
 			return exitError(4, oerr)
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		fetch = func() (*store.Run, error) { return st.GetRun(ctx, *runID) }
 	}
 
@@ -708,14 +684,9 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 	ticker := time.NewTicker(*poll)
 	defer ticker.Stop()
 
-	// Prime once before the first tick so --timeout 0s-ish paths don't
-	// always exit 2 before the first fetch.
 	run, ferr := fetch()
 	for {
 		if ferr != nil {
-			// Treat "not found" permanently on the first fetch as a 3;
-			// on subsequent fetches, a transient 404 can happen during
-			// queue handoff, so we prefer 4 with the raw error.
 			return exitError(3, ferr)
 		}
 		if run != nil && isTerminalRunStatus(run.Status) {
@@ -757,8 +728,6 @@ func emitWaitResult(run *store.Run, format string) {
 	}
 }
 
-// --- jobs find ---------------------------------------------------
-
 // runJobsFind searches recent runs for a match against git SHA / repo
 // / pipeline / since filters. --wait polls until one appears.
 func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) error {
@@ -771,10 +740,8 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	wait := fs.Bool("wait", false, "block until at least one match appears")
 	findTimeout := fs.Duration("find-timeout", 2*time.Minute, "give up after this long when --wait is set")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
-	on := fs.String("on", "", "profile name (cluster mode). Omit to search local.")
+	on := fs.String("profile", "", "profile name (cluster mode). Omit to search local.")
 	if err := parseAndCheck(cmdJobsFind, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -784,12 +751,11 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	if *gitSHA == "" && *pipeline == "" && *repo == "" {
 		return fmt.Errorf("jobs find: at least one of --git-sha, --pipeline, or --repo is required")
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, fs.Changed("output"), *asJSON, "jobs find")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs find")
 	if err != nil {
 		return err
 	}
 
-	// searchOnce fetches a page of candidate runs and narrows them.
 	var searchOnce func() ([]*store.Run, error)
 	if *on != "" {
 		prof, perr := resolveProfile(*on)
@@ -799,7 +765,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := requireController(prof, "jobs find"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		searchOnce = func() ([]*store.Run, error) {
 			return findRunsRemote(ctx, c, *gitSHA, *pipeline, *repo, *since, *limit)
 		}
@@ -811,7 +777,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if oerr != nil {
 			return oerr
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		searchOnce = func() ([]*store.Run, error) {
 			return findRunsLocal(ctx, st, *gitSHA, *pipeline, *repo, *since, *limit)
 		}
@@ -977,8 +943,6 @@ func shortSHAOrDash(s string) string {
 	}
 	return s
 }
-
-// --- local helpers -----------------------------------------------
 
 func jsonEncode(w *os.File, v any) error {
 	enc := json.NewEncoder(w)

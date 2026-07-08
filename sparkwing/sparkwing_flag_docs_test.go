@@ -56,11 +56,15 @@ func TestSparkwingFlagDocs_CoversSafetyFlags(t *testing.T) {
 
 // TestSparkwingFlagDocs_AllSwPrefixed pins that every documented
 // sparkwing-owned flag carries the sw- prefix. The prefix is the
-// entire reservation mechanism — it lets pipeline-author Inputs
+// entire reservation mechanism -- it lets pipeline-author Inputs
 // flags occupy the unprefixed namespace without collision.
 func TestSparkwingFlagDocs_AllSwPrefixed(t *testing.T) {
+	flatTopLevel := map[string]bool{"profile": true, "target": true}
 	for _, d := range SparkwingFlagDocs() {
-		if d.Name[:3] != "sw-" {
+		if flatTopLevel[d.Name] {
+			continue
+		}
+		if len(d.Name) < 3 || d.Name[:3] != "sw-" {
 			t.Errorf("--%s lacks sw- prefix; every sparkwing-owned flag must be sw-prefixed so pipeline-author flags are collision-free", d.Name)
 		}
 	}

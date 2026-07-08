@@ -27,7 +27,6 @@ import (
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
 
-	// DB-unreachable is the only "return 503" trigger.
 	if _, err := s.store.ListRuns(r.Context(), store.RunFilter{Limit: 1}); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",
@@ -36,7 +35,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stuck-trigger canary: any trigger claimed > 30m with no /done.
 	if triggers, err := s.store.ListTriggers(r.Context(), store.TriggerFilter{
 		Statuses: []string{"claimed"},
 		Limit:    200,
@@ -54,9 +52,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Run success-rate canary over a 24h window. Only flag when total
-	// is meaningful (>20) so a quiet cluster doesn't self-report
-	// degraded from 0/0.
 	if runs, err := s.store.ListRuns(r.Context(), store.RunFilter{
 		Since: time.Now().Add(-24 * time.Hour),
 		Limit: 500,
@@ -87,8 +82,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
-
-// --- Runs ---
 
 func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	var body store.Run
@@ -123,7 +116,6 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("status is required"))
 		return
 	}
-	// Fetch pre-finish state for the pipeline + duration metric labels.
 	run, runErr := s.store.GetRun(r.Context(), runID)
 	pipeline := ""
 	if runErr == nil && run != nil {
@@ -196,17 +188,11 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		if nodes == nil {
 			nodes = []*store.Node{}
 		}
-		// Normalize nil node.deps to [] so the dashboard's iteration
-		// over node.deps doesn't crash on JSON null.
 		for _, n := range nodes {
 			if n.Deps == nil {
 				n.Deps = []string{}
 			}
 		}
-		// Attach plan-snapshot-derived decorations (modifiers, groups,
-		// approval, inner-Work tree) and join per-step runtime state
-		// from node_steps so the dashboard reads structured rows
-		// instead of re-parsing the log stream.
 		steps, _ := s.store.ListNodeSteps(r.Context(), runID)
 		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
@@ -294,8 +280,6 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// --- Nodes ---
-
 func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var body store.Node
@@ -303,7 +287,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	body.RunID = runID // authoritative: path param wins over body
+	body.RunID = runID
 	if body.NodeID == "" || body.Status == "" {
 		writeError(w, http.StatusBadRequest, errors.New("node id and status are required"))
 		return
@@ -371,8 +355,6 @@ func (s *Server) handleUpdateNodeDeps(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- Events ---
-
 type appendEventReq struct {
 	NodeID  string `json:"node_id,omitempty"`
 	Kind    string `json:"kind"`
@@ -401,8 +383,6 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, appendEventResp{Seq: seq})
 }
-
-// --- Triggers ---
 
 // triggerReqMeta is the trigger block on POST /api/v1/triggers
 // bodies. Decoupled from the SDK's sparkwing.TriggerInfo: Env
@@ -551,24 +531,18 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// trigger_source is required so callers explicitly declare their
-	// origin (a missing source would mis-route to the wrong worker).
 	if body.Trigger.Source == "" {
 		writeError(w, http.StatusBadRequest, errors.New("trigger.source is required"))
 		return
 	}
 	runID := newRunID()
 
-	// Cycle detection: walk the ancestor chain so a pipeline awaiting
-	// itself fails fast with a "cycle: A -> B -> A" message instead of
-	// deadlocking on a trigger that can never complete.
 	if body.ParentRunID != "" {
 		ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), body.ParentRunID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("ancestor walk: %w", err))
 			return
 		}
-		// Include the direct parent's pipeline as the first hop.
 		parent, perr := s.store.GetRun(r.Context(), body.ParentRunID)
 		if perr != nil {
 			if errors.Is(perr, store.ErrNotFound) {
@@ -581,7 +555,6 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		chain := append([]string{parent.Pipeline}, ancestors...)
 		for _, p := range chain {
 			if p == body.Pipeline {
-				// Format: "cycle: newest -> ... -> parent -> requested"
 				trace := body.Pipeline
 				for i := range chain {
 					trace += " <- " + chain[i]
@@ -592,12 +565,6 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Parent-repo inheritance for RunAndAwait:
-		//   - Same-repo await (caller didn't set body.Git.Repo): copy
-		//     parent's git context so the spawned run hits the same SHA.
-		//   - Cross-repo await (caller set body.Git.Repo): do NOT copy
-		//     parent's SHA -- it belongs to a different repo. The
-		//     runner clones the caller's branch tip.
 		if body.Git.Repo == "" {
 			body.Git.Repo = parent.Repo
 			body.Git.RepoURL = parent.RepoURL
@@ -617,7 +584,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
-	var inheritedPlanCacheKey, inheritedPlanCacheHolderID string
+	var inheritedPlanConcurrencyKey, inheritedPlanConcurrencyHolderID string
 	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" {
 		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
 		if err != nil {
@@ -630,8 +597,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		for key, value := range admissionEnv {
 			triggerEnv[key] = value
 		}
-		inheritedPlanCacheKey = body.PlanAdmission.Key
-		inheritedPlanCacheHolderID = body.PlanAdmission.HolderID
+		inheritedPlanConcurrencyKey = body.PlanAdmission.Key
+		inheritedPlanConcurrencyHolderID = body.PlanAdmission.HolderID
 	}
 
 	// The trigger ID doubles as the eventual run ID.
@@ -658,12 +625,6 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// every accepted trigger gets a Run row up front so
-	// `runs list` / `runs status` surface it before the runner has
-	// even claimed the trigger. The orchestrator's CreateRun upserts
-	// the status from 'pending' -> 'running' once it actually starts;
-	// the trigger-loop's pre-orchestrator failure paths transition
-	// straight to 'failed' via FinishRun.
 	if err := s.store.CreateRun(r.Context(), store.Run{
 		ID:            runID,
 		Pipeline:      body.Pipeline,
@@ -679,11 +640,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		GithubRepo:    body.Git.GithubRepo,
 		RetryOf:       body.RetryOf,
 		CreatedAt:     now,
-		// started_at is required (NOT NULL); use the same instant.
-		// The orchestrator overwrites this on the pending->running
-		// upsert, so the value here is only ever read for runs that
-		// fail at the trigger-loop fetch/compile stage.
-		StartedAt: now,
+		StartedAt:     now,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
 		return
@@ -703,9 +660,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			Repo:    body.Git.Repo,
 			RepoURL: body.Git.RepoURL,
 		},
-		ParentRunID:                body.ParentRunID,
-		InheritedPlanCacheKey:      inheritedPlanCacheKey,
-		InheritedPlanCacheHolderID: inheritedPlanCacheHolderID,
+		ParentRunID:                      body.ParentRunID,
+		InheritedPlanConcurrencyKey:      inheritedPlanConcurrencyKey,
+		InheritedPlanConcurrencyHolderID: inheritedPlanConcurrencyHolderID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -891,8 +848,6 @@ func newRunID() string {
 	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }
 
-// --- helpers ---
-
 // decodeJSON reads the request body as JSON into v. Enforces a 1 MiB
 // ceiling to avoid unbounded memory on malformed clients.
 func decodeJSON(r *http.Request, v any) error {
@@ -946,7 +901,6 @@ func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Upstream not finished -> 409. Callers should wait and retry.
 	if n.Status != "done" {
 		writeError(w, http.StatusConflict, fmt.Errorf("node %s/%s not finished (status=%s)", runID, nodeID, n.Status))
 		return
@@ -989,7 +943,7 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("seq"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid seq: %v", err))
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid seq: %w", err))
 			return
 		}
 		seq = n
@@ -1054,9 +1008,6 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Metric label is pipeline-scoped; failure to resolve is
-	// swallowed so a metric miss never turns a successful claim into
-	// a 500.
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
 		pipeline = run.Pipeline
@@ -1136,7 +1087,6 @@ func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request
 	var body struct {
 		Detail string `json:"detail"`
 	}
-	// Empty body is OK; it clears detail and still bumps the heartbeat.
 	_ = decodeJSON(r, &body)
 	if err := s.store.UpdateNodeActivity(r.Context(), runID, nodeID, body.Detail); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1179,6 +1129,26 @@ func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.SetNodeSummary(r.Context(), runID, nodeID, body.Markdown); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetNodeArtifactManifest records the content-addressed digest of
+// the node's published-artifact manifest. Body is
+// {"manifest_digest":"<string>"}. Last write wins.
+func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		ManifestDigest string `json:"manifest_digest"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.SetNodeArtifactManifest(r.Context(), runID, nodeID, body.ManifestDigest); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1339,6 +1309,27 @@ func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleTouchRunHeartbeat bumps last_heartbeat_at on the run row.
+// Orchestrators call this on a ticker while the run is active so the
+// controller's reaper can detect a fully-orphaned dispatcher and
+// flip the run to failed instead of leaving it pinned at 'running'.
+func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	if _, err := s.store.GetRun(r.Context(), runID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.store.TouchRunHeartbeat(r.Context(), runID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var body store.DebugPause
@@ -1424,8 +1415,6 @@ func (s *Server) handleGetActiveDebugPause(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleReleaseDebugPause(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	// Only release_kind is honored; the audit identity comes from the
-	// authenticated principal, not the client body.
 	var body struct {
 		ReleaseKind string `json:"release_kind"`
 	}

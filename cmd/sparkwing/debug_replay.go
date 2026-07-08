@@ -45,7 +45,7 @@ func runDebugReplay(args []string) error {
 			_ = st.Close()
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		fmt.Fprintf(os.Stderr, "fetching dispatch state from %s for replay...\n", prof.Name)
 		if err := orchestrator.SideloadRemoteForReplay(ctx, st, c, t.run, t.node); err != nil {
 			_ = st.Close()
@@ -53,9 +53,6 @@ func runDebugReplay(args []string) error {
 		}
 	}
 
-	// Don't defer close: we exec the pipeline binary below, which opens
-	// the store itself. Closing here releases the file lock cleanly
-	// before exec replaces the process.
 	newRunID, err := orchestrator.MintReplayRun(ctx, st, t.run, t.node)
 	_ = st.Close()
 	if err != nil {
@@ -84,7 +81,7 @@ func parseReplayFlags(args []string) (replayFlags, error) {
 	fs := flag.NewFlagSet(cmdDebugReplay.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
-	on := fs.String("on", "", "profile name; sideloads the run+dispatch from the named controller, then replays locally")
+	on := fs.String("profile", "", "profile name; sideloads the run+dispatch from the named controller, then replays locally")
 	if err := parseAndCheck(cmdDebugReplay, fs, args); err != nil {
 		return replayFlags{}, err
 	}

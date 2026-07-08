@@ -139,7 +139,6 @@ func TestArtifactStore(t *testing.T, factory func() storage.ArtifactStore) {
 				t.Fatalf("List(build/) returned non-matching key %q", k)
 			}
 		}
-		// Both build/* keys must be present; order is implementation-defined.
 		seen := map[string]bool{}
 		for _, k := range got {
 			seen[k] = true

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // pipelinesPayload mirrors web/src/lib/api.ts:PipelineMeta.
@@ -14,7 +14,6 @@ type pipelinesPayload struct {
 
 type pipelineEntry struct {
 	Args []pipelineArg `json:"args"`
-	Tags []string      `json:"tags,omitempty"`
 }
 
 type pipelineArg struct {
@@ -36,17 +35,14 @@ func pipelinesHandler() http.HandlerFunc {
 			writeJSON(w, http.StatusOK, payload)
 			return
 		}
-		_, cfg, err := pipelines.Discover(cwd)
+		_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 		if err != nil {
-			// No .sparkwing nearby (e.g. prod dashboard pod): empty map
-			// lets TriggerForm fall back to a free-text input.
 			writeJSON(w, http.StatusOK, payload)
 			return
 		}
 		for _, p := range cfg.Pipelines {
 			payload.Pipelines[p.Name] = pipelineEntry{
 				Args: []pipelineArg{},
-				Tags: p.Tags,
 			}
 		}
 		writeJSON(w, http.StatusOK, payload)

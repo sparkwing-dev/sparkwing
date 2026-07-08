@@ -13,8 +13,11 @@
 # sequential to ~1-2 min parallel; trades runner-minutes for latency.
 #
 # Per-binary platform constraints:
-#   - sparkwing, sparkwing-local-ws -- run on user laptops; 6 platforms
-#     (linux/darwin/windows × amd64/arm64).
+#   - sparkwing -- the user-facing CLI; 6 platforms (linux/darwin/
+#     windows × amd64/arm64). It also bundles the local dashboard
+#     server, so `sparkwing dashboard start` is the supported way to
+#     run a long-lived local UI -- there is no separately-released
+#     daemon binary anymore.
 #   - sparkwing-cache, controller, runner, logs, web -- server-side
 #     components meant for Linux containers. linux + darwin (for local
 #     dev) only; windows is excluded because (a) nobody runs these on
@@ -43,7 +46,6 @@ jobs:
       matrix:
         binary:
           - sparkwing
-          - sparkwing-local-ws
           - sparkwing-cache
           - sparkwing-controller
           - sparkwing-runner
@@ -59,7 +61,13 @@ jobs:
           - { binary: sparkwing-web, goos: windows }
     runs-on: ubuntu-latest
     steps:
+      # Pin the checkout to the tag's exact commit. Every job in this
+      # workflow checks out the same github.sha, so a version string
+      # implies one identical tree across all assets and matches what
+      # `go install ...@tag` compiles -- no provenance drift.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -81,28 +89,20 @@ jobs:
           restore-keys: |
             gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-
 
-      # sparkwing-web embeds the dashboard via //go:embed all:next-out.
-      # Other binaries don't import internal/web, so they skip this.
-      - name: Setup Node (sparkwing-web only)
-        if: matrix.binary == 'sparkwing-web'
+      # The dashboard SPA is embedded via //go:embed all:next-out by
+      # both sparkwing (for `sparkwing dashboard start`) and
+      # sparkwing-web (the cluster pod). Other binaries skip this.
+      - name: Setup Node (binaries that embed the dashboard)
+        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
-      - name: Build dashboard + populate next-out (sparkwing-web only)
-        if: matrix.binary == 'sparkwing-web'
-        run: |
-          set -euo pipefail
-          cd web
-          npm ci
-          npm run build
-          cd ..
-          rm -rf internal/web/next-out
-          mkdir -p internal/web/next-out
-          cp -R web/out/. internal/web/next-out/
-          touch internal/web/next-out/.gitkeep
+      - name: Build dashboard + populate next-out
+        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
+        run: bash bin/build-web.sh
 
       - name: Build ${{ matrix.binary }} for ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
@@ -144,14 +144,21 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # gh release create --generate-notes shells out to git to walk
-      # commits since the last tag, so the release job needs the repo
-      # history. We don't build anything here; checkout is purely to
-      # let --generate-notes work. fetch-depth: 0 because shallow
-      # clones can miss the previous tag and produce empty notes.
+      # Checkout is needed so the release body can be extracted from
+      # CHANGELOG.md at the tagged commit. The release pipeline (see
+      # .sparkwing/jobs/release.go) renames `## [Unreleased]` to
+      # `## [vX.Y.Z] - DATE` and commits before pushing the tag, so
+      # the tagged tree already has the section in place. Pinned to
+      # github.sha so the schema-parity reference below compiles the
+      # exact tagged commit, identical to the build job's tree.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
 
       # merge-multiple: true flattens every artifact into one dist/
       # without per-artifact subdirectories, so sha256sum + the upload
@@ -171,6 +178,37 @@ jobs:
           sha256sum sparkwing-* > SHA256SUMS
           ls -la
 
+      - name: Verify release asset schema parity
+        # Pre-publish gate: the uploaded linux/amd64 binary must embed
+        # the same runs-store schema that the tagged source compiles.
+        # The reference is built fresh from the checked-out tag tree, so
+        # a mismatch means an asset was built from a different commit
+        # than the tag -- exactly the schema-skew failure mode. Fails
+        # the release before any asset reaches the public page.
+        # linux/amd64 is the one asset the runner can execute; every
+        # asset builds from the same pinned github.sha, and the schema
+        # constant is platform-independent, so this one is representative.
+        run: |
+          set -euo pipefail
+          chmod +x dist/sparkwing-linux-amd64
+          bash bin/check-release-schema-parity.sh \
+            --asset dist/sparkwing-linux-amd64 \
+            --repo .
+
+      - name: Extract CHANGELOG section for this tag
+        # The CHANGELOG entry for [vX.Y.Z] is the curated migration
+        # narrative. Use it verbatim as the release body so adopters
+        # see the migration tables, not the dev-facing commit log
+        # (which includes things like "regen apidiff" / "lint sweep"
+        # that aren't user-visible). Fails the workflow if the
+        # section is missing -- catches a missed [Unreleased] -> [v*]
+        # rename before adopters ever see an empty release page.
+        run: |
+          set -euo pipefail
+          bash bin/extract-changelog-section.sh "${GITHUB_REF_NAME}" CHANGELOG.md > release-notes.md
+          echo "==> release notes:"
+          cat release-notes.md
+
       - name: Create or update release + upload assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -178,14 +216,16 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           # Idempotent: re-running this workflow against the same tag
-          # (after a fix) replaces existing assets via --clobber.
+          # (after a fix) replaces existing assets via --clobber and
+          # rewrites the notes from the (possibly updated) CHANGELOG.
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "==> existing release $tag; updating assets"
+            echo "==> existing release $tag; updating assets + notes"
+            gh release edit "$tag" --notes-file release-notes.md
           else
             echo "==> creating release $tag"
             gh release create "$tag" \
               --title "sparkwing CLI $tag" \
-              --generate-notes
+              --notes-file release-notes.md
           fi
           # Glob expands to every binary + SHA256SUMS in one upload
           # call; --clobber replaces existing assets on workflow re-run.
@@ -220,7 +260,11 @@ jobs:
           - sparkwing-logs
           - sparkwing-web
     steps:
+      # Pinned to the tag's exact commit, matching the binary build
+      # job so images and binaries ship from one identical tree.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

@@ -64,9 +64,10 @@ func (g *JobGroup) Err() error {
 	return g.err
 }
 
-// Finalize populates a dynamic group with the generator's output and
-// signals readiness. Called by the orchestrator.
-func (g *JobGroup) Finalize(members []*JobNode, err error) {
+// finalize populates a dynamic group with the generator's output and
+// signals readiness. Exposed to the orchestrator via
+// RuntimePlumbing.Fns.JobGroupFinalize.
+func (g *JobGroup) finalize(members []*JobNode, err error) {
 	g.mu.Lock()
 	g.members = append(g.members, members...)
 	g.err = err
@@ -196,18 +197,9 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (
 	return g
 }
 
-// Group chainable modifiers delegate to every current member,
-// returning the same *JobGroup so calls can chain. For dynamic groups
-// (JobFanOutDynamic), only members materialized at call time are
-// affected; modifiers applied to runtime-fan-out groups should
-// typically be set on the generator's per-element Job instead.
-//
-// OnFailure is intentionally NOT mirrored on *JobGroup: recovery
-// handlers are per-node by intent.
-
 // Needs declares an upstream dependency on every member of the group.
-// Accepts the same shapes as Job.Needs (*JobNode, *JobGroup, []*JobNode, string).
-func (g *JobGroup) Needs(deps ...any) *JobGroup {
+// Accepts any [Dep], same as [JobNode.Needs].
+func (g *JobGroup) Needs(deps ...Dep) *JobGroup {
 	for _, m := range g.Members() {
 		m.Needs(deps...)
 	}
@@ -227,6 +219,37 @@ func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup {
 func (g *JobGroup) Timeout(d time.Duration) *JobGroup {
 	for _, m := range g.Members() {
 		m.Timeout(d)
+	}
+	return g
+}
+
+// Verify registers the same postcondition check on every member. Each
+// member runs the check after its action succeeds and fails at
+// StageVerify if the check returns an error. See Job.Verify.
+func (g *JobGroup) Verify(fn VerifyFn) *JobGroup {
+	for _, m := range g.Members() {
+		m.Verify(fn)
+	}
+	return g
+}
+
+// Outputs declares the same artifact output globs on every member.
+// Each member runs in its own workspace, so a fan-out group's members
+// each emit their own copy at the declared relative paths. See
+// Job.Outputs.
+func (g *JobGroup) Outputs(globs ...string) *JobGroup {
+	for _, m := range g.Members() {
+		m.Outputs(globs...)
+	}
+	return g
+}
+
+// Consumes stages the given producer's artifacts into every member's
+// workspace before it runs, and implies Needs(producer) on each. See
+// Job.Consumes.
+func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup {
+	for _, m := range g.Members() {
+		m.Consumes(producer, opts...)
 	}
 	return g
 }
@@ -253,15 +276,6 @@ func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 func (g *JobGroup) WhenRunner(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.WhenRunner(labels...)
-	}
-	return g
-}
-
-// OnTarget restricts every member to runs against the named targets.
-// See Job.OnTarget.
-func (g *JobGroup) OnTarget(targets ...string) *JobGroup {
-	for _, m := range g.Members() {
-		m.OnTarget(targets...)
 	}
 	return g
 }
@@ -323,18 +337,10 @@ func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup {
 	return g
 }
 
-// Cache applies the given cache options to every member. See Job.Cache.
-func (g *JobGroup) Cache(opts CacheOptions) *JobGroup {
-	for _, m := range g.Members() {
-		m.Cache(opts)
-	}
-	return g
-}
-
 // NeedsOptional declares optional upstream dependencies on every
 // member; unknown IDs are silently dropped at finalize. See
-// Job.NeedsOptional.
-func (g *JobGroup) NeedsOptional(deps ...any) *JobGroup {
+// [JobNode.NeedsOptional].
+func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup {
 	for _, m := range g.Members() {
 		m.NeedsOptional(deps...)
 	}

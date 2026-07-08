@@ -40,7 +40,7 @@ func TestPipelineLatest_HTTPRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	seedFinishedRun(t, st, "older", "build", "success", 1*time.Hour, 45*time.Minute)
 	seedFinishedRun(t, st, "newer", "build", "success", 10*time.Minute, 5*time.Minute)
@@ -67,7 +67,7 @@ func TestPipelineLatest_NotFound404(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -87,7 +87,7 @@ func TestPipelineLatest_MaxAgeFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	seedFinishedRun(t, st, "stale", "build", "success", 2*time.Hour, 90*time.Minute)
 

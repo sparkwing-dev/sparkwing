@@ -61,24 +61,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	runsDir := filepath.Join(s.root, "runs")
 	if _, err := os.Stat(runsDir); err != nil {
-		// Empty logs volume: return empty results rather than 500.
 		writeJSONResponse(w, http.StatusOK, resp)
 		return
 	}
 
-	// Walk runs/<runID>/<nodeID>.log. Skip dirs that don't match
-	// the run_id filter so we avoid opening their children.
 	err := filepath.WalkDir(runsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable paths; don't kill the walk
+			return nil
 		}
 		if d.IsDir() {
 			if path == runsDir {
 				return nil
 			}
 			if runFilter != "" && filepath.Base(path) != runFilter {
-				// Skip unrelated run dirs when a filter is set. Only
-				// applies at the one-level-deep run-dir.
 				rel, _ := filepath.Rel(runsDir, path)
 				if !strings.Contains(rel, string(filepath.Separator)) {
 					return fs.SkipDir
@@ -89,7 +84,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(d.Name(), ".log") {
 			return nil
 		}
-		// path is runs/<runID>/<nodeID>.log
 		rel, rerr := filepath.Rel(runsDir, path)
 		if rerr != nil {
 			return nil
@@ -108,8 +102,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(resp.Results) >= limit {
-			// Keep counting totals but stop collecting once we hit
-			// the limit. Return early to reduce file I/O.
 			return fs.SkipAll
 		}
 		f, oerr := os.Open(path)

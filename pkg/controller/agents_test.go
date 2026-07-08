@@ -18,13 +18,11 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
 
-	// Seed a run with 2 nodes: one claimed by a pool pod (busy),
-	// one by a laptop agent that finished (idle wrt active jobs).
 	if err := st.CreateRun(ctx, store.Run{
 		ID:        "run-a",
 		Pipeline:  "demo",
@@ -90,7 +88,7 @@ func TestAgents_EmptyWhenNoClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	data, err := httpGet(srv.URL + "/api/v1/agents")

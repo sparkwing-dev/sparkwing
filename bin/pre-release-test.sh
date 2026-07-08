@@ -3,7 +3,7 @@
 # desc: Full pre-release test suite (unit, security, build, config)
 # arg: quick (bool) Skip slow tests
 #
-# Pre-release test suite — run before all major releases.
+# Pre-release test suite -- run before all major releases.
 # Covers: unit tests, security tests, build verification, config validation.
 #
 # Usage:

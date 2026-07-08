@@ -52,8 +52,7 @@ func GetRunHandler(b backend.Backend) http.HandlerFunc {
 			if nodes == nil {
 				nodes = []*store.Node{}
 			}
-			// JSON null leaks to a runtime crash in the dashboard DAG
-			// view (.length / .map on null).
+			// safety: JSON null for Deps crashes the dashboard DAG view (.length / .map on null).
 			for _, n := range nodes {
 				if n.Deps == nil {
 					n.Deps = []string{}

@@ -43,8 +43,6 @@ func readDescribeCache(sparkwingDir string) ([]sparkwing.DescribePipeline, error
 	if out := readDescribeFile(describeCachePath(key)); out != nil {
 		return out, nil
 	}
-	// Binary present at current key -> regenerate via --describe (~50ms);
-	// otherwise fall through (compile too slow for tab).
 	if binPath := bincache.CachedBinaryPath(key); fileExists(binPath) {
 		if out, err := refreshDescribeFromBinary(sparkwingDir, binPath, key); err == nil && out != nil {
 			return out, nil
@@ -122,7 +120,6 @@ func writeDescribeCache(sparkwingDir, binPath string) error {
 	if err := os.WriteFile(path, out, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	// Mirror to per-repo so tab survives content-key shifts mid-edit.
 	writeDescribeFile(byRepoDescribePath(sparkwingDir), out)
 	return nil
 }

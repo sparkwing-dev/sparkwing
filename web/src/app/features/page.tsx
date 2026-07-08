@@ -32,7 +32,7 @@ export default function FeaturesPage() {
               },
               {
                 title: "One command setup",
-                desc: "sparkwing cluster create gives you a full CI/CD stack in 2 minutes. Controller, listeners, dashboard, git cache — all local.",
+                desc: "sparkwing cluster create gives you a full CI/CD stack in 2 minutes. Controller, listeners, dashboard, git cache -- all local.",
                 color: "text-green-400",
               },
               {

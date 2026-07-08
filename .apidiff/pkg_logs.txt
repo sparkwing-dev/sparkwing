@@ -44,7 +44,7 @@ type SearchResult struct {
 	Content string
 }
 func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error
-func ServeWithTokens(ctx context.Context, root, addr string, controllerURL string, logger *slog.Logger) error
+func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 type Server struct {
 }
 func (s *Server) Handler() http.Handler

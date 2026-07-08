@@ -24,7 +24,7 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
 	start := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
@@ -38,7 +38,6 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Promote the row out of pending so the next FinishRun is observable.
 	_, _ = st.DB().ExecContext(ctx,
 		`UPDATE runs SET status = 'success', finished_at = ? WHERE id = ?`,
 		end.UnixNano(), "run-recpt-1")
@@ -53,8 +52,6 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Patch node timing directly so the test is not at the mercy of
-	// FinishNode using time.Now().
 	mustExec(t, st, "UPDATE nodes SET status='done', outcome='success', started_at=?, finished_at=?, output_json=? WHERE node_id=?",
 		start.UnixNano(), start.Add(1*time.Hour).UnixNano(), []byte(`{"img":"x"}`), "build")
 	mustExec(t, st, "UPDATE nodes SET status='done', outcome='success', started_at=?, finished_at=?, output_json=? WHERE node_id=?",
@@ -90,7 +87,6 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	if cost["currency"] != "USD" {
 		t.Errorf("cost.currency = %v, want USD", cost["currency"])
 	}
-	// 2 runner-hours × $0.05/hr = 10 cents.
 	if cents, _ := cost["compute_cents"].(float64); cents != 10 {
 		t.Errorf("cost.compute_cents = %v, want 10", cost["compute_cents"])
 	}
@@ -113,7 +109,7 @@ func TestReceiptEndpoint_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	c := client.New(srv.URL, nil)

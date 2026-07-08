@@ -38,7 +38,7 @@ const (
 	argonSaltLen = 16
 )
 
-// PrefixLen: chars 0-2 = kind marker, char 3 = underscore, chars
+// PrefixLen is 12: chars 0-2 = kind marker, char 3 = underscore, chars
 // 4-11 = 48 bits of entropy.
 const PrefixLen = 12
 
@@ -114,7 +114,8 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 	}
 
 	scopeStr := strings.Join(dedupeScopes(scopes), ",")
-	_, err = s.db.Exec(`
+	_, err = s.execNoCtx(
+		`
         INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
@@ -139,7 +140,7 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 }
 
 // LookupToken authenticates and bumps last_used_at. Materialize the
-// candidate list before any follow-up Exec — MaxOpenConns=1 will
+// candidate list before any follow-up Exec -- MaxOpenConns=1 will
 // deadlock if a cursor is still open.
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	if len(raw) < PrefixLen {
@@ -167,9 +168,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		if !t.IsValid(now) {
 			return nil, errors.New("token is revoked or expired")
 		}
-		// Touch last_used_at. Best-effort: a failed UPDATE doesn't
-		// invalidate the auth result.
-		_, _ = s.db.Exec(
+		_, _ = s.execNoCtx(
 			`UPDATE tokens SET last_used_at = ? WHERE hash = ?`,
 			now.UTC().Unix(), t.Hash,
 		)
@@ -185,7 +184,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 // and LookupTokenByPrefix; centralizes the row-scan code + the
 // MaxOpenConns=1 cursor-lifetime discipline.
 func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.queryNoCtx(`
         SELECT hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
                COALESCE(replaced_by, '')
@@ -195,7 +194,7 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tokens: query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Token
 	for rows.Next() {
@@ -231,7 +230,7 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 
 // RevokeToken sets revoked_at=now; row is kept for audit.
 func (s *Store) RevokeToken(prefix string, now time.Time) error {
-	res, err := s.db.Exec(
+	res, err := s.execNoCtx(
 		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND revoked_at IS NULL`,
 		now.UTC().Unix(), prefix,
 	)
@@ -270,11 +269,11 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 	}
 	q += " ORDER BY created_at DESC"
 
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.queryNoCtx(q, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Token
 	for rows.Next() {
@@ -336,7 +335,7 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 	}
 
 	revokeAt := now.Add(grace).UTC()
-	_, err = s.db.Exec(
+	_, err = s.execNoCtx(
 		`UPDATE tokens SET revoked_at = ?, replaced_by = ? WHERE prefix = ?`,
 		revokeAt.Unix(), newTok.Prefix, prefix,
 	)
@@ -347,8 +346,6 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 	oldTok.ReplacedBy = newTok.Prefix
 	return raw, newTok, oldTok, nil
 }
-
-// --- helpers ---
 
 func prefixForKind(kind string) (string, bool) {
 	switch kind {

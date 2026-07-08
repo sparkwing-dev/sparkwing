@@ -82,7 +82,6 @@ func TestRunLocal_StartAtUnknownFailsRunBeforeDispatch(t *testing.T) {
 	if res.Error == nil || !strings.Contains(res.Error.Error(), `did you mean "fetch"`) {
 		t.Errorf("Error missing Levenshtein suggestion, got: %v", res.Error)
 	}
-	// Crucially: NO step ran.
 	if stepRangeFlags.a.Load() || stepRangeFlags.b.Load() || stepRangeFlags.c.Load() {
 		t.Errorf("no step should have executed when validation fails up front")
 	}

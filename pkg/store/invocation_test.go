@@ -50,9 +50,6 @@ func TestCreateRun_InvocationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	// JSON roundtrip turns nested maps into map[string]any and bools/
-	// strings stay typed; we expect the read-back shape to match the
-	// original (the comparison is value-equality after re-serialization).
 	if got.Invocation == nil {
 		t.Fatalf("Invocation lost: got nil")
 	}

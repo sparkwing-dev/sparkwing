@@ -15,15 +15,19 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+
+	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func runPipelineNew(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
 	pipelineName := fs.String("name", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
-	template := fs.String("template", "minimal", "template: minimal (default) | build-test-deploy")
+	template := fs.String("template", "minimal", "template: minimal | build-test-deploy | ci-pr-check | release | scheduled-report | any name from `sparkwing pipeline templates`")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
+	params := fs.StringArray("param", nil, "registry template parameter, k=v (repeatable)")
+	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -43,6 +47,12 @@ func runPipelineNew(args []string) error {
 		return err
 	}
 
+	if *changeDir != "" {
+		if err := os.Chdir(*changeDir); err != nil {
+			return fmt.Errorf("new: --sw-cd %q: %w", *changeDir, err)
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -56,11 +66,10 @@ func runPipelineNew(args []string) error {
 		sparkwingDir = filepath.Join(cwd, ".sparkwing")
 	}
 
-	// Refuse silent clobber on duplicate name.
-	if _, cfg, derr := pipelines.Discover(cwd); derr == nil && cfg != nil {
+	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			if p.Name == name {
-				return fmt.Errorf("pipeline %q already exists in pipelines.yaml (entrypoint %q)", name, p.Entrypoint)
+				return fmt.Errorf("pipeline %q already exists in sparkwing.yaml (entrypoint %q)", name, p.Entrypoint)
 			}
 		}
 	}
@@ -76,9 +85,78 @@ func runPipelineNew(args []string) error {
 		return scaffoldGoMinimal(sparkwingDir, name, *hidden, *short, bootstrapped)
 	case "build-test-deploy":
 		return scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
+	case "ci-pr-check":
+		return scaffoldGoCIPRCheck(sparkwingDir, name, *hidden, *short, bootstrapped)
+	case "release":
+		return scaffoldGoRelease(sparkwingDir, name, *hidden, *short, bootstrapped)
+	case "scheduled-report":
+		return scaffoldGoScheduledReport(sparkwingDir, name, *hidden, *short, bootstrapped)
 	default:
-		return fmt.Errorf("new: unknown template %q (valid: minimal, build-test-deploy)", *template)
+		return scaffoldFromRegistry(sparkwingDir, name, *template, *params, *hidden, bootstrapped)
 	}
+}
+
+// scaffoldFromRegistry renders a sparks-core registry template (anything
+// `sparkwing pipeline templates` lists) into jobs/<name>.go and wires the
+// sparkwing.yaml entry. The pipeline's registered name is the --name
+// flag: when the template declares a `pipeline-name` param it's set from
+// --name, so the rendered Register() call and the yaml entry agree.
+func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
+	tmpl, err := templates.Get(templateName)
+	if err != nil {
+		return fmt.Errorf("new: unknown template %q -- run `sparkwing pipeline templates` to list available templates", templateName)
+	}
+	pm, err := parseTemplateParams(params)
+	if err != nil {
+		return err
+	}
+	if manifestDeclaresParam(tmpl.Manifest, "pipeline-name") {
+		pm["pipeline-name"] = name
+	}
+	rendered, err := templates.Render(templateName, pm)
+	if err != nil {
+		return fmt.Errorf("new: %w", err)
+	}
+
+	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
+	if _, err := os.Stat(file); err == nil {
+		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
+	}
+	if err := os.WriteFile(file, []byte(rendered), 0o644); err != nil {
+		return err
+	}
+	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden); err != nil {
+		return err
+	}
+	if err := finishScaffold(sparkwingDir, file, name, bootstrapped); err != nil {
+		return err
+	}
+	if pre := strings.TrimSpace(tmpl.Manifest.Prerequisite); pre != "" {
+		fmt.Printf("\n%s %s\n", color.Bold("prerequisite:"), pre)
+	}
+	return nil
+}
+
+// parseTemplateParams turns repeated --param k=v flags into a map.
+func parseTemplateParams(params []string) (map[string]string, error) {
+	out := make(map[string]string, len(params))
+	for _, p := range params {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("new: --param %q must be k=v", p)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func manifestDeclaresParam(m templates.Manifest, name string) bool {
+	for _, p := range m.Parameters {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // validatePipelineName enforces kebab-case so the name round-trips
@@ -135,13 +213,11 @@ func kebabToSnake(name string) string {
 // scaffold landing on these silently gets build-tagged out.
 var goReservedTrailingTokens = map[string]bool{
 	"test": true,
-	// GOOS
-	"aix": true, "android": true, "darwin": true, "dragonfly": true,
+	"aix":  true, "android": true, "darwin": true, "dragonfly": true,
 	"freebsd": true, "hurd": true, "illumos": true, "ios": true,
 	"js": true, "linux": true, "nacl": true, "netbsd": true,
 	"openbsd": true, "plan9": true, "solaris": true, "wasip1": true,
 	"windows": true, "zos": true,
-	// GOARCH
 	"386": true, "amd64": true, "amd64p32": true, "arm": true,
 	"arm64": true, "arm64be": true, "armbe": true, "loong64": true,
 	"mips": true, "mips64": true, "mips64le": true, "mips64p32": true,
@@ -153,7 +229,7 @@ var goReservedTrailingTokens = map[string]bool{
 // goJobFilename produces a .go filename that Go won't silently exclude
 // (leading _/., trailing _test/_<goos>/_<goarch>).
 // All transforms preserve the user-chosen pipeline name in
-// pipelines.yaml; only the on-disk filename is adjusted.
+// sparkwing.yaml; only the on-disk filename is adjusted.
 func goJobFilename(name string) string {
 	snake := kebabToSnake(name)
 	if strings.HasPrefix(snake, "_") || strings.HasPrefix(snake, ".") {
@@ -181,28 +257,56 @@ func scaffoldGoBuildTestDeploy(sparkwingDir, name string, hidden bool, short str
 	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, buildTestDeployTemplate, bootstrapped)
 }
 
-// scaffoldGoFromTemplate is the shared write path. SHORTLIT is the
-// strconv.Quote'd literal so quoted user input survives codegen.
+// scaffoldGoCIPRCheck: lint + test in parallel converging on a gate.
+func scaffoldGoCIPRCheck(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, ciPRCheckTemplate, bootstrapped)
+}
+
+// scaffoldGoRelease: version-bump -> changelog -> publish linear Plan.
+func scaffoldGoRelease(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, releaseTemplate, bootstrapped)
+}
+
+// scaffoldGoScheduledReport: collect -> fan-out gatherers -> publish-report.
+func scaffoldGoScheduledReport(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, scheduledReportTemplate, bootstrapped)
+}
+
+// renderBuiltinTemplate expands the {{STRUCT}} / {{NAME}} / {{SHORTLIT}}
+// placeholders in a built-in template into compilable jobs-package
+// source for the given pipeline name. SHORTLIT is the strconv.Quote'd
+// literal so quoted user input survives codegen.
+func renderBuiltinTemplate(name, short, tmpl string) string {
+	if short == "" {
+		short = "one-line description of " + name
+	}
+	return strings.NewReplacer(
+		"{{STRUCT}}", kebabToPascal(name),
+		"{{NAME}}", name,
+		"{{SHORTLIT}}", strconv.Quote(short),
+	).Replace(tmpl)
+}
+
+// scaffoldGoFromTemplate is the shared write path.
 func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool) error {
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
 	if _, err := os.Stat(file); err == nil {
 		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
 	}
-	if short == "" {
-		short = "TODO: one-line description of " + name
-	}
-	body := strings.NewReplacer(
-		"{{STRUCT}}", struct_,
-		"{{NAME}}", name,
-		"{{SHORTLIT}}", strconv.Quote(short),
-	).Replace(tmpl)
+	body := renderBuiltinTemplate(name, short, tmpl)
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		return err
 	}
 	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden); err != nil {
 		return err
 	}
+	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+}
+
+// finishScaffold is the shared post-write reporting + tidy step for both
+// the built-in string templates and the rendered registry templates.
+func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
 		rel = file
@@ -212,11 +316,10 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	}
 	fmt.Printf("%s Creating new pipeline\n", color.Cyan("==>"))
 	fmt.Printf("  %s %s\n", color.Green("+"), rel)
-	fmt.Printf("  %s added %q entry to .sparkwing/pipelines.yaml\n", color.Green("+"), name)
+	fmt.Printf("  %s added %q entry to .sparkwing/sparkwing.yaml\n", color.Green("+"), name)
 	tidy := tidySkeleton(sparkwingDir, true)
 	switch {
 	case tidy.Skipped:
-		// nothing
 	case tidy.OK:
 		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim(tidy.Note))
 	default:
@@ -232,7 +335,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
-		{Command: "sparkwing docs read --topic pipelines", Purpose: "pipelines.yaml + DAG concepts"},
+		{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
 		{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
 		{Command: "sparkwing info", Purpose: "find out more about sparkwing"},
 	}
@@ -274,14 +377,14 @@ func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw
 type {{STRUCT}}Job struct{ sw.Base }
 
 func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
 // Paths in ExecIn / BashIn / ReadFile are relative to the repo root,
 // not .sparkwing/. See WorkDir().
 func ({{STRUCT}}Job) run(ctx context.Context) error {
-	sw.Info(ctx, "TODO: replace with your logic")
+	sw.Info(ctx, "replace this stub with your logic")
 	return nil
 }
 
@@ -328,47 +431,47 @@ func ({{STRUCT}}) Examples() []sw.Example {
 // state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
 // (registered name).
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	build := sw.Job(plan, "build", &{{STRUCT}}BuildJob{})
-	test := sw.Job(plan, "test", &{{STRUCT}}TestJob{}).Needs(build)
-	sw.Job(plan, "deploy", &{{STRUCT}}DeployJob{}).Needs(test)
+	build := sw.Job(plan, "build", &{{STRUCT}}Build{})
+	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Needs(build)
+	sw.Job(plan, "deploy", &{{STRUCT}}Deploy{}).Needs(test)
 	return nil
 }
 
-type {{STRUCT}}BuildJob struct{ sw.Base }
+type {{STRUCT}}Build struct{ sw.Base }
 
-func (j *{{STRUCT}}BuildJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+func (j *{{STRUCT}}Build) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
 // Paths in .Dir() / ReadFile are relative to the repo root, not
 // .sparkwing/. See WorkDir().
-func ({{STRUCT}}BuildJob) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: build\"`" + `).Run()
+func ({{STRUCT}}Build) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"build step - replace with real logic\"`" + `).Run()
 	return err
 }
 
-type {{STRUCT}}TestJob struct{ sw.Base }
+type {{STRUCT}}Test struct{ sw.Base }
 
-func (j *{{STRUCT}}TestJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+func (j *{{STRUCT}}Test) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
-func ({{STRUCT}}TestJob) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: test\"`" + `).Run()
+func ({{STRUCT}}Test) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"test step - replace with real logic\"`" + `).Run()
 	return err
 }
 
-type {{STRUCT}}DeployJob struct{ sw.Base }
+type {{STRUCT}}Deploy struct{ sw.Base }
 
-func (j *{{STRUCT}}DeployJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+func (j *{{STRUCT}}Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
 	return nil, nil
 }
 
-func ({{STRUCT}}DeployJob) run(ctx context.Context) error {
-	_, err := sw.Bash(ctx, ` + "`echo \"TODO: deploy\"`" + `).Run()
+func ({{STRUCT}}Deploy) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"deploy step - replace with real logic\"`" + `).Run()
 	return err
 }
 
@@ -377,14 +480,314 @@ func init() {
 }
 `
 
-// appendPipelinesYAML tacks a new entry onto .sparkwing/pipelines.yaml
+// ciPRCheckTemplate: the canonical pull-request gate. lint and test
+// run in parallel and a final gate job depends on both, so the
+// pipeline is green only when every check passes. test declares a
+// runner-label preference (Prefers) to show placement intent without
+// stranding a local run -- Prefers falls through to the default runner
+// when no labeled runner exists. The gate is Inline (a cheap
+// in-process convergence node) so it declares no runner label.
+const ciPRCheckTemplate = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+// {{STRUCT}} is a pull-request gate pipeline.
+//
+//   lint, test (in parallel) -> gate
+//
+// gate passes only when both lint and test pass. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
+type {{STRUCT}} struct{ sw.Base }
+
+func (p {{STRUCT}}) ShortHelp() string { return {{SHORTLIT}} }
+
+// Help is the long-form description; defaults to ShortHelp until you have more to say.
+func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
+
+func ({{STRUCT}}) Examples() []sw.Example {
+	return []sw.Example{
+		{Comment: "Run the gate locally", Command: "sparkwing run {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name {{NAME}}"},
+	}
+}
+
+// Plan registers the pipeline's DAG on the passed-in *Plan. run
+// carries run-time environment: run.Args (CLI flags), run.Git (repo
+// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
+// (registered name).
+//
+// Prefers biases runner selection when more than one runner can take
+// the job; it never fails a run on its own, so the scaffold still runs
+// locally on the default runner.
+func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	lint := sw.Job(plan, "lint", &{{STRUCT}}Lint{})
+	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Prefers("ci-linux")
+	sw.Job(plan, "gate", &{{STRUCT}}Gate{}).Needs(lint, test).Inline()
+	return nil
+}
+
+type {{STRUCT}}Lint struct{ sw.Base }
+
+func (j *{{STRUCT}}Lint) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+// Paths in .Dir() / ReadFile are relative to the repo root, not
+// .sparkwing/. See WorkDir().
+func ({{STRUCT}}Lint) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"lint step - replace with your linter\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}Test struct{ sw.Base }
+
+func (j *{{STRUCT}}Test) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}Test) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"test step - replace with your test command\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}Gate struct{ sw.Base }
+
+func (j *{{STRUCT}}Gate) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}Gate) run(ctx context.Context) error {
+	sw.Info(ctx, "all checks passed")
+	return nil
+}
+
+func init() {
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+}
+`
+
+// releaseTemplate: the canonical release shape. A linear
+// version-bump -> changelog -> publish flow with echo Run bodies so
+// the first ` + "`sparkwing run <name>`" + ` succeeds end-to-end. publish
+// Prefers a release runner label to show placement intent without
+// stranding a local run.
+const releaseTemplate = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+// {{STRUCT}} is a release pipeline.
+//
+//   version-bump -> changelog -> publish
+//
+// A linear release flow: compute the next version, regenerate the
+// changelog, then tag and publish. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
+type {{STRUCT}} struct{ sw.Base }
+
+func (p {{STRUCT}}) ShortHelp() string { return {{SHORTLIT}} }
+
+// Help is the long-form description; defaults to ShortHelp until you have more to say.
+func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
+
+func ({{STRUCT}}) Examples() []sw.Example {
+	return []sw.Example{
+		{Comment: "Run the release flow", Command: "sparkwing run {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline explain --name {{NAME}}"},
+	}
+}
+
+// Plan registers the pipeline's DAG on the passed-in *Plan. run
+// carries run-time environment: run.Args (CLI flags), run.Git (repo
+// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
+// (registered name).
+func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	bump := sw.Job(plan, "version-bump", &{{STRUCT}}VersionBump{})
+	changelog := sw.Job(plan, "changelog", &{{STRUCT}}Changelog{}).Needs(bump)
+	sw.Job(plan, "publish", &{{STRUCT}}Publish{}).Needs(changelog).Prefers("release")
+	return nil
+}
+
+type {{STRUCT}}VersionBump struct{ sw.Base }
+
+func (j *{{STRUCT}}VersionBump) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+// Paths in .Dir() / ReadFile are relative to the repo root, not
+// .sparkwing/. See WorkDir().
+func ({{STRUCT}}VersionBump) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"version-bump step - compute the next version\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}Changelog struct{ sw.Base }
+
+func (j *{{STRUCT}}Changelog) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}Changelog) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"changelog step - regenerate the changelog\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}Publish struct{ sw.Base }
+
+func (j *{{STRUCT}}Publish) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}Publish) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"publish step - tag and publish the release\"`" + `).Run()
+	return err
+}
+
+func init() {
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+}
+`
+
+// scheduledReportTemplate: the canonical scheduled-report shape. One
+// collect job seeds three parallel gatherers that fan out, and
+// publish-report converges them into a single summary. Designed to run
+// on a schedule -- the scaffold prints the exact sparkwing.yaml `+"`on:`"+`
+// trigger to add. gather-metrics Prefers a report runner label to show
+// placement intent; publish-report is Inline so it declares no label.
+const scheduledReportTemplate = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+// {{STRUCT}} is a scheduled report pipeline.
+//
+//   collect -> { gather-metrics, gather-errors, gather-usage } -> publish-report
+//
+// A fan-out report: collect seeds three independent gatherers that run
+// in parallel, and publish-report converges them into one summary.
+// Designed to run on a schedule -- add an "on:" trigger to this
+// pipeline's .sparkwing/sparkwing.yaml entry:
+//
+//   on:
+//     schedule: "0 8 * * *"   # daily at 08:00 UTC
+//
+// See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
+type {{STRUCT}} struct{ sw.Base }
+
+func (p {{STRUCT}}) ShortHelp() string { return {{SHORTLIT}} }
+
+// Help is the long-form description; defaults to ShortHelp until you have more to say.
+func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
+
+func ({{STRUCT}}) Examples() []sw.Example {
+	return []sw.Example{
+		{Comment: "Run the report now", Command: "sparkwing run {{NAME}}"},
+		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline explain --name {{NAME}}"},
+	}
+}
+
+// Plan registers the pipeline's DAG on the passed-in *Plan. run
+// carries run-time environment: run.Args (CLI flags), run.Git (repo
+// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
+// (registered name).
+func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	collect := sw.Job(plan, "collect", &{{STRUCT}}Collect{})
+	metrics := sw.Job(plan, "gather-metrics", &{{STRUCT}}GatherMetrics{}).Needs(collect).Prefers("report")
+	errs := sw.Job(plan, "gather-errors", &{{STRUCT}}GatherErrors{}).Needs(collect)
+	usage := sw.Job(plan, "gather-usage", &{{STRUCT}}GatherUsage{}).Needs(collect)
+	sw.Job(plan, "publish-report", &{{STRUCT}}PublishReport{}).Needs(metrics, errs, usage).Inline()
+	return nil
+}
+
+type {{STRUCT}}Collect struct{ sw.Base }
+
+func (j *{{STRUCT}}Collect) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+// Paths in .Dir() / ReadFile are relative to the repo root, not
+// .sparkwing/. See WorkDir().
+func ({{STRUCT}}Collect) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"collect step - gather the reporting window\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}GatherMetrics struct{ sw.Base }
+
+func (j *{{STRUCT}}GatherMetrics) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}GatherMetrics) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"gather-metrics step - summarize metrics\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}GatherErrors struct{ sw.Base }
+
+func (j *{{STRUCT}}GatherErrors) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}GatherErrors) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"gather-errors step - summarize errors\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}GatherUsage struct{ sw.Base }
+
+func (j *{{STRUCT}}GatherUsage) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}GatherUsage) run(ctx context.Context) error {
+	_, err := sw.Bash(ctx, ` + "`echo \"gather-usage step - summarize usage\"`" + `).Run()
+	return err
+}
+
+type {{STRUCT}}PublishReport struct{ sw.Base }
+
+func (j *{{STRUCT}}PublishReport) Work(w *sw.Work) (*sw.WorkStep, error) {
+	sw.Step(w, "run", j.run)
+	return nil, nil
+}
+
+func ({{STRUCT}}PublishReport) run(ctx context.Context) error {
+	sw.Info(ctx, "report published")
+	return nil
+}
+
+func init() {
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+}
+`
+
+// appendPipelinesYAML tacks a new entry onto .sparkwing/sparkwing.yaml
 // in the same shape the existing entries use. Plain text append keeps
 // the author's formatting (leading comments, spacing) intact -- a yaml
 // round-trip would reflow everything. Risk: the user's file could have
 // exotic yaml that we don't preserve; mitigated by the simplicity of
 // the append (we only add, never modify).
 func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool) error {
-	path := filepath.Join(sparkwingDir, "pipelines.yaml")
+	path := filepath.Join(sparkwingDir, projectconfig.Filename)
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		return err

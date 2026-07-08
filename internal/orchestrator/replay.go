@@ -40,7 +40,7 @@ func runReplayNodeCLI(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state db: %w", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	res, err := RunReplayNode(context.Background(), paths, st, runID, nodeID, selectLocalRenderer())
 	if err != nil {
@@ -90,7 +90,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		RunID:    run.ID,
 		Pipeline: run.Pipeline,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, run.Repo, run.RepoURL),
+			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:   sparkwing.TriggerInfo{Source: "replay"},
 		StartedAt: run.StartedAt,
 	}
@@ -122,7 +122,8 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 	if env.TypeName != currentType {
 		return runner.Result{}, fmt.Errorf(
 			"code drift: snapshot type %q != current %q (rebuild and replay, or restore the prior pipeline binary)",
-			env.TypeName, currentType)
+			env.TypeName, currentType,
+		)
 	}
 	if len(env.ScalarFields) > 0 && string(env.ScalarFields) != "null" {
 		if err := json.Unmarshal(env.ScalarFields, target.Job()); err != nil {
@@ -130,10 +131,8 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		}
 	}
 
-	backends := LocalBackends(paths, st)
+	backends := LocalBackends(paths, st, nil)
 
-	// Replay-run nodes first (chain-of-replays sees latest), then
-	// fall back to the original.
 	originalRunID := run.ReplayOfRunID
 	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) {
 		if data, err := st.GetNode(ctx, runID, id); err == nil && len(data.Output) > 0 {
@@ -160,7 +159,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		Pipeline: run.Pipeline,
 		Args:     run.Args,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, run.Repo, run.RepoURL),
+			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:  sparkwing.TriggerInfo{Source: "replay"},
 		Node:     target,
 		Delegate: delegate,
@@ -175,7 +174,6 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		}
 	}
 	if ferr := st.FinishRun(ctx, runID, finalStatus, errMsg); ferr != nil {
-		// Node was finalized in RunNode; this is best-effort.
 		fmt.Fprintf(os.Stderr, "warning: finish replay run %s: %v\n", runID, ferr)
 	}
 	return res, nil

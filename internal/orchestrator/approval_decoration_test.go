@@ -22,8 +22,6 @@ func TestApproval_DecorationCarriesResolution(t *testing.T) {
 		t.Fatalf("RunLocal: %v", err)
 	}
 	if res.Status != "failed" {
-		// approve-timeout's default policy is fail; the run failing
-		// is the expected outcome and means the gate did resolve.
 		t.Fatalf("status = %q, want failed (default timeout policy)", res.Status)
 	}
 
@@ -31,7 +29,7 @@ func TestApproval_DecorationCarriesResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	run, err := st.GetRun(context.Background(), res.RunID)
 	if err != nil {

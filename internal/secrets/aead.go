@@ -57,8 +57,6 @@ func (c *Cipher) Seal(plain string) (string, error) {
 		return "", fmt.Errorf("secrets cipher: nonce: %w", err)
 	}
 	ct := c.aead.Seal(nil, nonce, []byte(plain), nil)
-	// Pack nonce || ciphertext+tag into one blob so the on-disk
-	// shape is a single base64 string instead of two fields.
 	envelope := append(nonce, ct...)
 	return envelopePrefix + base64.StdEncoding.EncodeToString(envelope), nil
 }
@@ -107,9 +105,6 @@ func DecodeKey(s string) ([]byte, error) {
 	}
 	raw, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		// Try URL-safe encoding too -- some operator workflows pipe
-		// through tools that prefer it (e.g., openssl rand -base64
-		// vs head -c 32 ... | base64 -w0).
 		if alt, alterr := base64.URLEncoding.DecodeString(s); alterr == nil {
 			raw = alt
 		} else {

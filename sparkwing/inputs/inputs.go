@@ -1,19 +1,15 @@
 // Package inputs provides sparkwing.CacheKeyFn helpers for declaring "what
 // changed" inputs to a node's cache. Compose them via Compose(...) and
-// assign to CacheOptions.CacheKey to skip a node when its inputs match
-// a prior successful run.
+// pass the result to sparkwing.Cache to skip a node when its inputs
+// match a prior successful run.
 //
 //	import "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 //
-//	sd.Cache(sparkwing.CacheOptions{
-//	    Key:      "myapp/build-deploy",
-//	    OnLimit:  sparkwing.Coalesce,
-//	    CacheKey: inputs.Compose(
-//	        inputs.RepoFiles(inputs.Ignore("*.md", "docs/**")),
-//	        inputs.Env("NEXT_PUBLIC_BACKEND_URL"),
-//	        inputs.Const("v1"),
-//	    ),
-//	})
+//	sd.Cache(inputs.Compose(
+//	    inputs.RepoFiles(inputs.Ignore("*.md", "docs/**")),
+//	    inputs.Env("NEXT_PUBLIC_BACKEND_URL"),
+//	    inputs.Const("v1"),
+//	))
 package inputs
 
 import (
@@ -30,11 +26,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-// Helpers return sparkwing.CacheKeyFn so they slot directly into
-// CacheOptions without wrapping. Compose folds them via sparkwing.Key.
-// Hashing errors surface as the empty key (the orchestrator runs the
-// node uncached) and log to the node's pipeline logger.
 
 // RepoFilesOption mutates RepoFiles' behavior. Today only Ignore is
 // supported; the type exists so future knobs extend without breaking
@@ -174,8 +165,6 @@ func Compose(fns ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
 	}
 }
 
-// ── ignore / include matchers ─────────────────────────────────────────────
-
 type pathMatcher func(path string) bool
 
 func buildIgnoreMatcher(patterns []string) pathMatcher {
@@ -186,10 +175,10 @@ func buildIgnoreMatcher(patterns []string) pathMatcher {
 	return func(path string) bool {
 		for _, m := range matchers {
 			if m(path) {
-				return false // matched ignore -> drop
+				return false
 			}
 		}
-		return true // no ignore matched -> keep
+		return true
 	}
 }
 
@@ -220,14 +209,12 @@ func compilePattern(pattern string) func(string) bool {
 		return func(path string) bool { return strings.HasPrefix(path, prefix) }
 
 	case !strings.ContainsRune(pattern, '/'):
-		// Basename match anywhere
 		return func(path string) bool {
 			ok, _ := filepath.Match(pattern, filepath.Base(path))
 			return ok
 		}
 
 	default:
-		// Full-path glob with ** support; convert to regex.
 		re := globToRegex(pattern)
 		return func(path string) bool { return re.MatchString(path) }
 	}
@@ -265,8 +252,6 @@ func globToRegex(pat string) *regexp.Regexp {
 	b.WriteString(`\z`)
 	return regexp.MustCompile(b.String())
 }
-
-// ── filtered tracked-files hash ───────────────────────────────────────────
 
 // resolveTreeRoot turns Tree's root argument into an absolute path,
 // anchoring relative inputs at the repo root.
@@ -362,8 +347,7 @@ func hashTrackedFiles(ctx context.Context, keep pathMatcher) (string, error) {
 	for _, f := range files {
 		data, err := os.ReadFile(filepath.Join(root, f))
 		if err != nil {
-			// Missing-on-disk (submodule pointer, staged delete);
-			// index-vs-tree mismatch is a normal transient state.
+			// hack: missing on disk (submodule pointer or staged delete) is a normal transient state; skip.
 			continue
 		}
 		h.Write([]byte(f))

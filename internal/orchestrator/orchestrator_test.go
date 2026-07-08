@@ -28,8 +28,6 @@ func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]
 	sparkwing.Register[sparkwing.NoInputs](name, factory)
 }
 
-// --- pipelines used across tests ---
-
 type okPipe struct{ sparkwing.Base }
 
 func (okPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -66,35 +64,33 @@ func (middleFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-// --- typed ref chain ---
-
 type refBuildOut struct {
 	Tag string `json:"tag"`
 }
-type refBuildJob struct {
+type refBuild struct {
 	sparkwing.Base
 	sparkwing.Produces[refBuildOut]
 }
 
-func (j *refBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *refBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", j.run), nil
 }
 
-func (refBuildJob) run(ctx context.Context) (refBuildOut, error) {
+func (refBuild) run(ctx context.Context) (refBuildOut, error) {
 	return refBuildOut{Tag: "v9"}, nil
 }
 
-type refDeployJob struct {
+type refDeploy struct {
 	sparkwing.Base
 	Build sparkwing.Ref[refBuildOut]
 }
 
-func (d *refDeployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (d *refDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "run", d.run)
 	return nil, nil
 }
 
-func (d *refDeployJob) run(ctx context.Context) error {
+func (d *refDeploy) run(ctx context.Context) error {
 	got := d.Build.Get(ctx)
 	if got.Tag != "v9" {
 		return fmt.Errorf("ref got %q, want v9", got.Tag)
@@ -105,8 +101,8 @@ func (d *refDeployJob) run(ctx context.Context) error {
 type refPipe struct{ sparkwing.Base }
 
 func (refPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	build := sparkwing.Job(plan, "build", &refBuildJob{})
-	sparkwing.Job(plan, "deploy", &refDeployJob{Build: sparkwing.RefTo[refBuildOut](build)}).Needs(build)
+	build := sparkwing.Job(plan, "build", &refBuild{})
+	sparkwing.Job(plan, "deploy", &refDeploy{Build: sparkwing.RefTo[refBuildOut](build)}).Needs(build)
 	return nil
 }
 
@@ -121,6 +117,7 @@ func init() {
 // newPaths returns a Paths under t.TempDir() with the root created.
 func newPaths(t *testing.T) orchestrator.Paths {
 	t.Helper()
+	isolateProfiles(t)
 	root := t.TempDir()
 	p := orchestrator.PathsAt(root)
 	if err := p.EnsureRoot(); err != nil {
@@ -129,7 +126,18 @@ func newPaths(t *testing.T) orchestrator.Paths {
 	return p
 }
 
-// --- tests ---
+// isolateProfiles points profile resolution at an empty profiles.yaml and
+// neutralizes the detect env vars, so a run/read in tests resolves the
+// built-in laptop profile (local sqlite) rather than the developer's real
+// ~/.config/sparkwing/profiles.yaml.
+func isolateProfiles(t *testing.T) {
+	t.Helper()
+	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+}
 
 func TestRun_SingleJobSuccess(t *testing.T) {
 	p := newPaths(t)
@@ -143,7 +151,6 @@ func TestRun_SingleJobSuccess(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unexpected error: %v", res.Error)
 	}
-	// Log file should exist with content.
 	body, err := os.ReadFile(p.NodeLog(res.RunID, "orch-ok"))
 	if err != nil {
 		t.Fatalf("read log: %v", err)
@@ -167,6 +174,29 @@ func TestRun_FailurePropagatesResult(t *testing.T) {
 	}
 }
 
+// Bare errors.New("boom") from a node body must be prefixed with the
+// node ID by dispatch, so failure surfaces identify the failing node
+// without authors having to wrap manually.
+func TestRun_FailureAutoWrapsErrorWithNodeID(t *testing.T) {
+	p := newPaths(t)
+	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
+
+	st, _ := store.Open(p.StateDB())
+	defer func() { _ = st.Close() }()
+	nodes, _ := st.ListNodes(context.Background(), res.RunID)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	got := nodes[0].Error
+	want := "orch-fail:"
+	if !strings.HasPrefix(got, want) {
+		t.Fatalf("node error = %q, want it to start with %q (node ID prefix)", got, want)
+	}
+	if !strings.Contains(got, "boom") {
+		t.Fatalf("node error = %q, expected the original message to survive the wrap", got)
+	}
+}
+
 func TestRun_FanOutFanIn(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fanout-ok"})
@@ -181,7 +211,7 @@ func TestRun_FanOutFanIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, err := st.ListNodes(context.Background(), res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
@@ -207,7 +237,7 @@ func TestRun_MidFailureCancelsDownstream(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	byID := map[string]*store.Node{}
 	for _, n := range nodes {
@@ -238,7 +268,7 @@ func TestRun_TypedRefsThreadOutput(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	for _, n := range nodes {
 		if n.NodeID != "build" {
@@ -262,7 +292,7 @@ func TestRun_PersistsPlanSnapshotAndRunRow(t *testing.T) {
 	}
 
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	r, err := st.GetRun(context.Background(), res.RunID)
 	if err != nil {
@@ -294,7 +324,6 @@ func TestRun_UnknownPipelineErrors(t *testing.T) {
 }
 
 func TestRun_PathsIsolation(t *testing.T) {
-	// Verify run dir has the log file and no cross-run leakage.
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
 	if err != nil {
@@ -310,6 +339,5 @@ func TestRun_PathsIsolation(t *testing.T) {
 	if !strings.HasSuffix(filepath.Base(p.NodeLog(res.RunID, "orch-ok")), ".log") {
 		t.Fatal("log name convention broken")
 	}
-	// Avoid flake if OS clock resolution is coarse.
 	_ = time.Millisecond
 }

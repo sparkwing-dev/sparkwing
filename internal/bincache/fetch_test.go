@@ -69,7 +69,6 @@ func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 			"GIT_PROJECT_ROOT=" + repoParent,
 			"GIT_HTTP_EXPORT_ALL=1",
 		},
-		// Strip /git so PATH_INFO becomes /<name>.git/info/refs etc.
 		Root: "/git",
 	})
 	return httptest.NewServer(mux)
@@ -88,7 +87,8 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 	mustGit := func(dir string, args ...string) string {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(
+			os.Environ(),
 			"GIT_AUTHOR_NAME=test",
 			"GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=test",
@@ -124,9 +124,7 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 
 	bare := filepath.Join(repoParent, name+".git")
 	mustGit("", "clone", "--bare", "--quiet", work, bare)
-	// Required for fetch-by-SHA over smart-HTTP.
 	mustGit(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
-	// http-backend rejects bare repos that aren't marked exportable.
 	if err := os.WriteFile(filepath.Join(bare, "git-daemon-export-ok"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +206,8 @@ func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 	mustGit := func(dir string, args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(
+			os.Environ(),
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@e.x",
 			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@e.x",
 		)

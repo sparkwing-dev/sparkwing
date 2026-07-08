@@ -21,7 +21,7 @@ echo -e "Running ${CYAN}${RUNS}${RESET} iterations of ${CYAN}${PACKAGE}${RESET}"
 echo ""
 
 TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR" EXIT
+trap 'rm -rf "$TMPDIR"' EXIT
 
 TOTAL_TESTS=0
 declare -A PASS_COUNT
@@ -106,8 +106,9 @@ echo -e "${DIM}Total unique tests seen: ${#ALL_TESTS[@]}${RESET}"
 
 # Write JSON report for dashboard
 JSON_OUT="${SPARKWING_FLAKY_REPORT:-flaky-report.json}"
+timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {
-  echo '{"runs":'$RUNS',"timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",'
+  echo "{\"runs\":$RUNS,\"timestamp\":\"$timestamp\","
   echo '"flaky":['
   sep=""
   for t in "${FLAKY[@]}"; do

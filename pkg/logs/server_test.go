@@ -29,8 +29,6 @@ func TestLogs_AppendReadRoundTrip(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Read of a nonexistent file returns empty, not error. Lets
-	// callers poll before work starts without special-casing.
 	got, err := c.Read(ctx, "run-1", "step-a")
 	if err != nil {
 		t.Fatalf("Read empty: %v", err)
@@ -39,7 +37,6 @@ func TestLogs_AppendReadRoundTrip(t *testing.T) {
 		t.Errorf("expected empty, got %q", got)
 	}
 
-	// Append twice, make sure both chunks survive.
 	if err := c.Append(ctx, "run-1", "step-a", []byte("line 1\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +64,6 @@ func TestLogs_ReadRunConcatenates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRun: %v", err)
 	}
-	// Just assert both banners + bodies appear, without asserting
-	// order -- ReadDir order is fs-dependent.
 	s := string(got)
 	for _, want := range []string{"=== a ===", "A content", "=== b ===", "B content"} {
 		if !strings.Contains(s, want) {
@@ -84,9 +79,6 @@ func TestLogs_PathTraversalRejected(t *testing.T) {
 	_, _, stop := newLogsServer(t)
 	defer stop()
 
-	// Build raw URL with the nasty payload so the client's URL
-	// escaping doesn't paper over the issue; re-create the httptest
-	// server directly so its base URL is exposed.
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {
@@ -96,7 +88,6 @@ func TestLogs_PathTraversalRejected(t *testing.T) {
 	defer srv.Close()
 	srvURL := srv.URL
 
-	// `..%2Fescape` decodes to `../escape`, the guard rejects.
 	resp, err := http.Post(srvURL+"/api/v1/logs/..%2Fescape/node",
 		"text/plain", bytes.NewReader([]byte("pwn")))
 	if err != nil {

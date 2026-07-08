@@ -14,7 +14,7 @@ const SELECT_RUN_EVENT = "sparkwing:select-run";
 // siblings ordered by created_at, so the linear numbering stays
 // monotonic even when the underlying retry_of graph forks.
 //
-// Behaviour:
+// Behavior:
 //   - Hidden entirely when there's no retry history (just one
 //     attempt). The trigger button only paints once a 2nd run lands.
 //   - Compact variant (`dense`) for inline row use; the default
@@ -201,7 +201,7 @@ function statusDot(status: string): string {
 //   - null        retry_of is set but invocation hasn't been stamped
 //                 yet (the orchestrator writes flags only after the
 //                 subprocess starts), so the mode is genuinely unknown
-//                 for a brief window — render nothing rather than
+//                 for a brief window -- render nothing rather than
 //                 mislead.
 type AttemptMode = "original" | "full" | "failed";
 
@@ -226,7 +226,7 @@ function modeLabel(m: AttemptMode): string {
 function modeTooltip(m: AttemptMode): string {
   switch (m) {
     case "original":
-      return "Original run — not a retry.";
+      return "Original run -- not a retry.";
     case "full":
       return "Rerun all: every node re-executed from scratch.";
     case "failed":

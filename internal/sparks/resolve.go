@@ -115,7 +115,6 @@ func (r *Resolver) Resolve(ctx context.Context, m *Manifest) (map[string]string,
 }
 
 func (r *Resolver) resolveOne(ctx context.Context, lib Library) (string, error) {
-	// Exact-tag pin: validate locally, no network.
 	if semver.IsValid(lib.Version) && !isRangePrefix(lib.Version) {
 		return lib.Version, nil
 	}
@@ -231,11 +230,7 @@ func (r *Resolver) resolveViaGoList(ctx context.Context, lib Library) (string, e
 		bin = "go"
 	}
 	query := lib.Version
-	// Go understands "latest" natively; for range forms we translate by
-	// asking for "latest" and then filtering. This keeps us dependency-
-	// free of private-repo tag listing.
 	if isRangePrefix(query) && !strings.EqualFold(query, "latest") {
-		// Best effort: ask Go for the latest tag, then local-filter.
 		query = "latest"
 	}
 	cmd := exec.CommandContext(ctx, bin, "list", "-m", "-json", lib.Source+"@"+query)
@@ -270,7 +265,6 @@ func (r *Resolver) activeProxies() []string {
 }
 
 func (r *Resolver) proxyGET(ctx context.Context, rawURL string) ([]byte, error) {
-	// Validate URL so a malformed proxy doesn't silently no-op.
 	if _, err := url.Parse(rawURL); err != nil {
 		return nil, fmt.Errorf("bad url %q: %w", rawURL, err)
 	}

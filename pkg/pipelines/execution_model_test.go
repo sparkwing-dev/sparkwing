@@ -1,432 +1,124 @@
 package pipelines_test
 
 import (
-	"bytes"
-	"reflect"
 	"strings"
 	"testing"
-
-	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-func TestParse_PushTriggerValues_RoundTrip(t *testing.T) {
-	src := `
+func TestParse_PushTriggerBranchesAndPaths(t *testing.T) {
+	yaml := `
 pipelines:
   - name: release
     entrypoint: Release
     on:
       push:
         branches: [main]
-        values:
-          deploy_env: staging
-          replicas: 3
+        paths: ["cmd/**"]
 `
-	cfg, err := pipelines.Parse(strings.NewReader(src))
+	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	p := cfg.Pipelines[0]
-	if p.On.Push == nil {
+	p := cfg.Find("release")
+	if p == nil || p.On.Push == nil {
 		t.Fatal("push trigger missing")
 	}
-	if got := p.On.Push.Values["deploy_env"]; got != "staging" {
-		t.Errorf("values[deploy_env] = %v, want staging", got)
+	if len(p.On.Push.Branches) != 1 || p.On.Push.Branches[0] != "main" {
+		t.Errorf("branches: %v", p.On.Push.Branches)
 	}
-	if got := p.On.Push.Values["replicas"]; got != 3 {
-		t.Errorf("values[replicas] = %v, want 3", got)
-	}
-	tv := p.TriggerValues("push")
-	if !reflect.DeepEqual(tv, p.On.Push.Values) {
-		t.Errorf("TriggerValues(push) = %v, want %v", tv, p.On.Push.Values)
-	}
-	if tv := p.TriggerValues("schedule"); tv != nil {
-		t.Errorf("TriggerValues(schedule) = %v, want nil (no spec)", tv)
-	}
-	if tv := p.TriggerValues("manual"); tv != nil {
-		t.Errorf("TriggerValues(manual) = %v, want nil (manual has no values block today)", tv)
+	if len(p.On.Push.Paths) != 1 || p.On.Push.Paths[0] != "cmd/**" {
+		t.Errorf("paths: %v", p.On.Push.Paths)
 	}
 }
 
-func TestParse_PushTriggerEnv_Rejected(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    on:
-      push:
-        branches: [main]
-        env:
-          DEPLOY_ENV: staging
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil {
-		t.Fatal("expected parse error for push.env, got nil")
-	}
-	if !strings.Contains(err.Error(), "env") {
-		t.Errorf("error should reference the offending key, got: %v", err)
-	}
-}
-
-func TestPipeline_TriggerValues_NilPipelineSafe(t *testing.T) {
-	var p *pipelines.Pipeline
-	if got := p.TriggerValues("push"); got != nil {
-		t.Errorf("nil pipeline.TriggerValues = %v, want nil", got)
-	}
-}
-
-func TestParse_BareStringSecrets_Rejected(t *testing.T) {
-	src := `
+func TestParse_RejectsSecretsBlock(t *testing.T) {
+	yaml := `
 pipelines:
   - name: deploy
     entrypoint: Deploy
-    secrets: [FOO, BAR]
+    secrets:
+      - {name: DEPLOY_TOKEN, required: true}
 `
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil {
-		t.Fatal("expected parse error for bare-string secrets, got nil")
+	_, err := pipelines.Parse(strings.NewReader(yaml))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown-field rejection for secrets; got %v", err)
 	}
-	msg := err.Error()
-	for _, want := range []string{`bare string "FOO"`, `{name: FOO, required: true}`} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error missing %q\nfull message: %s", want, msg)
+}
+
+func TestParse_GuardsAndDefaults(t *testing.T) {
+	yaml := `
+pipelines:
+  - name: deploy-prod
+    entrypoint: Deploy
+    guards:
+      require: [profile:controller]
+      reject:  [profile:local]
+    args:
+      image: "registry.prod.com/myapp:latest"
+      replicas: "10"
+`
+	cfg, err := pipelines.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p := cfg.Find("deploy-prod")
+	if p == nil {
+		t.Fatal("pipeline missing")
+	}
+	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "profile:controller" {
+		t.Errorf("guards.require: %+v", p.Guards.Require)
+	}
+	if p.Args["replicas"] != "10" {
+		t.Errorf("defaults: %+v", p.Args)
+	}
+}
+
+func TestParse_GuardsInvalidTokenRejected(t *testing.T) {
+	yaml := `
+pipelines:
+  - name: deploy
+    entrypoint: Deploy
+    guards:
+      require: [unknown:thing]
+`
+	_, err := pipelines.Parse(strings.NewReader(yaml))
+	if err == nil || !strings.Contains(err.Error(), "unknown namespace") {
+		t.Fatalf("expected unknown-namespace rejection; got %v", err)
+	}
+}
+
+func TestParse_UnknownPipelineFieldRejected(t *testing.T) {
+	cases := []string{"targets", "runners", "values", "locked", "dispatch", "defaults", "completely_bogus"}
+	for _, key := range cases {
+		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    " + key + ": [a]\n"
+		_, err := pipelines.Parse(strings.NewReader(yaml))
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Errorf("key %q: expected unknown-field error; got %v", key, err)
 		}
 	}
 }
 
-func TestParse_TypedSecretEntries(t *testing.T) {
-	src := `
+func TestPipelinesByEntrypoint_GroupsMultiple(t *testing.T) {
+	yaml := `
 pipelines:
-  - name: deploy
+  - name: deploy-prod
     entrypoint: Deploy
-    secrets:
-      - name: FOO
-        required: true
-      - name: BAZ
-        optional: true
-`
-	cfg, err := pipelines.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	got := cfg.Pipelines[0].Secrets
-	want := pipelines.SecretsField{
-		{Name: "FOO", Required: true},
-		{Name: "BAZ", Optional: true},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Secrets = %+v, want %+v", got, want)
-	}
-	if got[0].IsRequired() != true {
-		t.Errorf("FOO.IsRequired() should be true")
-	}
-	if got[1].IsRequired() != false {
-		t.Errorf("BAZ.IsRequired() should be false (Optional)")
-	}
-}
-
-func TestParse_MixedSecretsRejectedAtFirstBareString(t *testing.T) {
-	src := `
-pipelines:
-  - name: deploy
+  - name: deploy-dev
     entrypoint: Deploy
-    secrets:
-      - BAR
-      - name: FOO
-        optional: true
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil {
-		t.Fatal("expected parse error for mixed-form secrets, got nil")
-	}
-	if !strings.Contains(err.Error(), `bare string "BAR"`) {
-		t.Errorf("error should call out the bare-string entry, got: %v", err)
-	}
-}
-
-func TestParse_SecretsRequiredAndOptionalRejected(t *testing.T) {
-	src := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    secrets:
-      - name: FOO
-        required: true
-        optional: true
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("expected mutually-exclusive error, got %v", err)
-	}
-}
-
-func TestParse_SecretsEmptyNameRejected(t *testing.T) {
-	src := `
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    secrets:
-      - required: true
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil || !strings.Contains(err.Error(), "name is required") {
-		t.Fatalf("expected empty-name error, got %v", err)
-	}
-}
-
-func TestParse_TargetsAndRunners(t *testing.T) {
-	src := `
-pipelines:
   - name: release
     entrypoint: Release
-    runners: [local, cloud-linux]
-    targets:
-      dev:
-        values: { replicas: 1 }
-      prod:
-        runners: [prod-builders]
-        approvals: required
-        protected: true
-        source: prod-vault
-        values: { replicas: 5 }
-      pi:
-        runners: [local]
-        source: local-keychain
-        values: { device_serial: ABCD1234 }
 `
-	cfg, err := pipelines.Parse(strings.NewReader(src))
+	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	p := cfg.Pipelines[0]
-	if !reflect.DeepEqual(p.Runners, []string{"local", "cloud-linux"}) {
-		t.Errorf("Runners = %v", p.Runners)
+	grouped := cfg.PipelinesByEntrypoint()
+	if len(grouped["Deploy"]) != 2 {
+		t.Errorf("Deploy entrypoint backed pipelines: %d, want 2", len(grouped["Deploy"]))
 	}
-	if got := p.TargetNames(); !reflect.DeepEqual(got, []string{"dev", "pi", "prod"}) {
-		t.Errorf("TargetNames = %v, want [dev pi prod]", got)
-	}
-	if !p.HasTarget("dev") || p.HasTarget("nope") {
-		t.Errorf("HasTarget mismatch")
-	}
-
-	prod := p.Targets["prod"]
-	if !reflect.DeepEqual(prod.Runners, []string{"prod-builders"}) {
-		t.Errorf("prod.Runners = %v", prod.Runners)
-	}
-	if prod.Approvals != "required" {
-		t.Errorf("prod.Approvals = %q", prod.Approvals)
-	}
-	if !prod.Protected {
-		t.Errorf("prod.Protected should be true")
-	}
-	if prod.Source != "prod-vault" {
-		t.Errorf("prod.Source = %q", prod.Source)
-	}
-	if v, _ := prod.Values["replicas"].(int); v != 5 {
-		t.Errorf("prod.Values[replicas] = %v", prod.Values["replicas"])
-	}
-}
-
-func TestParse_PipelineValuesLayered(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    values:
-      base:
-        image_repo: example.dev/api
-        replicas: 2
-      runners:
-        cloud-linux:
-          replicas: 8
-        local:
-          replicas: 1
-`
-	cfg, err := pipelines.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	v := cfg.Pipelines[0].Values
-	if v.Base["image_repo"] != "example.dev/api" {
-		t.Errorf("Values.Base[image_repo] = %v", v.Base["image_repo"])
-	}
-	if v.Runners["cloud-linux"]["replicas"] != 8 {
-		t.Errorf("Values.Runners[cloud-linux][replicas] = %v", v.Runners["cloud-linux"]["replicas"])
-	}
-	if v.Runners["local"]["replicas"] != 1 {
-		t.Errorf("Values.Runners[local][replicas] = %v", v.Runners["local"]["replicas"])
-	}
-}
-
-func TestParse_TargetBackend(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    targets:
-      prod:
-        backend:
-          cache:
-            type: s3
-            bucket: prod-cache
-          logs:
-            type: s3
-            bucket: prod-logs
-          state:
-            type: postgres
-            url: postgres://prod
-`
-	cfg, err := pipelines.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	be := cfg.Pipelines[0].Targets["prod"].Backend
-	if be == nil {
-		t.Fatalf("Backend nil")
-	}
-	if be.Cache["type"] != "s3" || be.Cache["bucket"] != "prod-cache" {
-		t.Errorf("Cache = %v", be.Cache)
-	}
-	if be.Logs["bucket"] != "prod-logs" {
-		t.Errorf("Logs = %v", be.Logs)
-	}
-	if be.State["type"] != "postgres" {
-		t.Errorf("State = %v", be.State)
-	}
-}
-
-func TestParse_TargetApprovalsUnknownRejected(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    targets:
-      prod:
-        approvals: two-person
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil || !strings.Contains(err.Error(), "approvals") {
-		t.Fatalf("expected approvals error, got %v", err)
-	}
-}
-
-func TestParse_TargetApprovalsRequiredAccepted(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    targets:
-      prod:
-        approvals: required
-`
-	if _, err := pipelines.Parse(strings.NewReader(src)); err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-}
-
-func TestParse_EmptyTargetBodyAccepted(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    targets:
-      dev: {}
-`
-	cfg, err := pipelines.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !cfg.Pipelines[0].HasTarget("dev") {
-		t.Errorf("dev target missing")
-	}
-}
-
-func TestParse_NoTargetsBlockAccepted(t *testing.T) {
-	src := `
-pipelines:
-  - name: lint
-    entrypoint: Lint
-`
-	cfg, err := pipelines.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(cfg.Pipelines[0].Targets) != 0 {
-		t.Errorf("expected zero targets, got %v", cfg.Pipelines[0].Targets)
-	}
-	if cfg.Pipelines[0].TargetNames() != nil {
-		t.Errorf("TargetNames should be nil for no-targets pipeline")
-	}
-}
-
-func TestParse_UnknownFieldAtPipelineRejected(t *testing.T) {
-	src := `
-pipelines:
-  - name: lint
-    entrypoint: Lint
-    surprise: yes
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil {
-		t.Fatalf("expected KnownFields error")
-	}
-}
-
-func TestParse_UnknownFieldAtTargetRejected(t *testing.T) {
-	src := `
-pipelines:
-  - name: lint
-    entrypoint: Lint
-    targets:
-      dev:
-        oops: 1
-`
-	_, err := pipelines.Parse(strings.NewReader(src))
-	if err == nil {
-		t.Fatalf("expected KnownFields error at target level")
-	}
-}
-
-func TestRoundTrip_FullSchema(t *testing.T) {
-	src := `
-pipelines:
-  - name: release
-    entrypoint: Release
-    runners: [local, cloud-linux]
-    secrets:
-      - name: DEPLOY_TOKEN
-        required: true
-      - name: SLACK_HOOK
-        optional: true
-    values:
-      base:
-        image_repo: example.dev/api
-    targets:
-      dev:
-        values:
-          replicas: 1
-      prod:
-        runners: [prod-builders]
-        approvals: required
-        protected: true
-        source: prod-vault
-        values:
-          replicas: 5
-`
-	first, err := pipelines.Parse(strings.NewReader(src))
-	if err != nil {
-		t.Fatalf("Parse first: %v", err)
-	}
-	out, err := yaml.Marshal(first)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	second, err := pipelines.Parse(bytes.NewReader(out))
-	if err != nil {
-		t.Fatalf("Parse second: %v\nyaml:\n%s", err, out)
-	}
-	if !reflect.DeepEqual(first, second) {
-		t.Errorf("round-trip mismatch:\nfirst:  %+v\nsecond: %+v", first, second)
+	if len(grouped["Release"]) != 1 {
+		t.Errorf("Release entrypoint backed pipelines: %d, want 1", len(grouped["Release"]))
 	}
 }

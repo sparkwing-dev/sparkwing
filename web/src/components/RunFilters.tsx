@@ -267,7 +267,7 @@ export function commitDateInput(value: string, setter: (v: string) => void) {
 export function fmtDateChip(local: string): string {
   if (!local) return "";
   // Parse via parseLooseDate so the chip matches what the filter
-  // actually uses — otherwise "5/11" displays a misleading year-2001
+  // actually uses -- otherwise "5/11" displays a misleading year-2001
   // date here but the filter sees a different (also wrong) year.
   const ms = parseLooseDate(local);
   if (ms === null) return local;
@@ -1122,7 +1122,7 @@ function DateFilterButton({
             ))}
           </div>
           <div className="text-[9px] text-[var(--muted)]">
-            accepts partial dates, times, or both — e.g. <code>2026-05-09</code>
+            accepts partial dates, times, or both -- e.g. <code>2026-05-09</code>
             , <code>14:30</code>, or <code>5/9 14:30</code>. Times shown in your
             local timezone; URL preserves the absolute instant.
           </div>
@@ -1187,16 +1187,16 @@ export function useFilterDropdownState() {
     const handler = (e: MouseEvent) => {
       if (!filterRef.current) return;
       const target = e.target as Element;
-      // Click landed inside a dropdown trigger or panel — let it
+      // Click landed inside a dropdown trigger or panel -- let it
       // handle itself (toggle, switch to another dropdown, etc.).
       if (target.closest("[data-dropdown-region]")) return;
-      // Click outside the filter bar entirely — swallow so the
+      // Click outside the filter bar entirely -- swallow so the
       // hidden detail row underneath doesn't also get hit.
       if (!filterRef.current.contains(target)) {
         e.stopPropagation();
         e.preventDefault();
       }
-      // Empty space inside the filter bar — close without swallowing
+      // Empty space inside the filter bar -- close without swallowing
       // so other inline controls (chips, search input) still react.
       setOpenDropdown(null);
     };
@@ -1240,7 +1240,7 @@ export interface FilterCtx {
 
 // useFilterCtx returns a stable FilterCtx bound to the given filter
 // state. Reads/writes pass through to the URL via a ref so the ctx
-// identity stays constant — consumers can pass it through memoized
+// identity stays constant -- consumers can pass it through memoized
 // components without busting them.
 export function useFilterCtx(filterState: RunFilterState): FilterCtx {
   const ref = useRef(filterState);

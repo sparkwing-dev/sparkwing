@@ -14,7 +14,7 @@
 // Format notes:
 //   - One file per package, named with slashes replaced by underscores
 //     (`pkg/storage/fs.txt` -> `pkg_storage_fs.txt`).
-//   - Godoc is intentionally NOT included — comments rot faster than
+//   - Godoc is intentionally NOT included -- comments rot faster than
 //     APIs and Layer 4 already covers their accuracy.
 //   - Output is stable: declarations sorted by name, methods grouped
 //     under their receiver type, no iteration-order surprises.
@@ -48,8 +48,6 @@ var packagePaths = []string{
 	"pkg/logs",
 	"pkg/pipelines",
 	"pkg/runner",
-	"pkg/runners",
-	"pkg/sources",
 	"pkg/storage",
 	"pkg/storage/fs",
 	"pkg/storage/s3",
@@ -158,9 +156,6 @@ func snapshotPackage(dir, importPath string) (string, error) {
 		}
 	}
 
-	// Build output. Methods group under their receiver type; orphan
-	// methods (receiver type not declared here — shouldn't happen for
-	// exported symbols, but guard against it) sort to the end.
 	methodsByRecv := map[string][]member{}
 	var primary []member
 	for _, m := range members {
@@ -310,7 +305,6 @@ func filterUnexportedFields(expr ast.Expr) ast.Expr {
 	var keep []*ast.Field
 	for _, f := range st.Fields.List {
 		if len(f.Names) == 0 {
-			// embedded field: include if the embedded type is exported.
 			if isExportedEmbedded(f.Type) {
 				f2 := *f
 				f2.Tag = nil
@@ -348,7 +342,6 @@ func isExportedEmbedded(expr ast.Expr) bool {
 	case *ast.StarExpr:
 		return isExportedEmbedded(t.X)
 	case *ast.SelectorExpr:
-		// e.g. sparkwing.Base — always exported if Sel is exported.
 		return t.Sel.IsExported()
 	case *ast.IndexExpr:
 		return isExportedEmbedded(t.X)
@@ -360,14 +353,9 @@ func isExportedEmbedded(expr ast.Expr) bool {
 
 func renderValueSpec(fset *token.FileSet, tok token.Token, name *ast.Ident, spec *ast.ValueSpec, i int) string {
 	newSpec := &ast.ValueSpec{Names: []*ast.Ident{name}, Type: spec.Type}
-	// Match name to value when both lists exist 1:1.
 	if len(spec.Values) == len(spec.Names) {
 		newSpec.Values = []ast.Expr{spec.Values[i]}
 	}
-	// Tuple assignment (one value, multiple names) and iota
-	// continuation (no values) both leave newSpec.Values nil, which
-	// renders as `const Name` / `var Name Type` -- the name is still
-	// visible to the diff, which is what stability tracking needs.
 	gd := &ast.GenDecl{Tok: tok, Specs: []ast.Spec{newSpec}}
 	var b bytes.Buffer
 	_ = format.Node(&b, fset, gd)

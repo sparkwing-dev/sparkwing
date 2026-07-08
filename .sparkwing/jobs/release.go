@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"golang.org/x/mod/semver"
 )
 
 // ReleaseArgs is the typed CLI surface for the public-sparkwing
@@ -65,9 +69,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		return fmt.Errorf("release: locate repo root: %w", err)
 	}
 
-	// All git/changelog probing happens inside Jobs. The
-	// version-resolve probe is small enough to inline; the rest are
-	// regular nodes so retries work cleanly on a transient origin.
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{
 		Explicit: r.args.Version,
 		Bump:     r.args.Bump,
@@ -85,17 +86,42 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
-	changelog := sparkwing.Job(plan, "check-changelog", &checkChangelogJob{
+	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
+	gatePreCommit.Needs(clean)
+
+	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
+		return (&PrePush{}).run(ctx)
+	})
+	gatePrePush.Needs(clean)
+
+	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	changelog.Needs(discover)
+	changelog.Needs(discover, gatePreCommit, gatePrePush)
+
+	bumpSelf := sparkwing.Job(plan, "bump-self-replace", &prepareSelfReplaceJob{
+		RepoDir: repoDir,
+		Version: versionRef,
+	})
+	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, changelog)
+
+	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
+		RepoDir: repoDir,
+		Version: versionRef,
+	})
+	schemaGate.Needs(discover, changelog)
 
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog)
+	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate)
+
+	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{
+		RepoDir: repoDir,
+	})
+	restoreSelf.Needs(pushTag)
 	return nil
 }
 
@@ -228,39 +254,406 @@ func (j *checkCleanTreeJob) run(ctx context.Context) error {
 	return nil
 }
 
-// checkChangelogJob refuses to ship if CHANGELOG.md's [Unreleased]
-// section has no entries. The PR-time CI gate (bin/check-changelog.sh
-// in `sparkwing run lint`) already enforces this on covered-surface
-// changes; this is the defense-in-depth fence at release time, so a
-// version cannot ship empty even if the CI gate was bypassed or the
-// branch landed via a path that skipped it. See VERSIONING.md.
-type checkChangelogJob struct {
+// prepareChangelogJob validates CHANGELOG.md has shippable content
+// for this release and renames the `## [Unreleased]` section to
+// `## [vX.Y.Z] - YYYY-MM-DD`, leaving a fresh empty `## [Unreleased]`
+// heading above. Commits the rewrite so the tag points at a commit
+// with the [vX.Y.Z] section in place -- the GH-Actions release
+// workflow extracts that section verbatim as the GitHub Release body
+// (see .github/workflows/release.yaml + bin/extract-changelog-section.sh).
+//
+// Idempotent: if `[vX.Y.Z]` already exists in the file, the rewrite
+// is a no-op (an operator who re-runs after a tag-push failure
+// shouldn't get a duplicate commit). Validation still runs in that
+// case to confirm the existing section has content.
+//
+// Refuses to run when:
+//   - [Unreleased] has no bullet entries AND [vX.Y.Z] doesn't exist
+//     (nothing to ship)
+//   - BOTH [Unreleased] and [vX.Y.Z] have content (ambiguous: the
+//     operator probably split the entries by hand and needs to
+//     consolidate before re-running)
+//
+// The PR-time CI gate (bin/check-changelog.sh in `sparkwing run
+// lint`) already enforces non-empty [Unreleased] on covered-surface
+// changes; this is the defense-in-depth fence at release time.
+type prepareChangelogJob struct {
 	sparkwing.Base
 	RepoDir string
 	Version sparkwing.Ref[string]
 }
 
-func (j *checkChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+func (j *prepareChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
 	return nil, nil
 }
 
-func (j *checkChangelogJob) run(ctx context.Context) error {
+func (j *prepareChangelogJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
 	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
-	entries, err := unreleasedEntries(string(body))
+	action, err := planChangelogRewrite(string(body), version)
 	if err != nil {
-		return fmt.Errorf("release: parse CHANGELOG.md: %w", err)
+		return fmt.Errorf("release: %w", err)
 	}
-	if entries == 0 {
-		version := j.Version.Get(ctx)
-		return fmt.Errorf("release: CHANGELOG.md [Unreleased] is empty -- no entries to ship as %s. Add at least one entry under Added/Changed/Fixed/Removed/Deprecated/Security before re-running release", version)
+	switch action.kind {
+	case rewriteNoop:
+		sparkwing.Info(ctx, "CHANGELOG.md already has [%s] section (%d entries); skipping rewrite", version, action.versionEntries)
+		return nil
+	case rewriteApply:
+		sparkwing.Info(ctx, "renaming CHANGELOG.md [Unreleased] -> [%s] (%d entries)", version, action.unreleasedEntries)
 	}
-	sparkwing.Info(ctx, "CHANGELOG.md [Unreleased]: %d entries ready to ship", entries)
+	if err := os.WriteFile(path, []byte(action.newBody), 0o644); err != nil {
+		return fmt.Errorf("release: write CHANGELOG.md: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "add", "CHANGELOG.md"); err != nil {
+		return fmt.Errorf("release: git add CHANGELOG.md: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", "release: "+version+" changelog"); err != nil {
+		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
+	}
+	sparkwing.Info(ctx, "committed CHANGELOG.md rewrite for %s", version)
 	return nil
+}
+
+func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
+	}
+	action, err := planChangelogRewrite(string(body), version)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	switch action.kind {
+	case rewriteNoop:
+		sparkwing.Info(ctx, "dry-run: CHANGELOG.md already has [%s] (%d entries); rewrite would be a no-op", version, action.versionEntries)
+	case rewriteApply:
+		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and commit", version, action.unreleasedEntries)
+	}
+	return nil
+}
+
+// selfReplaceComment is the comment block that precedes the dogfood
+// self-replace in `.sparkwing/go.mod`. Kept verbatim so restore-side
+// rewrites round-trip cleanly.
+const selfReplaceComment = `// The pipelines tree is consumed as the same module path the SDK
+// itself ships, so the require above is a placeholder; this replace
+// pins it to the parent checkout (the sparkwing repo root). The
+// pattern follows the standard "consumer .sparkwing/ uses a local
+// replace during development" convention; here the parent IS the
+// SDK rather than a sibling.
+`
+
+const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
+
+const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
+
+// prepareSelfReplaceJob bumps the sparkwing pin in `.sparkwing/go.mod`
+// to the release version and strips the dogfood self-replace. Runs
+// pre-tag so the shipped commit's `.sparkwing/go.mod` is in
+// ready-to-ship shape (no relative-path replace, real version pin).
+// Pairs with restoreSelfReplaceJob which puts the replace back after
+// the tag is out.
+type prepareSelfReplaceJob struct {
+	sparkwing.Base
+	RepoDir string
+	Version sparkwing.Ref[string]
+}
+
+func (j *prepareSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
+	return nil, nil
+}
+
+func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	newBody, changed, err := stripSelfReplace(string(body), version)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if !changed {
+		sparkwing.Info(ctx, ".sparkwing/go.mod already in shipped shape; skipping")
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
+		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
+		"release: pin .sparkwing/ to "+version+", drop dogfood self-replace"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+	}
+	sparkwing.Info(ctx, "bumped .sparkwing/go.mod sparkwing pin -> %s, removed self-replace", version)
+	return nil
+}
+
+func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	_, changed, err := stripSelfReplace(string(body), version)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if !changed {
+		sparkwing.Info(ctx, "dry-run: .sparkwing/go.mod already in shipped shape; no rewrite")
+	} else {
+		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod pin to %s and strip self-replace", version)
+	}
+	return nil
+}
+
+// restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
+// the tag has been pushed. Adds the self-replace block back and
+// pushes the restore commit so subsequent local development picks up
+// SDK edits via the parent checkout instead of the freshly-tagged
+// module proxy version. Idempotent: noop if the replace is already
+// present.
+type restoreSelfReplaceJob struct {
+	sparkwing.Base
+	RepoDir string
+}
+
+func (j *restoreSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun).Risk("destructive")
+	return nil, nil
+}
+
+func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	newBody, changed := restoreSelfReplace(string(body))
+	if !changed {
+		sparkwing.Info(ctx, ".sparkwing/go.mod self-replace already present; skipping")
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
+		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
+		"chore: restore .sparkwing/ dogfood self-replace for next dev cycle"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+	}
+	branch, err := currentBranch(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: detect branch for restore push: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("release: push restore commit: %w", err)
+	}
+	sparkwing.Info(ctx, "restored .sparkwing/ self-replace + pushed to %s", branch)
+	return nil
+}
+
+func (j *restoreSelfReplaceJob) dryRun(ctx context.Context) error {
+	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
+	}
+	_, changed := restoreSelfReplace(string(body))
+	if !changed {
+		sparkwing.Info(ctx, "dry-run: .sparkwing/go.mod self-replace already present; no rewrite")
+	} else {
+		sparkwing.Info(ctx, "dry-run: would restore .sparkwing/ self-replace, commit, and push")
+	}
+	return nil
+}
+
+// stripSelfReplace rewrites .sparkwing/go.mod for release: bumps the
+// `require github.com/sparkwing-dev/sparkwing vX.Y.Z` line to version
+// and removes the comment-block-plus-replace-line trailer. Pure
+// function so the rewrite is unit-testable without git or the file
+// system. Returns (newBody, changed, err).
+//
+//   - If neither the require nor the replace is present: error
+//     (unexpected go.mod shape; refuse to guess).
+//   - If the replace is absent but the require is on `version` already:
+//     (body, false, nil) -- already in shipped shape.
+//   - Otherwise: bump require, strip the comment + replace trailer.
+func stripSelfReplace(body, version string) (string, bool, error) {
+	requireRe := regexp.MustCompile(`(?m)^([\t ]*(?:require[\t ]+)?)` + regexp.QuoteMeta(sparkwingModulePath) + `[\t ]+v[0-9][0-9A-Za-z.+-]*[\t ]*$`)
+	if !requireRe.MatchString(body) {
+		return "", false, fmt.Errorf(".sparkwing/go.mod: no `%s vX.Y.Z` require line found", sparkwingModulePath)
+	}
+	newBody := requireRe.ReplaceAllString(body, "${1}"+sparkwingModulePath+" "+version)
+
+	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
+	loc := replaceRe.FindStringIndex(newBody)
+	if loc == nil {
+		return newBody, newBody != body, nil
+	}
+	start := loc[0]
+	for start > 0 {
+		prevEnd := start - 1
+		if prevEnd >= 0 && newBody[prevEnd] != '\n' {
+			break
+		}
+		prevStart := prevEnd - 1
+		for prevStart >= 0 && newBody[prevStart] != '\n' {
+			prevStart--
+		}
+		line := newBody[prevStart+1 : prevEnd]
+		if !strings.HasPrefix(line, "//") {
+			break
+		}
+		start = prevStart + 1
+	}
+	if start >= 2 && newBody[start-1] == '\n' && newBody[start-2] == '\n' {
+		start--
+	}
+	end := loc[1]
+	if end < len(newBody) && newBody[end] == '\n' {
+		end++
+	}
+	newBody = newBody[:start] + newBody[end:]
+	return newBody, true, nil
+}
+
+// restoreSelfReplace puts the dogfood self-replace block back after a
+// release cut. Idempotent: returns (body, false) if the replace is
+// already present.
+func restoreSelfReplace(body string) (string, bool) {
+	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
+	if replaceRe.MatchString(body) {
+		return body, false
+	}
+	trimmed := strings.TrimRight(body, "\n")
+	return trimmed + "\n\n" + selfReplaceComment + selfReplaceLine + "\n", true
+}
+
+// changelogRewriteKind distinguishes "operator already prepared the
+// CHANGELOG" from "we need to apply the rewrite ourselves".
+type changelogRewriteKind int
+
+const (
+	rewriteApply changelogRewriteKind = iota
+	rewriteNoop
+)
+
+type changelogRewrite struct {
+	kind              changelogRewriteKind
+	newBody           string
+	unreleasedEntries int
+	versionEntries    int
+}
+
+// planChangelogRewrite decides what (if anything) prepareChangelogJob
+// should do to body for the given version. Pure function so the test
+// suite can exercise every branch without touching git or the
+// filesystem.
+func planChangelogRewrite(body, version string) (changelogRewrite, error) {
+	unreleased, err := unreleasedEntries(body)
+	if err != nil {
+		return changelogRewrite{}, fmt.Errorf("parse CHANGELOG.md: %w", err)
+	}
+	versionCount, err := versionEntries(body, version)
+	if err != nil {
+		return changelogRewrite{}, fmt.Errorf("parse CHANGELOG.md: %w", err)
+	}
+	switch {
+	case versionCount > 0 && unreleased == 0:
+		return changelogRewrite{kind: rewriteNoop, versionEntries: versionCount}, nil
+	case versionCount > 0 && unreleased > 0:
+		return changelogRewrite{}, fmt.Errorf(
+			"CHANGELOG.md has BOTH [Unreleased] (%d entries) and [%s] (%d entries) populated -- "+
+				"consolidate the entries under one section before re-running",
+			unreleased, version, versionCount,
+		)
+	case unreleased == 0:
+		return changelogRewrite{}, fmt.Errorf(
+			"CHANGELOG.md [Unreleased] is empty -- no entries to ship as %s. "+
+				"Add at least one entry under Added/Changed/Fixed/Removed/Security before re-running release",
+			version,
+		)
+	}
+	newBody, err := rewriteUnreleasedToVersion(body, version, time.Now().UTC().Format("2006-01-02"))
+	if err != nil {
+		return changelogRewrite{}, err
+	}
+	return changelogRewrite{
+		kind:              rewriteApply,
+		newBody:           newBody,
+		unreleasedEntries: unreleased,
+	}, nil
+}
+
+// rewriteUnreleasedToVersion replaces the first `## [Unreleased]` /
+// `## Unreleased` heading with a pair of headings: a fresh empty
+// `## [Unreleased]` followed by `## [vX.Y.Z] - YYYY-MM-DD`. Returns
+// an error if no [Unreleased] heading is found.
+func rewriteUnreleasedToVersion(body, version, date string) (string, error) {
+	re := regexp.MustCompile(`(?m)^## \[?Unreleased\]?\s*$`)
+	loc := re.FindStringIndex(body)
+	if loc == nil {
+		return "", fmt.Errorf("CHANGELOG.md has no [Unreleased] heading to rewrite")
+	}
+	newHeader := "## [Unreleased]\n\n## [" + version + "] - " + date
+	return body[:loc[0]] + newHeader + body[loc[1]:], nil
+}
+
+// versionEntries counts the bullets under `## [vX.Y.Z]` (with or
+// without a date suffix). Mirrors unreleasedEntries' parsing.
+func versionEntries(body, version string) (int, error) {
+	target := strings.TrimSpace(version)
+	if target == "" {
+		return 0, fmt.Errorf("empty version")
+	}
+	lines := strings.Split(body, "\n")
+	in := false
+	count := 0
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		if strings.HasPrefix(line, "## ") {
+			rest := strings.TrimPrefix(line, "## ")
+			rest = strings.TrimSpace(rest)
+			rest = strings.TrimSuffix(strings.TrimPrefix(rest, "["), "]")
+			if i := strings.Index(rest, "] - "); i >= 0 {
+				rest = rest[:i]
+			}
+			if dash := strings.Index(rest, " - "); dash >= 0 {
+				rest = rest[:dash]
+			}
+			if strings.EqualFold(strings.TrimSpace(rest), target) {
+				in = true
+				continue
+			}
+			if in {
+				break
+			}
+			continue
+		}
+		if !in {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") || trimmed == "-" {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // unreleasedEntries counts the bullet lines (lines starting with
@@ -324,32 +717,56 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if exists {
 		return fmt.Errorf("release: tag %s appeared on origin between validate and push (race); abort", version)
 	}
+	branch, err := currentBranch(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: detect current branch: %w", err)
+	}
+	if branch != "main" {
+		return fmt.Errorf("release: refusing to push from branch %q -- release pipeline expects to run on main "+
+			"so the changelog-rewrite commit and the tag land on the default branch", branch)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("release: push branch: %w", err)
+	}
 	if _, err := runGitIn(ctx, j.RepoDir, "tag", "-a", version, "-m", "Release "+version); err != nil {
 		return fmt.Errorf("release: create tag: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/tags/"+version); err != nil {
 		return fmt.Errorf("release: push tag: %w", err)
 	}
-	sparkwing.Info(ctx, "pushed %s to origin (GH-Actions release.yaml will take over)", version)
+	sparkwing.Info(ctx, "pushed %s + branch %s to origin (GH-Actions release.yaml will take over)", version, branch)
 	return nil
 }
 
 func (j *pushTagJob) dryRun(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	sparkwing.Info(ctx, "dry-run: would tag %s and push refs/tags/%s to origin", version, version)
+	branch, err := currentBranch(ctx, j.RepoDir)
+	if err != nil {
+		sparkwing.Info(ctx, "dry-run: would tag %s and push branch+tag to origin (current-branch lookup failed: %v)", version, err)
+		return nil
+	}
+	sparkwing.Info(ctx, "dry-run: would push branch %s + tag %s to origin", branch, version)
 	return nil
 }
 
-// --- helpers (kept local; cross-module helper imports don't work
-// for the .sparkwing/ tree since it's a separate Go module). ---
+// currentBranch returns the abbreviated ref name (e.g. "main") of
+// HEAD. Detached HEAD returns "HEAD" -- the caller refuses the
+// release in that case via the `!= "main"` check.
+func currentBranch(ctx context.Context, repoDir string) (string, error) {
+	out, err := runGitIn(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
 
 func validateReleaseVersion(v string) error {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return errors.New("release: --version is required (e.g. --version v1.5.5)")
+		return errors.New("release: --version is required (e.g. --version v0.6.1)")
 	}
 	if !strings.HasPrefix(v, "v") {
-		return fmt.Errorf("release: version %q must begin with 'v' (e.g. v1.5.5)", v)
+		return fmt.Errorf("release: version %q must begin with 'v' (e.g. v0.6.1)", v)
 	}
 	if !semver.IsValid(v) {
 		return fmt.Errorf("release: version %q is not valid semver (expected vX.Y.Z)", v)
@@ -360,6 +777,12 @@ func validateReleaseVersion(v string) error {
 	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
 	if len(parts) != 3 {
 		return fmt.Errorf("release: version %q must be vX.Y.Z", v)
+	}
+	// safety: module is locked to v0.x; remove this check to allow v1+ tags.
+	if semver.Major(v) != "v0" {
+		return fmt.Errorf("release: version %q is v1.0.0+ but sparkwing is locked to v0.x. "+
+			"Bumping to v1+ commits the public API surface (see VERSIONING.md); "+
+			"if that's intentional, remove the pre-1.0 lock in .sparkwing/jobs/release.go and resubmit", v)
 	}
 	return nil
 }
@@ -384,24 +807,53 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 	return res.Stdout, nil
 }
 
-// latestSemverTagIn returns the highest stable-semver tag visible on
-// origin. Reads via `ls-remote --tags` rather than `git tag --list` so
-// stale local tags (orphans from before an OSS scrub, force-deleted
-// upstream refs, etc.) can't bias the bump fallback. The release
-// pipeline's "what's the next version" decision is fundamentally a
-// statement about what the world has seen -- not what this checkout
-// happens to remember.
+// releaseTagCeiling is the exclusive upper bound on tags the release
+// resolver treats as real releases. sparkwing is locked to the v0.x line
+// (validateReleaseVersion refuses v1.0.0+), so any v1.0.0+ tag is a
+// retracted tombstone -- notably v1.6.1, kept only to hold the Go module
+// @latest pointer on the v0.x line -- never a real release. Picking one as
+// the prev/latest release gives the schema gate a phantom prevSchema and
+// the --bump baseline a wrong floor, so they are skipped here.
+const releaseTagCeiling = "v1.0.0"
+
+// highestReleaseTag returns the highest stable-semver release tag in tags,
+// skipping pre-release/build tags and any tag at or above releaseTagCeiling
+// (the retracted v1.x line). tags are bare tag names (e.g. "v0.11.0").
+// Returns "" when no eligible tag exists. Pure so the resolver can be tested
+// without git or a remote.
+func highestReleaseTag(tags []string) string {
+	var best string
+	for _, t := range tags {
+		if !semver.IsValid(t) {
+			continue
+		}
+		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
+			continue
+		}
+		if semver.Compare(t, releaseTagCeiling) >= 0 {
+			continue
+		}
+		if best == "" || semver.Compare(t, best) > 0 {
+			best = t
+		}
+	}
+	return best
+}
+
+// latestSemverTagIn returns the highest stable-semver release tag visible on
+// origin, excluding the retracted v1.x line (see highestReleaseTag). Reads
+// via `ls-remote --tags` rather than `git tag --list` so stale local tags
+// (orphans from before an OSS scrub, force-deleted upstream refs, etc.)
+// can't bias the bump fallback. The release pipeline's "what's the next
+// version" decision is fundamentally a statement about what the world has
+// seen -- not what this checkout happens to remember.
 func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
 	if err != nil {
 		return "", err
 	}
-	var best string
+	var tags []string
 	for _, line := range strings.Split(out, "\n") {
-		// Each line: "<sha>\trefs/tags/<tag>" or
-		// "<sha>\trefs/tags/<tag>^{}" for the dereferenced peel of an
-		// annotated tag. The peeled entry duplicates the name; either
-		// form works for our compare so we just strip both suffixes.
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -411,18 +863,9 @@ func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 		if !strings.HasPrefix(ref, prefix) {
 			continue
 		}
-		t := strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "^{}")
-		if !semver.IsValid(t) {
-			continue
-		}
-		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
-			continue
-		}
-		if best == "" || semver.Compare(t, best) > 0 {
-			best = t
-		}
+		tags = append(tags, strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "^{}"))
 	}
-	return best, nil
+	return highestReleaseTag(tags), nil
 }
 
 func bumpVersion(v, kind string) (string, error) {
@@ -457,6 +900,94 @@ func bumpVersion(v, kind string) (string, error) {
 		return "", fmt.Errorf("bump kind %q not in patch|minor|major", kind)
 	}
 	return fmt.Sprintf("v%d.%d.%d", major, minor, patch), nil
+}
+
+// storeSchemaSourcePath is the source file holding the embedded
+// runs-store schema constant, read at HEAD and at the previous release
+// tag to detect a schema bump. Mirrors what bin/check-release-schema-
+// parity.sh compiles; reading the constant straight from source avoids
+// building a binary per release tag.
+const storeSchemaSourcePath = "pkg/store/store.go"
+
+var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
+
+// parseStoreSchemaVersion extracts the `expectedSchemaVersion` constant
+// from pkg/store/store.go source. Pure so the release gate can be tested
+// without git or a build.
+func parseStoreSchemaVersion(goSource string) (int, error) {
+	m := storeSchemaConstRe.FindStringSubmatch(goSource)
+	if m == nil {
+		return 0, fmt.Errorf("no `const expectedSchemaVersion = N` in %s", storeSchemaSourcePath)
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse %s schema version %q: %w", storeSchemaSourcePath, m[1], err)
+	}
+	return n, nil
+}
+
+// checkSchemaBreakJob refuses a release whose runs-store schema changed
+// since the previous tag without a matching `(Breaking)` changelog entry.
+// It reads the schema constant at HEAD (working tree) and at the latest
+// origin tag, and when they differ requires LintSchemaBreak to find a
+// marked schema entry in the section being cut. The first release (no
+// prior tag) has nothing to compare and passes.
+type checkSchemaBreakJob struct {
+	sparkwing.Base
+	RepoDir string
+	Version sparkwing.Ref[string]
+}
+
+func (j *checkSchemaBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+	return nil, nil
+}
+
+func (j *checkSchemaBreakJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: resolve previous tag for schema gate: %w", err)
+	}
+	if prevTag == "" {
+		sparkwing.Info(ctx, "no previous release tag; skipping schema-break changelog gate")
+		return nil
+	}
+	curSrc, err := os.ReadFile(filepath.Join(j.RepoDir, filepath.FromSlash(storeSchemaSourcePath)))
+	if err != nil {
+		return fmt.Errorf("release: read %s: %w", storeSchemaSourcePath, err)
+	}
+	curSchema, err := parseStoreSchemaVersion(string(curSrc))
+	if err != nil {
+		return fmt.Errorf("release: current schema: %w", err)
+	}
+	prevSrc, err := runGitIn(ctx, j.RepoDir, "show", prevTag+":"+storeSchemaSourcePath)
+	if err != nil {
+		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, prevTag, err)
+	}
+	prevSchema, err := parseStoreSchemaVersion(prevSrc)
+	if err != nil {
+		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+	}
+	if prevSchema == curSchema {
+		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	if err != nil {
+		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
+	}
+	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema)
+	if len(issues) > 0 {
+		var b strings.Builder
+		for _, i := range issues {
+			b.WriteString(i.Format())
+			b.WriteByte('\n')
+		}
+		return fmt.Errorf("release: unmarked runs-store schema change blocks %s:\n%s", version, b.String())
+	}
+	sparkwing.Info(ctx, "runs-store schema %d -> %d is marked (Breaking) in the changelog; gate passes", prevSchema, curSchema)
+	return nil
 }
 
 func init() {

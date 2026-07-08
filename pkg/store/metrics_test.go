@@ -15,7 +15,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
@@ -53,7 +53,6 @@ func TestMetrics_RoundTrip(t *testing.T) {
 		t.Errorf("sample ordering: %+v", samples)
 	}
 
-	// Inserting the exact same (run, node, ts) again is a no-op.
 	dup := samples[0]
 	if err := st.AddNodeMetricSample(ctx, "run-1", "a", dup); err != nil {
 		t.Fatalf("duplicate insert returned error: %v", err)

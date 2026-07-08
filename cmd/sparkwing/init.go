@@ -8,16 +8,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // fallbackSDKVersion is pinned into a fresh .sparkwing/go.mod when the
-// running CLI's version can't be detected. **Bump on each release.**
-// Must be ≥ v1.3.0 (pre-1.3 used the old module path).
-const fallbackSDKVersion = "v1.3.1"
+// running CLI's version can't be detected (source build, missing
+// ldflag stamp). **Bump on each release.** Must match an actual
+// published tag on github.com/sparkwing-dev/sparkwing, and be recent
+// enough that the registry templates `pipeline new --template` renders
+// (which use Job.Verify, Failure, ...) compile against it.
+const fallbackSDKVersion = "v0.8.1"
 
 // bootstrapDotSparkwingOpts writes the .sparkwing/ skeleton. `go mod
 // tidy` is deferred to the caller because tidy fails on the empty
@@ -58,7 +63,7 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 	}{
 		{filepath.Join(sparkwingDir, "go.mod"), func() string { return renderInitGoMod(moduleName) }},
 		{filepath.Join(sparkwingDir, "main.go"), func() string { return renderInitMainGo(moduleName) }},
-		{filepath.Join(sparkwingDir, "pipelines.yaml"), func() string { return renderInitPipelinesYAML() }},
+		{filepath.Join(sparkwingDir, projectconfig.Filename), func() string { return renderInitPipelinesYAML() }},
 		{filepath.Join(sparkwingDir, "README.md"), func() string { return renderInitReadme() }},
 	}
 	for _, f := range files {
@@ -78,7 +83,6 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 	}
 
 	if err := ensureGitignoreEntry(filepath.Dir(sparkwingDir), ".sparkwing/sparkwing-pipeline"); err != nil {
-		// Non-fatal: not every project tracks .gitignore.
 		fmt.Fprintf(os.Stderr, "init: note: could not update .gitignore: %v\n", err)
 	}
 
@@ -88,7 +92,6 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 func renderInitGoMod(moduleName string) string {
 	goDirective := userGoModDirective()
 	if goDirective == "" {
-		// SDK ≥ v1.3.0 requires Go 1.26 (transitive k8s.io/client-go bump).
 		goDirective = "1.26"
 	}
 	return fmt.Sprintf(`module %s
@@ -99,10 +102,49 @@ require github.com/sparkwing-dev/sparkwing %s
 `, moduleName, goDirective, sdkRequirementVersion())
 }
 
-// sdkRequirementVersion: tidy resolves to latest at first compile, so
-// stale fallbacks are non-load-bearing.
+// sdkRequirementVersion picks the version string to write into a fresh
+// .sparkwing/go.mod. Prefers the running CLI's ldflag-stamped version
+// (so scaffolds pin to the operator's installed line), falls back to
+// fallbackSDKVersion otherwise. Pseudo-versions and "(devel)" / "(unknown)"
+// strings fall through to the fallback -- those can't be require-d in
+// downstream go.mod files.
 func sdkRequirementVersion() string {
+	v := installedVersion()
+	if isResolvableModuleVersion(v) {
+		return v
+	}
 	return fallbackSDKVersion
+}
+
+// pseudoVersionRE matches Go module pseudo-versions: timestamp +
+// abbreviated commit hash. Examples:
+//   - v0.6.3-0.20260531005950-041d1c11f150        (no tag yet, base v0.6.3)
+//   - v1.0.0-20260531005950-041d1c11f150          (no pre-release tag)
+//   - v0.6.3-pre.0.20260531005950-041d1c11f150    (pre-release base)
+//
+// The +dirty suffix tacks onto any of these for a worktree with uncommitted
+// changes. Either form is unresolvable from a fresh `go mod` install.
+// The timestamp+hash is preceded by `-` (form vX.0.0-<ts>-<hash>) or by
+// `.` (forms vX.Y.Z-0.<ts>-<hash> and vX.Y.Z-pre.0.<ts>-<hash>, used for
+// a commit after a released tag), so the leading separator is [-.].
+var pseudoVersionRE = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+dirty)?$`)
+
+// isResolvableModuleVersion reports whether v looks like a published
+// semver tag (e.g. "v0.6.2") that `go mod` can resolve from a fresh
+// repo. Rejects "(unknown)" / "(devel)" fallbacks, the "+dirty"
+// worktree marker, and pseudo-versions whose commit isn't on a
+// published branch yet.
+func isResolvableModuleVersion(v string) bool {
+	if v == "" || strings.HasPrefix(v, "(") {
+		return false
+	}
+	if !strings.HasPrefix(v, "v") {
+		return false
+	}
+	if strings.HasSuffix(v, "+dirty") || pseudoVersionRE.MatchString(v) {
+		return false
+	}
+	return true
 }
 
 func renderInitMainGo(moduleName string) string {
@@ -126,7 +168,7 @@ func renderInitReadme() string {
 	return "# .sparkwing/\n" +
 		"\n" +
 		"This directory holds this repo's [sparkwing](https://sparkwing.dev) pipeline\n" +
-		"definitions. Pipelines are Go programs registered in `pipelines.yaml` and run\n" +
+		"definitions. Pipelines are Go programs registered in `sparkwing.yaml` and run\n" +
 		"via `sparkwing run <name>`.\n" +
 		"\n" +
 		"Add a pipeline:\n" +
@@ -139,7 +181,7 @@ func renderInitReadme() string {
 		"\n" +
 		"```\n" +
 		".sparkwing/\n" +
-		"  pipelines.yaml      registry of every pipeline (name -> entrypoint)\n" +
+		"  sparkwing.yaml      registry of every pipeline (name -> entrypoint)\n" +
 		"  jobs/               Go package holding pipeline definitions; scaffold lands one .go file per pipeline\n" +
 		"  main.go             thin entrypoint; delegates to runner.Main\n" +
 		"  go.mod / go.sum     module + pinned SDK version\n" +
@@ -285,7 +327,6 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	}
 	switch {
 	case tidy.Skipped:
-		// nothing to print
 	case tidy.OK:
 		fmt.Printf("  %s resolved dependencies (go mod tidy)\n", color.Green("+"))
 	default:
@@ -310,7 +351,7 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	fmt.Println()
 	fmt.Println("next steps:")
 	fmt.Printf("  1. sparkwing pipeline new --name release   %s\n", color.Dim("# scaffold a single-node pipeline (default --template minimal)"))
-	fmt.Printf("  2. sparkwing run release                   %s\n", color.Dim("# run it; replace the Log(\"TODO\") with real logic"))
+	fmt.Printf("  2. sparkwing run release                   %s\n", color.Dim("# run it; replace the placeholder step with real logic"))
 	fmt.Printf("  %s\n", color.Dim("for a build/test/deploy DAG: sparkwing pipeline new --name release --template build-test-deploy"))
 	fmt.Println()
 	fmt.Printf("  %s\n", color.Dim("dashboard:    sparkwing dashboard start"))

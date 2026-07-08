@@ -12,5 +12,5 @@ import (
 // inputs (set by the registration's invoke wrapper) so every step
 // body sees the typed value the Plan() method received.
 func WithInputs(ctx context.Context, in any) context.Context {
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Inputs, in)
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.Inputs, in)
 }

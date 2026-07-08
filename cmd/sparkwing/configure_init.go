@@ -51,7 +51,6 @@ type ConfigureInitToolchain struct {
 func runConfigureInit(args []string) error {
 	fs := flag.NewFlagSet(cmdConfigureInit.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	dryRun := fs.Bool("dry-run", false, "probe + report without creating ~/.config/sparkwing/")
 	if err := parseAndCheck(cmdConfigureInit, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -63,7 +62,7 @@ func runConfigureInit(args []string) error {
 		PrintHelp(cmdConfigureInit, os.Stderr)
 		return fmt.Errorf("configure init: unexpected positional %q", fs.Arg(0))
 	}
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdConfigureInit.Path)
+	format, err := resolveOutputFormat(*output, cmdConfigureInit.Path)
 	if err != nil {
 		return err
 	}
@@ -79,9 +78,6 @@ func runConfigureInit(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(info)
 	case "plain":
-		// One next-step command per line, same convention as `sparkwing
-		// info -o plain` -- pipe to head -n1 for "what should I do
-		// next?" in shell wrappers.
 		for _, ns := range info.NextSteps {
 			fmt.Println(ns.Command)
 		}
@@ -100,9 +96,6 @@ func runConfigureInit(args []string) error {
 func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	out := ConfigureInit{}
 
-	// Resolve the config dir via profile.DefaultPath()'s parent, so
-	// any future relocation (XDG override, env var) flows through one
-	// helper. profile + repos use the same conventions.
 	profilesPath, err := profile.DefaultPath()
 	if err != nil {
 		return out, fmt.Errorf("configure init: resolve config dir: %w", err)
@@ -152,7 +145,7 @@ func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
 func profileSummary(path string) string {
 	cfg, err := profile.Load(path)
 	if err != nil || cfg == nil {
-		return "remote-cluster profiles for `--on <name>` dispatch"
+		return "remote-cluster profiles for `--profile <name>` dispatch"
 	}
 	n := len(cfg.Profiles)
 	if n == 0 {
@@ -198,7 +191,7 @@ func probeToolchain() ConfigureInitToolchain {
 func configureInitNextSteps() []InfoNextStep {
 	return []InfoNextStep{
 		{Command: "cd <repo> && sparkwing pipeline new --name release", Purpose: "auto-bootstrap .sparkwing/ + scaffold a single-node pipeline"},
-		{Command: "sparkwing configure profiles", Purpose: "manage remote-cluster profiles for `--on <name>`"},
+		{Command: "sparkwing configure profiles", Purpose: "manage remote-cluster profiles for `--profile <name>`"},
 		{Command: "sparkwing info", Purpose: "current project + tooling cheat sheet"},
 	}
 }

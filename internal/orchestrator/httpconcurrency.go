@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -38,16 +37,18 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		RunID:         req.RunID,
 		NodeID:        req.NodeID,
 		Max:           req.Capacity,
+		Cost:          req.Cost,
 		Policy:        req.Policy,
 		CacheKeyHash:  req.CacheKeyHash,
 		CacheTTL:      req.CacheTTL,
 		CancelTimeout: req.CancelTimeout,
 		Lease:         req.Lease,
+		BypassRead:    req.BypassRead,
 	})
 	if err != nil {
 		return store.AcquireSlotResponse{}, err
 	}
-	return store.AcquireSlotResponse{
+	out := store.AcquireSlotResponse{
 		Kind:             store.AcquireKind(resp.Kind),
 		HolderID:         resp.HolderID,
 		LeaseExpiresAt:   resp.LeaseExpiresAt,
@@ -59,7 +60,24 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		SupersededIDs:    resp.SupersededIDs,
 		PreviousCapacity: resp.PreviousCapacity,
 		DriftNote:        resp.DriftNote,
-	}, nil
+		Position:         resp.Position,
+		QueueLength:      resp.QueueLength,
+	}
+	for _, hd := range resp.Holders {
+		out.Holders = append(out.Holders, storeHolderFromClient(req.Key, hd))
+	}
+	return out, nil
+}
+
+// storeHolderFromClient is the single mapping from the controller's
+// wire holder shape back into the store type, so a field added to one
+// response path can't silently vanish from its siblings.
+func storeHolderFromClient(key string, hd client.WaiterHolder) store.ConcurrencyHolder {
+	return store.ConcurrencyHolder{
+		Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
+		ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt,
+		Superseded: hd.Superseded, Cost: hd.Cost,
+	}
 }
 
 func (h *HTTPConcurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
@@ -77,22 +95,50 @@ func (h *HTTPConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 	return h.client.ReleaseSlot(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 }
 
-// ResolveWaiter has no HTTP endpoint yet; in-pod orchestrators
-// dispatch through the controller and don't wait locally.
-func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string) (store.WaiterResolution, error) {
-	_ = ctx
-	_ = runID
-	_ = nodeID
-	_ = cacheKeyHash
-	_ = leaderRunID
-	_ = leaderNodeID
-	return store.WaiterResolution{Status: store.WaiterStillWaiting}, fmt.Errorf("HTTPConcurrency.ResolveWaiter: not yet implemented on the wire; in-pod orchestrators should not wait locally (key=%s)", key)
+// ResolveWaiter polls the controller's resolve endpoint so an in-pod
+// orchestrator can wait on a queued/coalesced group slot and observe
+// promotion, a cache hit, leader completion, or cancellation -- the
+// same resolutions the in-process backend serves from the store.
+func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
+	resp, err := h.client.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
+	if err != nil {
+		return store.WaiterResolution{}, err
+	}
+	res := store.WaiterResolution{
+		Status:              store.WaiterStatus(resp.Status),
+		HolderID:            resp.HolderID,
+		HolderLeaseExpires:  resp.HolderLeaseExpires,
+		OutputRef:           resp.OutputRef,
+		OriginRunID:         resp.OriginRunID,
+		OriginNodeID:        resp.OriginNodeID,
+		LeaderRunID:         resp.LeaderRunID,
+		LeaderNodeID:        resp.LeaderNodeID,
+		LeaderOutcome:       resp.LeaderOutcome,
+		LeaderFailureReason: resp.LeaderFailureReason,
+		Position:            resp.Position,
+	}
+	for _, hd := range resp.Holders {
+		res.Holders = append(res.Holders, storeHolderFromClient(key, hd))
+	}
+	return res, nil
 }
 
-// ForceReleaseSuperseded has no HTTP wire today; the controller's
-// reaper sweeps superseded holders on lease expiry.
+// ForceReleaseSuperseded drops superseded holders via the controller so
+// a stuck CancelOthers eviction can't block forward progress.
 func (h *HTTPConcurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
-	_ = ctx
-	_ = key
-	return nil, nil
+	dropped, err := h.client.ForceReleaseSuperseded(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.ConcurrencyHolder, 0, len(dropped))
+	for _, hd := range dropped {
+		out = append(out, storeHolderFromClient(key, hd))
+	}
+	return out, nil
+}
+
+// CancelWaiter drops a parked waiter row via the controller so a
+// QueueTimeout'd waiter won't later be promoted to a holder.
+func (h *HTTPConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
+	return h.client.CancelWaiter(ctx, key, runID, nodeID)
 }

@@ -15,17 +15,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
-
-func firstNonEmptyStr(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
 
 func atoiNonNeg(s string) (int, error) {
 	n, err := strconv.Atoi(s)
@@ -39,17 +32,22 @@ func atoiNonNeg(s string) (int, error) {
 }
 
 type runFlags struct {
-	ref      string
-	on       string
+	ref string
+	// profile names a storage profile from
+	// ~/.config/sparkwing/profiles.yaml for local execution: state,
+	// logs, and cache route through the profile (with a local SQLite
+	// mirror for non-local profiles). Parsed from the flat --profile
+	// flag, forwarded to the inner binary as SPARKWING_PROFILE.
+	profile  string
 	noUpdate bool
 	verbose  bool
 	// secrets sources secrets from the named profile's controller.
-	// Orthogonal to --on: --secrets prod resolves against prod even
+	// Orthogonal to --profile: --secrets prod resolves against prod even
 	// when running locally. Empty = laptop dotenv.
 	secrets   string
 	changeDir string
 	// mode: "" / "local" = in-process workers; "ci-embedded" = capped
-	// local procs + S3 storage; "distributed" is reached via --on.
+	// local procs + S3 storage.
 	mode string
 	// workers caps concurrent nodes in ci-embedded mode; 0 = NumCPU.
 	workers int
@@ -70,7 +68,7 @@ type runFlags struct {
 	only string
 	// --no-cache disables cache READS for this run; per-node cache
 	// WRITES still happen on success so subsequent runs over the same
-	// content hit cache normally. Distinct from SPARKWING_NO_CACHE
+	// content hit cache normally. Distinct from SPARKWING_NO_BINCACHE
 	// (which gates the bincache compiled-pipeline-binary cache).
 	noCache bool
 	// --dry-run runs each step's DryRunFn instead of its apply Fn.
@@ -86,15 +84,22 @@ type runFlags struct {
 	// regardless. The gate degrades gracefully (no labels declared =
 	// no block).
 	allow []string
-	// forTarget picks the pipelines.yaml target the run resolves
-	// against. Empty means "use the single declared target if there's
-	// one, else no target."
-	forTarget string
-	// backendsConfig points at a (possibly synthesized) backends.yaml
-	// fragment the inner binary layers underneath defaults. The
-	// outer CLI uses this to forward profile-derived storage
-	// settings to the child via a temp file.
-	backendsConfig string
+	// localOnly forces SQLite state + filesystem logs + filesystem
+	// cache for this run, ignoring any configured shared backends.
+	// The escape hatch when shared state is misbehaving (stale
+	// Postgres, unreachable controller, broken bucket policy) and the
+	// operator wants to run against the laptop only.
+	localOnly bool
+	// boxSlots overrides the host-local concurrency semaphore's cap.
+	// String (not int) so empty means "fall back to the heuristic"
+	// (which defaults to 0 / disabled). Explicit values (1, 2, ...)
+	// enable the semaphore with that cap. Forwarded to the inner
+	// pipeline binary as SPARKWING_BOX_SLOTS.
+	boxSlots string
+	// boxNoWait flips the box-slot semaphore from queueing to
+	// fail-fast. CI runners that would rather decline overlap than
+	// block enable this. Forwarded as SPARKWING_BOX_NO_WAIT.
+	boxNoWait bool
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -118,7 +123,6 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 			i++
 			continue
 		}
-		// Following "--" token = next flag; treat current as bool.
 		if i+1 < len(passthrough) && !strings.HasPrefix(passthrough[i+1], "--") {
 			out[name] = passthrough[i+1]
 			i += 2
@@ -165,16 +169,16 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-ref="):
 			wf.ref = strings.TrimPrefix(a, "--sw-ref=")
 			i++
-		case a == "--sw-profile":
+		case a == "--profile":
 			if i+1 < len(args) {
-				wf.on = args[i+1]
+				wf.profile = args[i+1]
 				i += 2
 				continue
 			}
 			pass = append(pass, a)
 			i++
-		case strings.HasPrefix(a, "--sw-profile="):
-			wf.on = strings.TrimPrefix(a, "--sw-profile=")
+		case strings.HasPrefix(a, "--profile="):
+			wf.profile = strings.TrimPrefix(a, "--profile=")
 			i++
 		case a == "--sw-no-update":
 			wf.noUpdate = true
@@ -255,6 +259,9 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case a == "--sw-no-cache":
 			wf.noCache = true
 			i++
+		case a == "--sw-local-only":
+			wf.localOnly = true
+			i++
 		case a == "--sw-dry-run", a == "--dry-run=true":
 			wf.dryRun = true
 			i++
@@ -283,27 +290,19 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-cd="):
 			wf.changeDir = strings.TrimPrefix(a, "--sw-cd=")
 			i++
-		case a == "--sw-target":
+		case a == "--sw-box-slots":
 			if i+1 < len(args) {
-				wf.forTarget = args[i+1]
+				wf.boxSlots = args[i+1]
 				i += 2
 				continue
 			}
 			pass = append(pass, a)
 			i++
-		case strings.HasPrefix(a, "--sw-target="):
-			wf.forTarget = strings.TrimPrefix(a, "--sw-target=")
+		case strings.HasPrefix(a, "--sw-box-slots="):
+			wf.boxSlots = strings.TrimPrefix(a, "--sw-box-slots=")
 			i++
-		case a == "--sw-backends-config":
-			if i+1 < len(args) {
-				wf.backendsConfig = args[i+1]
-				i += 2
-				continue
-			}
-			pass = append(pass, a)
-			i++
-		case strings.HasPrefix(a, "--sw-backends-config="):
-			wf.backendsConfig = strings.TrimPrefix(a, "--sw-backends-config=")
+		case a == "--sw-no-wait":
+			wf.boxNoWait = true
 			i++
 		default:
 			pass = append(pass, a)
@@ -315,7 +314,7 @@ func parseRunFlags(args []string) (runFlags, []string) {
 
 // setupRefWorktree creates a git worktree at ref. Caller must defer cleanup.
 // Best-effort fetch first so unseen refs resolve; fetch failure is non-fatal.
-func setupRefWorktree(sparkwingDir, ref string) (worktreeDir string, sparkwingSub string, cleanup func(), err error) {
+func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub string, cleanup func(), err error) {
 	repoRoot := filepath.Dir(sparkwingDir)
 
 	tmpDir, err := os.MkdirTemp("", "sparkwing-from-*")
@@ -342,7 +341,6 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir string, sparkwingSu
 	}
 
 	cleanup = func() {
-		// worktree remove (not just RemoveAll) so .git/worktrees stays clean.
 		_ = exec.Command("git", "-C", repoRoot,
 			"worktree", "remove", "--force", tmpDir).Run()
 		_ = os.RemoveAll(tmpDir)
@@ -350,49 +348,43 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir string, sparkwingSu
 	return tmpDir, sub, cleanup, nil
 }
 
-// dispatchRemote POSTs a TriggerRequest to the profile's controller.
-// Does NOT compile locally — assumes the remote already has the pipeline.
-func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) error {
-	prof, err := resolveProfile(wf.on)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "sparkwing run --on"); err != nil {
-		return err
-	}
-
-	args := collectPipelineArgs(passthrough)
-	source := "sparkwing"
+// triggerSource builds the trigger_source string a remote dispatch
+// records, tagging the originating verb so runs are distinguishable in
+// `runs list`: "pipeline-trigger@host" for `pipeline trigger`. Falls
+// back to the bare prefix when the hostname can't be read.
+func triggerSource(prefix string) string {
 	if host, err := os.Hostname(); err == nil && host != "" {
-		source = "sparkwing@" + host
+		return prefix + "@" + host
 	}
+	return prefix
+}
+
+// createRemoteTrigger builds and POSTs a TriggerRequest to prof's
+// controller, returning the controller's response. It backs `sparkwing
+// pipeline trigger`. It does NOT print or tail -- the caller decides how
+// to report. prof must already carry a controller.
+func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
+	args := collectPipelineArgs(passthrough)
 	var userName string
 	if u, err := user.Current(); err == nil {
 		userName = u.Username
 	}
 
-	// Plumb repo via both env (warm-runner reads for clone+compile) and
-	// Git meta (dashboard reads for the repo pill).
 	branch, sha, repoSlug, repoURL := detectRemoteGit()
-	envMap := map[string]string{}
-	if repoSlug != "" {
-		envMap["GITHUB_REPOSITORY"] = repoSlug
+	if repoSlug == "" {
+		return nil, fmt.Errorf("pipeline trigger %q: no github repository detected from cwd. "+
+			"The cluster runner needs GITHUB_REPOSITORY to clone the pipeline source. "+
+			"Run from inside a checkout of a github repo, or pass --repo OWNER/NAME explicitly", pipelineName)
 	}
-	// --start-at / --stop-at are sparkwing-level on the local CLI; the
-	// remote runner reads them as SPARKWING_START_AT /
-	// SPARKWING_STOP_AT from trigger env. Same env-var protocol the
-	// laptop-local exec path uses, so behavior is identical across
-	// venues.
+	envMap := map[string]string{
+		"GITHUB_REPOSITORY": repoSlug,
+	}
 	if wf.startAt != "" {
 		envMap["SPARKWING_START_AT"] = wf.startAt
 	}
 	if wf.stopAt != "" {
 		envMap["SPARKWING_STOP_AT"] = wf.stopAt
 	}
-	// Forward --dry-run to the remote runner via the same env-var
-	// protocol the local-exec path uses. Behavior is identical
-	// across venues so `sparkwing run X --on prod --dry-run` previews the
-	// same way it does locally.
 	if wf.dryRun {
 		envMap["SPARKWING_DRY_RUN"] = "1"
 	}
@@ -400,7 +392,7 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 		envMap["SPARKWING_ONLY"] = wf.only
 	}
 	if wf.noCache {
-		envMap["SPARKWING_NO_CACHE_RUNS"] = "1"
+		envMap["SPARKWING_NO_CACHE"] = "1"
 	}
 
 	triggerBranch := wf.ref
@@ -431,39 +423,27 @@ func dispatchRemote(pipelineName string, wf runFlags, passthrough []string) erro
 		},
 	}
 
-	// Best-effort eager refresh closes the
-	// `git push && sparkwing run X --on prod` race where the gitcache
-	// hasn't yet mirrored the just-pushed SHA. The retry in the
-	// runner's trigger loop catches the residual race; this just
-	// shrinks the window to ~zero on the happy path. 5s ceiling so
-	// a wedged or unreachable cache never blocks dispatch — log a
-	// warning and continue.
-	if prof.Gitcache != "" && repoURL != "" {
-		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := bincache.RefreshRepo(refreshCtx, prof.Gitcache, repoURL); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"sparkwing run: gitcache eager refresh failed (%v); proceeding — runner will retry on stale-SHA\n",
-				err)
+	if repoURL != "" {
+		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
+		dCancel()
+		if derr == nil && services.CachePod != "" {
+			refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := bincache.RefreshRepo(refreshCtx, services.CachePod, repoURL); err != nil {
+				fmt.Fprintf(os.Stderr,
+					"sparkwing run: gitcache eager refresh failed (%v); proceeding -- runner will retry on stale-SHA\n",
+					err)
+			}
+			cancel()
 		}
-		cancel()
 	}
 
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	resp, err := c.CreateTrigger(context.Background(), req)
 	if err != nil {
-		return fmt.Errorf("create trigger on %s: %w", prof.Name, err)
+		return nil, fmt.Errorf("create trigger on %s: %w", prof.Name, err)
 	}
-
-	fmt.Fprintf(os.Stdout, "dispatched %s on %s as %s (status=%s)\n",
-		pipelineName, prof.Name, resp.RunID, resp.Status)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "tail logs:\n")
-	fmt.Fprintf(os.Stderr, "  sparkwing runs logs --run %s --on %s --follow\n",
-		resp.RunID, prof.Name)
-	fmt.Fprintf(os.Stderr, "check status:\n")
-	fmt.Fprintf(os.Stderr, "  sparkwing runs status --run %s --on %s\n",
-		resp.RunID, prof.Name)
-	return nil
+	return resp, nil
 }
 
 // detectRemoteGit reads cwd's git state. Unresolved fields return empty.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	flag "github.com/spf13/pflag"
@@ -49,15 +50,20 @@ type InfoVersion struct {
 }
 
 type InfoDocs struct {
-	CLI      string `json:"cli"`
-	Web      string `json:"web"`
-	LLMsFull string `json:"llms_full"`
-	LLMsTXT  string `json:"llms_txt"`
+	CLI                     string `json:"cli"`
+	WebURL                  string `json:"web_url"`
+	LLMsFullURL             string `json:"llms_full_url"`
+	LLMsTXTURL              string `json:"llms_txt_url"`
+	DocsIndexURL            string `json:"docs_index_url"`
+	MigrationGuidesURL      string `json:"migration_guides_url"`
+	MigrationGuidesAgentURL string `json:"migration_guides_agent_url"`
+	MigrationGuidesIndexURL string `json:"migration_guides_index_url"`
 }
 
 type InfoProject struct {
 	Found         bool             `json:"found"`
 	SparkwingDir  string           `json:"sparkwing_dir,omitempty"`
+	FoundAbove    bool             `json:"found_above_cwd,omitempty"`
 	Pipelines     InfoPipelinesSum `json:"pipelines,omitempty"`
 	HowToScaffold string           `json:"how_to_scaffold,omitempty"`
 }
@@ -142,9 +148,7 @@ const infoBat = `      /\                        /\
 
 func runInfo(args []string) error {
 	fs := flag.NewFlagSet(cmdInfo.Path, flag.ContinueOnError)
-	// Empty default lets resolveOutputFormat distinguish unset from explicit.
 	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	asJSON := fs.Bool("json", false, "alias for --output json")
 	forAgent := fs.Bool("for-agent", false, "emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)")
 	firstTime := fs.Bool("first-time", false, "print the post-install onboarding card (used by install.sh; re-runnable any time)")
 	if err := parseAndCheck(cmdInfo, fs, args); err != nil {
@@ -168,7 +172,7 @@ func runInfo(args []string) error {
 		return nil
 	}
 
-	format, err := resolveOutputFormat(*output, fs.Changed("output"), *asJSON, cmdInfo.Path)
+	format, err := resolveOutputFormat(*output, cmdInfo.Path)
 	if err != nil {
 		return err
 	}
@@ -197,9 +201,9 @@ func runInfo(args []string) error {
 const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go\n" +
 	"programs in `.sparkwing/`. Ask the binary, don't scrape the repo:\n" +
 	"\n" +
-	"- `sparkwing info --json` -- context: binary, project, next steps (start here)\n" +
+	"- `sparkwing info -o json` -- context: binary, project, next steps (start here)\n" +
 	"- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
-	"- `sparkwing pipeline list --json` -- this repo's pipelines\n" +
+	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
 
@@ -326,10 +330,14 @@ func gatherInfo(agentMode bool) Info {
 		Version: parseInfoVersion(installedVersion()),
 		Binary:  binary,
 		Docs: InfoDocs{
-			CLI:      "sparkwing docs list / read --topic <slug> / all",
-			Web:      "https://sparkwing.dev/docs/",
-			LLMsFull: "https://sparkwing.dev/llms-full.txt",
-			LLMsTXT:  "https://sparkwing.dev/llms.txt",
+			CLI:                     "sparkwing docs list / read --topic <slug> / all",
+			WebURL:                  "https://sparkwing.dev/docs/",
+			LLMsFullURL:             "https://sparkwing.dev/llms-full.txt",
+			LLMsTXTURL:              "https://sparkwing.dev/llms.txt",
+			DocsIndexURL:            "https://sparkwing.dev/docs/index.json",
+			MigrationGuidesURL:      "https://sparkwing.dev/docs/migration-guide/",
+			MigrationGuidesAgentURL: "https://sparkwing.dev/migrations-full.txt",
+			MigrationGuidesIndexURL: "https://sparkwing.dev/migrations/index.json",
 		},
 		ForAgents:    infoForAgents,
 		FirstRunNote: infoFirstRunNote,
@@ -348,6 +356,7 @@ func gatherInfo(agentMode bool) Info {
 		if sparkwingDir, ok := walkUpForSparkwing(cwd); ok {
 			info.Project.Found = true
 			info.Project.SparkwingDir = sparkwingDir
+			info.Project.FoundAbove = filepath.Dir(sparkwingDir) != cwd
 			if pipelineList, perr := gatherPipelinesCatalog(false); perr == nil {
 				info.Project.Pipelines = summarizePipelines(pipelineList)
 			}
@@ -478,7 +487,6 @@ func tipAgentBlockMissing(info Info) (InfoTip, bool) {
 		return InfoTip{}, false
 	}
 	root := info.Project.SparkwingDir
-	// SparkwingDir points at .sparkwing/; agent files live one up.
 	if i := strings.LastIndex(root, "/.sparkwing"); i >= 0 {
 		root = root[:i]
 	}
@@ -522,7 +530,7 @@ func semverBehind(current, latest string) bool {
 }
 
 // goToolchainVersion shells out to `go version`. The user-facing answer
-// is "what compiler runs when sparkwing compiles .sparkwing/?" — that's
+// is "what compiler runs when sparkwing compiles .sparkwing/?" -- that's
 // the version on PATH, not the one that built the CLI.
 func goToolchainVersion() string {
 	bin, err := exec.LookPath("go")
@@ -605,7 +613,7 @@ func printInfoTable(info Info) {
 
 	buildLabel := v.BuildType
 	if v.HumanLabel != "" {
-		buildLabel = v.BuildType + " — " + v.HumanLabel
+		buildLabel = v.BuildType + " -- " + v.HumanLabel
 	}
 	row("sparkwing", v.Installed, "("+buildLabel+")")
 
@@ -614,9 +622,9 @@ func printInfoTable(info Info) {
 	}
 
 	if info.Toolchain.Go.Found {
-		row("go", info.Toolchain.Go.Version, "(your local toolchain — used to compile .sparkwing/)")
+		row("go", info.Toolchain.Go.Version, "(your local toolchain -- used to compile .sparkwing/)")
 	} else {
-		row("go", color.Dim("not installed"), "(your local toolchain — needed to compile .sparkwing/)")
+		row("go", color.Dim("not installed"), "(your local toolchain -- needed to compile .sparkwing/)")
 		fmt.Printf("  %-*s  %s\n", lblW, "", color.Cyan(goInstallHintForce()))
 	}
 
@@ -627,6 +635,9 @@ func printInfoTable(info Info) {
 			noun = "pipeline"
 		}
 		row("project", ".sparkwing/ at "+info.Project.SparkwingDir, fmt.Sprintf("(%d %s: %d triggered, %d manual)", p.Total, noun, p.Triggered, p.Manual))
+		if info.Project.FoundAbove {
+			row("", color.Cyan("note: found by walking up from the current directory, not in it -- pass -C <dir> (or cd) to target a different repo"), "")
+		}
 	} else {
 		row("project", color.Dim("no .sparkwing/ in this directory or any parent"), "")
 	}
@@ -662,9 +673,17 @@ func printInfoTable(info Info) {
 
 	fmt.Println(color.Bold("DOCS"))
 	fmt.Printf("  cli:        %s %s\n", color.Cyan(info.Docs.CLI), color.Dim("(offline, version-locked)"))
-	fmt.Printf("  web:        %s\n", color.Cyan(info.Docs.Web))
-	fmt.Printf("  llms-full:  %s %s\n", color.Cyan(info.Docs.LLMsFull), color.Dim("(full corpus, one fetch)"))
-	fmt.Printf("  llms.txt:   %s %s\n", color.Cyan(info.Docs.LLMsTXT), color.Dim("(short index)"))
+	fmt.Printf("  web:        %s\n", color.Cyan(info.Docs.WebURL))
+	fmt.Printf("  llms-full:  %s %s\n", color.Cyan(info.Docs.LLMsFullURL), color.Dim("(full corpus, one fetch)"))
+	fmt.Printf("  llms.txt:   %s %s\n", color.Cyan(info.Docs.LLMsTXTURL), color.Dim("(short index)"))
+	fmt.Printf("  index:      %s %s\n", color.Cyan(info.Docs.DocsIndexURL), color.Dim("(structured doc discovery)"))
+	fmt.Println()
+
+	fmt.Println(color.Bold("MIGRATION GUIDES"))
+	fmt.Printf("  cli:        %s %s\n", color.Cyan("sparkwing docs migrations list / read / between"), color.Dim("(offline, version-locked)"))
+	fmt.Printf("  web:        %s\n", color.Cyan(info.Docs.MigrationGuidesURL))
+	fmt.Printf("  agent:      %s %s\n", color.Cyan(info.Docs.MigrationGuidesAgentURL), color.Dim("(concatenated corpus, one fetch)"))
+	fmt.Printf("  index:      %s %s\n", color.Cyan(info.Docs.MigrationGuidesIndexURL), color.Dim("(structured migration discovery)"))
 }
 
 func batsay(msg string, width int) string {

@@ -138,10 +138,9 @@ type webhookListRow struct {
 func runWebhooksList(args []string) error {
 	fs := flag.NewFlagSet(cmdWebhooksList.Path, flag.ContinueOnError)
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
-	asJSON := fs.BoolP("json", "", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table). Matches kubectl/gh")
 	on := addProfileFlag(fs)
-	_ = on // --on is accepted for symmetry with other verbs; list doesn't need controller state.
+	_ = on
 	if err := parseAndCheck(cmdWebhooksList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -174,7 +173,7 @@ func runWebhooksList(args []string) error {
 		})
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rows)
@@ -245,7 +244,6 @@ func runWebhooksDeliveries(args []string) error {
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
 	hook := fs.Int64("hook", 0, "GitHub hook id (from 'webhooks list')")
 	since := fs.Duration("since", 24*time.Hour, "only deliveries newer than this")
-	asJSON := fs.BoolP("json", "", false, "emit JSON instead of a table")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmdWebhooksDeliveries, fs, args); err != nil {
@@ -261,7 +259,7 @@ func runWebhooksDeliveries(args []string) error {
 		return errors.New("webhooks deliveries: --hook is required")
 	}
 	if *on == "" {
-		return errors.New("webhooks deliveries: --on is required (needed to cross-reference trigger state)")
+		return errors.New("webhooks deliveries: --profile is required (needed to cross-reference trigger state)")
 	}
 	if err := ghCLIAvailable(); err != nil {
 		return fmt.Errorf("webhooks deliveries: %w", err)
@@ -272,9 +270,6 @@ func runWebhooksDeliveries(args []string) error {
 	}
 
 	var deliveries []githubDelivery
-	// `gh api` auto-paginates when --paginate is passed, but the hook
-	// delivery log is only useful for recent entries -- cap at one
-	// page (30 rows) by default and filter client-side by --since.
 	if err := ghAPI(fmt.Sprintf("/repos/%s/hooks/%d/deliveries?per_page=100", repo, *hook), &deliveries); err != nil {
 		return fmt.Errorf("webhooks deliveries: %w", err)
 	}
@@ -286,16 +281,10 @@ func runWebhooksDeliveries(args []string) error {
 	if err := requireController(prof, "webhooks deliveries"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Build a delivery->run index by walking recent runs in the
-	// --since window and pulling each one's trigger row (which carries
-	// GITHUB_DELIVERY in TriggerEnv). We cap the scan at a reasonable
-	// batch so a stale deliveries feed doesn't fan out into hundreds
-	// of trigger lookups; entries that fall outside the window simply
-	// render without a trigger_id column.
 	recentRuns, err := c.ListRuns(ctx, store.RunFilter{Limit: 200, Since: time.Now().Add(-*since)})
 	if err != nil {
 		return fmt.Errorf("webhooks deliveries: list runs: %w", err)
@@ -323,7 +312,7 @@ func runWebhooksDeliveries(args []string) error {
 		rows = append(rows, row)
 	}
 
-	if *asJSON || *outputFormat == "json" {
+	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rows)
@@ -356,8 +345,6 @@ func buildDeliveryIndex(ctx context.Context, c *client.Client, runs []*store.Run
 			continue
 		}
 		if r.TriggerSource != "github" {
-			// Non-github-triggered runs cannot carry a GITHUB_DELIVERY
-			// env var; skip them to avoid the controller round-trip.
 			continue
 		}
 		trig, err := c.GetTrigger(ctx, r.ID)
@@ -423,9 +410,6 @@ func runWebhooksReplay(args []string) error {
 		return fmt.Errorf("webhooks replay: %w", err)
 	}
 
-	// GitHub's redeliver endpoint wants the numeric delivery id, not
-	// the GUID. Resolve via a lookup on the delivery GUID -> id. The
-	// delivery list endpoint is the only surface that exposes both.
 	var deliveries []githubDelivery
 	if err := ghAPI(fmt.Sprintf("/repos/%s/hooks/%d/deliveries?per_page=100", repo, *hook), &deliveries); err != nil {
 		return fmt.Errorf("webhooks replay: %w", err)
@@ -445,8 +429,6 @@ func runWebhooksReplay(args []string) error {
 	if err := ghAPIPost(fmt.Sprintf("/repos/%s/hooks/%d/deliveries/%d/attempts", repo, *hook, target.ID), &resp); err != nil {
 		return fmt.Errorf("webhooks replay: %w", err)
 	}
-	// GitHub returns 202 with a minimal body. Print the new delivery
-	// id (numeric) and GUID if present so the operator can tail it.
 	if resp.GUID != "" {
 		fmt.Fprintf(os.Stdout, "queued redelivery: guid=%s id=%d\n", resp.GUID, resp.ID)
 	} else {

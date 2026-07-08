@@ -40,7 +40,8 @@ func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunReq
 	if lg == nil {
 		lg = slog.Default()
 	}
-	lg.Info("in-process dispatch",
+	lg.Info(
+		"in-process dispatch",
 		"run_id", req.RunID,
 		"pipeline", req.Pipeline,
 		"trigger", req.Trigger.Source,
@@ -49,26 +50,28 @@ func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunReq
 	go func() {
 		runCtx := context.Background()
 		res, err := orchestrator.Run(runCtx, d.Backends, orchestrator.Options{
-			Pipeline:                   req.Pipeline,
-			RunID:                      req.RunID,
-			Args:                       req.Args,
-			Trigger:                    req.Trigger,
-			Git:                        req.Git,
-			ParentRunID:                req.ParentRunID,
-			InheritedPlanCacheKey:      req.InheritedPlanCacheKey,
-			InheritedPlanCacheHolderID: req.InheritedPlanCacheHolderID,
-			RetryOf:                    req.RetryOf,
-			MaxParallel:                d.MaxParallel,
+			Pipeline:                         req.Pipeline,
+			RunID:                            req.RunID,
+			Args:                             req.Args,
+			Trigger:                          req.Trigger,
+			Git:                              req.Git,
+			ParentRunID:                      req.ParentRunID,
+			InheritedPlanConcurrencyKey:      req.InheritedPlanConcurrencyKey,
+			InheritedPlanConcurrencyHolderID: req.InheritedPlanConcurrencyHolderID,
+			RetryOf:                          req.RetryOf,
+			MaxParallel:                      d.MaxParallel,
 		})
 		if err != nil {
-			lg.Error("dispatched run failed",
+			lg.Error(
+				"dispatched run failed",
 				"run_id", req.RunID,
 				"pipeline", req.Pipeline,
 				"err", err,
 			)
 			return
 		}
-		lg.Info("dispatched run finished",
+		lg.Info(
+			"dispatched run finished",
 			"run_id", res.RunID,
 			"pipeline", req.Pipeline,
 			"status", res.Status,

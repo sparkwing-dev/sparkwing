@@ -1,7 +1,7 @@
 // `sparkwing runs receipt --run X` -- recompute and emit the
 // per-run audit + cost receipt as JSON. Local mode reads the SQLite
 // store directly and uses the resolved profile's
-// cost_per_runner_hour; cluster mode (--on NAME) defers cost to the
+// cost_per_runner_hour; cluster mode (--profile NAME) defers cost to the
 // controller's configured rate.
 package main
 
@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -24,25 +23,19 @@ import (
 func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsReceipt.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	on := fs.String("on", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name (default: current default)")
 	outFmt := fs.StringP("output", "o", "", "output format: json (default)")
-	asJSON := fs.Bool("json", false, "emit JSON (hidden alias for -o json)")
-	_ = fs.MarkHidden("json")
 	if err := parseAndCheck(cmdJobsReceipt, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	// Receipts are JSON-only today; resolveOutputFormat would default
-	// to "table" which we don't support, so accept json (or empty)
-	// and reject anything else explicitly.
 	switch *outFmt {
 	case "", "json":
 	default:
 		return fmt.Errorf("runs receipt: -o/--output only supports json, got %q", *outFmt)
 	}
-	_ = *asJSON // alias accepted for shape parity with sibling verbs.
 
 	if *runID == "" {
 		return errors.New("runs receipt: --run is required")
@@ -57,15 +50,11 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 		if err := requireController(prof, "runs receipt"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		body, err := c.GetRunReceipt(ctx, *runID)
 		if err != nil {
 			return err
 		}
-		// Re-encode for stable indentation; the receipt's hashes
-		// commit to canonical (compact, sorted-key) bytes the server
-		// already produced, so pretty-printing here doesn't break
-		// receipt_sha verification.
 		var v any
 		if err := json.Unmarshal(body, &v); err != nil {
 			return fmt.Errorf("decode receipt: %w", err)
@@ -82,7 +71,7 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, *runID)
 	if err != nil {
 		return err
@@ -98,14 +87,9 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	return enc.Encode(rec)
 }
 
-// localCostRate resolves the cost_per_runner_hour for the active
-// profile (if any) so local-mode receipts reflect the same rate the
-// operator already has configured. A missing profile yields rate=0
-// and a "(none)" source, which the receipt renders as compute_cents:0.
+// localCostRate is the always-zero local-mode cost rate.
+// cost_per_runner_hour was dropped from profile config in v0.6;
+// receipts now show compute_seconds without a derived dollar figure.
 func localCostRate() (float64, string) {
-	prof, err := profile.LoadAndResolve("")
-	if err != nil || prof == nil {
-		return 0, "local (no profile)"
-	}
-	return prof.CostPerRunnerHour, fmt.Sprintf("profile:%s (cost_per_runner_hour=$%.4f)", prof.Name, prof.CostPerRunnerHour)
+	return 0, "local (rate not configured)"
 }

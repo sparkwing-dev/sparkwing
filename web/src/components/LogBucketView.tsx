@@ -94,7 +94,7 @@ function LogLines({
   // When set (filter mode), lines NOT in the set are hidden; gaps
   // between visible lines collapse into a "…" separator row.
   visibleLineSet?: Set<number> | null;
-  // Top-level find hits — painted fuchsia so they're visually
+  // Top-level find hits -- painted fuchsia so they're visually
   // distinct from the per-bucket yellow search.
   findLineSet?: Set<number>;
   findCurrentLine?: number | null;

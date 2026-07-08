@@ -95,8 +95,6 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 		if data.Next == "" {
 			data.Next = "/"
 		}
-		// Skip the form for already-authed callers so a logged-in user
-		// arriving via back-button / stale tab isn't forced to reauth.
 		if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 			if _, err := controllerResolveSession(r.Context(), opts.ControllerURL, c.Value); err == nil {
 				http.Redirect(w, r, data.Next, http.StatusSeeOther)
@@ -159,8 +157,6 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 
 		if err := controllerCreateFirstUser(r.Context(), opts.ControllerURL, user, pass); err != nil {
 			data := loginPageData{Next: next, Bootstrap: true, Error: err.Error()}
-			// 409 means a user already exists; fall back to the plain
-			// login form on the next render.
 			if strings.Contains(err.Error(), "bootstrap closed") {
 				data.Bootstrap = false
 				data.Error = "Bootstrap closed -- sign in with the existing admin credentials."
@@ -343,7 +339,6 @@ func controllerResolveSession(ctx context.Context, controllerURL, sessionID stri
 }
 
 func setSessionCookies(w http.ResponseWriter, sess *loginResp) {
-	// MaxAge mirrors the controller's session TTL (12h).
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    sess.SessionID,
@@ -357,7 +352,7 @@ func setSessionCookies(w http.ResponseWriter, sess *loginResp) {
 		Name:     csrfCookieName,
 		Value:    sess.CSRFToken,
 		Path:     "/",
-		HttpOnly: false, // the SPA reads this and echoes it in X-Sparkwing-Csrf
+		HttpOnly: false, // safety: SPA reads this cookie and echoes it in X-Sparkwing-Csrf; must not be HttpOnly
 		Secure:   cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(12 * time.Hour / time.Second),

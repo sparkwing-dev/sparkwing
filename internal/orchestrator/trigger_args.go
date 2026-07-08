@@ -24,7 +24,8 @@ func resolveTriggerArgs(ctx context.Context, state StateBackend, trigger *store.
 		if logger == nil {
 			logger = slog.Default()
 		}
-		logger.Warn("retry-of: original run args not fetchable; falling back to invocation args",
+		logger.Warn(
+			"retry-of: original run args not fetchable; falling back to invocation args",
 			"retry_of", trigger.RetryOf,
 			"err", err,
 			"is_not_found", errors.Is(err, store.ErrNotFound),

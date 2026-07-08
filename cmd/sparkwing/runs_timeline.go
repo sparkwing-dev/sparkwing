@@ -18,9 +18,7 @@ func runJobsTimeline(ctx context.Context, paths orchestrator.Paths, args []strin
 	steps := fs.Bool("steps", false, "include per-step rows under each node")
 	width := fs.Int("width", 60, "bar width in characters")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty on TTY, json when piped)")
-	asJSON := fs.Bool("json", false, "emit JSON (alias for -o json)")
-	pretty := fs.Bool("pretty", false, "force the human-readable waterfall even when piped (alias for -o pretty)")
-	on := fs.String("on", "", "profile name; omit for local-only")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsTimeline, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -28,7 +26,7 @@ func runJobsTimeline(ctx context.Context, paths orchestrator.Paths, args []strin
 		return err
 	}
 	*runID = normalizeRunID(*runID)
-	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, fs.Changed("output"), *asJSON, *pretty, cmdJobsTimeline.Path)
+	resolvedFmt, err := resolveTTYAwareOutput(*outFmt, cmdJobsTimeline.Path)
 	if err != nil {
 		return err
 	}
@@ -47,5 +45,5 @@ func runJobsTimeline(ctx context.Context, paths orchestrator.Paths, args []strin
 	if err := requireController(prof, cmdJobsTimeline.Path); err != nil {
 		return err
 	}
-	return orchestrator.RunTimelineRemote(ctx, prof.Controller, prof.Token, *runID, opts, os.Stdout)
+	return orchestrator.RunTimelineRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, opts, os.Stdout)
 }

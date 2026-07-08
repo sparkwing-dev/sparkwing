@@ -98,14 +98,8 @@ func TestGroup_RetryAndTimeoutApplyToEveryMember(t *testing.T) {
 // are per-node by intent.
 func TestGroupModifiersMirrorNode(t *testing.T) {
 	exempt := map[string]bool{
-		// Recovery handlers are per-node by intent.
-		"OnFailure": true,
-		// Dynamic() hand-marks a Job for renderer purposes; Group
-		// dynamism is already a structural property (JobFanOutDynamic
-		// produces a dynamic group; static helpers don't).
-		"Dynamic": true,
-		// OnFailureNode is a getter that accidentally matches the
-		// chainable shape (returns *JobNode).
+		"OnFailure":     true,
+		"Dynamic":       true,
 		"OnFailureNode": true,
 	}
 	nodeChainable := chainableMethods(reflect.TypeOf(&sparkwing.JobNode{}))

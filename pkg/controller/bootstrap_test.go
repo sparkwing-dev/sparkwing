@@ -46,7 +46,6 @@ func TestBootstrap_PostBootstrapRequiresAuth(t *testing.T) {
 	base, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 
-	// Seed a user so bootstrap is definitively closed.
 	if _, err := st.CreateUser("preexisting", "correctbatteryhorse", timeNowUTC()); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
@@ -55,7 +54,6 @@ func TestBootstrap_PostBootstrapRequiresAuth(t *testing.T) {
 		t.Fatalf("expected needed=false when a user already exists")
 	}
 
-	// Unauthenticated second POST must 401 (auth middleware kicks in).
 	status, _ := postJSONWithStatus(t, base+"/api/v1/users", map[string]string{
 		"name":     "usurper",
 		"password": "anotherlongone",
@@ -103,8 +101,6 @@ func TestBootstrap_ConcurrentSignupRace(t *testing.T) {
 		t.Fatalf("expected 1 user row, got %d", len(users))
 	}
 }
-
-// --- helpers ---
 
 func getBootstrapNeeded(t *testing.T, base string) bool {
 	t.Helper()

@@ -47,7 +47,7 @@ func RunTimeline(ctx context.Context, paths Paths, runID string, opts TimelineOp
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func renderTimeline(run *store.Run, nodes []*store.Node, steps []*store.NodeStep
 	}
 	span := runEnd.Sub(runStart)
 	if span <= 0 {
-		span = time.Millisecond // avoid divide-by-zero on instant runs
+		span = time.Millisecond
 	}
 	rows := buildTimelineRows(runStart, span, nodes, steps, opts.IncludeSteps)
 	if opts.JSON {

@@ -87,14 +87,12 @@ func TestSearch_MissingQueryReturns400(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != 400 {
+	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status=%d want 400", resp.StatusCode)
 	}
 }
 
 func TestSearch_EmptyLogsVolume(t *testing.T) {
-	// Logs service freshly created, no runs dir yet -- should return
-	// an empty result set, not a 500.
 	root := t.TempDir()
 	s, _ := New(root, nil)
 	srv := httptest.NewServer(s.Handler())

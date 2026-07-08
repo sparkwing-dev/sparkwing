@@ -6,11 +6,11 @@
 # for a full-stack Ruby + Node application.
 #
 # Scenarios:
-#   1. Cold build (no proxy, no cache)     — baseline, everything from internet
-#   2. Rebuild (Docker layer cache)         — fast, layers already exist
-#   3. Cold build with proxy (proxy warms)  — similar to #1, but populates proxy
-#   4. New base image + proxy (proxy warm)  — THE MONEY SHOT: layers busted, proxy saves the day
-#   5. New base image, no proxy             — comparison: how slow without proxy
+#   1. Cold build (no proxy, no cache)     -- baseline, everything from internet
+#   2. Rebuild (Docker layer cache)         -- fast, layers already exist
+#   3. Cold build with proxy (proxy warms)  -- similar to #1, but populates proxy
+#   4. New base image + proxy (proxy warm)  -- THE MONEY SHOT: layers busted, proxy saves the day
+#   5. New base image, no proxy             -- comparison: how slow without proxy
 #
 set -e
 cd "$(dirname "$0")"
@@ -80,7 +80,7 @@ fi
 
 # ── benchmarks ───────────────────────────────────────────
 
-# 1. Cold build — no proxy, no cache
+# 1. Cold build -- no proxy, no cache
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -91,13 +91,13 @@ time_build \
     --build-arg PROXY_URL="" \
     -t bench-cold
 
-# 2. Rebuild — Docker layer cache
+# 2. Rebuild -- Docker layer cache
 time_build \
     "2. Warm rebuild (Docker cache)" \
     --build-arg PROXY_URL="" \
     -t bench-warm
 
-# 3. Cold build with proxy — warms the proxy cache
+# 3. Cold build with proxy -- warms the proxy cache
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -114,7 +114,7 @@ echo "Proxy cache after warming:"
 curl -s "http://localhost:$PROXY_PORT/stats" | python3 -m json.tool 2>/dev/null || \
     curl -s "http://localhost:$PROXY_PORT/stats"
 
-# 4. New base image + proxy — cache busted, proxy saves the day
+# 4. New base image + proxy -- cache busted, proxy saves the day
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -127,7 +127,7 @@ time_build \
     --build-arg PROXY_URL="$PROXY_URL" \
     -t bench-newbase-proxy
 
-# 5. New base image, no proxy — comparison
+# 5. New base image, no proxy -- comparison
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true

@@ -14,14 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// --- Pipelines used by the cache + hook tests ---
-
 type cachedPipe struct{ sparkwing.Base }
 
 var cachedInvocations atomic.Int32
 
 func (cachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "build", &cachedBuildJob{})
+	sparkwing.Job(plan, "build", &cachedBuild{})
 	return nil
 }
 
@@ -29,16 +27,16 @@ type cachedBuildOut struct {
 	Tag string `json:"tag"`
 }
 
-type cachedBuildJob struct {
+type cachedBuild struct {
 	sparkwing.Base
 	sparkwing.Produces[cachedBuildOut]
 }
 
-func (j *cachedBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *cachedBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", j.run), nil
 }
 
-func (cachedBuildJob) run(ctx context.Context) (cachedBuildOut, error) {
+func (cachedBuild) run(ctx context.Context) (cachedBuildOut, error) {
 	cachedInvocations.Add(1)
 	return cachedBuildOut{Tag: "v-cached"}, nil
 }
@@ -107,7 +105,7 @@ func (afterFiresOnFailure) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 type hookOrderingPipe struct{ sparkwing.Base }
 
 var hookOrderingLog struct {
-	mu      atomic.Int32 // simple counter; sequence matters not concurrency
+	mu      atomic.Int32
 	entries [3]string
 }
 
@@ -141,25 +139,15 @@ func init() {
 	register("hooks-ordering", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &hookOrderingPipe{} })
 }
 
-// --- Cache tests ---
-
 func TestCacheKey_FirstRunRunsJob(t *testing.T) {
 	cachedInvocations.Store(0)
 	p := newPaths(t)
-	// Plan-side: attach cache key to the build node.
-	//
-	// The cache test uses the registered pipeline which doesn't
-	// attach a cache key by default. We pass the cache key via an
-	// env-toggled variant: register a cache-enabled pipeline locally.
 	enabledPipeline := func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		pipe := &cachedPipe{}
 		return wrapWithCacheKey(pipe)
 	}
 	sparkwing.Register[sparkwing.NoInputs]("cache-keyed", enabledPipeline)
-	defer func() {
-		// best-effort cleanup; Register panics on duplicates so we
-		// can't simply re-use. Tests run once per name.
-	}()
+	defer func() {}()
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-keyed"})
 	if err != nil {
@@ -172,12 +160,9 @@ func TestCacheKey_FirstRunRunsJob(t *testing.T) {
 		t.Fatalf("first run should invoke Run once, got %d", got)
 	}
 
-	// Verify an entry landed in the cache table.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	// We don't know the exact key string, but we know there must be
-	// exactly one cache row with a matching output payload.
 	rows := countCacheRows(t, st)
 	if rows != 1 {
 		t.Fatalf("expected 1 cache row, got %d", rows)
@@ -188,17 +173,13 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 	cachedInvocations.Store(0)
 	p := newPaths(t)
 
-	// Register a fresh pipeline for isolation since this test
-	// expects two sequential runs on a fresh cache.
 	sparkwing.Register[sparkwing.NoInputs]("cache-replay", func() sparkwing.Pipeline[sparkwing.NoInputs] { return wrapWithCacheKey(&cachedPipe{}) })
 
-	// First run -- populates the cache.
 	res1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-replay"})
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 
-	// Second run -- should hit the cache and not invoke Run again.
 	res2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-replay"})
 	if err != nil {
 		t.Fatalf("second run: %v", err)
@@ -208,9 +189,8 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 		t.Fatalf("Run should be invoked once total across two runs, got %d", got)
 	}
 
-	// Second run's "build" node must be Cached.
 	st, _ := store.Open(p.StateDB())
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	nodes, _ := st.ListNodes(context.Background(), res2.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("expected 1 node, got %d", len(nodes))
@@ -219,7 +199,6 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 		t.Fatalf("node outcome = %q, want cached", nodes[0].Outcome)
 	}
 
-	// Output should roundtrip through the cache.
 	var out cachedBuildOut
 	if err := json.Unmarshal(nodes[0].Output, &out); err != nil {
 		t.Fatalf("unmarshal cached output: %v", err)
@@ -229,15 +208,13 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 	}
 
 	_ = res1
-	_ = time.Millisecond // avoid unused import if we trim later
+	_ = time.Millisecond
 }
 
 func TestCacheKey_EmptyKeyDisablesCaching(t *testing.T) {
 	cachedInvocations.Store(0)
 	p := newPaths(t)
 
-	// Register a pipeline whose cache key function returns the empty
-	// string -- should behave like no cache key at all.
 	sparkwing.Register[sparkwing.NoInputs]("cache-empty-key", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return wrapWithSpecificKey(&cachedPipe{}, func(ctx context.Context) sparkwing.CacheKey {
 			return ""
@@ -254,8 +231,6 @@ func TestCacheKey_EmptyKeyDisablesCaching(t *testing.T) {
 		t.Fatalf("empty key should disable caching; got %d invocations, want 2", got)
 	}
 }
-
-// --- Hook tests ---
 
 func TestHooks_BeforeAndAfterFire(t *testing.T) {
 	resetHooksCounters()
@@ -326,8 +301,6 @@ func TestHooks_Ordering(t *testing.T) {
 	}
 }
 
-// --- test helpers ---
-
 // wrapWithCacheKey returns a Pipeline whose plan attaches a constant
 // CacheKey to the first node. Used by the cache tests above since
 // cachedPipe itself doesn't declare a key by default.
@@ -352,11 +325,7 @@ func (w *planWrapper) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwi
 		return err
 	}
 	if node := plan.Job("build"); node != nil {
-		node.Cache(sparkwing.CacheOptions{
-			Key:      "cache-test-build",
-			OnLimit:  sparkwing.Coalesce,
-			CacheKey: w.keyFn,
-		})
+		node.Cache(w.keyFn)
 	}
 	return nil
 }

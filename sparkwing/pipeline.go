@@ -43,7 +43,16 @@ type Registration struct {
 
 var (
 	registryMu sync.RWMutex
-	registry   = map[string]*Registration{}
+	// registry is keyed by *pipeline* name -- what the operator types
+	// after `sparkwing run`. A single registry entry produces a *Plan
+	// per invocation.
+	registry = map[string]*Registration{}
+	// entrypointRegistry is keyed by *entrypoint* name -- the YAML
+	// `entrypoint:` field. The v0.6 redesign separates the two so one
+	// entrypoint can back many pipelines: Go calls RegisterEntrypoint
+	// once with the entrypoint name; YAML enumerates pipelines and
+	// names the entrypoint for each.
+	entrypointRegistry = map[string]*Registration{}
 )
 
 // Register installs a pipeline under the given name. The factory is
@@ -82,31 +91,64 @@ var (
 //	    SkipFilterArgs   // --skip and --only become first-class flags
 //	}
 func Register[T any](name string, factory func() Pipeline[T]) {
+	reg := buildRegistration(name, factory, "sparkwing.Register")
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, exists := registry[name]; exists {
+		panic(fmt.Sprintf("sparkwing.Register(%q): already registered", name))
+	}
+	registry[name] = reg
+	if _, exists := entrypointRegistry[name]; !exists {
+		entrypointRegistry[name] = reg
+	}
+}
+
+// buildRegistration is the private workhorse shared by [Register]
+// and [RegisterEntrypoint]. It builds the schema, the invoke closure,
+// and the *Registration; the caller writes the entry into the
+// appropriate registry map.
+//
+// callerLabel is the SDK-author-facing identifier ("sparkwing.Register"
+// or "sparkwing.RegisterEntrypoint") that surfaces in panic messages.
+func buildRegistration[T any](name string, factory func() Pipeline[T], callerLabel string) *Registration {
 	if name == "" {
-		panic("sparkwing.Register: name must not be empty")
+		panic(callerLabel + ": name must not be empty")
 	}
 	if factory == nil {
-		panic("sparkwing.Register: factory must not be nil")
+		panic(callerLabel + ": factory must not be nil")
 	}
 	if factory() == nil {
-		panic(fmt.Sprintf("sparkwing.Register(%q): factory returned nil", name))
+		panic(fmt.Sprintf("%s(%q): factory returned nil", callerLabel, name))
 	}
 
 	var zero T
 	t := reflect.TypeOf(zero)
 	schema, err := parseInputsSchema(t)
 	if err != nil {
-		panic(fmt.Sprintf("sparkwing.Register(%q): invalid Inputs schema on %s: %v", name, t, err))
+		panic(fmt.Sprintf("%s(%q): invalid Inputs schema on %s: %v", callerLabel, name, t, err))
 	}
-	// Wing-owned flags are prefixed sw-* (--sw-ref, --sw-profile,
-	// --sw-start-at, ...), so pipeline `flag:"..."` tags have the
-	// full unprefixed namespace to themselves — no reserved-name
-	// collision check needed.
-
 	invoke := func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error) {
+		pipeKnown := map[string]bool{}
+		for _, f := range schema.Fields {
+			pipeKnown[f.Name] = true
+		}
+		var pipeArgs, extraArgs map[string]string
+		if schema.Extra {
+			pipeArgs = args
+		} else {
+			pipeArgs = make(map[string]string, len(args))
+			extraArgs = make(map[string]string)
+			for k, v := range args {
+				if pipeKnown[k] {
+					pipeArgs[k] = v
+				} else {
+					extraArgs[k] = v
+				}
+			}
+		}
 		var in T
 		if t != nil && t.Kind() == reflect.Struct {
-			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), args); err != nil {
+			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), pipeArgs); err != nil {
 				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)
 			}
 		}
@@ -114,40 +156,118 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 		if p == nil {
 			return nil, fmt.Errorf("sparkwing: factory for pipeline %q returned nil", name)
 		}
-		// Mark ctx as plan-time so side-effect helpers panic if Plan()
-		// shells out instead of declaring a node that does the work.
 		plan := NewPlan()
-		// Capture the parsed Inputs on the Plan so the orchestrator
-		// can install them on dispatch ctx -- step bodies then read
-		// the same value via sparkwing.Inputs[T](ctx) without closure
-		// threading.
 		plan.setInputs(in)
 		if err := p.Plan(planguard.With(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
-		// Catch typo'd string-keyed Needs("...") references once the
-		// DAG is fully materialized but before the orchestrator can
-		// dispatch. Fail loud at Plan time so authors discover
-		// misspellings at registration, not at first dispatch when the
-		// typo would silently make the dependency edge a no-op.
-		validateRefs(plan)
+		if err := plan.validateArtifactEdges(); err != nil {
+			return nil, err
+		}
+		if len(extraArgs) > 0 {
+			if err := assertJobArgsCoverage(plan, extraArgs); err != nil {
+				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)
+			}
+		}
+		if !skipArgResolveFromContext(ctx) {
+			pr := profileResolutionFromContext(ctx)
+			resolveIn := ResolveInputs{
+				FlagValues:     args,
+				ProfileName:    pr.Name,
+				ProfileIsLocal: pr.IsLocal,
+			}
+			resolved, err := resolveAndBindJobArgs(plan, resolveIn)
+			if err != nil {
+				return nil, fmt.Errorf("pipeline %q: %w", name, err)
+			}
+			plan.setResolvedArgs(resolved)
+		}
 		return plan, nil
 	}
 
-	reg := &Registration{
+	return &Registration{
 		Name:      name,
 		InputType: t,
 		Schema:    schema,
 		Invoke:    invoke,
 		instance:  func() any { return factory() },
 	}
+}
 
+// RegisterEntrypoint installs a Go work unit (the entrypoint) under
+// the given type-name, matching the `entrypoint:` field in
+// sparkwing.yaml. One entrypoint can back many pipelines -- each
+// pipeline in YAML names this entrypoint and supplies its own
+// defaults / dispatch / guards / locked policy.
+//
+//	sparkwing.RegisterEntrypoint[DeployArgs]("Deploy", func() sparkwing.Pipeline[DeployArgs] {
+//	    return Deploy{}
+//	})
+//
+//	# .sparkwing/sparkwing.yaml
+//	pipelines:
+//	  - name: deploy-prod
+//	    entrypoint: Deploy
+//	    dispatch: { runners: [prod-pool] }
+//	  - name: deploy-dev
+//	    entrypoint: Deploy
+//
+// Both `sparkwing run deploy-prod` and `sparkwing run deploy-dev`
+// resolve to this same factory after [BindPipelinesFromYAML] runs
+// at the orchestrator's bootstrap.
+//
+// For the older one-pipeline-per-Go-entry model, [Register] is
+// kept as a deprecation-marked sugar wrapper that registers the
+// entrypoint AND inserts an implicit pipeline binding under the
+// same name.
+func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]) {
+	reg := buildRegistration(entrypointName, factory, "sparkwing.RegisterEntrypoint")
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if _, exists := registry[name]; exists {
-		panic(fmt.Sprintf("sparkwing.Register(%q): already registered", name))
+	if _, exists := entrypointRegistry[entrypointName]; exists {
+		panic(fmt.Sprintf("sparkwing.RegisterEntrypoint(%q): already registered", entrypointName))
 	}
-	registry[name] = reg
+	entrypointRegistry[entrypointName] = reg
+}
+
+// BindPipelinesFromYAML walks every pipeline entry in cfg and
+// installs a Registration under the pipeline's name, sharing the
+// Invoke / Schema / Instance of the registered entrypoint. The
+// orchestrator's bootstrap calls this after loading sparkwing.yaml
+// so `sparkwing run <pipeline-name>` resolves via the standard
+// [Lookup] path.
+//
+// Pipelines whose entrypoint isn't registered are skipped silently
+// (the SDK doesn't know which binaries will be linked into the
+// pipeline binary); the orchestrator surfaces "pipeline X not
+// registered" at lookup time.
+//
+// Safe to call multiple times; existing pipeline-name bindings are
+// preserved (a name that was registered via the legacy [Register]
+// API doesn't get clobbered by a YAML rebind).
+func BindPipelinesFromYAML(cfg interface {
+	EachPipeline(func(name, entrypoint string))
+}) {
+	if cfg == nil {
+		return
+	}
+	cfg.EachPipeline(func(name, entrypoint string) {
+		if name == "" || entrypoint == "" {
+			return
+		}
+		registryMu.Lock()
+		defer registryMu.Unlock()
+		if _, exists := registry[name]; exists {
+			return
+		}
+		ep, ok := entrypointRegistry[entrypoint]
+		if !ok {
+			return
+		}
+		bound := *ep
+		bound.Name = name
+		registry[name] = &bound
+	})
 }
 
 // Lookup returns the Registration for a registered pipeline name, or
@@ -212,7 +332,7 @@ func Registered() []string {
 }
 
 // TypeName returns the Go type name of p, suitable for matching against
-// a pipelines.yaml `entrypoint:` field.
+// a sparkwing.yaml `entrypoint:` field.
 func TypeName(p any) string {
 	t := reflect.TypeOf(p)
 	if t == nil {

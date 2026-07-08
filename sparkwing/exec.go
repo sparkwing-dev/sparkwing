@@ -94,7 +94,7 @@ type Cmd struct {
 }
 
 // Bash starts building a shell command (run via "bash -c"). The line
-// is the shell program verbatim — there is no printf-style formatting,
+// is the shell program verbatim -- there is no printf-style formatting,
 // so dynamic values must come through .Env() (the shell expands the
 // var safely) or argv via Exec. Splicing dynamic values into a shell
 // string is a quoting/injection footgun.
@@ -107,17 +107,41 @@ type Cmd struct {
 //	sparkwing.Bash(ctx, `git -C "$R" status --porcelain`).Env("R", repo).MustBeEmpty("dirty tree")
 //	sparkwing.Bash(ctx, `if [[ -d .git ]]; then echo repo; fi`).Run()
 //
-// For dynamic argv, prefer Exec — no shell, no quoting.
+// Prefer [Exec] for argv-shaped invocations. No shell parsing means no
+// quoting concerns and safer handling of values that might contain
+// shell metacharacters (spaces, $, backticks). Reserve Bash for cases
+// that genuinely need shell features (pipes, redirects, globs,
+// conditionals).
+//
+// Signal propagation: the child runs under exec.CommandContext, which
+// kills the direct child (SIGKILL) when ctx is cancelled. Bash spawns
+// a shell that may fork further; those grandchildren are NOT signaled
+// by ctx cancellation and can outlive the run if the bash script
+// backgrounds work or wraps a long-lived helper. Terminal SIGINT
+// (Ctrl-C) goes to the whole foreground process group and DOES reach
+// grandchildren via the OS. Authors who need clean tree teardown on
+// programmatic cancel should use Exec on a single binary, or run the
+// shell program through `setsid` / `exec` and reap explicitly.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
 
 // Exec starts building an argv command (no shell). Use this whenever
-// you have argv-shaped inputs, especially anything dynamic — there is
+// you have argv-shaped inputs, especially anything dynamic -- there is
 // no shell, so no quoting and no injection risk.
 //
 //	sparkwing.Exec(ctx, "go", "test", "./...").Dir("internal").Run()
 //	sparkwing.Exec(ctx, "kubectl", "apply", "-f", manifestPath).Run()
+//	sparkwing.Exec(ctx, "docker", "push", tag).Run()
+//
+// Signal propagation: the binary runs under exec.CommandContext, which
+// sends SIGKILL to the direct child when ctx is cancelled. Most CLIs
+// (go, kubectl, docker, git) are single-process and terminate cleanly
+// on that signal. If the binary forks long-lived children of its own,
+// those grandchildren are NOT signaled by ctx cancellation -- the
+// same caveat as [Bash]. Terminal SIGINT (Ctrl-C) reaches the whole
+// foreground process group via the OS, so interactive cancel does
+// teardown the tree.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }
@@ -162,7 +186,7 @@ func (c *Cmd) Run() (ExecResult, error) {
 	return c.execute(false)
 }
 
-// Capture executes the command silently — no per-line log records,
+// Capture executes the command silently -- no per-line log records,
 // just the exec_start banner. The full stdout/stderr are returned in
 // the ExecResult; on failure, the *ExecError carries the captured
 // streams.
@@ -232,9 +256,6 @@ func (c *Cmd) MustBeEmpty(reason string) error {
 }
 
 func (c *Cmd) execute(silent bool) (ExecResult, error) {
-	// Guard at execution time (not Bash/Exec construction) so authors
-	// can still build a *Cmd and pass it around as data inside Plan();
-	// the panic only fires when something actually tries to run it.
 	var helper string
 	switch c.kind {
 	case kindBash:
@@ -276,8 +297,6 @@ func isSilent(ctx context.Context) bool {
 
 func execCmd(ctx context.Context, name string, args []string, dir string, extraEnv map[string]string) (ExecResult, error) {
 	display := renderCommand(name, args)
-	// Empty dir means WorkDir() is unset; refuse to execute against
-	// whatever cwd the binary happens to inherit.
 	if dir == "" {
 		return ExecResult{Command: display}, &ExecError{
 			Command:  display,
@@ -296,9 +315,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 		dir = filepath.Join(wd, dir)
 	}
-	// Pre-validate dir so a missing subdirectory surfaces a clean,
-	// typed error rather than chdir EACCES/ENOENT bubbling up from
-	// cmd.Start().
 	if dir != "" {
 		if info, statErr := os.Stat(dir); statErr != nil {
 			return ExecResult{Command: display}, &ExecError{
@@ -324,8 +340,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 
-	// Log the invocation so silent-success commands still have visible
-	// proof of life in the run log.
 	logger := LoggerFromContext(ctx)
 	logger.Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
@@ -355,10 +369,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	var outBuf, errBuf strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
-	// Both streams log at info level: docker/go/kubectl/npm/next all
-	// write progress + deprecation warnings to stderr under normal
-	// success paths. Severity tracks the command's exit outcome, not
-	// a per-line judgment.
 	go streamLines(ctx, &wg, stdout, "info", logger, &outBuf)
 	go streamLines(ctx, &wg, stderr, "info", logger, &errBuf)
 
@@ -384,9 +394,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 				Cause:    waitErr,
 			}
 		}
-		// waitErr is not an ExitError: the process never produced an
-		// exit status. Tag with ExitNotStarted so Error() doesn't
-		// render the misleading "exit 0".
 		return res, &ExecError{
 			Command:  display,
 			ExitCode: ExitNotStarted,
@@ -410,8 +417,6 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 		buf.WriteString(line)
 		buf.WriteByte('\n')
 		if silent {
-			// Capture: drained to keep the child from blocking on
-			// the pipe, but don't emit a record per line.
 			continue
 		}
 		logger.Emit(recordEnvelope(ctx, LogRecord{

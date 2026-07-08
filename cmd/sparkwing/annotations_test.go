@@ -26,7 +26,7 @@ func seedAnnotationsRun(t *testing.T) orchestrator.Paths {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	start := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	if err := st.CreateRun(ctx, store.Run{
@@ -143,7 +143,7 @@ func TestAnnotationsAdd_LocalAppendsToNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	n, err := st.GetNode(context.Background(), "run-annot-1", "build")
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestAnnotationsAdd_LocalAppendsToStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	steps, err := st.ListNodeSteps(context.Background(), "run-annot-1")
 	if err != nil {
 		t.Fatal(err)

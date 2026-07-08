@@ -10,20 +10,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Concurrency service. Callers declare their OnLimit policy on every
-// acquire; the store enforces capacity per-key with latest-wins drift
-// handling. All decisions happen inside one SQLite transaction.
-
 type acquireSlotReq struct {
 	HolderID        string `json:"holder_id"`
 	RunID           string `json:"run_id"`
 	NodeID          string `json:"node_id,omitempty"`
 	Max             int    `json:"max,omitempty"`
+	Cost            int    `json:"cost,omitempty"`
 	Policy          string `json:"policy,omitempty"`
 	CacheKeyHash    string `json:"cache_key_hash,omitempty"`
 	CacheTTLNS      int64  `json:"cache_ttl_ns,omitempty"`
 	CancelTimeoutNS int64  `json:"cancel_timeout_ns,omitempty"`
 	LeaseSecs       int    `json:"lease_secs,omitempty"`
+	BypassRead      bool   `json:"bypass_read,omitempty"`
 }
 
 type acquireSlotResp struct {
@@ -39,6 +37,10 @@ type acquireSlotResp struct {
 	SupersededIDs    []string  `json:"superseded_ids,omitempty"`
 	PreviousCapacity int       `json:"previous_capacity,omitempty"`
 	DriftNote        string    `json:"drift_note,omitempty"`
+	// Queue observability for AcquireQueued, mirroring the store.
+	Position    int               `json:"position,omitempty"`
+	QueueLength int               `json:"queue_length,omitempty"`
+	Holders     []stateHolderResp `json:"holders,omitempty"`
 }
 
 // handleAcquireSlot resolves a single arrival. Status codes
@@ -64,18 +66,20 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		RunID:         body.RunID,
 		NodeID:        body.NodeID,
 		Capacity:      body.Max,
+		Cost:          body.Cost,
 		Policy:        body.Policy,
 		CacheKeyHash:  body.CacheKeyHash,
 		CacheTTL:      time.Duration(body.CacheTTLNS),
 		CancelTimeout: time.Duration(body.CancelTimeoutNS),
 		Lease:         time.Duration(body.LeaseSecs) * time.Second,
+		BypassRead:    body.BypassRead,
 	}
 	resp, err := s.store.AcquireConcurrencySlot(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	body_out := acquireSlotResp{
+	bodyOut := acquireSlotResp{
 		Kind:             string(resp.Kind),
 		HolderID:         resp.HolderID,
 		LeaseExpiresAt:   resp.LeaseExpiresAt,
@@ -87,15 +91,20 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		SupersededIDs:    resp.SupersededIDs,
 		PreviousCapacity: resp.PreviousCapacity,
 		DriftNote:        resp.DriftNote,
+		Position:         resp.Position,
+		QueueLength:      resp.QueueLength,
+	}
+	for _, h := range resp.Holders {
+		bodyOut.Holders = append(bodyOut.Holders, holderResp(h))
 	}
 	switch resp.Kind {
 	case store.AcquireGranted, store.AcquireCached:
-		body_out.Granted = true
-		writeJSON(w, http.StatusOK, body_out)
+		bodyOut.Granted = true
+		writeJSON(w, http.StatusOK, bodyOut)
 	case store.AcquireQueued, store.AcquireCoalesced, store.AcquireCancellingOthers:
-		writeJSON(w, http.StatusAccepted, body_out)
+		writeJSON(w, http.StatusAccepted, bodyOut)
 	case store.AcquireSkipped, store.AcquireFailed:
-		writeJSON(w, http.StatusTooManyRequests, body_out)
+		writeJSON(w, http.StatusTooManyRequests, bodyOut)
 	default:
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("unknown kind %q", resp.Kind))
 	}
@@ -164,8 +173,6 @@ func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	// One atomic transaction so a mid-handler crash leaves no
-	// stranded waiters.
 	_, _, _, err := s.store.ReleaseAndNotify(
 		r.Context(), key, body.HolderID, body.Outcome,
 		body.OutputRef, body.CacheKeyHash,
@@ -179,10 +186,15 @@ func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 }
 
 type stateResp struct {
-	Key      string            `json:"key"`
-	Capacity int               `json:"capacity"`
-	Holders  []stateHolderResp `json:"holders"`
-	Waiters  []stateWaiterResp `json:"waiters"`
+	Key      string `json:"key"`
+	Capacity int    `json:"capacity"`
+	// EffectiveCapacity is the most-restrictive minimum actually
+	// enforced; UsedCost is the summed cost of active holders. Available
+	// budget is EffectiveCapacity - UsedCost.
+	EffectiveCapacity int               `json:"effective_capacity"`
+	UsedCost          int               `json:"used_cost"`
+	Holders           []stateHolderResp `json:"holders"`
+	Waiters           []stateWaiterResp `json:"waiters"`
 }
 
 type stateHolderResp struct {
@@ -192,6 +204,18 @@ type stateHolderResp struct {
 	ClaimedAt      time.Time `json:"claimed_at"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 	Superseded     bool      `json:"superseded"`
+	Cost           int       `json:"cost,omitempty"`
+}
+
+// holderResp is the single mapping from a store holder to its wire
+// shape; every endpoint that returns holders goes through it so a new
+// field can't silently go missing from one response.
+func holderResp(h store.ConcurrencyHolder) stateHolderResp {
+	return stateHolderResp{
+		HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
+		ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
+		Superseded: h.Superseded, Cost: h.Cost,
+	}
 }
 
 type stateWaiterResp struct {
@@ -203,6 +227,10 @@ type stateWaiterResp struct {
 	LeaderRunID   string    `json:"leader_run_id,omitempty"`
 	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
 	CancelTimeout string    `json:"cancel_timeout,omitempty"`
+	Cost          int       `json:"cost,omitempty"`
+	// Position is the queue-policy waiter's 0-based rank in arrival
+	// order (0 == next in line).
+	Position int `json:"position"`
 }
 
 // handleConcurrencyState returns the current capacity + holders +
@@ -218,13 +246,12 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	resp := stateResp{Key: st.Key, Capacity: st.Capacity}
+	resp := stateResp{
+		Key: st.Key, Capacity: st.Capacity,
+		EffectiveCapacity: st.EffectiveCapacity, UsedCost: st.UsedCost,
+	}
 	for _, h := range st.Holders {
-		resp.Holders = append(resp.Holders, stateHolderResp{
-			HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
-			ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
-			Superseded: h.Superseded,
-		})
+		resp.Holders = append(resp.Holders, holderResp(h))
 	}
 	for _, wt := range st.Waiters {
 		var ct string
@@ -235,19 +262,137 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 			RunID: wt.RunID, NodeID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
 			Policy: wt.Policy, CacheKeyHash: wt.CacheKeyHash,
 			LeaderRunID: wt.LeaderRunID, LeaderNodeID: wt.LeaderNodeID,
-			CancelTimeout: ct,
+			CancelTimeout: ct, Cost: wt.Cost, Position: wt.Position,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
+type resolveWaiterResp struct {
+	Status              string            `json:"status"`
+	HolderID            string            `json:"holder_id,omitempty"`
+	HolderLeaseExpires  time.Time         `json:"holder_lease_expires,omitempty"`
+	OutputRef           string            `json:"output_ref,omitempty"`
+	OriginRunID         string            `json:"origin_run_id,omitempty"`
+	OriginNodeID        string            `json:"origin_node_id,omitempty"`
+	LeaderRunID         string            `json:"leader_run_id,omitempty"`
+	LeaderNodeID        string            `json:"leader_node_id,omitempty"`
+	LeaderOutcome       string            `json:"leader_outcome,omitempty"`
+	LeaderFailureReason string            `json:"leader_failure_reason,omitempty"`
+	Position            int               `json:"position,omitempty"`
+	Holders             []stateHolderResp `json:"holders,omitempty"`
+}
+
+// handleResolveWaiter is the polling read a waiting in-pod orchestrator
+// uses to learn whether it was promoted, cached, coalesced behind a
+// finished leader, or cancelled. Mirrors store.ResolveWaiter; the
+// orchestrator's waitThenRun loop drives it once the controller backend
+// returns a queued/coalesced/cancelling acquire.
+func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	q := r.URL.Query()
+	runID := q.Get("run_id")
+	if key == "" || runID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("key and run_id are required"))
+		return
+	}
+	res, err := s.store.ResolveWaiter(
+		r.Context(), key, runID, q.Get("node_id"),
+		q.Get("cache_key_hash"), q.Get("leader_run_id"), q.Get("leader_node_id"),
+		q.Get("bypass_read") == "true",
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := resolveWaiterResp{
+		Status:              string(res.Status),
+		HolderID:            res.HolderID,
+		HolderLeaseExpires:  res.HolderLeaseExpires,
+		OutputRef:           res.OutputRef,
+		OriginRunID:         res.OriginRunID,
+		OriginNodeID:        res.OriginNodeID,
+		LeaderRunID:         res.LeaderRunID,
+		LeaderNodeID:        res.LeaderNodeID,
+		LeaderOutcome:       res.LeaderOutcome,
+		LeaderFailureReason: res.LeaderFailureReason,
+		Position:            res.Position,
+	}
+	for _, h := range res.Holders {
+		out.Holders = append(out.Holders, holderResp(h))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type cancelWaiterReq struct {
+	RunID  string `json:"run_id"`
+	NodeID string `json:"node_id,omitempty"`
+}
+
+type cancelWaiterResp struct {
+	Cancelled bool `json:"cancelled"`
+}
+
+// handleCancelWaiter drops a parked waiter row so a waiter that gave up
+// (QueueTimeout) can't later be promoted to a holder.
+func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	var body cancelWaiterReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.RunID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
+		return
+	}
+	cancelled, err := s.store.CancelWaiter(r.Context(), key, body.RunID, body.NodeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cancelWaiterResp{Cancelled: cancelled})
+}
+
+type forceReleaseResp struct {
+	Dropped []stateHolderResp `json:"dropped,omitempty"`
+}
+
+// handleForceRelease drops superseded holders (a CancelOthers eviction
+// whose evicted holders won't terminate) and promotes the next
+// waiters, bounding forward progress.
+func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	dropped, err := s.store.ForceReleaseSupersededHolders(r.Context(), key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(dropped) > 0 {
+		if _, err := s.store.PromoteNextWaiters(r.Context(), key, store.DefaultConcurrencyLease); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("force-release: promote: %w", err))
+			return
+		}
+	}
+	var out forceReleaseResp
+	for _, h := range dropped {
+		out.Dropped = append(out.Dropped, holderResp(h))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleWaiterNotify is an SSE stream that surfaces resolution events
-// for a given run's waiting nodes. Events emitted:
+// for a given (run_id, node_id) waiter. Polls the concurrency state at
+// 250ms cadence and emits exactly one terminal event per stream, then
+// closes. Every event payload carries key + run_id, plus node_id when
+// one was supplied on the query string.
 //
-//	event: ready         data: {"key":"...","node_id":"..."}
-//	event: coalesced     data: {"key":"...","node_id":"...","output_ref":"..."}
-//	event: superseded    data: {"key":"...","node_id":"..."}
-//	event: stream_end    data: {}
+//	event: ready         data: {"key":"...","run_id":"...","node_id":"..."}
+//	event: superseded    data: {"key":"...","run_id":"...","node_id":"..."}
+//	event: stream_end    data: {"reason":"max_wait"|"key_not_found", ...}
+//
+// 30 minutes is the fail-safe per-stream cap; the stream also closes
+// when the client disconnects.
 func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	runID := r.URL.Query().Get("run_id")

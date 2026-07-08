@@ -80,10 +80,8 @@ func runNodeRemote(
 	logger.Info("runNodeRemote: fetching source",
 		"run_id", runID, "node_id", nodeID, "repo", repoURL, "branch", branch)
 
-	// Scoped per run+node so concurrent remote fallbacks on the same
-	// pod don't collide.
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	sparkwingDir, err := bincache.FetchPipelineSource(gcURL, repoURL, branch, trig.GitSHA, workDir)
 	if err != nil {
@@ -97,9 +95,8 @@ func runNodeRemote(
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binPath)
 
-	// cmd.Dir below must be the repo root so the SDK's walk-up to
-	// .sparkwing/ resolves.
-	childEnv := append(os.Environ(),
+	childEnv := append(
+		os.Environ(),
 		"SPARKWING_CONTROLLER_URL="+controllerURL,
 		"SPARKWING_LOGS_URL="+logsURL,
 		"SPARKWING_AGENT_TOKEN="+token,
@@ -113,8 +110,6 @@ func runNodeRemote(
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		// Child already wrote terminal state; surface a Result so the
-		// caller's logging matches the local path's shape.
 		logger.Warn("runNodeRemote: child exited non-zero",
 			"run_id", runID, "node_id", nodeID, "err", err)
 		return runner.Result{
@@ -130,8 +125,6 @@ func runNodeRemote(
 func resolveRemoteBinary(sparkwingDir, gcURL, token string, logger *slog.Logger) (string, error) {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
-		// Compile into a scoped path so a transient hash error doesn't
-		// poison the cache.
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
 		if cerr := bincache.CompilePipeline(sparkwingDir, tmp); cerr != nil {
 			return "", cerr

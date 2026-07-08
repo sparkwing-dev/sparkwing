@@ -3,6 +3,7 @@ package cache
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestHandleHealth(t *testing.T) {
-	req := httptest.NewRequest("GET", "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 	handleHealthCombined(w, req)
 
@@ -26,7 +27,7 @@ func TestArtifactUpload(t *testing.T) {
 	defer func() { artifactsDir = oldDir }()
 
 	body := strings.NewReader("test content")
-	req := httptest.NewRequest("POST", "/artifacts/job123?path=coverage/report.html", body)
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=coverage/report.html", body)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -34,7 +35,6 @@ func TestArtifactUpload(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Verify file was created
 	data, err := os.ReadFile(filepath.Join(artifactsDir, "job123", "coverage", "report.html"))
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestArtifactUpload(t *testing.T) {
 }
 
 func TestArtifactUpload_MissingPath(t *testing.T) {
-	req := httptest.NewRequest("POST", "/artifacts/job123", nil)
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -59,7 +59,7 @@ func TestArtifactUpload_DirectoryTraversal(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest("POST", "/artifacts/job123?path=../../etc/passwd", strings.NewReader("evil"))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=../../etc/passwd", strings.NewReader("evil"))
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -73,12 +73,11 @@ func TestArtifactList(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	// Create some files
 	os.MkdirAll(filepath.Join(artifactsDir, "job123", "sub"), 0o755)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "a.txt"), nil, 0o644)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "sub", "b.txt"), nil, 0o644)
 
-	req := httptest.NewRequest("GET", "/artifacts/job123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -94,7 +93,7 @@ func TestArtifactList_Empty(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest("GET", "/artifacts/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/nonexistent", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -113,7 +112,7 @@ func TestArtifactDownload_SingleFile(t *testing.T) {
 	os.MkdirAll(filepath.Join(artifactsDir, "job123"), 0o755)
 	os.WriteFile(filepath.Join(artifactsDir, "job123", "report.html"), []byte("html content"), 0o644)
 
-	req := httptest.NewRequest("GET", "/artifacts/job123?glob=*.html", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*.html", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -134,7 +133,7 @@ func TestArtifactDownload_NotFound(t *testing.T) {
 
 	os.MkdirAll(filepath.Join(artifactsDir, "job123"), 0o755)
 
-	req := httptest.NewRequest("GET", "/artifacts/job123?glob=*.xyz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*.xyz", nil)
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
@@ -164,12 +163,96 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 	artifactsDir = t.TempDir()
 	defer func() { artifactsDir = oldDir }()
 
-	req := httptest.NewRequest("POST", "/artifacts/job123?path=/etc/passwd", strings.NewReader("evil"))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=/etc/passwd", strings.NewReader("evil"))
 	w := httptest.NewRecorder()
 	handleArtifacts(w, req)
 
 	if w.Code != 400 {
 		t.Errorf("expected 400 for absolute path, got %d", w.Code)
+	}
+}
+
+// TestResolveGitRepo_AutoClonesWhenMissing covers the split-brain
+// recovery path: a name is in repoNames (config persisted) but the
+// bare-repo dir is missing (disk was wiped or never cloned at
+// registration time). resolveGitRepo should clone on demand from a
+// reachable URL rather than returning "registered but not cloned"
+// forever.
+//
+// The test uses a local upstream bare repo as the registered URL so
+// no SSH / network is required.
+func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
+	root := t.TempDir()
+
+	upstream := filepath.Join(root, "upstream.git")
+	if out, err := gitCmd("init", "--bare", upstream); err != nil {
+		t.Fatalf("init upstream: %v (%s)", err, out)
+	}
+
+	oldRepoDir := repoDir
+	oldNamesFile := namesFile
+	repoDir = filepath.Join(root, "cache")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	namesFile = filepath.Join(root, "names.json")
+	t.Cleanup(func() {
+		repoDir = oldRepoDir
+		namesFile = oldNamesFile
+		repoNamesMu.Lock()
+		delete(repoNames, "auto-clone-fixture")
+		repoNamesMu.Unlock()
+	})
+
+	repoNamesMu.Lock()
+	repoNames["auto-clone-fixture"] = upstream
+	repoNamesMu.Unlock()
+
+	bare, err := resolveGitRepo("auto-clone-fixture")
+	if err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(bare, "HEAD")); err != nil {
+		t.Fatalf("cloned bare missing HEAD: %v", err)
+	}
+
+	bare2, err := resolveGitRepo("auto-clone-fixture")
+	if err != nil {
+		t.Fatalf("second resolve: %v", err)
+	}
+	if bare2 != bare {
+		t.Fatalf("expected same bare path; got %q vs %q", bare2, bare)
+	}
+}
+
+// TestResolveGitRepo_AutoCloneFailureKeepsSeedHint verifies that a
+// failed auto-clone (bad URL / no network) still returns an error
+// pointing at the /sync/seed recovery path, so the operator's
+// playbook stays valid.
+func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
+	root := t.TempDir()
+	oldRepoDir := repoDir
+	repoDir = filepath.Join(root, "cache")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		repoDir = oldRepoDir
+		repoNamesMu.Lock()
+		delete(repoNames, "bad-url-fixture")
+		repoNamesMu.Unlock()
+	})
+
+	repoNamesMu.Lock()
+	repoNames["bad-url-fixture"] = "/this/path/does/not/exist.git"
+	repoNamesMu.Unlock()
+
+	_, err := resolveGitRepo("bad-url-fixture")
+	if err == nil {
+		t.Fatal("expected error from auto-clone of bogus URL")
+	}
+	if !strings.Contains(err.Error(), "/sync/seed") {
+		t.Fatalf("error should still point operators at /sync/seed; got %v", err)
 	}
 }
 

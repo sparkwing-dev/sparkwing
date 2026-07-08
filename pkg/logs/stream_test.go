@@ -37,8 +37,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 	}
 	defer stream.Close()
 
-	// Give the server loop a moment to enter the poll ticker. Then
-	// append a few lines and verify they show up on the stream.
 	var readErr error
 	var gotLines []string
 	var mu sync.Mutex
@@ -57,8 +55,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		readErr = scan.Err()
 	}()
 
-	// Append lines with tiny pauses so they land on separate poll
-	// cycles (server polls at 200ms). Tolerant of any scheduler.
 	for _, line := range []string{"alpha", "beta", "gamma"} {
 		if err := c.Append(context.Background(), "run-a", "node-x", []byte(line+"\n")); err != nil {
 			t.Fatalf("Append %s: %v", line, err)
@@ -66,7 +62,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		time.Sleep(220 * time.Millisecond)
 	}
 
-	// Wait for the reader to catch up.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
@@ -78,7 +73,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Close the stream to terminate the read goroutine cleanly.
 	_ = stream.Close()
 	<-done
 
@@ -87,7 +81,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 	if len(gotLines) < 3 {
 		t.Fatalf("got %d lines, want >= 3: %v (readErr=%v)", len(gotLines), gotLines, readErr)
 	}
-	// Order must be preserved even if more polls were interleaved.
 	want := []string{"alpha", "beta", "gamma"}
 	for i, w := range want {
 		if gotLines[i] != w {
@@ -115,15 +108,12 @@ func TestStream_ContextCancellationStops(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Confirm open.
 	buf := make([]byte, 16)
 	_, _ = stream.Read(buf)
 
 	cancel()
-	// Reader should now see EOF or similar within a moment.
 	stream.Close()
 
-	// Nothing to assert beyond "no hang"; the test times out on failure.
 	_ = filepath.Join(dir)
 }
 
@@ -148,10 +138,6 @@ func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
 	}
 	defer stream.Close()
 
-	// Pre-seed the log file -- the raw bytes include an embedded \r
-	// which would otherwise confuse SSE parsers. Append a normal
-	// line that does NOT have a trailing newline paired with a
-	// final line that does; both should survive.
 	_ = c.Append(context.Background(), "run-esc", "node-x",
 		[]byte("with\rembedded\n"))
 	_ = c.Append(context.Background(), "run-esc", "node-x",
@@ -159,18 +145,15 @@ func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Read what arrived.
 	go func() { time.Sleep(500 * time.Millisecond); stream.Close() }()
 	body, _ := io.ReadAll(stream)
 	got := string(body)
 
-	// CR must not appear in any data: line.
 	for _, line := range strings.Split(got, "\n") {
 		if strings.HasPrefix(line, "data: ") && strings.Contains(line, "\r") {
 			t.Errorf("SSE line contains raw CR: %q", line)
 		}
 	}
-	// "embedded" and "second" should both appear.
 	if !strings.Contains(got, "embedded") || !strings.Contains(got, "second") {
 		t.Errorf("missing expected content:\n%s", got)
 	}

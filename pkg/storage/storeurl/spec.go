@@ -7,9 +7,11 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/stdoutlogs"
@@ -115,13 +117,15 @@ func resolveControllerProfile(surface, controller string, lookup ProfileLookup) 
 }
 
 // OpenStateStoreFromSpec constructs a StateStore from a backends.Spec.
-// See OpenArtifactStoreFromSpec for error semantics.
+// See OpenArtifactStoreFromSpec for error semantics. The lookup
+// callback is consulted for type=controller specs; pass nil when no
+// controller-typed spec can appear.
 //
 // For type=sqlite, spec.Path is required and names the SQLite database
 // file. Callers that want the historical default (~/.sparkwing/state.db)
 // should pass that path explicitly so the factory has a single,
 // caller-provided source of truth.
-func OpenStateStoreFromSpec(_ context.Context, spec backends.Spec) (storage.StateStore, error) {
+func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.StateStore, error) {
 	switch spec.Type {
 	case backends.TypeSQLite:
 		path, err := expandPath(spec.Path)
@@ -129,7 +133,28 @@ func OpenStateStoreFromSpec(_ context.Context, spec backends.Spec) (storage.Stat
 			return nil, fmt.Errorf("state sqlite: %w", err)
 		}
 		return store.Open(path)
-	case backends.TypePostgres, backends.TypeMySQL, backends.TypeController:
+	case backends.TypeS3:
+		s3client, err := newS3Client(ctx)
+		if err != nil {
+			return nil, err
+		}
+		art := s3store.NewArtifactStore(spec.Bucket, spec.Prefix, s3client)
+		return s3state.New(art), nil
+	case backends.TypeController:
+		url, token, err := resolveControllerProfile("state", spec.Controller, lookup)
+		if err != nil {
+			return nil, err
+		}
+		return client.NewWithToken(url, nil, token), nil
+	case backends.TypeGCS, backends.TypeAzureBlob:
+		return nil, unimplemented("state", spec.Type)
+	case backends.TypePostgres:
+		dsn, err := resolveStateDSN("postgres", spec.URL, spec.URLSource)
+		if err != nil {
+			return nil, err
+		}
+		return store.OpenPostgres(ctx, dsn)
+	case backends.TypeMySQL:
 		return nil, unimplemented("state", spec.Type)
 	default:
 		return nil, fmt.Errorf("state backend type %q is not recognized", spec.Type)
@@ -138,6 +163,33 @@ func OpenStateStoreFromSpec(_ context.Context, spec backends.Spec) (storage.Stat
 
 func unimplemented(surface, t string) error {
 	return fmt.Errorf("%s backend type %q is recognized but not implemented in this build", surface, t)
+}
+
+// resolveStateDSN reads either an inline url or an env-var indirection
+// (`env:VAR_NAME`) and returns the resolved DSN. Mirrors the
+// convention used elsewhere in the backends config: keep the literal
+// connection string out of YAML by pointing at an environment variable
+// the runner provides.
+func resolveStateDSN(surface, url, urlSource string) (string, error) {
+	if url != "" {
+		return url, nil
+	}
+	if urlSource == "" {
+		return "", fmt.Errorf("state backend type=%s requires url or url_source: env:VAR", surface)
+	}
+	const prefix = "env:"
+	if !strings.HasPrefix(urlSource, prefix) {
+		return "", fmt.Errorf("state backend url_source must use the form %sVAR_NAME (got %q)", prefix, urlSource)
+	}
+	name := urlSource[len(prefix):]
+	if name == "" {
+		return "", fmt.Errorf("state backend url_source: %s name is empty", prefix)
+	}
+	val := os.Getenv(name)
+	if val == "" {
+		return "", fmt.Errorf("state backend url_source: env %s is empty or unset", name)
+	}
+	return val, nil
 }
 
 func expandPath(p string) (string, error) {

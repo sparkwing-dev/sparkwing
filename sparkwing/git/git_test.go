@@ -109,6 +109,35 @@ func TestCurrentBranch(t *testing.T) {
 	}
 }
 
+func TestDefaultBranch(t *testing.T) {
+	dir := withRepo(t)
+	writeFile(t, dir, "a.txt", "x")
+	commitIn(t, dir, "init")
+	ctx := context.Background()
+	def, err := DefaultBranch(ctx, dir)
+	if err != nil {
+		t.Fatalf("DefaultBranch (no origin): %v", err)
+	}
+	if def != "" {
+		t.Errorf("no origin: got %q, want empty", def)
+	}
+
+	upstream := withRepo(t)
+	writeFile(t, upstream, "u.txt", "y")
+	commitIn(t, upstream, "init upstream")
+	runIn(t, dir, "git", "remote", "add", "origin", upstream)
+	runIn(t, dir, "git", "fetch", "origin")
+	runIn(t, dir, "git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	def, err = DefaultBranch(ctx, dir)
+	if err != nil {
+		t.Fatalf("DefaultBranch (with origin/HEAD): %v", err)
+	}
+	if def != "main" {
+		t.Errorf("got %q, want main", def)
+	}
+}
+
 func TestRemoteOriginURL(t *testing.T) {
 	dir := withRepo(t)
 	writeFile(t, dir, "a.txt", "x")
@@ -116,7 +145,6 @@ func TestRemoteOriginURL(t *testing.T) {
 
 	ctx := context.Background()
 
-	// No origin: returns "" without error.
 	url, err := RemoteOriginURL(ctx, dir)
 	if err != nil {
 		t.Fatalf("RemoteOriginURL no-origin: %v", err)
@@ -125,7 +153,6 @@ func TestRemoteOriginURL(t *testing.T) {
 		t.Fatalf("RemoteOriginURL no-origin = %q, want empty", url)
 	}
 
-	// Add an origin and re-check.
 	runIn(t, dir, "git", "remote", "add", "origin", "git@github.com:owner/repo.git")
 	url, err = RemoteOriginURL(ctx, dir)
 	if err != nil {
@@ -188,9 +215,6 @@ func TestFilesetHashDeterministic(t *testing.T) {
 		t.Fatalf("non-deterministic: %q != %q", h1, h2)
 	}
 
-	// Untracked-not-ignored files are part of the build context the
-	// hash represents, so adding one shifts the hash. Adding the same
-	// file to .gitignore puts it back behind the ignore wall.
 	writeFile(t, dir, "junk.txt", "not tracked")
 	h3, err := FilesetHash(ctx, dir)
 	if err != nil {
@@ -204,9 +228,6 @@ func TestFilesetHashDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FilesetHash after gitignore: %v", err)
 	}
-	// .gitignore is itself an untracked file, so the hash differs from
-	// h1. The point is that h3b reflects "junk.txt is ignored": removing
-	// junk.txt from disk should leave the hash unchanged.
 	if err := os.Remove(filepath.Join(dir, "junk.txt")); err != nil {
 		t.Fatalf("remove junk.txt: %v", err)
 	}
@@ -245,7 +266,6 @@ func TestFilesetHashRespectsDockerignore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FilesetHash with dockerignore: %v", err)
 	}
-	// .dockerignore itself is in the fileset, so the hash changes.
 	if h1 == h2 {
 		t.Fatalf(".dockerignore had no effect: %q == %q", h1, h2)
 	}

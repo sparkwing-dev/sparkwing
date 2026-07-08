@@ -22,17 +22,14 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
-	// Seed a trigger and a half-finished run: worker got as far as
-	// CreateRun but crashed before FinishRun.
 	ctx := context.Background()
 	_ = st.CreateTrigger(ctx, store.Trigger{
 		ID:        "run-dead-1",
 		Pipeline:  "demo",
 		CreatedAt: time.Now(),
 	})
-	// Simulate worker claim with a very short lease.
 	claimed, err := st.ClaimNextTrigger(ctx, 100*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -44,16 +41,11 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 		StartedAt: time.Now(),
 	})
 
-	// Start the controller (Serve spawns the reaper). httptest.Server
-	// doesn't run Serve, so we need a variant that spins the reaper
-	// separately. Do it inline.
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	reaperCtx, cancelReaper := context.WithCancel(ctx)
 	defer cancelReaper()
-	// Run the reaper directly via the store; the unit test for the
-	// server's runReaper is covered by Serve integration, not here.
 	go func() {
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
@@ -62,7 +54,7 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 			case <-reaperCtx.Done():
 				return
 			case <-ticker.C:
-				ids, err := st.ReapExpiredTriggers(reaperCtx)
+				ids, err := store.Maintenance.ReapExpiredTriggers(st, reaperCtx)
 				if err != nil {
 					continue
 				}
@@ -76,7 +68,6 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 		}
 	}()
 
-	// Wait for lease to expire + reaper to sweep.
 	deadline := time.Now().Add(2 * time.Second)
 	var trig *store.Trigger
 	for time.Now().Before(deadline) {
@@ -90,7 +81,6 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 		t.Fatalf("trigger not re-queued after lease expiry: %+v", trig)
 	}
 
-	// Associated run is marked failed.
 	run, err := st.GetRun(ctx, "run-dead-1")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
@@ -102,7 +92,6 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 		t.Error("run.Error empty; want lease-expiry message")
 	}
 
-	// A fresh worker can claim the re-queued trigger.
 	c := client.New(ts.URL, nil)
 	second, err := c.ClaimTrigger(ctx)
 	if err != nil {
@@ -121,7 +110,7 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -136,7 +125,6 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Send heartbeats faster than the lease.
 	hbDone := make(chan struct{})
 	go func() {
 		defer close(hbDone)
@@ -149,10 +137,9 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 		}
 	}()
 
-	// Reap concurrently -- should not re-queue while heartbeats land.
 	go func() {
 		for range 10 {
-			_, _ = st.ReapExpiredTriggers(ctx)
+			_, _ = store.Maintenance.ReapExpiredTriggers(st, ctx)
 			time.Sleep(30 * time.Millisecond)
 		}
 	}()

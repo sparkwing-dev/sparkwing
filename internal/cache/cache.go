@@ -21,9 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Config holds every tunable knob the cache service accepts. All
@@ -53,6 +54,27 @@ type Config struct {
 	// ProxyMaxAge is the cleanup threshold for immutable proxy
 	// entries (typically content-addressed files like .tgz).
 	ProxyMaxAge time.Duration
+
+	// APIToken gates write endpoints (/bin, /cache, /upload, /sync,
+	// /uploads). Empty disables auth so in-cluster callers without
+	// the header keep working. External callers must send
+	// Authorization: Bearer <token>.
+	APIToken string
+
+	// AutoRegisterRepos is a comma-separated list of "name=url"
+	// pairs that get cloned into the gitcache on startup. Empty
+	// skips auto-registration.
+	AutoRegisterRepos string
+
+	// SSHKeyDir is the directory the SSH key is mounted at (a k8s
+	// secret in production). The contents are copied into ~/.ssh
+	// at startup with a trailing newline appended to satisfy
+	// OpenSSH. Missing directory degrades to public-repo-only.
+	SSHKeyDir string
+
+	// GitForkLimit caps concurrent git subprocesses. Webhook bursts
+	// at tight memory limits otherwise hit fork() EAGAIN.
+	GitForkLimit int
 }
 
 // DefaultConfig returns the same defaults the service shipped with
@@ -65,6 +87,8 @@ func DefaultConfig() Config {
 		FetchInterval: 30 * time.Second,
 		ProxyCacheTTL: 10 * time.Minute,
 		ProxyMaxAge:   7 * 24 * time.Hour,
+		SSHKeyDir:     "/etc/ssh-key",
+		GitForkLimit:  4,
 	}
 }
 
@@ -80,8 +104,9 @@ type Server struct {
 
 // New resolves a Config onto the package's filesystem layout,
 // creates every required directory, loads persisted repo-name
-// mappings, initialises metrics, sets up SSH, and auto-registers
-// repos from $GITCACHE_REPOS. Returns a ready-to-Run *Server.
+// mappings, initializes metrics, sets up SSH, and auto-registers
+// repos from Config.AutoRegisterRepos. Returns a ready-to-Run
+// *Server.
 //
 // Every effect that the legacy init() / initDataDirs() chain used
 // to perform at package-load time now happens here, AFTER the
@@ -107,11 +132,13 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ProxyMaxAge <= 0 {
 		cfg.ProxyMaxAge = 7 * 24 * time.Hour
 	}
+	if cfg.SSHKeyDir == "" {
+		cfg.SSHKeyDir = "/etc/ssh-key"
+	}
+	if cfg.GitForkLimit <= 0 {
+		cfg.GitForkLimit = 4
+	}
 
-	// Apply Config to the package-level path / interval vars the
-	// existing handlers + background loops still read directly.
-	// (Converting every handler to a method on *Server is a future
-	// cleanup; this preserves behavior with the smallest diff.)
 	dataRoot = cfg.DataDir
 	repoDir = filepath.Join(cfg.DataDir, "repos")
 	archDir = filepath.Join(cfg.DataDir, "archives")
@@ -123,6 +150,10 @@ func New(cfg Config) (*Server, error) {
 	proxyDir = cfg.ProxyDir
 	proxyCacheTTL = cfg.ProxyCacheTTL
 	proxyMaxAge = cfg.ProxyMaxAge
+	apiToken = cfg.APIToken
+	sshKeyDir = cfg.SSHKeyDir
+	autoRegisterReposSpec = cfg.AutoRegisterRepos
+	gitForkSem = make(chan struct{}, cfg.GitForkLimit)
 
 	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -142,7 +173,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)
 
-	// Gitcache routes.
 	s.mux.HandleFunc("/archive", handleArchive)
 	s.mux.HandleFunc("/repos", handleRepos)
 	s.mux.HandleFunc("/artifacts/", handleArtifacts)
@@ -159,7 +189,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/git/refresh", handleGitRefresh)
 	s.mux.HandleFunc("/git/", handleGit)
 
-	// Proxy routes (package registry cache).
 	s.mux.HandleFunc("/proxy/", handleProxy)
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
@@ -169,7 +198,7 @@ func New(cfg Config) (*Server, error) {
 		Addr:         cfg.Addr,
 		Handler:      otelhttp.NewHandler(s.mux, "sparkwing-cache"),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Minute, // archives can be large
+		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -213,7 +242,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
-	s.tel.Shutdown(shutdownCtx)
+	_ = s.tel.Shutdown(shutdownCtx)
 	s.wg.Wait()
 	log.Printf("sparkwing-cache stopped")
 	return <-serveErr

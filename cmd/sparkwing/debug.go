@@ -59,10 +59,6 @@ func runDebugRun(args []string) error {
 		return nil
 	}
 
-	// Hand-parse debug-owned flags (--pipeline plus the three pause
-	// directives) and forward everything else to the pipeline binary.
-	// Rule: no positional args on sparkwing -- --pipeline names the
-	// pipeline to run under debug supervision.
 	var pauseBefore, pauseAfter []string
 	var pauseOnFailure bool
 	pipelineName := ""
@@ -142,7 +138,7 @@ func runDebugRun(args []string) error {
 	return dispatchRun(append([]string{pipelineName}, remaining...))
 }
 
-// debugTargetFlags are the shared --run/--node/--on parse surface
+// debugTargetFlags are the shared --run/--node/--profile parse surface
 // for release/attach/env. Pulling this into a helper keeps the three
 // CLI entry points terse.
 type debugTargetFlags struct {
@@ -155,7 +151,7 @@ func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
-	on := fs.String("on", "", "profile name (cluster mode)")
+	on := fs.String("profile", "", "profile name (cluster mode)")
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		return debugTargetFlags{}, err
 	}
@@ -187,7 +183,7 @@ func runDebugRelease(args []string) error {
 		if err := requireController(prof, "debug release"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		if err := c.ReleaseDebugPause(ctx, t.run, t.node, releasedBy, store.PauseReleaseManual); err != nil {
 			return fmt.Errorf("release %s/%s: %w", t.run, t.node, err)
 		}
@@ -203,7 +199,7 @@ func runDebugRelease(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if err := st.ReleaseDebugPause(ctx, t.run, t.node, releasedBy, store.PauseReleaseManual); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("no active pause for %s/%s (already released or never paused)", t.run, t.node)
@@ -245,7 +241,7 @@ func runDebugAttach(args []string) error {
 	if err := requireController(prof, "debug attach"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	node, err := c.GetNode(ctx, t.run, t.node)
 	if err != nil {
 		return fmt.Errorf("get node %s/%s: %w", t.run, t.node, err)
@@ -290,7 +286,7 @@ func runDebugEnv(args []string) error {
 		if err := requireController(prof, "debug env"); err != nil {
 			return err
 		}
-		c := client.NewWithToken(prof.Controller, nil, prof.Token)
+		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		node, err = c.GetNode(ctx, t.run, t.node)
 		if err != nil {
 			return fmt.Errorf("get node: %w", err)
@@ -308,7 +304,7 @@ func runDebugEnv(args []string) error {
 		if oerr != nil {
 			return oerr
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 		node, err = st.GetNode(ctx, t.run, t.node)
 		if err != nil {
 			return err
@@ -348,10 +344,6 @@ func claimToPod(claim string) (pod, namespace string) {
 	case strings.HasPrefix(claim, "runner:"):
 		return strings.TrimPrefix(claim, "runner:"), namespace
 	case strings.HasPrefix(claim, "pod:"):
-		// pod:<runID>:<nodeID> -- the actual pod name is derived from
-		// the Job spec and isn't directly recoverable from the claim
-		// string. Fall back to the raw runID:nodeID value; operators
-		// can adjust via kubectl get pods + the printed namespace.
 		return strings.TrimPrefix(claim, "pod:"), namespace
 	}
 	return "", namespace

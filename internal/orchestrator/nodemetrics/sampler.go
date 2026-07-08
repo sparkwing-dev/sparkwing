@@ -32,7 +32,6 @@ func Run(ctx context.Context, interval time.Duration, sink Sink) {
 		prevCPUJiffies int64
 		prevWall       time.Time
 	)
-	// Seed so the first delta is meaningful.
 	if jiffies, ok := readCPUJiffies(); ok {
 		prevCPUJiffies = jiffies
 		prevWall = time.Now()
@@ -50,7 +49,6 @@ func Run(ctx context.Context, interval time.Duration, sink Sink) {
 				dWall := now.Sub(prevWall).Seconds()
 				dJiffies := jiffies - prevCPUJiffies
 				if dWall > 0 {
-					// CLK_TCK=100 on Linux; CPU-second/wall-second*1000 = millicores.
 					cpuSeconds := float64(dJiffies) / 100.0
 					millicores := int64((cpuSeconds / dWall) * 1000.0)
 					sample.CPUMillicores = max(millicores, 0)
@@ -84,15 +82,13 @@ func readCPUJiffies() (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	// Walk past the last ')' so a parenthesized comm with spaces
-	// doesn't confuse field indexing.
+	// hack: walk past the last ')' because a process name with spaces would misalign field indices
 	s := string(data)
 	end := strings.LastIndex(s, ")")
 	if end < 0 {
 		return 0, false
 	}
 	fields := strings.Fields(s[end+1:])
-	// After comm: field 0 = state, utime = field 11, stime = 12.
 	if len(fields) < 13 {
 		return 0, false
 	}

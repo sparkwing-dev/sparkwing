@@ -24,7 +24,10 @@ type TrendPoint struct {
 
 // handleTrends aggregates the runs table into hourly buckets over the
 // last N hours (default 24, capped at 14d). Cached runs = every node
-// finished with outcome=cached.
+// finished with outcome=cached. avg_wait_ms is the mean intake-to-start
+// latency (started_at - created_at) across the bucket's runs; rows with
+// a zero created_at (legacy sentinel) or with created_at > started_at
+// (clock skew) are excluded so the average reflects real waits.
 func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	hours := 24
 	if v := r.URL.Query().Get("hours"); v != "" {
@@ -39,8 +42,6 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 
-	// Bucket size: hour for <=48h windows, 3 hours for <=7 days,
-	// else daily.
 	bucketDur := time.Hour
 	switch {
 	case hours > 48 && hours <= 7*24:
@@ -51,7 +52,7 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	bucketNs := int64(bucketDur)
 
 	query := `
-SELECT id, pipeline, status, started_at, finished_at
+SELECT id, pipeline, status, created_at, started_at, finished_at
   FROM runs
  WHERE started_at >= ?
 `
@@ -67,18 +68,18 @@ SELECT id, pipeline, status, started_at, finished_at
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type runRow struct {
 		id, pipeline, status string
-		startedNs            int64
+		createdNs, startedNs int64
 		finishedNs           *int64
 	}
 	var runs []runRow
 	for rows.Next() {
 		var rr runRow
 		var fin *int64
-		if err := rows.Scan(&rr.id, &rr.pipeline, &rr.status, &rr.startedNs, &fin); err != nil {
+		if err := rows.Scan(&rr.id, &rr.pipeline, &rr.status, &rr.createdNs, &rr.startedNs, &fin); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -86,8 +87,6 @@ SELECT id, pipeline, status, started_at, finished_at
 		runs = append(runs, rr)
 	}
 
-	// "Cached" == every node's outcome is cached or satisfied. Done
-	// in Go to keep the SQL simple.
 	cachedIDs := map[string]bool{}
 	if len(runs) > 0 {
 		cq := `SELECT run_id, outcome FROM nodes WHERE run_id IN (` + placeholders(len(runs)) + `)`
@@ -104,7 +103,7 @@ SELECT id, pipeline, status, started_at, finished_at
 					byRun[runID] = append(byRun[runID], outcome)
 				}
 			}
-			nrows.Close()
+			_ = nrows.Close()
 			for id, outcomes := range byRun {
 				allCached := len(outcomes) > 0
 				for _, o := range outcomes {
@@ -123,6 +122,8 @@ SELECT id, pipeline, status, started_at, finished_at
 	type bucket struct {
 		total, passed, failed, cached int
 		durationsMs                   []int64
+		waitSumNs                     int64
+		waitCount                     int
 	}
 	buckets := map[int64]*bucket{}
 	for _, rr := range runs {
@@ -144,6 +145,10 @@ SELECT id, pipeline, status, started_at, finished_at
 		if rr.finishedNs != nil {
 			durMs := (*rr.finishedNs - rr.startedNs) / 1_000_000
 			bkt.durationsMs = append(bkt.durationsMs, durMs)
+		}
+		if rr.createdNs > 0 && rr.createdNs <= rr.startedNs {
+			bkt.waitSumNs += rr.startedNs - rr.createdNs
+			bkt.waitCount++
 		}
 	}
 
@@ -170,14 +175,19 @@ SELECT id, pipeline, status, started_at, finished_at
 			}
 			p95 = b.durationsMs[p95Idx]
 		}
+		var avgWait int64
+		if b.waitCount > 0 {
+			avgWait = b.waitSumNs / int64(b.waitCount) / int64(time.Millisecond)
+		}
 		out = append(out, TrendPoint{
-			Bucket:   time.Unix(0, k).UTC().Format(time.RFC3339),
-			Total:    b.total,
-			Passed:   b.passed,
-			Failed:   b.failed,
-			Cached:   b.cached,
-			AvgDurMs: avg,
-			P95DurMs: p95,
+			Bucket:    time.Unix(0, k).UTC().Format(time.RFC3339),
+			Total:     b.total,
+			Passed:    b.passed,
+			Failed:    b.failed,
+			Cached:    b.cached,
+			AvgDurMs:  avg,
+			P95DurMs:  p95,
+			AvgWaitMs: avgWait,
 		})
 	}
 

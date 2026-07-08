@@ -11,15 +11,17 @@ import (
 	"strings"
 )
 
-//go:embed all:content
+//go:embed all:mirror
 var allDocs embed.FS
 
 // Entry describes one doc topic. Slug is what the CLI takes via
 // --topic. Title and Summary are extracted from the markdown's first
-// H1 / first paragraph.
+// H1 / first paragraph. Field shape mirrors the web's
+// /docs/index.json (minus url / raw_url, which are web-deployment
+// artifacts) so an agent that learned the schema from either source
+// can consume the other.
 type Entry struct {
 	Slug    string `json:"slug"`
-	Path    string `json:"path"`
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
 	Bytes   int    `json:"bytes"`
@@ -28,7 +30,7 @@ type Entry struct {
 // List returns every embedded doc in alphabetical slug order.
 func List() []Entry {
 	var entries []Entry
-	_ = fs.WalkDir(allDocs, "content", func(p string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(allDocs, "mirror", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -39,12 +41,11 @@ func List() []Entry {
 		if rerr != nil {
 			return nil
 		}
-		rel := strings.TrimPrefix(p, "content/")
+		rel := strings.TrimPrefix(p, "mirror/")
 		slug := strings.TrimSuffix(rel, ".md")
 		title, summary := extractTitleSummary(body)
 		entries = append(entries, Entry{
 			Slug:    slug,
-			Path:    rel,
 			Title:   title,
 			Summary: summary,
 			Bytes:   len(body),
@@ -60,7 +61,7 @@ func List() []Entry {
 // rewriteCLILinks). Returns ErrNotFound when the slug is unknown.
 func Read(slug string) (string, error) {
 	slug = strings.TrimSuffix(slug, ".md")
-	p := path.Join("content", slug+".md")
+	p := path.Join("mirror", slug+".md")
 	body, err := fs.ReadFile(allDocs, p)
 	if err != nil {
 		return "", fmt.Errorf("docs: %q: %w", slug, ErrNotFound)
@@ -188,7 +189,7 @@ const ErrNotFound = docsError("doc not found")
 func extractTitleSummary(body []byte) (title, summary string) {
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	state := 0 // 0: looking for title, 1: looking for summary, 2: collecting summary
+	state := 0
 	var summaryLines []string
 	for scanner.Scan() {
 		line := scanner.Text()

@@ -103,7 +103,6 @@ func TestCompilePattern_DoubleStar(t *testing.T) {
 
 func TestCompilePattern_ExactPath(t *testing.T) {
 	m := compilePattern("CI_TRADEOFFS.md")
-	// No slash → basename match anywhere.
 	if !m("CI_TRADEOFFS.md") {
 		t.Error("expected exact match")
 	}
@@ -114,7 +113,7 @@ func TestCompilePattern_ExactPath(t *testing.T) {
 
 func TestIgnoreMatcherDropsMatched(t *testing.T) {
 	keep := buildIgnoreMatcher([]string{"*.md", "docs/"})
-	cases := map[string]bool{ // path -> expected keep
+	cases := map[string]bool{
 		"src/foo.tsx":       true,
 		"README.md":         false,
 		"docs/api.md":       false,
@@ -167,8 +166,6 @@ func TestDirPrefixIsBoundaryAware(t *testing.T) {
 // Composability: helpers should be assignable directly to a
 // CacheKeyFn-typed slot without ceremony.
 func TestSignatureIsCacheKeyFn(t *testing.T) {
-	// Compile-time check: assign each constructor result to an
-	// untyped variable; type inference picks sparkwing.CacheKeyFn.
 	_ = RepoFiles()
 	_ = RepoFiles(Ignore("*.md"))
 	_ = Files("src/**")

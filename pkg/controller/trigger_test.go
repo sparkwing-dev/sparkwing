@@ -30,18 +30,17 @@ func TestTrigger_Validation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	// Empty pipeline.
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]string{})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d want 400", resp.StatusCode)
 	}
+	_ = resp.Body.Close()
 
-	// Unknown field.
 	resp2 := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "demo",
 		"unknown":  true,
@@ -49,6 +48,7 @@ func TestTrigger_Validation(t *testing.T) {
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("unknown field status=%d want 400", resp2.StatusCode)
 	}
+	_ = resp2.Body.Close()
 }
 
 // A POST without trigger.source gets 400, not a 202 with a
@@ -59,15 +59,15 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "demo",
-		// trigger.source intentionally omitted
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d want 400 (missing trigger.source)", resp.StatusCode)
 	}
@@ -83,7 +83,7 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -92,6 +92,7 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 		"pipeline": "demo",
 		"trigger":  map[string]string{"source": "github"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -298,11 +299,11 @@ func TestTrigger_PlanAdmissionAcceptsAncestorHolder(t *testing.T) {
 	capture.mu.Lock()
 	got := capture.last
 	capture.mu.Unlock()
-	if got.InheritedPlanCacheKey != "cache-key" {
-		t.Fatalf("dispatcher admission key = %q, want cache-key", got.InheritedPlanCacheKey)
+	if got.InheritedPlanConcurrencyKey != "cache-key" {
+		t.Fatalf("dispatcher admission key = %q, want cache-key", got.InheritedPlanConcurrencyKey)
 	}
-	if got.InheritedPlanCacheHolderID != "grandparent-run/-" {
-		t.Fatalf("dispatcher admission holder = %q, want grandparent-run/-", got.InheritedPlanCacheHolderID)
+	if got.InheritedPlanConcurrencyHolderID != "grandparent-run/-" {
+		t.Fatalf("dispatcher admission holder = %q, want grandparent-run/-", got.InheritedPlanConcurrencyHolderID)
 	}
 }
 
@@ -359,28 +360,22 @@ func TestTrigger_PlanAdmissionRejectsNodeLevelHolder(t *testing.T) {
 func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	registerPipeline("trigger-e2e", func() sparkwing.Pipeline[sparkwing.NoInputs] { return triggerE2EPipe{} })
 
-	// Build the server first; httptest gives us a URL; we can then
-	// construct an InProcessDispatcher whose Backends point back at
-	// that URL via the HTTP client.
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Local Logs + Locks; State is the HTTP client targeting the
-	// same controller. This is the cluster-mode shape, collapsed
-	// into one process.
 	paths := orchestrator.PathsAt(dir)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	local := orchestrator.LocalBackends(paths, st) // State discarded
+	local := orchestrator.LocalBackends(paths, st, nil)
 	backends := orchestrator.Backends{
 		State:       client.New(ts.URL, nil),
 		Logs:        local.Logs,
@@ -388,12 +383,12 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	}
 	srv.WithDispatcher(inprocdispatch.InProcessDispatcher{Backends: backends})
 
-	// Fire the webhook.
 	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "trigger-e2e",
 		"trigger":  map[string]string{"source": "github"},
 		"git":      map[string]string{"branch": "main", "sha": "abc123"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("trigger status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -406,8 +401,6 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 		t.Fatal("empty run_id")
 	}
 
-	// Poll until the run terminates. Budget is generous; the
-	// pipeline is trivial.
 	deadline := time.Now().Add(3 * time.Second)
 	var finalRun *store.Run
 	for time.Now().Before(deadline) {
@@ -450,7 +443,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
@@ -460,6 +453,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 		"trigger":  map[string]string{"source": "github"},
 		"git":      map[string]string{"branch": "main", "sha": "deadbeef"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
@@ -490,7 +484,6 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if run.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
 	}
-	// runs list should include it.
 	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
@@ -518,7 +511,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	created := time.Now().Add(-time.Hour)
@@ -532,7 +525,6 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 		t.Fatalf("CreateRun pending: %v", err)
 	}
 
-	// Orchestrator-side promotion: same id, status=running, fresh started_at.
 	started := time.Now()
 	if err := st.CreateRun(ctx, store.Run{
 		ID:        "run-pending-1",
@@ -550,7 +542,6 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	if got.Status != "running" {
 		t.Errorf("Status=%q want running", got.Status)
 	}
-	// CreatedAt preserved from original pending insert.
 	if got.CreatedAt.Truncate(time.Second) != created.Truncate(time.Second) {
 		t.Errorf("CreatedAt=%v want %v (lost on upsert)", got.CreatedAt, created)
 	}
@@ -564,7 +555,7 @@ func TestTrigger_DispatcherError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
@@ -576,12 +567,11 @@ func TestTrigger_DispatcherError(t *testing.T) {
 		"pipeline": "x",
 		"trigger":  map[string]string{"source": "manual"},
 	})
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status=%d want 500", resp.StatusCode)
 	}
 }
-
-// --- fixtures ---
 
 type triggerE2EPipe struct{ sparkwing.Base }
 

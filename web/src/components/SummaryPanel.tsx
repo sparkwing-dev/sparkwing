@@ -116,6 +116,15 @@ interface Tally {
 // shape, approval gates, cached runs, inline jobs, group membership,
 // and cross-pipeline spawns. Each spawn entry is a deep link to the
 // child run; everything else is informational.
+// fmtDurMs renders a coarse human duration for the cache-TTL chip.
+function fmtDurMs(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s >= 86400) return `${Math.round(s / 86400)}d`;
+  if (s >= 3600) return `${Math.round(s / 3600)}h`;
+  if (s >= 60) return `${Math.round(s / 60)}m`;
+  return `${s}s`;
+}
+
 export function NodeAttrChips({ n }: { n: RunNode }) {
   const chips: { label: string; cls: string; key: string }[] = [];
   if (n.dynamic)
@@ -154,6 +163,29 @@ export function NodeAttrChips({ n }: { n: RunNode }) {
       label: `group: ${n.groups.join(", ")}`,
       cls: "bg-cyan-500/15 text-cyan-300",
     });
+  if (n.modifiers?.cache)
+    chips.push({
+      key: "cache",
+      label: n.modifiers.cache_ttl_ms
+        ? `cache (ttl ${fmtDurMs(n.modifiers.cache_ttl_ms)})`
+        : "cache",
+      cls: "bg-violet-500/15 text-violet-300",
+    });
+  if (n.modifiers?.conc_group) {
+    const m = n.modifiers;
+    const parts: string[] = [`group ${m.conc_group}`];
+    if (m.conc_capacity) parts.push(`cap ${m.conc_capacity}`);
+    if (m.conc_cost && m.conc_cost > 1) parts.push(`cost ${m.conc_cost}`);
+    if (m.conc_scope && m.conc_scope !== "global")
+      parts.push(`scope ${m.conc_scope}`);
+    if (m.conc_on_limit && m.conc_on_limit !== "queue")
+      parts.push(m.conc_on_limit);
+    chips.push({
+      key: "concurrency",
+      label: `concurrency: ${parts.join(", ")}`,
+      cls: "bg-teal-500/15 text-teal-300",
+    });
+  }
   return (
     <span className="flex items-center gap-1 flex-wrap">
       {chips.map((c) => (

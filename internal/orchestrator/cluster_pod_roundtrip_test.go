@@ -10,8 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/sources"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -51,9 +50,6 @@ func ensurePodRTPipe(t *testing.T) *sparkwing.Registration {
 func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	reg := ensurePodRTPipe(t)
 
-	// 1. Fake controller serving /api/v1/secrets/<name>. Auth header
-	// is checked so a missing/wrong token surfaces as 401, matching
-	// the production controller's contract.
 	const wantToken = "pod-rt-token"
 	hits := map[string]int{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,52 +74,14 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 2. Build the snapshot the orchestrator would persist. The pod
-	// receives only declarations and the resolved Config blob -- no
-	// secret values.
-	cfgBlob, _ := json.Marshal(&podRTCfg{ImageRepo: "example.dev/api", Replicas: 3})
-	snap, err := json.Marshal(planSnapshot{
-		Pipeline:       "pod-rt-pipe",
-		RunID:          "run-pod-rt",
-		PipelineConfig: cfgBlob,
-		Secrets: pipelines.SecretsField{
-			{Name: "DEPLOY_TOKEN", Required: true},
-			{Name: "SLACK_HOOK", Optional: true},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal snapshot: %v", err)
-	}
-
-	// 3. Pod-side: build the resolver the cluster worker would
-	// install for a remote-controller source binding. The SDK
-	// factory handles the http wiring; we just supply the URL+token
-	// via the profile-lookup callback.
-	src := sources.Source{
-		Name: "pod-controller", Type: sources.TypeRemoteController, Controller: "pod-profile",
-	}
-	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
-		func(_ string) (string, string, error) { return srv.URL, wantToken, nil })
+	src := backends.Spec{Type: backends.TypeController, URL: srv.URL, Token: wantToken}
+	resolver, err := sparkwing.NewSecretResolverFromSpec(context.Background(), src)
 	if err != nil {
 		t.Fatalf("build resolver: %v", err)
 	}
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
 
-	// 4. Rehydrate config from the snapshot. Same call the pod's
-	// run-node path makes.
-	gotCfg, err := rehydratePipelineConfig(snap, reg)
-	if err != nil {
-		t.Fatalf("rehydrate config: %v", err)
-	}
-	c := gotCfg.(*podRTCfg)
-	if c.ImageRepo != "example.dev/api" || c.Replicas != 3 {
-		t.Errorf("config rehydrated wrong: %+v", c)
-	}
-
-	// 5. Re-resolve secrets against the controller-backed resolver.
-	// DEPLOY_TOKEN must come back with the value the fake server
-	// served; SLACK_HOOK is optional so a 404 doesn't fail the run.
-	gotSec, err := rehydratePipelineSecrets(ctx, snap, reg)
+	gotSec, err := rehydratePipelineSecrets(ctx, nil, reg)
 	if err != nil {
 		t.Fatalf("rehydrate secrets: %v", err)
 	}
@@ -135,8 +93,6 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 		t.Errorf("SLACK_HOOK should be empty (optional, 404'd), got %q", s.SlackHook)
 	}
 
-	// 6. Confirm the controller was actually hit. The snapshot
-	// shipped names only -- values came over the wire at run time.
 	if hits["DEPLOY_TOKEN"] == 0 {
 		t.Errorf("controller never queried for DEPLOY_TOKEN")
 	}
@@ -184,19 +140,13 @@ func TestClusterPodRoundTrip_AuthFailureSurfacesAsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src := sources.Source{
-		Name: "pod-controller", Type: sources.TypeRemoteController, Controller: "pod-profile",
-	}
-	resolver, err := sparkwing.NewSecretResolverFromSource(context.Background(), src,
-		func(_ string) (string, string, error) { return srv.URL, "bad-token", nil })
+	src := backends.Spec{Type: backends.TypeController, URL: srv.URL, Token: "bad-token"}
+	resolver, err := sparkwing.NewSecretResolverFromSpec(context.Background(), src)
 	if err != nil {
 		t.Fatalf("resolver: %v", err)
 	}
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
-	snap, _ := json.Marshal(planSnapshot{
-		Secrets: pipelines.SecretsField{{Name: "DEPLOY_TOKEN", Required: true}},
-	})
-	_, err = rehydratePipelineSecrets(ctx, snap, reg)
+	_, err = rehydratePipelineSecrets(ctx, nil, reg)
 	if err == nil {
 		t.Fatal("expected auth-error to propagate")
 	}

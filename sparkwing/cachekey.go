@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+// NoCache is the typed sentinel returned from a [CacheKeyFn] to
+// explicitly opt this invocation out of memoization. It is distinct
+// from the zero CacheKey: returning
+// NoCache surfaces "explicit opt-out" in operator logs (cache row
+// "skipped: explicit opt-out"), while returning the zero value
+// surfaces a "missing key" warning. Both bypass memoization for the
+// invocation, but the operator-facing signal is different.
+const NoCache CacheKey = "ck:nocache"
+
+// IsNoCache reports whether k is the explicit [NoCache] sentinel.
+// The zero CacheKey is NOT NoCache.
+func (k CacheKey) IsNoCache() bool { return k == NoCache }
+
 // Key composes a CacheKey from arbitrary parts. Parts are stringified
 // (via fmt.Sprintf("%v")), joined with a separator unlikely to appear
 // in values, and SHA-256 hashed. The result is a 16-char hex digest
@@ -27,7 +40,7 @@ func Key(parts ...any) CacheKey {
 	var b strings.Builder
 	for i, p := range parts {
 		if i > 0 {
-			b.WriteByte('\x1e') // ASCII record-separator
+			b.WriteByte('\x1e')
 		}
 		fmt.Fprintf(&b, "%v", p)
 	}

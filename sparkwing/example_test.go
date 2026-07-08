@@ -90,9 +90,20 @@ func ExampleWorkStep_Risk() {
 		_, err := sw.Bash(ctx, "rm -rf /var/cache/sparkwing/old").Run()
 		return err
 	})
-	// The Risk() modifier lives on the inner WorkStep; for a single-
-	// step Job built from a bare func, declare a typed Job (see
-	// ExampleRefTo's deploy) so you have a WorkStep to mark.
+	_ = plan
+}
+
+// ExampleExec shows the argv-style command builder. Prefer it over
+// [sw.Bash] for invocations that don't need shell features: no shell
+// parsing means no quoting concerns even when argv values contain
+// spaces, dollar signs, or backticks.
+func ExampleExec() {
+	plan := sw.NewPlan()
+	sw.Job(plan, "push-image", func(ctx context.Context) error {
+		tag := "app:" + "dev"
+		_, err := sw.Exec(ctx, "docker", "push", tag).Run()
+		return err
+	})
 	_ = plan
 }
 

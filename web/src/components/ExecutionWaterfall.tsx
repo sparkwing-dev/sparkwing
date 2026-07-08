@@ -90,7 +90,7 @@ interface StepRow {
 
 // stepsForNode pulls every NodeWorkStep with timing data and projects
 // it onto the run-wide timeline (offsets relative to `zero`). Steps
-// without started_at are excluded — they never ran or haven't run yet.
+// without started_at are excluded -- they never ran or haven't run yet.
 function stepsForNode(node: Node, zero: number): StepRow[] {
   const work = node.work;
   if (!work || !work.steps) return [];
@@ -146,7 +146,7 @@ export default function ExecutionWaterfall({
   onSelectNode?: (id: string | null) => void;
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
   findMatched?: Set<string>;
-  // Keys: "<nodeID>::<stepID>" — disambiguates step names reused across nodes.
+  // Keys: "<nodeID>::<stepID>" -- disambiguates step names reused across nodes.
   findMatchedSteps?: Set<string>;
 }) {
   const { rows, totalMs, zero } = extractRows(nodes);

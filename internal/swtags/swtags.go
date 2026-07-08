@@ -2,7 +2,7 @@
 // values back to struct fields by reflection. The reflection is shared
 // between the sparkwing package (InspectPipelineConfig /
 // ResolvePipelineConfig) and internal/sparkwingruntime
-// (ResolvePipelineSecrets / DecodePipelineConfig); centralising it
+// (ResolvePipelineSecrets / DecodePipelineConfig); centralizing it
 // here keeps the two import paths from carrying duplicate copies.
 //
 // Tag grammar:
@@ -67,7 +67,6 @@ func Parse(t reflect.Type) ([]FieldSpec, error) {
 			case "optional":
 				spec.Optional = true
 			case "":
-				// trailing comma, ignore
 			default:
 				return nil, fmt.Errorf("field %s: unknown sw modifier %q", f.Name, mod)
 			}

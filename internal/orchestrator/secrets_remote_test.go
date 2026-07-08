@@ -13,12 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// sparkwing run --secrets PROF wires through to remoteSecretSource which
-// reads the profile from
-// ~/.config/sparkwing/profiles.yaml and builds an HTTP-backed
-// secrets.Source. We verify both the happy path and the
-// "name not found" -> ErrSecretMissing translation.
-
 func TestRemoteSecretSource_ResolvesAgainstProfile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") {
@@ -44,8 +38,9 @@ func TestRemoteSecretSource_ResolvesAgainstProfile(t *testing.T) {
 	yaml := fmt.Sprintf(`default: stage
 profiles:
   stage:
-    controller: %s
-    token: t-stage
+    controller:
+      url: %s
+      token: t-stage
 `, srv.URL)
 	if err := os.WriteFile(filepath.Join(cfgDir, "profiles.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write profiles.yaml: %v", err)
@@ -78,9 +73,7 @@ func TestRemoteSecretSource_BadProfileErrors(t *testing.T) {
 	}
 	yaml := `default: only
 profiles:
-  only:
-    controller: ""
-    token: ""
+  only: {}
 `
 	if err := os.WriteFile(filepath.Join(tmpHome, ".config", "sparkwing", "profiles.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write: %v", err)

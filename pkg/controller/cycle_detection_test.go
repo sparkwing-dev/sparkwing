@@ -24,10 +24,9 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	// Seed: a parent run for pipeline "A".
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "A", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
@@ -37,7 +36,6 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	// Trigger for pipeline "A" carrying parent_run_id=parent -> cycle.
 	body := strings.NewReader(`{"pipeline":"A","parent_run_id":"parent","trigger":{"source":"manual"}}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
@@ -62,10 +60,9 @@ func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	// Chain: A -> B. Spawning C from B is fine.
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "root", Pipeline: "A", Status: "success", StartedAt: time.Now(),
 	}); err != nil {
@@ -100,7 +97,7 @@ func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	for _, e := range []struct {
@@ -143,7 +140,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
@@ -212,7 +209,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
@@ -274,7 +271,7 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
@@ -291,7 +288,6 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	// Cross-repo spawn: declare a different repo, no SHA.
 	body := strings.NewReader(`{
 		"pipeline":"build",
 		"parent_run_id":"parent",
@@ -338,7 +334,7 @@ func TestCycleDetect_ParentNotFound400(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()

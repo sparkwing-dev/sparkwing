@@ -37,15 +37,6 @@ func runTriggers(args []string) error {
 	}
 }
 
-// 'sparkwing triggers fire' was a functional duplicate of
-// 'sparkwing pipeline run --on <profile>'. Both called CreateTrigger
-// on the controller with the same request shape, so the fire
-// subcommand was removed. Use 'sparkwing pipeline run --pipeline X
-// --on <profile>' instead; pass --from, --config the same way you
-// would locally.
-
-// --- list -------------------------------------------------------
-
 func runTriggersList(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersList.Path, flag.ContinueOnError)
 	status := fs.String("status", "", "filter by status (pending|claimed|done)")
@@ -54,7 +45,6 @@ func runTriggersList(args []string) error {
 	limit := fs.Int("limit", 20, "max rows")
 	quiet := fs.BoolP("quiet", "q", false, "print only trigger ids")
 	output := fs.StringP("output", "o", "", "output format (json)")
-	asJSON := fs.Bool("json", false, "alias for -o json")
 	on := addProfileFlag(fs)
 
 	if err := parseAndCheck(cmdTriggersList, fs, args); err != nil {
@@ -83,7 +73,7 @@ func runTriggersList(args []string) error {
 		f.Repo = *repo
 	}
 
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	trigs, err := c.ListTriggers(ctx, f)
@@ -91,8 +81,7 @@ func runTriggersList(args []string) error {
 		return fmt.Errorf("triggers list: %w", err)
 	}
 
-	wantJSON := *asJSON || strings.EqualFold(*output, "json")
-	if wantJSON {
+	if strings.EqualFold(*output, "json") {
 		buf, _ := json.MarshalIndent(trigs, "", "  ")
 		fmt.Fprintln(os.Stdout, string(buf))
 		return nil
@@ -137,13 +126,10 @@ func runTriggersList(args []string) error {
 	return tw.Flush()
 }
 
-// --- get --------------------------------------------------------
-
 func runTriggersGet(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersGet.Path, flag.ContinueOnError)
 	id := fs.String("id", "", "trigger identifier")
 	output := fs.StringP("output", "o", "", "output format (json)")
-	asJSON := fs.Bool("json", false, "alias for -o json")
 	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmdTriggersGet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -158,7 +144,7 @@ func runTriggersGet(args []string) error {
 	if err := requireController(prof, "triggers get"); err != nil {
 		return err
 	}
-	c := client.NewWithToken(prof.Controller, nil, prof.Token)
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	trig, err := c.GetTrigger(ctx, *id)
@@ -169,13 +155,11 @@ func runTriggersGet(args []string) error {
 		return fmt.Errorf("triggers get: %w", err)
 	}
 
-	wantJSON := *asJSON || strings.EqualFold(*output, "json")
-	if wantJSON {
+	if strings.EqualFold(*output, "json") {
 		buf, _ := json.MarshalIndent(trig, "", "  ")
 		fmt.Fprintln(os.Stdout, string(buf))
 		return nil
 	}
-	// Plain multi-line render. Stable alignment so eyeball diffs work.
 	fmt.Fprintf(os.Stdout, "id:         %s\n", trig.ID)
 	fmt.Fprintf(os.Stdout, "pipeline:   %s\n", trig.Pipeline)
 	fmt.Fprintf(os.Stdout, "status:     %s\n", trig.Status)
