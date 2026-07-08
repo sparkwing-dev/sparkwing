@@ -47,6 +47,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **controller:** Queued concurrency waiters now recover when a holder row
+  disappears without a release notification. Waiter polling promotes the FIFO
+  head under the same per-key lock as admission, and the controller's notify
+  stream uses that waiter-resolution path while preserving the documented
+  `key_not_found` terminal event.
 
 ## [v0.15.0] - 2026-07-08
 ### Fixed
