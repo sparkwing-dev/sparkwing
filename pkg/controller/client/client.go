@@ -444,10 +444,11 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 
 // TriggerRequest is the body of POST /api/v1/triggers.
 type TriggerRequest struct {
-	Pipeline string            `json:"pipeline"`
-	Args     map[string]string `json:"args,omitempty"`
-	Trigger  TriggerMeta       `json:"trigger"`
-	Git      GitMeta           `json:"git"`
+	Pipeline      string               `json:"pipeline"`
+	Args          map[string]string    `json:"args,omitempty"`
+	Trigger       TriggerMeta          `json:"trigger"`
+	Git           GitMeta              `json:"git"`
+	PlanAdmission TriggerPlanAdmission `json:"plan_admission,omitempty"`
 	// ParentRunID threads cross-pipeline ancestry so the controller
 	// can reject cycles.
 	ParentRunID string `json:"parent_run_id,omitempty"`
@@ -467,6 +468,11 @@ type TriggerMeta struct {
 	Source string            `json:"source,omitempty"`
 	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
+}
+
+type TriggerPlanAdmission struct {
+	Key      string `json:"key,omitempty"`
+	HolderID string `json:"holder_id,omitempty"`
 }
 
 // GitMeta is the optional git state attached to a trigger. Any field
@@ -772,8 +778,12 @@ func (c *Client) EnqueueTriggerWithEnv(
 	triggerEnv map[string]string,
 ) (string, error) {
 	req := TriggerRequest{
-		Pipeline:     pipeline,
-		Args:         args,
+		Pipeline: pipeline,
+		Args:     args,
+		PlanAdmission: TriggerPlanAdmission{
+			Key:      triggerEnv["SPARKWING_PLAN_ADMISSION_KEY"],
+			HolderID: triggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"],
+		},
 		ParentRunID:  parentRunID,
 		ParentNodeID: parentNodeID,
 		RetryOf:      retryOf,
