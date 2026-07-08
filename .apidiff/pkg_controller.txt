@@ -96,4 +96,5 @@ type TrendPoint struct {
 }
 
 # methods on un-declared receiver types (likely a bug)
+func (r *flushingStatusRecorder) Flush()
 func (r *statusRecorder) WriteHeader(code int)
