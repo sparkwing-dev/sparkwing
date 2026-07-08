@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.1] - 2026-07-08
 ### Fixed
 
 - **controller:** Queued concurrency waiters now recover when a holder row
