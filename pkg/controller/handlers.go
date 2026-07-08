@@ -469,27 +469,48 @@ func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, 
 	if admission.Key == "" || admission.HolderID == "" {
 		return nil, errors.New("plan_admission requires key and holder_id")
 	}
-	expectedHolderID := parentRunID + "/-"
-	if admission.HolderID != expectedHolderID {
-		return nil, fmt.Errorf("plan_admission holder_id %q does not match parent holder %q", admission.HolderID, expectedHolderID)
-	}
-	state, err := s.store.GetConcurrencyState(ctx, admission.Key)
+	holder, err := s.store.ActiveConcurrencyHolder(ctx, admission.Key, admission.HolderID, time.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, fmt.Errorf("plan_admission key %q has no active entry", admission.Key)
+			return nil, fmt.Errorf("plan_admission holder %q is not active for key %q", admission.HolderID, admission.Key)
 		}
-		return nil, fmt.Errorf("plan_admission validate state: %w", err)
+		return nil, fmt.Errorf("plan_admission validate holder: %w", err)
 	}
-	now := time.Now()
-	for _, holder := range state.Holders {
-		if holder.HolderID == admission.HolderID && !holder.Superseded && holder.LeaseExpiresAt.After(now) {
-			return map[string]string{
-				triggerEnvPlanAdmissionKey:      admission.Key,
-				triggerEnvPlanAdmissionHolderID: admission.HolderID,
-			}, nil
+	if ok, err := s.runIsSelfOrAncestor(ctx, parentRunID, holder.RunID); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("plan_admission holder %q belongs to run %q, not parent run %q or its ancestors",
+			admission.HolderID, holder.RunID, parentRunID)
+	}
+	return map[string]string{
+		triggerEnvPlanAdmissionKey:      admission.Key,
+		triggerEnvPlanAdmissionHolderID: admission.HolderID,
+	}, nil
+}
+
+func (s *Server) runIsSelfOrAncestor(ctx context.Context, runID, candidateAncestorRunID string) (bool, error) {
+	if candidateAncestorRunID == "" {
+		return false, nil
+	}
+	currentRunID := runID
+	const maxDepth = 64
+	for range maxDepth {
+		if currentRunID == "" {
+			return false, nil
 		}
+		if currentRunID == candidateAncestorRunID {
+			return true, nil
+		}
+		run, err := s.store.GetRun(ctx, currentRunID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return false, fmt.Errorf("parent_run_id %s not found", currentRunID)
+			}
+			return false, fmt.Errorf("get parent run %s: %w", currentRunID, err)
+		}
+		currentRunID = run.ParentRunID
 	}
-	return nil, fmt.Errorf("plan_admission holder %q is not active for key %q", admission.HolderID, admission.Key)
+	return false, fmt.Errorf("parent_run_id %s ancestor chain exceeds %d", runID, maxDepth)
 }
 
 // handleTrigger is the external intake for a new run. Persists the
@@ -559,6 +580,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
+	var inheritedPlanCacheKey, inheritedPlanCacheHolderID string
 	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" {
 		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
 		if err != nil {
@@ -571,6 +593,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		for key, value := range admissionEnv {
 			triggerEnv[key] = value
 		}
+		inheritedPlanCacheKey = body.PlanAdmission.Key
+		inheritedPlanCacheHolderID = body.PlanAdmission.HolderID
 	}
 
 	// The trigger ID doubles as the eventual run ID.
@@ -632,7 +656,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			Repo:    body.Git.Repo,
 			RepoURL: body.Git.RepoURL,
 		},
-		ParentRunID: body.ParentRunID,
+		ParentRunID:                body.ParentRunID,
+		InheritedPlanCacheKey:      inheritedPlanCacheKey,
+		InheritedPlanCacheHolderID: inheritedPlanCacheHolderID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

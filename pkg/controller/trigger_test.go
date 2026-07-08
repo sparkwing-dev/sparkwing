@@ -234,6 +234,79 @@ func TestTrigger_PlanAdmissionRequiresActiveParentHolder(t *testing.T) {
 	}
 }
 
+func TestTrigger_PlanAdmissionAcceptsAncestorHolder(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for _, run := range []store.Run{
+		{ID: "grandparent-run", Pipeline: "grandparent", Status: "running", StartedAt: time.Now()},
+		{ID: "parent-run", Pipeline: "parent", Status: "running", ParentRunID: "grandparent-run", StartedAt: time.Now()},
+	} {
+		if err := st.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun(%s): %v", run.ID, err)
+		}
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "grandparent-run/-",
+		RunID:    "grandparent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	capture := &captureDispatcher{}
+	srv := controller.New(st, nil)
+	srv.WithDispatcher(capture)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "cache-key",
+			"holder_id": "grandparent-run/-",
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(ctx, body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "cache-key" {
+		t.Fatalf("admission key = %q, want cache-key", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "grandparent-run/-" {
+		t.Fatalf("admission holder = %q, want grandparent-run/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	}
+	capture.mu.Lock()
+	got := capture.last
+	capture.mu.Unlock()
+	if got.InheritedPlanCacheKey != "cache-key" {
+		t.Fatalf("dispatcher admission key = %q, want cache-key", got.InheritedPlanCacheKey)
+	}
+	if got.InheritedPlanCacheHolderID != "grandparent-run/-" {
+		t.Fatalf("dispatcher admission holder = %q, want grandparent-run/-", got.InheritedPlanCacheHolderID)
+	}
+}
+
 // TestTrigger_InProcessDispatcher_FullLoop is the full vertical
 // slice: webhook arrives, controller dispatches, pipeline runs
 // against the same controller via HTTP, final state lands in the
@@ -471,6 +544,18 @@ type failingDispatcher struct {
 func (f *failingDispatcher) Dispatch(_ context.Context, _ controller.RunRequest) error {
 	f.called.Add(1)
 	return errors.New("dispatcher broken")
+}
+
+type captureDispatcher struct {
+	mu   sync.Mutex
+	last controller.RunRequest
+}
+
+func (c *captureDispatcher) Dispatch(_ context.Context, req controller.RunRequest) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = req
+	return nil
 }
 
 // registerPipeline defined in e2e_test context via the client package,
