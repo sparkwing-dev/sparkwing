@@ -158,6 +158,24 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 	}
 }
 
+func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder", RunID: "waiter", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+
+	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "holder" {
+		t.Fatalf("resolution = %+v", resolution)
+	}
+}
+
 // Orphan coalesce followers get reaped when their leader is gone.
 func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	s := newStoreT(t)

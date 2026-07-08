@@ -1689,6 +1689,9 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	// safety: clock read after BEGIN so liveness answers match what the
 	// serialized writers committed, not a pre-wait snapshot.
 	nowNS := time.Now().UnixNano()
+	if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+		return WaiterResolution{}, err
+	}
 
 	var holderID string
 	var leaseNS int64
@@ -1751,9 +1754,6 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 			shouldPromote = holderCount == 0
 		}
 		if shouldPromote {
-			if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
-				return WaiterResolution{}, err
-			}
 			now := time.Now()
 			promoted, err := txPromoteWaiters(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
 			if err != nil {
