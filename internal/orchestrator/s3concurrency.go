@@ -758,6 +758,33 @@ func (c *s3Concurrency) HeartbeatSlot(ctx context.Context, key, holderID string,
 	return expires, superseded, nil
 }
 
+func (c *s3Concurrency) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
+	if fb := c.fallback(ctx); fb != nil {
+		return fb.ObserveSlot(ctx, key, holderID)
+	}
+	doc, _, exists, err := c.load(ctx, s3SlotKey(key))
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, store.ErrNotFound
+	}
+	h := findHolder(doc, holderID)
+	if h == nil || h.LeaseExpiresNS <= time.Now().UnixNano() {
+		return nil, store.ErrNotFound
+	}
+	return &store.ConcurrencyHolder{
+		Key:            key,
+		HolderID:       h.HolderID,
+		RunID:          h.RunID,
+		NodeID:         h.NodeID,
+		ClaimedAt:      time.Unix(0, h.ClaimedAtNS),
+		LeaseExpiresAt: time.Unix(0, h.LeaseExpiresNS),
+		Superseded:     h.Superseded,
+		Cost:           h.Cost,
+	}, nil
+}
+
 func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
 	if fb := c.fallback(ctx); fb != nil {
 		return fb.ReleaseSlot(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)

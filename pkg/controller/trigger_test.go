@@ -32,7 +32,10 @@ func TestTrigger_Validation(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]string{})
@@ -61,7 +64,10 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -85,7 +91,10 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
@@ -109,6 +118,347 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	}
 	if body.Status != "dispatched" {
 		t.Errorf("status=%q want dispatched", body.Status)
+	}
+}
+
+func TestTrigger_StripsClientSuppliedPlanAdmissionEnv(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline": "demo",
+		"trigger": map[string]any{
+			"source": "manual",
+			"env": map[string]string{
+				"SPARKWING_PLAN_ADMISSION_KEY":       "cache-key",
+				"SPARKWING_PLAN_ADMISSION_HOLDER_ID": "forged/-",
+				"SAFE":                               "kept",
+			},
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "" {
+		t.Fatalf("reserved admission key persisted from public env: %+v", trigger.TriggerEnv)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "" {
+		t.Fatalf("reserved admission holder persisted from public env: %+v", trigger.TriggerEnv)
+	}
+	if trigger.TriggerEnv["SAFE"] != "kept" {
+		t.Fatalf("safe env = %q, want kept", trigger.TriggerEnv["SAFE"])
+	}
+}
+
+func TestTrigger_PlanAdmissionRequiresActiveParentHolder(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "parent-run",
+		Pipeline:  "parent",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/-",
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "cache-key",
+			"holder_id": "parent-run/-",
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(ctx, body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "cache-key" {
+		t.Fatalf("admission key = %q, want cache-key", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "parent-run/-" {
+		t.Fatalf("admission holder = %q, want parent-run/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	}
+
+	stale := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "missing-key",
+			"holder_id": "parent-run/-",
+		},
+	})
+	if stale.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(stale.Body)
+		t.Fatalf("stale status=%d want 400 (body: %s)", stale.StatusCode, body)
+	}
+}
+
+func TestTrigger_PlanAdmissionAcceptsAncestorHolder(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for _, run := range []store.Run{
+		{ID: "grandparent-run", Pipeline: "grandparent", Status: "running", StartedAt: time.Now()},
+		{ID: "parent-run", Pipeline: "parent", Status: "running", ParentRunID: "grandparent-run", StartedAt: time.Now()},
+	} {
+		if err := st.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun(%s): %v", run.ID, err)
+		}
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "grandparent-run/-",
+		RunID:    "grandparent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	capture := &captureDispatcher{}
+	srv := controller.New(st, nil)
+	srv.WithDispatcher(capture)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "cache-key",
+			"holder_id": "grandparent-run/-",
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(ctx, body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "cache-key" {
+		t.Fatalf("admission key = %q, want cache-key", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "grandparent-run/-" {
+		t.Fatalf("admission holder = %q, want grandparent-run/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	}
+	capture.mu.Lock()
+	got := capture.last
+	capture.mu.Unlock()
+	if got.InheritedPlanConcurrencyKey != "cache-key" {
+		t.Fatalf("dispatcher admission key = %q, want cache-key", got.InheritedPlanConcurrencyKey)
+	}
+	if got.InheritedPlanConcurrencyHolderID != "grandparent-run/-" {
+		t.Fatalf("dispatcher admission holder = %q, want grandparent-run/-", got.InheritedPlanConcurrencyHolderID)
+	}
+}
+
+func TestTrigger_PlanAdmissionAcceptsAdmissionSet(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for _, run := range []store.Run{
+		{ID: "ancestor-run", Pipeline: "ancestor", Status: "running", StartedAt: time.Now()},
+		{ID: "middle-run", Pipeline: "middle", Status: "running", ParentRunID: "ancestor-run", StartedAt: time.Now()},
+	} {
+		if err := st.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun(%s): %v", run.ID, err)
+		}
+	}
+	for _, req := range []store.AcquireSlotRequest{
+		{
+			Key:      "g:ancestor-key",
+			HolderID: "ancestor-run/-",
+			RunID:    "ancestor-run",
+			Capacity: 1,
+			Policy:   store.OnLimitQueue,
+		},
+		{
+			Key:      "g:middle-key",
+			HolderID: "middle-run/-",
+			RunID:    "middle-run",
+			Capacity: 1,
+			Policy:   store.OnLimitQueue,
+		},
+	} {
+		resp, err := st.AcquireConcurrencySlot(ctx, req)
+		if err != nil {
+			t.Fatalf("AcquireConcurrencySlot(%s): %v", req.Key, err)
+		}
+		if resp.Kind != store.AcquireGranted {
+			t.Fatalf("AcquireConcurrencySlot(%s) = %s, want granted", req.Key, resp.Kind)
+		}
+	}
+
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "grandchild",
+		"parent_run_id": "middle-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]any{
+			"key":       "g:middle-key",
+			"holder_id": "middle-run/-",
+			"admissions": map[string]string{
+				"g:ancestor-key": "ancestor-run/-",
+				"g:middle-key":   "middle-run/-",
+			},
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(ctx, body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	var admissions map[string]string
+	if err := json.Unmarshal([]byte(trigger.TriggerEnv["SPARKWING_PLAN_ADMISSIONS"]), &admissions); err != nil {
+		t.Fatalf("unmarshal plan admissions: %v", err)
+	}
+	if admissions["g:ancestor-key"] != "ancestor-run/-" {
+		t.Fatalf("ancestor admission = %q, want ancestor-run/-", admissions["g:ancestor-key"])
+	}
+	if admissions["g:middle-key"] != "middle-run/-" {
+		t.Fatalf("middle admission = %q, want middle-run/-", admissions["g:middle-key"])
+	}
+	capture.mu.Lock()
+	got := capture.last
+	capture.mu.Unlock()
+	if got.InheritedPlanConcurrencyHolders["g:ancestor-key"] != "ancestor-run/-" {
+		t.Fatalf("dispatcher ancestor admission = %q, want ancestor-run/-",
+			got.InheritedPlanConcurrencyHolders["g:ancestor-key"])
+	}
+	if got.InheritedPlanConcurrencyHolders["g:middle-key"] != "middle-run/-" {
+		t.Fatalf("dispatcher middle admission = %q, want middle-run/-",
+			got.InheritedPlanConcurrencyHolders["g:middle-key"])
+	}
+}
+
+func TestTrigger_PlanAdmissionRejectsNodeLevelHolder(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "parent-run",
+		Pipeline:  "parent",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/build",
+		RunID:    "parent-run",
+		NodeID:   "build",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "cache-key",
+			"holder_id": "parent-run/build",
+		},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 400 (body: %s)", resp.StatusCode, body)
 	}
 }
 
@@ -349,6 +699,18 @@ type failingDispatcher struct {
 func (f *failingDispatcher) Dispatch(_ context.Context, _ controller.RunRequest) error {
 	f.called.Add(1)
 	return errors.New("dispatcher broken")
+}
+
+type captureDispatcher struct {
+	mu   sync.Mutex
+	last controller.RunRequest
+}
+
+func (c *captureDispatcher) Dispatch(_ context.Context, req controller.RunRequest) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = req
+	return nil
 }
 
 // registerPipeline defined in e2e_test context via the client package,

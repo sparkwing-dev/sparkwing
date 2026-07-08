@@ -95,13 +95,17 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		r = opts.RunnerFactory(backends, trigger)
 	}
 	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
+	inheritedAdmission := planAdmissionFromTriggerEnv(trigger.TriggerEnv)
 	res, err := Run(runCtx, backends, Options{
-		Pipeline:    trigger.Pipeline,
-		RunID:       trigger.ID,
-		Args:        args,
-		ParentRunID: trigger.ParentRunID,
-		RetryOf:     trigger.RetryOf,
-		RetrySource: trigger.RetrySource,
+		Pipeline:                         trigger.Pipeline,
+		RunID:                            trigger.ID,
+		Args:                             args,
+		ParentRunID:                      trigger.ParentRunID,
+		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
+		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
+		InheritedPlanConcurrencyHolders:  inheritedAdmission.HolderIDs,
+		RetryOf:                          trigger.RetryOf,
+		RetrySource:                      trigger.RetrySource,
 		Trigger: sparkwing.TriggerInfo{
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,

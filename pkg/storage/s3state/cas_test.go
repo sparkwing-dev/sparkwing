@@ -380,6 +380,31 @@ func TestS3CAS_EnqueueTrigger_IdempotentChild(t *testing.T) {
 	}
 }
 
+func TestS3CAS_EnqueueTriggerWithEnvStoresTriggerEnv(t *testing.T) {
+	b := newCASBackend(t)
+	ctx := context.Background()
+	id, err := b.EnqueueTriggerWithEnv(ctx,
+		"deploy", nil, "parent-run", "node-1", "", "await-pipeline", "", "", "",
+		map[string]string{
+			"SPARKWING_PLAN_ADMISSION_KEY":       "g:deploy",
+			"SPARKWING_PLAN_ADMISSION_HOLDER_ID": "parent-run/-",
+		},
+	)
+	if err != nil {
+		t.Fatalf("EnqueueTriggerWithEnv: %v", err)
+	}
+	trigger, err := b.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "g:deploy" {
+		t.Fatalf("admission key = %q, want g:deploy", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "parent-run/-" {
+		t.Fatalf("admission holder = %q, want parent-run/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	}
+}
+
 func TestS3CAS_EnqueueTrigger_RequiresPipeline(t *testing.T) {
 	b := newCASBackend(t)
 	if _, err := b.EnqueueTrigger(context.Background(), "", nil, "", "", "", "", "", "", ""); err == nil {

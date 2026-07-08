@@ -62,6 +62,13 @@ type Options struct {
 	// cross-pipeline cycle detection.
 	ParentRunID string
 
+	// InheritedPlanConcurrencyKey / HolderID let child runs spawned from a
+	// plan-level Concurrency holder execute under the parent's admission
+	// instead of queueing behind it.
+	InheritedPlanConcurrencyKey      string
+	InheritedPlanConcurrencyHolderID string
+	InheritedPlanConcurrencyHolders  map[string]string
+
 	// RetryOf is the run id this execution retries. Drives skip-passed
 	// rehydration unless Full is set.
 	RetryOf string
@@ -470,7 +477,16 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if dispatchWaitTimeout == 0 {
 		dispatchWaitTimeout = DefaultDispatchWaitTimeout
 	}
-	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip, dispatchWaitTimeout)
+	inheritedAdmission := planAdmission{
+		Key:       opts.InheritedPlanConcurrencyKey,
+		HolderID:  opts.InheritedPlanConcurrencyHolderID,
+		HolderIDs: opts.InheritedPlanConcurrencyHolders,
+	}
+	runErr := dispatch(
+		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
+		opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
+		dispatchWaitTimeout, inheritedAdmission,
+	)
 
 	finalStatus := "success"
 	errMsg := ""
@@ -633,10 +649,30 @@ func DumpRunState(ctx context.Context, st *store.Store, runID string, art storag
 // dispatch runs nodes in parallel where deps allow. Failed upstreams
 // produce Cancelled downstreams (reason "upstream-failed"). OnFailure
 // recoveries dispatch only when their parent fails.
-func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta, onlySkip map[string]string, dispatchWaitTimeout time.Duration) error {
+func dispatch(
+	ctx context.Context,
+	backends Backends,
+	r runner.Runner,
+	runID string,
+	plan *sparkwing.Plan,
+	delegate sparkwing.Logger,
+	debug DebugDirectives,
+	retryOf string,
+	full bool,
+	masker *secrets.Masker,
+	maxParallel int,
+	snapMeta planSnapshotMeta,
+	onlySkip map[string]string,
+	dispatchWaitTimeout time.Duration,
+	inheritedAdmission planAdmission,
+) error {
 	runStart := time.Now()
+	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
+	defer cancelDispatch(nil)
 
-	planRelease, planOutcome, perr := acquirePlanSlot(ctx, backends, runID, plan)
+	planRelease, planOutcome, activeAdmission, perr := acquirePlanSlot(
+		dispatchCtx, backends, runID, plan, inheritedAdmission, cancelDispatch,
+	)
 	if perr != nil {
 		return perr
 	}
@@ -651,13 +687,16 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
 
-	state := newDispatchState(ctx, backends, r, runID, plan, delegate, debug, retryOf, masker, maxParallel)
+	state := newDispatchState(
+		dispatchCtx, backends, r, runID, plan, delegate, debug, retryOf,
+		masker, maxParallel, activeAdmission,
+	)
 	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
 	state.onlySkip = onlySkip
 
 	if retryOf != "" && !full {
-		state.rehydrateFromRetry(ctx, retryOf)
+		state.rehydrateFromRetry(dispatchCtx, retryOf)
 	}
 
 	seen := make(map[string]bool, len(plan.Nodes()))
@@ -710,6 +749,12 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 		planReleaseOutcome = "failed"
 		return fmt.Errorf("dispatch_wait_timeout: %d node(s) did not terminate within %s: %v",
 			len(stuck), dispatchWaitTimeout, stuck)
+	}
+	if cause := context.Cause(dispatchCtx); cause != nil &&
+		!errors.Is(cause, context.Canceled) &&
+		!errors.Is(cause, context.DeadlineExceeded) {
+		planReleaseOutcome = "failed"
+		return cause
 	}
 
 	var failed []string
@@ -1173,7 +1218,19 @@ type dispatchState struct {
 	wg sync.WaitGroup
 }
 
-func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, masker *secrets.Masker, maxParallel int) *dispatchState {
+func newDispatchState(
+	ctx context.Context,
+	backends Backends,
+	r runner.Runner,
+	runID string,
+	plan *sparkwing.Plan,
+	delegate sparkwing.Logger,
+	debug DebugDirectives,
+	retryOf string,
+	masker *secrets.Masker,
+	maxParallel int,
+	admission planAdmission,
+) *dispatchState {
 	if masker == nil {
 		masker = secrets.NewMasker()
 	}
@@ -1217,6 +1274,7 @@ func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, r
 	} else {
 		s.resolverCtx = ctx
 	}
+	s.resolverCtx = withPlanAdmission(s.resolverCtx, admission)
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
@@ -1246,9 +1304,11 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 
-		childRunID, err := s.backends.State.EnqueueTrigger(ctx,
+		childRunID, err := enqueueTriggerWithEnv(ctx, s.backends.State,
 			req.Pipeline, req.Args, s.runID, currentNode, childRetryOf,
-			"await-pipeline", "", req.Repo, req.Branch)
+			"await-pipeline", "", req.Repo, req.Branch,
+			planAdmissionTriggerEnv(ctx),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("enqueue trigger: %w", err)
 		}

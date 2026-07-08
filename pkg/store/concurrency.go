@@ -31,6 +31,10 @@ func holderLiveSQL(alias string) string {
 	return alias + "superseded = 0 AND " + alias + "lease_expires_at > ?"
 }
 
+func holderLeaseLiveSQL(alias string) string {
+	return alias + "lease_expires_at > ?"
+}
+
 // holderCountsForBudget reports whether an already-scanned holder row
 // still counts toward its key's budget. It is the Go-side twin of
 // holderLiveSQL; the two must answer identically. The heartbeat path
@@ -235,6 +239,39 @@ type ConcurrencyState struct {
 	UsedCost          int
 	Holders           []ConcurrencyHolder
 	Waiters           []ConcurrencyWaiter
+}
+
+// ActiveConcurrencyHolder returns one non-superseded holder with an
+// unexpired lease. ErrNotFound means the key/holder pair is not
+// currently admitted.
+func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
+	return s.concurrencyHolder(ctx, key, holderID, now, holderLiveSQL(""))
+}
+
+// ConcurrencyHolder returns one unexpired holder row, including
+// superseded holders. ErrNotFound means the key/holder pair is absent
+// or its lease has expired.
+func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
+	return s.concurrencyHolder(ctx, key, holderID, now, holderLeaseLiveSQL(""))
+}
+
+func (s *Store) concurrencyHolder(ctx context.Context, key, holderID string, now time.Time, livePredicate string) (*ConcurrencyHolder, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+holderColumns+`
+		   FROM concurrency_holders
+		  WHERE key = ?
+		    AND holder_id = ?
+		    AND `+livePredicate,
+		key, holderID, now.UnixNano(),
+	)
+	holder, err := scanHolder(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &holder, nil
 }
 
 // AcquireConcurrencySlot atomically performs cache-lookup, capacity

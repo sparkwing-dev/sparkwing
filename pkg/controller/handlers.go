@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -408,10 +409,11 @@ type triggerReqGit struct {
 }
 
 type triggerReq struct {
-	Pipeline string            `json:"pipeline"`
-	Args     map[string]string `json:"args,omitempty"`
-	Trigger  triggerReqMeta    `json:"trigger,omitempty"` // see triggerReqMeta below
-	Git      triggerReqGit     `json:"git,omitempty"`
+	Pipeline      string                  `json:"pipeline"`
+	Args          map[string]string       `json:"args,omitempty"`
+	Trigger       triggerReqMeta          `json:"trigger,omitempty"` // see triggerReqMeta below
+	Git           triggerReqGit           `json:"git,omitempty"`
+	PlanAdmission triggerReqPlanAdmission `json:"plan_admission,omitempty"`
 	// ParentRunID identifies the run that spawned this trigger via
 	// sparkwing.RunAndAwait; the controller walks the parent
 	// chain to reject cycles before persisting.
@@ -426,9 +428,143 @@ type triggerReq struct {
 	RetryOf string `json:"retry_of,omitempty"`
 }
 
+type triggerReqPlanAdmission struct {
+	Key        string            `json:"key,omitempty"`
+	HolderID   string            `json:"holder_id,omitempty"`
+	Admissions map[string]string `json:"admissions,omitempty"`
+}
+
+func (admission triggerReqPlanAdmission) normalizedAdmissions() map[string]string {
+	admissions := make(map[string]string, len(admission.Admissions)+1)
+	for key, holderID := range admission.Admissions {
+		if key != "" && holderID != "" {
+			admissions[key] = holderID
+		}
+	}
+	if admission.Key != "" && admission.HolderID != "" {
+		admissions[admission.Key] = admission.HolderID
+	}
+	if len(admissions) == 0 {
+		return nil
+	}
+	return admissions
+}
+
 type triggerResp struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
+}
+
+const (
+	triggerEnvPlanAdmissionKey      = "SPARKWING_PLAN_ADMISSION_KEY"
+	triggerEnvPlanAdmissionHolderID = "SPARKWING_PLAN_ADMISSION_HOLDER_ID"
+	triggerEnvPlanAdmissions        = "SPARKWING_PLAN_ADMISSIONS"
+)
+
+func sanitizeTriggerEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	cleaned := make(map[string]string, len(env))
+	for key, value := range env {
+		switch key {
+		case triggerEnvPlanAdmissionKey, triggerEnvPlanAdmissionHolderID, triggerEnvPlanAdmissions:
+			continue
+		default:
+			cleaned[key] = value
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
+func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, admission triggerReqPlanAdmission) (map[string]string, error) {
+	if parentRunID == "" {
+		return nil, errors.New("plan_admission requires parent_run_id")
+	}
+	if (admission.Key == "") != (admission.HolderID == "") {
+		return nil, errors.New("plan_admission requires key and holder_id")
+	}
+	admissions := admission.normalizedAdmissions()
+	for key, holderID := range admissions {
+		if key == "" || holderID == "" {
+			return nil, errors.New("plan_admission admissions require non-empty keys and holder ids")
+		}
+	}
+	if len(admissions) == 0 {
+		return nil, errors.New("plan_admission requires key and holder_id")
+	}
+	for key, holderID := range admissions {
+		if err := s.validateOnePlanAdmission(ctx, parentRunID, key, holderID); err != nil {
+			return nil, err
+		}
+	}
+	selectedKey := admission.Key
+	selectedHolderID := admission.HolderID
+	if selectedKey == "" {
+		for key, holderID := range admissions {
+			selectedKey = key
+			selectedHolderID = holderID
+			break
+		}
+	}
+	payload, err := json.Marshal(admissions)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		triggerEnvPlanAdmissionKey:      selectedKey,
+		triggerEnvPlanAdmissionHolderID: selectedHolderID,
+		triggerEnvPlanAdmissions:        string(payload),
+	}, nil
+}
+
+func (s *Server) validateOnePlanAdmission(ctx context.Context, parentRunID, key, holderID string) error {
+	holder, err := s.store.ActiveConcurrencyHolder(ctx, key, holderID, time.Now())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("plan_admission holder %q is not active for key %q", holderID, key)
+		}
+		return fmt.Errorf("plan_admission validate holder: %w", err)
+	}
+	expectedHolderID := holder.RunID + "/-"
+	if holder.NodeID != "" || holderID != expectedHolderID {
+		return fmt.Errorf("plan_admission holder %q is not a plan holder for run %q", holderID, holder.RunID)
+	}
+	if ok, err := s.runIsSelfOrAncestor(ctx, parentRunID, holder.RunID); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("plan_admission holder %q belongs to run %q, not parent run %q or its ancestors",
+			holderID, holder.RunID, parentRunID)
+	}
+	return nil
+}
+
+func (s *Server) runIsSelfOrAncestor(ctx context.Context, runID, candidateAncestorRunID string) (bool, error) {
+	if candidateAncestorRunID == "" {
+		return false, nil
+	}
+	currentRunID := runID
+	const maxDepth = 64
+	for range maxDepth {
+		if currentRunID == "" {
+			return false, nil
+		}
+		if currentRunID == candidateAncestorRunID {
+			return true, nil
+		}
+		run, err := s.store.GetRun(ctx, currentRunID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return false, fmt.Errorf("parent_run_id %s not found", currentRunID)
+			}
+			return false, fmt.Errorf("get parent run %s: %w", currentRunID, err)
+		}
+		currentRunID = run.ParentRunID
+	}
+	return false, fmt.Errorf("parent_run_id %s ancestor chain exceeds %d", runID, maxDepth)
 }
 
 // handleTrigger is the external intake for a new run. Persists the
@@ -497,6 +633,27 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
+	var inheritedPlanConcurrencyKey, inheritedPlanConcurrencyHolderID string
+	var inheritedPlanConcurrencyHolders map[string]string
+	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" || len(body.PlanAdmission.Admissions) > 0 {
+		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if triggerEnv == nil {
+			triggerEnv = map[string]string{}
+		}
+		for key, value := range admissionEnv {
+			triggerEnv[key] = value
+		}
+		inheritedPlanConcurrencyKey = admissionEnv[triggerEnvPlanAdmissionKey]
+		inheritedPlanConcurrencyHolderID = admissionEnv[triggerEnvPlanAdmissionHolderID]
+		inheritedPlanConcurrencyHolders = body.PlanAdmission.normalizedAdmissions()
+	}
+
+	// The trigger ID doubles as the eventual run ID.
 	now := time.Now()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:            runID,
@@ -504,7 +661,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		Args:          body.Args,
 		TriggerSource: body.Trigger.Source,
 		TriggerUser:   body.Trigger.User,
-		TriggerEnv:    body.Trigger.Env,
+		TriggerEnv:    triggerEnv,
 		GitBranch:     body.Git.Branch,
 		GitSHA:        body.Git.SHA,
 		Repo:          body.Git.Repo,
@@ -555,7 +712,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			Repo:    body.Git.Repo,
 			RepoURL: body.Git.RepoURL,
 		},
-		ParentRunID: body.ParentRunID,
+		ParentRunID:                      body.ParentRunID,
+		InheritedPlanConcurrencyKey:      inheritedPlanConcurrencyKey,
+		InheritedPlanConcurrencyHolderID: inheritedPlanConcurrencyHolderID,
+		InheritedPlanConcurrencyHolders:  inheritedPlanConcurrencyHolders,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
