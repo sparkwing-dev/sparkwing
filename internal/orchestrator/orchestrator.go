@@ -58,6 +58,12 @@ type Options struct {
 	// cross-pipeline cycle detection.
 	ParentRunID string
 
+	// InheritedPlanCacheKey / HolderID let child runs spawned from a
+	// plan-level Cache holder execute under the parent's admission
+	// instead of queueing behind it.
+	InheritedPlanCacheKey      string
+	InheritedPlanCacheHolderID string
+
 	// RetryOf is the run id this execution retries. Drives skip-passed
 	// rehydration unless Full is set.
 	RetryOf string
@@ -485,7 +491,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		go runLocalTriggerLoop(consumerCtx, ls.st, runID, nil)
 	}
 
-	runErr := dispatch(ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip)
+	inheritedAdmission := planAdmission{
+		Key:      opts.InheritedPlanCacheKey,
+		HolderID: opts.InheritedPlanCacheHolderID,
+	}
+	runErr := dispatch(
+		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
+		opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip, inheritedAdmission,
+	)
 
 	finalStatus := "success"
 	errMsg := ""
@@ -632,11 +645,28 @@ func DumpRunState(ctx context.Context, st *store.Store, runID string, art storag
 // dispatch runs nodes in parallel where deps allow. Failed upstreams
 // produce Cancelled downstreams (reason "upstream-failed"). OnFailure
 // recoveries dispatch only when their parent fails.
-func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, full bool, masker *secrets.Masker, maxParallel int, snapMeta planSnapshotMeta, onlySkip map[string]string) error {
+func dispatch(
+	ctx context.Context,
+	backends Backends,
+	r runner.Runner,
+	runID string,
+	plan *sparkwing.Plan,
+	delegate sparkwing.Logger,
+	debug DebugDirectives,
+	retryOf string,
+	full bool,
+	masker *secrets.Masker,
+	maxParallel int,
+	snapMeta planSnapshotMeta,
+	onlySkip map[string]string,
+	inheritedAdmission planAdmission,
+) error {
 	runStart := time.Now()
 
 	// Plan-level .Cache() gates the whole run before any dispatch.
-	planRelease, planOutcome, perr := acquirePlanSlot(ctx, backends, runID, plan)
+	planRelease, planOutcome, activeAdmission, perr := acquirePlanSlot(
+		ctx, backends, runID, plan, inheritedAdmission,
+	)
 	if perr != nil {
 		return perr
 	}
@@ -651,7 +681,10 @@ func dispatch(ctx context.Context, backends Backends, r runner.Runner, runID str
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
 
-	state := newDispatchState(ctx, backends, r, runID, plan, delegate, debug, retryOf, masker, maxParallel)
+	state := newDispatchState(
+		ctx, backends, r, runID, plan, delegate, debug, retryOf,
+		masker, maxParallel, activeAdmission,
+	)
 	state.snapMeta = snapMeta
 	state.onTargetSkip = computeOnTargetSkip(plan, snapMeta.Target)
 	state.onlySkip = onlySkip
@@ -1188,7 +1221,19 @@ type dispatchState struct {
 	wg sync.WaitGroup
 }
 
-func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, runID string, plan *sparkwing.Plan, delegate sparkwing.Logger, debug DebugDirectives, retryOf string, masker *secrets.Masker, maxParallel int) *dispatchState {
+func newDispatchState(
+	ctx context.Context,
+	backends Backends,
+	r runner.Runner,
+	runID string,
+	plan *sparkwing.Plan,
+	delegate sparkwing.Logger,
+	debug DebugDirectives,
+	retryOf string,
+	masker *secrets.Masker,
+	maxParallel int,
+	admission planAdmission,
+) *dispatchState {
 	if masker == nil {
 		masker = secrets.NewMasker()
 	}
@@ -1234,6 +1279,7 @@ func newDispatchState(ctx context.Context, backends Backends, r runner.Runner, r
 	} else {
 		s.resolverCtx = ctx
 	}
+	s.resolverCtx = withPlanAdmission(s.resolverCtx, admission)
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
@@ -1268,9 +1314,11 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 
-		childRunID, err := s.backends.State.EnqueueTrigger(ctx,
+		childRunID, err := enqueueTriggerWithEnv(ctx, s.backends.State,
 			req.Pipeline, req.Args, s.runID, currentNode, childRetryOf,
-			"await-pipeline", "", req.Repo, req.Branch)
+			"await-pipeline", "", req.Repo, req.Branch,
+			planAdmissionTriggerEnv(ctx),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("enqueue trigger: %w", err)
 		}

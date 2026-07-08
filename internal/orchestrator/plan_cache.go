@@ -27,16 +27,27 @@ const (
 // acquirePlanSlot handles plan-level .Cache() coordination. Caller
 // invokes release() at plan terminal. release uses a fresh context so
 // it survives a cancelled run.
-func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan *sparkwing.Plan) (release func(outcome string), outcome planCacheOutcome, err error) {
+func acquirePlanSlot(
+	ctx context.Context,
+	backends Backends,
+	runID string,
+	plan *sparkwing.Plan,
+	inheritedAdmission planAdmission,
+) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
 	opts := plan.CacheOpts()
 	if !opts.HasKey() {
-		return func(string) {}, planCacheProceed, nil
+		return func(string) {}, planCacheProceed, planAdmission{}, nil
 	}
 	if backends.Concurrency == nil {
-		return nil, "", fmt.Errorf("plan Cache(%q) declared but Backends.Concurrency is nil", opts.Key)
+		return nil, "", planAdmission{}, fmt.Errorf("plan Cache(%q) declared but Backends.Concurrency is nil", opts.Key)
+	}
+
+	if inheritedAdmission.Key == opts.Key && inheritedAdmission.HolderID != "" {
+		return func(string) {}, planCacheProceed, inheritedAdmission, nil
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
+	admission := planAdmission{Key: opts.Key, HolderID: holderID}
 	req := store.AcquireSlotRequest{
 		Key:           opts.Key,
 		HolderID:      holderID,
@@ -49,7 +60,7 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 	resp, err := backends.Concurrency.AcquireSlot(ctx, req)
 	if err != nil {
-		return nil, "", fmt.Errorf("plan Cache acquire(%q): %w", opts.Key, err)
+		return nil, "", planAdmission{}, fmt.Errorf("plan Cache acquire(%q): %w", opts.Key, err)
 	}
 
 	if resp.DriftNote != "" {
@@ -65,15 +76,15 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, opts.Key, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, opts.Key, holderID), planCacheProceed, admission, nil
 
 	case store.AcquireSkipped:
 		_ = backends.State.AppendEvent(ctx, runID, "", "plan_skipped_concurrent", nil)
-		return nil, planCacheSkipped, nil
+		return nil, planCacheSkipped, planAdmission{}, nil
 
 	case store.AcquireFailed:
 		_ = backends.State.AppendEvent(ctx, runID, "", "plan_failed_concurrent", nil)
-		return nil, planCacheFailed, nil
+		return nil, planCacheFailed, planAdmission{}, nil
 
 	case store.AcquireQueued, store.AcquireCancellingOthers:
 		payload, _ := json.Marshal(map[string]any{
@@ -96,19 +107,22 @@ func acquirePlanSlot(ctx context.Context, backends Backends, runID string, plan 
 
 		promoted, err := waitForPlanSlot(ctx, backends, opts.Key, runID, holderID)
 		if err != nil {
-			return nil, "", err
+			return nil, "", planAdmission{}, err
 		}
 		if !promoted {
-			return nil, planCacheEvicted, nil
+			return nil, planCacheEvicted, planAdmission{}, nil
 		}
-		return makePlanSlotRelease(backends, opts.Key, holderID), planCacheProceed, nil
+		return makePlanSlotRelease(backends, opts.Key, holderID), planCacheProceed, admission, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
 		// Coalesce + CacheKey are rejected at plan build.
-		return nil, "", fmt.Errorf("plan Cache(%q) unexpectedly got %q from acquire; this should have been rejected at build", opts.Key, resp.Kind)
+		return nil, "", planAdmission{}, fmt.Errorf(
+			"plan Cache(%q) unexpectedly got %q from acquire; this should have been rejected at build",
+			opts.Key, resp.Kind,
+		)
 	}
 
-	return nil, "", fmt.Errorf("plan Cache acquire returned unknown kind %q", resp.Kind)
+	return nil, "", planAdmission{}, fmt.Errorf("plan Cache acquire returned unknown kind %q", resp.Kind)
 }
 
 // waitForPlanSlot polls until promoted or cancelled. Plans never
