@@ -325,7 +325,14 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 		case store.WaiterCached:
 			emit("ready", map[string]string{})
 			return
-		case store.WaiterLeaderFinished, store.WaiterCancelled:
+		case store.WaiterLeaderFinished:
+			emit("superseded", map[string]string{})
+			return
+		case store.WaiterCancelled:
+			if _, err := s.store.GetConcurrencyState(ctx, key); errors.Is(err, store.ErrNotFound) {
+				emit("stream_end", map[string]string{"reason": "key_not_found"})
+				return
+			}
 			emit("superseded", map[string]string{})
 			return
 		}
