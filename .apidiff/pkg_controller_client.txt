@@ -53,7 +53,31 @@ func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bo
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
-func (c *Client) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error)
+func (c *Client) EnqueueTrigger(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+) (string, error)
+func (c *Client) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
@@ -85,6 +109,7 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
+func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
@@ -135,11 +160,17 @@ type TriggerMeta struct {
 	User   string
 	Env    map[string]string
 }
+type TriggerPlanAdmission struct {
+	Key        string
+	HolderID   string
+	Admissions map[string]string
+}
 type TriggerRequest struct {
-	Pipeline string
-	Args     map[string]string
-	Trigger  TriggerMeta
-	Git      GitMeta
+	Pipeline      string
+	Args          map[string]string
+	Trigger       TriggerMeta
+	Git           GitMeta
+	PlanAdmission TriggerPlanAdmission
 
 	ParentRunID string
 

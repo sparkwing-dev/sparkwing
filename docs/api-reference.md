@@ -19,6 +19,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/heartbeat` | `admin` |
+| `GET` | `/api/v1/concurrency/{key}/holder` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/notify` | `runs.read` |
 | `POST` | `/api/v1/concurrency/{key}/release` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `admin` |

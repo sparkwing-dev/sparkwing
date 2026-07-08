@@ -333,6 +333,7 @@ const StepSkipped = "skipped"
 type Store struct {
 }
 func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
+func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
@@ -343,6 +344,7 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) Close() error
+func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
 func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error)
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
