@@ -65,24 +65,26 @@ func acquirePlanSlot(
 		return nil, "", planAdmission{}, err
 	}
 
-	if inheritedAdmission.Key != "" || inheritedAdmission.HolderID != "" {
+	inheritedAdmission = inheritedAdmission.normalized()
+	if len(inheritedAdmission.HolderIDs) > 0 {
 		if inheritedAdmission.Key == "" || inheritedAdmission.HolderID == "" {
 			return nil, "", planAdmission{}, errors.New("plan Concurrency inherited admission is incomplete")
 		}
-		if inheritedAdmission.Key == key {
-			holder, err := backends.Concurrency.ObserveSlot(ctx, key, inheritedAdmission.HolderID)
+		if inheritedHolderID, ok := inheritedAdmission.holderFor(key); ok {
+			holder, err := backends.Concurrency.ObserveSlot(ctx, key, inheritedHolderID)
 			if err != nil {
 				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission: %w", err)
 			}
 			if holder.Superseded {
 				return nil, planCacheEvicted, planAdmission{}, nil
 			}
-			return makeInheritedPlanSlotRelease(backends, key, inheritedAdmission.HolderID, cancelRun), planCacheProceed, inheritedAdmission, nil
+			return makeInheritedPlanSlotRelease(backends, key, inheritedHolderID, cancelRun),
+				planCacheProceed, inheritedAdmission.with(key, inheritedHolderID), nil
 		}
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
-	admission := planAdmission{Key: key, HolderID: holderID}
+	admission := inheritedAdmission.with(key, holderID)
 	req := store.AcquireSlotRequest{
 		Key:      key,
 		HolderID: holderID,

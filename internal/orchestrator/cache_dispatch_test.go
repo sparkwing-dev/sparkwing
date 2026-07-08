@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -226,6 +227,27 @@ func (planLevelInheritedMiddlePipe) Plan(
 	return nil
 }
 
+type planLevelInheritedMiddleWithOwnConcurrencyPipe struct{ sparkwing.Base }
+
+func (planLevelInheritedMiddleWithOwnConcurrencyPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-middle-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
+			ctx, "plan-level-inherited-child", "work",
+			sparkwing.WithFreshTimeout(150*time.Millisecond))
+		return err
+	})
+	return nil
+}
+
 func init() {
 	register("cache-queue-serialize", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheQueuePipe{} })
 	register("cache-skip-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheSkipLeaderPipe{} })
@@ -248,6 +270,9 @@ func init() {
 	})
 	register("plan-level-inherited-middle", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelInheritedMiddlePipe{}
+	})
+	register("plan-level-inherited-middle-own", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelInheritedMiddleWithOwnConcurrencyPipe{}
 	})
 }
 
@@ -613,6 +638,69 @@ func TestConcurrency_RunAndAwaitCarriesInheritedAdmissionThroughPlanWithoutConcu
 	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != parentHolderID {
 		t.Fatalf("grandchild admission holder = %q, want %q",
 			trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"], parentHolderID)
+	}
+}
+
+func TestConcurrency_RunAndAwaitCarriesAncestorAdmissionThroughDifferentPlanConcurrency(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	parentHolderID := "ancestor-with-plan-admission/-"
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-inherited-key",
+		HolderID: parentHolderID,
+		RunID:    "ancestor-with-plan-admission",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("parent acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("parent acquire = %s, want granted", resp.Kind)
+	}
+
+	res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+		Pipeline:                         "plan-level-inherited-middle-own",
+		RunID:                            "middle-with-own-plan-concurrency",
+		InheritedPlanConcurrencyKey:      "g:plan-level-inherited-key",
+		InheritedPlanConcurrencyHolderID: parentHolderID,
+	})
+	if err != nil {
+		t.Fatalf("middle run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("middle status = %q, want failed from child timeout", res.Status)
+	}
+
+	childID, err := st.FindSpawnedChildTriggerID(ctx, "middle-with-own-plan-concurrency", "spawn", "plan-level-inherited-child")
+	if err != nil {
+		t.Fatalf("FindSpawnedChildTriggerID: %v", err)
+	}
+	if childID == "" {
+		t.Fatal("expected grandchild trigger row")
+	}
+	trigger, err := st.GetTrigger(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	var admissions map[string]string
+	if err := json.Unmarshal([]byte(trigger.TriggerEnv["SPARKWING_PLAN_ADMISSIONS"]), &admissions); err != nil {
+		t.Fatalf("unmarshal plan admissions: %v", err)
+	}
+	if admissions["g:plan-level-inherited-key"] != parentHolderID {
+		t.Fatalf("grandchild ancestor admission = %q, want %q",
+			admissions["g:plan-level-inherited-key"], parentHolderID)
+	}
+	if admissions["g:plan-level-middle-key"] != "middle-with-own-plan-concurrency/-" {
+		t.Fatalf("grandchild middle admission = %q, want middle-with-own-plan-concurrency/-",
+			admissions["g:plan-level-middle-key"])
 	}
 }
 

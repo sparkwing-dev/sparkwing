@@ -67,6 +67,7 @@ type Options struct {
 	// instead of queueing behind it.
 	InheritedPlanConcurrencyKey      string
 	InheritedPlanConcurrencyHolderID string
+	InheritedPlanConcurrencyHolders  map[string]string
 
 	// RetryOf is the run id this execution retries. Drives skip-passed
 	// rehydration unless Full is set.
@@ -477,8 +478,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		dispatchWaitTimeout = DefaultDispatchWaitTimeout
 	}
 	inheritedAdmission := planAdmission{
-		Key:      opts.InheritedPlanConcurrencyKey,
-		HolderID: opts.InheritedPlanConcurrencyHolderID,
+		Key:       opts.InheritedPlanConcurrencyKey,
+		HolderID:  opts.InheritedPlanConcurrencyHolderID,
+		HolderIDs: opts.InheritedPlanConcurrencyHolders,
 	}
 	runErr := dispatch(
 		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,

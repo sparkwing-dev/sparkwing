@@ -441,6 +441,7 @@ type triggerResp struct {
 const (
 	triggerEnvPlanAdmissionKey      = "SPARKWING_PLAN_ADMISSION_KEY"
 	triggerEnvPlanAdmissionHolderID = "SPARKWING_PLAN_ADMISSION_HOLDER_ID"
+	triggerEnvPlanAdmissions        = "SPARKWING_PLAN_ADMISSIONS"
 )
 
 func sanitizeTriggerEnv(env map[string]string) map[string]string {
@@ -450,7 +451,7 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	cleaned := make(map[string]string, len(env))
 	for key, value := range env {
 		switch key {
-		case triggerEnvPlanAdmissionKey, triggerEnvPlanAdmissionHolderID:
+		case triggerEnvPlanAdmissionKey, triggerEnvPlanAdmissionHolderID, triggerEnvPlanAdmissions:
 			continue
 		default:
 			cleaned[key] = value

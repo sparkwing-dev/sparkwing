@@ -103,6 +103,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		ParentRunID:                      trigger.ParentRunID,
 		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
 		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
+		InheritedPlanConcurrencyHolders:  inheritedAdmission.HolderIDs,
 		RetryOf:                          trigger.RetryOf,
 		RetrySource:                      trigger.RetrySource,
 		Trigger: sparkwing.TriggerInfo{

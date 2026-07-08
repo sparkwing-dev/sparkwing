@@ -74,6 +74,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		ParentRunID:                      trigger.ParentRunID,
 		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
 		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
+		InheritedPlanConcurrencyHolders:  inheritedAdmission.HolderIDs,
 		RetryOf:                          trigger.RetryOf,
 		RetrySource:                      trigger.RetrySource,
 		Full:                             trigger.Full,
