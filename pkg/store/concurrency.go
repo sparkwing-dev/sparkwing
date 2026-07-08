@@ -237,6 +237,31 @@ type ConcurrencyState struct {
 	Waiters           []ConcurrencyWaiter
 }
 
+// ActiveConcurrencyHolder returns one non-superseded holder with an
+// unexpired lease. ErrNotFound means the key/holder pair is not
+// currently admitted.
+func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
+	var holder ConcurrencyHolder
+	var claimedNS, expiresNS int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded
+		   FROM concurrency_holders
+		  WHERE key = ?
+		    AND holder_id = ?
+		    AND `+holderLiveSQL(""),
+		key, holderID, now.UnixNano(),
+	).Scan(&holder.Key, &holder.HolderID, &holder.RunID, &holder.NodeID, &claimedNS, &expiresNS, &holder.Superseded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	holder.ClaimedAt = time.Unix(0, claimedNS)
+	holder.LeaseExpiresAt = time.Unix(0, expiresNS)
+	return &holder, nil
+}
+
 // AcquireConcurrencySlot atomically performs cache-lookup, capacity
 // upsert, holder-count, and the policy branch in one txn. Cancel
 // dispatch is the controller's job; SupersededIDs lists the targets.
