@@ -99,6 +99,28 @@ func TestController_WaiterNotifyPromotesOrphanedQueue(t *testing.T) {
 	}
 }
 
+func TestController_WaiterNotifyMissingKeyEndsStream(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(base + "/api/v1/concurrency/missing-slot/notify?run_id=waiter&node_id=n")
+	if err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("notify status=%d want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read notify: %v", err)
+	}
+	if !bytes.Contains(body, []byte("event: stream_end")) || !bytes.Contains(body, []byte(`"reason":"key_not_found"`)) {
+		t.Fatalf("notify body = %q, want key_not_found stream_end", string(body))
+	}
+}
+
 func TestController_RunLifecycle(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
