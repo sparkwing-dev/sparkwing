@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -428,10 +429,11 @@ type triggerReqGit struct {
 }
 
 type triggerReq struct {
-	Pipeline string            `json:"pipeline"`
-	Args     map[string]string `json:"args,omitempty"`
-	Trigger  triggerReqMeta    `json:"trigger,omitempty"` // see triggerReqMeta below
-	Git      triggerReqGit     `json:"git,omitempty"`
+	Pipeline      string                  `json:"pipeline"`
+	Args          map[string]string       `json:"args,omitempty"`
+	Trigger       triggerReqMeta          `json:"trigger,omitempty"` // see triggerReqMeta below
+	Git           triggerReqGit           `json:"git,omitempty"`
+	PlanAdmission triggerReqPlanAdmission `json:"plan_admission,omitempty"`
 	// ParentRunID identifies the run that spawned this trigger via
 	// sparkwing.RunAndAwait; the controller walks the parent
 	// chain to reject cycles before persisting.
@@ -446,9 +448,68 @@ type triggerReq struct {
 	RetryOf string `json:"retry_of,omitempty"`
 }
 
+type triggerReqPlanAdmission struct {
+	Key      string `json:"key,omitempty"`
+	HolderID string `json:"holder_id,omitempty"`
+}
+
 type triggerResp struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
+}
+
+const (
+	triggerEnvPlanAdmissionKey      = "SPARKWING_PLAN_ADMISSION_KEY"
+	triggerEnvPlanAdmissionHolderID = "SPARKWING_PLAN_ADMISSION_HOLDER_ID"
+)
+
+func sanitizeTriggerEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	cleaned := make(map[string]string, len(env))
+	for key, value := range env {
+		switch key {
+		case triggerEnvPlanAdmissionKey, triggerEnvPlanAdmissionHolderID:
+			continue
+		default:
+			cleaned[key] = value
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
+func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, admission triggerReqPlanAdmission) (map[string]string, error) {
+	if parentRunID == "" {
+		return nil, errors.New("plan_admission requires parent_run_id")
+	}
+	if admission.Key == "" || admission.HolderID == "" {
+		return nil, errors.New("plan_admission requires key and holder_id")
+	}
+	expectedHolderID := parentRunID + "/-"
+	if admission.HolderID != expectedHolderID {
+		return nil, fmt.Errorf("plan_admission holder_id %q does not match parent holder %q", admission.HolderID, expectedHolderID)
+	}
+	state, err := s.store.GetConcurrencyState(ctx, admission.Key)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("plan_admission key %q has no active entry", admission.Key)
+		}
+		return nil, fmt.Errorf("plan_admission validate state: %w", err)
+	}
+	now := time.Now()
+	for _, holder := range state.Holders {
+		if holder.HolderID == admission.HolderID && !holder.Superseded && holder.LeaseExpiresAt.After(now) {
+			return map[string]string{
+				triggerEnvPlanAdmissionKey:      admission.Key,
+				triggerEnvPlanAdmissionHolderID: admission.HolderID,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("plan_admission holder %q is not active for key %q", admission.HolderID, admission.Key)
 }
 
 // handleTrigger is the external intake for a new run. Persists the
@@ -530,6 +591,21 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
+	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" {
+		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if triggerEnv == nil {
+			triggerEnv = map[string]string{}
+		}
+		for key, value := range admissionEnv {
+			triggerEnv[key] = value
+		}
+	}
+
 	// The trigger ID doubles as the eventual run ID.
 	now := time.Now()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
@@ -538,7 +614,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		Args:          body.Args,
 		TriggerSource: body.Trigger.Source,
 		TriggerUser:   body.Trigger.User,
-		TriggerEnv:    body.Trigger.Env,
+		TriggerEnv:    triggerEnv,
 		GitBranch:     body.Git.Branch,
 		GitSHA:        body.Git.SHA,
 		Repo:          body.Git.Repo,

@@ -111,6 +111,128 @@ func TestTrigger_NoopDispatcher(t *testing.T) {
 	}
 }
 
+func TestTrigger_StripsClientSuppliedPlanAdmissionEnv(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline": "demo",
+		"trigger": map[string]any{
+			"source": "manual",
+			"env": map[string]string{
+				"SPARKWING_PLAN_ADMISSION_KEY":       "cache-key",
+				"SPARKWING_PLAN_ADMISSION_HOLDER_ID": "forged/-",
+				"SAFE":                               "kept",
+			},
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "" {
+		t.Fatalf("reserved admission key persisted from public env: %+v", trigger.TriggerEnv)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "" {
+		t.Fatalf("reserved admission holder persisted from public env: %+v", trigger.TriggerEnv)
+	}
+	if trigger.TriggerEnv["SAFE"] != "kept" {
+		t.Fatalf("safe env = %q, want kept", trigger.TriggerEnv["SAFE"])
+	}
+}
+
+func TestTrigger_PlanAdmissionRequiresActiveParentHolder(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "parent-run",
+		Pipeline:  "parent",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/-",
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "cache-key",
+			"holder_id": "parent-run/-",
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	trigger, err := st.GetTrigger(ctx, body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "cache-key" {
+		t.Fatalf("admission key = %q, want cache-key", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "parent-run/-" {
+		t.Fatalf("admission holder = %q, want parent-run/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	}
+
+	stale := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]string{
+			"key":       "missing-key",
+			"holder_id": "parent-run/-",
+		},
+	})
+	if stale.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(stale.Body)
+		t.Fatalf("stale status=%d want 400 (body: %s)", stale.StatusCode, body)
+	}
+}
+
 // TestTrigger_InProcessDispatcher_FullLoop is the full vertical
 // slice: webhook arrives, controller dispatches, pipeline runs
 // against the same controller via HTTP, final state lands in the

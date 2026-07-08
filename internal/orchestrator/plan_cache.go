@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -42,8 +43,22 @@ func acquirePlanSlot(
 		return nil, "", planAdmission{}, fmt.Errorf("plan Cache(%q) declared but Backends.Concurrency is nil", opts.Key)
 	}
 
-	if inheritedAdmission.Key == opts.Key && inheritedAdmission.HolderID != "" {
-		return func(string) {}, planCacheProceed, inheritedAdmission, nil
+	if inheritedAdmission.Key != "" || inheritedAdmission.HolderID != "" {
+		if inheritedAdmission.Key == "" || inheritedAdmission.HolderID == "" {
+			return nil, "", planAdmission{}, errors.New("plan Cache inherited admission is incomplete")
+		}
+		if inheritedAdmission.Key == opts.Key {
+			_, superseded, err := backends.Concurrency.HeartbeatSlot(
+				ctx, opts.Key, inheritedAdmission.HolderID, store.DefaultConcurrencyLease,
+			)
+			if err != nil {
+				return nil, "", planAdmission{}, fmt.Errorf("plan Cache inherited admission: %w", err)
+			}
+			if superseded {
+				return nil, planCacheEvicted, planAdmission{}, nil
+			}
+			return makeInheritedPlanSlotRelease(backends, opts.Key, inheritedAdmission.HolderID), planCacheProceed, inheritedAdmission, nil
+		}
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
@@ -123,6 +138,39 @@ func acquirePlanSlot(
 	}
 
 	return nil, "", planAdmission{}, fmt.Errorf("plan Cache acquire returned unknown kind %q", resp.Kind)
+}
+
+func makeInheritedPlanSlotRelease(backends Backends, key, holderID string) func(outcome string) {
+	hbCtx, hbCancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-t.C:
+				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
+				_, _, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, store.DefaultConcurrencyLease)
+				cancel()
+				if err != nil {
+					slog.Warn("inherited plan concurrency heartbeat failed",
+						"key", key, "holder_id", holderID, "err", err)
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func(string) {
+		once.Do(func() {
+			hbCancel()
+			wg.Wait()
+		})
+	}
 }
 
 // waitForPlanSlot polls until promoted or cancelled. Plans never
