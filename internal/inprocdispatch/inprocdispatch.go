@@ -49,14 +49,16 @@ func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunReq
 	go func() {
 		runCtx := context.Background()
 		res, err := orchestrator.Run(runCtx, d.Backends, orchestrator.Options{
-			Pipeline:    req.Pipeline,
-			RunID:       req.RunID,
-			Args:        req.Args,
-			Trigger:     req.Trigger,
-			Git:         req.Git,
-			ParentRunID: req.ParentRunID,
-			RetryOf:     req.RetryOf,
-			MaxParallel: d.MaxParallel,
+			Pipeline:                   req.Pipeline,
+			RunID:                      req.RunID,
+			Args:                       req.Args,
+			Trigger:                    req.Trigger,
+			Git:                        req.Git,
+			ParentRunID:                req.ParentRunID,
+			InheritedPlanCacheKey:      req.InheritedPlanCacheKey,
+			InheritedPlanCacheHolderID: req.InheritedPlanCacheHolderID,
+			RetryOf:                    req.RetryOf,
+			MaxParallel:                d.MaxParallel,
 		})
 		if err != nil {
 			lg.Error("dispatched run failed",

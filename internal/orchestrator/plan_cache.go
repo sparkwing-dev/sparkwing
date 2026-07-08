@@ -25,6 +25,8 @@ const (
 	planCacheEvicted planCacheOutcome = "evicted" // superseded mid-run
 )
 
+var inheritedPlanHeartbeatInterval = store.DefaultConcurrencyHeartbeatInterval
+
 // acquirePlanSlot handles plan-level .Cache() coordination. Caller
 // invokes release() at plan terminal. release uses a fresh context so
 // it survives a cancelled run.
@@ -152,7 +154,7 @@ func makeInheritedPlanSlotRelease(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		t := time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
+		t := time.NewTicker(inheritedPlanHeartbeatInterval)
 		defer t.Stop()
 		for {
 			select {
@@ -160,12 +162,19 @@ func makeInheritedPlanSlotRelease(
 				return
 			case <-t.C:
 				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
-				_, _, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, store.DefaultConcurrencyLease)
+				_, superseded, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, store.DefaultConcurrencyLease)
 				cancel()
 				if err != nil {
 					err = fmt.Errorf("plan Cache inherited admission lost for key %q: %w", key, err)
 					slog.Warn("inherited plan concurrency heartbeat failed",
 						"key", key, "holder_id", holderID, "err", err)
+					cancelRun(err)
+					return
+				}
+				if superseded {
+					err := fmt.Errorf("plan Cache inherited admission superseded for key %q", key)
+					slog.Warn("inherited plan concurrency holder superseded",
+						"key", key, "holder_id", holderID)
 					cancelRun(err)
 					return
 				}
