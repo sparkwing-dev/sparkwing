@@ -653,7 +653,6 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		inheritedPlanConcurrencyHolders = body.PlanAdmission.normalizedAdmissions()
 	}
 
-	// The trigger ID doubles as the eventual run ID.
 	now := time.Now()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:            runID,

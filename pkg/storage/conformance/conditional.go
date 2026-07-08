@@ -94,7 +94,6 @@ func TestConditionalWriter(t *testing.T, factory func() storage.ArtifactStore) {
 		if err != nil {
 			t.Fatalf("seed PutIfAbsent: %v", err)
 		}
-		// A concurrent writer advances the object; first is now stale.
 		if _, err := c.PutIfMatch(ctx, "k", bytes.NewReader([]byte("v2")), first); err != nil {
 			t.Fatalf("advance PutIfMatch: %v", err)
 		}
@@ -144,8 +143,6 @@ func TestConditionalWriter(t *testing.T, factory func() storage.ArtifactStore) {
 		if _, err := c.PutIfAbsent(ctx, "counter", bytes.NewReader([]byte("0"))); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		// One writer's read-modify-CAS cycle: read current, write next
-		// gated on the read ETag. Must succeed when uncontended.
 		rc, etag, err := c.GetWithETag(ctx, "counter")
 		if err != nil {
 			t.Fatalf("GetWithETag: %v", err)

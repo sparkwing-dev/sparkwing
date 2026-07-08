@@ -91,8 +91,6 @@ func (a *analysis) run(body *ast.BlockStmt) {
 	})
 }
 
-// --- rule: plan-io -------------------------------------------------------
-
 var sdkIOFuncs = map[string]struct{}{"Bash": {}, "Exec": {}, "Shell": {}}
 
 var osIOFuncs = map[string]struct{}{
@@ -144,14 +142,11 @@ func (a *analysis) checkPlanIO(call *ast.CallExpr) {
 	}
 }
 
-// --- rule: plan-runtime-branch ------------------------------------------
-
 func (a *analysis) checkRuntimeBranch(call *ast.CallExpr) {
 	sel := selectorOf(call.Fun)
 	if sel == nil {
 		return
 	}
-	// IsLocal() on any receiver: a host-environment branch.
 	if sel.Sel.Name == "IsLocal" {
 		a.add(RulePlanRuntimeBranch, call.Pos(),
 			"Plan() must be deterministic: IsLocal() branches the DAG on where it runs. Use a job-level SkipIf / Requires or a pipeline guard instead.")
@@ -177,8 +172,6 @@ func (a *analysis) checkRuntimeSelector(sel *ast.SelectorExpr) {
 			"Plan() must be deterministic: runtime."+sel.Sel.Name+" branches the DAG on the build host. Express host targeting via a job-level Requires label instead.")
 	}
 }
-
-// --- rules over job-builder chains and Ref discards ---------------------
 
 func (a *analysis) checkAssign(as *ast.AssignStmt) {
 	for _, rhs := range as.Rhs {
@@ -261,8 +254,6 @@ func (a *analysis) isRefCall(call *ast.CallExpr) bool {
 	return sel.Sel.Name == "RefTo" || sel.Sel.Name == "RefToLastRun"
 }
 
-// --- AST helpers --------------------------------------------------------
-
 func importMap(file *ast.File) map[string]string {
 	out := map[string]string{}
 	for _, imp := range file.Imports {
@@ -292,8 +283,6 @@ func isPlanMethod(fn *ast.FuncDecl) bool {
 	if fn.Type.Params == nil {
 		return false
 	}
-	// Identify the *Plan parameter (the DAG builder) to avoid matching
-	// unrelated methods named Plan.
 	for _, field := range fn.Type.Params.List {
 		star, ok := field.Type.(*ast.StarExpr)
 		if !ok {

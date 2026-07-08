@@ -101,8 +101,6 @@ func (c *s3Concurrency) fallback(ctx context.Context) ConcurrencyBackend {
 	return nil
 }
 
-// --- slot document ---
-
 // s3SlotDoc is the full coordination state for one concurrency key,
 // serialized as one object. Holders draw budget; waiters await it;
 // cache memoizes a finished leader's output; finished records carry a
@@ -194,8 +192,6 @@ func nodeOrDash(nodeID string) string {
 	return nodeID
 }
 
-// --- CAS loop ---
-
 // load reads and decodes the slot object. A missing object yields a
 // fresh empty doc with exists=false so the first writer uses
 // PutIfAbsent.
@@ -277,8 +273,6 @@ func casBackoff(attempt int, key string) time.Duration {
 	jitter := time.Duration(sha256.Sum256([]byte(key))[0]) % s3CASBackoffStep
 	return d + jitter
 }
-
-// --- budget helpers (twins of pkg/store's accounting) ---
 
 func liveHolderCost(holders []s3Holder, nowNS int64) int {
 	used := 0
@@ -569,8 +563,6 @@ func promoteWaiters(doc *s3SlotDoc, now time.Time, lease time.Duration) bool {
 	doc.Waiters = kept
 	return true
 }
-
-// --- ConcurrencyBackend ---
 
 func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	if fb := c.fallback(ctx); fb != nil {

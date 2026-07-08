@@ -155,7 +155,7 @@ func TestS3Concurrency_NoOverBudgetWithCost(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			cost := (w % 3) + 1 // 1, 2, 3
+			cost := (w % 3) + 1
 			runID := fmt.Sprintf("run-%d", w)
 			holderID := holdSlot(t, c, key, runID, "n", capacity, cost)
 
@@ -349,8 +349,6 @@ func TestS3Concurrency_QueueOrderingAndPromotion(t *testing.T) {
 		}
 	}
 
-	// Release the head holder; the FIFO head (B) is promoted, the rest
-	// shift forward.
 	release(t, c, key, a.HolderID, "success")
 
 	bHolder := waitPromoted(t, c, key, "B", "n")
@@ -404,7 +402,6 @@ func TestS3Concurrency_SkipAndFail(t *testing.T) {
 		t.Errorf("B kind = %q, want failed", b.Kind)
 	}
 
-	// Cost beyond capacity rejects immediately, by policy.
 	if s := acquire(t, c, store.AcquireSlotRequest{Key: "g:cost-skip", RunID: "A", NodeID: "n", Capacity: 1, Cost: 2, Policy: store.OnLimitSkip}); s.Kind != store.AcquireSkipped {
 		t.Errorf("cost>cap skip kind = %q, want skipped", s.Kind)
 	}
@@ -567,7 +564,6 @@ func TestS3Concurrency_FallsBackWhenPreconditionsIgnored(t *testing.T) {
 	if a.Kind != store.AcquireGranted {
 		t.Fatalf("A kind = %q, want granted", a.Kind)
 	}
-	// Under real CAS this would queue; the no-op fallback grants it.
 	b := acquire(t, c, store.AcquireSlotRequest{Key: key, RunID: "B", NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue})
 	if b.Kind != store.AcquireGranted {
 		t.Errorf("B kind = %q, want granted (no-op fallback grants every slot)", b.Kind)
@@ -586,8 +582,6 @@ func TestS3Concurrency_NonConditionalStoreIsNoop(t *testing.T) {
 		t.Errorf("kinds = %q,%q, want granted,granted (non-conditional store is no-op)", a.Kind, b.Kind)
 	}
 }
-
-// --- fakes for the fallback paths ---
 
 // plainStore is an ArtifactStore with no conditional-write capability.
 type plainStore struct{}

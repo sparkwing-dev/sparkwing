@@ -98,6 +98,11 @@ func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, e
 	return ok, err
 }
 
+// probeConditionalWrites reports whether the backing endpoint honors
+// create-if-absent preconditions. It writes a unique probe key twice: an
+// endpoint that fails the second write with ErrPreconditionFailed enforces
+// conditional writes; one that accepts the overwrite ignores preconditions,
+// so the caller falls back to last-write-wins.
 func (s *ArtifactStore) probeConditionalWrites(ctx context.Context) (bool, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
@@ -116,8 +121,6 @@ func (s *ArtifactStore) probeConditionalWrites(ctx context.Context) (bool, error
 	if err != nil {
 		return false, fmt.Errorf("cas probe second write: %w", err)
 	}
-	// The endpoint accepted a create-if-absent over an existing key:
-	// it ignores preconditions. Fall back to last-write-wins.
 	return false, nil
 }
 

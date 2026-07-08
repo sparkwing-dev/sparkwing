@@ -57,8 +57,6 @@ func TestConditionalWritesSupported_MemoizesProbe(t *testing.T) {
 			t.Fatalf("probe %d: %v", i, err)
 		}
 	}
-	// The probe writes twice; a single un-memoized probe is 2 PutObject
-	// calls. Repeated capability checks must not re-probe.
 	if got := api.puts.Load(); got != 2 {
 		t.Fatalf("PutObject called %d times across 3 capability checks, want 2 (probe runs once)", got)
 	}

@@ -198,8 +198,7 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 			return nil, ErrSlotsFull
 		}
 		if waiter == nil {
-			// best-effort: a waiter marker makes the queue observable to
-			// box-slots show; failing to create one only costs visibility.
+			// hack: ignore the error; a missing waiter marker only costs box-slots queue visibility.
 			waiter, _ = createLockFile(opts.LockDir, waiterPrefix)
 		}
 		if opts.OnWait != nil {
