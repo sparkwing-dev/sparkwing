@@ -53,6 +53,14 @@ code change to unlock.
   refresh the inherited holder lease while the child run is active, so a
   child that outlives its parent keeps the shared budget reservation
   visible instead of letting overlapping work enter the same gate.
+- **sdk:** `Plan.Concurrency` now accepts an optional cost argument, matching
+  node-level `Concurrency(group, cost)`, so whole-run gates can participate in
+  cost-weighted budgets instead of always charging one unit.
+- **run:** Local child runs launched through `sparkwing.Bash` or
+  `sparkwing.Exec` inherit active plan-admission handles through
+  context-scoped command env, and nested `sparkwing run` processes read those
+  handles back into inherited plan admission without mutating global process
+  environment.
 
 ## [v0.14.1] - 2026-07-08
 ### Fixed
