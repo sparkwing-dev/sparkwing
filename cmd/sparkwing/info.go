@@ -102,12 +102,14 @@ func parseInfoVersion(raw string) InfoVersion {
 		return v
 	}
 	dirty := strings.Contains(raw, "+dirty")
+	devBuild := strings.Contains(raw, "-dev")
+	pseudo := pseudoVersionRE.MatchString(raw)
 	clean := raw
 	if idx := strings.IndexAny(clean, "+-"); idx >= 0 {
 		clean = clean[:idx]
 	}
 	parts := strings.Split(strings.TrimPrefix(clean, "v"), ".")
-	if len(parts) == 3 {
+	if len(parts) == 3 && !pseudo {
 		v.Semver = clean
 	}
 	switch {
@@ -115,6 +117,9 @@ func parseInfoVersion(raw string) InfoVersion {
 		v.IsDirty = true
 		v.BuildType = "local-dirty"
 		v.HumanLabel = "local build with uncommitted changes"
+	case devBuild:
+		v.BuildType = "local-clean"
+		v.HumanLabel = "local source build"
 	case v.Semver != "":
 		v.IsRelease = true
 		v.BuildType = "release"
