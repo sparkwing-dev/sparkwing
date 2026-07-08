@@ -11,17 +11,18 @@ import (
 )
 
 type acquireSlotReq struct {
-	HolderID        string `json:"holder_id"`
-	RunID           string `json:"run_id"`
-	NodeID          string `json:"node_id,omitempty"`
-	Max             int    `json:"max,omitempty"`
-	Cost            int    `json:"cost,omitempty"`
-	Policy          string `json:"policy,omitempty"`
-	CacheKeyHash    string `json:"cache_key_hash,omitempty"`
-	CacheTTLNS      int64  `json:"cache_ttl_ns,omitempty"`
-	CancelTimeoutNS int64  `json:"cancel_timeout_ns,omitempty"`
-	LeaseSecs       int    `json:"lease_secs,omitempty"`
-	BypassRead      bool   `json:"bypass_read,omitempty"`
+	HolderID          string `json:"holder_id"`
+	InheritedHolderID string `json:"inherited_holder_id,omitempty"`
+	RunID             string `json:"run_id"`
+	NodeID            string `json:"node_id,omitempty"`
+	Max               int    `json:"max,omitempty"`
+	Cost              int    `json:"cost,omitempty"`
+	Policy            string `json:"policy,omitempty"`
+	CacheKeyHash      string `json:"cache_key_hash,omitempty"`
+	CacheTTLNS        int64  `json:"cache_ttl_ns,omitempty"`
+	CancelTimeoutNS   int64  `json:"cancel_timeout_ns,omitempty"`
+	LeaseSecs         int    `json:"lease_secs,omitempty"`
+	BypassRead        bool   `json:"bypass_read,omitempty"`
 }
 
 type acquireSlotResp struct {
@@ -61,21 +62,26 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req := store.AcquireSlotRequest{
-		Key:           key,
-		HolderID:      body.HolderID,
-		RunID:         body.RunID,
-		NodeID:        body.NodeID,
-		Capacity:      body.Max,
-		Cost:          body.Cost,
-		Policy:        body.Policy,
-		CacheKeyHash:  body.CacheKeyHash,
-		CacheTTL:      time.Duration(body.CacheTTLNS),
-		CancelTimeout: time.Duration(body.CancelTimeoutNS),
-		Lease:         time.Duration(body.LeaseSecs) * time.Second,
-		BypassRead:    body.BypassRead,
+		Key:               key,
+		HolderID:          body.HolderID,
+		InheritedHolderID: body.InheritedHolderID,
+		RunID:             body.RunID,
+		NodeID:            body.NodeID,
+		Capacity:          body.Max,
+		Cost:              body.Cost,
+		Policy:            body.Policy,
+		CacheKeyHash:      body.CacheKeyHash,
+		CacheTTL:          time.Duration(body.CacheTTLNS),
+		CancelTimeout:     time.Duration(body.CancelTimeoutNS),
+		Lease:             time.Duration(body.LeaseSecs) * time.Second,
+		BypassRead:        body.BypassRead,
 	}
 	resp, err := s.store.AcquireConcurrencySlot(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, store.ErrConcurrencySuperseded) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

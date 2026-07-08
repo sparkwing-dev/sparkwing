@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,7 +127,21 @@ type s3Holder struct {
 	DeclaredCapacity int    `json:"declared_capacity"`
 }
 
-func (h s3Holder) costOrOne() int {
+const inheritedS3HolderDeclaredCapacity = -1
+const inheritedS3HolderNodePrefix = "\x00inherited:"
+
+func inheritedS3HolderNodeID(holderID string) string {
+	return inheritedS3HolderNodePrefix + holderID
+}
+
+func isInheritedS3HolderNodeID(nodeID string) bool {
+	return strings.HasPrefix(nodeID, inheritedS3HolderNodePrefix)
+}
+
+func (h s3Holder) budgetCost() int {
+	if h.Cost == 0 && h.DeclaredCapacity == inheritedS3HolderDeclaredCapacity {
+		return 0
+	}
 	if h.Cost <= 0 {
 		return 1
 	}
@@ -269,7 +284,7 @@ func liveHolderCost(holders []s3Holder, nowNS int64) int {
 	used := 0
 	for _, h := range holders {
 		if !h.Superseded && h.LeaseExpiresNS > nowNS {
-			used += h.costOrOne()
+			used += h.budgetCost()
 		}
 	}
 	return used
@@ -279,6 +294,9 @@ func liveFloor(holders []s3Holder, nowNS int64) int {
 	floor := 0
 	for _, h := range holders {
 		if h.Superseded || h.LeaseExpiresNS <= nowNS {
+			continue
+		}
+		if h.Cost == 0 && h.DeclaredCapacity == inheritedS3HolderDeclaredCapacity {
 			continue
 		}
 		term := h.DeclaredCapacity
@@ -324,6 +342,22 @@ func upsertHolder(doc *s3SlotDoc, h s3Holder) {
 		}
 	}
 	doc.Holders = append(doc.Holders, h)
+}
+
+func supersedeS3HolderAndInherited(doc *s3SlotDoc, holderID string) []string {
+	h := findHolder(doc, holderID)
+	if h == nil || h.Superseded {
+		return nil
+	}
+	h.Superseded = true
+	ids := []string{holderID}
+	for i := range doc.Holders {
+		if doc.Holders[i].Superseded || doc.Holders[i].NodeID != inheritedS3HolderNodeID(holderID) {
+			continue
+		}
+		ids = append(ids, supersedeS3HolderAndInherited(doc, doc.Holders[i].HolderID)...)
+	}
+	return ids
 }
 
 func oldestLiveHolder(doc *s3SlotDoc, nowNS int64) *s3Holder {
@@ -395,15 +429,23 @@ func liveHolders(doc *s3SlotDoc, nowNS int64) []store.ConcurrencyHolder {
 }
 
 func toStoreHolder(h s3Holder) store.ConcurrencyHolder {
+	nodeID := h.NodeID
+	declaredCapacity := h.DeclaredCapacity
+	if declaredCapacity == inheritedS3HolderDeclaredCapacity {
+		declaredCapacity = 0
+	}
+	if isInheritedS3HolderNodeID(nodeID) {
+		nodeID = ""
+	}
 	return store.ConcurrencyHolder{
 		HolderID:         h.HolderID,
 		RunID:            h.RunID,
-		NodeID:           h.NodeID,
+		NodeID:           nodeID,
 		ClaimedAt:        time.Unix(0, h.ClaimedAtNS),
 		LeaseExpiresAt:   time.Unix(0, h.LeaseExpiresNS),
 		Superseded:       h.Superseded,
 		Cost:             h.Cost,
-		DeclaredCapacity: h.DeclaredCapacity,
+		DeclaredCapacity: declaredCapacity,
 	}
 }
 
@@ -556,7 +598,10 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 		holderID = req.RunID + "/" + nodeOrDash(req.NodeID)
 	}
 
-	if cost > capacity {
+	if req.InheritedHolderID != "" && req.CacheKeyHash != "" {
+		return store.AcquireSlotResponse{}, errors.New("s3 concurrency: inherited holder cannot be used with cache acquisition")
+	}
+	if req.InheritedHolderID == "" && cost > capacity {
 		if policy == store.OnLimitSkip {
 			return store.AcquireSlotResponse{Kind: store.AcquireSkipped}, nil
 		}
@@ -593,6 +638,33 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 			dirty = true
 		}
 		entryCap := doc.Capacity
+
+		if req.InheritedHolderID != "" {
+			h := findHolder(doc, req.InheritedHolderID)
+			if h == nil {
+				return false, fmt.Errorf("s3 concurrency: inherited holder %q for key %q is not active", req.InheritedHolderID, req.Key)
+			}
+			if h.Superseded {
+				return false, fmt.Errorf("%w: inherited holder %q for key %q", store.ErrConcurrencySuperseded, req.InheritedHolderID, req.Key)
+			}
+			if h.LeaseExpiresNS <= nowNS {
+				return false, fmt.Errorf("s3 concurrency: inherited holder %q for key %q is not active", req.InheritedHolderID, req.Key)
+			}
+			h.LeaseExpiresNS = now.Add(lease).UnixNano()
+			upsertHolder(doc, s3Holder{
+				HolderID:         holderID,
+				RunID:            req.RunID,
+				NodeID:           inheritedS3HolderNodeID(req.InheritedHolderID),
+				ClaimedAtNS:      nowNS,
+				LeaseExpiresNS:   h.LeaseExpiresNS,
+				Cost:             0,
+				DeclaredCapacity: inheritedS3HolderDeclaredCapacity,
+			})
+			resp.Kind = store.AcquireGranted
+			resp.HolderID = holderID
+			resp.LeaseExpiresAt = time.Unix(0, h.LeaseExpiresNS)
+			return true, nil
+		}
 
 		if h := findHolder(doc, holderID); h != nil && !h.Superseded && h.LeaseExpiresNS > nowNS {
 			h.LeaseExpiresNS = now.Add(lease).UnixNano()
@@ -678,9 +750,8 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 				if fitsBudget(used-freed, cost, effCap) && len(supersededIDs) > 0 {
 					break
 				}
-				h.Superseded = true
-				supersededIDs = append(supersededIDs, h.HolderID)
-				freed += h.costOrOne()
+				supersededIDs = append(supersededIDs, supersedeS3HolderAndInherited(doc, h.HolderID)...)
+				freed += h.budgetCost()
 			}
 			expires := now.Add(lease).UnixNano()
 			upsertHolder(doc, s3Holder{
@@ -773,16 +844,9 @@ func (c *s3Concurrency) ObserveSlot(ctx context.Context, key, holderID string) (
 	if h == nil || h.LeaseExpiresNS <= time.Now().UnixNano() {
 		return nil, store.ErrNotFound
 	}
-	return &store.ConcurrencyHolder{
-		Key:            key,
-		HolderID:       h.HolderID,
-		RunID:          h.RunID,
-		NodeID:         h.NodeID,
-		ClaimedAt:      time.Unix(0, h.ClaimedAtNS),
-		LeaseExpiresAt: time.Unix(0, h.LeaseExpiresNS),
-		Superseded:     h.Superseded,
-		Cost:           h.Cost,
-	}, nil
+	holder := toStoreHolder(*h)
+	holder.Key = key
+	return &holder, nil
 }
 
 func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
@@ -799,7 +863,25 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 		released := false
 		for i := range doc.Holders {
 			if doc.Holders[i].HolderID == holderID {
+				releasedHolder := doc.Holders[i]
 				rRun, rNode = doc.Holders[i].RunID, doc.Holders[i].NodeID
+				if releasedHolder.Cost > 0 && !releasedHolder.Superseded && releasedHolder.LeaseExpiresNS > nowNS {
+					for j := range doc.Holders {
+						if i == j {
+							continue
+						}
+						if doc.Holders[j].Superseded || doc.Holders[j].LeaseExpiresNS <= nowNS {
+							continue
+						}
+						if doc.Holders[j].Cost == 0 &&
+							doc.Holders[j].DeclaredCapacity == inheritedS3HolderDeclaredCapacity &&
+							doc.Holders[j].NodeID == inheritedS3HolderNodeID(releasedHolder.HolderID) {
+							doc.Holders[j].Cost = releasedHolder.Cost
+							doc.Holders[j].DeclaredCapacity = releasedHolder.DeclaredCapacity
+							break
+						}
+					}
+				}
 				doc.Holders = append(doc.Holders[:i], doc.Holders[i+1:]...)
 				released = true
 				break

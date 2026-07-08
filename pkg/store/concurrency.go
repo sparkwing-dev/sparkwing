@@ -132,6 +132,34 @@ const (
 	AcquireCancellingOthers AcquireKind = "cancelling_others"
 )
 
+const inheritedHolderDeclaredCapacity = -1
+const inheritedHolderNodePrefix = "\x00inherited:"
+
+func inheritedHolderNodeID(holderID string) string {
+	return inheritedHolderNodePrefix + holderID
+}
+
+func isInheritedHolderNodeID(nodeID string) bool {
+	return strings.HasPrefix(nodeID, inheritedHolderNodePrefix)
+}
+
+func holderBudgetCost(cost, declaredCapacity int) int {
+	if cost == 0 && declaredCapacity == inheritedHolderDeclaredCapacity {
+		return 0
+	}
+	if cost <= 0 {
+		return 1
+	}
+	return cost
+}
+
+func holderFloorTerm(cost, declaredCapacity int) (int, bool) {
+	if cost == 0 && declaredCapacity == inheritedHolderDeclaredCapacity {
+		return 0, false
+	}
+	return declaredCapacityFloorTerm(declaredCapacity), true
+}
+
 // AcquireSlotRequest: empty CacheKeyHash = no memo; empty NodeID =
 // plan-level. HolderID convention: "runID/nodeID" or "runID/-".
 //
@@ -141,17 +169,20 @@ const (
 // Used by --no-cache so a run forces fresh execution but still
 // populates the runs store for subsequent runs over the same content.
 type AcquireSlotRequest struct {
-	Key           string
-	HolderID      string
-	RunID         string
-	NodeID        string
-	Capacity      int
-	Policy        string
-	CacheKeyHash  string
-	CacheTTL      time.Duration
-	CancelTimeout time.Duration
-	Lease         time.Duration
-	BypassRead    bool
+	Key      string
+	HolderID string
+	// InheritedHolderID joins and refreshes an existing live holder
+	// instead of creating HolderID. Its Cost is already accounted.
+	InheritedHolderID string
+	RunID             string
+	NodeID            string
+	Capacity          int
+	Policy            string
+	CacheKeyHash      string
+	CacheTTL          time.Duration
+	CancelTimeout     time.Duration
+	Lease             time.Duration
+	BypassRead        bool
 
 	// Cost is the admission weight this arrival draws from the key's
 	// capacity (author-defined units). Zero or negative is treated as
@@ -271,7 +302,17 @@ func (s *Store) concurrencyHolder(ctx context.Context, key, holderID string, now
 	if err != nil {
 		return nil, err
 	}
+	scrubInheritedHolder(&holder)
 	return &holder, nil
+}
+
+func scrubInheritedHolder(holder *ConcurrencyHolder) {
+	if holder.DeclaredCapacity == inheritedHolderDeclaredCapacity {
+		holder.DeclaredCapacity = 0
+	}
+	if isInheritedHolderNodeID(holder.NodeID) {
+		holder.NodeID = ""
+	}
 }
 
 // AcquireConcurrencySlot atomically performs cache-lookup, capacity
@@ -300,7 +341,10 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		req.CancelTimeout = DefaultCancelTimeout
 	}
 
-	if req.Cost > req.Capacity {
+	if req.InheritedHolderID != "" && req.CacheKeyHash != "" {
+		return AcquireSlotResponse{}, errors.New("concurrency: inherited holder cannot be used with cache acquisition")
+	}
+	if req.InheritedHolderID == "" && req.Cost > req.Capacity {
 		if req.Policy == OnLimitSkip {
 			return AcquireSlotResponse{Kind: AcquireSkipped}, nil
 		}
@@ -400,6 +444,29 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 				return AcquireSlotResponse{}, err
 			}
 		}
+	}
+
+	if req.InheritedHolderID != "" {
+		expires, err := txRefreshInheritedHolder(ctx, tx, req.Key, req.InheritedHolderID, now, req.Lease)
+		if err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		if err := txInsertHolder(ctx, tx, holderRow{
+			key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: inheritedHolderNodeID(req.InheritedHolderID),
+			cost: 0, declaredCapacity: inheritedHolderDeclaredCapacity,
+		}, nowNS, expires.UnixNano()); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		return AcquireSlotResponse{
+			Kind:             AcquireGranted,
+			HolderID:         req.HolderID,
+			LeaseExpiresAt:   expires,
+			PreviousCapacity: prevCap,
+			DriftNote:        driftNote,
+		}, nil
 	}
 
 	var existingLeaseNS int64
@@ -531,13 +598,17 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 				break
 			}
 			supersededIDs = append(supersededIDs, h.HolderID)
-			freed += h.Cost
+			freed += holderBudgetCost(h.Cost, h.DeclaredCapacity)
 		}
+		var expandedSupersededIDs []string
 		for _, hid := range supersededIDs {
-			if err := txSupersede(ctx, tx, req.Key, hid); err != nil {
+			ids, err := txSupersedeHolderAndInherited(ctx, tx, req.Key, hid, nowNS)
+			if err != nil {
 				return AcquireSlotResponse{}, err
 			}
+			expandedSupersededIDs = append(expandedSupersededIDs, ids...)
 		}
+		supersededIDs = expandedSupersededIDs
 		expiresNS := now.Add(req.Lease).UnixNano()
 		if err := txInsertHolder(ctx, tx, holderRow{
 			key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
@@ -674,8 +745,8 @@ func txConcurrencyAccounting(ctx context.Context, tx *storeTx, key string, nowNS
 	}
 	a := concurrencyAccounting{entryCap: entryCap, holders: holders}
 	for _, h := range holders {
-		a.used += h.Cost
-		if t := declaredCapacityFloorTerm(h.DeclaredCapacity); a.floor == 0 || t < a.floor {
+		a.used += holderBudgetCost(h.Cost, h.DeclaredCapacity)
+		if t, ok := holderFloorTerm(h.Cost, h.DeclaredCapacity); ok && (a.floor == 0 || t < a.floor) {
 			a.floor = t
 		}
 	}
@@ -910,7 +981,7 @@ func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, key string, 
 		violations = append(violations, fmt.Sprintf("live cost %d exceeds effective capacity %d", acct.used, eff))
 	}
 	for _, h := range acct.holders {
-		if h.DeclaredCapacity > 0 && h.Cost > h.DeclaredCapacity {
+		if h.DeclaredCapacity > 0 && holderBudgetCost(h.Cost, h.DeclaredCapacity) > h.DeclaredCapacity {
 			violations = append(violations, fmt.Sprintf("holder %q cost %d exceeds its declared capacity %d", h.HolderID, h.Cost, h.DeclaredCapacity))
 		}
 	}
@@ -1019,6 +1090,82 @@ func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expire
 	return nil
 }
 
+func txRefreshInheritedHolder(
+	ctx context.Context,
+	tx *storeTx,
+	key string,
+	holderID string,
+	now time.Time,
+	lease time.Duration,
+) (time.Time, error) {
+	var superInt int
+	var leaseNS int64
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT superseded, lease_expires_at FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		key, holderID,
+	).Scan(&superInt, &leaseNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, fmt.Errorf("concurrency: inherited holder %q for key %q is not active", holderID, key)
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if superInt == 1 {
+		return time.Time{}, fmt.Errorf("%w: inherited holder %q for key %q", ErrConcurrencySuperseded, holderID, key)
+	}
+	if leaseNS <= now.UnixNano() {
+		return time.Time{}, fmt.Errorf("concurrency: inherited holder %q for key %q is expired", holderID, key)
+	}
+	expires := now.Add(lease)
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+		expires.UnixNano(), key, holderID,
+	); err != nil {
+		return time.Time{}, err
+	}
+	return expires, nil
+}
+
+func txSupersedeHolderAndInherited(ctx context.Context, tx *storeTx, key, holderID string, nowNS int64) ([]string, error) {
+	if err := txSupersede(ctx, tx, key, holderID); err != nil {
+		return nil, err
+	}
+	ids := []string{holderID}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT holder_id FROM concurrency_holders
+		  WHERE key = ? AND `+holderLiveSQL("")+` AND node_id = ?
+		  ORDER BY claimed_at ASC`,
+		key, nowNS, inheritedHolderNodeID(holderID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	var children []string
+	for rows.Next() {
+		var childID string
+		if err := rows.Scan(&childID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		children = append(children, childID)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, childID := range children {
+		childIDs, err := txSupersedeHolderAndInherited(ctx, tx, key, childID, nowNS)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, childIDs...)
+	}
+	return ids, nil
+}
+
 // HeartbeatConcurrencySlot extends the lease and reports the
 // supersede signal; ErrLockHeld when caller no longer holds.
 //
@@ -1118,11 +1265,16 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 // TTL), writes the shared cache entry. Reports whether a holder row
 // matched, plus the released holder's (runID, nodeID).
 func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
+	var supersededInt int
+	var leaseNS int64
+	var cost int
+	var declaredCapacity int
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT run_id, node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		`SELECT run_id, node_id, superseded, lease_expires_at, cost, declared_capacity
+		   FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
-	).Scan(&runID, &nodeID)
+	).Scan(&runID, &nodeID, &supersededInt, &leaseNS, &cost, &declaredCapacity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, "", "", nil
 	}
@@ -1130,12 +1282,18 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, o
 		return false, "", "", err
 	}
 
+	now := time.Now()
+	if cost > 0 && supersededInt == 0 && leaseNS > now.UnixNano() {
+		if err := txTransferInheritedHolderCost(ctx, tx, key, holderID, cost, declaredCapacity, now.UnixNano()); err != nil {
+			return false, "", "", err
+		}
+	}
+
 	if err := txDeleteHolder(ctx, tx, key, holderID); err != nil {
 		return false, "", "", err
 	}
 
 	if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
-		now := time.Now()
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO concurrency_cache
@@ -1155,6 +1313,47 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, o
 		}
 	}
 	return true, runID, nodeID, nil
+}
+
+func txTransferInheritedHolderCost(
+	ctx context.Context,
+	tx *storeTx,
+	key string,
+	releasedHolderID string,
+	cost int,
+	declaredCapacity int,
+	nowNS int64,
+) error {
+	var inheritedHolderID string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT holder_id
+		   FROM concurrency_holders
+		  WHERE key = ?
+		    AND holder_id != ?
+		    AND superseded = 0
+		    AND `+holderLeaseLiveSQL("")+`
+		    AND cost = 0
+		    AND declared_capacity = ?
+		    AND node_id = ?
+		  ORDER BY claimed_at ASC
+		  LIMIT 1`,
+		key, releasedHolderID, nowNS, inheritedHolderDeclaredCapacity, inheritedHolderNodeID(releasedHolderID),
+	).Scan(&inheritedHolderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE concurrency_holders
+		    SET cost = ?, declared_capacity = ?
+		  WHERE key = ? AND holder_id = ?`,
+		cost, declaredCapacity, key, inheritedHolderID,
+	)
+	return err
 }
 
 // concurrencyCacheHit is a served memo entry.
@@ -1676,11 +1875,12 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 			return nil, err
 		}
 		if holderCountsForBudget(h.Superseded, h.LeaseExpiresAt.UnixNano(), nowNS) {
-			state.UsedCost += h.Cost
-			if t := declaredCapacityFloorTerm(h.DeclaredCapacity); floor == 0 || t < floor {
+			state.UsedCost += holderBudgetCost(h.Cost, h.DeclaredCapacity)
+			if t, ok := holderFloorTerm(h.Cost, h.DeclaredCapacity); ok && (floor == 0 || t < floor) {
 				floor = t
 			}
 		}
+		scrubInheritedHolder(&h)
 		state.Holders = append(state.Holders, h)
 	}
 	_ = hrows.Close()

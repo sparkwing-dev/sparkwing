@@ -185,6 +185,139 @@ func TestS3Concurrency_NoOverBudgetWithCost(t *testing.T) {
 	}
 }
 
+func TestS3Concurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	key := "g:inherited-budget"
+
+	parent := acquire(t, c, store.AcquireSlotRequest{
+		Key:      key,
+		HolderID: "parent/-",
+		RunID:    "parent",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitQueue,
+		Lease:    time.Minute,
+	})
+	if parent.Kind != store.AcquireGranted {
+		t.Fatalf("parent: want Granted got %s", parent.Kind)
+	}
+
+	child := acquire(t, c, store.AcquireSlotRequest{
+		Key:               key,
+		HolderID:          "child/-",
+		InheritedHolderID: "parent/-",
+		RunID:             "child",
+		Capacity:          10,
+		Cost:              20,
+		Policy:            store.OnLimitQueue,
+		Lease:             2 * time.Minute,
+	})
+	if child.Kind != store.AcquireGranted {
+		t.Fatalf("child: want Granted got %s", child.Kind)
+	}
+	if child.HolderID != "child/-" {
+		t.Fatalf("child holder = %q, want child holder", child.HolderID)
+	}
+
+	parentAfter, err := c.ObserveSlot(context.Background(), key, "parent/-")
+	if err != nil {
+		t.Fatalf("ObserveSlot(parent): %v", err)
+	}
+	if !parentAfter.LeaseExpiresAt.After(parent.LeaseExpiresAt) {
+		t.Fatalf("inherited join did not extend parent lease: before=%s after=%s",
+			parent.LeaseExpiresAt, parentAfter.LeaseExpiresAt)
+	}
+	childHolder, err := c.ObserveSlot(context.Background(), key, "child/-")
+	if err != nil {
+		t.Fatalf("ObserveSlot(child): %v", err)
+	}
+	if childHolder.Cost != 0 {
+		t.Fatalf("child holder cost = %d, want zero before parent release", childHolder.Cost)
+	}
+
+	if err := c.ReleaseSlot(context.Background(), key, "parent/-", "success", "", "", 0); err != nil {
+		t.Fatalf("ReleaseSlot(parent): %v", err)
+	}
+	childHolder, err = c.ObserveSlot(context.Background(), key, "child/-")
+	if err != nil {
+		t.Fatalf("ObserveSlot(child after parent release): %v", err)
+	}
+	if childHolder.Cost != 8 {
+		t.Fatalf("child holder cost after parent release = %d, want transferred 8", childHolder.Cost)
+	}
+	if childHolder.NodeID != "" {
+		t.Fatalf("child node id after parent release = %q, want empty plan holder node", childHolder.NodeID)
+	}
+
+	follower := acquire(t, c, store.AcquireSlotRequest{
+		Key:      key,
+		HolderID: "follower/-",
+		RunID:    "follower",
+		Capacity: 10,
+		Cost:     3,
+		Policy:   store.OnLimitQueue,
+	})
+	if follower.Kind != store.AcquireQueued {
+		t.Fatalf("follower: want Queued because parent still accounts for cost 8, got %s", follower.Kind)
+	}
+}
+
+func TestS3Concurrency_CancelOthersSupersedesInheritedHolder(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	key := "g:inherited-cancel-others"
+
+	parent := acquire(t, c, store.AcquireSlotRequest{
+		Key:      key,
+		HolderID: "parent/-",
+		RunID:    "parent",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitQueue,
+		Lease:    time.Minute,
+	})
+	if parent.Kind != store.AcquireGranted {
+		t.Fatalf("parent: want Granted got %s", parent.Kind)
+	}
+	child := acquire(t, c, store.AcquireSlotRequest{
+		Key:               key,
+		HolderID:          "child/-",
+		InheritedHolderID: "parent/-",
+		RunID:             "child",
+		Capacity:          10,
+		Cost:              8,
+		Policy:            store.OnLimitQueue,
+		Lease:             time.Minute,
+	})
+	if child.Kind != store.AcquireGranted {
+		t.Fatalf("child: want Granted got %s", child.Kind)
+	}
+
+	evictor := acquire(t, c, store.AcquireSlotRequest{
+		Key:      key,
+		HolderID: "evictor/-",
+		RunID:    "evictor",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitCancelOthers,
+		Lease:    time.Minute,
+	})
+	if evictor.Kind != store.AcquireCancellingOthers {
+		t.Fatalf("evictor: want CancellingOthers got %s", evictor.Kind)
+	}
+	if len(evictor.SupersededIDs) != 2 || evictor.SupersededIDs[0] != "parent/-" || evictor.SupersededIDs[1] != "child/-" {
+		t.Fatalf("superseded ids = %v, want parent and child", evictor.SupersededIDs)
+	}
+	_, superseded, err := c.HeartbeatSlot(context.Background(), key, "child/-", time.Minute)
+	if err != nil {
+		t.Fatalf("HeartbeatSlot(child): %v", err)
+	}
+	if !superseded {
+		t.Fatal("child heartbeat did not report superseded")
+	}
+}
+
 // TestS3Concurrency_QueueOrderingAndPromotion drives the queue policy
 // deterministically: arrivals report FIFO positions, ResolveWaiter
 // reflects the live queue, and each release promotes the head of line

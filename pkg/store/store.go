@@ -3487,6 +3487,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 // ErrLockHeld signals the caller is not the current slot holder. HTTP -> 409.
 var ErrLockHeld = errors.New("held by another holder")
 
+// ErrConcurrencySuperseded signals a concurrency holder was superseded.
+var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+
 // CountPendingNodes returns the count of unclaimed ready nodes.
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 	var n int
