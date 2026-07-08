@@ -64,6 +64,34 @@ func (s3TriggerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
+type s3PlanAdmissionChildPipe struct{ sparkwing.Base }
+
+func (s3PlanAdmissionChildPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("s3-plan-admission", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", func(context.Context) error { return nil })
+	return nil
+}
+
+type s3PlanAdmissionParentPipe struct{ sparkwing.Base }
+
+func (s3PlanAdmissionParentPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("s3-plan-admission", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "trigger", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
+			ctx, "s3-integ-plan-admission-child", "work",
+			sparkwing.WithFreshTimeout(50*time.Millisecond),
+		)
+		return err
+	})
+	return nil
+}
+
 func registerS3IntegPipelines(t *testing.T) {
 	t.Helper()
 	s3IntegRegisterOnce.Do(func() {
@@ -71,6 +99,10 @@ func registerS3IntegPipelines(t *testing.T) {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &s3CachedPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("s3-integ-trigger",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &s3TriggerPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("s3-integ-plan-admission-parent",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &s3PlanAdmissionParentPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("s3-integ-plan-admission-child",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &s3PlanAdmissionChildPipe{} })
 	})
 }
 
@@ -202,5 +234,41 @@ func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 	}
 	if childID == "" {
 		t.Fatalf("no child trigger enqueued for %s/trigger -> s3-integ-cache", res.RunID)
+	}
+}
+
+func TestS3Sharing_RunAndAwaitPreservesPlanAdmissionEnv(t *testing.T) {
+	registerS3IntegPipelines(t)
+	art, logs := openIntegrationS3(t)
+	paths := newPaths(t)
+
+	state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
+		Pipeline:      "s3-integ-plan-admission-parent",
+		RunID:         "s3-plan-parent",
+		State:         state,
+		LogStore:      logs,
+		ArtifactStore: art,
+	})
+	if err == nil && res != nil && res.Status == "success" {
+		t.Fatalf("trigger pipeline succeeded; expected the await to time out with no runner to claim the child")
+	}
+	if res == nil || res.RunID == "" {
+		t.Fatalf("no run id from RunLocal (res=%v err=%v)", res, err)
+	}
+
+	childID, ferr := state.FindSpawnedChildTriggerID(context.Background(), "s3-plan-parent", "trigger", "s3-integ-plan-admission-child")
+	if ferr != nil {
+		t.Fatalf("FindSpawnedChildTriggerID: %v", ferr)
+	}
+	trigger, ferr := state.GetTrigger(context.Background(), childID)
+	if ferr != nil {
+		t.Fatalf("GetTrigger: %v", ferr)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "g:s3-plan-admission" {
+		t.Fatalf("child admission key = %q, want g:s3-plan-admission", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "s3-plan-parent/-" {
+		t.Fatalf("child admission holder = %q, want s3-plan-parent/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
 	}
 }
