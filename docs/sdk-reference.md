@@ -40,6 +40,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func Summary(ctx context.Context, markdown string)` -- Summary records a persistent markdown run summary on the currently-executing Job or Step.
 - `func TypeName(p any) string` -- TypeName returns the Go type name of p, suitable for matching against a sparkwing.yaml `entrypoint:` field.
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
+- `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
 - `func WithFailure(ctx context.Context, f Failure) context.Context` -- WithFailure returns a context carrying f, read back by a failure-aware recovery callback via FailureFromContext.
 - `func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context` -- WithResolvedArgs installs a resolved-args map on the context so sparkwing.Arg[T] / ArgOrDefault can read it from any step body.
 - `func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context` -- WithSecretResolver returns a derived ctx carrying the given resolver.
@@ -910,7 +911,8 @@ type Plan struct {
 ```
 
 - `func NewPlan() *Plan` -- NewPlan returns an empty Plan.
-- `func (p *Plan) Concurrency(g *ConcurrencyGroup) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires one unit of g's budget before any node dispatches and releases it when the run reaches a terminal status.
+- `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires g's budget before any node dispatches and releases it when the run reaches a terminal status.
+- `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
 - `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.
 - `func (p *Plan) Expansions() []Expansion` -- Expansions returns the registered ExpandFrom generators.
 - `func (p *Plan) GroupSourceIDs(id string) []string` -- GroupSourceIDs returns the ids of the source nodes backing any ExpandFrom Groups this node waits on via Needs(group).
