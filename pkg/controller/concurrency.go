@@ -470,7 +470,7 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 
-		st, err := s.store.GetConcurrencyState(ctx, key)
+		resolution, err := s.store.ResolveWaiter(ctx, key, runID, nodeID, "", "", "")
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				emit("stream_end", map[string]string{"reason": "key_not_found"})
@@ -478,31 +478,18 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if hasHolder(st, runID, nodeID) {
+		switch resolution.Status {
+		case store.WaiterPromoted:
 			emit("ready", map[string]string{})
 			return
-		}
-		if !hasWaiter(st, runID, nodeID) {
+		case store.WaiterStillWaiting:
+			continue
+		case store.WaiterCached:
+			emit("ready", map[string]string{})
+			return
+		case store.WaiterLeaderFinished, store.WaiterCancelled:
 			emit("superseded", map[string]string{})
 			return
 		}
 	}
-}
-
-func hasHolder(st *store.ConcurrencyState, runID, nodeID string) bool {
-	for _, h := range st.Holders {
-		if h.RunID == runID && h.NodeID == nodeID && !h.Superseded {
-			return true
-		}
-	}
-	return false
-}
-
-func hasWaiter(st *store.ConcurrencyState, runID, nodeID string) bool {
-	for _, wt := range st.Waiters {
-		if wt.RunID == runID && wt.NodeID == nodeID {
-			return true
-		}
-	}
-	return false
 }

@@ -158,6 +158,55 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 	}
 }
 
+func TestConcurrency_ResolveWaiterDoesNotBypassCancelOthersTimeout(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "waiter", RunID: "waiter", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitCancelOthers,
+	})
+
+	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "n", "", "", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterStillWaiting {
+		t.Fatalf("resolution = %+v, want still waiting", resolution)
+	}
+}
+
+func TestConcurrency_ResolveWaiterPromotesOrphanedCancelOthersQueue(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "waiter", RunID: "waiter", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitCancelOthers,
+	})
+	if _, err := s.DB().ExecContext(ctx,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		"k", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "n", "", "", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "waiter" {
+		t.Fatalf("resolution = %+v", resolution)
+	}
+}
+
 // Orphan coalesce followers get reaped when their leader is gone.
 func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	s := newStoreT(t)
