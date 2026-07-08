@@ -1731,17 +1731,52 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	}
 
 	var waiterArrivedNS int64
+	var waiterPolicy string
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT arrived_at FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+		`SELECT arrived_at, policy FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 		key, runID, nodeID,
-	).Scan(&waiterArrivedNS)
+	).Scan(&waiterArrivedNS, &waiterPolicy)
 	if err == nil {
+		shouldPromote := waiterPolicy == OnLimitQueue
+		if waiterPolicy == OnLimitCancelOthers {
+			var holderCount int
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM concurrency_holders WHERE key = ?`,
+				key,
+			).Scan(&holderCount); err != nil {
+				return WaiterResolution{}, err
+			}
+			shouldPromote = holderCount == 0
+		}
+		if shouldPromote {
+			if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+				return WaiterResolution{}, err
+			}
+			now := time.Now()
+			promoted, err := txPromoteWaiters(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+			if err != nil {
+				return WaiterResolution{}, err
+			}
+			for _, waiter := range promoted {
+				if waiter.RunID == runID && waiter.NodeID == nodeID {
+					if err := txCommitChecked(ctx, tx, now.UnixNano(), key); err != nil {
+						return WaiterResolution{}, err
+					}
+					return WaiterResolution{
+						Status:             WaiterPromoted,
+						HolderID:           waiter.HolderID,
+						HolderLeaseExpires: now.Add(DefaultConcurrencyLease),
+					}, nil
+				}
+			}
+		}
 		var position int
 		if e := tx.QueryRowContext(
 			ctx,
-			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy = ? AND arrived_at < ?`,
-			key, OnLimitQueue, waiterArrivedNS,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy IN (?, ?) AND arrived_at < ?`,
+			key, OnLimitQueue, OnLimitCancelOthers, waiterArrivedNS,
 		).Scan(&position); e != nil {
 			return WaiterResolution{}, e
 		}
