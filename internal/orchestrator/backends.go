@@ -367,7 +367,37 @@ func (l localState) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, 
 	return l.st.FindSpawnedChildTriggerID(ctx, parentRunID, parentNodeID, pipeline)
 }
 
-func (l localState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
+func (l localState) EnqueueTrigger(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+) (string, error) {
+	return l.EnqueueTriggerWithEnv(
+		ctx, pipeline, args, parentRunID, parentNodeID,
+		retryOf, source, user, repo, branch, nil,
+	)
+}
+
+func (l localState) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
 	if pipeline == "" {
 		return "", errors.New("EnqueueTrigger: pipeline required")
 	}
@@ -398,6 +428,7 @@ func (l localState) EnqueueTrigger(ctx context.Context, pipeline string, args ma
 		ParentRunID:   parentRunID,
 		ParentNodeID:  parentNodeID,
 		RetryOf:       retryOf,
+		TriggerEnv:    triggerEnv,
 	}
 	if repo != "" {
 		tg.Repo = repo
@@ -420,6 +451,48 @@ func (l localState) EnqueueTrigger(ctx context.Context, pipeline string, args ma
 		return "", err
 	}
 	return runID, nil
+}
+
+type triggerEnqueuerWithEnv interface {
+	EnqueueTriggerWithEnv(
+		ctx context.Context,
+		pipeline string,
+		args map[string]string,
+		parentRunID string,
+		parentNodeID string,
+		retryOf string,
+		source string,
+		user string,
+		repo string,
+		branch string,
+		triggerEnv map[string]string,
+	) (string, error)
+}
+
+func enqueueTriggerWithEnv(
+	ctx context.Context,
+	state StateBackend,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
+	if withEnv, ok := state.(triggerEnqueuerWithEnv); ok {
+		return withEnv.EnqueueTriggerWithEnv(
+			ctx, pipeline, args, parentRunID, parentNodeID,
+			retryOf, source, user, repo, branch, triggerEnv,
+		)
+	}
+	if len(triggerEnv) > 0 {
+		return "", errors.New("EnqueueTriggerWithEnv: state backend cannot persist trigger env")
+	}
+	return state.EnqueueTrigger(ctx, pipeline, args, parentRunID, parentNodeID, retryOf, source, user, repo, branch)
 }
 
 // sparkwingGithubSplit returns owner+repo from "owner/repo".

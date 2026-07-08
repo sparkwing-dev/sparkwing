@@ -172,6 +172,43 @@ func (planLevelSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _
 	return nil
 }
 
+type planLevelInheritedChildPipe struct{ sparkwing.Base }
+
+func (planLevelInheritedChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-inherited-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(10*time.Millisecond))
+	return nil
+}
+
+type planLevelInheritedSpawnerPipe struct{ sparkwing.Base }
+
+func (planLevelInheritedSpawnerPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-inherited-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
+			ctx, "plan-level-inherited-child", "work",
+			sparkwing.WithFreshTimeout(150*time.Millisecond))
+		return err
+	})
+	return nil
+}
+
 func init() {
 	register("cache-queue-serialize", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheQueuePipe{} })
 	register("cache-skip-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheSkipLeaderPipe{} })
@@ -186,6 +223,12 @@ func init() {
 	register("plan-level-queue", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelQueuePipe{} })
 	register("plan-level-skip-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelSkipLeaderPipe{} })
 	register("plan-level-skip-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelSkipFollowerPipe{} })
+	register("plan-level-inherited-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelInheritedChildPipe{}
+	})
+	register("plan-level-inherited-spawner", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelInheritedSpawnerPipe{}
+	})
 }
 
 func resetCacheCounter() {
@@ -412,6 +455,88 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	}
 }
 
+func TestConcurrency_PlanLevelInheritedAdmissionDoesNotQueueBehindParent(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	parentHolderID := "parent-run/-"
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-inherited-key",
+		HolderID: parentHolderID,
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("parent acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("parent acquire = %s, want granted", resp.Kind)
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	res, err := orchestrator.RunLocal(runCtx, p, orchestrator.Options{
+		Pipeline:                   "plan-level-inherited-child",
+		InheritedPlanCacheKey:      "g:plan-level-inherited-key",
+		InheritedPlanCacheHolderID: parentHolderID,
+	})
+	if err != nil {
+		t.Fatalf("child run with inherited admission: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("child status = %q, want success", res.Status)
+	}
+}
+
+func TestConcurrency_RunAndAwaitPropagatesPlanAdmissionToChildTrigger(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+
+	res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+		Pipeline: "plan-level-inherited-spawner",
+		RunID:    "parent-with-plan-admission",
+	})
+	if err != nil {
+		t.Fatalf("parent run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("parent status = %q, want failed from child timeout", res.Status)
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	childID, err := st.FindSpawnedChildTriggerID(ctx, "parent-with-plan-admission", "spawn", "plan-level-inherited-child")
+	if err != nil {
+		t.Fatalf("FindSpawnedChildTriggerID: %v", err)
+	}
+	if childID == "" {
+		t.Fatal("expected child trigger row")
+	}
+	trigger, err := st.GetTrigger(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "g:plan-level-inherited-key" {
+		t.Fatalf("child admission key = %q, want g:plan-level-inherited-key",
+			trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "parent-with-plan-admission/-" {
+		t.Fatalf("child admission holder = %q, want parent-with-plan-admission/-",
+			trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	}
+}
+
 func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -425,7 +550,9 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 
 	snapshotBefore := cacheCounter.inflight.Load()
 
-	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-skip-follower"})
+	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline: "plan-level-skip-follower",
+	})
 	if err != nil {
 		t.Fatalf("follower: %v", err)
 	}
@@ -447,13 +574,17 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-cancel-others-leader"})
+		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+			Pipeline: "cache-cancel-others-leader",
+		})
 		leaderDone <- res
 	}()
 	time.Sleep(200 * time.Millisecond)
 
 	followerStart := time.Now()
-	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-cancel-others-follower"})
+	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline: "cache-cancel-others-follower",
+	})
 	followerElapsed := time.Since(followerStart)
 
 	if followerRes.Status != "success" {

@@ -740,7 +740,37 @@ func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, par
 // EnqueueTrigger matches orchestrator.StateBackend's shape for
 // spawning a new pipeline run from inside another. Cycle errors from
 // the controller pass through verbatim.
-func (c *Client) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
+func (c *Client) EnqueueTrigger(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+) (string, error) {
+	return c.EnqueueTriggerWithEnv(
+		ctx, pipeline, args, parentRunID, parentNodeID,
+		retryOf, source, user, repo, branch, nil,
+	)
+}
+
+func (c *Client) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
 	req := TriggerRequest{
 		Pipeline:     pipeline,
 		Args:         args,
@@ -750,6 +780,7 @@ func (c *Client) EnqueueTrigger(ctx context.Context, pipeline string, args map[s
 		Trigger: TriggerMeta{
 			Source: source,
 			User:   user,
+			Env:    triggerEnv,
 		},
 	}
 	// hack: without explicit repo, the controller inherits the parent's repo+SHA and builds the wrong code for cross-repo awaits.
