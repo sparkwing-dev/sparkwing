@@ -14,12 +14,85 @@ non-zero so it can gate a push or a CI job. `sparkwing pipeline lint
 --rules` prints the live rule set, each with the charter of what it forbids
 and why. Every rule has a section below with a do/don't pair.
 
+## Sequencing jobs with `Needs`
+
+A multi-job pipeline dispatches in the order its edges require, not the
+order `Plan` calls `Job`. `Needs` declares that ordering: a job never
+dispatches until every job it needs has succeeded.
+
+```go
+type Deploy struct{ sparkwing.Base }
+
+func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.NoInputs, rc sparkwing.RunContext) error {
+    build := sparkwing.Job(plan, "build", p.build)
+    test := sparkwing.Job(plan, "test", p.test).Needs(build)
+    sparkwing.Job(plan, "deploy", p.deploy).Needs(test)
+    return nil
+}
+
+func (p *Deploy) build(ctx context.Context) error {
+    _, err := sparkwing.Bash(ctx, "go build ./...").Run()
+    return err
+}
+
+func (p *Deploy) test(ctx context.Context) error {
+    _, err := sparkwing.Bash(ctx, "go test ./...").Run()
+    return err
+}
+
+func (p *Deploy) deploy(ctx context.Context) error {
+    return sparkwing.Bash(ctx, "./deploy.sh").MustBeEmpty("deploy failed")
+}
+```
+
+`test` will not dispatch until `build` succeeds, and `deploy` waits on
+`test` in turn. A job can chain any number of upstream `Needs`; a job
+with none dispatches as soon as the runner has a slot. When a downstream
+job needs an upstream job's typed output rather than just its completion,
+wire a `Ref` and still add the `Needs` edge explicitly (see "Discarded
+`Ref` results" below) -- `RefTo` does not add the edge for you.
+
+## The `Work` return contract
+
+A job with more than one step implements `Workable` instead of passing a
+plain func to `Job`: it declares a `Work(w *sparkwing.Work) (*sparkwing.WorkStep, error)`
+method, registers its steps onto `w` via `Step`, and returns.
+
+```go
+type deployJob struct{ sparkwing.Base }
+
+func (j *deployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    sparkwing.Step(w, "apply", j.apply)
+    return nil, nil
+}
+
+func (j *deployJob) apply(ctx context.Context) error { return nil }
+```
+
+The two return values are the job's typed output step and a Plan-time
+materialization error. An untyped job -- one that does not embed
+`Produces[T]` -- has no output to designate, so it returns `nil, nil` once
+its steps are registered; this is not an error case, it is the normal
+return for the common case. A typed job returns the step whose value
+becomes the `Produces[T]` output that `RefTo` exposes downstream:
+
+```go
+func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+    compile := sparkwing.Step(w, "compile", j.compile)
+    publish := sparkwing.Step(w, "publish", j.publish)
+    publish.Needs(compile)
+    return publish, nil // this step's return value becomes the Job's Produces[T] output
+}
+```
+
 ## I/O in `Plan` (`plan-io`)
 
 A `Plan` body that shells out, touches the filesystem, or makes an HTTP
 call runs that I/O every time the plan is read. The runtime plan-guard
 panics on it. Move the call into a job or step body, which runs at dispatch
-on the runner.
+on the runner. That includes reading configuration: calling `os.Getenv`
+inside a job or step body is sanctioned, since the body runs once, at
+dispatch, on the runner -- `Plan` is the only place it is forbidden.
 
 Don't shell out while the DAG is built:
 
@@ -53,6 +126,33 @@ func (p *Release) publish(ctx context.Context) error {
     return sparkwing.Bash(ctx, "publish "+sha[0]).MustBeEmpty("publish failed")
 }
 ```
+
+## Choosing `Bash` versus `Exec`
+
+Both run inside a job or step body; neither is a lint rule, so nothing
+flags a wrong choice. Pick by where the values in the command come from.
+
+Use `Exec` whenever an argument is dynamic -- a branch name, an image tag,
+anything built from a variable. `Exec` runs the argv directly with no
+shell, so there is no quoting to get wrong and no way for a value
+containing `$`, backticks, or `;` to be read as shell syntax:
+
+```go
+tag := "app:" + sha
+_, err := sparkwing.Exec(ctx, "docker", "push", tag).Run()
+```
+
+Reserve `Bash` for a command line that itself needs shell features -- a
+pipe, a redirect, a glob, a conditional. Pass any dynamic value in through
+`.Env()` instead of interpolating it into the line, so it never reaches
+the shell parser:
+
+```go
+sparkwing.Bash(ctx, `git -C "$R" status --porcelain`).Env("R", repo).MustBeEmpty("dirty tree")
+```
+
+Interpolating an untrusted value straight into a `Bash` line is a
+shell-injection risk; `Exec`, or `Bash` with `.Env()`, avoids it.
 
 ## Branching on the runtime environment (`plan-runtime-branch`)
 
