@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.15.2] - 2026-07-09
 ### Fixed
 
 - **orchestrator:** A run queued for a box slot now reaps a stalled holder
