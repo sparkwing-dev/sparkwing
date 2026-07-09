@@ -63,6 +63,11 @@ import (
 // and no slot was available at the moment of the call.
 var ErrSlotsFull = errors.New("box slots full")
 
+const (
+	headWaiterPollInterval = 100 * time.Millisecond
+	createLockFileAttempts = 128
+)
+
 // Options controls a single Acquire invocation.
 type Options struct {
 	// MaxSlots caps concurrent holders on this host. Zero or negative
@@ -200,7 +205,7 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 				return nil, err
 			}
 		}
-		release, active, err := tryAcquire(opts.LockDir, max, waiter)
+		release, active, ahead, err := tryAcquire(opts.LockDir, max, waiter)
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +235,7 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 				}
 			}
 		}
-		wait := opts.PollInterval + time.Duration(rand.Int64N(int64(opts.PollInterval)))
+		wait := waitInterval(opts.PollInterval, opts.PollMax, ahead)
 		if wait > opts.PollMax {
 			wait = opts.PollMax
 		}
@@ -242,47 +247,62 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 	}
 }
 
+func waitInterval(pollInterval, pollMax time.Duration, waitersAhead int) time.Duration {
+	if waitersAhead == 0 {
+		if pollInterval < headWaiterPollInterval {
+			return pollInterval
+		}
+		return headWaiterPollInterval
+	}
+	wait := pollInterval + time.Duration(rand.Int64N(int64(pollInterval)))
+	if wait > pollMax {
+		return pollMax
+	}
+	return wait
+}
+
 // tryAcquire makes one admission attempt for the caller's waiter ticket.
-// Returns (release, _, nil) on success, (nil, activeHolders, nil) when the
-// caller may not take a slot this attempt (all slots held, or free slots are
-// spoken for by earlier-arriving waiters), or (nil, 0, err) on hard errors.
+// Returns (release, _, _, nil) on success, (nil, activeHolders, waitersAhead,
+// nil) when the caller may not take a slot this attempt (all slots held, or free
+// slots are spoken for by earlier-arriving waiters), or (nil, 0, 0, err) on hard
+// errors.
 //
 // A free slot is granted to the caller only when fewer than (max - active)
 // live waiters arrived before it, so admission follows arrival order rather
 // than whichever waiter's poll fires first. On success the ticket is
 // converted to a holder atomically under coord.lock.
-func tryAcquire(lockDir string, max int, waiter *os.File) (func(), int, error) {
+func tryAcquire(lockDir string, max int, waiter *os.File) (func(), int, int, error) {
 	coord, err := openCoord(lockDir)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer coord.Close()
 	if err := flockExclusive(coord); err != nil {
-		return nil, 0, fmt.Errorf("boxslot: coord flock: %w", err)
+		return nil, 0, 0, fmt.Errorf("boxslot: coord flock: %w", err)
 	}
 	defer func() { _ = flockUnlock(coord) }()
 
 	active, err := countActiveHolders(lockDir)
 	if err != nil {
-		return nil, 0, err
-	}
-	if active >= max {
-		removeStale(lockDir, waiterPrefix)
-		return nil, active, nil
+		return nil, 0, 0, err
 	}
 	ahead, err := waitersAheadOf(lockDir, waiter.Name())
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
+	}
+	if active >= max {
+		removeStale(lockDir, waiterPrefix)
+		return nil, active, ahead, nil
 	}
 	if ahead >= max-active {
-		return nil, active, nil
+		return nil, active, ahead, nil
 	}
 	holder, err := createHolder(lockDir)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	discardWaiter(waiter)
-	return makeRelease(holder), active + 1, nil
+	return makeRelease(holder), active + 1, ahead, nil
 }
 
 // discardWaiter unlocks and removes a waiter ticket, tolerating a nil handle.
@@ -432,24 +452,36 @@ func createHolder(lockDir string) (*os.File, error) {
 // share the mechanism: the kernel releases the flock on process exit,
 // so a crashed owner's marker is reclaimable by removeStale.
 func createLockFile(lockDir, prefix string) (*os.File, error) {
-	name := fmt.Sprintf("%spid%d-%d-%d.lock",
-		prefix,
-		os.Getpid(),
-		time.Now().UnixNano(),
-		holderCounter.Add(1),
-	)
-	path := filepath.Join(lockDir, name)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("boxslot: create %s: %w", path, err)
+	for attempt := 0; attempt < createLockFileAttempts; attempt++ {
+		name := fmt.Sprintf("%spid%d-%d-%d.lock",
+			prefix,
+			os.Getpid(),
+			time.Now().UnixNano(),
+			holderCounter.Add(1),
+		)
+		path := filepath.Join(lockDir, name)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("boxslot: create %s: %w", path, err)
+		}
+		if err := flockExclusive(f); err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return nil, fmt.Errorf("boxslot: lock fresh %s: %w", path, err)
+		}
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			_ = flockUnlock(f)
+			_ = f.Close()
+			continue
+		} else if err != nil {
+			_ = flockUnlock(f)
+			_ = f.Close()
+			return nil, fmt.Errorf("boxslot: stat fresh %s: %w", path, err)
+		}
+		_, _ = fmt.Fprintf(f, "pid=%d start=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+		return f, nil
 	}
-	if err := flockExclusiveNonblock(f); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("boxslot: lock fresh %s: %w", path, err)
-	}
-	_, _ = fmt.Fprintf(f, "pid=%d start=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))
-	return f, nil
+	return nil, fmt.Errorf("boxslot: could not create a stable %s marker after %d attempts", prefix, createLockFileAttempts)
 }
 
 // removeStale flocks each prefix-matched marker non-blockingly; success

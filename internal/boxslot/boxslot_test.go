@@ -481,6 +481,53 @@ func TestAcquire_GrantsSlotsInArrivalOrder(t *testing.T) {
 	}
 }
 
+func TestAcquire_HeadWaiterDrainsPromptlyWhenSlotFrees(t *testing.T) {
+	dir := t.TempDir()
+	rel0, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1,
+		LockDir:  dir,
+	})
+	if err != nil {
+		t.Fatalf("hold Acquire: %v", err)
+	}
+
+	waiting := make(chan struct{}, 1)
+	acquired := make(chan struct{})
+	go func() {
+		rel, err := boxslot.Acquire(context.Background(), boxslot.Options{
+			MaxSlots:     1,
+			LockDir:      dir,
+			PollInterval: 5 * time.Second,
+			PollMax:      5 * time.Second,
+			OnWait: func(_, _ int) {
+				select {
+				case waiting <- struct{}{}:
+				default:
+				}
+			},
+		})
+		if err != nil {
+			t.Errorf("waiter Acquire: %v", err)
+			close(acquired)
+			return
+		}
+		rel()
+		close(acquired)
+	}()
+
+	select {
+	case <-waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter did not enter wait path")
+	}
+	rel0()
+	select {
+	case <-acquired:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("head waiter did not drain promptly after slot freed")
+	}
+}
+
 // TestAcquire_MultiSlotAdmitsEarliestArrivalsFirst covers the max>1 path:
 // when several slots free together, the earliest arrivals fill them and
 // admission never exceeds the cap.
