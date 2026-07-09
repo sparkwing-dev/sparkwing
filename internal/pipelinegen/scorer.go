@@ -15,8 +15,14 @@ import (
 type CheckName string
 
 const (
+	// CheckFormat is `gofmt -l` of the generated source: it reports no
+	// files, i.e. the source is already canonically formatted.
+	CheckFormat CheckName = "format"
 	// CheckCompile is `go build` of the generated source in a project.
 	CheckCompile CheckName = "compile"
+	// CheckVet is `go vet` of the generated project: the source is free of
+	// the suspicious constructs vet reports.
+	CheckVet CheckName = "vet"
 	// CheckExplain is `sparkwing pipeline explain --all`: Plan() builds a
 	// valid DAG without dispatching any job.
 	CheckExplain CheckName = "explain"
@@ -33,7 +39,8 @@ type CheckResult struct {
 	Detail string    `json:"detail,omitempty"`
 }
 
-// Scorer runs a generated pipeline through the compile+explain+lint bar.
+// Scorer runs a generated pipeline through the
+// gofmt+compile+vet+explain+lint bar.
 type Scorer interface {
 	Score(ctx context.Context, spec Spec, source string) ([]CheckResult, error)
 }
@@ -41,7 +48,7 @@ type Scorer interface {
 // ProjectScorer scores a generation by materializing a single-pipeline
 // .sparkwing project in a temp dir -- copying go.mod/go.sum/main.go from
 // a discovered base project so the build resolves against the same
-// pinned SDK -- then running the three checks against it. Each spec gets
+// pinned SDK -- then running the oracle bar against it. Each spec gets
 // its own project so a generation that does not compile cannot poison
 // the others.
 type ProjectScorer struct {
@@ -88,11 +95,28 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 	}
 
 	checks := []CheckResult{
+		runFormatCheck(ctx, jobsDir),
 		runCheck(ctx, CheckCompile, proj, "go", "build", "./..."),
+		runCheck(ctx, CheckVet, proj, "go", "vet", "./..."),
 		runCheck(ctx, CheckExplain, tmp, s.Sparkwing, "pipeline", "explain", "--all", "-o", "json"),
 		runCheck(ctx, CheckLint, tmp, s.Sparkwing, "pipeline", "lint", "--all", "-o", "json"),
 	}
 	return checks, nil
+}
+
+// runFormatCheck runs `gofmt -l` over dir. gofmt exits 0 even when files
+// need formatting -- it lists them on stdout -- so the check is OK only
+// when that list is empty, so a pipeline that is not gofmt-clean fails
+// acceptance.
+func runFormatCheck(ctx context.Context, dir string) CheckResult {
+	out, err := exec.CommandContext(ctx, "gofmt", "-l", dir).CombinedOutput()
+	if err != nil {
+		return CheckResult{Name: CheckFormat, OK: false, Detail: truncate(strings.TrimSpace(string(out)), 600)}
+	}
+	if listed := strings.TrimSpace(string(out)); listed != "" {
+		return CheckResult{Name: CheckFormat, OK: false, Detail: "needs gofmt: " + truncate(listed, 600)}
+	}
+	return CheckResult{Name: CheckFormat, OK: true}
 }
 
 // runCheck runs name's command in dir, mapping a zero exit to OK and a

@@ -1,8 +1,8 @@
 // Package pipelinegen is the AI-generation eval harness for sparkwing
 // pipelines: a corpus of natural-language pipeline specs, a generator
 // that turns each spec into pipeline source, and a scorer that runs the
-// generation through the same bar a human pipeline must clear --
-// compile, `pipeline explain`, and `pipeline lint`. The harness reports
+// generation through the same bar a human pipeline must clear -- gofmt,
+// compile, `go vet`, `pipeline explain`, and `pipeline lint`. The harness reports
 // a pass-rate and wall-clock latency so "AI can generate idiomatic
 // pipelines" is measured, not asserted.
 //
