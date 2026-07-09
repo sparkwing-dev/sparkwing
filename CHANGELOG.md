@@ -47,6 +47,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **controller:** Host box-slot admission now grants freed slots to queued
+  waiters in arrival order instead of letting whichever waiter polls first
+  claim the slot. The queue head retries on a short drain cadence, so a freed
+  slot does not sit idle behind the normal jittered poll interval; `NoWait`
+  callers also respect the existing queue.
 
 ## [v0.15.2] - 2026-07-09
 ### Fixed
