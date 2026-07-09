@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** A pipeline scaffolded by a source-built `sparkwing` (one with no
+  release version stamp, e.g. `go install`ed from a checkout) now pins the
+  current SDK release in its generated `.sparkwing/go.mod` instead of a stale
+  fallback, so `sparkwing pipeline new` followed by a build is reliably green.
+  The pre-push version-freshness gate now also fails when that scaffold fallback
+  pin falls behind the latest released SDK, keeping it honest as the SDK advances.
 
 ## [v0.15.6] - 2026-07-10
 ### Fixed

@@ -1,6 +1,21 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
+)
+
+// TestFallbackSDKVersionIsResolvable guards the scaffold fallback pin
+// against being set to a value the scaffolder can't require -- a
+// pseudo-version, a "+dirty" marker, or a "(devel)" placeholder. The
+// freshness gate keeps it from lagging the latest release; this keeps it
+// a real release version at all. Offline: no proxy resolution.
+func TestFallbackSDKVersionIsResolvable(t *testing.T) {
+	if !isResolvableModuleVersion(scaffold.FallbackSDKVersion) {
+		t.Errorf("scaffold.FallbackSDKVersion = %q is not a resolvable release version", scaffold.FallbackSDKVersion)
+	}
+}
 
 func TestIsResolvableModuleVersion(t *testing.T) {
 	cases := []struct {

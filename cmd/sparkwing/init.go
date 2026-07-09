@@ -14,15 +14,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
-
-// fallbackSDKVersion is pinned into a fresh .sparkwing/go.mod when the
-// running CLI's version can't be detected (source build, missing
-// ldflag stamp). **Bump on each release.** Must match an actual
-// published tag on github.com/sparkwing-dev/sparkwing, and be recent
-// enough that the registry templates `pipeline new --template` renders
-// (which use Job.Verify, Failure, ...) compile against it.
-const fallbackSDKVersion = "v0.8.1"
 
 // bootstrapDotSparkwingOpts writes the .sparkwing/ skeleton. `go mod
 // tidy` is deferred to the caller because tidy fails on the empty
@@ -105,15 +98,15 @@ require github.com/sparkwing-dev/sparkwing %s
 // sdkRequirementVersion picks the version string to write into a fresh
 // .sparkwing/go.mod. Prefers the running CLI's ldflag-stamped version
 // (so scaffolds pin to the operator's installed line), falls back to
-// fallbackSDKVersion otherwise. Pseudo-versions and "(devel)" / "(unknown)"
-// strings fall through to the fallback -- those can't be require-d in
-// downstream go.mod files.
+// scaffold.FallbackSDKVersion otherwise. Pseudo-versions and "(devel)" /
+// "(unknown)" strings fall through to the fallback -- those can't be
+// require-d in downstream go.mod files.
 func sdkRequirementVersion() string {
 	v := installedVersion()
 	if isResolvableModuleVersion(v) {
 		return v
 	}
-	return fallbackSDKVersion
+	return scaffold.FallbackSDKVersion
 }
 
 // pseudoVersionRE matches Go module pseudo-versions: timestamp +
