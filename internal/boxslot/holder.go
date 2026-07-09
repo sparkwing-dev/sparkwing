@@ -199,31 +199,47 @@ func AnnotateHolder(lockDir, runID string) error {
 // truncated files), which still hold or free a slot -- the flock is the
 // authority, the name is metadata.
 func parseHolderName(name string) (pid int, claimedAt time.Time, ok bool) {
-	body, found := strings.CutPrefix(name, holderPrefix+"pid")
-	if !found {
-		return 0, time.Time{}, false
-	}
-	body, found = strings.CutSuffix(body, ".lock")
-	if !found {
-		return 0, time.Time{}, false
-	}
-	pidPart, rest, found := strings.Cut(body, "-")
-	if !found {
-		return 0, time.Time{}, false
-	}
-	nanoPart, _, found := strings.Cut(rest, "-")
-	if !found {
-		return 0, time.Time{}, false
-	}
-	pid, err := strconv.Atoi(pidPart)
-	if err != nil || pid <= 0 {
-		return 0, time.Time{}, false
-	}
-	nano, err := strconv.ParseInt(nanoPart, 10, 64)
-	if err != nil {
+	pid, nano, _, ok := parseMarkerName(name, holderPrefix)
+	if !ok {
 		return 0, time.Time{}, false
 	}
 	return pid, time.Unix(0, nano), true
+}
+
+// parseMarkerName decomposes a lock-file name of the shape
+// <prefix>pid<PID>-<unixNano>-<seq>.lock into its parts, shared by the holder
+// and waiter markers createLockFile emits. ok is false for a name that
+// doesn't carry the shape; the flock is the authority, the name is metadata.
+func parseMarkerName(name, prefix string) (pid int, nano int64, seq uint64, ok bool) {
+	body, found := strings.CutPrefix(name, prefix+"pid")
+	if !found {
+		return 0, 0, 0, false
+	}
+	body, found = strings.CutSuffix(body, ".lock")
+	if !found {
+		return 0, 0, 0, false
+	}
+	pidPart, rest, found := strings.Cut(body, "-")
+	if !found {
+		return 0, 0, 0, false
+	}
+	nanoPart, seqPart, found := strings.Cut(rest, "-")
+	if !found {
+		return 0, 0, 0, false
+	}
+	pid, err := strconv.Atoi(pidPart)
+	if err != nil || pid <= 0 {
+		return 0, 0, 0, false
+	}
+	nano, err = strconv.ParseInt(nanoPart, 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	seq, err = strconv.ParseUint(seqPart, 10, 64)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return pid, nano, seq, true
 }
 
 // newestHolderNameForPID scans lockDir for holder markers owned by pid

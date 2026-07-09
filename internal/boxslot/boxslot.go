@@ -186,13 +186,7 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 	}
 
 	var waiter *os.File
-	defer func() {
-		if waiter != nil {
-			_ = os.Remove(waiter.Name())
-			_ = flockUnlock(waiter)
-			_ = waiter.Close()
-		}
-	}()
+	defer func() { discardWaiter(waiter) }()
 
 	var lastStallProbe time.Time
 	for {
@@ -200,19 +194,24 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 		if max <= 0 {
 			return func() {}, nil
 		}
-		release, active, err := tryAcquire(opts.LockDir, max)
+		if waiter == nil {
+			waiter, err = createLockFile(opts.LockDir, waiterPrefix)
+			if err != nil {
+				return nil, err
+			}
+		}
+		release, active, err := tryAcquire(opts.LockDir, max, waiter)
 		if err != nil {
 			return nil, err
 		}
 		if release != nil {
+			// safety: tryAcquire consumed the ticket under coord.lock; the
+			// deferred discard must not double-free it.
+			waiter = nil
 			return release, nil
 		}
 		if opts.NoWait {
 			return nil, ErrSlotsFull
-		}
-		if waiter == nil {
-			// hack: ignore the error; a missing waiter marker only costs box-slots queue visibility.
-			waiter, _ = createLockFile(opts.LockDir, waiterPrefix)
 		}
 		if opts.OnWait != nil {
 			opts.OnWait(active, max)
@@ -243,10 +242,16 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 	}
 }
 
-// tryAcquire makes one admission attempt. Returns (release, _, nil)
-// on success, (nil, activeHolders, nil) on slots-full, or
-// (nil, 0, err) on hard errors.
-func tryAcquire(lockDir string, max int) (func(), int, error) {
+// tryAcquire makes one admission attempt for the caller's waiter ticket.
+// Returns (release, _, nil) on success, (nil, activeHolders, nil) when the
+// caller may not take a slot this attempt (all slots held, or free slots are
+// spoken for by earlier-arriving waiters), or (nil, 0, err) on hard errors.
+//
+// A free slot is granted to the caller only when fewer than (max - active)
+// live waiters arrived before it, so admission follows arrival order rather
+// than whichever waiter's poll fires first. On success the ticket is
+// converted to a holder atomically under coord.lock.
+func tryAcquire(lockDir string, max int, waiter *os.File) (func(), int, error) {
 	coord, err := openCoord(lockDir)
 	if err != nil {
 		return nil, 0, err
@@ -261,15 +266,106 @@ func tryAcquire(lockDir string, max int) (func(), int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	removeStale(lockDir, waiterPrefix)
 	if active >= max {
+		removeStale(lockDir, waiterPrefix)
+		return nil, active, nil
+	}
+	ahead, err := waitersAheadOf(lockDir, waiter.Name())
+	if err != nil {
+		return nil, 0, err
+	}
+	if ahead >= max-active {
 		return nil, active, nil
 	}
 	holder, err := createHolder(lockDir)
 	if err != nil {
 		return nil, 0, err
 	}
+	discardWaiter(waiter)
 	return makeRelease(holder), active + 1, nil
+}
+
+// discardWaiter unlocks and removes a waiter ticket, tolerating a nil handle.
+func discardWaiter(w *os.File) {
+	if w == nil {
+		return
+	}
+	_ = os.Remove(w.Name())
+	_ = flockUnlock(w)
+	_ = w.Close()
+}
+
+// waiterKey is the arrival ordering of a waiter ticket, parsed from its
+// marker filename. Earlier arrivals sort first, with the per-process
+// sequence and pid breaking equal timestamps into a total order.
+type waiterKey struct {
+	nanos int64
+	seq   uint64
+	pid   int
+}
+
+func (a waiterKey) before(b waiterKey) bool {
+	if a.nanos != b.nanos {
+		return a.nanos < b.nanos
+	}
+	if a.seq != b.seq {
+		return a.seq < b.seq
+	}
+	return a.pid < b.pid
+}
+
+// parseWaiterKey extracts the arrival key from a waiter marker name. ok is
+// false for any name that doesn't fit createLockFile's shape.
+func parseWaiterKey(name string) (waiterKey, bool) {
+	pid, nano, seq, ok := parseMarkerName(name, waiterPrefix)
+	if !ok {
+		return waiterKey{}, false
+	}
+	return waiterKey{nanos: nano, seq: seq, pid: pid}, true
+}
+
+// waitersAheadOf counts live waiter tickets that arrived before myName, and
+// opportunistically reclaims stale waiter markers (owner gone). Callers hold
+// coord.lock, so the count is stable for the duration of an admission attempt.
+func waitersAheadOf(lockDir, myName string) (int, error) {
+	myBase := filepath.Base(myName)
+	myKey, ok := parseWaiterKey(myBase)
+	if !ok {
+		return 0, fmt.Errorf("boxslot: unparseable waiter marker %q", myName)
+	}
+	entries, err := os.ReadDir(lockDir)
+	if err != nil {
+		return 0, err
+	}
+	ahead := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), waiterPrefix) || e.Name() == myBase {
+			continue
+		}
+		key, ok := parseWaiterKey(e.Name())
+		if !ok {
+			continue
+		}
+		path := filepath.Join(lockDir, e.Name())
+		f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return 0, err
+		}
+		if err := flockExclusiveNonblock(f); err != nil {
+			_ = f.Close()
+			if key.before(myKey) {
+				ahead++
+			}
+			continue
+		}
+		_ = os.Remove(path)
+		_ = flockUnlock(f)
+		_ = f.Close()
+	}
+	return ahead, nil
 }
 
 // holderPrefix scopes the per-process lock files so countActiveHolders
