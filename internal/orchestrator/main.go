@@ -458,6 +458,11 @@ func stripExplainOutputFlags(args []string) []string {
 // args into a string map. Bool flags accept "--flag" or "--flag=v";
 // others require values. Unknown flags are rejected unless the
 // schema has Extra=true. Enums are validated.
+//
+// It is parse-only: schema defaults and required-arg validation happen
+// later, after the run merges DefaultArgs, the pipeline's sparkwing.yaml
+// args:, and the CLI flags. Applying them here would reject a required
+// value that args: supplies and let a schema default outrank args:.
 func parseTypedFlags(pipeline string, args []string) (map[string]string, error) {
 	schema, ok, err := sparkwingruntime.DescribePipelineByName(pipeline)
 	if err != nil {
@@ -475,7 +480,6 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 		}
 	}
 	out := map[string]string{}
-	seen := map[string]bool{}
 	i := 0
 	for i < len(args) {
 		tok := args[i]
@@ -527,7 +531,6 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 				value = "true"
 			}
 			out[arg.Name] = value
-			seen[arg.Name] = true
 			i++
 			continue
 		}
@@ -545,20 +548,6 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 				arg.Name, value, strings.Join(arg.Enum, ", "))
 		}
 		out[arg.Name] = value
-		seen[arg.Name] = true
-	}
-	for _, a := range schema.Args {
-		if a.Required && !seen[a.Name] {
-			return nil, fmt.Errorf("flag --%s is required", a.Name)
-		}
-	}
-	for _, a := range schema.Args {
-		if _, ok := out[a.Name]; ok {
-			continue
-		}
-		if a.Default != "" {
-			out[a.Name] = a.Default
-		}
 	}
 	return out, nil
 }

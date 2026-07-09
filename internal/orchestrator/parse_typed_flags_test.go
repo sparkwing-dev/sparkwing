@@ -42,7 +42,10 @@ func init() {
 	})
 }
 
-func TestParseTypedFlags_RequiredAndDefault(t *testing.T) {
+// parseTypedFlags is parse-only: it returns the CLI-parsed flags and does
+// not inject schema defaults. The --target default is applied downstream,
+// after the DefaultArgs / args: / CLI merge, so it is absent here.
+func TestParseTypedFlags_NoDefaultInjection(t *testing.T) {
 	out, err := parseTypedFlags("ptf-demo", []string{"--repo", "r"})
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
@@ -50,15 +53,35 @@ func TestParseTypedFlags_RequiredAndDefault(t *testing.T) {
 	if out["repo"] != "r" {
 		t.Errorf("repo=%q", out["repo"])
 	}
-	if out["target"] != "local" {
-		t.Errorf("default target should apply, got %q", out["target"])
+	if _, ok := out["target"]; ok {
+		t.Errorf("parse must not inject the --target default, got %q", out["target"])
 	}
 }
 
-func TestParseTypedFlags_RequiredMissing(t *testing.T) {
-	_, err := parseTypedFlags("ptf-demo", []string{"--target", "prod"})
-	if err == nil {
-		t.Fatal("expected required-missing error")
+// A required flag absent from the CLI is not a parse-time error: the value
+// may still arrive from the pipeline's args: block, so the required check
+// runs downstream on the merged inputs rather than here.
+func TestParseTypedFlags_MissingRequiredDeferred(t *testing.T) {
+	out, err := parseTypedFlags("ptf-demo", []string{"--target", "prod"})
+	if err != nil {
+		t.Fatalf("parse-only must not reject a missing required flag, got %v", err)
+	}
+	if _, ok := out["repo"]; ok {
+		t.Errorf("repo should be absent from parse output, got %q", out["repo"])
+	}
+}
+
+// The required check lives in Invoke (populateInputs) on the merged
+// argument map, so a required value supplied by anything other than the
+// CLI -- e.g. the pipeline's args: block -- satisfies it, and a genuinely
+// missing value still fails.
+func TestInvoke_RequiredSatisfiedByMergedArgs(t *testing.T) {
+	reg, _ := sparkwing.Lookup("ptf-demo")
+	if _, err := reg.Invoke(context.Background(), map[string]string{"repo": "r"}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err != nil {
+		t.Fatalf("required repo from merged args should satisfy, got %v", err)
+	}
+	if _, err := reg.Invoke(context.Background(), map[string]string{}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err == nil {
+		t.Fatal("missing required repo should still fail at Invoke")
 	}
 }
 
