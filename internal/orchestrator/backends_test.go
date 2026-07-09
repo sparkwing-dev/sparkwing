@@ -3,7 +3,9 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -84,6 +86,258 @@ func TestBackendsSeam_StateErrorPropagates(t *testing.T) {
 	}
 }
 
+type hostAdmissionPlanPipe struct{ sparkwing.Base }
+
+func (hostAdmissionPlanPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	group := sparkwing.NewConcurrencyGroup("host-admission", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		HostAdmission: true,
+	})
+	plan.Concurrency(group)
+	sparkwing.Job(plan, "work", func(ctx context.Context) error { return nil })
+	return nil
+}
+
+func TestRun_ReleasesProvisionalBoxSlotBeforeHostAdmission(t *testing.T) {
+	register("host-admission-release", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return hostAdmissionPlanPipe{}
+	})
+
+	fakes := newFakeBackends()
+	var releases atomic.Int32
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:       "host-admission-release",
+			BoxSlotRelease: func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 1", got)
+	}
+}
+
+func TestRun_ReacquiresPinnedBoxSlotAfterHostAdmission(t *testing.T) {
+	t.Setenv("SPARKWING_BOX_SLOTS_PIN", "1")
+	register("host-admission-reacquire", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return hostAdmissionPlanPipe{}
+	})
+
+	fakes := newFakeBackends()
+	var releases atomic.Int32
+	var acquires atomic.Int32
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:       "host-admission-reacquire",
+			BoxSlotRelease: func() { releases.Add(1) },
+			BoxSlotAcquire: func(runID string) error {
+				acquires.Add(1)
+				return nil
+			},
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 1", got)
+	}
+	if got := acquires.Load(); got != 1 {
+		t.Fatalf("BoxSlotAcquire calls = %d, want 1", got)
+	}
+}
+
+func TestRun_ReleasesProvisionalBoxSlotForInheritedHostAdmission(t *testing.T) {
+	register("inherited-host-admission-release", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return seamOK{}
+	})
+
+	fakes := newFakeBackends()
+	fakes.state.runs["parent"] = store.Run{
+		ID:           "parent",
+		Status:       "running",
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"b:4:hostkey","host_admission":true}}`),
+	}
+	fakes.state.runs["child"] = store.Run{ID: "child", Status: "running", ParentRunID: "parent"}
+	fakes.concurrency.holders["b:4:hostkey\x00parent/-"] = store.ConcurrencyHolder{
+		Key:            "b:4:hostkey",
+		HolderID:       "parent/-",
+		RunID:          "parent",
+		LeaseExpiresAt: time.Now().Add(30 * time.Second),
+	}
+	var releases atomic.Int32
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:                         "inherited-host-admission-release",
+			RunID:                            "child",
+			ParentRunID:                      "parent",
+			InheritedPlanConcurrencyKey:      "b:4:hostkey",
+			InheritedPlanConcurrencyHolderID: "parent/-",
+			InheritedPlanHostAdmission:       true,
+			InheritedPlanHostAdmissionKey:    "b:4:hostkey",
+			BoxSlotRelease:                   func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 1", got)
+	}
+}
+
+func TestRun_RejectsTerminalInheritedHostAdmissionOwner(t *testing.T) {
+	register("terminal-inherited-host-admission", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return seamOK{}
+	})
+
+	fakes := newFakeBackends()
+	fakes.state.runs["parent"] = store.Run{
+		ID:           "parent",
+		Status:       "success",
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"b:4:hostkey","host_admission":true}}`),
+	}
+	fakes.state.runs["child"] = store.Run{ID: "child", Status: "running", ParentRunID: "parent"}
+	fakes.concurrency.holders["b:4:hostkey\x00parent/-"] = store.ConcurrencyHolder{
+		Key:            "b:4:hostkey",
+		HolderID:       "parent/-",
+		RunID:          "parent",
+		LeaseExpiresAt: time.Now().Add(30 * time.Second),
+	}
+	var releases atomic.Int32
+	res, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:                         "terminal-inherited-host-admission",
+			RunID:                            "child",
+			ParentRunID:                      "parent",
+			InheritedPlanConcurrencyKey:      "b:4:hostkey",
+			InheritedPlanConcurrencyHolderID: "parent/-",
+			InheritedPlanHostAdmission:       true,
+			InheritedPlanHostAdmissionKey:    "b:4:hostkey",
+			BoxSlotRelease:                   func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run returned transport error: %v", err)
+	}
+	if res == nil || res.Status != "failed" {
+		t.Fatalf("status = %v, want failed", res)
+	}
+	if got := releases.Load(); got != 0 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 0", got)
+	}
+}
+
+func TestRun_RejectsUnverifiedInheritedHostAdmission(t *testing.T) {
+	register("unverified-inherited-host-admission", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return seamOK{}
+	})
+
+	fakes := newFakeBackends()
+	var releases atomic.Int32
+	res, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:                         "unverified-inherited-host-admission",
+			InheritedPlanConcurrencyKey:      "b:4:hostkey",
+			InheritedPlanConcurrencyHolderID: "parent/-",
+			InheritedPlanHostAdmission:       true,
+			InheritedPlanHostAdmissionKey:    "b:4:hostkey",
+			BoxSlotRelease:                   func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run returned transport error: %v", err)
+	}
+	if res == nil || res.Status != "failed" {
+		t.Fatalf("status = %v, want failed", res)
+	}
+	if got := releases.Load(); got != 0 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 0", got)
+	}
+}
+
+func TestRun_ValidatesOnlyInheritedHostAdmissionKey(t *testing.T) {
+	register("mixed-inherited-host-admission", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return seamOK{}
+	})
+
+	fakes := newFakeBackends()
+	fakes.state.runs["parent"] = store.Run{
+		ID:           "parent",
+		Status:       "running",
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"b:4:hostkey","host_admission":true}}`),
+	}
+	fakes.state.runs["middle"] = store.Run{
+		ID:           "middle",
+		Status:       "running",
+		ParentRunID:  "parent",
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"b:4:other","host_admission":false}}`),
+	}
+	fakes.state.runs["child"] = store.Run{ID: "child", Status: "running", ParentRunID: "middle"}
+	fakes.concurrency.holders["b:4:hostkey\x00parent/-"] = store.ConcurrencyHolder{
+		Key:            "b:4:hostkey",
+		HolderID:       "parent/-",
+		RunID:          "parent",
+		LeaseExpiresAt: time.Now().Add(30 * time.Second),
+	}
+	fakes.concurrency.holders["b:4:other\x00middle/-"] = store.ConcurrencyHolder{
+		Key:            "b:4:other",
+		HolderID:       "middle/-",
+		RunID:          "middle",
+		LeaseExpiresAt: time.Now().Add(30 * time.Second),
+	}
+	var releases atomic.Int32
+	res, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:                         "mixed-inherited-host-admission",
+			RunID:                            "child",
+			ParentRunID:                      "middle",
+			InheritedPlanConcurrencyKey:      "b:4:hostkey",
+			InheritedPlanConcurrencyHolderID: "parent/-",
+			InheritedPlanConcurrencyHolders: map[string]string{
+				"b:4:hostkey": "parent/-",
+				"b:4:other":   "middle/-",
+			},
+			InheritedPlanHostAdmission:    true,
+			InheritedPlanHostAdmissionKey: "b:4:hostkey",
+			BoxSlotRelease:                func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q, want success", res.Status)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 1", got)
+	}
+}
+
+func TestRun_KeepsProvisionalBoxSlotWithoutHostAdmission(t *testing.T) {
+	register("no-host-admission-release", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return seamOK{}
+	})
+
+	fakes := newFakeBackends()
+	var releases atomic.Int32
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:       "no-host-admission-release",
+			BoxSlotRelease: func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := releases.Load(); got != 0 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 0", got)
+	}
+}
+
 type seamOK struct{ sparkwing.Base }
 
 func (seamOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -101,9 +355,9 @@ type fakeBackends struct {
 
 func newFakeBackends() *fakeBackends {
 	return &fakeBackends{
-		state:       &fakeState{eventKinds: map[string]int{}, cache: map[string][]byte{}},
+		state:       &fakeState{eventKinds: map[string]int{}, cache: map[string][]byte{}, runs: map[string]store.Run{}},
 		logs:        &fakeLogs{},
-		concurrency: &fakeConcurrency{},
+		concurrency: &fakeConcurrency{holders: map[string]store.ConcurrencyHolder{}},
 	}
 }
 
@@ -116,6 +370,7 @@ type fakeState struct {
 	finishNodes  int
 	eventKinds   map[string]int
 	cache        map[string][]byte
+	runs         map[string]store.Run
 	createRunErr error
 }
 
@@ -127,6 +382,7 @@ func (f *fakeState) CreateRun(ctx context.Context, r store.Run) error {
 	if f.createRunErr != nil {
 		return f.createRunErr
 	}
+	f.runs[r.ID] = r
 	f.createRuns++
 	return nil
 }
@@ -139,6 +395,12 @@ func (f *fakeState) FinishRun(ctx context.Context, runID, status, errMsg string)
 }
 
 func (f *fakeState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	run := f.runs[runID]
+	run.ID = runID
+	run.PlanSnapshot = snapshot
+	f.runs[runID] = run
 	return nil
 }
 
@@ -246,7 +508,13 @@ func (f *fakeState) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, 
 }
 
 func (f *fakeState) GetRun(ctx context.Context, runID string) (*store.Run, error) {
-	return nil, store.ErrNotFound
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	run, ok := f.runs[runID]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return &run, nil
 }
 
 func (f *fakeState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
@@ -327,6 +595,7 @@ type fakeConcurrency struct {
 	mu       sync.Mutex
 	acquires int
 	releases int
+	holders  map[string]store.ConcurrencyHolder
 }
 
 func (f *fakeConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
@@ -345,9 +614,13 @@ func (f *fakeConcurrency) HeartbeatSlot(ctx context.Context, key, holderID strin
 }
 
 func (f *fakeConcurrency) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
+	if holder, ok := f.holders[key+"\x00"+holderID]; ok {
+		return &holder, nil
+	}
 	return &store.ConcurrencyHolder{
 		Key:            key,
 		HolderID:       holderID,
+		RunID:          strings.TrimSuffix(holderID, "/-"),
 		LeaseExpiresAt: time.Now().Add(30 * time.Second),
 	}, nil
 }

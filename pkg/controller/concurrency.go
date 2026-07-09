@@ -305,6 +305,7 @@ type resolveWaiterResp struct {
 	LeaderOutcome       string            `json:"leader_outcome,omitempty"`
 	LeaderFailureReason string            `json:"leader_failure_reason,omitempty"`
 	Position            int               `json:"position,omitempty"`
+	QueueLength         int               `json:"queue_length,omitempty"`
 	Holders             []stateHolderResp `json:"holders,omitempty"`
 }
 
@@ -342,6 +343,7 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 		LeaderOutcome:       res.LeaderOutcome,
 		LeaderFailureReason: res.LeaderFailureReason,
 		Position:            res.Position,
+		QueueLength:         res.QueueLength,
 	}
 	for _, h := range res.Holders {
 		out.Holders = append(out.Holders, holderResp(h))

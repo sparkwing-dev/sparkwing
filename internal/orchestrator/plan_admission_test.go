@@ -13,6 +13,8 @@ func TestPlanAdmissionFromEnv(t *testing.T) {
 	t.Setenv(triggerEnvPlanAdmissionKey, "g:box-budget")
 	t.Setenv(triggerEnvPlanAdmissionHolderID, "parent/-")
 	t.Setenv(triggerEnvPlanAdmissions, `{"g:other":"other/-"}`)
+	t.Setenv(triggerEnvPlanHostAdmission, "1")
+	t.Setenv(triggerEnvPlanHostAdmissionKey, "g:box-budget")
 
 	admission := planAdmissionFromEnv()
 	if admission.Key != "g:box-budget" {
@@ -26,6 +28,12 @@ func TestPlanAdmissionFromEnv(t *testing.T) {
 	}
 	if got := admission.HolderIDs["g:other"]; got != "other/-" {
 		t.Fatalf("additional holder = %q, want other/-", got)
+	}
+	if !admission.HostAdmission {
+		t.Fatalf("HostAdmission = false, want true")
+	}
+	if admission.HostAdmissionKey != "g:box-budget" {
+		t.Fatalf("HostAdmissionKey = %q, want g:box-budget", admission.HostAdmissionKey)
 	}
 }
 
@@ -42,6 +50,8 @@ func TestPlanAdmissionProcessBoundaryThroughCommandEnv(t *testing.T) {
 			"g:box-budget": "parent/-",
 			"g:other":      "other/-",
 		},
+		HostAdmission:    true,
+		HostAdmissionKey: "g:box-budget",
 	})
 
 	_, err = sparkwing.Bash(ctx, `"$EXE" -test.run '^TestPlanAdmissionProcessBoundaryHarness$' -- "$OUT"`).
@@ -57,7 +67,7 @@ func TestPlanAdmissionProcessBoundaryThroughCommandEnv(t *testing.T) {
 		t.Fatalf("read helper output: %v", err)
 	}
 	got := strings.TrimSpace(string(body))
-	want := "g:box-budget parent/- parent/- other/-"
+	want := "g:box-budget parent/- parent/- other/- true g:box-budget"
 	if got != want {
 		t.Fatalf("helper admission = %q, want %q", got, want)
 	}
@@ -73,6 +83,12 @@ func TestPlanAdmissionProcessBoundaryHarness(t *testing.T) {
 	out := os.Args[len(os.Args)-1]
 	admission := planAdmissionFromEnv()
 	body := admission.Key + " " + admission.HolderID + " " + admission.HolderIDs["g:box-budget"] + " " + admission.HolderIDs["g:other"]
+	if admission.HostAdmission {
+		body += " true"
+	} else {
+		body += " false"
+	}
+	body += " " + admission.HostAdmissionKey
 	if err := os.WriteFile(out, []byte(body+"\n"), 0o644); err != nil {
 		t.Fatalf("write helper output: %v", err)
 	}

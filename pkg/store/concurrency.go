@@ -287,7 +287,7 @@ func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now
 }
 
 func (s *Store) concurrencyHolder(ctx context.Context, key, holderID string, now time.Time, livePredicate string) (*ConcurrencyHolder, error) {
-	row := s.db.QueryRowContext(ctx,
+	row := s.queryRow(ctx,
 		`SELECT `+holderColumns+`
 		   FROM concurrency_holders
 		  WHERE key = ?
@@ -370,6 +370,14 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	// holders whose budget was already reassigned.
 	now := time.Now()
 	nowNS := now.UnixNano()
+
+	if reaped, err := txReapTerminalConcurrencyHolders(ctx, tx, req.Key); err != nil {
+		return AcquireSlotResponse{}, err
+	} else if len(reaped) > 0 {
+		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano()); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+	}
 
 	hit, err := txCacheLookup(ctx, tx, req.Key, req.CacheKeyHash, nowNS, req.BypassRead, true)
 	if err != nil {
@@ -799,6 +807,13 @@ func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) 
 // the leader path, not here. Returns the promoted waiters with their
 // assigned HolderID set.
 func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
+		return nil, err
+	}
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS)
+}
+
+func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
 	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -1129,16 +1144,33 @@ func txRefreshInheritedHolder(
 }
 
 func txSupersedeHolderAndInherited(ctx context.Context, tx *storeTx, key, holderID string, nowNS int64) ([]string, error) {
+	var nodeID string
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		key, holderID,
+	).Scan(&nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	if err := txSupersede(ctx, tx, key, holderID); err != nil {
 		return nil, err
 	}
 	ids := []string{holderID}
+	inheritedMarker := inheritedHolderNodeID(holderID)
+	originalMarker := inheritedMarker
+	if isInheritedHolderNodeID(nodeID) {
+		originalMarker = nodeID
+	}
 	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT holder_id FROM concurrency_holders
-		  WHERE key = ? AND `+holderLiveSQL("")+` AND node_id = ?
+		  WHERE key = ? AND `+holderLiveSQL("")+` AND node_id IN (?, ?)
 		  ORDER BY claimed_at ASC`,
-		key, nowNS, inheritedHolderNodeID(holderID),
+		key, nowNS, inheritedMarker, originalMarker,
 	)
 	if err != nil {
 		return nil, err
@@ -1284,7 +1316,7 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, o
 
 	now := time.Now()
 	if cost > 0 && supersededInt == 0 && leaseNS > now.UnixNano() {
-		if err := txTransferInheritedHolderCost(ctx, tx, key, holderID, cost, declaredCapacity, now.UnixNano()); err != nil {
+		if err := txTransferInheritedHolderCost(ctx, tx, key, holderID, nodeID, cost, declaredCapacity, now.UnixNano()); err != nil {
 			return false, "", "", err
 		}
 	}
@@ -1320,11 +1352,16 @@ func txTransferInheritedHolderCost(
 	tx *storeTx,
 	key string,
 	releasedHolderID string,
+	releasedNodeID string,
 	cost int,
 	declaredCapacity int,
 	nowNS int64,
 ) error {
 	var inheritedHolderID string
+	inheritedMarker := inheritedHolderNodeID(releasedHolderID)
+	if releasedNodeID == "" {
+		releasedNodeID = inheritedMarker
+	}
 	err := tx.QueryRowContext(
 		ctx,
 		`SELECT holder_id
@@ -1335,10 +1372,10 @@ func txTransferInheritedHolderCost(
 		    AND `+holderLeaseLiveSQL("")+`
 		    AND cost = 0
 		    AND declared_capacity = ?
-		    AND node_id = ?
+		    AND node_id IN (?, ?)
 		  ORDER BY claimed_at ASC
 		  LIMIT 1`,
-		key, releasedHolderID, nowNS, inheritedHolderDeclaredCapacity, inheritedHolderNodeID(releasedHolderID),
+		key, releasedHolderID, nowNS, inheritedHolderDeclaredCapacity, inheritedMarker, releasedNodeID,
 	).Scan(&inheritedHolderID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -1670,8 +1707,9 @@ type WaiterResolution struct {
 	// policy) so a poller can refresh its "N ahead, held by X" display
 	// against the fully-committed queue -- self-correcting any stale
 	// value computed at insert time under simultaneous arrival.
-	Position int
-	Holders  []ConcurrencyHolder
+	Position    int
+	QueueLength int
+	Holders     []ConcurrencyHolder
 }
 
 // ResolveWaiter is the read-side for polling; never inserts waiter
@@ -1690,6 +1728,9 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	// serialized writers committed, not a pre-wait snapshot.
 	nowNS := time.Now().UnixNano()
 	if err := txLockEntry(ctx, tx, s.forUpdate(), key); err != nil {
+		return WaiterResolution{}, err
+	}
+	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
 		return WaiterResolution{}, err
 	}
 
@@ -1780,6 +1821,14 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		).Scan(&position); e != nil {
 			return WaiterResolution{}, e
 		}
+		var queueLength int
+		if e := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy IN (?, ?)`,
+			key, OnLimitQueue, OnLimitCancelOthers,
+		).Scan(&queueLength); e != nil {
+			return WaiterResolution{}, e
+		}
 		holders, e := txActiveHolders(ctx, tx, key, nowNS)
 		if e != nil {
 			return WaiterResolution{}, e
@@ -1787,7 +1836,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		if err := tx.Commit(); err != nil {
 			return WaiterResolution{}, err
 		}
-		return WaiterResolution{Status: WaiterStillWaiting, Position: position, Holders: holders}, nil
+		return WaiterResolution{Status: WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return WaiterResolution{}, err
@@ -1957,6 +2006,43 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		return nil, err
 	}
 	return state, nil
+}
+
+// txReapTerminalConcurrencyHolders removes holders whose run already has a
+// terminal row. A missing run row is not proof of death; absence falls back
+// to the lease-expiry reaper.
+func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, key string) ([]ConcurrencyHolder, error) {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT `+prefixColumns(holderColumns, "h.")+`
+		   FROM concurrency_holders h
+		   JOIN runs r ON r.id = h.run_id
+		  WHERE h.key = ?
+		    AND r.finished_at IS NOT NULL`,
+		key,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var stale []ConcurrencyHolder
+	for rows.Next() {
+		holder, err := scanHolder(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		stale = append(stale, holder)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, holder := range stale {
+		if _, _, _, err := txReleaseHolder(ctx, tx, holder.Key, holder.HolderID, "failed", "", "", 0); err != nil {
+			return nil, err
+		}
+	}
+	return stale, nil
 }
 
 // reapStaleConcurrencyHolders deletes lease-expired holders; caller

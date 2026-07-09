@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"golang.org/x/term"
 
@@ -152,6 +153,8 @@ func Main() {
 		opts.InheritedPlanConcurrencyKey = inheritedAdmission.Key
 		opts.InheritedPlanConcurrencyHolderID = inheritedAdmission.HolderID
 		opts.InheritedPlanConcurrencyHolders = inheritedAdmission.HolderIDs
+		opts.InheritedPlanHostAdmission = inheritedAdmission.HostAdmission
+		opts.InheritedPlanHostAdmissionKey = inheritedAdmission.HostAdmissionKey
 	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
@@ -199,12 +202,40 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)
 	}
-	defer release()
+	var boxSlotMu sync.Mutex
+	currentBoxSlotRelease := release
+	releaseBoxSlot := func() {
+		boxSlotMu.Lock()
+		release := currentBoxSlotRelease
+		currentBoxSlotRelease = nil
+		boxSlotMu.Unlock()
+		if release != nil {
+			release()
+		}
+	}
+	reacquireBoxSlot := func(runID string) error {
+		release, err := acquireBoxSlot(ctx, paths, workersHintForBoxSlot())
+		if err != nil {
+			return err
+		}
+		annotateBoxSlotHolder(paths, runID)
+		boxSlotMu.Lock()
+		previous := currentBoxSlotRelease
+		currentBoxSlotRelease = release
+		boxSlotMu.Unlock()
+		if previous != nil {
+			previous()
+		}
+		return nil
+	}
+	defer releaseBoxSlot()
 
+	opts.BoxSlotRelease = releaseBoxSlot
+	opts.BoxSlotAcquire = reacquireBoxSlot
 	res, err := RunLocal(ctx, paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
-		release()
+		releaseBoxSlot()
 		os.Exit(1)
 	}
 	_ = delegate
@@ -212,7 +243,7 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}
 	if res != nil && res.Status != "success" {
-		release()
+		releaseBoxSlot()
 		os.Exit(1)
 	}
 }

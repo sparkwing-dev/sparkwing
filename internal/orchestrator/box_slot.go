@@ -147,6 +147,11 @@ func envTruthy(name string) bool {
 	return false
 }
 
+func boxSlotPinned() bool {
+	_, ok := parseBoxSlots(os.Getenv("SPARKWING_BOX_SLOTS_PIN"))
+	return ok
+}
+
 // HostBoxSlotCap is BoxSlotCap with the standard workers hint applied,
 // for callers (the box-slots CLI) that want the host-level view without
 // re-deriving the heuristic input.

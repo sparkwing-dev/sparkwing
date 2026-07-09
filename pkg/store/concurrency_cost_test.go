@@ -130,6 +130,192 @@ func TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *tes
 	}
 }
 
+func TestConcurrency_TerminalReaperTransfersInheritedHolderCost(t *testing.T) {
+	s := newStoreT(t)
+	createRunningRunT(t, s, "parent")
+	createRunningRunT(t, s, "child")
+	parent := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "db",
+		HolderID: "parent/-",
+		RunID:    "parent",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitQueue,
+		Lease:    time.Minute,
+	})
+	if parent.Kind != store.AcquireGranted {
+		t.Fatalf("parent: want Granted got %s", parent.Kind)
+	}
+	child := acquireT(t, s, store.AcquireSlotRequest{
+		Key:               "db",
+		HolderID:          "child/-",
+		InheritedHolderID: "parent/-",
+		RunID:             "child",
+		Capacity:          10,
+		Cost:              20,
+		Policy:            store.OnLimitQueue,
+		Lease:             2 * time.Minute,
+	})
+	if child.Kind != store.AcquireGranted {
+		t.Fatalf("child: want Granted got %s", child.Kind)
+	}
+	finishRunT(t, s, "parent")
+
+	follower := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "db",
+		HolderID: "follower/-",
+		RunID:    "follower",
+		Capacity: 10,
+		Cost:     3,
+		Policy:   store.OnLimitQueue,
+	})
+	if follower.Kind != store.AcquireQueued {
+		t.Fatalf("follower: want Queued after inherited cost transfer, got %s", follower.Kind)
+	}
+	state, err := s.GetConcurrencyState(ctxT(t), "db")
+	if err != nil {
+		t.Fatalf("GetConcurrencyState: %v", err)
+	}
+	if state.UsedCost != 8 {
+		t.Fatalf("used cost = %d, want transferred 8", state.UsedCost)
+	}
+	if len(state.Holders) != 1 || state.Holders[0].HolderID != "child/-" || state.Holders[0].Cost != 8 {
+		t.Fatalf("holders = %+v, want child carrying transferred parent cost", state.Holders)
+	}
+}
+
+func TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder(t *testing.T) {
+	s := newStoreT(t)
+	parent := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "db",
+		HolderID: "parent/-",
+		RunID:    "parent",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitQueue,
+		Lease:    time.Minute,
+	})
+	if parent.Kind != store.AcquireGranted {
+		t.Fatalf("parent: want Granted got %s", parent.Kind)
+	}
+	for _, childRunID := range []string{"child-a", "child-b"} {
+		child := acquireT(t, s, store.AcquireSlotRequest{
+			Key:               "db",
+			HolderID:          childRunID + "/-",
+			InheritedHolderID: "parent/-",
+			RunID:             childRunID,
+			Capacity:          10,
+			Cost:              20,
+			Policy:            store.OnLimitQueue,
+			Lease:             2 * time.Minute,
+		})
+		if child.Kind != store.AcquireGranted {
+			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
+		}
+	}
+	if _, err := s.ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
+	}
+	if _, err := s.ReleaseConcurrencySlot(ctxT(t), "db", "child-a/-", "success", "", "", 0); err != nil {
+		t.Fatalf("ReleaseConcurrencySlot(child-a): %v", err)
+	}
+
+	follower := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "db",
+		HolderID: "follower/-",
+		RunID:    "follower",
+		Capacity: 10,
+		Cost:     3,
+		Policy:   store.OnLimitQueue,
+	})
+	if follower.Kind != store.AcquireQueued {
+		t.Fatalf("follower: want Queued while child-b carries inherited cost, got %s", follower.Kind)
+	}
+	state, err := s.GetConcurrencyState(ctxT(t), "db")
+	if err != nil {
+		t.Fatalf("GetConcurrencyState: %v", err)
+	}
+	if state.UsedCost != 8 {
+		t.Fatalf("used cost = %d, want transferred sibling cost 8", state.UsedCost)
+	}
+	if len(state.Holders) != 1 || state.Holders[0].HolderID != "child-b/-" || state.Holders[0].Cost != 8 {
+		t.Fatalf("holders = %+v, want child-b carrying transferred parent cost", state.Holders)
+	}
+}
+
+func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T) {
+	s := newStoreT(t)
+	parent := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "db",
+		HolderID: "parent/-",
+		RunID:    "parent",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitQueue,
+		Lease:    time.Minute,
+	})
+	if parent.Kind != store.AcquireGranted {
+		t.Fatalf("parent: want Granted got %s", parent.Kind)
+	}
+	for _, childRunID := range []string{"child-a", "child-b"} {
+		child := acquireT(t, s, store.AcquireSlotRequest{
+			Key:               "db",
+			HolderID:          childRunID + "/-",
+			InheritedHolderID: "parent/-",
+			RunID:             childRunID,
+			Capacity:          10,
+			Cost:              20,
+			Policy:            store.OnLimitQueue,
+			Lease:             2 * time.Minute,
+		})
+		if child.Kind != store.AcquireGranted {
+			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
+		}
+	}
+	if _, err := s.ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
+	}
+
+	evictor := acquireT(t, s, store.AcquireSlotRequest{
+		Key:      "db",
+		HolderID: "evictor/-",
+		RunID:    "evictor",
+		Capacity: 10,
+		Cost:     8,
+		Policy:   store.OnLimitCancelOthers,
+		Lease:    time.Minute,
+	})
+	if evictor.Kind != store.AcquireCancellingOthers {
+		t.Fatalf("evictor: want CancellingOthers got %s", evictor.Kind)
+	}
+	if !containsString(evictor.SupersededIDs, "child-a/-") || !containsString(evictor.SupersededIDs, "child-b/-") {
+		t.Fatalf("superseded ids = %+v, want both inherited siblings", evictor.SupersededIDs)
+	}
+}
+
+func createRunningRunT(t *testing.T, s *store.Store, runID string) {
+	t.Helper()
+	now := time.Now()
+	if err := s.CreateRun(ctxT(t), store.Run{
+		ID:        runID,
+		Pipeline:  "test",
+		Status:    "running",
+		StartedAt: now,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRun(%s): %v", runID, err)
+	}
+}
+
+func containsString(list []string, target string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestConcurrency_CancelOthersSupersedesInheritedHolder(t *testing.T) {
 	s := newStoreT(t)
 	parent := acquireT(t, s, store.AcquireSlotRequest{

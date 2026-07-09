@@ -47,6 +47,36 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** Plan-level `Concurrency` calls now compose, so one run can hold
+  independent whole-run budgets such as a deploy mutex plus per-host CPU and
+  memory limits.
+
+### Changed
+
+- **sdk:** (Breaking) `ConcurrencyLimit` and
+  `client.TriggerPlanAdmission` added fields for host admission. Callers using
+  unkeyed Go struct literals must switch to keyed literals before upgrading;
+  see [the migration guide](docs/migrations/v0.15.4.md).
+- **sdk:** Plan-level `Concurrency` groups can now opt into host admission
+  with `ConcurrencyLimit.HostAdmission`, giving local runs one plan-owned
+  queue for host execution budget instead of double-holding the default
+  `box-slots` queue. Exactly one plan-level group may own host admission.
+
+### Fixed
+
+- **controller:** Inherited plan admission now verifies that a parent plan
+  holder actually owns host admission before passing that ownership to child
+  runs, so a normal plan-level queue cannot be upgraded by request payload.
+- **orchestrator:** Local runs that wait on host-admission plan concurrency
+  release the provisional `box-slots` holder while queued, reacquire pinned
+  slots only after admission, and always release the plan holder if the
+  pinned reacquire fails.
+- **store:** Concurrency admission now prunes holders whose runs already
+  reached a terminal state before computing budget or promoting waiters, and
+  local maintenance uses an owned in-progress claim so startup sweeps stay
+  bounded without suppressing retries after failure.
 
 ## [v0.15.3] - 2026-07-09
 ### Fixed

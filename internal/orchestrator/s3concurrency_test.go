@@ -185,6 +185,52 @@ func TestS3Concurrency_NoOverBudgetWithCost(t *testing.T) {
 	}
 }
 
+func TestS3Concurrency_ResolveWaiterPromotesAfterHolderLeaseExpires(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	ctx := context.Background()
+	key := "g:resolve-expired-holder"
+
+	a := acquire(t, c, store.AcquireSlotRequest{
+		Key:      key,
+		HolderID: "A/n",
+		RunID:    "A",
+		NodeID:   "n",
+		Capacity: 1,
+		Cost:     1,
+		Policy:   store.OnLimitQueue,
+		Lease:    20 * time.Millisecond,
+	})
+	if a.Kind != store.AcquireGranted {
+		t.Fatalf("A kind = %q, want granted", a.Kind)
+	}
+	b := acquire(t, c, store.AcquireSlotRequest{
+		Key:      key,
+		HolderID: "B/n",
+		RunID:    "B",
+		NodeID:   "n",
+		Capacity: 1,
+		Cost:     1,
+		Policy:   store.OnLimitQueue,
+		Lease:    time.Minute,
+	})
+	if b.Kind != store.AcquireQueued {
+		t.Fatalf("B kind = %q, want queued", b.Kind)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	res, err := c.ResolveWaiter(ctx, key, "B", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if res.Status != store.WaiterPromoted {
+		t.Fatalf("status = %q, want promoted", res.Status)
+	}
+	if res.HolderID != "B/n" {
+		t.Fatalf("holder = %q, want B/n", res.HolderID)
+	}
+}
+
 func TestS3Concurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -378,6 +424,9 @@ func assertStillWaiting(t *testing.T, c orchestrator.ConcurrencyBackend, key, ru
 	if res.Position != wantPos {
 		t.Errorf("%s position = %d, want %d", runID, res.Position, wantPos)
 	}
+	if res.QueueLength < wantPos+1 {
+		t.Errorf("%s queue length = %d, want at least %d", runID, res.QueueLength, wantPos+1)
+	}
 }
 
 // TestS3Concurrency_SkipAndFail covers the non-queuing reject policies
@@ -408,6 +457,49 @@ func TestS3Concurrency_SkipAndFail(t *testing.T) {
 	if f := acquire(t, c, store.AcquireSlotRequest{Key: "g:cost-fail", RunID: "A", NodeID: "n", Capacity: 1, Cost: 2, Policy: store.OnLimitQueue}); f.Kind != store.AcquireFailed {
 		t.Errorf("cost>cap non-skip kind = %q, want failed", f.Kind)
 	}
+}
+
+func TestS3Concurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	key := "g:inherited-siblings"
+	parent := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "parent/-", RunID: "parent",
+		Capacity: 10, Cost: 8, Policy: store.OnLimitQueue, Lease: time.Minute,
+	})
+	if parent.Kind != store.AcquireGranted {
+		t.Fatalf("parent: want Granted got %s", parent.Kind)
+	}
+	for _, childRunID := range []string{"child-a", "child-b"} {
+		child := acquire(t, c, store.AcquireSlotRequest{
+			Key: key, HolderID: childRunID + "/-", InheritedHolderID: "parent/-", RunID: childRunID,
+			Capacity: 10, Cost: 20, Policy: store.OnLimitQueue, Lease: 2 * time.Minute,
+		})
+		if child.Kind != store.AcquireGranted {
+			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
+		}
+	}
+	release(t, c, key, "parent/-", "success")
+
+	evictor := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "evictor/-", RunID: "evictor",
+		Capacity: 10, Cost: 8, Policy: store.OnLimitCancelOthers, Lease: time.Minute,
+	})
+	if evictor.Kind != store.AcquireCancellingOthers {
+		t.Fatalf("evictor: want CancellingOthers got %s", evictor.Kind)
+	}
+	if !containsString(evictor.SupersededIDs, "child-a/-") || !containsString(evictor.SupersededIDs, "child-b/-") {
+		t.Fatalf("superseded ids = %+v, want both inherited siblings", evictor.SupersededIDs)
+	}
+}
+
+func containsString(list []string, target string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 // TestS3Concurrency_CoalesceCacheHit asserts a coalesced follower

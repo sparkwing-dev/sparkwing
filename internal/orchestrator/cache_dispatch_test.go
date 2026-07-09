@@ -360,18 +360,19 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	p := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
-	leaderDrained := false
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-leader"})
 		leaderDone <- res
 	}()
 	waitForLeaderHolding(t)
-	t.Cleanup(func() {
+	var waitLeaderOnce sync.Once
+	var leaderRes *orchestrator.Result
+	waitLeader := func() *orchestrator.Result {
 		leaderRelease.Store(true)
-		if !leaderDrained {
-			<-leaderDone
-		}
-	})
+		waitLeaderOnce.Do(func() { leaderRes = <-leaderDone })
+		return leaderRes
+	}
+	t.Cleanup(func() { _ = waitLeader() })
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
 	if err != nil {
@@ -392,8 +393,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	}
 
 	leaderRelease.Store(true)
-	leaderRes := <-leaderDone
-	leaderDrained = true
+	leaderRes = waitLeader()
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
 	}
@@ -507,14 +507,6 @@ func TestConcurrency_DriftWarnEventEmitted(t *testing.T) {
 	}
 }
 
-func outcomeSummary(nodes []*store.Node) map[string]int {
-	m := map[string]int{}
-	for _, n := range nodes {
-		m[n.Outcome]++
-	}
-	return m
-}
-
 func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 	t.Helper()
 	st, err := store.Open(dbPath)
@@ -553,6 +545,76 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("plan-level Queue cross-run peak concurrency = %d, want <= 1", peak)
+	}
+}
+
+func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+
+	leaderDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+			Pipeline: "plan-level-queue",
+			RunID:    "plan-queue-leader",
+		})
+		leaderDone <- res
+	}()
+	waitForConcurrencyHolder(t, p.StateDB(), "plan-queue-leader/-")
+
+	follower, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline: "plan-level-queue",
+		RunID:    "plan-queue-follower",
+	})
+	if err != nil {
+		t.Fatalf("follower: %v", err)
+	}
+	if follower.Status != "success" {
+		t.Fatalf("follower status = %q, want success", follower.Status)
+	}
+	select {
+	case leader := <-leaderDone:
+		if leader.Status != "success" {
+			t.Fatalf("leader status = %q, want success", leader.Status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for leader")
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	events, err := st.ListEventsAfter(context.Background(), "plan-queue-follower", 0, 500)
+	if err != nil {
+		t.Fatalf("ListEventsAfter: %v", err)
+	}
+	want := map[string]bool{
+		"concurrency_wait":        false,
+		"concurrency_wait_update": false,
+		"concurrency_promoted":    false,
+	}
+	for _, event := range events {
+		if _, ok := want[event.Kind]; !ok {
+			continue
+		}
+		want[event.Kind] = true
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("%s payload: %v", event.Kind, err)
+		}
+		if payload["scope"] != "plan" || payload["key"] != "g:plan-level-key" || payload["resource"] != "plan_admission" {
+			t.Fatalf("%s payload = %+v", event.Kind, payload)
+		}
+		if event.Kind != "concurrency_promoted" && payload["holders"] == nil {
+			t.Fatalf("%s payload missing holders: %+v", event.Kind, payload)
+		}
+	}
+	for kind, found := range want {
+		if !found {
+			t.Fatalf("missing %s event in %+v", kind, events)
+		}
 	}
 }
 

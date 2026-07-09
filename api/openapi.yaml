@@ -2115,6 +2115,28 @@ components:
         parent_run_id: { type: string }
         parent_node_id: { type: string }
         retry_of: { type: string }
+        plan_admission: { $ref: "#/components/schemas/TriggerPlanAdmission" }
+
+    TriggerPlanAdmission:
+      type: object
+      description: Inherited plan-admission holders forwarded from an ancestor run.
+      properties:
+        key:
+          type: string
+          description: Primary inherited concurrency key.
+        holder_id:
+          type: string
+          description: Holder id for `key`.
+        admissions:
+          type: object
+          description: Full inherited admission set keyed by concurrency key.
+          additionalProperties: { type: string }
+        host_admission:
+          type: boolean
+          description: Whether one inherited holder owns host execution admission.
+        host_admission_key:
+          type: string
+          description: Key in `admissions` whose holder owns host execution admission.
 
     Approval:
       type: object

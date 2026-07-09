@@ -275,6 +275,11 @@ type ConcurrencyLimit struct {
     // Scope is how far the budget reaches (see [Scope]). The zero value
     // is [ScopeGlobal].
     Scope Scope
+    // HostAdmission marks a plan-level ScopeBox group as the host execution
+    // admission budget for the whole run. ScopeBox alone only says the key
+    // is per-machine; HostAdmission says this budget replaces the default
+    // host process semaphore while the plan waits for admission.
+    HostAdmission bool
     // OnLimit is what a member does when the group is full. The zero
     // value is [Queue].
     OnLimit OnLimit
@@ -911,11 +916,12 @@ type Plan struct {
 ```
 
 - `func NewPlan() *Plan` -- NewPlan returns an empty Plan.
-- `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires g's budget before any node dispatches and releases it when the run reaches a terminal status.
-- `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
-- `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.
+- `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
+- `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the first plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
+- `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the first group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.
 - `func (p *Plan) Expansions() []Expansion` -- Expansions returns the registered ExpandFrom generators.
 - `func (p *Plan) GroupSourceIDs(id string) []string` -- GroupSourceIDs returns the ids of the source nodes backing any ExpandFrom Groups this node waits on via Needs(group).
+- `func (p *Plan) HostAdmission() bool` -- HostAdmission reports whether the plan-level concurrency group owns host execution admission for this run.
 - `func (p *Plan) Inputs() any` -- Inputs returns the parsed Inputs value the orchestrator handed to this pipeline's Plan() method, or nil for a Plan built directly (outside the registration path).
 - `func (p *Plan) IsDynamicNode(id string) bool` -- IsDynamicNode reports whether the node sources runtime-variable downstream work -- i.e.
 - `func (p *Plan) Job(id string) *JobNode` -- Job returns the node with the given ID, or nil if absent.
@@ -924,8 +930,21 @@ type Plan struct {
 - `func (p *Plan) JobGroupNames(id string) []string` -- JobGroupNames returns the names of every declared *JobGroup whose members include the given node.
 - `func (p *Plan) LintWarnings() []LintWarning` -- LintWarnings returns the non-fatal Plan-time advisories accumulated while building this Plan.
 - `func (p *Plan) Nodes() []*JobNode` -- Nodes returns the plan's nodes in insertion order.
+- `func (p *Plan) PlanConcurrency() []PlanConcurrency` -- PlanConcurrency returns every whole-run gate declared via Plan.Concurrency.
 - `func (p *Plan) ResolvedArgs() map[string]any` -- ResolvedArgs returns the merged map of every job's typed-args resolution result, keyed by CLI flag name.
 - `func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg` -- TransitiveArgsSurface returns the deduplicated map of every flag the plan exposes (across all its jobs that declare args), keyed by flag name with the owning job id.
+
+### type PlanConcurrency
+
+PlanConcurrency records one whole-run concurrency gate.
+
+```
+type PlanConcurrency struct {
+    Group *ConcurrencyGroup
+    Cost  int
+}
+```
+
 
 ### type Predicate
 

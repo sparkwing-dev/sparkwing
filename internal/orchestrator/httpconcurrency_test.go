@@ -196,3 +196,32 @@ func TestParity_QueuedAcquire_Position_QueueLength_Holders(t *testing.T) {
 		t.Fatalf("queued acquire Holders = %+v, want the rA holder (dropped on the wire)", r.Holders)
 	}
 }
+
+func TestParity_ResolveWaiter_Position_QueueLength_Holders(t *testing.T) {
+	b, _ := newHTTPConcurrency(t)
+	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		Key: "resolve-k", HolderID: "rA/n", RunID: "rA", NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("A: want Granted got %s", r.Kind)
+	}
+	for _, runID := range []string{"rB", "rC"} {
+		if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+			Key: "resolve-k", HolderID: runID + "/n", RunID: runID, NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
+		}); r.Kind != store.AcquireQueued {
+			t.Fatalf("%s: want Queued got %s", runID, r.Kind)
+		}
+	}
+	res, err := b.ResolveWaiter(context.Background(), "resolve-k", "rC", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if res.Status != store.WaiterStillWaiting {
+		t.Fatalf("status = %s, want still_waiting", res.Status)
+	}
+	if res.Position != 1 || res.QueueLength != 2 {
+		t.Fatalf("position/queue_length = %d/%d, want 1/2", res.Position, res.QueueLength)
+	}
+	if len(res.Holders) != 1 || res.Holders[0].RunID != "rA" {
+		t.Fatalf("holders = %+v, want rA holder", res.Holders)
+	}
+}

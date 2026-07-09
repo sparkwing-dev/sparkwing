@@ -138,6 +138,7 @@ func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID,
 		LeaderOutcome:       resp.LeaderOutcome,
 		LeaderFailureReason: resp.LeaderFailureReason,
 		Position:            resp.Position,
+		QueueLength:         resp.QueueLength,
 	}
 	for _, hd := range resp.Holders {
 		res.Holders = append(res.Holders, storeHolderFromClient(key, hd))

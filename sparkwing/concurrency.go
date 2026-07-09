@@ -63,6 +63,11 @@ type ConcurrencyLimit struct {
 	// Scope is how far the budget reaches (see [Scope]). The zero value
 	// is [ScopeGlobal].
 	Scope Scope
+	// HostAdmission marks a plan-level ScopeBox group as the host execution
+	// admission budget for the whole run. ScopeBox alone only says the key
+	// is per-machine; HostAdmission says this budget replaces the default
+	// host process semaphore while the plan waits for admission.
+	HostAdmission bool
 	// OnLimit is what a member does when the group is full. The zero
 	// value is [Queue].
 	OnLimit OnLimit
@@ -115,6 +120,12 @@ func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup 
 			name, limit.Scope,
 		))
 	}
+	if limit.HostAdmission && limit.Scope != ScopeBox {
+		panic(fmt.Sprintf(
+			"sparkwing: NewConcurrencyGroup(%q): HostAdmission requires ScopeBox",
+			name,
+		))
+	}
 	switch limit.OnLimit {
 	case "", Queue, Fail, Skip, CancelOthers:
 	default:
@@ -146,6 +157,12 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 	if g == nil {
 		n.concurrency = nil
 		return n
+	}
+	if g.limit.HostAdmission {
+		panic(fmt.Sprintf(
+			"sparkwing: node %q cannot join host-admission group %q; HostAdmission is plan-level only",
+			n.id, g.name,
+		))
 	}
 	c := concurrencyCost(g, "node "+strconv.Quote(n.id), cost...)
 	n.concurrency = &concurrencyMembership{group: g, cost: c}
@@ -188,40 +205,98 @@ func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup {
 	return g
 }
 
-// Concurrency gates the whole run on concurrency group g: the run
-// acquires g's budget before any node dispatches and releases it when
-// the run reaches a terminal status. Cost defaults to one. A plan
-// never memoizes (it has side effects not captured in one output), so
-// a plan participates in concurrency only -- there is no plan-level
-// Cache.
+// PlanConcurrency records one whole-run concurrency gate.
+type PlanConcurrency struct {
+	Group *ConcurrencyGroup
+	Cost  int
+}
+
+// Concurrency gates the whole run on concurrency group g: the run acquires
+// each declared plan-level budget before any node dispatches and releases
+// it when the run reaches a terminal status. Cost defaults to one. Repeated
+// calls compose independent gates, so authors can combine a deploy mutex with
+// CPU and memory budgets. Passing nil clears every plan-level gate.
+//
+// A plan never memoizes (it has side effects not captured in one output), so a
+// plan participates in concurrency only -- there is no plan-level Cache.
 func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if g == nil {
-		p.concurrency = nil
-		p.concurrencyCost = 0
+		p.planConcurrency = nil
 		return p
 	}
-	p.concurrency = g
-	p.concurrencyCost = concurrencyCost(g, "plan", cost...)
+	c := concurrencyCost(g, "plan", cost...)
+	for _, existing := range p.planConcurrency {
+		if existing.Group.limit.HostAdmission && g.limit.HostAdmission && !sameConcurrencyGroup(existing.Group, g) {
+			panic(fmt.Sprintf(
+				"sparkwing: Plan.Concurrency(%q): only one plan-level group can own HostAdmission",
+				g.name,
+			))
+		}
+	}
+	membership := PlanConcurrency{Group: g, Cost: c}
+	for i, existing := range p.planConcurrency {
+		if sameConcurrencyGroup(existing.Group, g) {
+			p.planConcurrency[i] = membership
+			return p
+		}
+	}
+	p.planConcurrency = append(p.planConcurrency, membership)
 	return p
 }
 
-// ConcurrencyGroupRef returns the group set via [Plan.Concurrency], or
-// nil when the plan declared no whole-run coordination.
+// HostAdmission reports whether the plan-level concurrency group owns
+// host execution admission for this run.
+func (p *Plan) HostAdmission() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, membership := range p.planConcurrency {
+		if membership.Group != nil && membership.Group.limit.HostAdmission {
+			return true
+		}
+	}
+	return false
+}
+
+// PlanConcurrency returns every whole-run gate declared via [Plan.Concurrency].
+func (p *Plan) PlanConcurrency() []PlanConcurrency {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]PlanConcurrency, len(p.planConcurrency))
+	copy(out, p.planConcurrency)
+	return out
+}
+
+// ConcurrencyGroupRef returns the first group set via [Plan.Concurrency], or
+// nil when the plan declared no whole-run coordination. Prefer
+// [Plan.PlanConcurrency] when a caller must observe every whole-run gate.
 func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.concurrency
+	if len(p.planConcurrency) == 0 {
+		return nil
+	}
+	return p.planConcurrency[0].Group
 }
 
-// ConcurrencyCost returns the plan-level admission cost declared via
-// [Plan.Concurrency], or 0 when the plan declared no whole-run
-// coordination.
+// ConcurrencyCost returns the first plan-level admission cost declared via
+// [Plan.Concurrency], or 0 when the plan declared no whole-run coordination.
+// Prefer [Plan.PlanConcurrency] when a caller must observe every gate.
 func (p *Plan) ConcurrencyCost() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.concurrencyCost
+	if len(p.planConcurrency) == 0 {
+		return 0
+	}
+	return p.planConcurrency[0].Cost
+}
+
+func sameConcurrencyGroup(a, b *ConcurrencyGroup) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.name == b.name && a.limit.Scope == b.limit.Scope
 }
 
 func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) int {

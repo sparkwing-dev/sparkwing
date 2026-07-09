@@ -127,6 +127,98 @@ func TestPlanConcurrency_RecordsGroup(t *testing.T) {
 	}
 }
 
+func TestPlanConcurrency_ComposesMultipleGroups(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	land := sparkwing.NewConcurrencyGroup("land", sparkwing.ConcurrencyLimit{Capacity: 1})
+	memory := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{Capacity: 32})
+	plan.Concurrency(land)
+	plan.Concurrency(memory, 8)
+
+	memberships := plan.PlanConcurrency()
+	if len(memberships) != 2 {
+		t.Fatalf("plan memberships = %d, want 2", len(memberships))
+	}
+	if memberships[0].Group != land || memberships[0].Cost != 1 {
+		t.Fatalf("first membership = %+v, want land cost 1", memberships[0])
+	}
+	if memberships[1].Group != memory || memberships[1].Cost != 8 {
+		t.Fatalf("second membership = %+v, want memory cost 8", memberships[1])
+	}
+}
+
+func TestPlanConcurrency_ReplacesSameGroup(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	group := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{Capacity: 32})
+	plan.Concurrency(group, 4)
+	plan.Concurrency(group, 8)
+
+	memberships := plan.PlanConcurrency()
+	if len(memberships) != 1 {
+		t.Fatalf("plan memberships = %d, want 1", len(memberships))
+	}
+	if memberships[0].Cost != 8 {
+		t.Fatalf("cost = %d, want replacement cost 8", memberships[0].Cost)
+	}
+}
+
+func TestConcurrencyGroup_HostAdmissionRequiresScopeBox(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic")
+		}
+	}()
+	sparkwing.NewConcurrencyGroup("host", sparkwing.ConcurrencyLimit{HostAdmission: true})
+}
+
+func TestNodeConcurrency_RejectsHostAdmissionGroup(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("host", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		HostAdmission: true,
+	})
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic")
+		}
+	}()
+	sparkwing.Job(plan, "x", &buildJob{}).Concurrency(g)
+}
+
+func TestPlanConcurrency_HostAdmissionRecorded(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	g := sparkwing.NewConcurrencyGroup("host", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		HostAdmission: true,
+	})
+	plan.Concurrency(g)
+	if !plan.HostAdmission() {
+		t.Fatalf("plan HostAdmission = false, want true")
+	}
+}
+
+func TestPlanConcurrency_RejectsMultipleHostAdmissionGroups(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	first := sparkwing.NewConcurrencyGroup("host-a", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		HostAdmission: true,
+	})
+	second := sparkwing.NewConcurrencyGroup("host-b", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		HostAdmission: true,
+	})
+	plan.Concurrency(first)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic")
+		}
+	}()
+	plan.Concurrency(second)
+}
+
 func TestPlanConcurrency_ExplicitCost(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	g := sparkwing.NewConcurrencyGroup("box-budget", sparkwing.ConcurrencyLimit{Capacity: 8})

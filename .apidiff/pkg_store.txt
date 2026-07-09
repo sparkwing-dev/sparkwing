@@ -520,8 +520,9 @@ type WaiterResolution struct {
 
 	LeaderFailureReason string
 
-	Position int
-	Holders  []ConcurrencyHolder
+	Position    int
+	QueueLength int
+	Holders     []ConcurrencyHolder
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"

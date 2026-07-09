@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,10 +39,18 @@ var inheritedPlanObserveInterval = store.DefaultConcurrencyHeartbeatInterval
 // planConcurrencyName returns the plan's whole-run concurrency group
 // name, or "" when none was declared. Used for operator-facing errors.
 func planConcurrencyName(plan *sparkwing.Plan) string {
-	if g := plan.ConcurrencyGroupRef(); g != nil {
-		return g.Name()
+	memberships := plan.PlanConcurrency()
+	if len(memberships) > 0 && memberships[0].Group != nil {
+		return memberships[0].Group.Name()
 	}
 	return ""
+}
+
+func planConcurrencyResource(group *sparkwing.ConcurrencyGroup) string {
+	if group.Limit().HostAdmission {
+		return "host_admission"
+	}
+	return "plan_admission"
 }
 
 // acquirePlanSlot handles plan-level Concurrency() coordination. Caller
@@ -59,13 +68,48 @@ func acquirePlanSlot(
 	inheritedAdmission planAdmission,
 	cancelRun context.CancelCauseFunc,
 ) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
-	group := plan.ConcurrencyGroupRef()
-	if group == nil {
+	memberships := plan.PlanConcurrency()
+	if len(memberships) == 0 {
 		return func(string) {}, planCacheProceed, inheritedAdmission, nil
 	}
+	activeAdmission = inheritedAdmission.normalized()
+	releases := make([]func(string), 0, len(memberships))
+	defer func() {
+		if err != nil || outcome != planCacheProceed {
+			for i := len(releases) - 1; i >= 0; i-- {
+				releases[i]("failed")
+			}
+		}
+	}()
+	for _, membership := range memberships {
+		var groupRelease func(string)
+		groupRelease, outcome, activeAdmission, err = acquireOnePlanSlot(
+			ctx, backends, runID, membership, activeAdmission, cancelRun,
+		)
+		if err != nil || outcome != planCacheProceed {
+			return nil, outcome, planAdmission{}, err
+		}
+		releases = append(releases, groupRelease)
+	}
+	return func(outcome string) {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i](outcome)
+		}
+	}, planCacheProceed, activeAdmission, nil
+}
+
+func acquireOnePlanSlot(
+	ctx context.Context,
+	backends Backends,
+	runID string,
+	membership sparkwing.PlanConcurrency,
+	inheritedAdmission planAdmission,
+	cancelRun context.CancelCauseFunc,
+) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
+	group := membership.Group
 	key := scopedGroupKey(group, runID)
 	limit := group.Limit()
-	cost := plan.ConcurrencyCost()
+	cost := membership.Cost
 	if backends.Concurrency == nil {
 		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", group.Name())
 	}
@@ -99,13 +143,26 @@ func acquirePlanSlot(
 			if resp.Kind != store.AcquireGranted {
 				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission got %q from acquire", resp.Kind)
 			}
+			activeAdmission = inheritedAdmission.with(key, resp.HolderID)
+			if limit.HostAdmission {
+				activeAdmission, err = activeAdmission.withHostAdmission(key)
+				if err != nil {
+					return nil, "", planAdmission{}, err
+				}
+			}
 			return makeInheritedPlanSlotRelease(backends, key, resp.HolderID, cancelRun),
-				planCacheProceed, inheritedAdmission.with(key, resp.HolderID), nil
+				planCacheProceed, activeAdmission, nil
 		}
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
 	admission := inheritedAdmission.with(key, holderID)
+	if limit.HostAdmission {
+		admission, err = admission.withHostAdmission(key)
+		if err != nil {
+			return nil, "", planAdmission{}, err
+		}
+	}
 	req := store.AcquireSlotRequest{
 		Key:      key,
 		HolderID: holderID,
@@ -145,10 +202,15 @@ func acquirePlanSlot(
 		return nil, planCacheFailed, planAdmission{}, nil
 
 	case store.AcquireQueued, store.AcquireCancellingOthers:
-		payload, _ := json.Marshal(map[string]any{
-			"scope": "plan",
-			"key":   key,
-			"kind":  string(resp.Kind),
+		resource := planConcurrencyResource(group)
+		payload, _ := json.Marshal(planConcurrencyEventPayload{
+			Scope:       "plan",
+			Resource:    resource,
+			Key:         key,
+			Kind:        string(resp.Kind),
+			Position:    resp.Position,
+			QueueLength: resp.QueueLength,
+			Holders:     cappedPlanEventHolders(resp.Holders),
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait", payload)
 
@@ -156,7 +218,7 @@ func acquirePlanSlot(
 		if resp.Kind == store.AcquireQueued {
 			queueTimeout = limit.QueueTimeout
 		}
-		promoted, err := waitForPlanSlot(ctx, backends, key, group.Name(), runID, holderID, queueTimeout, wedgeBudget)
+		promoted, err := waitForPlanSlot(ctx, backends, key, group.Name(), resource, runID, holderID, queueTimeout, wedgeBudget)
 		if err != nil {
 			return nil, "", planAdmission{}, err
 		}
@@ -211,12 +273,36 @@ func makeInheritedPlanSlotRelease(
 		}
 	}()
 	var once sync.Once
-	return func(string) {
+	return func(outcome string) {
 		once.Do(func() {
 			hbCancel()
 			wg.Wait()
+			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := backends.Concurrency.ReleaseSlot(bg, key, holderID, outcome, "", "", 0); err != nil {
+				slog.Warn("inherited plan concurrency release failed; relying on reaper",
+					"key", key, "holder_id", holderID, "err", err)
+			}
 		})
 	}
+}
+
+type planConcurrencyEventPayload struct {
+	Scope        string                         `json:"scope"`
+	Resource     string                         `json:"resource"`
+	Key          string                         `json:"key"`
+	Kind         string                         `json:"kind,omitempty"`
+	Position     int                            `json:"position,omitempty"`
+	QueueLength  int                            `json:"queue_length,omitempty"`
+	QueueTimeout string                         `json:"queue_timeout,omitempty"`
+	Holders      []planConcurrencyHolderPayload `json:"holders,omitempty"`
+}
+
+type planConcurrencyHolderPayload struct {
+	RunID          string    `json:"run_id"`
+	NodeID         string    `json:"node_id,omitempty"`
+	HolderID       string    `json:"holder_id"`
+	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
 // waitForPlanSlot polls until promoted or cancelled. Plans never
@@ -228,13 +314,14 @@ func makeInheritedPlanSlotRelease(
 // polling; the wedge guard turns a continuous failure streak past
 // wedgeBudget (or one "locking protocol" error) into a terminal error
 // instead of a poll loop spinning against a wedged store.
-func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, runID, holderID string, queueTimeout, wedgeBudget time.Duration) (bool, error) {
+func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, resource, runID, holderID string, queueTimeout, wedgeBudget time.Duration) (bool, error) {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	var deadline time.Time
 	if queueTimeout > 0 {
 		deadline = time.Now().Add(queueTimeout)
 	}
 	var lastHolders []store.ConcurrencyHolder
+	var lastWaitUpdatePayload []byte
 	const pollInterval = 100 * time.Millisecond
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -257,26 +344,62 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, run
 			if len(res.Holders) > 0 {
 				lastHolders = res.Holders
 			}
+			payload, _ := json.Marshal(planConcurrencyEventPayload{
+				Scope:       "plan",
+				Resource:    resource,
+				Key:         key,
+				Position:    res.Position,
+				QueueLength: res.QueueLength,
+				Holders:     cappedPlanEventHolders(res.Holders),
+			})
+			if !bytes.Equal(payload, lastWaitUpdatePayload) {
+				_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait_update", payload)
+				lastWaitUpdatePayload = payload
+			}
 			if !deadline.IsZero() && time.Now().After(deadline) {
 				if _, cerr := backends.Concurrency.CancelWaiter(ctx, key, runID, ""); cerr != nil {
 					slog.Warn("cancel plan waiter after queue timeout failed; reaper will sweep it",
 						"key", key, "run", runID, "err", cerr)
 				}
-				payload, _ := json.Marshal(map[string]any{
-					"scope": "plan", "key": key, "queue_timeout": queueTimeout.String(),
+				payload, _ := json.Marshal(planConcurrencyEventPayload{
+					Scope:        "plan",
+					Resource:     resource,
+					Key:          key,
+					QueueTimeout: queueTimeout.String(),
+					Position:     res.Position,
+					QueueLength:  res.QueueLength,
+					Holders:      cappedPlanEventHolders(lastHolders),
 				})
 				_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_queue_timeout", payload)
-				return false, fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue (held by %s); a wedged holder shows in `sparkwing box-slots list`", groupName, queueTimeout, heldByLabel(lastHolders))
+				return false, fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue (held by %s); inspect with `sparkwing cluster concurrency --namespace %s --profile <profile>`", groupName, queueTimeout, heldByLabel(lastHolders), key)
 			}
 			continue
 		case store.WaiterPromoted:
+			payload, _ := json.Marshal(planConcurrencyEventPayload{Scope: "plan", Resource: resource, Key: key})
+			_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_promoted", payload)
 			return true, nil
 		case store.WaiterCancelled:
+			payload, _ := json.Marshal(planConcurrencyEventPayload{Scope: "plan", Resource: resource, Key: key})
+			_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_cancelled", payload)
 			return false, nil
 		case store.WaiterCached, store.WaiterLeaderFinished:
 			return false, fmt.Errorf("plan waiter got unexpected status %q", res.Status)
 		}
 	}
+}
+
+func cappedPlanEventHolders(holders []store.ConcurrencyHolder) []planConcurrencyHolderPayload {
+	limit := min(len(holders), 8)
+	payload := make([]planConcurrencyHolderPayload, 0, limit)
+	for _, holder := range holders[:limit] {
+		payload = append(payload, planConcurrencyHolderPayload{
+			RunID:          holder.RunID,
+			NodeID:         holder.NodeID,
+			HolderID:       holder.HolderID,
+			LeaseExpiresAt: holder.LeaseExpiresAt,
+		})
+	}
+	return payload
 }
 
 // makePlanSlotRelease builds an idempotent release closure backed by

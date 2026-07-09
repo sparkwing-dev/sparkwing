@@ -462,6 +462,246 @@ func TestTrigger_PlanAdmissionRejectsNodeLevelHolder(t *testing.T) {
 	}
 }
 
+func TestTrigger_PlanAdmissionRejectsUnverifiedHostAdmission(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:           "parent-run",
+		Pipeline:     "parent",
+		Status:       "running",
+		StartedAt:    time.Now(),
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"cache-key","host_admission":false}}`),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/-",
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]any{
+			"key":            "cache-key",
+			"holder_id":      "parent-run/-",
+			"host_admission": true,
+		},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 400 (body: %s)", resp.StatusCode, body)
+	}
+}
+
+func TestTrigger_PlanAdmissionAcceptsVerifiedHostAdmission(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:           "parent-run",
+		Pipeline:     "parent",
+		Status:       "running",
+		StartedAt:    time.Now(),
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"cache-key","host_admission":true}}`),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/-",
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]any{
+			"key":            "cache-key",
+			"holder_id":      "parent-run/-",
+			"host_admission": true,
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	capture.mu.Lock()
+	got := capture.last
+	capture.mu.Unlock()
+	if !got.InheritedPlanHostAdmission {
+		t.Fatalf("dispatcher InheritedPlanHostAdmission = false, want true")
+	}
+	trigger, err := st.GetTrigger(ctx, got.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_HOST_ADMISSION"] != "1" {
+		t.Fatalf("trigger host admission env = %q, want 1", trigger.TriggerEnv["SPARKWING_PLAN_HOST_ADMISSION"])
+	}
+	if trigger.TriggerEnv["SPARKWING_PLAN_HOST_ADMISSION_KEY"] != "cache-key" {
+		t.Fatalf("trigger host admission key env = %q, want cache-key", trigger.TriggerEnv["SPARKWING_PLAN_HOST_ADMISSION_KEY"])
+	}
+	if got.InheritedPlanHostAdmissionKey != "cache-key" {
+		t.Fatalf("dispatcher InheritedPlanHostAdmissionKey = %q, want cache-key", got.InheritedPlanHostAdmissionKey)
+	}
+}
+
+func TestTrigger_PlanAdmissionRejectsTerminalHostAdmissionOwner(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:           "parent-run",
+		Pipeline:     "parent",
+		Status:       "running",
+		StartedAt:    time.Now(),
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"cache-key","host_admission":true}}`),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	_, err = st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "cache-key",
+		HolderID: "parent-run/-",
+		RunID:    "parent-run",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("AcquireConcurrencySlot: %v", err)
+	}
+	if err := st.FinishRun(ctx, "parent-run", "success", ""); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "parent-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]any{
+			"key":            "cache-key",
+			"holder_id":      "parent-run/-",
+			"host_admission": true,
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 400 (body: %s)", resp.StatusCode, body)
+	}
+}
+
+func TestTrigger_PlanAdmissionAcceptsMixedHostAndNonHostAdmissions(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID:           "parent-run",
+		Pipeline:     "parent",
+		Status:       "running",
+		StartedAt:    time.Now(),
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"host-key","host_admission":true}}`),
+	}); err != nil {
+		t.Fatalf("CreateRun(parent): %v", err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
+		ID:           "middle-run",
+		Pipeline:     "middle",
+		Status:       "running",
+		ParentRunID:  "parent-run",
+		StartedAt:    time.Now(),
+		PlanSnapshot: []byte(`{"plan_concurrency":{"key":"other-key","host_admission":false}}`),
+	}); err != nil {
+		t.Fatalf("CreateRun(middle): %v", err)
+	}
+	for _, req := range []store.AcquireSlotRequest{
+		{Key: "host-key", HolderID: "parent-run/-", RunID: "parent-run", Capacity: 1, Policy: store.OnLimitQueue},
+		{Key: "other-key", HolderID: "middle-run/-", RunID: "middle-run", Capacity: 1, Policy: store.OnLimitQueue},
+	} {
+		if _, err := st.AcquireConcurrencySlot(ctx, req); err != nil {
+			t.Fatalf("AcquireConcurrencySlot(%s): %v", req.Key, err)
+		}
+	}
+
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline":      "child",
+		"parent_run_id": "middle-run",
+		"trigger":       map[string]string{"source": "await-pipeline"},
+		"plan_admission": map[string]any{
+			"admissions": map[string]string{
+				"host-key":  "parent-run/-",
+				"other-key": "middle-run/-",
+			},
+			"host_admission":     true,
+			"host_admission_key": "host-key",
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	capture.mu.Lock()
+	got := capture.last
+	capture.mu.Unlock()
+	if !got.InheritedPlanHostAdmission || got.InheritedPlanHostAdmissionKey != "host-key" {
+		t.Fatalf("dispatcher host admission = %v/%q, want true/host-key", got.InheritedPlanHostAdmission, got.InheritedPlanHostAdmissionKey)
+	}
+	if got.InheritedPlanConcurrencyHolders["other-key"] != "middle-run/-" {
+		t.Fatalf("dispatcher holders = %+v, want other-key preserved", got.InheritedPlanConcurrencyHolders)
+	}
+}
+
 // TestTrigger_InProcessDispatcher_FullLoop is the full vertical
 // slice: webhook arrives, controller dispatches, pipeline runs
 // against the same controller via HTTP, final state lands in the

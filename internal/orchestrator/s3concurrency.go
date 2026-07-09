@@ -343,10 +343,15 @@ func supersedeS3HolderAndInherited(doc *s3SlotDoc, holderID string) []string {
 	if h == nil || h.Superseded {
 		return nil
 	}
+	inheritedMarker := inheritedS3HolderNodeID(holderID)
+	originalMarker := inheritedMarker
+	if isInheritedS3HolderNodeID(h.NodeID) {
+		originalMarker = h.NodeID
+	}
 	h.Superseded = true
 	ids := []string{holderID}
 	for i := range doc.Holders {
-		if doc.Holders[i].Superseded || doc.Holders[i].NodeID != inheritedS3HolderNodeID(holderID) {
+		if doc.Holders[i].Superseded || (doc.Holders[i].NodeID != inheritedMarker && doc.Holders[i].NodeID != originalMarker) {
 			continue
 		}
 		ids = append(ids, supersedeS3HolderAndInherited(doc, doc.Holders[i].HolderID)...)
@@ -858,6 +863,11 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 				releasedHolder := doc.Holders[i]
 				rRun, rNode = doc.Holders[i].RunID, doc.Holders[i].NodeID
 				if releasedHolder.Cost > 0 && !releasedHolder.Superseded && releasedHolder.LeaseExpiresNS > nowNS {
+					inheritedMarker := inheritedS3HolderNodeID(releasedHolder.HolderID)
+					originalMarker := inheritedMarker
+					if isInheritedS3HolderNodeID(releasedHolder.NodeID) {
+						originalMarker = releasedHolder.NodeID
+					}
 					for j := range doc.Holders {
 						if i == j {
 							continue
@@ -867,7 +877,7 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 						}
 						if doc.Holders[j].Cost == 0 &&
 							doc.Holders[j].DeclaredCapacity == inheritedS3HolderDeclaredCapacity &&
-							doc.Holders[j].NodeID == inheritedS3HolderNodeID(releasedHolder.HolderID) {
+							(doc.Holders[j].NodeID == inheritedMarker || doc.Holders[j].NodeID == originalMarker) {
 							doc.Holders[j].Cost = releasedHolder.Cost
 							doc.Holders[j].DeclaredCapacity = releasedHolder.DeclaredCapacity
 							break
@@ -922,59 +932,80 @@ func (c *s3Concurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, c
 	if fb := c.fallback(ctx); fb != nil {
 		return fb.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
 	}
-	doc, _, exists, err := c.load(ctx, s3SlotKey(key))
+	var resolution store.WaiterResolution
+	err := c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
+		if !exists {
+			if leaderRunID != "" {
+				resolution = store.WaiterResolution{Status: store.WaiterLeaderFinished, LeaderRunID: leaderRunID, LeaderNodeID: leaderNodeID}
+			} else {
+				resolution = store.WaiterResolution{Status: store.WaiterCancelled}
+			}
+			return false, nil
+		}
+		nowNS := now.UnixNano()
+		beforeHolders := len(doc.Holders)
+		beforeCache := len(doc.Cache)
+		beforeFinished := len(doc.Finished)
+		prune(doc, nowNS)
+		changed := len(doc.Holders) != beforeHolders || len(doc.Cache) != beforeCache || len(doc.Finished) != beforeFinished
+		if promoteWaiters(doc, now, store.DefaultConcurrencyLease) {
+			changed = true
+		}
+
+		for _, h := range doc.Holders {
+			if h.RunID == runID && h.NodeID == nodeID && !h.Superseded {
+				resolution = store.WaiterResolution{
+					Status:             store.WaiterPromoted,
+					HolderID:           h.HolderID,
+					HolderLeaseExpires: time.Unix(0, h.LeaseExpiresNS),
+				}
+				return changed, nil
+			}
+		}
+
+		if cacheKeyHash != "" && !bypassRead {
+			if hit, ok := doc.Cache[cacheKeyHash]; ok && hit.ExpiresNS > nowNS {
+				resolution = store.WaiterResolution{
+					Status:       store.WaiterCached,
+					OutputRef:    hit.OutputRef,
+					OriginRunID:  hit.OriginRunID,
+					OriginNodeID: hit.OriginNodeID,
+				}
+				return changed, nil
+			}
+		}
+
+		if w := findWaiter(doc, runID, nodeID); w != nil {
+			position := 0
+			queueLength := 0
+			for _, x := range doc.Waiters {
+				if x.Policy == store.OnLimitQueue || x.Policy == store.OnLimitCancelOthers {
+					queueLength++
+					if x.ArrivedAtNS < w.ArrivedAtNS {
+						position++
+					}
+				}
+			}
+			resolution = store.WaiterResolution{Status: store.WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: liveHolders(doc, nowNS)}
+			return changed, nil
+		}
+
+		if leaderRunID != "" {
+			resolution = store.WaiterResolution{
+				Status:        store.WaiterLeaderFinished,
+				LeaderRunID:   leaderRunID,
+				LeaderNodeID:  leaderNodeID,
+				LeaderOutcome: finishedOutcome(doc, leaderRunID, leaderNodeID),
+			}
+		} else {
+			resolution = store.WaiterResolution{Status: store.WaiterCancelled}
+		}
+		return changed, nil
+	})
 	if err != nil {
 		return store.WaiterResolution{}, err
 	}
-	now := time.Now()
-	nowNS := now.UnixNano()
-	if !exists {
-		if leaderRunID != "" {
-			return store.WaiterResolution{Status: store.WaiterLeaderFinished, LeaderRunID: leaderRunID, LeaderNodeID: leaderNodeID}, nil
-		}
-		return store.WaiterResolution{Status: store.WaiterCancelled}, nil
-	}
-
-	for _, h := range doc.Holders {
-		if h.RunID == runID && h.NodeID == nodeID && !h.Superseded {
-			return store.WaiterResolution{
-				Status:             store.WaiterPromoted,
-				HolderID:           h.HolderID,
-				HolderLeaseExpires: time.Unix(0, h.LeaseExpiresNS),
-			}, nil
-		}
-	}
-
-	if cacheKeyHash != "" && !bypassRead {
-		if hit, ok := doc.Cache[cacheKeyHash]; ok && hit.ExpiresNS > nowNS {
-			return store.WaiterResolution{
-				Status:       store.WaiterCached,
-				OutputRef:    hit.OutputRef,
-				OriginRunID:  hit.OriginRunID,
-				OriginNodeID: hit.OriginNodeID,
-			}, nil
-		}
-	}
-
-	if w := findWaiter(doc, runID, nodeID); w != nil {
-		position := 0
-		for _, x := range doc.Waiters {
-			if x.Policy == store.OnLimitQueue && x.ArrivedAtNS < w.ArrivedAtNS {
-				position++
-			}
-		}
-		return store.WaiterResolution{Status: store.WaiterStillWaiting, Position: position, Holders: liveHolders(doc, nowNS)}, nil
-	}
-
-	if leaderRunID != "" {
-		return store.WaiterResolution{
-			Status:        store.WaiterLeaderFinished,
-			LeaderRunID:   leaderRunID,
-			LeaderNodeID:  leaderNodeID,
-			LeaderOutcome: finishedOutcome(doc, leaderRunID, leaderNodeID),
-		}, nil
-	}
-	return store.WaiterResolution{Status: store.WaiterCancelled}, nil
+	return resolution, nil
 }
 
 func (c *s3Concurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {

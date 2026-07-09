@@ -32,7 +32,7 @@ func (f *inheritedPlanObserveFake) HeartbeatSlot(ctx context.Context, key, holde
 }
 
 func (f *inheritedPlanObserveFake) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
-	return errors.New("unexpected release")
+	return nil
 }
 
 func (f *inheritedPlanObserveFake) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
@@ -48,12 +48,15 @@ func (f *inheritedPlanObserveFake) CancelWaiter(ctx context.Context, key, runID,
 }
 
 type inheritedPlanAcquireFake struct {
-	request store.AcquireSlotRequest
-	err     error
+	request  store.AcquireSlotRequest
+	requests []store.AcquireSlotRequest
+	releases []string
+	err      error
 }
 
 func (f *inheritedPlanAcquireFake) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	f.request = req
+	f.requests = append(f.requests, req)
 	if f.err != nil {
 		return store.AcquireSlotResponse{}, f.err
 	}
@@ -73,6 +76,7 @@ func (f *inheritedPlanAcquireFake) HeartbeatSlot(ctx context.Context, key, holde
 }
 
 func (f *inheritedPlanAcquireFake) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
+	f.releases = append(f.releases, key+"\x00"+holderID)
 	return nil
 }
 
@@ -120,6 +124,87 @@ func TestAcquirePlanSlotInheritedAdmissionReturnsChildHolder(t *testing.T) {
 	}
 	if holderID, ok := active.holderFor(key); !ok || holderID != "child/-" {
 		t.Fatalf("active admission holder = %q, %v; want child/-", holderID, ok)
+	}
+}
+
+func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	land := sparkwing.NewConcurrencyGroup("land", sparkwing.ConcurrencyLimit{Capacity: 1})
+	memory := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{
+		Capacity: 32,
+		Scope:    sparkwing.ScopeBox,
+	})
+	plan.Concurrency(land)
+	plan.Concurrency(memory, 8)
+	fake := &inheritedPlanAcquireFake{}
+
+	release, outcome, active, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"run-multi",
+		plan,
+		planAdmission{},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	if outcome != planCacheProceed {
+		t.Fatalf("outcome = %q, want proceed", outcome)
+	}
+	if len(fake.requests) != 2 {
+		t.Fatalf("AcquireSlot calls = %d, want 2", len(fake.requests))
+	}
+	if fake.requests[0].Key != "g:land" || fake.requests[0].Cost != 1 {
+		t.Fatalf("first request = %+v, want land cost 1", fake.requests[0])
+	}
+	expectedMemoryKey := scopedGroupKey(memory, "run-multi")
+	if fake.requests[1].Key != expectedMemoryKey || fake.requests[1].Cost != 8 {
+		t.Fatalf("second request = %+v, want memory cost 8", fake.requests[1])
+	}
+	if holderID, ok := active.holderFor("g:land"); !ok || holderID != "run-multi/-" {
+		t.Fatalf("active land holder = %q, %v", holderID, ok)
+	}
+	memoryKey := expectedMemoryKey
+	if holderID, ok := active.holderFor(memoryKey); !ok || holderID != "run-multi/-" {
+		t.Fatalf("active memory holder = %q, %v", holderID, ok)
+	}
+	release("success")
+	if len(fake.releases) != 2 {
+		t.Fatalf("ReleaseSlot calls = %d, want 2", len(fake.releases))
+	}
+	if fake.releases[0] != memoryKey+"\x00run-multi/-" || fake.releases[1] != "g:land\x00run-multi/-" {
+		t.Fatalf("releases = %+v, want reverse acquisition order", fake.releases)
+	}
+}
+
+func TestAcquirePlanSlot_RejectsSecondHostAdmissionOwner(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	parentKey := "b:1:parent-host"
+	childGroup := sparkwing.NewConcurrencyGroup("child-host", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		HostAdmission: true,
+	})
+	plan.Concurrency(childGroup)
+	fake := &inheritedPlanAcquireFake{}
+
+	_, _, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"child",
+		plan,
+		planAdmission{
+			Key:              parentKey,
+			HolderID:         "parent/-",
+			HolderIDs:        map[string]string{parentKey: "parent/-"},
+			HostAdmission:    true,
+			HostAdmissionKey: parentKey,
+		},
+		func(error) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "already has host-admission key") {
+		t.Fatalf("err = %v, want duplicate host-admission owner rejection", err)
 	}
 }
 
@@ -192,6 +277,19 @@ func TestInheritedPlanSlotReleaseCancelsOnAdmissionLoss(t *testing.T) {
 	}
 	if cause := context.Cause(ctx); cause == nil || !strings.Contains(cause.Error(), "inherited admission lost") {
 		t.Fatalf("cause = %v, want inherited admission lost", cause)
+	}
+}
+
+func TestInheritedPlanSlotReleaseReleasesChildHolder(t *testing.T) {
+	withFastInheritedPlanObserve(t)
+	fake := &inheritedPlanAcquireFake{}
+	release := makeInheritedPlanSlotRelease(Backends{Concurrency: fake}, "g:shared", "child/-", func(error) {})
+	release("success")
+	if len(fake.releases) != 1 {
+		t.Fatalf("ReleaseSlot calls = %d, want 1", len(fake.releases))
+	}
+	if fake.releases[0] != "g:shared\x00child/-" {
+		t.Fatalf("release = %q, want child holder", fake.releases[0])
 	}
 }
 

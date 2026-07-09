@@ -21,6 +21,8 @@ type RunRequest struct {
 	InheritedPlanConcurrencyKey      string
 	InheritedPlanConcurrencyHolderID string
 	InheritedPlanConcurrencyHolders  map[string]string
+	InheritedPlanHostAdmission       bool
+	InheritedPlanHostAdmissionKey    string
 }
 
 // Dispatcher decides what happens to a triggered run. Implementations

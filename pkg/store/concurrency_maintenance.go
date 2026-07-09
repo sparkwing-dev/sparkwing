@@ -17,6 +17,8 @@ const DefaultConcurrencyCacheCap = 10_000
 // concurrency maintenance pass so the daemonless run path can throttle the
 // global sweep across separate processes.
 const metaKeyConcurrencySwept = "concurrency_swept_at"
+const metaKeyConcurrencySweepClaim = "concurrency_sweep_claimed_at"
+const concurrencySweepClaimTTL = 15 * time.Second
 
 // ConcurrencyMaintenanceResult reports what one janitorial pass over the
 // concurrency tables touched. Counts are zero when a pass ran but found
@@ -113,12 +115,16 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 }
 
 // MaintainConcurrencyThrottled runs MaintainConcurrency only when at least
-// minInterval has elapsed since the last pass recorded in sparkwing_meta,
-// stamping the window atomically so concurrent daemonless processes don't
-// all sweep at once. The bool reports whether the pass ran; when false,
-// the result is the zero value and the window belonged to another caller.
+// minInterval has elapsed since the last successful pass recorded in
+// sparkwing_meta. A short in-progress claim collapses concurrent daemonless
+// starters to one sweep without suppressing retries for the full interval
+// after a timeout or failure.
 func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error) {
-	claimed, err := s.claimSweepWindow(ctx, metaKeyConcurrencySwept, minInterval)
+	claimTTL := minInterval
+	if claimTTL <= 0 || claimTTL > concurrencySweepClaimTTL {
+		claimTTL = concurrencySweepClaimTTL
+	}
+	claimed, claimToken, err := s.claimSweepWindow(ctx, metaKeyConcurrencySwept, metaKeyConcurrencySweepClaim, minInterval, claimTTL)
 	if err != nil {
 		return ConcurrencyMaintenanceResult{}, false, err
 	}
@@ -126,5 +132,11 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 		return ConcurrencyMaintenanceResult{}, false, nil
 	}
 	res, err := s.MaintainConcurrency(ctx, opts)
+	if err == nil {
+		err = s.stampSweepWindow(ctx, metaKeyConcurrencySwept)
+	}
+	if cerr := s.clearSweepClaim(ctx, metaKeyConcurrencySweepClaim, claimToken); err == nil {
+		err = cerr
+	}
 	return res, true, err
 }

@@ -68,6 +68,8 @@ type Options struct {
 	InheritedPlanConcurrencyKey      string
 	InheritedPlanConcurrencyHolderID string
 	InheritedPlanConcurrencyHolders  map[string]string
+	InheritedPlanHostAdmission       bool
+	InheritedPlanHostAdmissionKey    string
 
 	// RetryOf is the run id this execution retries. Drives skip-passed
 	// rehydration unless Full is set.
@@ -214,6 +216,17 @@ type Options struct {
 	// below the explicit CLI flag). Nil when no project defaults
 	// apply.
 	DefaultArgs map[string]string
+
+	// BoxSlotRelease releases the provisional local host-process slot
+	// acquired before pipeline planning. Nil means no provisional slot
+	// exists, which is how tests and cluster paths run.
+	BoxSlotRelease func()
+
+	// BoxSlotAcquire reacquires the local host-process slot for an already
+	// admitted run. Used only when an operator explicitly pins box-slots on
+	// a run that also uses host admission: the run waits without holding
+	// the host slot, then reacquires the pinned slot before dispatch.
+	BoxSlotAcquire func(runID string) error
 
 	// MirrorLocal, when non-nil, is an opened local SQLite store that
 	// RunLocal tees state writes to alongside the canonical state
@@ -375,6 +388,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
+	inheritedAdmission := planAdmission{
+		Key:              opts.InheritedPlanConcurrencyKey,
+		HolderID:         opts.InheritedPlanConcurrencyHolderID,
+		HolderIDs:        opts.InheritedPlanConcurrencyHolders,
+		HostAdmission:    opts.InheritedPlanHostAdmission,
+		HostAdmissionKey: opts.InheritedPlanHostAdmissionKey,
+	}
+	if err := validateInheritedHostAdmission(ctx, backends, opts.ParentRunID, inheritedAdmission); err != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan admission: %v", err))
+		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
+	if opts.BoxSlotRelease != nil && (plan.HostAdmission() || inheritedAdmission.hasHostAdmission()) {
+		opts.BoxSlotRelease()
+		opts.BoxSlotRelease = nil
+	}
 
 	snapMeta := planSnapshotMeta{
 		Secrets: sparkwingruntime.ReflectSecretsField(reg),
@@ -477,15 +505,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if dispatchWaitTimeout == 0 {
 		dispatchWaitTimeout = DefaultDispatchWaitTimeout
 	}
-	inheritedAdmission := planAdmission{
-		Key:       opts.InheritedPlanConcurrencyKey,
-		HolderID:  opts.InheritedPlanConcurrencyHolderID,
-		HolderIDs: opts.InheritedPlanConcurrencyHolders,
-	}
 	runErr := dispatch(
 		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
 		opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
-		dispatchWaitTimeout, inheritedAdmission,
+		dispatchWaitTimeout, inheritedAdmission, opts.BoxSlotAcquire,
 	)
 
 	finalStatus := "success"
@@ -538,14 +561,110 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 // goroutine, so each run opportunistically sweeps the concurrency tables,
 // but at most once per interval regardless of how often runs fire.
 const localConcurrencyMaintenanceInterval = 5 * time.Minute
+const localConcurrencyMaintenanceTimeout = 15 * time.Second
 
 // maintainLocalConcurrency runs the throttled concurrency janitorial pass
 // against a local store. Best-effort: a sweep failure is logged and
 // swallowed so it never fails the run that triggered it.
 func maintainLocalConcurrency(ctx context.Context, st *store.Store) {
-	if _, _, err := st.MaintainConcurrencyThrottled(ctx, store.ConcurrencyMaintenanceOptions{}, localConcurrencyMaintenanceInterval); err != nil {
+	maintCtx, cancel := context.WithTimeout(ctx, localConcurrencyMaintenanceTimeout)
+	defer cancel()
+	if _, _, err := st.MaintainConcurrencyThrottled(maintCtx, store.ConcurrencyMaintenanceOptions{}, localConcurrencyMaintenanceInterval); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: concurrency maintenance: %v\n", err)
 	}
+}
+
+func validateInheritedHostAdmission(ctx context.Context, backends Backends, parentRunID string, admission planAdmission) error {
+	admission = admission.normalized()
+	if !admission.HostAdmission {
+		return nil
+	}
+	if len(admission.HolderIDs) == 0 {
+		return errors.New("inherited host admission requires a plan holder")
+	}
+	if parentRunID == "" {
+		return errors.New("inherited host admission requires a parent run")
+	}
+	if backends.Concurrency == nil {
+		return errors.New("inherited host admission requires a concurrency backend")
+	}
+	holderID, ok := admission.HolderIDs[admission.HostAdmissionKey]
+	if !ok {
+		return errors.New("inherited host admission requires a matching host-admission holder")
+	}
+	for key, holderID := range map[string]string{admission.HostAdmissionKey: holderID} {
+		holder, err := backends.Concurrency.ObserveSlot(ctx, key, holderID)
+		if err != nil {
+			return fmt.Errorf("validate inherited host admission holder %q for key %q: %w", holderID, key, err)
+		}
+		if holder.Superseded || !holder.LeaseExpiresAt.After(time.Now()) {
+			return fmt.Errorf("inherited host admission holder %q for key %q is not active", holderID, key)
+		}
+		if holder.NodeID != "" || holderID != holder.RunID+"/-" {
+			return fmt.Errorf("inherited host admission holder %q is not a plan holder", holderID)
+		}
+		run, err := backends.State.GetRun(ctx, holder.RunID)
+		if err != nil {
+			return fmt.Errorf("validate inherited host admission run %q: %w", holder.RunID, err)
+		}
+		if isTerminalStatus(run.Status) {
+			return fmt.Errorf("inherited host admission holder %q belongs to terminal run %q", holderID, holder.RunID)
+		}
+		if ok, err := runIsSelfOrAncestor(ctx, backends.State, parentRunID, holder.RunID); err != nil {
+			return err
+		} else if !ok {
+			return fmt.Errorf("inherited host admission holder %q belongs to run %q, not parent run %q or its ancestors",
+				holderID, holder.RunID, parentRunID)
+		}
+		ok, err := runSnapshotMarksHostAdmission(ctx, backends.State, holder.RunID, key)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("inherited host admission holder %q for key %q does not match an ancestor host-admission plan", holderID, key)
+		}
+	}
+	return nil
+}
+
+func runIsSelfOrAncestor(ctx context.Context, state StateBackend, runID, candidateAncestorRunID string) (bool, error) {
+	currentRunID := runID
+	for currentRunID != "" {
+		if currentRunID == candidateAncestorRunID {
+			return true, nil
+		}
+		run, err := state.GetRun(ctx, currentRunID)
+		if err != nil {
+			return false, fmt.Errorf("validate inherited host admission ancestor %q: %w", currentRunID, err)
+		}
+		currentRunID = run.ParentRunID
+	}
+	return false, nil
+}
+
+func runSnapshotMarksHostAdmission(ctx context.Context, state StateBackend, runID, key string) (bool, error) {
+	run, err := state.GetRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("validate inherited host admission run %q: %w", runID, err)
+	}
+	var snapshot struct {
+		PlanConcurrency   *snapshotConc  `json:"plan_concurrency"`
+		PlanConcurrencies []snapshotConc `json:"plan_concurrency_groups"`
+	}
+	if err := json.Unmarshal(run.PlanSnapshot, &snapshot); err != nil {
+		return false, fmt.Errorf("validate inherited host admission snapshot for run %q: %w", runID, err)
+	}
+	if snapshot.PlanConcurrency != nil &&
+		snapshot.PlanConcurrency.Key == key &&
+		snapshot.PlanConcurrency.HostAdmission {
+		return true, nil
+	}
+	for _, group := range snapshot.PlanConcurrencies {
+		if group.Key == key && group.HostAdmission {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // RunLocal opens the local store, wires LocalBackends, and runs.
@@ -669,6 +788,7 @@ func dispatch(
 	onlySkip map[string]string,
 	dispatchWaitTimeout time.Duration,
 	inheritedAdmission planAdmission,
+	boxSlotAcquire func(runID string) error,
 ) error {
 	runStart := time.Now()
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
@@ -690,6 +810,11 @@ func dispatch(
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
+	if boxSlotAcquire != nil && boxSlotPinned() && (plan.HostAdmission() || activeAdmission.hasHostAdmission()) {
+		if err := boxSlotAcquire(runID); err != nil {
+			return err
+		}
+	}
 
 	state := newDispatchState(
 		dispatchCtx, backends, r, runID, plan, delegate, debug, retryOf,
@@ -2430,9 +2555,11 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 // planSnapshot is the stored DAG with each Node's eager-materialized
 // inner Work tree.
 type planSnapshot struct {
-	Pipeline string         `json:"pipeline"`
-	RunID    string         `json:"run_id"`
-	Nodes    []snapshotNode `json:"nodes"`
+	Pipeline  string         `json:"pipeline"`
+	RunID     string         `json:"run_id"`
+	Nodes     []snapshotNode `json:"nodes"`
+	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
+	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
 
 	// Secrets is the typed declaration the pipelines.yaml file
 	// shipped (name + required/optional). The cluster pod uses it
@@ -2458,6 +2585,11 @@ type snapshotNode struct {
 	// Work is the eager-materialized inner DAG; nil for gates and
 	// recovery nodes without a Job.
 	Work *snapshotWork `json:"work,omitempty"`
+}
+
+type snapshotConc struct {
+	Key           string `json:"key,omitempty"`
+	HostAdmission bool   `json:"host_admission,omitempty"`
 }
 
 // snapshotApproval is the wire shape of an approval gate's prompt +
@@ -2562,6 +2694,21 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
 		Secrets:  meta.Secrets,
+	}
+	if group := p.ConcurrencyGroupRef(); group != nil {
+		snap.PlanConc = &snapshotConc{
+			Key:           scopedGroupKey(group, rc.RunID),
+			HostAdmission: group.Limit().HostAdmission,
+		}
+	}
+	for _, membership := range p.PlanConcurrency() {
+		if membership.Group == nil {
+			continue
+		}
+		snap.PlanConcs = append(snap.PlanConcs, snapshotConc{
+			Key:           scopedGroupKey(membership.Group, rc.RunID),
+			HostAdmission: membership.Group.Limit().HostAdmission,
+		})
 	}
 	walker := newWorkWalker()
 	seen := make(map[string]bool)

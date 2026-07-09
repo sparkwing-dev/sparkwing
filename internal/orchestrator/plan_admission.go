@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -12,12 +13,16 @@ const (
 	triggerEnvPlanAdmissionKey      = "SPARKWING_PLAN_ADMISSION_KEY"
 	triggerEnvPlanAdmissionHolderID = "SPARKWING_PLAN_ADMISSION_HOLDER_ID"
 	triggerEnvPlanAdmissions        = "SPARKWING_PLAN_ADMISSIONS"
+	triggerEnvPlanHostAdmission     = "SPARKWING_PLAN_HOST_ADMISSION"
+	triggerEnvPlanHostAdmissionKey  = "SPARKWING_PLAN_HOST_ADMISSION_KEY"
 )
 
 type planAdmission struct {
-	Key       string
-	HolderID  string
-	HolderIDs map[string]string
+	Key              string
+	HolderID         string
+	HolderIDs        map[string]string
+	HostAdmission    bool
+	HostAdmissionKey string
 }
 
 type planAdmissionContextKey struct{}
@@ -44,14 +49,15 @@ func planAdmissionFromTriggerEnv(env map[string]string) planAdmission {
 	if env == nil {
 		return planAdmission{}
 	}
-	admission := planAdmission{}
+	admission := planAdmission{
+		HostAdmission:    env[triggerEnvPlanHostAdmission] == "1",
+		HostAdmissionKey: env[triggerEnvPlanHostAdmissionKey],
+	}
 	if raw := env[triggerEnvPlanAdmissions]; raw != "" {
 		_ = json.Unmarshal([]byte(raw), &admission.HolderIDs)
 	}
-	admission = admission.with(
-		env[triggerEnvPlanAdmissionKey],
-		env[triggerEnvPlanAdmissionHolderID],
-	)
+	admission.Key = env[triggerEnvPlanAdmissionKey]
+	admission.HolderID = env[triggerEnvPlanAdmissionHolderID]
 	return admission.normalized()
 }
 
@@ -60,6 +66,8 @@ func planAdmissionFromEnv() planAdmission {
 		triggerEnvPlanAdmissionKey:      os.Getenv(triggerEnvPlanAdmissionKey),
 		triggerEnvPlanAdmissionHolderID: os.Getenv(triggerEnvPlanAdmissionHolderID),
 		triggerEnvPlanAdmissions:        os.Getenv(triggerEnvPlanAdmissions),
+		triggerEnvPlanHostAdmission:     os.Getenv(triggerEnvPlanHostAdmission),
+		triggerEnvPlanHostAdmissionKey:  os.Getenv(triggerEnvPlanHostAdmissionKey),
 	})
 }
 
@@ -86,6 +94,17 @@ func (admission planAdmission) normalized() planAdmission {
 			break
 		}
 	}
+	if admission.HostAdmission && admission.HostAdmissionKey == "" && len(admission.HolderIDs) == 1 {
+		admission.HostAdmissionKey = admission.Key
+	}
+	if admission.HostAdmissionKey != "" {
+		if _, ok := admission.HolderIDs[admission.HostAdmissionKey]; ok {
+			admission.HostAdmission = true
+		} else {
+			admission.HostAdmissionKey = ""
+			admission.HostAdmission = false
+		}
+	}
 	return admission
 }
 
@@ -106,10 +125,27 @@ func (admission planAdmission) with(key, holderID string) planAdmission {
 	}
 	holders[key] = holderID
 	return planAdmission{
-		Key:       key,
-		HolderID:  holderID,
-		HolderIDs: holders,
+		Key:              key,
+		HolderID:         holderID,
+		HolderIDs:        holders,
+		HostAdmission:    admission.HostAdmission,
+		HostAdmissionKey: admission.HostAdmissionKey,
 	}
+}
+
+func (admission planAdmission) withHostAdmission(key string) (planAdmission, error) {
+	admission = admission.normalized()
+	if admission.HostAdmissionKey != "" && admission.HostAdmissionKey != key {
+		return planAdmission{}, fmt.Errorf("plan admission already has host-admission key %q; cannot add %q", admission.HostAdmissionKey, key)
+	}
+	admission.HostAdmission = true
+	admission.HostAdmissionKey = key
+	return admission.normalized(), nil
+}
+
+func (admission planAdmission) hasHostAdmission() bool {
+	admission = admission.normalized()
+	return admission.HostAdmission && admission.HostAdmissionKey != ""
 }
 
 func planAdmissionTriggerEnv(ctx context.Context) map[string]string {
@@ -128,6 +164,10 @@ func (admission planAdmission) triggerEnv() map[string]string {
 	env := map[string]string{
 		triggerEnvPlanAdmissionKey:      admission.Key,
 		triggerEnvPlanAdmissionHolderID: admission.HolderID,
+	}
+	if admission.HostAdmission {
+		env[triggerEnvPlanHostAdmission] = "1"
+		env[triggerEnvPlanHostAdmissionKey] = admission.HostAdmissionKey
 	}
 	if len(admission.HolderIDs) > 0 {
 		if payload, err := json.Marshal(admission.HolderIDs); err == nil {

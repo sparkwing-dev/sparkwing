@@ -471,9 +471,11 @@ type TriggerMeta struct {
 }
 
 type TriggerPlanAdmission struct {
-	Key        string            `json:"key,omitempty"`
-	HolderID   string            `json:"holder_id,omitempty"`
-	Admissions map[string]string `json:"admissions,omitempty"`
+	Key              string            `json:"key,omitempty"`
+	HolderID         string            `json:"holder_id,omitempty"`
+	Admissions       map[string]string `json:"admissions,omitempty"`
+	HostAdmission    bool              `json:"host_admission,omitempty"`
+	HostAdmissionKey string            `json:"host_admission_key,omitempty"`
 }
 
 // GitMeta is the optional git state attached to a trigger. Any field
@@ -498,9 +500,28 @@ type TriggerResponse struct {
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error) {
 	var resp TriggerResponse
 	if err := c.post(ctx, "/api/v1/triggers", req, http.StatusAccepted, &resp); err != nil {
+		if canRetryTriggerWithoutHostAdmission(req, err) {
+			compatReq := req
+			compatReq.PlanAdmission.HostAdmission = false
+			compatReq.PlanAdmission.HostAdmissionKey = ""
+			resp = TriggerResponse{}
+			if retryErr := c.post(ctx, "/api/v1/triggers", compatReq, http.StatusAccepted, &resp); retryErr == nil {
+				return &resp, nil
+			}
+		}
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func canRetryTriggerWithoutHostAdmission(req TriggerRequest, err error) bool {
+	if !req.PlanAdmission.HostAdmission && req.PlanAdmission.HostAdmissionKey == "" {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "controller 400:") &&
+		(strings.Contains(msg, `unknown field "host_admission"`) ||
+			strings.Contains(msg, `unknown field "host_admission_key"`))
 }
 
 // FinishTrigger flips a trigger to 'done' after the worker's Run
@@ -812,8 +833,10 @@ func triggerPlanAdmissionFromEnv(triggerEnv map[string]string) TriggerPlanAdmiss
 		return TriggerPlanAdmission{}
 	}
 	admission := TriggerPlanAdmission{
-		Key:      triggerEnv["SPARKWING_PLAN_ADMISSION_KEY"],
-		HolderID: triggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"],
+		Key:              triggerEnv["SPARKWING_PLAN_ADMISSION_KEY"],
+		HolderID:         triggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"],
+		HostAdmission:    triggerEnv["SPARKWING_PLAN_HOST_ADMISSION"] == "1",
+		HostAdmissionKey: triggerEnv["SPARKWING_PLAN_HOST_ADMISSION_KEY"],
 	}
 	if raw := triggerEnv["SPARKWING_PLAN_ADMISSIONS"]; raw != "" {
 		_ = json.Unmarshal([]byte(raw), &admission.Admissions)

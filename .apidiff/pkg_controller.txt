@@ -56,6 +56,8 @@ type RunRequest struct {
 	InheritedPlanConcurrencyKey      string
 	InheritedPlanConcurrencyHolderID string
 	InheritedPlanConcurrencyHolders  map[string]string
+	InheritedPlanHostAdmission       bool
+	InheritedPlanHostAdmissionKey    string
 }
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = "approvals.write"

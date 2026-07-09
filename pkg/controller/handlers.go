@@ -429,9 +429,11 @@ type triggerReq struct {
 }
 
 type triggerReqPlanAdmission struct {
-	Key        string            `json:"key,omitempty"`
-	HolderID   string            `json:"holder_id,omitempty"`
-	Admissions map[string]string `json:"admissions,omitempty"`
+	Key              string            `json:"key,omitempty"`
+	HolderID         string            `json:"holder_id,omitempty"`
+	Admissions       map[string]string `json:"admissions,omitempty"`
+	HostAdmission    bool              `json:"host_admission,omitempty"`
+	HostAdmissionKey string            `json:"host_admission_key,omitempty"`
 }
 
 func (admission triggerReqPlanAdmission) normalizedAdmissions() map[string]string {
@@ -459,6 +461,8 @@ const (
 	triggerEnvPlanAdmissionKey      = "SPARKWING_PLAN_ADMISSION_KEY"
 	triggerEnvPlanAdmissionHolderID = "SPARKWING_PLAN_ADMISSION_HOLDER_ID"
 	triggerEnvPlanAdmissions        = "SPARKWING_PLAN_ADMISSIONS"
+	triggerEnvPlanHostAdmission     = "SPARKWING_PLAN_HOST_ADMISSION"
+	triggerEnvPlanHostAdmissionKey  = "SPARKWING_PLAN_HOST_ADMISSION_KEY"
 )
 
 func sanitizeTriggerEnv(env map[string]string) map[string]string {
@@ -468,7 +472,7 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	cleaned := make(map[string]string, len(env))
 	for key, value := range env {
 		switch key {
-		case triggerEnvPlanAdmissionKey, triggerEnvPlanAdmissionHolderID, triggerEnvPlanAdmissions:
+		case triggerEnvPlanAdmissionKey, triggerEnvPlanAdmissionHolderID, triggerEnvPlanAdmissions, triggerEnvPlanHostAdmission, triggerEnvPlanHostAdmissionKey:
 			continue
 		default:
 			cleaned[key] = value
@@ -487,18 +491,46 @@ func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, 
 	if (admission.Key == "") != (admission.HolderID == "") {
 		return nil, errors.New("plan_admission requires key and holder_id")
 	}
-	admissions := admission.normalizedAdmissions()
-	for key, holderID := range admissions {
+	for key, holderID := range admission.Admissions {
 		if key == "" || holderID == "" {
 			return nil, errors.New("plan_admission admissions require non-empty keys and holder ids")
 		}
 	}
+	admissions := admission.normalizedAdmissions()
 	if len(admissions) == 0 {
 		return nil, errors.New("plan_admission requires key and holder_id")
 	}
+	hostAdmissionKey := admission.HostAdmissionKey
+	if admission.HostAdmission && hostAdmissionKey == "" && len(admissions) == 1 {
+		hostAdmissionKey = selectedAdmissionKey(admission, admissions)
+	}
+	if admission.HostAdmission {
+		if hostAdmissionKey == "" {
+			return nil, errors.New("plan_admission host_admission requires host_admission_key when multiple admissions are present")
+		}
+		if _, ok := admissions[hostAdmissionKey]; !ok {
+			return nil, errors.New("plan_admission host_admission_key must match an admission key")
+		}
+	}
+	hostAdmissionVerified := false
 	for key, holderID := range admissions {
-		if err := s.validateOnePlanAdmission(ctx, parentRunID, key, holderID); err != nil {
+		holder, err := s.validateOnePlanAdmission(ctx, parentRunID, key, holderID)
+		if err != nil {
 			return nil, err
+		}
+		if admission.HostAdmission && key == hostAdmissionKey {
+			ok, err := s.runPlanHostAdmissionMatches(ctx, holder.RunID, key)
+			if err != nil {
+				return nil, err
+			}
+			run, err := s.store.GetRun(ctx, holder.RunID)
+			if err != nil {
+				return nil, fmt.Errorf("plan_admission validate host_admission run %q: %w", holder.RunID, err)
+			}
+			if isTerminalStatus(run.Status) {
+				return nil, fmt.Errorf("plan_admission host_admission holder %q belongs to terminal run %q", holderID, holder.RunID)
+			}
+			hostAdmissionVerified = hostAdmissionVerified || ok
 		}
 	}
 	selectedKey := admission.Key
@@ -514,32 +546,90 @@ func (s *Server) validatePlanAdmission(ctx context.Context, parentRunID string, 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
+	env := map[string]string{
 		triggerEnvPlanAdmissionKey:      selectedKey,
 		triggerEnvPlanAdmissionHolderID: selectedHolderID,
 		triggerEnvPlanAdmissions:        string(payload),
-	}, nil
+	}
+	if admission.HostAdmission && !hostAdmissionVerified {
+		return nil, errors.New("plan_admission host_admission does not match an ancestor host-admission plan")
+	}
+	if hostAdmissionVerified {
+		env[triggerEnvPlanHostAdmission] = "1"
+		env[triggerEnvPlanHostAdmissionKey] = hostAdmissionKey
+	}
+	return env, nil
 }
 
-func (s *Server) validateOnePlanAdmission(ctx context.Context, parentRunID, key, holderID string) error {
+func selectedAdmissionKey(admission triggerReqPlanAdmission, admissions map[string]string) string {
+	if admission.Key != "" {
+		return admission.Key
+	}
+	for key := range admissions {
+		return key
+	}
+	return ""
+}
+
+func (s *Server) validateOnePlanAdmission(ctx context.Context, parentRunID, key, holderID string) (*store.ConcurrencyHolder, error) {
 	holder, err := s.store.ActiveConcurrencyHolder(ctx, key, holderID, time.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("plan_admission holder %q is not active for key %q", holderID, key)
+			return nil, fmt.Errorf("plan_admission holder %q is not active for key %q", holderID, key)
 		}
-		return fmt.Errorf("plan_admission validate holder: %w", err)
+		return nil, fmt.Errorf("plan_admission validate holder: %w", err)
 	}
 	expectedHolderID := holder.RunID + "/-"
 	if holder.NodeID != "" || holderID != expectedHolderID {
-		return fmt.Errorf("plan_admission holder %q is not a plan holder for run %q", holderID, holder.RunID)
+		return nil, fmt.Errorf("plan_admission holder %q is not a plan holder for run %q", holderID, holder.RunID)
 	}
 	if ok, err := s.runIsSelfOrAncestor(ctx, parentRunID, holder.RunID); err != nil {
-		return err
+		return nil, err
 	} else if !ok {
-		return fmt.Errorf("plan_admission holder %q belongs to run %q, not parent run %q or its ancestors",
+		return nil, fmt.Errorf("plan_admission holder %q belongs to run %q, not parent run %q or its ancestors",
 			holderID, holder.RunID, parentRunID)
 	}
-	return nil
+	return holder, nil
+}
+
+func (s *Server) runPlanHostAdmissionMatches(ctx context.Context, runID, key string) (bool, error) {
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("plan_admission validate host_admission run %q: %w", runID, err)
+	}
+	var snapshot struct {
+		PlanConcurrency *struct {
+			Key           string `json:"key"`
+			HostAdmission bool   `json:"host_admission"`
+		} `json:"plan_concurrency"`
+		PlanConcurrencies []struct {
+			Key           string `json:"key"`
+			HostAdmission bool   `json:"host_admission"`
+		} `json:"plan_concurrency_groups"`
+	}
+	if err := json.Unmarshal(run.PlanSnapshot, &snapshot); err != nil {
+		return false, fmt.Errorf("plan_admission validate host_admission snapshot for run %q: %w", runID, err)
+	}
+	if snapshot.PlanConcurrency != nil &&
+		snapshot.PlanConcurrency.Key == key &&
+		snapshot.PlanConcurrency.HostAdmission {
+		return true, nil
+	}
+	for _, group := range snapshot.PlanConcurrencies {
+		if group.Key == key && group.HostAdmission {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isTerminalStatus(status string) bool {
+	switch status {
+	case "success", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) runIsSelfOrAncestor(ctx context.Context, runID, candidateAncestorRunID string) (bool, error) {
@@ -636,7 +726,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
 	var inheritedPlanConcurrencyKey, inheritedPlanConcurrencyHolderID string
 	var inheritedPlanConcurrencyHolders map[string]string
-	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" || len(body.PlanAdmission.Admissions) > 0 {
+	var inheritedPlanHostAdmission bool
+	var inheritedPlanHostAdmissionKey string
+	if body.PlanAdmission.Key != "" || body.PlanAdmission.HolderID != "" || len(body.PlanAdmission.Admissions) > 0 || body.PlanAdmission.HostAdmission {
 		admissionEnv, err := s.validatePlanAdmission(r.Context(), body.ParentRunID, body.PlanAdmission)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -651,6 +743,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		inheritedPlanConcurrencyKey = admissionEnv[triggerEnvPlanAdmissionKey]
 		inheritedPlanConcurrencyHolderID = admissionEnv[triggerEnvPlanAdmissionHolderID]
 		inheritedPlanConcurrencyHolders = body.PlanAdmission.normalizedAdmissions()
+		inheritedPlanHostAdmission = admissionEnv[triggerEnvPlanHostAdmission] == "1"
+		inheritedPlanHostAdmissionKey = admissionEnv[triggerEnvPlanHostAdmissionKey]
 	}
 
 	now := time.Now()
@@ -715,6 +809,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		InheritedPlanConcurrencyKey:      inheritedPlanConcurrencyKey,
 		InheritedPlanConcurrencyHolderID: inheritedPlanConcurrencyHolderID,
 		InheritedPlanConcurrencyHolders:  inheritedPlanConcurrencyHolders,
+		InheritedPlanHostAdmission:       inheritedPlanHostAdmission,
+		InheritedPlanHostAdmissionKey:    inheritedPlanHostAdmissionKey,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

@@ -196,6 +196,7 @@ type WaiterResolution struct {
 	LeaderOutcome       string         `json:"leader_outcome,omitempty"`
 	LeaderFailureReason string         `json:"leader_failure_reason,omitempty"`
 	Position            int            `json:"position,omitempty"`
+	QueueLength         int            `json:"queue_length,omitempty"`
 	Holders             []WaiterHolder `json:"holders,omitempty"`
 }
 

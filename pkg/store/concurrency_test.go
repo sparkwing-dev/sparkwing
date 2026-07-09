@@ -87,6 +87,76 @@ func TestConcurrency_QueueWhenFull(t *testing.T) {
 	}
 }
 
+func finishRunT(t *testing.T, s *store.Store, runID string) {
+	t.Helper()
+	now := time.Now()
+	if err := s.CreateRun(ctxT(t), store.Run{
+		ID:        runID,
+		Pipeline:  "test",
+		Status:    "running",
+		StartedAt: now,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRun(%s): %v", runID, err)
+	}
+	if err := s.FinishRun(ctxT(t), runID, "success", ""); err != nil {
+		t.Fatalf("FinishRun(%s): %v", runID, err)
+	}
+}
+
+func TestConcurrency_AcquireReapsTerminalHolderBeforeAccounting(t *testing.T) {
+	s := newStoreT(t)
+	r1 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "terminal-holder", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Hour,
+	})
+	if r1.Kind != store.AcquireGranted {
+		t.Fatalf("r1: want Granted got %s", r1.Kind)
+	}
+	finishRunT(t, s, "r1")
+
+	r2 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "terminal-holder", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r2.Kind != store.AcquireGranted {
+		t.Fatalf("r2: want Granted after terminal holder reap got %s", r2.Kind)
+	}
+	if holderExists(t, s, "terminal-holder", "r1/n1") {
+		t.Fatalf("terminal holder still present")
+	}
+}
+
+func TestConcurrency_ResolveWaiterReapsTerminalHolderAndPromotes(t *testing.T) {
+	s := newStoreT(t)
+	r1 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "terminal-promote", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Hour,
+	})
+	if r1.Kind != store.AcquireGranted {
+		t.Fatalf("r1: want Granted got %s", r1.Kind)
+	}
+	r2 := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "terminal-promote", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r2.Kind != store.AcquireQueued {
+		t.Fatalf("r2: want Queued got %s", r2.Kind)
+	}
+	finishRunT(t, s, "r1")
+
+	res, err := s.ResolveWaiter(ctxT(t), "terminal-promote", "r2", "n1", "", "", "", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if res.Status != store.WaiterPromoted {
+		t.Fatalf("status = %s, want promoted", res.Status)
+	}
+	if holderExists(t, s, "terminal-promote", "r1/n1") {
+		t.Fatalf("terminal holder still present")
+	}
+}
+
 func TestConcurrency_Semaphore(t *testing.T) {
 	s := newStoreT(t)
 	for i := range 3 {

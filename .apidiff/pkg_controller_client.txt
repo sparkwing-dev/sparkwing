@@ -162,9 +162,11 @@ type TriggerMeta struct {
 	Env    map[string]string
 }
 type TriggerPlanAdmission struct {
-	Key        string
-	HolderID   string
-	Admissions map[string]string
+	Key              string
+	HolderID         string
+	Admissions       map[string]string
+	HostAdmission    bool
+	HostAdmissionKey string
 }
 type TriggerRequest struct {
 	Pipeline      string
@@ -204,6 +206,7 @@ type WaiterResolution struct {
 	LeaderOutcome       string
 	LeaderFailureReason string
 	Position            int
+	QueueLength         int
 	Holders             []WaiterHolder
 }
 

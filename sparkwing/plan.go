@@ -25,13 +25,10 @@ type Plan struct {
 	// no name to membership output.
 	groups []*JobGroup
 
-	// concurrency is the whole-run coordination group set via
-	// Plan.Concurrency, or nil. Plans never memoize, so there is no
-	// plan-level content cache.
-	concurrency *ConcurrencyGroup
-	// concurrencyCost is the admission cost set via Plan.Concurrency.
-	// Zero means no plan-level concurrency.
-	concurrencyCost int
+	// planConcurrency is the whole-run coordination set declared via
+	// Plan.Concurrency. Plans never memoize, so there is no plan-level
+	// content cache.
+	planConcurrency []PlanConcurrency
 
 	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
