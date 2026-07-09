@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.3] - 2026-07-09
 ### Fixed
 
 - **controller:** Host box-slot admission now grants freed slots to queued
