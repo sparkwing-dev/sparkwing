@@ -47,14 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-### Added
-
-- **sdk:** Plan-level `Concurrency` calls now compose, so one run can hold
-  independent whole-run budgets such as a deploy mutex plus per-host CPU and
-  memory limits.
-
 ### Changed
 
+- **sdk:** (Breaking) Repeated plan-level `Concurrency` calls now compose
+  independent whole-run budgets instead of replacing the prior gate. Call
+  `plan.Concurrency(nil)` before the replacement when preserving overwrite
+  behavior; see [the migration guide](docs/migrations/v0.15.4.md).
 - **sdk:** (Breaking) `ConcurrencyLimit` and
   `client.TriggerPlanAdmission` added fields for host admission. Callers using
   unkeyed Go struct literals must switch to keyed literals before upgrading;

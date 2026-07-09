@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,21 +37,31 @@ func (e *planAdmissionEvictedError) Error() string {
 
 var inheritedPlanObserveInterval = store.DefaultConcurrencyHeartbeatInterval
 
-// planConcurrencyName returns the plan's whole-run concurrency group
-// name, or "" when none was declared. Used for operator-facing errors.
-func planConcurrencyName(plan *sparkwing.Plan) string {
-	memberships := plan.PlanConcurrency()
-	if len(memberships) > 0 && memberships[0].Group != nil {
-		return memberships[0].Group.Name()
-	}
-	return ""
-}
-
 func planConcurrencyResource(group *sparkwing.ConcurrencyGroup) string {
 	if group.Limit().HostAdmission {
 		return "host_admission"
 	}
 	return "plan_admission"
+}
+
+func appendPlanEvent(ctx context.Context, backends Backends, runID, kind string, payload []byte) {
+	if backends.State == nil {
+		return
+	}
+	_ = backends.State.AppendEvent(ctx, runID, "", kind, payload)
+}
+
+func planConcurrencyAcquireOrder(plan *sparkwing.Plan, runID string) []sparkwing.PlanConcurrency {
+	memberships := plan.PlanConcurrency()
+	sort.SliceStable(memberships, func(i, j int) bool {
+		leftGroup := memberships[i].Group
+		rightGroup := memberships[j].Group
+		if leftGroup == nil || rightGroup == nil {
+			return leftGroup != nil
+		}
+		return scopedGroupKey(leftGroup, runID) < scopedGroupKey(rightGroup, runID)
+	})
+	return memberships
 }
 
 // acquirePlanSlot handles plan-level Concurrency() coordination. Caller
@@ -67,10 +78,10 @@ func acquirePlanSlot(
 	plan *sparkwing.Plan,
 	inheritedAdmission planAdmission,
 	cancelRun context.CancelCauseFunc,
-) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
-	memberships := plan.PlanConcurrency()
+) (release func(outcome string), outcome planCacheOutcome, outcomeGroup string, activeAdmission planAdmission, err error) {
+	memberships := planConcurrencyAcquireOrder(plan, runID)
 	if len(memberships) == 0 {
-		return func(string) {}, planCacheProceed, inheritedAdmission, nil
+		return func(string) {}, planCacheProceed, "", inheritedAdmission, nil
 	}
 	activeAdmission = inheritedAdmission.normalized()
 	releases := make([]func(string), 0, len(memberships))
@@ -87,7 +98,10 @@ func acquirePlanSlot(
 			ctx, backends, runID, membership, activeAdmission, cancelRun,
 		)
 		if err != nil || outcome != planCacheProceed {
-			return nil, outcome, planAdmission{}, err
+			if membership.Group != nil {
+				outcomeGroup = membership.Group.Name()
+			}
+			return nil, outcome, outcomeGroup, planAdmission{}, err
 		}
 		releases = append(releases, groupRelease)
 	}
@@ -95,7 +109,7 @@ func acquirePlanSlot(
 		for i := len(releases) - 1; i >= 0; i-- {
 			releases[i](outcome)
 		}
-	}, planCacheProceed, activeAdmission, nil
+	}, planCacheProceed, "", activeAdmission, nil
 }
 
 func acquireOnePlanSlot(
@@ -186,7 +200,7 @@ func acquireOnePlanSlot(
 			"new_capacity":      limit.Capacity,
 			"note":              resp.DriftNote,
 		})
-		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_drift", payload)
+		appendPlanEvent(ctx, backends, runID, "concurrency_drift", payload)
 	}
 
 	switch resp.Kind {
@@ -194,11 +208,11 @@ func acquireOnePlanSlot(
 		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, admission, nil
 
 	case store.AcquireSkipped:
-		_ = backends.State.AppendEvent(ctx, runID, "", "plan_skipped_concurrent", nil)
+		appendPlanEvent(ctx, backends, runID, "plan_skipped_concurrent", nil)
 		return nil, planCacheSkipped, planAdmission{}, nil
 
 	case store.AcquireFailed:
-		_ = backends.State.AppendEvent(ctx, runID, "", "plan_failed_concurrent", nil)
+		appendPlanEvent(ctx, backends, runID, "plan_failed_concurrent", nil)
 		return nil, planCacheFailed, planAdmission{}, nil
 
 	case store.AcquireQueued, store.AcquireCancellingOthers:
@@ -212,7 +226,7 @@ func acquireOnePlanSlot(
 			QueueLength: resp.QueueLength,
 			Holders:     cappedPlanEventHolders(resp.Holders),
 		})
-		_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait", payload)
+		appendPlanEvent(ctx, backends, runID, "concurrency_wait", payload)
 
 		queueTimeout := time.Duration(0)
 		if resp.Kind == store.AcquireQueued {
@@ -353,7 +367,7 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, res
 				Holders:     cappedPlanEventHolders(res.Holders),
 			})
 			if !bytes.Equal(payload, lastWaitUpdatePayload) {
-				_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_wait_update", payload)
+				appendPlanEvent(ctx, backends, runID, "concurrency_wait_update", payload)
 				lastWaitUpdatePayload = payload
 			}
 			if !deadline.IsZero() && time.Now().After(deadline) {
@@ -370,17 +384,17 @@ func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, res
 					QueueLength:  res.QueueLength,
 					Holders:      cappedPlanEventHolders(lastHolders),
 				})
-				_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_queue_timeout", payload)
+				appendPlanEvent(ctx, backends, runID, "concurrency_queue_timeout", payload)
 				return false, fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue (held by %s); inspect with `sparkwing cluster concurrency --namespace %s --profile <profile>`", groupName, queueTimeout, heldByLabel(lastHolders), key)
 			}
 			continue
 		case store.WaiterPromoted:
 			payload, _ := json.Marshal(planConcurrencyEventPayload{Scope: "plan", Resource: resource, Key: key})
-			_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_promoted", payload)
+			appendPlanEvent(ctx, backends, runID, "concurrency_promoted", payload)
 			return true, nil
 		case store.WaiterCancelled:
 			payload, _ := json.Marshal(planConcurrencyEventPayload{Scope: "plan", Resource: resource, Key: key})
-			_ = backends.State.AppendEvent(ctx, runID, "", "concurrency_cancelled", payload)
+			appendPlanEvent(ctx, backends, runID, "concurrency_cancelled", payload)
 			return false, nil
 		case store.WaiterCached, store.WaiterLeaderFinished:
 			return false, fmt.Errorf("plan waiter got unexpected status %q", res.Status)

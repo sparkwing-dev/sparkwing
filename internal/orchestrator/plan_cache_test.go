@@ -51,6 +51,7 @@ type inheritedPlanAcquireFake struct {
 	request  store.AcquireSlotRequest
 	requests []store.AcquireSlotRequest
 	releases []string
+	kinds    map[string]store.AcquireKind
 	err      error
 }
 
@@ -60,8 +61,12 @@ func (f *inheritedPlanAcquireFake) AcquireSlot(ctx context.Context, req store.Ac
 	if f.err != nil {
 		return store.AcquireSlotResponse{}, f.err
 	}
+	kind := store.AcquireGranted
+	if f.kinds != nil && f.kinds[req.Key] != "" {
+		kind = f.kinds[req.Key]
+	}
 	return store.AcquireSlotResponse{
-		Kind:           store.AcquireGranted,
+		Kind:           kind,
 		HolderID:       req.HolderID,
 		LeaseExpiresAt: time.Now().Add(store.DefaultConcurrencyLease),
 	}, nil
@@ -98,7 +103,7 @@ func TestAcquirePlanSlotInheritedAdmissionReturnsChildHolder(t *testing.T) {
 	key := scopedGroupKey(plan.ConcurrencyGroupRef(), "child")
 	fake := &inheritedPlanAcquireFake{}
 
-	release, outcome, active, err := acquirePlanSlot(
+	release, outcome, _, active, err := acquirePlanSlot(
 		context.Background(),
 		Backends{Concurrency: fake},
 		"child",
@@ -138,7 +143,7 @@ func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 	plan.Concurrency(memory, 8)
 	fake := &inheritedPlanAcquireFake{}
 
-	release, outcome, active, err := acquirePlanSlot(
+	release, outcome, _, active, err := acquirePlanSlot(
 		context.Background(),
 		Backends{Concurrency: fake},
 		"run-multi",
@@ -155,12 +160,12 @@ func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 	if len(fake.requests) != 2 {
 		t.Fatalf("AcquireSlot calls = %d, want 2", len(fake.requests))
 	}
-	if fake.requests[0].Key != "g:land" || fake.requests[0].Cost != 1 {
-		t.Fatalf("first request = %+v, want land cost 1", fake.requests[0])
-	}
 	expectedMemoryKey := scopedGroupKey(memory, "run-multi")
-	if fake.requests[1].Key != expectedMemoryKey || fake.requests[1].Cost != 8 {
-		t.Fatalf("second request = %+v, want memory cost 8", fake.requests[1])
+	if fake.requests[0].Key != expectedMemoryKey || fake.requests[0].Cost != 8 {
+		t.Fatalf("first request = %+v, want memory cost 8", fake.requests[0])
+	}
+	if fake.requests[1].Key != "g:land" || fake.requests[1].Cost != 1 {
+		t.Fatalf("second request = %+v, want land cost 1", fake.requests[1])
 	}
 	if holderID, ok := active.holderFor("g:land"); !ok || holderID != "run-multi/-" {
 		t.Fatalf("active land holder = %q, %v", holderID, ok)
@@ -173,8 +178,77 @@ func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {
 	if len(fake.releases) != 2 {
 		t.Fatalf("ReleaseSlot calls = %d, want 2", len(fake.releases))
 	}
-	if fake.releases[0] != memoryKey+"\x00run-multi/-" || fake.releases[1] != "g:land\x00run-multi/-" {
+	if fake.releases[0] != "g:land\x00run-multi/-" || fake.releases[1] != memoryKey+"\x00run-multi/-" {
 		t.Fatalf("releases = %+v, want reverse acquisition order", fake.releases)
+	}
+}
+
+func TestAcquirePlanSlotUsesCanonicalGateOrder(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	land := sparkwing.NewConcurrencyGroup("land", sparkwing.ConcurrencyLimit{Capacity: 1})
+	memory := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{
+		Capacity: 32,
+		Scope:    sparkwing.ScopeBox,
+	})
+	plan.Concurrency(memory, 8)
+	plan.Concurrency(land)
+	fake := &inheritedPlanAcquireFake{}
+
+	release, outcome, _, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"run-canonical",
+		plan,
+		planAdmission{},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	defer release("success")
+	if outcome != planCacheProceed {
+		t.Fatalf("outcome = %q, want proceed", outcome)
+	}
+	expectedMemoryKey := scopedGroupKey(memory, "run-canonical")
+	if got := []string{fake.requests[0].Key, fake.requests[1].Key}; got[0] != expectedMemoryKey || got[1] != "g:land" {
+		t.Fatalf("acquire order = %+v, want [%s g:land]", got, expectedMemoryKey)
+	}
+}
+
+func TestAcquirePlanSlotReportsGateThatRejectedAdmission(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	land := sparkwing.NewConcurrencyGroup("land", sparkwing.ConcurrencyLimit{Capacity: 1})
+	memory := sparkwing.NewConcurrencyGroup("memory-gb", sparkwing.ConcurrencyLimit{
+		Capacity: 32,
+		Scope:    sparkwing.ScopeBox,
+		OnLimit:  sparkwing.Fail,
+	})
+	plan.Concurrency(land)
+	plan.Concurrency(memory, 8)
+	memoryKey := scopedGroupKey(memory, "run-fail")
+	fake := &inheritedPlanAcquireFake{kinds: map[string]store.AcquireKind{
+		memoryKey: store.AcquireFailed,
+	}}
+
+	release, outcome, outcomeGroup, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"run-fail",
+		plan,
+		planAdmission{},
+		func(error) {},
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	if release != nil {
+		t.Fatal("release is non-nil on failed admission")
+	}
+	if outcome != planCacheFailed {
+		t.Fatalf("outcome = %q, want failed", outcome)
+	}
+	if outcomeGroup != "memory-gb" {
+		t.Fatalf("outcome group = %q, want memory-gb", outcomeGroup)
 	}
 }
 
@@ -189,7 +263,7 @@ func TestAcquirePlanSlot_RejectsSecondHostAdmissionOwner(t *testing.T) {
 	plan.Concurrency(childGroup)
 	fake := &inheritedPlanAcquireFake{}
 
-	_, _, _, err := acquirePlanSlot(
+	_, _, _, _, err := acquirePlanSlot(
 		context.Background(),
 		Backends{Concurrency: fake},
 		"child",
@@ -213,7 +287,7 @@ func TestAcquirePlanSlotSendsPlanCost(t *testing.T) {
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}), 6)
 	fake := &inheritedPlanAcquireFake{}
 
-	release, outcome, _, err := acquirePlanSlot(
+	release, outcome, _, _, err := acquirePlanSlot(
 		context.Background(),
 		Backends{Concurrency: fake},
 		"run-costed",
@@ -239,7 +313,7 @@ func TestAcquirePlanSlotInheritedSupersededReturnsEvicted(t *testing.T) {
 	key := scopedGroupKey(plan.ConcurrencyGroupRef(), "child")
 	fake := &inheritedPlanAcquireFake{err: store.ErrConcurrencySuperseded}
 
-	release, outcome, active, err := acquirePlanSlot(
+	release, outcome, _, active, err := acquirePlanSlot(
 		context.Background(),
 		Backends{Concurrency: fake},
 		"child",

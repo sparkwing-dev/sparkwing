@@ -794,7 +794,7 @@ func dispatch(
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
 	defer cancelDispatch(nil)
 
-	planRelease, planOutcome, activeAdmission, perr := acquirePlanSlot(
+	planRelease, planOutcome, planOutcomeGroup, activeAdmission, perr := acquirePlanSlot(
 		dispatchCtx, backends, runID, plan, inheritedAdmission, cancelDispatch,
 	)
 	if perr != nil {
@@ -804,9 +804,9 @@ func dispatch(
 	case planCacheSkipped:
 		return nil
 	case planCacheFailed:
-		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", planConcurrencyName(plan))
+		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", planOutcomeGroup)
 	case planCacheEvicted:
-		return &planAdmissionEvictedError{groupName: planConcurrencyName(plan)}
+		return &planAdmissionEvictedError{groupName: planOutcomeGroup}
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
