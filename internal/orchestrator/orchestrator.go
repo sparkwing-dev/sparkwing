@@ -492,6 +492,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	errMsg := ""
 	if runErr != nil {
 		finalStatus = "failed"
+		var evicted *planAdmissionEvictedError
+		if errors.As(runErr, &evicted) {
+			finalStatus = "cancelled"
+		}
 		errMsg = runErr.Error()
 	}
 	_ = backends.State.FinishRun(ctx, runID, finalStatus, errMsg)
@@ -682,7 +686,7 @@ func dispatch(
 	case planCacheFailed:
 		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", planConcurrencyName(plan))
 	case planCacheEvicted:
-		return fmt.Errorf("plan concurrency group %q: evicted before dispatch", planConcurrencyName(plan))
+		return &planAdmissionEvictedError{groupName: planConcurrencyName(plan)}
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()

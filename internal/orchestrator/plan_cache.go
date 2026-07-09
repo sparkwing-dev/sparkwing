@@ -25,6 +25,14 @@ const (
 	planCacheEvicted planCacheOutcome = "evicted" // superseded mid-run
 )
 
+type planAdmissionEvictedError struct {
+	groupName string
+}
+
+func (e *planAdmissionEvictedError) Error() string {
+	return fmt.Sprintf("plan concurrency group %q: evicted before dispatch", e.groupName)
+}
+
 var inheritedPlanObserveInterval = store.DefaultConcurrencyHeartbeatInterval
 
 // planConcurrencyName returns the plan's whole-run concurrency group

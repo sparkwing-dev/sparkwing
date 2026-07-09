@@ -152,6 +152,28 @@ func (planLevelQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 	return nil
 }
 
+type planLevelCancelOthersPipe struct{ sparkwing.Base }
+
+func (planLevelCancelOthersPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-cancel-others-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.CancelOthers,
+	}))
+	sparkwing.Job(plan, "work", held(nil))
+	return nil
+}
+
+type planLevelCancelOthersQuickPipe struct{ sparkwing.Base }
+
+func (planLevelCancelOthersQuickPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-cancel-others-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.CancelOthers,
+	}))
+	sparkwing.Job(plan, "work", func(context.Context) error { return nil })
+	return nil
+}
+
 // planLevelSkipFollowerPipe: Skip-policy plan-level arrival that should
 // no-op when a plan-level leader is already holding the key.
 type planLevelSkipFollowerPipe struct{ sparkwing.Base }
@@ -260,6 +282,10 @@ func init() {
 	register("cache-drift-a", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheDriftPipeA{} })
 	register("cache-drift-b", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheDriftPipeB{} })
 	register("plan-level-queue", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelQueuePipe{} })
+	register("plan-level-cancel-others", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelCancelOthersPipe{} })
+	register("plan-level-cancel-others-quick", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelCancelOthersQuickPipe{}
+	})
 	register("plan-level-skip-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelSkipLeaderPipe{} })
 	register("plan-level-skip-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelSkipFollowerPipe{} })
 	register("plan-level-inherited-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
@@ -339,6 +365,10 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		leaderDone <- res
 	}()
 	waitForLeaderHolding(t)
+	t.Cleanup(func() {
+		leaderRelease.Store(true)
+		<-leaderDone
+	})
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
 	if err != nil {
@@ -481,6 +511,28 @@ func outcomeSummary(nodes []*store.Node) map[string]int {
 	return m
 }
 
+func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
+	t.Helper()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		var count int
+		err := st.DB().QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM concurrency_holders WHERE holder_id = ?`,
+			holderID,
+		).Scan(&count)
+		if err == nil && count > 0 {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for concurrency holder %q", holderID)
+}
+
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -497,6 +549,52 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("plan-level Queue cross-run peak concurrency = %d, want <= 1", peak)
+	}
+}
+
+func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
+	resetLeaderBarrier()
+	p := newPaths(t)
+
+	leaderDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+			Pipeline: "plan-level-cancel-others",
+			RunID:    "plan-cancel-leader",
+		})
+		leaderDone <- res
+	}()
+	waitForLeaderHolding(t)
+
+	victimDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+			Pipeline: "plan-level-cancel-others-quick",
+			RunID:    "plan-cancel-victim",
+		})
+		victimDone <- res
+	}()
+	waitForConcurrencyHolder(t, p.StateDB(), "plan-cancel-victim/-")
+
+	evictor, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline: "plan-level-cancel-others-quick",
+		RunID:    "plan-cancel-evictor",
+	})
+	if err != nil {
+		t.Fatalf("evictor: %v", err)
+	}
+	if evictor.Status != "success" {
+		t.Fatalf("evictor status = %q, want success", evictor.Status)
+	}
+
+	var victim *orchestrator.Result
+	select {
+	case victim = <-victimDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("timed out waiting for pre-dispatch evicted run to finish")
+	}
+	if victim.Status != "cancelled" {
+		t.Fatalf("victim status = %q, want cancelled for pre-dispatch admission eviction (err=%v)", victim.Status, victim.Error)
 	}
 }
 

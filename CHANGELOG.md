@@ -48,6 +48,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **orchestrator:** A run queued for a box slot now reaps a stalled holder
+  automatically instead of blocking behind it indefinitely. When the wait-path
+  stall probe flags a holder whose run has gone silent past the stall TTL, the
+  waiter SIGTERMs (then SIGKILLs) it to free the slot, so one wedged run no
+  longer deadlocks every other run on the host. Set `SPARKWING_BOX_NO_AUTOREAP=1`
+  to restore the previous report-only behavior.
+- **orchestrator:** Plan-level `Concurrency` runs superseded before their first
+  node dispatch now finish as `cancelled` instead of `failed`, so admission
+  churn is distinguishable from a real test or job failure.
+
 ## [v0.15.1] - 2026-07-08
 ### Fixed
 

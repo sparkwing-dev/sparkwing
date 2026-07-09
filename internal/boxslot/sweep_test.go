@@ -262,6 +262,42 @@ func TestAcquire_WaitReportsStalledBlocker(t *testing.T) {
 	}
 }
 
+func TestAcquire_AutoReapDrainsStalledHolderAndAcquires(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal escalation semantics differ on windows")
+	}
+	lockDir, runsDir := t.TempDir(), t.TempDir()
+	cmd, stalled := sweepChildStalled(t, lockDir, runsDir, "obey-term")
+
+	if held, _ := boxslot.Acquire(context.Background(), boxslot.Options{MaxSlots: 1, LockDir: lockDir, NoWait: true}); held != nil {
+		held()
+		t.Fatal("precondition: the slot was free before the wait; the child must hold it")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var reported []boxslot.StalledHolder
+	release, err := boxslot.Acquire(ctx, boxslot.Options{
+		MaxSlots:     1,
+		LockDir:      lockDir,
+		RunsDir:      runsDir,
+		StallTTL:     30 * time.Minute,
+		AutoReap:     true,
+		ReapGrace:    2 * time.Second,
+		PollInterval: 20 * time.Millisecond,
+		OnStalled:    func(s []boxslot.StalledHolder) { reported = s },
+	})
+	if err != nil {
+		t.Fatalf("Acquire with AutoReap blocked behind a stalled holder instead of reaping it: %v", err)
+	}
+	defer release()
+	_ = cmd.Wait()
+
+	if len(reported) != 1 || reported[0].PID != stalled.PID {
+		t.Fatalf("OnStalled reported %+v, want the reaped holder (pid %d)", reported, stalled.PID)
+	}
+}
+
 // startSweepChild re-execs the test binary as a slot-holding child in
 // mode "obey-term" (default SIGTERM disposition) or "ignore-term"
 // (SIGTERM ignored, so only SIGKILL clears it), and waits for READY.
@@ -326,8 +362,10 @@ func TestReapStalled_ChildProcessHarness(t *testing.T) {
 		t.Fatalf("child: AnnotateHolder: %v", err)
 	}
 	_, _ = os.Stdout.WriteString("READY\n")
-	_ = release
-	select {}
+	for {
+		time.Sleep(time.Hour)
+		runtime.KeepAlive(release)
+	}
 }
 
 // sweepChildStalled starts a child holder, backdates its envelope, and

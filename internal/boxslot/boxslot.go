@@ -103,11 +103,24 @@ type Options struct {
 
 	// OnStalled is called at most once per probe interval, while
 	// waiting for a slot, with the live holders that look stalled --
-	// so a queued run can say who it is stuck behind. Reporting only:
-	// the wait path never signals or removes a holder; reaping is the
-	// operator's explicit act via ReapStalled / box-slots sweep --reap.
-	// Nil disables the probe.
+	// so a queued run can say who it is stuck behind. Reporting only
+	// unless AutoReap is set: on its own the wait path never signals or
+	// removes a holder; reaping is otherwise the operator's explicit act
+	// via ReapStalled / box-slots sweep --reap. Nil still lets the probe
+	// run when AutoReap is set.
 	OnStalled func([]StalledHolder)
+
+	// AutoReap lets the wait path reap a holder the stalled probe flags
+	// -- SIGTERM then SIGKILL via ReapStalled -- so its slot frees
+	// instead of the queue blocking behind it indefinitely. Requires
+	// RunsDir and a positive StallTTL, the same inputs the probe needs.
+	// Off by default: a caller opts in only where a wedged holder must
+	// not deadlock the queue.
+	AutoReap bool
+
+	// ReapGrace bounds how long an AutoReap SIGTERM is given before the
+	// holder is SIGKILLed. Non-positive uses DefaultReapGrace.
+	ReapGrace time.Duration
 
 	// PollInterval is the base wait between admission retries.
 	// Jittered up to PollMax. Zero uses sane defaults (1s base, 3s max).
@@ -204,11 +217,18 @@ func Acquire(ctx context.Context, opts Options) (release func(), err error) {
 		if opts.OnWait != nil {
 			opts.OnWait(active, max)
 		}
-		if opts.OnStalled != nil && opts.RunsDir != "" && opts.StallTTL > 0 &&
+		if opts.RunsDir != "" && opts.StallTTL > 0 && (opts.OnStalled != nil || opts.AutoReap) &&
 			time.Since(lastStallProbe) >= stallProbeInterval {
 			lastStallProbe = time.Now()
 			if stalled, err := SweepStalled(opts.LockDir, opts.RunsDir, opts.StallTTL); err == nil && len(stalled) > 0 {
-				opts.OnStalled(stalled)
+				if opts.OnStalled != nil {
+					opts.OnStalled(stalled)
+				}
+				if opts.AutoReap {
+					for _, h := range stalled {
+						_ = ReapStalled(h, opts.ReapGrace)
+					}
+				}
 			}
 		}
 		wait := opts.PollInterval + time.Duration(rand.Int64N(int64(opts.PollInterval)))

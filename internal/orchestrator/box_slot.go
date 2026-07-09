@@ -40,6 +40,7 @@ import (
 // budget cover that surface.
 func acquireBoxSlot(ctx context.Context, paths Paths, workersHint int) (func(), error) {
 	noWait := envTruthy("SPARKWING_BOX_NO_WAIT")
+	autoReap := !envTruthy("SPARKWING_BOX_NO_AUTOREAP")
 
 	resolve := func() int { cap, _ := BoxSlotCap(paths, workersHint); return cap }
 	if pin, ok := parseBoxSlots(os.Getenv("SPARKWING_BOX_SLOTS_PIN")); ok {
@@ -64,8 +65,16 @@ func acquireBoxSlot(ctx context.Context, paths Paths, workersHint int) (func(), 
 		},
 		RunsDir:  paths.RunsDir(),
 		StallTTL: stallTTL,
+		AutoReap: autoReap,
 		OnStalled: func(stalled []boxslot.StalledHolder) {
 			for _, s := range stalled {
+				if autoReap {
+					fmt.Fprintf(os.Stderr,
+						"box slot held by a stalled process: pid %d (%s); reaping it to free the slot "+
+							"(set SPARKWING_BOX_NO_AUTOREAP=1 to only warn).\n",
+						s.PID, s.Evidence)
+					continue
+				}
 				fmt.Fprintf(os.Stderr,
 					"box slot held by a stalled process: pid %d (%s). "+
 						"Inspect with `sparkwing box-slots sweep`; clear with "+
