@@ -215,6 +215,8 @@ const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwin
 func printAgentBlock() {
 	fmt.Println("<!-- Sparkwing context for AI agents. Paste into CLAUDE.md or AGENTS.md and commit. Refresh after major sparkwing upgrades via `sparkwing info --for-agent`. -->")
 	fmt.Println()
+	fmt.Println("## Sparkwing")
+	fmt.Println()
 	fmt.Print(agentBlockBody)
 }
 
