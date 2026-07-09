@@ -413,6 +413,207 @@ func TestWriteControl_CreatesLockDir(t *testing.T) {
 	}
 }
 
+// TestAcquire_GrantsSlotsInArrivalOrder pins the fairness contract: a freed
+// slot goes to the longest-waiting run, not whichever waiter's poll fires
+// first. Waiters are launched in an observed arrival order, then the held
+// slot is released and the queue must drain in that same order.
+func TestAcquire_GrantsSlotsInArrivalOrder(t *testing.T) {
+	dir := t.TempDir()
+	rel0, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1,
+		LockDir:  dir,
+	})
+	if err != nil {
+		t.Fatalf("hold Acquire: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	const N = 8
+	var mu sync.Mutex
+	grantOrder := make([]int, 0, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rel, err := boxslot.Acquire(ctx, boxslot.Options{
+				MaxSlots:     1,
+				LockDir:      dir,
+				PollInterval: 5 * time.Millisecond,
+				PollMax:      10 * time.Millisecond,
+			})
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("waiter %d Acquire: %v", i, err)
+				}
+				return
+			}
+			mu.Lock()
+			grantOrder = append(grantOrder, i)
+			mu.Unlock()
+			time.Sleep(5 * time.Millisecond)
+			rel()
+		}(i)
+		want := i + 1
+		waitFor(t, 2*time.Second, func() bool {
+			st, err := boxslot.Status(dir)
+			return err == nil && st.Waiters == want
+		}, "waiter did not register before the next arrival")
+	}
+
+	rel0()
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(grantOrder) != N {
+		t.Fatalf("granted %d slots, want %d", len(grantOrder), N)
+	}
+	for pos, id := range grantOrder {
+		if id != pos {
+			t.Fatalf("grant order = %v, want strict arrival order 0..%d", grantOrder, N-1)
+		}
+	}
+}
+
+// TestAcquire_MultiSlotAdmitsEarliestArrivalsFirst covers the max>1 path:
+// when several slots free together, the earliest arrivals fill them and
+// admission never exceeds the cap.
+func TestAcquire_MultiSlotAdmitsEarliestArrivalsFirst(t *testing.T) {
+	dir := t.TempDir()
+	const Slots = 2
+	held := make([]func(), 0, Slots)
+	for i := 0; i < Slots; i++ {
+		rel, err := boxslot.Acquire(context.Background(), boxslot.Options{
+			MaxSlots: Slots, LockDir: dir, NoWait: true,
+		})
+		if err != nil {
+			t.Fatalf("fill holder %d: %v", i, err)
+		}
+		held = append(held, rel)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	const N = 4
+	var mu sync.Mutex
+	grantOrder := make([]int, 0, N)
+	var inflight, peak atomic.Int32
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rel, err := boxslot.Acquire(ctx, boxslot.Options{
+				MaxSlots:     Slots,
+				LockDir:      dir,
+				PollInterval: 5 * time.Millisecond,
+				PollMax:      10 * time.Millisecond,
+			})
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("waiter %d Acquire: %v", i, err)
+				}
+				return
+			}
+			mu.Lock()
+			grantOrder = append(grantOrder, i)
+			mu.Unlock()
+			cur := inflight.Add(1)
+			for {
+				p := peak.Load()
+				if cur <= p || peak.CompareAndSwap(p, cur) {
+					break
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			inflight.Add(-1)
+			rel()
+		}(i)
+		want := i + 1
+		waitFor(t, 2*time.Second, func() bool {
+			st, err := boxslot.Status(dir)
+			return err == nil && st.Waiters == want
+		}, "waiter did not register before the next arrival")
+	}
+
+	for _, rel := range held {
+		rel()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if p := peak.Load(); p != Slots {
+		t.Fatalf("peak concurrent admissions = %d, want %d", p, Slots)
+	}
+	firstBatch := map[int]bool{grantOrder[0]: true, grantOrder[1]: true}
+	if !firstBatch[0] || !firstBatch[1] {
+		t.Fatalf("grant order = %v, want the two earliest arrivals admitted first", grantOrder)
+	}
+}
+
+// TestAcquire_StaleWaiterDoesNotBlockQueue asserts an abandoned waiter marker
+// with an earlier arrival key is reclaimed rather than holding the line: a
+// live waiter queued behind it is still admitted when a slot frees.
+func TestAcquire_StaleWaiterDoesNotBlockQueue(t *testing.T) {
+	dir := t.TempDir()
+	rel0, err := boxslot.Acquire(context.Background(), boxslot.Options{
+		MaxSlots: 1, LockDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("hold Acquire: %v", err)
+	}
+
+	stale := filepath.Join(dir, "waiter-pid99999-1-1.lock")
+	if err := os.WriteFile(stale, []byte("stale"), 0o600); err != nil {
+		t.Fatalf("seed stale waiter: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	acquired := make(chan struct{})
+	defer func() {
+		cancel()
+		<-acquired
+	}()
+	go func() {
+		rel, err := boxslot.Acquire(ctx, boxslot.Options{
+			MaxSlots:     1,
+			LockDir:      dir,
+			PollInterval: 5 * time.Millisecond,
+			PollMax:      10 * time.Millisecond,
+		})
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("waiter Acquire: %v", err)
+			}
+			close(acquired)
+			return
+		}
+		rel()
+		close(acquired)
+	}()
+
+	rel0()
+	select {
+	case <-acquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("live waiter never admitted behind a stale earlier-key marker")
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale waiter marker not reclaimed: %v", err)
+	}
+}
+
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
