@@ -360,6 +360,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	p := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
+	leaderDrained := false
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-leader"})
 		leaderDone <- res
@@ -367,7 +368,9 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	waitForLeaderHolding(t)
 	t.Cleanup(func() {
 		leaderRelease.Store(true)
-		<-leaderDone
+		if !leaderDrained {
+			<-leaderDone
+		}
 	})
 
 	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
@@ -390,6 +393,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 
 	leaderRelease.Store(true)
 	leaderRes := <-leaderDone
+	leaderDrained = true
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
 	}
