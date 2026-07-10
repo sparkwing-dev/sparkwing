@@ -399,9 +399,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan admission: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
-	if opts.BoxSlotRelease != nil && (plan.HostAdmission() || inheritedAdmission.hasHostAdmission()) {
+	boxSlotReleasedForPlanAdmission := false
+	if opts.BoxSlotRelease != nil && usesPlanAdmission(plan, inheritedAdmission) {
 		opts.BoxSlotRelease()
 		opts.BoxSlotRelease = nil
+		boxSlotReleasedForPlanAdmission = true
 	}
 
 	snapMeta := planSnapshotMeta{
@@ -509,6 +511,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
 		opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
 		dispatchWaitTimeout, inheritedAdmission, opts.BoxSlotAcquire,
+		boxSlotReleasedForPlanAdmission,
 	)
 
 	finalStatus := "success"
@@ -625,6 +628,13 @@ func validateInheritedHostAdmission(ctx context.Context, backends Backends, pare
 		}
 	}
 	return nil
+}
+
+func usesPlanAdmission(plan *sparkwing.Plan, admission planAdmission) bool {
+	if len(plan.PlanConcurrency()) > 0 {
+		return true
+	}
+	return len(admission.normalized().HolderIDs) > 0
 }
 
 func runIsSelfOrAncestor(ctx context.Context, state StateBackend, runID, candidateAncestorRunID string) (bool, error) {
@@ -789,6 +799,7 @@ func dispatch(
 	dispatchWaitTimeout time.Duration,
 	inheritedAdmission planAdmission,
 	boxSlotAcquire func(runID string) error,
+	boxSlotReleasedForPlanAdmission bool,
 ) error {
 	runStart := time.Now()
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
@@ -810,7 +821,7 @@ func dispatch(
 	}
 	planReleaseOutcome := "success"
 	defer func() { planRelease(planReleaseOutcome) }()
-	if boxSlotAcquire != nil && boxSlotPinned() && (plan.HostAdmission() || activeAdmission.hasHostAdmission()) {
+	if boxSlotAcquire != nil && boxSlotPinned() && boxSlotReleasedForPlanAdmission {
 		if err := boxSlotAcquire(runID); err != nil {
 			return err
 		}

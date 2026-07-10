@@ -99,6 +99,161 @@ func (hostAdmissionPlanPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 	return nil
 }
 
+type planAdmissionPipe struct{ sparkwing.Base }
+
+func (planAdmissionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	group := sparkwing.NewConcurrencyGroup("plan-admission", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		Scope:    sparkwing.ScopeBox,
+	})
+	plan.Concurrency(group)
+	sparkwing.Job(plan, "work", func(ctx context.Context) error { return nil })
+	return nil
+}
+
+func TestRun_ReleasesProvisionalBoxSlotBeforePlanAdmission(t *testing.T) {
+	register("plan-admission-release", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return planAdmissionPipe{}
+	})
+
+	fakes := newFakeBackends()
+	var releases atomic.Int32
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:       "plan-admission-release",
+			BoxSlotRelease: func() { releases.Add(1) },
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 1", got)
+	}
+}
+
+func TestRun_ReacquiresPinnedBoxSlotAfterPlanAdmission(t *testing.T) {
+	t.Setenv("SPARKWING_BOX_SLOTS_PIN", "1")
+	register("plan-admission-reacquire", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return planAdmissionPipe{}
+	})
+
+	fakes := newFakeBackends()
+	var releases atomic.Int32
+	var acquires atomic.Int32
+	_, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{
+			Pipeline:       "plan-admission-reacquire",
+			BoxSlotRelease: func() { releases.Add(1) },
+			BoxSlotAcquire: func(runID string) error {
+				acquires.Add(1)
+				return nil
+			},
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls = %d, want 1", got)
+	}
+	if got := acquires.Load(); got != 1 {
+		t.Fatalf("BoxSlotAcquire calls = %d, want 1", got)
+	}
+}
+
+func TestRun_ReleasesBoxSlotWhileQueuedForPlanAdmissionThenReacquires(t *testing.T) {
+	t.Setenv("SPARKWING_BOX_SLOTS_PIN", "1")
+	register("queued-plan-admission-reacquire", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return planAdmissionPipe{}
+	})
+
+	fakes := newFakeBackends()
+	resolveCalled := make(chan struct{})
+	promote := make(chan struct{})
+	var releases atomic.Int32
+	var acquires atomic.Int32
+	fakes.concurrency.acquire = func(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+		return store.AcquireSlotResponse{
+			Kind:        store.AcquireQueued,
+			HolderID:    req.HolderID,
+			Position:    1,
+			QueueLength: 1,
+			Holders: []store.ConcurrencyHolder{{
+				Key:            req.Key,
+				HolderID:       "holder/-",
+				RunID:          "holder",
+				LeaseExpiresAt: time.Now().Add(30 * time.Second),
+			}},
+		}, nil
+	}
+	fakes.concurrency.resolve = func(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
+		select {
+		case <-resolveCalled:
+		default:
+			close(resolveCalled)
+		}
+		select {
+		case <-promote:
+			return store.WaiterResolution{
+				Status:             store.WaiterPromoted,
+				HolderID:           runID + "/-",
+				HolderLeaseExpires: time.Now().Add(30 * time.Second),
+			}, nil
+		default:
+			return store.WaiterResolution{Status: store.WaiterStillWaiting}, nil
+		}
+	}
+
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := orchestrator.Run(context.Background(),
+			orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+			orchestrator.Options{
+				Pipeline:       "queued-plan-admission-reacquire",
+				BoxSlotRelease: func() { releases.Add(1) },
+				BoxSlotAcquire: func(runID string) error {
+					acquires.Add(1)
+					return nil
+				},
+			})
+		runDone <- err
+	}()
+
+	select {
+	case <-resolveCalled:
+	case err := <-runDone:
+		t.Fatalf("Run returned before queued admission was promoted: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not reach queued plan admission")
+	}
+	if got := releases.Load(); got != 1 {
+		t.Fatalf("BoxSlotRelease calls before queued wait = %d, want 1", got)
+	}
+	if got := acquires.Load(); got != 0 {
+		t.Fatalf("BoxSlotAcquire calls before promotion = %d, want 0", got)
+	}
+	if got := fakes.state.startNodes; got != 0 {
+		t.Fatalf("StartNode calls before promotion = %d, want 0", got)
+	}
+
+	close(promote)
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not finish after queued plan admission was promoted")
+	}
+	if got := acquires.Load(); got != 1 {
+		t.Fatalf("BoxSlotAcquire calls after promotion = %d, want 1", got)
+	}
+	if got := fakes.state.startNodes; got == 0 {
+		t.Fatal("StartNode calls after promotion = 0, want dispatched work")
+	}
+}
+
 func TestRun_ReleasesProvisionalBoxSlotBeforeHostAdmission(t *testing.T) {
 	register("host-admission-release", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return hostAdmissionPlanPipe{}
@@ -596,12 +751,17 @@ type fakeConcurrency struct {
 	acquires int
 	releases int
 	holders  map[string]store.ConcurrencyHolder
+	acquire  func(context.Context, store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
+	resolve  func(context.Context, string, string, string, string, string, string, bool) (store.WaiterResolution, error)
 }
 
 func (f *fakeConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	f.mu.Lock()
 	f.acquires++
 	f.mu.Unlock()
+	if f.acquire != nil {
+		return f.acquire(ctx, req)
+	}
 	return store.AcquireSlotResponse{
 		Kind:           store.AcquireGranted,
 		HolderID:       req.HolderID,
@@ -637,6 +797,9 @@ func (f *fakeConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 }
 
 func (f *fakeConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
+	if f.resolve != nil {
+		return f.resolve(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
+	}
 	return store.WaiterResolution{Status: store.WaiterStillWaiting}, nil
 }
 
