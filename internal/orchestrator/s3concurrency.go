@@ -119,6 +119,7 @@ type s3Holder struct {
 	RunID            string `json:"run_id"`
 	NodeID           string `json:"node_id"`
 	ClaimedAtNS      int64  `json:"claimed_at_ns"`
+	QueueArrivedAtNS int64  `json:"queue_arrived_at_ns,omitempty"`
 	LeaseExpiresNS   int64  `json:"lease_expires_ns"`
 	Superseded       bool   `json:"superseded,omitempty"`
 	Cost             int    `json:"cost"`
@@ -427,6 +428,54 @@ func liveHolders(doc *s3SlotDoc, nowNS int64) []store.ConcurrencyHolder {
 	return out
 }
 
+func (c *s3Concurrency) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
+	if fb := c.fallback(ctx); fb != nil {
+		return fb.State(ctx, key)
+	}
+	doc, _, exists, err := c.load(ctx, s3SlotKey(key))
+	if err != nil {
+		return nil, err
+	}
+	if !exists || doc.Capacity <= 0 {
+		return nil, store.ErrNotFound
+	}
+	nowNS := time.Now().UnixNano()
+	state := &store.ConcurrencyState{
+		Key:               key,
+		Capacity:          doc.Capacity,
+		EffectiveCapacity: doc.Capacity,
+		UsedCost:          liveHolderCost(doc.Holders, nowNS),
+	}
+	if floor := liveFloor(doc.Holders, nowNS); floor > 0 && floor < state.EffectiveCapacity {
+		state.EffectiveCapacity = floor
+	}
+	for _, holder := range doc.Holders {
+		state.Holders = append(state.Holders, toStoreHolder(holder))
+	}
+	queuePosition := 0
+	for _, waiter := range doc.Waiters {
+		row := store.ConcurrencyWaiter{
+			Key:              key,
+			RunID:            waiter.RunID,
+			NodeID:           waiter.NodeID,
+			HolderID:         waiter.HolderID,
+			ArrivedAt:        time.Unix(0, waiter.ArrivedAtNS),
+			Policy:           waiter.Policy,
+			CacheKeyHash:     waiter.CacheKeyHash,
+			LeaderRunID:      waiter.LeaderRunID,
+			LeaderNodeID:     waiter.LeaderNodeID,
+			Cost:             waiter.Cost,
+			DeclaredCapacity: waiter.DeclaredCapacity,
+		}
+		if waiter.Policy == store.OnLimitQueue {
+			row.Position = queuePosition
+			queuePosition++
+		}
+		state.Waiters = append(state.Waiters, row)
+	}
+	return state, nil
+}
+
 func toStoreHolder(h s3Holder) store.ConcurrencyHolder {
 	nodeID := h.NodeID
 	declaredCapacity := h.DeclaredCapacity
@@ -436,11 +485,16 @@ func toStoreHolder(h s3Holder) store.ConcurrencyHolder {
 	if isInheritedS3HolderNodeID(nodeID) {
 		nodeID = ""
 	}
+	var queueArrivedAt time.Time
+	if h.QueueArrivedAtNS > 0 {
+		queueArrivedAt = time.Unix(0, h.QueueArrivedAtNS)
+	}
 	return store.ConcurrencyHolder{
 		HolderID:         h.HolderID,
 		RunID:            h.RunID,
 		NodeID:           nodeID,
 		ClaimedAt:        time.Unix(0, h.ClaimedAtNS),
+		QueueArrivedAt:   queueArrivedAt,
 		LeaseExpiresAt:   time.Unix(0, h.LeaseExpiresNS),
 		Superseded:       h.Superseded,
 		Cost:             h.Cost,
@@ -546,6 +600,7 @@ func promoteWaiters(doc *s3SlotDoc, now time.Time, lease time.Duration) bool {
 			RunID:            w.RunID,
 			NodeID:           w.NodeID,
 			ClaimedAtNS:      nowNS,
+			QueueArrivedAtNS: w.ArrivedAtNS,
 			LeaseExpiresNS:   now.Add(lease).UnixNano(),
 			Cost:             cost,
 			DeclaredCapacity: w.DeclaredCapacity,
@@ -884,7 +939,13 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 						}
 					}
 				}
-				doc.Holders = append(doc.Holders[:i], doc.Holders[i+1:]...)
+				if releasedHolder.NodeID == "" && releasedHolder.QueueArrivedAtNS > 0 {
+					doc.Holders[i].Superseded = true
+					doc.Holders[i].LeaseExpiresNS = now.Add(s3FinishedRetention).UnixNano()
+					doc.Holders[i].Cost = 0
+				} else {
+					doc.Holders = append(doc.Holders[:i], doc.Holders[i+1:]...)
+				}
 				released = true
 				break
 			}

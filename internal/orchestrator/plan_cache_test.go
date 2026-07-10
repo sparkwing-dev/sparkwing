@@ -24,6 +24,10 @@ func (f *inheritedPlanObserveFake) ObserveSlot(ctx context.Context, key, holderI
 	return nil, errors.New("unexpected observe")
 }
 
+func (f *inheritedPlanObserveFake) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
+	return nil, errors.New("unexpected state")
+}
+
 func (f *inheritedPlanObserveFake) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
 	if f.err != nil {
 		return time.Time{}, false, f.err
@@ -74,6 +78,10 @@ func (f *inheritedPlanAcquireFake) AcquireSlot(ctx context.Context, req store.Ac
 
 func (f *inheritedPlanAcquireFake) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
 	return nil, errors.New("unexpected observe")
+}
+
+func (f *inheritedPlanAcquireFake) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
+	return nil, errors.New("unexpected state")
 }
 
 func (f *inheritedPlanAcquireFake) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {

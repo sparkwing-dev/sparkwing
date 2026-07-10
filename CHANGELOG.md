@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** Parent node timeouts now pause while `RunAndAwait` children
+  are queued for plan-level admission, then resume once admission clears, so
+  admission wait is governed by queue policy rather than the parent's execution
+  budget.
 
 ## [v0.15.4] - 2026-07-10
 ### Changed

@@ -625,6 +625,10 @@ func (f *fakeConcurrency) ObserveSlot(ctx context.Context, key, holderID string)
 	}, nil
 }
 
+func (f *fakeConcurrency) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
+	return &store.ConcurrencyState{Key: key, Capacity: 1, EffectiveCapacity: 1}, nil
+}
+
 func (f *fakeConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
 	f.mu.Lock()
 	f.releases++

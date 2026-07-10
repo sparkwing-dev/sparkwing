@@ -78,11 +78,47 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 // wire holder shape back into the store type, so a field added to one
 // response path can't silently vanish from its siblings.
 func storeHolderFromClient(key string, hd client.WaiterHolder) store.ConcurrencyHolder {
-	return store.ConcurrencyHolder{
+	holder := store.ConcurrencyHolder{
 		Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
 		ClaimedAt: hd.ClaimedAt, LeaseExpiresAt: hd.LeaseExpiresAt,
 		Superseded: hd.Superseded, Cost: hd.Cost,
 	}
+	if hd.QueueArrivedAt != nil {
+		holder.QueueArrivedAt = *hd.QueueArrivedAt
+	}
+	return holder
+}
+
+func (h *HTTPConcurrency) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
+	resp, err := h.client.ConcurrencyState(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	out := &store.ConcurrencyState{
+		Key:               resp.Key,
+		Capacity:          resp.Capacity,
+		EffectiveCapacity: resp.EffectiveCapacity,
+		UsedCost:          resp.UsedCost,
+	}
+	for _, holder := range resp.Holders {
+		out.Holders = append(out.Holders, storeHolderFromClient(key, holder))
+	}
+	for _, waiter := range resp.Waiters {
+		out.Waiters = append(out.Waiters, store.ConcurrencyWaiter{
+			Key:           key,
+			RunID:         waiter.RunID,
+			NodeID:        waiter.NodeID,
+			ArrivedAt:     waiter.ArrivedAt,
+			Policy:        waiter.Policy,
+			CacheKeyHash:  waiter.CacheKeyHash,
+			LeaderRunID:   waiter.LeaderRunID,
+			LeaderNodeID:  waiter.LeaderNodeID,
+			Cost:          waiter.Cost,
+			Position:      waiter.Position,
+			CancelTimeout: waiter.CancelTimeoutDuration(),
+		})
+	}
+	return out, nil
 }
 
 func (h *HTTPConcurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
@@ -101,16 +137,8 @@ func (h *HTTPConcurrency) ObserveSlot(ctx context.Context, key, holderID string)
 	if err != nil {
 		return nil, err
 	}
-	return &store.ConcurrencyHolder{
-		Key:            key,
-		HolderID:       resp.HolderID,
-		RunID:          resp.RunID,
-		NodeID:         resp.NodeID,
-		ClaimedAt:      resp.ClaimedAt,
-		LeaseExpiresAt: resp.LeaseExpiresAt,
-		Superseded:     resp.Superseded,
-		Cost:           resp.Cost,
-	}, nil
+	holder := storeHolderFromClient(key, *resp)
+	return &holder, nil
 }
 
 func (h *HTTPConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
