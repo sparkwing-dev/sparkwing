@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.5] - 2026-07-10
 ### Fixed
 
 - **orchestrator:** Parent node timeouts now pause while `RunAndAwait` children
