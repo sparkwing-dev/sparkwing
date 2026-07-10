@@ -41,12 +41,25 @@ func (g FixtureGenerator) Generate(_ context.Context, spec Spec) (string, error)
 }
 
 // CommandGenerator shells an external generator: it runs Argv with the
-// spec's prompt on stdin and takes the pipeline source from stdout. This
-// is the seam a real AI generator plugs into without touching the
-// scorer -- the harness stays the measuring instrument, the model stays
-// swappable.
+// spec's prompt on stdin (prefixed with the registration contract) and
+// takes the pipeline source from stdout. This is the seam a real AI
+// generator plugs into without touching the scorer -- the harness stays
+// the measuring instrument, the model stays swappable.
 type CommandGenerator struct {
 	Argv []string
+}
+
+// commandPrompt is the payload a command generator reads on stdin: the
+// registration contract the scorer binds to, then the spec prompt. The
+// scored project's sparkwing.yaml names spec.Name/spec.Entrypoint, so the
+// authored source must register under exactly those or `explain` cannot
+// resolve the pipeline. The fixture source encodes this contract in its
+// file; a live author has to be told it.
+func commandPrompt(spec Spec) string {
+	return fmt.Sprintf(
+		"Register the pipeline under the name %q with an entrypoint struct named %s.\n\n%s",
+		spec.Name, spec.Entrypoint, spec.Prompt,
+	)
 }
 
 func (g CommandGenerator) Label() string {
@@ -61,7 +74,7 @@ func (g CommandGenerator) Generate(ctx context.Context, spec Spec) (string, erro
 		return "", fmt.Errorf("generator command is empty")
 	}
 	cmd := exec.CommandContext(ctx, g.Argv[0], g.Argv[1:]...)
-	cmd.Stdin = strings.NewReader(spec.Prompt)
+	cmd.Stdin = strings.NewReader(commandPrompt(spec))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
