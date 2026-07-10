@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -31,6 +32,14 @@ func acquireHTTP(t *testing.T, b *orchestrator.HTTPConcurrency, req store.Acquir
 		t.Fatalf("AcquireSlot(%s/%s): %v", req.Key, req.HolderID, err)
 	}
 	return resp
+}
+
+func TestHTTPConcurrency_StateNotFoundMapsStoreErrNotFound(t *testing.T) {
+	b, _ := newHTTPConcurrency(t)
+	_, err := b.State(context.Background(), "missing-key")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("State missing-key err = %v, want store.ErrNotFound", err)
+	}
 }
 
 func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {

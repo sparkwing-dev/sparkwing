@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // AcquireSlotRequest mirrors the controller's acquireSlotReq JSON
@@ -174,13 +176,73 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 // WaiterHolder is the minimal holder shape a resolved waiter needs to
 // refresh its "N ahead, held by X" display.
 type WaiterHolder struct {
-	HolderID       string    `json:"holder_id"`
-	RunID          string    `json:"run_id"`
-	NodeID         string    `json:"node_id,omitempty"`
-	ClaimedAt      time.Time `json:"claimed_at"`
-	LeaseExpiresAt time.Time `json:"lease_expires_at"`
-	Superseded     bool      `json:"superseded"`
-	Cost           int       `json:"cost,omitempty"`
+	HolderID       string     `json:"holder_id"`
+	RunID          string     `json:"run_id"`
+	NodeID         string     `json:"node_id,omitempty"`
+	ClaimedAt      time.Time  `json:"claimed_at"`
+	QueueArrivedAt *time.Time `json:"queue_arrived_at,omitempty"`
+	LeaseExpiresAt time.Time  `json:"lease_expires_at"`
+	Superseded     bool       `json:"superseded"`
+	Cost           int        `json:"cost,omitempty"`
+}
+
+// ConcurrencyState mirrors the controller's state endpoint.
+type ConcurrencyState struct {
+	Key               string         `json:"key"`
+	Capacity          int            `json:"capacity"`
+	EffectiveCapacity int            `json:"effective_capacity"`
+	UsedCost          int            `json:"used_cost"`
+	Holders           []WaiterHolder `json:"holders"`
+	Waiters           []StateWaiter  `json:"waiters"`
+}
+
+type StateWaiter struct {
+	RunID         string    `json:"run_id"`
+	NodeID        string    `json:"node_id,omitempty"`
+	ArrivedAt     time.Time `json:"arrived_at"`
+	Policy        string    `json:"policy"`
+	CacheKeyHash  string    `json:"cache_key_hash,omitempty"`
+	LeaderRunID   string    `json:"leader_run_id,omitempty"`
+	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
+	CancelTimeout string    `json:"cancel_timeout,omitempty"`
+	Cost          int       `json:"cost,omitempty"`
+	Position      int       `json:"position"`
+}
+
+func (w StateWaiter) CancelTimeoutDuration() time.Duration {
+	if w.CancelTimeout == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(w.CancelTimeout)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
+func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error) {
+	u := fmt.Sprintf("%s/api/v1/concurrency/%s/state", c.baseURL, url.PathEscape(key))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, store.ErrNotFound
+	default:
+		return nil, readHTTPError(resp)
+	}
+	var out ConcurrencyState
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // WaiterResolution mirrors the controller's resolveWaiterResp.

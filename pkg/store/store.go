@@ -378,6 +378,7 @@ CREATE TABLE IF NOT EXISTS concurrency_holders (
     run_id            TEXT NOT NULL,
     node_id           TEXT NOT NULL DEFAULT '',
     claimed_at        INTEGER NOT NULL,
+    queue_arrived_at  INTEGER NOT NULL DEFAULT 0,
     lease_expires_at  INTEGER NOT NULL,
     superseded        INTEGER NOT NULL DEFAULT 0,
     cost              INTEGER NOT NULL DEFAULT 1,
@@ -893,6 +894,7 @@ var columnMigrations = []columnSpec{
 	{"concurrency_holders", map[string]string{
 		"cost":              "INTEGER NOT NULL DEFAULT 1",
 		"declared_capacity": "INTEGER NOT NULL DEFAULT 0",
+		"queue_arrived_at":  "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",

@@ -270,6 +270,232 @@ func (planLevelInheritedMiddleWithOwnConcurrencyPipe) Plan(
 	return nil
 }
 
+type planLevelQueuedAwaitParentPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
+		return err
+	}).Timeout(time.Second)
+	return nil
+}
+
+type planLevelQueuedAwaitThenContinueParentPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		select {
+		case <-time.After(20 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).Timeout(time.Second)
+	return nil
+}
+
+type planLevelQueuedAwaitChildPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-queued-await-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(10*time.Millisecond))
+	return nil
+}
+
+type planLevelQueuedAwaitRemainingBudgetParentPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitRemainingBudgetParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		select {
+		case <-time.After(120 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-remaining-budget-child", "work")
+		return err
+	}).Timeout(200 * time.Millisecond)
+	return nil
+}
+
+type planLevelQueuedAwaitRemainingBudgetChildPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitRemainingBudgetChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-queued-await-remaining-budget-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(300*time.Millisecond))
+	return nil
+}
+
+type planLevelQueuedAwaitEarlyResumeParentPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitEarlyResumeParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-early-resume-child", "work")
+		return err
+	}).Timeout(time.Second)
+	return nil
+}
+
+type planLevelQueuedAwaitEarlyResumeChildPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitEarlyResumeChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-queued-await-early-resume-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(400*time.Millisecond))
+	return nil
+}
+
+type planLevelQueuedAwaitMissedPromotionParentPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitMissedPromotionParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-missed-promotion-child", "work")
+		return err
+	}).Timeout(700 * time.Millisecond)
+	return nil
+}
+
+type planLevelQueuedAwaitMissedPromotionChildPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitMissedPromotionChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-queued-await-missed-promotion-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(250*time.Millisecond))
+	return nil
+}
+
+type planLevelQueuedAwaitMultiKeyParentPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitMultiKeyParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-multi-key-child", "work")
+		return err
+	}).Timeout(500 * time.Millisecond)
+	return nil
+}
+
+type planLevelQueuedAwaitMultiKeyChildPipe struct{ sparkwing.Base }
+
+func (planLevelQueuedAwaitMultiKeyChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-queued-await-multi-key-a", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-queued-await-multi-key-b", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(300*time.Millisecond))
+	return nil
+}
+
+type planLevelSlowPlanAwaitParentPipe struct{ sparkwing.Base }
+
+func (planLevelSlowPlanAwaitParentPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-slow-plan-await-child", "work")
+		return err
+	}).Timeout(150 * time.Millisecond)
+	return nil
+}
+
+type planLevelSlowPlanAwaitChildPipe struct{ sparkwing.Base }
+
+func (planLevelSlowPlanAwaitChildPipe) Plan(
+	ctx context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	rc sparkwing.RunContext,
+) error {
+	select {
+	case <-time.After(300 * time.Millisecond):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-slow-plan-await-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
+	}))
+	sparkwing.Job(plan, "work", cacheStep(10*time.Millisecond))
+	return nil
+}
+
 func init() {
 	register("cache-queue-serialize", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheQueuePipe{} })
 	register("cache-skip-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheSkipLeaderPipe{} })
@@ -300,12 +526,62 @@ func init() {
 	register("plan-level-inherited-middle-own", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelInheritedMiddleWithOwnConcurrencyPipe{}
 	})
+	register("plan-level-queued-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitParentPipe{}
+	})
+	register("plan-level-queued-await-then-continue-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitThenContinueParentPipe{}
+	})
+	register("plan-level-queued-await-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitChildPipe{}
+	})
+	register("plan-level-queued-await-remaining-budget-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitRemainingBudgetParentPipe{}
+	})
+	register("plan-level-queued-await-remaining-budget-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitRemainingBudgetChildPipe{}
+	})
+	register("plan-level-queued-await-early-resume-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitEarlyResumeParentPipe{}
+	})
+	register("plan-level-queued-await-early-resume-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitEarlyResumeChildPipe{}
+	})
+	register("plan-level-queued-await-missed-promotion-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitMissedPromotionParentPipe{}
+	})
+	register("plan-level-queued-await-missed-promotion-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitMissedPromotionChildPipe{}
+	})
+	register("plan-level-queued-await-multi-key-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitMultiKeyParentPipe{}
+	})
+	register("plan-level-queued-await-multi-key-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelQueuedAwaitMultiKeyChildPipe{}
+	})
+	register("plan-level-slow-plan-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelSlowPlanAwaitParentPipe{}
+	})
+	register("plan-level-slow-plan-await-child", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &planLevelSlowPlanAwaitChildPipe{}
+	})
 }
 
 func resetCacheCounter() {
 	cacheCounter.inflight.Store(0)
 	cacheCounter.max.Store(0)
 	resetLeaderBarrier()
+}
+
+func claimManualChildTrigger(t *testing.T, ctx context.Context, st *store.Store, childID string) {
+	t.Helper()
+	trigger, err := st.ClaimSpecificTrigger(ctx, childID, store.DefaultLeaseDuration)
+	if err != nil {
+		t.Fatalf("claim child trigger %q for manual run: %v", childID, err)
+	}
+	if trigger.ID != childID {
+		t.Fatalf("claimed trigger = %q, want %q", trigger.ID, childID)
+	}
 }
 
 // cacheCounterBump records one in-flight body against the peak gauge and
@@ -865,6 +1141,743 @@ func TestConcurrency_RunAndAwaitCarriesAncestorAdmissionThroughDifferentPlanConc
 	if admissions["g:plan-level-middle-key"] != "middle-with-own-plan-concurrency/-" {
 		t.Fatalf("grandchild middle admission = %q, want middle-with-own-plan-concurrency/-",
 			admissions["g:plan-level-middle-key"])
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-queued-await-key",
+		HolderID: "external-plan-holder/-",
+		RunID:    "external-plan-holder",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("external acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	}
+
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-parent",
+			RunID:    "queued-await-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-parent", "spawn", "plan-level-queued-await-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-parent",
+		})
+		childDone <- res
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-key"); err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == childID && waiter.NodeID == "" {
+					goto childQueued
+				}
+			}
+		}
+		select {
+		case child := <-childDone:
+			t.Fatalf("child finished before queuing for admission: status=%q err=%v", child.Status, child.Error)
+		default:
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
+
+childQueued:
+	time.Sleep(1200 * time.Millisecond)
+
+	select {
+	case parent := <-parentDone:
+		t.Fatalf("parent finished while child was queued for plan admission: status=%q err=%v", parent.Status, parent.Error)
+	default:
+	}
+
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release external holder: %v", err)
+	}
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "success" {
+			t.Fatalf("parent status = %q, want success after child admission (err=%v)", parent.Status, parent.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	select {
+	case child := <-childDone:
+		if child.Status != "success" {
+			t.Fatalf("child status = %q, want success (err=%v)", child.Status, child.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentContextContinuesAfterAdmissionWait(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-queued-await-key",
+		HolderID: "external-continue-holder/-",
+		RunID:    "external-continue-holder",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("external acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	}
+
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-then-continue-parent",
+			RunID:    "queued-await-continue-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-continue-parent", "spawn", "plan-level-queued-await-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-continue-parent",
+		})
+		childDone <- res
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-key"); err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == childID && waiter.NodeID == "" {
+					goto childQueued
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
+
+childQueued:
+	time.Sleep(1200 * time.Millisecond)
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		"g:plan-level-queued-await-key", "external-continue-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release external holder: %v", err)
+	}
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "success" {
+			t.Fatalf("parent status = %q, want success after continuing post-await work (err=%v)", parent.Status, parent.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	select {
+	case child := <-childDone:
+		if child.Status != "success" {
+			t.Fatalf("child status = %q, want success (err=%v)", child.Status, child.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	resp, err := st.AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
+		Key:      "g:plan-level-queued-await-key",
+		HolderID: "external-plan-holder/-",
+		RunID:    "external-plan-holder",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("external acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	}
+
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-parent",
+			RunID:    "queued-await-cancel-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(context.Background(), "queued-await-cancel-parent", "spawn", "plan-level-queued-await-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, context.Background(), st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(context.Background(), orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-cancel-parent",
+		})
+		childDone <- res
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if state, err := st.GetConcurrencyState(context.Background(), "g:plan-level-queued-await-key"); err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == childID && waiter.NodeID == "" {
+					goto childQueued
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
+
+childQueued:
+	time.Sleep(250 * time.Millisecond)
+	cancel()
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "failed" {
+			t.Fatalf("parent status = %q, want failed after cancellation", parent.Status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for parent cancellation")
+	}
+
+	if _, _, _, err := st.ReleaseAndNotify(context.Background(),
+		"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release external holder: %v", err)
+	}
+	select {
+	case <-childDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-queued-await-remaining-budget-key",
+		HolderID: "external-remaining-budget-holder/-",
+		RunID:    "external-remaining-budget-holder",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("external acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	}
+
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-remaining-budget-parent",
+			RunID:    "queued-await-remaining-budget-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-remaining-budget-parent", "spawn", "plan-level-queued-await-remaining-budget-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-remaining-budget-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-remaining-budget-parent",
+		})
+		childDone <- res
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-remaining-budget-key"); err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == childID && waiter.NodeID == "" {
+					goto childQueued
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
+
+childQueued:
+	time.Sleep(250 * time.Millisecond)
+
+	select {
+	case parent := <-parentDone:
+		t.Fatalf("parent finished while child was queued for plan admission: status=%q err=%v", parent.Status, parent.Error)
+	default:
+	}
+
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		"g:plan-level-queued-await-remaining-budget-key", "external-remaining-budget-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release external holder: %v", err)
+	}
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "failed" {
+			t.Fatalf("parent status = %q, want failed after remaining timeout budget is spent", parent.Status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	select {
+	case child := <-childDone:
+		if child.Status != "success" {
+			t.Fatalf("child status = %q, want success (err=%v)", child.Status, child.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-queued-await-early-resume-key",
+		HolderID: "external-early-resume-holder/-",
+		RunID:    "external-early-resume-holder",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("external acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	}
+
+	startedAt := time.Now()
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-early-resume-parent",
+			RunID:    "queued-await-early-resume-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-early-resume-parent", "spawn", "plan-level-queued-await-early-resume-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-early-resume-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-early-resume-parent",
+		})
+		childDone <- res
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-early-resume-key"); err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == childID && waiter.NodeID == "" {
+					goto childQueued
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
+
+childQueued:
+	time.Sleep(700 * time.Millisecond)
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		"g:plan-level-queued-await-early-resume-key", "external-early-resume-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release external holder: %v", err)
+	}
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "success" {
+			t.Fatalf("parent status = %q, want success after pre-deadline admission wait (err=%v)", parent.Status, parent.Error)
+		}
+		if elapsed := time.Since(startedAt); elapsed < time.Second {
+			t.Fatalf("parent elapsed = %s, want completion after original wall-clock timeout", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	select {
+	case child := <-childDone:
+		if child.Status != "success" {
+			t.Fatalf("child status = %q, want success (err=%v)", child.Status, child.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key:      "g:plan-level-queued-await-missed-promotion-key",
+		HolderID: "external-missed-promotion-holder/-",
+		RunID:    "external-missed-promotion-holder",
+		Capacity: 1,
+		Policy:   store.OnLimitQueue,
+	})
+	if err != nil {
+		t.Fatalf("external acquire: %v", err)
+	}
+	if resp.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	}
+
+	startedAt := time.Now()
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-missed-promotion-parent",
+			RunID:    "queued-await-missed-promotion-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-missed-promotion-parent", "spawn", "plan-level-queued-await-missed-promotion-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-missed-promotion-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-missed-promotion-parent",
+		})
+		childDone <- res
+	}()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-missed-promotion-key"); err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == childID && waiter.NodeID == "" {
+					goto childQueued
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
+
+childQueued:
+	time.Sleep(350 * time.Millisecond)
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		"g:plan-level-queued-await-missed-promotion-key", "external-missed-promotion-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release external holder: %v", err)
+	}
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "success" {
+			t.Fatalf("parent status = %q, want success after missed promotion accounting (err=%v)", parent.Status, parent.Error)
+		}
+		if elapsed := time.Since(startedAt); elapsed < 700*time.Millisecond {
+			t.Fatalf("parent elapsed = %s, want completion after original wall-clock timeout", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	select {
+	case child := <-childDone:
+		if child.Status != "success" {
+			t.Fatalf("child status = %q, want success (err=%v)", child.Status, child.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	for _, key := range []string{"g:plan-level-queued-await-multi-key-a", "g:plan-level-queued-await-multi-key-b"} {
+		resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+			Key:      key,
+			HolderID: "external-" + key + "/-",
+			RunID:    "external-" + key,
+			Capacity: 1,
+			Policy:   store.OnLimitQueue,
+		})
+		if err != nil {
+			t.Fatalf("external acquire %s: %v", key, err)
+		}
+		if resp.Kind != store.AcquireGranted {
+			t.Fatalf("external acquire %s = %s, want granted", key, resp.Kind)
+		}
+	}
+
+	startedAt := time.Now()
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-queued-await-multi-key-parent",
+			RunID:    "queued-await-multi-key-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-multi-key-parent", "spawn", "plan-level-queued-await-multi-key-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for queued child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-queued-await-multi-key-child",
+			RunID:       childID,
+			ParentRunID: "queued-await-multi-key-parent",
+		})
+		childDone <- res
+	}()
+	waitForPlanWaiter := func(key string) {
+		t.Helper()
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+			if state, err := st.GetConcurrencyState(ctx, key); err == nil {
+				for _, waiter := range state.Waiters {
+					if waiter.RunID == childID && waiter.NodeID == "" {
+						return
+					}
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for child %q to queue for %s", childID, key)
+	}
+
+	keyA := "g:plan-level-queued-await-multi-key-a"
+	keyB := "g:plan-level-queued-await-multi-key-b"
+	waitForPlanWaiter(keyA)
+	time.Sleep(200 * time.Millisecond)
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		keyA, "external-"+keyA+"/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release key A holder: %v", err)
+	}
+	waitForPlanWaiter(keyB)
+	time.Sleep(200 * time.Millisecond)
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		keyB, "external-"+keyB+"/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release key B holder: %v", err)
+	}
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "success" {
+			t.Fatalf("parent status = %q, want success after multi-key admission accounting (err=%v)", parent.Status, parent.Error)
+		}
+		if elapsed := time.Since(startedAt); elapsed < 500*time.Millisecond {
+			t.Fatalf("parent elapsed = %s, want completion after original wall-clock timeout", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	select {
+	case child := <-childDone:
+		if child.Status != "success" {
+			t.Fatalf("child status = %q, want success (err=%v)", child.Status, child.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.T) {
+	resetCacheCounter()
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	parentDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline: "plan-level-slow-plan-await-parent",
+			RunID:    "slow-plan-await-parent",
+		})
+		parentDone <- res
+	}()
+
+	var childID string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		childID, err = st.FindSpawnedChildTriggerID(ctx, "slow-plan-await-parent", "spawn", "plan-level-slow-plan-await-child")
+		if err == nil && childID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if childID == "" {
+		t.Fatal("timed out waiting for slow-plan child trigger")
+	}
+	claimManualChildTrigger(t, ctx, st, childID)
+	childDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+			Pipeline:    "plan-level-slow-plan-await-child",
+			RunID:       childID,
+			ParentRunID: "slow-plan-await-parent",
+		})
+		childDone <- res
+	}()
+
+	select {
+	case parent := <-parentDone:
+		if parent.Status != "failed" {
+			t.Fatalf("parent status = %q, want failed while child is still planning", parent.Status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for parent timeout")
+	}
+	select {
+	case <-childDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child after slow planning")
 	}
 }
 

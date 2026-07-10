@@ -43,16 +43,16 @@ The data and most of the plumbing are already here:
 - **HTTP endpoint** (`pkg/controller/concurrency.go:208`):
   `GET /api/v1/concurrency/{key}/state` already exposes that state.
 
-So Pace's "a small wing-side query keyed by namespace" is, in effect,
-already shipped -- the waiters list is ordered, so a caller can already
-derive position by index. What is missing is making it *effortless*
-(position computed for you) and *push-based* (in the wait event, so a
-wrapper or the dashboard need not poll).
+The small query keyed by namespace is, in effect, already shipped: the
+waiters list is ordered, so a caller can already derive position by
+index. What is missing is making it *effortless* (position computed for
+you) and *push-based* (in the wait event, so a wrapper or the dashboard
+need not poll).
 
 ## Design
 
-Pace offered two avenues -- "on AcquireSlot, or a small wing-side
-query." Both already have their plumbing; we finish both, cheaply.
+There are two natural surfaces: the acquire response and the synchronous
+state query. Both already have their plumbing; we finish both, cheaply.
 
 ### 1. Enrich the acquire response, then the wait event
 
@@ -102,8 +102,8 @@ GET /api/v1/concurrency/{key}/waiter/{run}/{node}  # optional: just this waiter'
 
 - **CLI:** `sparkwing concurrency status <namespace>`, backed by the
   existing endpoint, rendering holders + the ordered queue so an
-  operator (and Pace's wrapper) gets "queued for `<ns>`: 2 ahead, held
-  by `<run>/<node>`" without hand-rolling.
+  operator sees "queued for `<ns>`: 2 ahead, held by `<run>/<node>`"
+  without hand-rolling.
 - **Dashboard:** populate the node's `StatusDetail`
   (`pkg/store/store.go:1399`, "phase string for the dashboard") from the
   enriched `concurrency_wait` event, so a queued node renders its

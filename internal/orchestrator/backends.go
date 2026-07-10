@@ -87,6 +87,7 @@ type NodeLog interface {
 // heartbeats that surface the supersede signal.
 type ConcurrencyBackend interface {
 	AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
+	State(ctx context.Context, key string) (*store.ConcurrencyState, error)
 	ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error)
 	HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 	ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
@@ -548,6 +549,10 @@ type localConcurrency struct {
 
 func (l localConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	return l.st.AcquireConcurrencySlot(ctx, req)
+}
+
+func (l localConcurrency) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
+	return l.st.GetConcurrencyState(ctx, key)
 }
 
 func (l localConcurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {

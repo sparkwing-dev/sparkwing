@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -233,18 +234,107 @@ func RunNodeOnce(
 				}
 			}
 			pollCtx := innerCtx
+			parentCtx := nodeParentContextFromContext(innerCtx)
 			if req.Timeout > 0 {
 				var cancel context.CancelFunc
 				pollCtx, cancel = context.WithTimeout(innerCtx, req.Timeout)
 				defer cancel()
 			}
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
+			timeoutPausedForAdmission := false
+			timeoutAdjustedForAdmission := false
+			var admissionStatusErr error
+			nodeTimeout := nodeTimeoutControllerFromContext(innerCtx)
+			var admissionMu sync.Mutex
+			updateTimeoutForAdmission := func(statusCtx context.Context) {
+				if req.Timeout > 0 || nodeTimeout == nil || nodeTimeoutDurationFromContext(innerCtx) <= 0 {
+					return
+				}
+				if statusCtx.Err() != nil {
+					return
+				}
+				admission, statusErr := childPlanAdmissionStatusForRun(statusCtx, stateClient, backends.Concurrency, childRunID)
+				admissionMu.Lock()
+				defer admissionMu.Unlock()
+				if timeoutAdjustedForAdmission {
+					return
+				}
+				if statusErr != nil {
+					if timeoutPausedForAdmission {
+						admissionStatusErr = statusErr
+					}
+					return
+				}
+				switch admission.Status {
+				case childPlanAdmissionQueued:
+					if timeoutPausedForAdmission {
+						return
+					}
+					if nodeTimeout.pauseAt(admission.QueuedAt) {
+						timeoutPausedForAdmission = true
+						logger.Info("child run queued for plan admission; pausing parent node timeout until admission",
+							"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
+					}
+				case childPlanAdmissionAdmitted:
+					if timeoutPausedForAdmission {
+						if nodeTimeout.resumeAt(admission.AdmittedAt) {
+							timeoutPausedForAdmission = false
+							timeoutAdjustedForAdmission = true
+							logger.Info("child run left plan admission; parent node timeout resumed",
+								"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
+						}
+						return
+					}
+					if admission.QueuedAt.IsZero() || admission.AdmittedAt.IsZero() {
+						return
+					}
+					if nodeTimeout.accountCompletedAdmission(admission.QueuedAt, admission.AdmittedAt) {
+						timeoutAdjustedForAdmission = true
+						logger.Info("child run completed plan admission; parent node timeout adjusted",
+							"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
+					}
+				}
+			}
+			admissionPauseActive := func() bool {
+				admissionMu.Lock()
+				defer admissionMu.Unlock()
+				return timeoutPausedForAdmission
+			}
+			currentAdmissionStatusErr := func() error {
+				admissionMu.Lock()
+				defer admissionMu.Unlock()
+				return admissionStatusErr
+			}
+			admissionDeadlineHandled := func() bool {
+				inspectCtx, cancel := context.WithTimeout(parentCtx, childAdmissionInspectorTimeout)
+				defer cancel()
+				updateTimeoutForAdmission(inspectCtx)
+				admissionMu.Lock()
+				defer admissionMu.Unlock()
+				return timeoutPausedForAdmission || timeoutAdjustedForAdmission
+			}
+			if nodeTimeout != nil && req.Timeout == 0 {
+				clearInspector := nodeTimeout.setDeadlineInspector(admissionDeadlineHandled)
+				defer clearInspector()
+			}
 			for {
+				updateTimeoutForAdmission(parentCtx)
+				if statusErr := currentAdmissionStatusErr(); statusErr != nil {
+					emitChildFinish("failed", statusErr.Error())
+					return nil, fmt.Errorf("child %s plan admission status: %w", childRunID, statusErr)
+				}
 				run, err := stateClient.GetRun(pollCtx, childRunID)
 				if err == nil {
 					switch run.Status {
 					case "success":
+						updateTimeoutForAdmission(parentCtx)
+						if err := pollCtx.Err(); err != nil {
+							emitChildFinish("timeout", err.Error())
+							return nil, fmt.Errorf("waiting for child %s: %w", childRunID, err)
+						}
+						if deadline, ok := pollCtx.Deadline(); ok && time.Now().After(deadline) {
+							emitChildFinish("timeout", context.DeadlineExceeded.Error())
+							return nil, fmt.Errorf("waiting for child %s: %w", childRunID, context.DeadlineExceeded)
+						}
 						emitChildFinish("success", "")
 						if req.NodeID == "" {
 							return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
@@ -262,11 +352,17 @@ func RunNodeOnce(
 						return nil, fmt.Errorf("child run %s was cancelled", childRunID)
 					}
 				}
+				updateTimeoutForAdmission(parentCtx)
+				if statusErr := currentAdmissionStatusErr(); statusErr != nil {
+					emitChildFinish("failed", statusErr.Error())
+					return nil, fmt.Errorf("child %s plan admission status: %w", childRunID, statusErr)
+				}
 				select {
 				case <-pollCtx.Done():
+					updateTimeoutForAdmission(parentCtx)
 					emitChildFinish("timeout", pollCtx.Err().Error())
 					return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
-				case <-ticker.C:
+				case <-time.After(childAwaitPollInterval(pollCtx, admissionPauseActive())):
 				}
 			}
 		},
