@@ -46,6 +46,7 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) Close() error
+func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
 func (c *Client) CreateNode(ctx context.Context, n store.Node) error
@@ -131,6 +132,14 @@ func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
+type ConcurrencyState struct {
+	Key               string
+	Capacity          int
+	EffectiveCapacity int
+	UsedCost          int
+	Holders           []WaiterHolder
+	Waiters           []StateWaiter
+}
 type GitMeta struct {
 	Branch      string
 	SHA         string
@@ -156,6 +165,19 @@ type Secret struct {
 	CreatedAt int64
 	UpdatedAt int64
 }
+type StateWaiter struct {
+	RunID         string
+	NodeID        string
+	ArrivedAt     time.Time
+	Policy        string
+	CacheKeyHash  string
+	LeaderRunID   string
+	LeaderNodeID  string
+	CancelTimeout string
+	Cost          int
+	Position      int
+}
+func (w StateWaiter) CancelTimeoutDuration() time.Duration
 type TriggerMeta struct {
 	Source string
 	User   string
@@ -190,6 +212,7 @@ type WaiterHolder struct {
 	RunID          string
 	NodeID         string
 	ClaimedAt      time.Time
+	QueueArrivedAt *time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
 	Cost           int

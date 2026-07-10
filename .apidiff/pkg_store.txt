@@ -69,6 +69,7 @@ type ConcurrencyHolder struct {
 	RunID          string
 	NodeID         string
 	ClaimedAt      time.Time
+	QueueArrivedAt time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
 
