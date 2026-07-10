@@ -26,6 +26,8 @@ import (
 // Cluster-mode subcommands live in cluster.Main to keep heavy deps
 // out of consumer pipeline binaries.
 func Main() {
+	projectCfg := bindProjectPipelines()
+
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {
 		described, err := sparkwingruntime.DescribeAll()
 		if err != nil {
@@ -106,14 +108,6 @@ func Main() {
 				os.Exit(1)
 			}
 			return
-		}
-	}
-
-	var projectCfg *projectconfig.Config
-	if cwd, err := os.Getwd(); err == nil {
-		if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
-			sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
-			projectCfg = cfg
 		}
 	}
 
@@ -246,6 +240,26 @@ func Main() {
 		releaseBoxSlot()
 		os.Exit(1)
 	}
+}
+
+// bindProjectPipelines discovers the project config from the working
+// directory and binds its YAML pipeline entries into the registry, so a
+// typed-Args entrypoint resolves by its pipeline name for every
+// subcommand -- --describe, `<pipeline> --help|--explain|--plan`, and
+// config inspect all run before the plain-run path would otherwise
+// bind. Binding is best-effort and idempotent: a missing or malformed
+// config yields a nil result and never blocks dispatch.
+func bindProjectPipelines() *projectconfig.Config {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	_, cfg, err := projectconfig.Discover(cwd)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
+	return cfg
 }
 
 // selectLocalRenderer chooses the live delegate based on
