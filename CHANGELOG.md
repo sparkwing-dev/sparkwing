@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** Local runs that declare plan-level concurrency now release
+  their provisional `box-slots` holder while queued for plan admission, so
+  queued runs do not consume a host execution slot before their first node can
+  dispatch.
 
 ## [v0.15.5] - 2026-07-10
 ### Fixed
