@@ -20,6 +20,8 @@ output=pretty
 spec=""
 
 while [[ $# -gt 0 ]]; do
+  # --live's generator=command is a literal mode value, not a substitution.
+  # shellcheck disable=SC2209
   case "$1" in
     --live) generator=command ;;
     --json) output=json ;;
