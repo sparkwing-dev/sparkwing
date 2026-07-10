@@ -30,6 +30,10 @@ type Plan struct {
 	// content cache.
 	planConcurrency []PlanConcurrency
 
+	// resources is the whole-run cold-start cost hint set declared via
+	// Plan.Resources; nil when the plan declared none.
+	resources *ResourceHints
+
 	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
 
@@ -442,6 +446,10 @@ type JobNode struct {
 	// The two are independent: a node may set either, both, or neither.
 	contentCache *CacheConfig
 	concurrency  *concurrencyMembership
+
+	// resources is the node's cold-start cost hint set declared via
+	// JobNode.Resources; nil when the node declared none.
+	resources *ResourceHints
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn

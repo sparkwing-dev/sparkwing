@@ -1,0 +1,116 @@
+# pkg/wingwire
+
+type AdmissionRequest struct {
+	RunID string
+
+	Resources  HostResources
+	Semaphores []SemaphoreClaim
+
+	ParentLeaseToken string
+}
+func Decode(line []byte) (Message, error)
+type DrainAck struct {
+	HoldersRemaining int
+}
+type DrainRequest struct {
+	SuccessorVersion string
+}
+func Encode(m Message) ([]byte, error)
+type Envelope struct {
+	Type    MessageType
+	Payload json.RawMessage
+}
+type Evicted struct {
+	RunID string
+	Key   string
+
+	SupersededBy string
+	Policy       Policy
+}
+type Grant struct {
+	RunID      string
+	LeaseToken string
+
+	Resources HostResources
+}
+type Hello struct {
+	ProtocolMajor int
+	BinaryVersion string
+}
+type HelloAck struct {
+	ProtocolMajor int
+	BinaryVersion string
+	Draining      bool
+}
+type Holder struct {
+	RunID string
+
+	ElapsedMS int64
+
+	Resources HostResources
+
+	Semaphores []string
+}
+type HostResources struct {
+	Cores float64
+
+	MemoryBytes int64
+}
+const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN"
+type Message interface {
+	wireType() MessageType
+}
+type MessageType string
+type Policy string
+const PolicyCancelOthers Policy = "cancel_others"
+const PolicyFail Policy = "fail"
+const PolicyQueue Policy = "queue"
+const PolicySkip Policy = "skip"
+const ProtocolMajor = 1
+type QueueState struct {
+	Resources []ResourceState
+	Holders   []Holder
+	Waiters   []Waiter
+}
+type Queued struct {
+	RunID string
+	Key   string
+
+	Position    int
+	QueueLength int
+}
+type Reattach struct {
+	LeaseToken string
+}
+type Release struct {
+	LeaseToken string
+}
+type ResourceState struct {
+	Key      string
+	Capacity float64
+	Held     float64
+}
+type SemaphoreClaim struct {
+	Name     string
+	Cost     int
+	Capacity int
+	Policy   Policy
+
+	QueueTimeoutMS int64
+}
+const TypeAdmissionRequest MessageType = "admission_request"
+const TypeDrainAck MessageType = "drain_ack"
+const TypeDrainRequest MessageType = "drain_request"
+const TypeEvicted MessageType = "evicted"
+const TypeGrant MessageType = "grant"
+const TypeHello MessageType = "hello"
+const TypeHelloAck MessageType = "hello_ack"
+const TypeQueueState MessageType = "queue_state"
+const TypeQueued MessageType = "queued"
+const TypeReattach MessageType = "reattach"
+const TypeRelease MessageType = "release"
+type Waiter struct {
+	RunID      string
+	Resources  HostResources
+	Semaphores []string
+}

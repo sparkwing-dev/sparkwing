@@ -703,6 +703,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers biases runner selection for every member.
 - `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes (success or failure).
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires restricts every member to runners advertising the given labels.
+- `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources declares the same cold-start cost hints on every member of the group.
 - `func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup` -- Retry configures every member to be re-attempted up to attempts additional times on failure.
 - `func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup` -- SkipIf registers a predicate on every member.
 - `func (g *JobGroup) Timeout(d time.Duration) *JobGroup` -- Timeout caps the per-attempt duration on every member.
@@ -758,6 +759,8 @@ type JobNode struct {
 - `func (n *JobNode) PrefersLabels() []string` -- PrefersLabels returns the terms declared via Prefers.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires restricts this job to runners advertising every term in the given set.
 - `func (n *JobNode) RequiresLabels() []string` -- RequiresLabels returns the terms declared via Requires.
+- `func (n *JobNode) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the cost hints declared via JobNode.Resources, or nil when the node declared none.
+- `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources declares optional cold-start cost hints for this node: the estimated peak CPU and memory the node's work occupies while it runs.
 - `func (n *JobNode) ResultStep() *WorkStep` -- ResultStep returns the *WorkStep the Job designated as its typed output via Work's return value, or nil for untyped Jobs.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
 - `func (n *JobNode) RetryConfig() RetryConfig` -- RetryConfig returns the resolved retry envelope.
@@ -932,6 +935,8 @@ type Plan struct {
 - `func (p *Plan) Nodes() []*JobNode` -- Nodes returns the plan's nodes in insertion order.
 - `func (p *Plan) PlanConcurrency() []PlanConcurrency` -- PlanConcurrency returns every whole-run gate declared via Plan.Concurrency.
 - `func (p *Plan) ResolvedArgs() map[string]any` -- ResolvedArgs returns the merged map of every job's typed-args resolution result, keyed by CLI flag name.
+- `func (p *Plan) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the plan-level cost hints declared via Plan.Resources, or nil when the plan declared none.
+- `func (p *Plan) Resources(hints ...ResourceHint) *Plan` -- Resources declares optional cold-start cost hints for the whole run: the estimated peak CPU and memory the run occupies on its host while admission has no measured profile for the pipeline yet.
 - `func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg` -- TransitiveArgsSurface returns the deduplicated map of every flag the plan exposes (across all its jobs that declare args), keyed by flag name with the owning job id.
 
 ### type PlanConcurrency
@@ -1155,6 +1160,35 @@ ResolvedPipelineRef is what a PipelineResolver returns: the source run id (for a
 type ResolvedPipelineRef struct {
     RunID string
     Data  []byte
+}
+```
+
+
+### type ResourceHint
+
+ResourceHint is one option for Plan.Resources or JobNode.Resources.
+
+```
+type ResourceHint func(*ResourceHints)
+```
+
+- `func Cores(n float64) ResourceHint` -- Cores hints that the work peaks at n CPU cores.
+- `func MemoryGB(n float64) ResourceHint` -- MemoryGB hints that the work peaks at n gigabytes of resident memory, where one gigabyte is 2^30 bytes.
+
+### type ResourceHints
+
+ResourceHints is the resolved set of cold-start cost hints declared via Plan.Resources or JobNode.Resources.
+
+```
+type ResourceHints struct {
+    // Cores is the estimated peak number of CPU cores the work uses.
+    // Fractional values are meaningful (0.5 = half a core). Zero means
+    // no hint was given for cores.
+    Cores float64
+    // MemoryBytes is the estimated peak resident memory in bytes.
+    // Authors express this via [MemoryGB]; it is stored in bytes. Zero
+    // means no hint was given for memory.
+    MemoryBytes int64
 }
 ```
 

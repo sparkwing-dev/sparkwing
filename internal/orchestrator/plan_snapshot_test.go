@@ -271,3 +271,60 @@ func TestMarshalPlanSnapshot_RendersSpawnEachTemplate(t *testing.T) {
 		t.Errorf("synthetic id missing: %q", se.ID)
 	}
 }
+
+func TestMarshalPlanSnapshot_CarriesResourceHints(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Resources(sparkwing.Cores(4), sparkwing.MemoryGB(8))
+	sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil }).
+		Resources(sparkwing.Cores(2), sparkwing.MemoryGB(1))
+	sparkwing.Job(plan, "plain", func(ctx context.Context) error { return nil })
+
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatalf("marshalPlanSnapshot: %v", err)
+	}
+	var snap planSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if snap.Resources == nil {
+		t.Fatal("plan_resources missing from snapshot")
+	}
+	if snap.Resources.Cores != 4 {
+		t.Errorf("plan Cores = %v, want 4", snap.Resources.Cores)
+	}
+	if want := int64(8 * (1 << 30)); snap.Resources.MemoryBytes != want {
+		t.Errorf("plan MemoryBytes = %d, want %d", snap.Resources.MemoryBytes, want)
+	}
+
+	byID := map[string]snapshotNode{}
+	for _, n := range snap.Nodes {
+		byID[n.ID] = n
+	}
+	m := byID["build"].Modifiers
+	if m == nil {
+		t.Fatal("build node lost its modifiers")
+	}
+	if m.ResCores != 2 {
+		t.Errorf("node ResCores = %v, want 2", m.ResCores)
+	}
+	if want := int64(1 << 30); m.ResMemoryBytes != want {
+		t.Errorf("node ResMemoryBytes = %d, want %d", m.ResMemoryBytes, want)
+	}
+	if byID["plain"].Modifiers != nil {
+		t.Errorf("plain node grew modifiers: %+v", byID["plain"].Modifiers)
+	}
+}
+
+func TestMarshalPlanSnapshot_OmitsResourcesWhenUndeclared(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil })
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatalf("marshalPlanSnapshot: %v", err)
+	}
+	if strings.Contains(string(raw), "plan_resources") {
+		t.Errorf("snapshot emitted plan_resources for an undeclared plan: %s", raw)
+	}
+}

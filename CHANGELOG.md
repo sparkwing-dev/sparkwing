@@ -47,6 +47,23 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `Plan.Resources(...)` and `JobNode.Resources(...)` (plus the
+  `JobGroup` equivalent) declare optional cold-start cost hints via
+  `sparkwing.Cores(n)` and `sparkwing.MemoryGB(n)`: advisory estimates of
+  peak CPU and memory that admission uses before a measured profile
+  exists for the pipeline. Hints flow into the plan snapshot; they are
+  never limits, and pipelines that declare none keep today's behavior.
+- **wire:** New `pkg/wingwire` package defines the versioned JSON wire
+  protocol (newline-delimited JSON) shared by the upcoming local
+  admission daemon and its clients: version handshake, all-or-nothing
+  admission request/grant, queue-position and eviction events, lease
+  release/re-attach, drain handshake, and a queue-state snapshot. It
+  also defines `SPARKWING_LEASE_TOKEN`, the single environment variable
+  a parent run will use to pass its lease to child runs. Data types
+  only -- the daemon and its transport ship separately.
+
 ### Fixed
 
 - **cli:** A pipeline scaffolded by a source-built `sparkwing` (one with no

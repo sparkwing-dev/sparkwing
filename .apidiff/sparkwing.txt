@@ -105,6 +105,7 @@ type ConsumeEdge struct {
 	Into     string
 }
 type ConsumeOption func(*consumeEdge)
+func Cores(n float64) ResourceHint
 func CurrentRuntime() RuntimeConfig
 func Custom(fn any) Constraint
 func Debug(ctx context.Context, format string, args ...any)
@@ -296,6 +297,7 @@ func (g *JobGroup) Outputs(globs ...string) *JobGroup
 func (g *JobGroup) Prefers(labels ...string) *JobGroup
 func (g *JobGroup) Ready() <-chan struct{}
 func (g *JobGroup) Requires(labels ...string) *JobGroup
+func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup
 func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup
 func (g *JobGroup) Timeout(d time.Duration) *JobGroup
@@ -340,6 +342,8 @@ func (n *JobNode) Prefers(labels ...string) *JobNode
 func (n *JobNode) PrefersLabels() []string
 func (n *JobNode) Requires(labels ...string) *JobNode
 func (n *JobNode) RequiresLabels() []string
+func (n *JobNode) ResourceHints() *ResourceHints
+func (n *JobNode) Resources(hints ...ResourceHint) *JobNode
 func (n *JobNode) ResultStep() *WorkStep
 func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode
 func (n *JobNode) RetryConfig() RetryConfig
@@ -381,6 +385,7 @@ func Lookup(name string) (*Registration, bool)
 func Max(v any) Constraint
 func MaxAge(d time.Duration) RefOption
 const MaxCacheTTL = 35 * 24 * time.Hour
+func MemoryGB(n float64) ResourceHint
 func Min(v any) Constraint
 func MustConfig(ctx context.Context, name string) string
 func MustSecret(ctx context.Context, name string) string
@@ -436,6 +441,8 @@ func (p *Plan) LintWarnings() []LintWarning
 func (p *Plan) Nodes() []*JobNode
 func (p *Plan) PlanConcurrency() []PlanConcurrency
 func (p *Plan) ResolvedArgs() map[string]any
+func (p *Plan) ResourceHints() *ResourceHints
+func (p *Plan) Resources(hints ...ResourceHint) *Plan
 func (p *Plan) TransitiveArgsSurface() map[string]TransitiveArg
 type PlanConcurrency struct {
 	Group *ConcurrencyGroup
@@ -515,6 +522,12 @@ type ResolveInputs struct {
 type ResolvedPipelineRef struct {
 	RunID string
 	Data  []byte
+}
+type ResourceHint func(*ResourceHints)
+type ResourceHints struct {
+	Cores float64
+
+	MemoryBytes int64
 }
 func RetryAuto() RetryOption
 func RetryBackoff(d time.Duration) RetryOption

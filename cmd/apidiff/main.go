@@ -56,6 +56,7 @@ var packagePaths = []string{
 	"pkg/storage/stdoutlogs",
 	"pkg/storage/storeurl",
 	"pkg/store",
+	"pkg/wingwire",
 }
 
 func main() {

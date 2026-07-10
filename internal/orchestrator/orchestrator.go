@@ -2708,6 +2708,10 @@ type planSnapshot struct {
 	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
 	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
 
+	// Resources is the plan-level cold-start cost hint set declared via
+	// Plan.Resources; nil when the pipeline declared none.
+	Resources *snapshotResources `json:"plan_resources,omitempty"`
+
 	// Secrets is the typed declaration the pipelines.yaml file
 	// shipped (name + required/optional). The cluster pod uses it
 	// to drive ResolvePipelineSecrets against the pod's existing
@@ -2737,6 +2741,13 @@ type snapshotNode struct {
 type snapshotConc struct {
 	Key           string `json:"key,omitempty"`
 	HostAdmission bool   `json:"host_admission,omitempty"`
+}
+
+// snapshotResources is the wire shape of a ResourceHints declaration:
+// advisory peak-usage estimates for admission, never limits.
+type snapshotResources struct {
+	Cores       float64 `json:"cores,omitempty"`
+	MemoryBytes int64   `json:"memory_bytes,omitempty"`
 }
 
 // snapshotApproval is the wire shape of an approval gate's prompt +
@@ -2771,13 +2782,17 @@ type snapshotModifiers struct {
 	ConcOnLimit         string `json:"conc_on_limit,omitempty"`
 	ConcQueueTimeoutMS  int64  `json:"conc_queue_timeout_ms,omitempty"`
 	ConcCancelTimeoutMS int64  `json:"conc_cancel_timeout_ms,omitempty"`
-	Inline              bool   `json:"inline,omitempty"`
-	Optional            bool   `json:"optional,omitempty"`
-	ContinueOnError     bool   `json:"continue_on_error,omitempty"`
-	OnFailure           string `json:"on_failure,omitempty"`
-	HasBeforeRun        bool   `json:"has_before_run,omitempty"`
-	HasAfterRun         bool   `json:"has_after_run,omitempty"`
-	HasSkipIf           bool   `json:"has_skip_if,omitempty"`
+	// Resource hints (JobNode.Resources): advisory peak-usage
+	// estimates for admission. Independent of concurrency groups.
+	ResCores        float64 `json:"res_cores,omitempty"`
+	ResMemoryBytes  int64   `json:"res_memory_bytes,omitempty"`
+	Inline          bool    `json:"inline,omitempty"`
+	Optional        bool    `json:"optional,omitempty"`
+	ContinueOnError bool    `json:"continue_on_error,omitempty"`
+	OnFailure       string  `json:"on_failure,omitempty"`
+	HasBeforeRun    bool    `json:"has_before_run,omitempty"`
+	HasAfterRun     bool    `json:"has_after_run,omitempty"`
+	HasSkipIf       bool    `json:"has_skip_if,omitempty"`
 }
 
 // snapshotWork is the wire shape of a Job's inner DAG.
@@ -2856,6 +2871,12 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 			Key:           scopedGroupKey(membership.Group, rc.RunID),
 			HostAdmission: membership.Group.Limit().HostAdmission,
 		})
+	}
+	if rh := p.ResourceHints(); rh != nil {
+		snap.Resources = &snapshotResources{
+			Cores:       rh.Cores,
+			MemoryBytes: rh.MemoryBytes,
+		}
 	}
 	walker := newWorkWalker()
 	seen := make(map[string]bool)
@@ -3011,6 +3032,10 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 		m.ConcQueueTimeoutMS = limit.QueueTimeout.Milliseconds()
 		m.ConcCancelTimeoutMS = limit.CancelTimeout.Milliseconds()
 	}
+	if rh := n.ResourceHints(); rh != nil {
+		m.ResCores = rh.Cores
+		m.ResMemoryBytes = rh.MemoryBytes
+	}
 	if isZeroModifiers(m) {
 		return nil
 	}
@@ -3035,6 +3060,8 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		m.ConcOnLimit == "" &&
 		m.ConcQueueTimeoutMS == 0 &&
 		m.ConcCancelTimeoutMS == 0 &&
+		m.ResCores == 0 &&
+		m.ResMemoryBytes == 0 &&
 		!m.Inline &&
 		!m.Optional &&
 		!m.ContinueOnError &&
