@@ -125,7 +125,7 @@ type AwaitOption func(*awaitConfig)
 - `func WithFreshBranch(branch string) AwaitOption` -- WithFreshBranch overrides the branch the spawned trigger runs against.
 - `func WithFreshInputs[T any](in T) AwaitOption` -- WithFreshInputs flattens a typed Inputs struct into the underlying args map.
 - `func WithFreshRepo(repo string) AwaitOption` -- WithFreshRepo declares which repo the spawned pipeline lives in (e.g.
-- `func WithFreshTimeout(d time.Duration) AwaitOption` -- WithFreshTimeout bounds the total wait.
+- `func WithFreshTimeout(d time.Duration) AwaitOption` -- WithFreshTimeout bounds the total wait, including admission queue time.
 
 ### type AwaitRequest
 
