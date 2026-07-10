@@ -121,6 +121,78 @@ func TestController_WaiterNotifyMissingKeyEndsStream(t *testing.T) {
 	}
 }
 
+func TestController_ConcurrencyStateOmitsQueueArrivedAtForImmediateHolder(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "state-immediate-slot", HolderID: "holder", RunID: "holder", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); err != nil {
+		t.Fatalf("acquire holder: %v", err)
+	}
+
+	resp := mustGet(t, base+"/api/v1/concurrency/state-immediate-slot/state")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("state status=%d want 200", resp.StatusCode)
+	}
+	var body struct {
+		Holders []map[string]json.RawMessage `json:"holders"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(body.Holders) != 1 {
+		t.Fatalf("holders = %d, want 1", len(body.Holders))
+	}
+	if _, ok := body.Holders[0]["queue_arrived_at"]; ok {
+		t.Fatalf("immediate holder response includes queue_arrived_at: %+v", body.Holders[0])
+	}
+}
+
+func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "state-promoted-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); err != nil {
+		t.Fatalf("acquire leader: %v", err)
+	}
+	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "state-promoted-slot", HolderID: "waiter", RunID: "waiter", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); err != nil {
+		t.Fatalf("acquire waiter: %v", err)
+	}
+	if _, _, _, err := st.ReleaseAndNotify(ctx,
+		"state-promoted-slot", "leader", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatalf("release leader: %v", err)
+	}
+
+	resp := mustGet(t, base+"/api/v1/concurrency/state-promoted-slot/state")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("state status=%d want 200", resp.StatusCode)
+	}
+	var body struct {
+		Holders []map[string]json.RawMessage `json:"holders"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(body.Holders) != 1 {
+		t.Fatalf("holders = %d, want 1", len(body.Holders))
+	}
+	if _, ok := body.Holders[0]["queue_arrived_at"]; !ok {
+		t.Fatalf("promoted holder response omits queue_arrived_at: %+v", body.Holders[0])
+	}
+}
+
 func TestController_RunLifecycle(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()

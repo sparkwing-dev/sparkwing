@@ -79,6 +79,10 @@ func (*noopConcurrency) ObserveSlot(_ context.Context, key, holderID string) (*s
 	}, nil
 }
 
+func (*noopConcurrency) State(_ context.Context, key string) (*store.ConcurrencyState, error) {
+	return &store.ConcurrencyState{Key: key, Capacity: 1, EffectiveCapacity: 1}, nil
+}
+
 func (*noopConcurrency) ReleaseSlot(_ context.Context, _, _, _, _, _ string, _ time.Duration) error {
 	return nil
 }

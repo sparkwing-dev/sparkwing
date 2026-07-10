@@ -223,24 +223,29 @@ type stateResp struct {
 }
 
 type stateHolderResp struct {
-	HolderID       string    `json:"holder_id"`
-	RunID          string    `json:"run_id"`
-	NodeID         string    `json:"node_id,omitempty"`
-	ClaimedAt      time.Time `json:"claimed_at"`
-	LeaseExpiresAt time.Time `json:"lease_expires_at"`
-	Superseded     bool      `json:"superseded"`
-	Cost           int       `json:"cost,omitempty"`
+	HolderID       string     `json:"holder_id"`
+	RunID          string     `json:"run_id"`
+	NodeID         string     `json:"node_id,omitempty"`
+	ClaimedAt      time.Time  `json:"claimed_at"`
+	QueueArrivedAt *time.Time `json:"queue_arrived_at,omitempty"`
+	LeaseExpiresAt time.Time  `json:"lease_expires_at"`
+	Superseded     bool       `json:"superseded"`
+	Cost           int        `json:"cost,omitempty"`
 }
 
 // holderResp is the single mapping from a store holder to its wire
 // shape; every endpoint that returns holders goes through it so a new
 // field can't silently go missing from one response.
 func holderResp(h store.ConcurrencyHolder) stateHolderResp {
-	return stateHolderResp{
+	resp := stateHolderResp{
 		HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
 		ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
 		Superseded: h.Superseded, Cost: h.Cost,
 	}
+	if !h.QueueArrivedAt.IsZero() {
+		resp.QueueArrivedAt = &h.QueueArrivedAt
+	}
+	return resp
 }
 
 type stateWaiterResp struct {

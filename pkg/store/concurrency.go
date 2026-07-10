@@ -222,6 +222,7 @@ type ConcurrencyHolder struct {
 	RunID          string
 	NodeID         string
 	ClaimedAt      time.Time
+	QueueArrivedAt time.Time
 	LeaseExpiresAt time.Time
 	Superseded     bool
 
@@ -901,7 +902,7 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 		}
 		if err := txInsertHolder(ctx, tx, holderRow{
 			key: w.Key, holderID: newHolder, runID: w.RunID, nodeID: w.NodeID,
-			cost: c, declaredCapacity: dc,
+			cost: c, declaredCapacity: dc, queueArrivedNS: w.ArrivedAt.UnixNano(),
 		}, nowNS, expiresNS); err != nil {
 			return nil, err
 		}
@@ -1056,6 +1057,7 @@ type holderRow struct {
 	nodeID           string
 	cost             int
 	declaredCapacity int
+	queueArrivedNS   int64
 }
 
 // txInsertHolder mints the live holder row for an admission -- the
@@ -1079,18 +1081,19 @@ func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expire
 	res, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO concurrency_holders
-		   (key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+		   (key, holder_id, run_id, node_id, claimed_at, queue_arrived_at, lease_expires_at, superseded, cost, declared_capacity)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
 		 ON CONFLICT (key, holder_id) DO UPDATE SET
 		   run_id            = excluded.run_id,
 		   node_id           = excluded.node_id,
 		   claimed_at        = excluded.claimed_at,
+		   queue_arrived_at  = excluded.queue_arrived_at,
 		   lease_expires_at  = excluded.lease_expires_at,
 		   superseded        = 0,
 		   cost              = excluded.cost,
 		   declared_capacity = excluded.declared_capacity
 		 WHERE concurrency_holders.superseded = 1 OR concurrency_holders.lease_expires_at <= ?`,
-		h.key, h.holderID, h.runID, h.nodeID, nowNS, expiresNS, h.cost, h.declaredCapacity, nowNS,
+		h.key, h.holderID, h.runID, h.nodeID, nowNS, h.queueArrivedNS, expiresNS, h.cost, h.declaredCapacity, nowNS,
 	)
 	if err != nil {
 		return err
@@ -1298,15 +1301,15 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 // matched, plus the released holder's (runID, nodeID).
 func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
 	var supersededInt int
-	var leaseNS int64
+	var leaseNS, queueArrivedNS int64
 	var cost int
 	var declaredCapacity int
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT run_id, node_id, superseded, lease_expires_at, cost, declared_capacity
+		`SELECT run_id, node_id, superseded, lease_expires_at, queue_arrived_at, cost, declared_capacity
 		   FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		key, holderID,
-	).Scan(&runID, &nodeID, &supersededInt, &leaseNS, &cost, &declaredCapacity)
+	).Scan(&runID, &nodeID, &supersededInt, &leaseNS, &queueArrivedNS, &cost, &declaredCapacity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, "", "", nil
 	}
@@ -1321,8 +1324,20 @@ func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, o
 		}
 	}
 
-	if err := txDeleteHolder(ctx, tx, key, holderID); err != nil {
-		return false, "", "", err
+	if nodeID == "" && queueArrivedNS > 0 {
+		if err := txSupersede(ctx, tx, key, holderID); err != nil {
+			return false, "", "", err
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE concurrency_holders
+   SET lease_expires_at = ?, cost = 0
+ WHERE key = ? AND holder_id = ?`, now.UnixNano(), key, holderID); err != nil {
+			return false, "", "", err
+		}
+	} else {
+		if err := txDeleteHolder(ctx, tx, key, holderID); err != nil {
+			return false, "", "", err
+		}
 	}
 
 	if outcome == "success" && cacheKeyHash != "" && ttl > 0 {
@@ -2334,16 +2349,19 @@ func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error) {
 // holderColumns is the canonical SELECT column list for scanHolder, in
 // the exact order it scans. Centralized so the cost /
 // declared_capacity tail can't drift between call sites.
-const holderColumns = `key, holder_id, run_id, node_id, claimed_at, lease_expires_at, superseded, cost, declared_capacity`
+const holderColumns = `key, holder_id, run_id, node_id, claimed_at, queue_arrived_at, lease_expires_at, superseded, cost, declared_capacity`
 
 func scanHolder(rs rowScanner) (ConcurrencyHolder, error) {
 	var h ConcurrencyHolder
-	var claimedNS, expiresNS int64
+	var claimedNS, queueArrivedNS, expiresNS int64
 	var superInt int
-	if err := rs.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &expiresNS, &superInt, &h.Cost, &h.DeclaredCapacity); err != nil {
+	if err := rs.Scan(&h.Key, &h.HolderID, &h.RunID, &h.NodeID, &claimedNS, &queueArrivedNS, &expiresNS, &superInt, &h.Cost, &h.DeclaredCapacity); err != nil {
 		return ConcurrencyHolder{}, err
 	}
 	h.ClaimedAt = time.Unix(0, claimedNS)
+	if queueArrivedNS > 0 {
+		h.QueueArrivedAt = time.Unix(0, queueArrivedNS)
+	}
 	h.LeaseExpiresAt = time.Unix(0, expiresNS)
 	h.Superseded = superInt == 1
 	return h, nil

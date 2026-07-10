@@ -270,7 +270,9 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		attemptCtx := nodeCtx
 		var cancel context.CancelFunc
 		if timeout > 0 {
-			attemptCtx, cancel = context.WithTimeout(nodeCtx, timeout)
+			timeoutCtx := withNodeTimeoutDuration(nodeCtx, timeout)
+			timeoutCtx = withNodeParentContext(timeoutCtx, nodeCtx)
+			attemptCtx, cancel = newNodeTimeoutContext(timeoutCtx, timeout)
 		}
 		out, aerr := runJobBody(attemptCtx, node)
 		if aerr == nil {
