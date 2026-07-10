@@ -20,8 +20,6 @@ func TestCommandPromptPrependsRegistrationContract(t *testing.T) {
 }
 
 func TestCommandGeneratorReturnsStdoutAndCarriesContract(t *testing.T) {
-	// `cat` echoes the stdin payload back as the "source", so the output
-	// must contain the registration contract the generator prepends.
 	gen := CommandGenerator{Argv: []string{"cat"}}
 	out, err := gen.Generate(context.Background(), Spec{Name: "minimal", Entrypoint: "GenMinimal", Prompt: "body"})
 	if err != nil {

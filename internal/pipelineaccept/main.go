@@ -94,10 +94,6 @@ func run(ctx context.Context, opts options) (pipelinegen.Report, error) {
 			return pipelinegen.Report{}, err
 		}
 	}
-	// The expect=fail specs ship deliberately-bad fixture source to prove
-	// the linter rejects anti-patterns; asking a live author to reproduce
-	// an anti-pattern is not a cold-author test, so drop them for the
-	// command generator (and say how many, never silently).
 	if opts.generator == "command" {
 		specs = dropAntiPatterns(specs)
 	}
@@ -136,8 +132,11 @@ func exitCode(rep pipelinegen.Report) int {
 	return 0
 }
 
-// dropAntiPatterns returns the expect=pass specs, noting on stderr how
-// many expect=fail specs it skipped so a live run never silently narrows.
+// dropAntiPatterns returns the expect=pass specs. The expect=fail specs
+// ship deliberately-bad fixture source to prove the linter rejects
+// anti-patterns; asking a live author to reproduce an anti-pattern is not a
+// cold-author test, so the command generator drops them. It notes on stderr
+// how many it skipped so a live run never silently narrows.
 func dropAntiPatterns(specs []pipelinegen.Spec) []pipelinegen.Spec {
 	kept := make([]pipelinegen.Spec, 0, len(specs))
 	skipped := 0
