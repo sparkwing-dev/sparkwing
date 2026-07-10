@@ -1514,8 +1514,8 @@ childQueued:
 		if parent.Status != "failed" {
 			t.Fatalf("parent status = %q, want failed after remaining timeout budget is spent", parent.Status)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for parent after releasing queued child")
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for parent after releasing queued child; parent timeout may still be suppressed")
 	}
 	select {
 	case child := <-childDone:

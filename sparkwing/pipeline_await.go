@@ -115,10 +115,11 @@ type awaitConfig struct {
 	branch  string
 }
 
-// WithFreshTimeout bounds the total wait. On timeout RunAndAwait
-// returns an error; the spawned run continues to completion on the
-// controller's schedule (it's not cancelled). The default is unbounded
-// (rely on the caller's ctx deadline).
+// WithFreshTimeout bounds the total wait, including admission queue
+// time. On timeout RunAndAwait returns an error; the spawned run
+// continues to completion on the controller's schedule (it's not
+// cancelled). The default is unbounded (rely on the caller's ctx
+// deadline).
 func WithFreshTimeout(d time.Duration) AwaitOption {
 	return func(c *awaitConfig) { c.timeout = d }
 }

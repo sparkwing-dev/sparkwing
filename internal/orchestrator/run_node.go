@@ -245,34 +245,35 @@ func RunNodeOnce(
 			var admissionStatusErr error
 			nodeTimeout := nodeTimeoutControllerFromContext(innerCtx)
 			var admissionMu sync.Mutex
-			updateTimeoutForAdmission := func(statusCtx context.Context) {
+			updateTimeoutForAdmission := func(statusCtx context.Context) bool {
 				if req.Timeout > 0 || nodeTimeout == nil || nodeTimeoutDurationFromContext(innerCtx) <= 0 {
-					return
+					return false
 				}
 				if statusCtx.Err() != nil {
-					return
+					return false
 				}
 				admission, statusErr := childPlanAdmissionStatusForRun(statusCtx, stateClient, backends.Concurrency, childRunID)
 				admissionMu.Lock()
 				defer admissionMu.Unlock()
 				if timeoutAdjustedForAdmission {
-					return
+					return false
 				}
 				if statusErr != nil {
 					if timeoutPausedForAdmission {
 						admissionStatusErr = statusErr
 					}
-					return
+					return false
 				}
 				switch admission.Status {
 				case childPlanAdmissionQueued:
 					if timeoutPausedForAdmission {
-						return
+						return true
 					}
 					if nodeTimeout.pauseAt(admission.QueuedAt) {
 						timeoutPausedForAdmission = true
 						logger.Info("child run queued for plan admission; pausing parent node timeout until admission",
 							"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
+						return true
 					}
 				case childPlanAdmissionAdmitted:
 					if timeoutPausedForAdmission {
@@ -281,18 +282,21 @@ func RunNodeOnce(
 							timeoutAdjustedForAdmission = true
 							logger.Info("child run left plan admission; parent node timeout resumed",
 								"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
+							return true
 						}
-						return
+						return false
 					}
 					if admission.QueuedAt.IsZero() || admission.AdmittedAt.IsZero() {
-						return
+						return false
 					}
 					if nodeTimeout.accountCompletedAdmission(admission.QueuedAt, admission.AdmittedAt) {
 						timeoutAdjustedForAdmission = true
 						logger.Info("child run completed plan admission; parent node timeout adjusted",
 							"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
+						return true
 					}
 				}
+				return false
 			}
 			admissionPauseActive := func() bool {
 				admissionMu.Lock()
@@ -307,10 +311,7 @@ func RunNodeOnce(
 			admissionDeadlineHandled := func() bool {
 				inspectCtx, cancel := context.WithTimeout(parentCtx, childAdmissionInspectorTimeout)
 				defer cancel()
-				updateTimeoutForAdmission(inspectCtx)
-				admissionMu.Lock()
-				defer admissionMu.Unlock()
-				return timeoutPausedForAdmission || timeoutAdjustedForAdmission
+				return updateTimeoutForAdmission(inspectCtx)
 			}
 			if nodeTimeout != nil && req.Timeout == 0 {
 				clearInspector := nodeTimeout.setDeadlineInspector(admissionDeadlineHandled)

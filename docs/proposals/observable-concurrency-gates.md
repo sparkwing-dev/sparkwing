@@ -32,8 +32,8 @@ That is the whole gap.
 The data and most of the plumbing are already here:
 
 - **Schema** (`pkg/store/store.go:287`): `concurrency_holders` (active
-  holders, `claimed_at`) and `concurrency_waiters` (queued arrivals,
-  ordered by `arrived_at`, indexed). No migration needed.
+  holders, `claimed_at`, `queue_arrived_at`) and `concurrency_waiters`
+  (queued arrivals, ordered by `arrived_at`, indexed).
 - **Events** (`concurrency_dispatch.go`): `concurrency_wait`,
   `concurrency_promoted`, `concurrency_queue_timeout`,
   `concurrency_cancelled`, `concurrency_force_release`.
@@ -113,8 +113,8 @@ GET /api/v1/concurrency/{key}/waiter/{run}/{node}  # optional: just this waiter'
 
 - **No change to concurrency semantics.** FIFO ordering, `Max`, and the
   `OnLimit` policies are untouched. This is purely observability.
-- **No schema migration.** Holders and waiters already carry everything
-  needed; position is derived, not stored.
+- **No stored queue position.** Holders and waiters carry the raw timestamps;
+  position is derived, not stored.
 - **Not host admission.** That is a separate proposal about throttling
   total processes on a box; this is visibility into the existing
   namespace concurrency gate. They share the "surface queue state"

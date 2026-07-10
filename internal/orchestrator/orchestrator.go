@@ -1490,35 +1490,36 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		var admissionStatusErr error
 		nodeTimeout := nodeTimeoutControllerFromContext(ctx)
 		var admissionMu sync.Mutex
-		updateTimeoutForAdmission := func(statusCtx context.Context) {
+		updateTimeoutForAdmission := func(statusCtx context.Context) bool {
 			if req.Timeout > 0 || nodeTimeout == nil || nodeTimeoutDurationFromContext(ctx) <= 0 {
-				return
+				return false
 			}
 			if statusCtx.Err() != nil {
-				return
+				return false
 			}
 			admission, statusErr := childPlanAdmissionStatusForRun(statusCtx, s.backends.State, s.backends.Concurrency, childRunID)
 			admissionMu.Lock()
 			defer admissionMu.Unlock()
 			if timeoutAdjustedForAdmission {
-				return
+				return false
 			}
 			if statusErr != nil {
 				if timeoutPausedForAdmission {
 					admissionStatusErr = statusErr
 				}
-				return
+				return false
 			}
 			switch admission.Status {
 			case childPlanAdmissionQueued:
 				if timeoutPausedForAdmission {
-					return
+					return true
 				}
 				if nodeTimeout.pauseAt(admission.QueuedAt) {
 					timeoutPausedForAdmission = true
 					sparkwing.Info(ctx,
 						"child %s [%s] is queued for plan admission; pausing parent node timeout until admission",
 						childRunID, req.Pipeline)
+					return true
 				}
 			case childPlanAdmissionAdmitted:
 				if timeoutPausedForAdmission {
@@ -1528,19 +1529,22 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 						sparkwing.Info(ctx,
 							"child %s [%s] left plan admission; parent node timeout resumed",
 							childRunID, req.Pipeline)
+						return true
 					}
-					return
+					return false
 				}
 				if admission.QueuedAt.IsZero() || admission.AdmittedAt.IsZero() {
-					return
+					return false
 				}
 				if nodeTimeout.accountCompletedAdmission(admission.QueuedAt, admission.AdmittedAt) {
 					timeoutAdjustedForAdmission = true
 					sparkwing.Info(ctx,
 						"child %s [%s] completed plan admission; parent node timeout adjusted",
 						childRunID, req.Pipeline)
+					return true
 				}
 			}
+			return false
 		}
 		admissionPauseActive := func() bool {
 			admissionMu.Lock()
@@ -1555,10 +1559,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		admissionDeadlineHandled := func() bool {
 			inspectCtx, cancel := context.WithTimeout(parentCtx, childAdmissionInspectorTimeout)
 			defer cancel()
-			updateTimeoutForAdmission(inspectCtx)
-			admissionMu.Lock()
-			defer admissionMu.Unlock()
-			return timeoutPausedForAdmission || timeoutAdjustedForAdmission
+			return updateTimeoutForAdmission(inspectCtx)
 		}
 		if nodeTimeout != nil && req.Timeout == 0 {
 			clearInspector := nodeTimeout.setDeadlineInspector(admissionDeadlineHandled)
