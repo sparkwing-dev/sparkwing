@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.4] - 2026-07-10
 ### Changed
 
 - **sdk:** (Breaking) Repeated plan-level `Concurrency` calls now compose
