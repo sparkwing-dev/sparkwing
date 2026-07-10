@@ -64,6 +64,22 @@ func (middleFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+// inflightCancelStarted is closed by the orch-cancel-inflight victim
+// job the moment its body begins, so the test can cancel the run ctx
+// while the node is genuinely in-flight.
+var inflightCancelStarted chan struct{}
+
+type cancelInflight struct{ sparkwing.Base }
+
+func (cancelInflight) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "victim", func(ctx context.Context) error {
+		close(inflightCancelStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	return nil
+}
+
 type refBuildOut struct {
 	Tag string `json:"tag"`
 }
@@ -112,6 +128,7 @@ func init() {
 	register("orch-fanout-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &fanOutOK{} })
 	register("orch-middle-fails", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &middleFails{} })
 	register("orch-ref", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &refPipe{} })
+	register("orch-cancel-inflight", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cancelInflight{} })
 }
 
 // newPaths returns a Paths under t.TempDir() with the root created.
@@ -254,6 +271,41 @@ func TestRun_MidFailureCancelsDownstream(t *testing.T) {
 	}
 	if !strings.Contains(byID["c"].Error, "upstream-failed") {
 		t.Fatalf("c should cite upstream-failed, got %q", byID["c"].Error)
+	}
+}
+
+func TestRun_InFlightNodeCanceledByRunRecordedCancelledNotFailed(t *testing.T) {
+	p := newPaths(t)
+	inflightCancelStarted = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-inflightCancelStarted
+		cancel()
+	}()
+
+	res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "orch-cancel-inflight"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	st, _ := store.Open(p.StateDB())
+	defer func() { _ = st.Close() }()
+	nodes, _ := st.ListNodes(context.Background(), res.RunID)
+	var victim *store.Node
+	for _, n := range nodes {
+		if n.NodeID == "victim" {
+			victim = n
+		}
+	}
+	if victim == nil {
+		t.Fatal("victim node not found")
+	}
+	if victim.Outcome != string(sparkwing.Cancelled) {
+		t.Fatalf("victim outcome = %q, want cancelled (killed by run teardown, not an independent failure)", victim.Outcome)
+	}
+	if strings.Contains(victim.Error, "context canceled") || strings.Contains(victim.Error, "signal: killed") {
+		t.Fatalf("victim carries a scary teardown error %q; a cancelled node should not read as a fault", victim.Error)
 	}
 }
 
