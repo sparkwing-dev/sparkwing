@@ -25,7 +25,7 @@ func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	if _, err := st.DB().Exec(`ALTER TABLE nodes DROP COLUMN artifact_manifest`); err != nil {
 		t.Fatalf("drop artifact_manifest: %v", err)
 	}
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version = 5`); err != nil {
+	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version > 4`); err != nil {
 		t.Fatalf("reset version to 4: %v", err)
 	}
 	if v := readSchemaVersion(t, st.DB()); v != 4 {
@@ -42,8 +42,8 @@ func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	}
 	defer func() { _ = up.Close() }()
 
-	if v := readSchemaVersion(t, up.DB()); v != 5 {
-		t.Errorf("version after upgrade = %d, want 5", v)
+	if v := readSchemaVersion(t, up.DB()); v != store.ExpectedSchemaVersion() {
+		t.Errorf("version after upgrade = %d, want %d", v, store.ExpectedSchemaVersion())
 	}
 	if !hasArtifactManifestColumn(t, up) {
 		t.Fatal("artifact_manifest should be present after upgrade")
