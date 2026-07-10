@@ -10,7 +10,13 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
+
+// sdkModulePath is the SDK module whose latest release the scaffold
+// fallback pin is measured against.
+const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 // CheckVersionsFreshness verifies every sparkwing-ecosystem dependency
 // in every go.mod under repoRoot is current:
@@ -75,10 +81,82 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 			}
 		}
 	}
+	if msg := checkScaffoldFallbackPin(ctx, repoRoot); msg != "" {
+		problems = append(problems, msg)
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("version freshness:\n  - %s", strings.Join(problems, "\n  - "))
 	}
 	return nil
+}
+
+// checkScaffoldFallbackPin verifies the SDK version baked into the
+// scaffolder's fallback constant (scaffold.FallbackSDKVersion) is not
+// behind the latest released SDK. A source-built CLI with no release
+// ldflag pins fresh scaffolds to this constant, so a stale fallback
+// ships a go.mod that can't build the current templates -- the very
+// drift the go.mod pins above are checked for. Returns "" when current,
+// or a problem description otherwise.
+//
+// The latest release is read from repoRoot's own git tags: this repo IS
+// the SDK, so `go list -m -versions` can't self-resolve it (and the
+// dogfood replace short-circuits the proxy anyway), but the release tags
+// live right here.
+func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
+	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
+	if err != nil {
+		return fmt.Sprintf("scaffold fallback pin: cannot resolve latest %s release (%v)", sdkModulePath, err)
+	}
+	return scaffoldFallbackProblem(scaffold.FallbackSDKVersion, latest)
+}
+
+// latestReleasedTag returns the highest stable semver git tag in the
+// repo at repoRoot, honoring an optional major-version cap (-1 for
+// none). Pre-releases and tags above the cap are skipped, so the bogus
+// v1.x tags on the SDK (see maxAllowedMajor) never win.
+func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, error) {
+	out, err := captureGit(ctx, repoRoot, "tag", "--list", "v*")
+	if err != nil {
+		return "", fmt.Errorf("git tag: %w", err)
+	}
+	var stable []string
+	for _, line := range strings.Split(out, "\n") {
+		v := strings.TrimSpace(line)
+		if !semver.IsValid(v) || semver.Prerelease(v) != "" {
+			continue
+		}
+		if cap >= 0 {
+			if maj, ok := semverMajor(v); !ok || maj > cap {
+				continue
+			}
+		}
+		stable = append(stable, v)
+	}
+	if len(stable) == 0 {
+		return "", fmt.Errorf("no stable release tags in %s within cap", repoRoot)
+	}
+	semver.Sort(stable)
+	return stable[len(stable)-1], nil
+}
+
+// scaffoldFallbackProblem compares the scaffold fallback pin against the
+// latest released SDK version and returns a problem description, or ""
+// when the pin is a valid semver that is current or ahead. Pure so the
+// comparison is unit-testable without resolving the proxy.
+func scaffoldFallbackProblem(pinned, latest string) string {
+	if !semver.IsValid(pinned) {
+		return fmt.Sprintf(
+			"scaffold fallback pin %q is not a valid release version (set scaffold.FallbackSDKVersion to a published tag)",
+			pinned,
+		)
+	}
+	if semver.Compare(pinned, latest) < 0 {
+		return fmt.Sprintf(
+			"scaffold fallback pin %s is behind latest release %s (bump scaffold.FallbackSDKVersion to %s so fresh source-built scaffolds build green)",
+			pinned, latest, latest,
+		)
+	}
+	return ""
 }
 
 // watchedModulePrefixes lists every module path whose freshness we
