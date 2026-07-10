@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.6] - 2026-07-10
 ### Fixed
 
 - **orchestrator:** Local runs that declare plan-level concurrency now release
