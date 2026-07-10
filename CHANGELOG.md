@@ -51,6 +51,11 @@ code change to unlock.
 ## [v0.15.5] - 2026-07-10
 ### Fixed
 
+- **store:** (Breaking) The runs-store schema moved from version 5 to 6 so
+  existing databases gain `concurrency_holders.queue_arrived_at` before
+  admission state queries read it. The store auto-migrates on open; upgrade all
+  Sparkwing binaries that share a state database before running mixed-version
+  admission workloads. See [the migration guide](docs/migrations/v0.15.5.md).
 - **orchestrator:** Parent node timeouts now pause while `RunAndAwait` children
   are queued for plan-level admission, then resume once admission clears, so
   admission wait is governed by queue policy rather than the parent's execution
