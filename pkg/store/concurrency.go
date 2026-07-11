@@ -929,7 +929,7 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 
 func txLiveRunningRunIDs(ctx context.Context, tx *storeTx, ids []string, heartbeatCutoff int64) (map[string]bool, error) {
 	seen := make(map[string]bool, len(ids))
-	args := make([]any, 0, len(ids)+2)
+	args := make([]any, 0, len(ids)+3)
 	for _, id := range ids {
 		if id == "" || seen[id] {
 			continue
@@ -944,13 +944,16 @@ func txLiveRunningRunIDs(ctx context.Context, tx *storeTx, ids []string, heartbe
 	for i := range placeholders {
 		placeholders[i] = "?"
 	}
-	args = append(args, runStatusRunning, heartbeatCutoff)
+	args = append(args, runStatusRunning, heartbeatCutoff, heartbeatCutoff)
 	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT id FROM runs
 		  WHERE id IN (`+strings.Join(placeholders, ",")+`)
 		    AND status = ?
-		    AND last_heartbeat_at >= ?`,
+		    AND (
+		      last_heartbeat_at >= ?
+		      OR (last_heartbeat_at IS NULL AND started_at >= ?)
+		    )`,
 		args...,
 	)
 	if err != nil {
@@ -2230,9 +2233,12 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		      SELECT 1 FROM runs r
 		       WHERE r.id = w.run_id
 		         AND r.status = ?
-		         AND r.last_heartbeat_at >= ?
+		         AND (
+		           r.last_heartbeat_at >= ?
+		           OR (r.last_heartbeat_at IS NULL AND r.started_at >= ?)
+		         )
 		    )`+s.forUpdateSkipLocked(),
-		cutoff, runStatusRunning, heartbeatCutoff,
+		cutoff, runStatusRunning, heartbeatCutoff, heartbeatCutoff,
 	)
 	if err != nil {
 		return nil, err
