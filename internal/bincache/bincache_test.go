@@ -200,6 +200,111 @@ func TestCompilePipeline_WithGoWorkAndGoworkOff_UsesModfile(t *testing.T) {
 	}
 }
 
+// installFakeGoLoggingEnv drops a fake `go` on PATH that records its argv
+// and the GOWORK it ran under, so a test can assert both the build flags
+// and whether the enclosing workspace was disabled. Returns the log path.
+func installFakeGoLoggingEnv(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	log := filepath.Join(binDir, "argv.log")
+	script := "#!/bin/sh\n" +
+		"printf 'ARGV %s\\n' \"$*\" >> " + log + "\n" +
+		"printf 'GOWORK %s\\n' \"${GOWORK}\" >> " + log + "\n" +
+		"while [ $# -gt 0 ]; do\n" +
+		"  if [ \"$1\" = \"-o\" ]; then\n" +
+		"    shift\n" +
+		"    : > \"$1\"\n" +
+		"    break\n" +
+		"  fi\n" +
+		"  shift\n" +
+		"done\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake go: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func TestCompilePipeline_NonCoveringGoWork_IgnoredAndModfileHonored(t *testing.T) {
+	log := installFakeGoLoggingEnv(t)
+	t.Setenv("GOWORK", "")
+	root := t.TempDir()
+	pipelineDir := filepath.Join(root, "project", ".sparkwing")
+	if err := os.MkdirAll(pipelineDir, 0o755); err != nil {
+		t.Fatalf("mkdir pipeline: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pipelineDir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pipelineDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	overlay := filepath.Join(pipelineDir, ".resolved.mod")
+	if err := os.WriteFile(overlay, []byte("module overlay\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.26\n\nuse ./other\n"), 0o644); err != nil {
+		t.Fatalf("write go.work: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
+	if err := CompilePipeline(pipelineDir, dest); err != nil {
+		t.Fatalf("CompilePipeline: %v", err)
+	}
+	got := strings.TrimSpace(string(mustReadFile(t, log)))
+	if !strings.Contains(got, "-modfile="+overlay) {
+		t.Errorf("expected -modfile honored when the enclosing go.work does not cover the module, got:\n%s", got)
+	}
+	if !strings.Contains(got, "GOWORK off") {
+		t.Errorf("expected the non-covering workspace disabled via GOWORK=off, got:\n%s", got)
+	}
+}
+
+func TestCompilePipeline_CoveringGoWork_Honored(t *testing.T) {
+	log := installFakeGoLoggingEnv(t)
+	t.Setenv("GOWORK", "")
+	root := t.TempDir()
+	pipelineDir := filepath.Join(root, "svc")
+	if err := os.MkdirAll(pipelineDir, 0o755); err != nil {
+		t.Fatalf("mkdir pipeline: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pipelineDir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pipelineDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	overlay := filepath.Join(pipelineDir, ".resolved.mod")
+	if err := os.WriteFile(overlay, []byte("module overlay\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.26\n\nuse ./svc\n"), 0o644); err != nil {
+		t.Fatalf("write go.work: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
+	if err := CompilePipeline(pipelineDir, dest); err != nil {
+		t.Fatalf("CompilePipeline: %v", err)
+	}
+	got := strings.TrimSpace(string(mustReadFile(t, log)))
+	if strings.Contains(got, "-modfile=") {
+		t.Errorf("expected -modfile skipped when the workspace covers the module, got:\n%s", got)
+	}
+	if strings.Contains(got, "GOWORK off") {
+		t.Errorf("expected a covering workspace left in force, but it was disabled:\n%s", got)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return raw
+}
+
 // installFailingGo drops a fake `go` on PATH that prints `stderrLine`
 // to stderr, `stdoutLine` to stdout, and exits with status 1. Lets
 // us exercise the failure path of CompilePipeline without depending

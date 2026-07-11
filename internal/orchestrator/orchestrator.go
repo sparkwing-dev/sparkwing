@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -587,7 +588,21 @@ type runInterruptedError struct {
 }
 
 func (e *runInterruptedError) Error() string {
-	return fmt.Sprintf("interrupted by %s", e.signal)
+	return fmt.Sprintf("interrupted by %s", signalName(e.signal))
+}
+
+// signalName renders a signal for a terminal message, preferring the
+// conventional uppercase name over Go's lowercase os.Signal.String() (so
+// os.Interrupt reads "SIGINT", not the bare "interrupt").
+func signalName(sig os.Signal) string {
+	switch sig {
+	case os.Interrupt:
+		return "SIGINT"
+	case syscall.SIGTERM:
+		return "SIGTERM"
+	default:
+		return sig.String()
+	}
 }
 
 // nodeSupersededError reports that a run's only non-passing nodes were

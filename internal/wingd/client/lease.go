@@ -24,8 +24,9 @@ type Lease struct {
 // the daemon grants it, returning the [Lease]. While queued it invokes
 // onQueued (nil to ignore) with each position update. A terminal negative
 // outcome -- fail, skip, cancel_others eviction, or a draining daemon --
-// returns an [*AdmissionError]. Cancelling ctx abandons the request and
-// closes the connection.
+// returns an [*AdmissionError]; a daemon cancel of the still-queued run
+// (from `sparkwing runs cancel`) returns a [*CancelledError]. Cancelling
+// ctx abandons the request and closes the connection.
 func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (*Lease, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
@@ -46,6 +47,8 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 			}
 		case *wingwire.Evicted:
 			return nil, &AdmissionError{Policy: m.Policy, Key: m.Key, SupersededBy: m.SupersededBy}
+		case *wingwire.Cancel:
+			return nil, &CancelledError{Reason: m.Reason}
 		default:
 			return nil, fmt.Errorf("wingd/client: unexpected %T while acquiring", msg)
 		}

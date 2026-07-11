@@ -22,6 +22,16 @@ type Sink interface {
 	Push(ctx context.Context, sample Sample) error
 }
 
+// CPUAccountingAvailable reports whether this platform can measure a
+// process's CPU time, so a caller can tell a healthy sampler's genuine
+// near-zero CPU reading (a sleep-heavy pipeline) from a blind sampler's
+// uninformative zero. It matches the signal the sampler itself uses to
+// decide whether to emit real CPU numbers or announce its blindness.
+func CPUAccountingAvailable() bool {
+	_, ok := readCPUTime()
+	return ok
+}
+
 // blindOnce guards the single log line emitted when the platform offers
 // no CPU accounting, so a blind sampler announces itself instead of
 // masquerading as a healthy one reporting genuine zeros.

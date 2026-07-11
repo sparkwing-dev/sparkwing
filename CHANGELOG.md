@@ -138,9 +138,32 @@ code change to unlock.
 - **cli:** `sparkwing runs cancel` cancels a local run through the
   admission daemon first, so the recovery command the queue view
   recommends for a stalled holder works on a bare machine with no
-  dashboard and no profile. The daemon signals the run to wind down on the
-  same clean path an operator interrupt uses; cluster runs and runs the
-  daemon does not hold still route through the controller.
+  dashboard and no profile. It cancels a run in either admission state --
+  a holder or a run still queued for admission -- so "get this out of
+  line" works on a waiting run too: the daemon removes it from the queue,
+  re-states the positions behind it, and winds it down to a cancelled
+  status. The daemon signals the run on the same clean path an operator
+  interrupt uses; cluster runs and runs the daemon does not hold still
+  route through the controller.
+- **orchestrator:** A pipeline that mostly waits (a poller, approval
+  waiter, or lock holder) is now costed by measurement once it has enough
+  samples, instead of being pinned at the conservative cold-start default
+  forever. A healthy sampler that measured a genuine near-zero CPU peak
+  admits the run at its measured memory plus a small core floor; a
+  platform whose sampler cannot measure CPU still holds the conservative
+  default, so a blind zero is never mistaken for a real measurement.
+- **cli:** `sparkwing queue` no longer prints "clears in ~-" when no clear
+  estimate is available; the header simply omits the clause. `sparkwing
+  runs stats --capacity` prints a pin-drift warning as a footnote below
+  the table rather than crammed into a column, so the table stays aligned.
+- **orchestrator:** A SIGINT-cancelled run names the signal as `SIGINT`
+  (and SIGTERM as `SIGTERM`) in its terminal reason, instead of the bare
+  lowercase "interrupt".
+- **cli:** Compiling a `.sparkwing` project nested inside another Go
+  module's workspace no longer fails with a bewildering "main module does
+  not contain package". When an enclosing `go.work` does not list the
+  project, the build ignores that workspace and compiles the project as
+  the self-contained module it is.
 - **wingd:** A self-spawned admission daemon reliably writes its log at
   `<home>/wingd/d.log`. The spawn now creates the daemon directory before
   opening the log and rotates the log once past a size cap, and the daemon

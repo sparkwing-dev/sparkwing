@@ -35,6 +35,11 @@ const (
 	// both hold capacity at once, so unknown heavy work serializes until
 	// the sampler has profiled it.
 	coldStartFraction = 0.5
+	// measuredCoreFloor is the minimum core charge for a measured profile,
+	// so a pipeline the sampler observed drawing near-zero CPU (a poller,
+	// approval waiter, or lock holder) is still accounted for rather than
+	// admitted for free, while costing far less than the cold-start default.
+	measuredCoreFloor = 0.1
 )
 
 // Pin is an explicit .Resources() declaration flattened to host figures.
@@ -64,6 +69,14 @@ type Resolution struct {
 // otherwise the cold-start default is charged. ExpectedDuration is filled
 // from the profile whenever one exists, even when a pin sets the cost, so
 // ETA still has a duration to simulate with.
+//
+// A profile qualifies as measured on sample count plus evidence the
+// sampler was not blind: either a positive peak, or a healthy sampler
+// (CPUMeasured) that observed a genuine near-zero peak. A near-zero
+// measured pipeline is charged its measured memory plus a small core
+// floor, so quiet pollers and lock holders admit at their true tiny cost
+// instead of queueing behind the conservative default forever. A blind
+// sampler's zero never qualifies, keeping the conservative default.
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int) Resolution {
 	res := Resolution{}
 	if profile != nil {
@@ -74,8 +87,8 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int) Resolution {
 		res.Cores = pin.Cores
 		res.MemoryBytes = pin.MemoryBytes
 		res.Source = store.CostSourcePin
-	case profile != nil && profile.SampleCount >= MinSamples && profile.PeakCores > 0:
-		res.Cores = profile.PeakCores
+	case measurementQualifies(profile):
+		res.Cores = math.Max(profile.PeakCores, measuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 	default:
@@ -83,6 +96,16 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int) Resolution {
 		res.Source = store.CostSourceDefault
 	}
 	return res
+}
+
+// measurementQualifies reports whether a profile has enough evidence to
+// cost a run by measurement rather than the cold-start default: at least
+// MinSamples observations, and either a positive measured peak or a
+// healthy sampler that recorded a real near-zero peak. A blind sampler's
+// zero peak (CPUMeasured false, PeakCores zero) never qualifies.
+func measurementQualifies(profile *store.PipelineProfile) bool {
+	return profile != nil && profile.SampleCount >= MinSamples &&
+		(profile.PeakCores > 0 || profile.CPUMeasured)
 }
 
 // coldStartCores is the conservative charge for an unknown pipeline: half

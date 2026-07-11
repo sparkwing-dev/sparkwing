@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -379,6 +380,17 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 	return wingwire.Holder{}
 }
 
+// findQueuedWaiter returns the queued waiter with runID and whether it is
+// present, without blocking.
+func findQueuedWaiter(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
+	for _, w := range qs.Waiters {
+		if w.RunID == runID {
+			return w, true
+		}
+	}
+	return wingwire.Waiter{}, false
+}
+
 func seedProfile(t *testing.T, st *store.Store, pipeline string, obs store.ProfileObservation, runs int) {
 	t.Helper()
 	for range runs {
@@ -432,6 +444,70 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 		}
 	case <-time.After(wingdTestWait):
 		t.Fatal("run did not finish")
+	}
+}
+
+// TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork
+// seeds a sleep-heavy pipeline with three healthy-sampler observations at
+// a zero CPU peak. On the 2-core box its cold-start default (1 core) would
+// not fit behind the 1.5-core holder, so admitting it concurrently proves
+// the zero-CPU profile is trusted at its tiny measured cost.
+func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	backends, st, _ := openWingdBackends(t, home)
+	seedProfile(t, st, "wingd-e2e-unpinned", store.ProfileObservation{
+		Duration: 5 * time.Second, PeakCores: 0, PeakMemoryBytes: 64 << 20, CPUMeasured: true,
+	}, capacity.MinSamples)
+
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	ctx := context.Background()
+
+	heavy := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "heavy-holder",
+			Admission: testWingdAdmission(home, nil),
+		})
+		heavy <- res
+	}()
+	gate.awaitStarted(t, "heavy-holder")
+
+	sleepy := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-unpinned",
+			RunID:     "sleepy-run",
+			Admission: testWingdAdmission(home, nil),
+		})
+		sleepy <- res
+	}()
+	gate.awaitStarted(t, "sleepy-run")
+
+	h := findWingdHolder(t, home, "sleepy-run")
+	if h.CostSource != "measured" {
+		t.Errorf("CostSource = %q, want measured (healthy-sampler zero-CPU profile)", h.CostSource)
+	}
+	if h.Resources.Cores != 0.1 {
+		t.Errorf("admitted cores = %v, want the 0.1 measured core floor", h.Resources.Cores)
+	}
+	if qs := queryWingd(t, home); len(qs.Holders) != 2 {
+		t.Fatalf("holders = %d, want 2 (heavy work and the sleep-heavy run concurrently)", len(qs.Holders))
+	}
+
+	close(gate.release)
+	for name, ch := range map[string]chan *Result{"heavy-holder": heavy, "sleepy-run": sleepy} {
+		select {
+		case res := <-ch:
+			if res == nil || res.Status != "success" {
+				t.Fatalf("%s result = %+v, want success", name, res)
+			}
+		case <-time.After(wingdTestWait):
+			t.Fatalf("%s did not finish", name)
+		}
 	}
 }
 
@@ -865,6 +941,121 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 	}
 }
 
+func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	backends, st, _ := openWingdBackends(t, home)
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	ctx := context.Background()
+
+	holder := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "cancel-holder",
+			Admission: testWingdAdmission(home, nil),
+		})
+		holder <- res
+	}()
+	gate.awaitStarted(t, "cancel-holder")
+
+	waiterA := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "cancel-waiter-a",
+			Admission: testWingdAdmission(home, nil),
+		})
+		waiterA <- res
+	}()
+	awaitWaiter(t, home, "cancel-waiter-a")
+
+	waiterB := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "cancel-waiter-b",
+			Admission: testWingdAdmission(home, nil),
+		})
+		waiterB <- res
+	}()
+	awaitWaiter(t, home, "cancel-waiter-b")
+
+	if w, ok := findQueuedWaiter(queryWingd(t, home), "cancel-waiter-b"); !ok || w.Position != 2 {
+		t.Fatalf("waiter-b position before cancel = %d (present=%v), want 2", w.Position, ok)
+	}
+
+	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, "cancel-waiter-a")
+	if err != nil {
+		t.Fatalf("daemon-first cancel: %v", err)
+	}
+	if !found {
+		t.Fatal("daemon did not know the queued run; cancel would dead-end at a dashboard")
+	}
+
+	select {
+	case res := <-waiterA:
+		if res.Status != "cancelled" {
+			t.Fatalf("cancelled waiter status = %q (err=%v), want cancelled", res.Status, res.Error)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("queued waiter never wound down after cancel")
+	}
+
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		qs := queryWingd(t, home)
+		if _, stillQueued := findQueuedWaiter(qs, "cancel-waiter-a"); stillQueued {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		b, ok := findQueuedWaiter(qs, "cancel-waiter-b")
+		if ok && b.Position == 1 && len(qs.Holders) == 1 && qs.Holders[0].RunID == "cancel-holder" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	qs := queryWingd(t, home)
+	if _, stillQueued := findQueuedWaiter(qs, "cancel-waiter-a"); stillQueued {
+		t.Fatal("cancelled waiter still in the queue after cancel")
+	}
+	b, ok := findQueuedWaiter(qs, "cancel-waiter-b")
+	if !ok || b.Position != 1 {
+		t.Fatalf("waiter-b position after cancel = %d (present=%v), want 1 (positions re-stated)", b.Position, ok)
+	}
+	if len(qs.Holders) != 1 || qs.Holders[0].RunID != "cancel-holder" {
+		t.Fatalf("holder disturbed by waiter cancel: holders = %+v", qs.Holders)
+	}
+
+	run, err := st.GetRun(ctx, "cancel-waiter-a")
+	if err != nil {
+		t.Fatalf("get cancelled waiter run: %v", err)
+	}
+	if run.Status != "cancelled" {
+		t.Fatalf("stored waiter status = %q, want cancelled", run.Status)
+	}
+
+	close(gate.release)
+	select {
+	case res := <-holder:
+		if res.Status != "success" {
+			t.Fatalf("holder status = %q, want success (undisturbed)", res.Status)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("undisturbed holder never finished")
+	}
+	select {
+	case res := <-waiterB:
+		if res.Status != "success" {
+			t.Fatalf("promoted waiter-b status = %q, want success", res.Status)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("promoted waiter-b never finished after holder released")
+	}
+}
+
 func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
@@ -893,8 +1084,8 @@ func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
 		if res == nil || res.Status != "cancelled" {
 			t.Fatalf("result = %+v, want cancelled on SIGINT", res)
 		}
-		if res.Error == nil || !strings.Contains(res.Error.Error(), "interrupted by") {
-			t.Fatalf("error = %v, want the interrupting signal named", res.Error)
+		if res.Error == nil || !strings.Contains(res.Error.Error(), "interrupted by SIGINT") {
+			t.Fatalf("error = %v, want the interrupting signal named as SIGINT", res.Error)
 		}
 	case <-time.After(wingdTestWait):
 		t.Fatal("run did not finish after SIGINT")
@@ -904,8 +1095,8 @@ func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if run.Status != "cancelled" || !strings.Contains(run.Error, "interrupted by") {
-		t.Fatalf("stored run = %q / %q, want cancelled with the signal named", run.Status, run.Error)
+	if run.Status != "cancelled" || !strings.Contains(run.Error, "interrupted by SIGINT") {
+		t.Fatalf("stored run = %q / %q, want cancelled with the signal named as SIGINT", run.Status, run.Error)
 	}
 
 	deadline := time.Now().Add(wingdTestWait)

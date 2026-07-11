@@ -243,6 +243,15 @@ func (la *LocalAdmission) acquireBlocking(
 			appendPlanEvent(ctx, backends, runID, "admission_queue_timeout", nil)
 			return nil, admitProceed, cause
 		}
+		var cancelErr *wingdclient.CancelledError
+		if errors.As(err, &cancelErr) {
+			appendPlanEvent(ctx, backends, runID, "admission_cancelled", nil)
+			reason := cancelErr.Reason
+			if reason == "" {
+				reason = "cancelled via the admission daemon"
+			}
+			return nil, admitProceed, &runDaemonCanceledError{reason: reason}
+		}
 		var admErr *wingdclient.AdmissionError
 		if errors.As(err, &admErr) {
 			switch admErr.Policy {

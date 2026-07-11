@@ -46,7 +46,14 @@ type PipelineProfile struct {
 	PeakCores       float64       `json:"peak_cores"`
 	PeakMemoryBytes int64         `json:"peak_memory_bytes"`
 	SampleCount     int           `json:"sample_count"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+	// CPUMeasured records whether the sampler that produced these
+	// observations could actually measure CPU on this platform. A healthy
+	// sampler sets it true even when the peak is a genuine near-zero (a
+	// sleep-heavy pipeline), so admission can cost the pipeline at its real
+	// tiny cost; a blind sampler leaves it false, keeping the conservative
+	// default. Meaningful only on the rollup row.
+	CPUMeasured bool      `json:"cpu_measured"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	// PinnedCores and PinnedMemoryBytes record the explicit .Resources()
 	// pin last seen for this pipeline, or zero when it declared none. They
 	// let a reader recompute pin drift against the measured peaks without
@@ -61,6 +68,10 @@ type ProfileObservation struct {
 	Duration        time.Duration
 	PeakCores       float64
 	PeakMemoryBytes int64
+	// CPUMeasured reports whether the sampler could measure CPU for this
+	// run. It gates whether a near-zero peak is trusted as a real
+	// measurement or treated as a blind sampler's uninformative zero.
+	CPUMeasured bool
 }
 
 // profileSample is one windowed observation as persisted in samples_json.
@@ -106,20 +117,21 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 	return retryOnBusy(func() error {
 		_, err := s.exec(ctx, `
 INSERT INTO pipeline_profiles
-    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, samples_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (pipeline, node_id) DO UPDATE SET
     p50_duration_ms   = excluded.p50_duration_ms,
     p99_duration_ms   = excluded.p99_duration_ms,
     peak_cores        = excluded.peak_cores,
     peak_memory_bytes = excluded.peak_memory_bytes,
     sample_count      = excluded.sample_count,
+    cpu_measured      = excluded.cpu_measured,
     updated_at        = excluded.updated_at,
     samples_json      = excluded.samples_json`,
 			pipeline, nodeID,
 			prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
 			prof.PeakCores, prof.PeakMemoryBytes, len(window),
-			time.Now().UnixNano(), raw)
+			boolToInt(obs.CPUMeasured), time.Now().UnixNano(), raw)
 		return err
 	})
 }
@@ -162,7 +174,7 @@ UPDATE pipeline_profiles SET pinned_cores = ?, pinned_memory_bytes = ?
 // runs have been measured for it yet.
 func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error) {
 	row := s.queryRow(ctx, `
-SELECT p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, pinned_cores, pinned_memory_bytes
+SELECT p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes
   FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, nodeID)
 	prof, err := scanProfile(row, pipeline, nodeID)
 	if err != nil {
@@ -179,7 +191,7 @@ SELECT p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_c
 // rollup id sorts first). A non-empty pipeline restricts the result.
 func (s *Store) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error) {
 	q := `
-SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, pinned_cores, pinned_memory_bytes
+SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes
   FROM pipeline_profiles`
 	var args []any
 	if pipeline != "" {
@@ -199,11 +211,12 @@ SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_mem
 			cores        float64
 			mem          int64
 			count        int
+			cpuMeasured  int
 			updatedNanos int64
 			pinCores     float64
 			pinMem       int64
 		)
-		if err := rows.Scan(&p, &n, &p50, &p99, &cores, &mem, &count, &updatedNanos, &pinCores, &pinMem); err != nil {
+		if err := rows.Scan(&p, &n, &p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos, &pinCores, &pinMem); err != nil {
 			return nil, err
 		}
 		out = append(out, PipelineProfile{
@@ -214,6 +227,7 @@ SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_mem
 			PeakCores:         cores,
 			PeakMemoryBytes:   mem,
 			SampleCount:       count,
+			CPUMeasured:       cpuMeasured != 0,
 			UpdatedAt:         time.Unix(0, updatedNanos),
 			PinnedCores:       pinCores,
 			PinnedMemoryBytes: pinMem,
@@ -237,11 +251,12 @@ func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, err
 		cores        float64
 		mem          int64
 		count        int
+		cpuMeasured  int
 		updatedNanos int64
 		pinCores     float64
 		pinMem       int64
 	)
-	if err := row.Scan(&p50, &p99, &cores, &mem, &count, &updatedNanos, &pinCores, &pinMem); err != nil {
+	if err := row.Scan(&p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos, &pinCores, &pinMem); err != nil {
 		return nil, err
 	}
 	return &PipelineProfile{
@@ -252,6 +267,7 @@ func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, err
 		PeakCores:         cores,
 		PeakMemoryBytes:   mem,
 		SampleCount:       count,
+		CPUMeasured:       cpuMeasured != 0,
 		UpdatedAt:         time.Unix(0, updatedNanos),
 		PinnedCores:       pinCores,
 		PinnedMemoryBytes: pinMem,
@@ -274,6 +290,13 @@ func profileFromWindow(window []profileSample) PipelineProfile {
 		PeakMemoryBytes: int64(percentile(mems, 0.99)),
 		SampleCount:     len(window),
 	}
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // percentile returns the nearest-rank q-percentile (0..1) of xs. An empty

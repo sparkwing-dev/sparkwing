@@ -62,6 +62,54 @@ func TestResolve_Order(t *testing.T) {
 	}
 }
 
+func TestResolve_ZeroCPUProfileQualifiesOnHealthySampler(t *testing.T) {
+	sleepHeavy := &store.PipelineProfile{
+		P50Duration:     10 * time.Second,
+		PeakCores:       0,
+		PeakMemoryBytes: 256 << 20,
+		SampleCount:     MinSamples,
+		CPUMeasured:     true,
+	}
+	got := Resolve(nil, sleepHeavy, 8)
+	if got.Source != store.CostSourceMeasured {
+		t.Fatalf("Source = %q, want measured (healthy sampler, near-zero peak)", got.Source)
+	}
+	if got.Cores != measuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v core floor", got.Cores, measuredCoreFloor)
+	}
+	if got.MemoryBytes != 256<<20 {
+		t.Errorf("MemoryBytes = %d, want the measured 256MiB", got.MemoryBytes)
+	}
+}
+
+func TestResolve_ZeroCPUProfileStaysConservativeOnBlindSampler(t *testing.T) {
+	blind := &store.PipelineProfile{
+		P50Duration:     10 * time.Second,
+		PeakCores:       0,
+		PeakMemoryBytes: 256 << 20,
+		SampleCount:     MinSamples,
+		CPUMeasured:     false,
+	}
+	got := Resolve(nil, blind, 8)
+	if got.Source != store.CostSourceDefault {
+		t.Fatalf("Source = %q, want default (blind sampler's zero is not a measurement)", got.Source)
+	}
+	if got.Cores != coldStartCores(8) {
+		t.Errorf("Cores = %v, want the cold-start default %v", got.Cores, coldStartCores(8))
+	}
+}
+
+func TestResolve_MeasuredPeakBelowFloorLiftsToFloor(t *testing.T) {
+	tiny := &store.PipelineProfile{
+		PeakCores:   0.05,
+		SampleCount: MinSamples,
+		CPUMeasured: true,
+	}
+	if got := Resolve(nil, tiny, 8); got.Cores != measuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
+	}
+}
+
 func TestResolve_ColdStartSerializesOnBigMachine(t *testing.T) {
 	got := Resolve(nil, nil, 32)
 	if got.Cores != 16 {

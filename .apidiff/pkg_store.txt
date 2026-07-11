@@ -264,7 +264,9 @@ type PipelineProfile struct {
 	PeakCores       float64
 	PeakMemoryBytes int64
 	SampleCount     int
-	UpdatedAt       time.Time
+
+	CPUMeasured bool
+	UpdatedAt   time.Time
 
 	PinnedCores       float64
 	PinnedMemoryBytes int64
@@ -274,6 +276,8 @@ type ProfileObservation struct {
 	Duration        time.Duration
 	PeakCores       float64
 	PeakMemoryBytes int64
+
+	CPUMeasured bool
 }
 const RetrySourceAuto = "auto"
 const RetrySourceManual = "manual"

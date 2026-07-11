@@ -406,17 +406,33 @@ func CompilePipeline(sparkwingDir, dest string) error {
 		return err
 	}
 	args := []string{"build"}
-	if overlay := overlayModfilePath(sparkwingDir); overlay != "" {
-		if work, present := goWorkInScope(sparkwingDir); present {
+	env := os.Environ()
+	overlay := overlayModfilePath(sparkwingDir)
+	work, workPresent := goWorkInScope(sparkwingDir)
+	switch {
+	case workPresent && !goWorkCovers(work, sparkwingDir):
+		fmt.Fprintf(os.Stderr,
+			"warning: %s does not include this .sparkwing module; ignoring it. "+
+				"A sparkwing project builds as a self-contained module, not nested "+
+				"inside another Go workspace; add it to the go.work `use` list to "+
+				"link it deliberately.\n",
+			work,
+		)
+		env = withGoworkOff(env)
+		if overlay != "" {
+			args = append(args, "-modfile="+overlay)
+		}
+	case workPresent:
+		if overlay != "" {
 			fmt.Fprintf(os.Stderr,
 				"warning: %s in effect; skipping sparks resolution. "+
 					"Modules resolve from go.mod + workspace, not .resolved.mod. "+
 					"To use local copies of sparks libs too, add them to go.work.\n",
 				work,
 			)
-		} else {
-			args = append(args, "-modfile="+overlay)
 		}
+	case overlay != "":
+		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-o", dest, ".")
 	cmd := exec.Command("go", args...)
@@ -424,7 +440,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
@@ -472,6 +488,56 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 		}
 		dir = parent
 	}
+}
+
+// goWorkCovers reports whether the workspace at workPath lists moduleDir
+// in its `use` directives. When it does not, `go build .` inside moduleDir
+// would resolve against the workspace and fail because the workspace's
+// main modules do not contain the package -- so the caller ignores such a
+// workspace and builds the module standalone. A parse failure is treated
+// as not-covering, the conservative choice.
+func goWorkCovers(workPath, moduleDir string) bool {
+	raw, err := os.ReadFile(workPath)
+	if err != nil {
+		return false
+	}
+	wf, err := modfile.ParseWork(workPath, raw, nil)
+	if err != nil {
+		return false
+	}
+	absModule, err := filepath.Abs(moduleDir)
+	if err != nil {
+		return false
+	}
+	workDir := filepath.Dir(workPath)
+	for _, u := range wf.Use {
+		p := u.Path
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(workDir, p)
+		}
+		ap, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if filepath.Clean(ap) == filepath.Clean(absModule) {
+			return true
+		}
+	}
+	return false
+}
+
+// withGoworkOff returns env with any GOWORK entry replaced by GOWORK=off,
+// so a build ignores an enclosing workspace that does not cover the
+// module being built.
+func withGoworkOff(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if strings.HasPrefix(e, "GOWORK=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "GOWORK=off")
 }
 
 // PipelineCacheKey returns a 16-char hex fingerprint of the pipeline

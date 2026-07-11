@@ -628,20 +628,46 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 }
 
 // handleCancelLease answers a control client's cancel-by-run-id request:
-// it signals the run's holding connection to wind down cleanly (the same
-// terminal path as an operator interrupt) and reports whether the run was
-// found. A run the daemon does not hold returns not-found so the caller
-// falls back to the controller.
+// it signals the run's connection to wind down cleanly (the same terminal
+// path as an operator interrupt) and reports whether the run was found. It
+// covers both a holder and a still-queued waiter -- cancelling a waiter is
+// the most common cancel there is -- so the dashboard-free recovery path
+// reaches a run in either admission state. A waiter is removed from the
+// queue at once (re-stating positions and promoting any run it blocked)
+// and its connection neutralized, so the imminent close is a clean no-op
+// rather than a second removal or a redundant orphan finalize; the
+// signalled process finalizes its own row as cancelled. A holder keeps its
+// lease until its process winds down and the disconnect handler releases
+// it. A run the daemon does not hold or queue returns not-found so the
+// caller falls back to the controller.
 func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	d.mu.Lock()
-	holder := d.byRun[req.RunID]
-	found := holder != nil && holder.role == roleHolder && holder.finalizable
-	d.mu.Unlock()
-	if found {
-		d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
-		_ = holder.send(&wingwire.Cancel{RunID: req.RunID, Reason: "cancelled via sparkwing runs cancel"})
+	target := d.byRun[req.RunID]
+	if target == nil || !target.finalizable ||
+		(target.role != roleHolder && target.role != roleWaiter) {
+		d.mu.Unlock()
+		_ = c.send(&wingwire.CancelLeaseAck{Found: false})
+		return
 	}
-	_ = c.send(&wingwire.CancelLeaseAck{Found: found})
+	waiter := target.role == roleWaiter
+	var deliveries []delivery
+	var snap admission.Snapshot
+	if waiter {
+		events := d.cancelWaiterLocked(req.RunID)
+		delete(d.byRun, req.RunID)
+		target.role = roleNone
+		target.finalizable = false
+		deliveries = d.routeLocked(events)
+		snap = d.ledger.Snapshot()
+		d.touchLocked()
+	}
+	d.mu.Unlock()
+	d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
+	_ = target.send(&wingwire.Cancel{RunID: req.RunID, Reason: "cancelled via sparkwing runs cancel"})
+	if waiter {
+		d.flush(deliveries, snap)
+	}
+	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
 
 // handleQueueState answers a read-only state query. It creates no lease

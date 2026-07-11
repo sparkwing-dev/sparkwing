@@ -98,6 +98,22 @@ func (e *AdmissionError) Error() string {
 	return fmt.Sprintf("wingd: %s on %q", e.Policy, e.Key)
 }
 
+// CancelledError reports that the daemon cancelled a run while it was
+// still queued for admission -- the daemon pushed a [wingwire.Cancel]
+// down the waiting connection instead of a grant. Reason is the short
+// human phrase the daemon named. A caller maps it to a cancelled
+// terminal status, the same category as an operator interrupt.
+type CancelledError struct {
+	Reason string
+}
+
+func (e *CancelledError) Error() string {
+	if e.Reason == "" {
+		return "wingd: run cancelled while queued"
+	}
+	return "wingd: " + e.Reason
+}
+
 // dialsPerSpawn is how many times connect is retried after a spawn before
 // the daemon is presumed dead and respawned; maxSpawnAttempts bounds the
 // respawns so a daemon that dies at startup fails fast with its own logged

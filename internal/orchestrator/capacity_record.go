@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -26,6 +27,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	if err != nil {
 		return
 	}
+	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	var runPeakCores float64
 	var runPeakMem int64
 	measured := false
@@ -47,6 +49,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 			Duration:        nodeDuration(n, samples),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
+			CPUMeasured:     cpuMeasured,
 		})
 		runPeakCores = math.Max(runPeakCores, peakCores)
 		if peakMem > runPeakMem {
@@ -64,6 +67,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		Duration:        runDur,
 		PeakCores:       runPeakCores,
 		PeakMemoryBytes: runPeakMem,
+		CPUMeasured:     cpuMeasured,
 	})
 	if !pin.Empty() {
 		_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)

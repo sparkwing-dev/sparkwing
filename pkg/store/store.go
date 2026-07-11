@@ -580,7 +580,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 7
+const expectedSchemaVersion = 8
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -627,6 +627,7 @@ const pipelineProfilesTableSQLite = `CREATE TABLE IF NOT EXISTS pipeline_profile
     samples_json        BLOB,
     pinned_cores        REAL    NOT NULL DEFAULT 0,
     pinned_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    cpu_measured        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (pipeline, node_id)
 );`
 
@@ -823,6 +824,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 	case 7:
 		_, err := s.exec(ctx, pipelineProfilesTableSQLite)
 		return err
+	case 8:
+		return s.ensureColumns("pipeline_profiles", pipelineProfilesCPUMeasuredCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -851,6 +854,17 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 7:
 		_, err := tx.ExecContext(ctx, pipelineProfilesTablePostgres)
 		return err
+	case 8:
+		for name, typ := range pipelineProfilesCPUMeasuredCols {
+			stmt := fmt.Sprintf(
+				`ALTER TABLE %q ADD COLUMN IF NOT EXISTS %q %s`,
+				"pipeline_profiles", name, translateColumnType(typ),
+			)
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("add column pipeline_profiles.%s: %w", name, err)
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -934,6 +948,14 @@ var columnMigrations = []columnSpec{
 	{"secrets", map[string]string{
 		"masked": "INTEGER NOT NULL DEFAULT 1",
 	}},
+}
+
+// pipelineProfilesCPUMeasuredCols is the additive column v8 adds to the
+// v7 pipeline_profiles table. It is applied on its own rather than through
+// columnMigrations because that list runs at v1, before v7 has created the
+// table.
+var pipelineProfilesCPUMeasuredCols = map[string]string{
+	"cpu_measured": "INTEGER NOT NULL DEFAULT 0",
 }
 
 func (s *Store) ensureColumnsAll() error {

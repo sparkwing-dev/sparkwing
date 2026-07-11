@@ -23,6 +23,10 @@ type capacityStat struct {
 	Nodes    []store.PipelineProfile `json:"nodes,omitempty"`
 }
 
+// runCapacityStats prints the measured capacity profiles as a table, one
+// row per pipeline plus its node breakdown. Any pin-drift warning is
+// printed below the table as a per-pipeline footnote rather than inside a
+// cell, so its long message never widens or raggeds the aligned columns.
 func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline string, emitJSON bool) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -57,11 +61,16 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 				n.NodeID, fmtDur(n.P50Duration), fmtDur(n.P99Duration),
 				n.PeakCores, humanBytes(n.PeakMemoryBytes), n.SampleCount)
 		}
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	for _, s := range stats {
 		if s.Drift != "" {
-			fmt.Fprintf(tw, "  drift\t%s\t\t\t\t\t\n", s.Drift)
+			fmt.Fprintf(os.Stdout, "\n%s: %s\n", s.Pipeline, s.Drift)
 		}
 	}
-	return tw.Flush()
+	return nil
 }
 
 // groupCapacityStats folds the flat profile rows into per-pipeline stats,
@@ -103,7 +112,7 @@ func deriveSource(rollup store.PipelineProfile) store.CostSource {
 	if rollup.PinnedCores > 0 || rollup.PinnedMemoryBytes > 0 {
 		return store.CostSourcePin
 	}
-	if rollup.SampleCount >= capacity.MinSamples && rollup.PeakCores > 0 {
+	if rollup.SampleCount >= capacity.MinSamples && (rollup.PeakCores > 0 || rollup.CPUMeasured) {
 		return store.CostSourceMeasured
 	}
 	return store.CostSourceDefault

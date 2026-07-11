@@ -129,7 +129,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 
 func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	clear := ""
-	if qs.ExpectedClearMS != nil {
+	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
 		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
 	}
 	if d := fmtDaemonHeader(qs); d != "" {
