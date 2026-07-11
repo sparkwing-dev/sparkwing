@@ -495,7 +495,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.Admission != nil {
 		var outcome admitOutcome
 		var admitErr error
-		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, runID, plan, opts.MaxParallel, cancelRun)
+		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, runID, opts.Pipeline, plan, opts.MaxParallel, cancelRun)
 		if admitErr != nil {
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause

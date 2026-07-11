@@ -172,6 +172,7 @@ func Run(ctx context.Context, opts Options) error {
 		root.Handle("/api/v1/logs/", logsSrv.Handler())
 	}
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
+	root.Handle("GET /api/v1/queue", queueHandler(paths.Root))
 	if ctrl != nil {
 		ctrlHandler := ctrl.Handler()
 		if opts.ReadOnly {

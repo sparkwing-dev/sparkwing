@@ -22,9 +22,10 @@ const defaultChargeCores = 1.0
 // drive it with [Run]; it serves until it is drained, told to stop, or
 // idles out.
 type Daemon struct {
-	cfg     Config
-	layout  layout
-	sampler HostSampler
+	cfg         Config
+	layout      layout
+	sampler     HostSampler
+	procSampler ProcSampler
 
 	lockFile *os.File
 	ln       net.Listener
@@ -70,10 +71,15 @@ func New(cfg Config) (*Daemon, error) {
 	if sampler == nil {
 		sampler = platformSampler{}
 	}
+	procSampler := cfg.ProcSampler
+	if procSampler == nil {
+		procSampler = newProcSampler()
+	}
 	return &Daemon{
 		cfg:          cfg,
 		layout:       lay,
 		sampler:      sampler,
+		procSampler:  procSampler,
 		ready:        make(chan struct{}),
 		quit:         make(chan struct{}),
 		conns:        map[*conn]struct{}{},
@@ -122,6 +128,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.watchContext(ctx)
 	go d.sampleLoop(ctx)
+	go d.stallLoop(ctx)
 	go d.idleLoop(ctx)
 
 	for {
@@ -382,6 +389,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	c.runID = req.RunID
+	c.pipeline = req.Pipeline
+	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
 	c.finalizable = !req.SemaphoresOnly
@@ -436,6 +445,8 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
+	c.pipeline = req.Pipeline
+	c.pid = req.PID
 	c.role = roleHolder
 	c.leaseID = leaseID
 	c.members = []string{req.RunID}

@@ -1,9 +1,18 @@
 package wingd
 
 import (
+	"fmt"
+
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+// stallRecoveryCommand is the single non-destructive verb a queue view
+// advertises for a wedged holder. It cancels one run by id and never
+// touches shared host state.
+func stallRecoveryCommand(runID string) string {
+	return fmt.Sprintf("sparkwing runs cancel --run %s", runID)
+}
 
 // buildQueueStateLocked renders the current admission picture for the
 // read-only queue view: capacity rows with held amounts, holders with
@@ -60,27 +69,63 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			},
 			Semaphores: claimKeys(ls.Claims),
 		}
-		if c := d.byRun[ls.RequestID]; c != nil && !c.startAt.IsZero() {
-			h.ElapsedMS = now.Sub(c.startAt).Milliseconds()
+		if c := d.byRun[ls.RequestID]; c != nil {
+			h.Pipeline = c.pipeline
+			if !c.startAt.IsZero() {
+				h.ElapsedMS = now.Sub(c.startAt).Milliseconds()
+			}
+			if c.stalled {
+				h.Stalled = true
+				h.Recovery = stallRecoveryCommand(ls.RequestID)
+			}
 		}
 		qs.Holders = append(qs.Holders, h)
 	}
 
-	for _, w := range snap.Waiters {
+	remaining := map[string]float64{}
+	for _, r := range qs.Resources {
+		remaining[r.Key] = r.Capacity - r.Held
+	}
+	for i, w := range snap.Waiters {
 		waiter := wingwire.Waiter{
-			RunID: w.RequestID,
+			RunID:    w.RequestID,
+			Position: i + 1,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
 			},
 			Semaphores: claimKeys(w.Claims),
+			WaitingOn:  waitingOn(w, remaining),
 		}
-		if c := d.byRun[w.RequestID]; c != nil && !c.startAt.IsZero() {
-			waiter.WaitingMS = now.Sub(c.startAt).Milliseconds()
+		if c := d.byRun[w.RequestID]; c != nil {
+			waiter.Pipeline = c.pipeline
+			if !c.startAt.IsZero() {
+				waiter.WaitingMS = now.Sub(c.startAt).Milliseconds()
+			}
 		}
 		qs.Waiters = append(qs.Waiters, waiter)
 	}
 	return qs
+}
+
+// waitingOn names the resources a waiter cannot fit into right now: host
+// dimensions and full semaphore keys whose remaining room is smaller than
+// what the waiter draws. An empty result means the waiter is blocked only
+// by arrival order behind a heavier request ahead of it.
+func waitingOn(w admission.WaiterState, remaining map[string]float64) []string {
+	var keys []string
+	if cores := float64(w.MilliCores) / 1000.0; cores > 0 && remaining["cores"] < cores {
+		keys = append(keys, "cores")
+	}
+	if mem := float64(w.MemoryBytes); mem > 0 && remaining["memory"] < mem {
+		keys = append(keys, "memory")
+	}
+	for _, c := range w.Claims {
+		if room, ok := remaining[c.Key]; ok && room < float64(c.Cost) {
+			keys = append(keys, c.Key)
+		}
+	}
+	return keys
 }
 
 // effectiveCapacity is the smallest capacity any live hold declares for a
