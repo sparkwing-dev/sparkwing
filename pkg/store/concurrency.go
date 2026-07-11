@@ -375,7 +375,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	if reaped, err := txReapTerminalConcurrencyHolders(ctx, tx, req.Key); err != nil {
 		return AcquireSlotResponse{}, err
 	} else if len(reaped) > 0 {
-		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano(), true); err != nil {
+		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano(), livePollingWaiter{}); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 	}
@@ -811,17 +811,26 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
 		return nil, err
 	}
-	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, true)
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, livePollingWaiter{})
 }
 
-func txPromotePollingWaiter(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+func txPromotePollingWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
 		return nil, err
 	}
-	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, false)
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, livePollingWaiter{runID: runID, nodeID: nodeID})
 }
 
-func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64, requireLiveRun bool) ([]ConcurrencyWaiter, error) {
+type livePollingWaiter struct {
+	runID  string
+	nodeID string
+}
+
+func (p livePollingWaiter) matches(waiter ConcurrencyWaiter) bool {
+	return p.runID != "" && waiter.RunID == p.runID && waiter.NodeID == p.nodeID
+}
+
+func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64, polling livePollingWaiter) ([]ConcurrencyWaiter, error) {
 	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -857,23 +866,14 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 	for _, w := range candidates {
 		ids = append(ids, w.RunID)
 	}
-	var live map[string]bool
-	var finished map[string]bool
-	if requireLiveRun {
-		live, err = txLiveRunningRunIDs(ctx, tx, ids, time.Unix(0, nowNS).Add(-DefaultLeaseDuration).UnixNano())
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		finished, err = txFinishedRunIDs(ctx, tx, ids)
-		if err != nil {
-			return nil, err
-		}
+	live, err := txLiveRunningRunIDs(ctx, tx, ids, time.Unix(0, nowNS).Add(-DefaultLeaseDuration).UnixNano())
+	if err != nil {
+		return nil, err
 	}
 
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
-		if (requireLiveRun && !live[w.RunID]) || (!requireLiveRun && finished[w.RunID]) {
+		if !live[w.RunID] && !polling.matches(w) {
 			if _, derr := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); derr != nil {
 				return nil, derr
 			}
@@ -966,48 +966,6 @@ func txLiveRunningRunIDs(ctx context.Context, tx *storeTx, ids []string, heartbe
 		live[id] = true
 	}
 	return live, rows.Err()
-}
-
-// txFinishedRunIDs returns the subset of ids whose runs row exists and has a
-// non-NULL finished_at. Empty and missing ids are absent from the result: a
-// run with no row is not reported finished, since concurrency keys are
-// decoupled from the runs table and absence carries no liveness meaning here.
-func txFinishedRunIDs(ctx context.Context, tx *storeTx, ids []string) (map[string]bool, error) {
-	seen := make(map[string]bool, len(ids))
-	args := make([]any, 0, len(ids))
-	for _, id := range ids {
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		args = append(args, id)
-	}
-	if len(args) == 0 {
-		return nil, nil
-	}
-	placeholders := make([]string, len(args))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT id FROM runs
-		  WHERE finished_at IS NOT NULL AND id IN (`+strings.Join(placeholders, ",")+`)`,
-		args...,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	finished := make(map[string]bool)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		finished[id] = true
-	}
-	return finished, rows.Err()
 }
 
 // concurrencyInvariantFailFast selects how a violated concurrency
@@ -1868,7 +1826,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		}
 		if shouldPromote {
 			now := time.Now()
-			promoted, err := txPromotePollingWaiter(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+			promoted, err := txPromotePollingWaiter(ctx, tx, key, runID, nodeID, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
 			if err != nil {
 				return WaiterResolution{}, err
 			}
