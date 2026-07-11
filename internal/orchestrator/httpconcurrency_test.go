@@ -34,6 +34,30 @@ func acquireHTTP(t *testing.T, b *orchestrator.HTTPConcurrency, req store.Acquir
 	return resp
 }
 
+func createHTTPLiveRun(t *testing.T, st *store.Store, runID string) {
+	t.Helper()
+	if runID == "" {
+		return
+	}
+	if err := st.CreateRun(context.Background(), store.Run{
+		ID:        runID,
+		Pipeline:  "test-pipeline",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun(%s): %v", runID, err)
+	}
+	if err := st.TouchRunHeartbeat(context.Background(), runID); err != nil {
+		t.Fatalf("TouchRunHeartbeat(%s): %v", runID, err)
+	}
+}
+
+func acquireHTTPLive(t *testing.T, st *store.Store, b *orchestrator.HTTPConcurrency, req store.AcquireSlotRequest) store.AcquireSlotResponse {
+	t.Helper()
+	createHTTPLiveRun(t, st, req.RunID)
+	return acquireHTTP(t, b, req)
+}
+
 func TestHTTPConcurrency_StateNotFoundMapsStoreErrNotFound(t *testing.T) {
 	b, _ := newHTTPConcurrency(t)
 	_, err := b.State(context.Background(), "missing-key")
@@ -43,20 +67,20 @@ func TestHTTPConcurrency_StateNotFoundMapsStoreErrNotFound(t *testing.T) {
 }
 
 func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {
-	b, _ := newHTTPConcurrency(t)
+	b, st := newHTTPConcurrency(t)
 	mk := func(run string) store.AcquireSlotRequest {
 		return store.AcquireSlotRequest{
 			Key: "db", HolderID: run + "/n", RunID: run, NodeID: "n",
 			Capacity: 8, Cost: 4, Policy: store.OnLimitQueue,
 		}
 	}
-	if r := acquireHTTP(t, b, mk("r1")); r.Kind != store.AcquireGranted {
+	if r := acquireHTTPLive(t, st, b, mk("r1")); r.Kind != store.AcquireGranted {
 		t.Fatalf("r1: want Granted got %s", r.Kind)
 	}
-	if r := acquireHTTP(t, b, mk("r2")); r.Kind != store.AcquireGranted {
+	if r := acquireHTTPLive(t, st, b, mk("r2")); r.Kind != store.AcquireGranted {
 		t.Fatalf("r2: want Granted (4+4<=8) got %s", r.Kind)
 	}
-	if r := acquireHTTP(t, b, mk("r3")); r.Kind != store.AcquireQueued {
+	if r := acquireHTTPLive(t, st, b, mk("r3")); r.Kind != store.AcquireQueued {
 		t.Fatalf("r3: want Queued (8+4>8) got %s", r.Kind)
 	}
 
@@ -84,20 +108,20 @@ func TestHTTPConcurrency_CostWeightedAdmission(t *testing.T) {
 }
 
 func TestHTTPConcurrency_MostRestrictiveWins(t *testing.T) {
-	b, _ := newHTTPConcurrency(t)
+	b, st := newHTTPConcurrency(t)
 	mk := func(run string, cap int) store.AcquireSlotRequest {
 		return store.AcquireSlotRequest{
 			Key: "db", HolderID: run + "/n", RunID: run, NodeID: "n",
 			Capacity: cap, Cost: 1, Policy: store.OnLimitQueue,
 		}
 	}
-	if r := acquireHTTP(t, b, mk("rA", 5)); r.Kind != store.AcquireGranted {
+	if r := acquireHTTPLive(t, st, b, mk("rA", 5)); r.Kind != store.AcquireGranted {
 		t.Fatalf("A: want Granted got %s", r.Kind)
 	}
-	if r := acquireHTTP(t, b, mk("rB", 2)); r.Kind != store.AcquireGranted {
+	if r := acquireHTTPLive(t, st, b, mk("rB", 2)); r.Kind != store.AcquireGranted {
 		t.Fatalf("B: want Granted got %s", r.Kind)
 	}
-	if r := acquireHTTP(t, b, mk("rC", 5)); r.Kind != store.AcquireQueued {
+	if r := acquireHTTPLive(t, st, b, mk("rC", 5)); r.Kind != store.AcquireQueued {
 		t.Fatalf("C: want Queued under effective cap 2, got %s", r.Kind)
 	}
 	if err := b.ReleaseSlot(context.Background(), "db", "rB/n", "success", "", "", 0); err != nil {
