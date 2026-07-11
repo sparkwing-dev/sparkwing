@@ -3,12 +3,22 @@
 type AdmissionRequest struct {
 	RunID string
 
+	Pipeline string
+
+	PID int
+
 	Resources  HostResources
 	Semaphores []SemaphoreClaim
 
 	ParentLeaseToken string
 
 	SemaphoresOnly bool
+
+	CostSource string
+
+	ExpectedDurationMS int64
+
+	DriftWarning string
 }
 func Decode(line []byte) (Message, error)
 type DrainAck struct {
@@ -49,11 +59,23 @@ type HelloAck struct {
 type Holder struct {
 	RunID string
 
+	Pipeline string
+
 	ElapsedMS int64
 
 	Resources HostResources
 
 	Semaphores []string
+
+	CostSource string
+
+	ExpectedDurationMS int64
+
+	DriftWarning string
+
+	Stalled bool
+
+	Recovery string
 }
 type HostResources struct {
 	Cores float64
@@ -75,6 +97,12 @@ type QueueState struct {
 	Resources []ResourceState
 	Holders   []Holder
 	Waiters   []Waiter
+
+	ExpectedClearMS *int64
+
+	DaemonVersion string
+
+	DaemonUptimeMS int64
 }
 type Queued struct {
 	RunID string
@@ -114,9 +142,23 @@ const TypeQueued MessageType = "queued"
 const TypeReattach MessageType = "reattach"
 const TypeRelease MessageType = "release"
 type Waiter struct {
-	RunID      string
+	RunID string
+
+	Pipeline string
+
+	Position   int
 	Resources  HostResources
 	Semaphores []string
 
+	WaitingOn []string
+
 	WaitingMS int64
+
+	CostSource string
+
+	ExpectedDurationMS int64
+
+	DriftWarning string
+
+	ExpectedStartMS *int64
 }

@@ -68,8 +68,16 @@ code change to unlock.
   `--sw-no-wait` (with the `SPARKWING_BOX_SLOTS_PIN` /
   `SPARKWING_BOX_NO_WAIT` variables): local runs no longer take box
   slots, so there is no per-run cap to pin and queue waits cancel
-  cleanly with Ctrl-C. The `box-slots` verbs remain for inspecting the
-  on-disk lock directory.
+  cleanly with Ctrl-C.
+- **cli:** (Breaking) The `box-slots` command tree
+  (`show`/`list`/`set`/`release`/`sweep`) and `sparkwing maintenance` are
+  removed, along with the `SPARKWING_BOX_SLOTS` cap baseline and the
+  `SPARKWING_BOX_SLOT_STALL_TTL` override. The admission daemon owns host
+  admission and converges local state on its own, so the inspect-and-tune
+  and manual-sweep verbs have no remaining purpose. Read live admission
+  with `sparkwing queue`; clear provably-dead leftovers with the new
+  `sparkwing doctor`. See
+  [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md).
 - **sdk:** (Breaking) `ConcurrencyLimit.HostAdmission` and
   `Plan.HostAdmission()` are removed: host admission is universal and
   implicit under the daemon, and `ScopeBox` means locality only.
@@ -82,6 +90,20 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `sparkwing doctor` -- the one safe repair verb. It removes
+  only provably-dead local state (run rows left `running` with no live
+  process or daemon lease, leftover box-slot lock files whose owner is
+  gone, local-scope concurrency rows whose run has ended, and run
+  directories with no run row) and reports what it found and did.
+  `--dry-run` reports without changing anything. It never kills a
+  process, never touches the daemon's live state, and never touches
+  cluster-scoped (global) rows, so it is safe to run at any time and a
+  healthy machine reports a clean bill.
+- **cli:** `sparkwing queue` now names the serving daemon's version and
+  uptime in its header, and both `sparkwing queue` and `sparkwing doctor`
+  warn when an older-pinned pipeline binary is admitting outside the
+  daemon through a held box-slot lock -- with the fix (bump that repo's
+  sparkwing pin) so a mixed machine cannot silently oversubscribe.
 - **sdk:** `Plan.Resources(...)` and `JobNode.Resources(...)` (plus the
   `JobGroup` equivalent) declare optional cold-start cost hints via
   `sparkwing.Cores(n)` and `sparkwing.MemoryGB(n)`: advisory estimates of

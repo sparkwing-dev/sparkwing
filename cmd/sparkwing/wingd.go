@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -51,11 +52,13 @@ func runWingdRun(args []string) error {
 		v = installedVersion()
 	}
 
+	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
 	d, err := wingd.New(wingd.Config{
 		Home:             *home,
 		Version:          v,
 		HeadroomFraction: *headroom,
 		FinalizeRun:      orchestrator.NewOrphanRunFinalizer(*home),
+		Logf:             func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 	if err != nil {
 		return err

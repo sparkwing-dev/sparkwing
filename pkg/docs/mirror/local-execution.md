@@ -130,36 +130,83 @@ sparkwing to block them.
 
 ## Per-host concurrency
 
-Two `sparkwing run` invocations on the same machine compete for the
-same CPU. Local runs are arbitrated by a per-host admission daemon
-(`sparkwingd`) that starts on demand -- no installation or setup step.
-At run start the process connects to the daemon and submits one
-admission request covering everything the run needs: host CPU and
-memory (from the plan's optional `.Resources()` hints, or a
-conservative default when none are declared) plus any box- or
-run-scoped `.Concurrency()` groups the plan claims. The grant is
-all-or-nothing, and the lease is held by the open connection for the
-run's lifetime.
+Two `sparkwing run` invocations on the same machine compete for the same
+CPU. Local runs are arbitrated by a per-host admission daemon
+(`sparkwingd`) -- invisible infrastructure you never install, start, or
+tune. The first run that needs admission elects one: a lock file under
+the sparkwing home makes the race safe, so one process wins and the rest
+connect to the winner. A newer sparkwing binary transparently takes over
+from a running older daemon, and the daemon exits on its own once the
+machine has been idle for a while, coming back the next time a run needs
+it.
 
-While a run waits for capacity it prints a single queue-position line
-on stderr (`queued for local admission: position 2 of 3 ...`); Ctrl-C
-cancels the wait cleanly. When a run process dies -- crash, kill, or
-power event -- the kernel closes its daemon connection and the daemon
-releases the lease immediately, finalizes the orphaned run record, and
-admits the next waiter. There are no heartbeats, leases to tune, or
-polling loops.
-
+At run start the process connects and submits one admission request
+covering everything the run needs: host CPU and memory plus any logical
+`.Concurrency()` groups the plan claims. The grant is all-or-nothing,
+and the lease is held by the open connection for the run's lifetime.
+While a run waits it prints a single queue-position line on stderr
+(`queued for local admission: position 2 of 3 ...`) and Ctrl-C cancels
+the wait cleanly. When a run process dies -- crash, kill, or power event
+-- the kernel closes the connection and the daemon releases the lease
+immediately, finalizes the orphaned run record, and admits the next
+waiter. There are no heartbeats, leases to tune, or polling loops.
 Nested runs never double-charge the host: a parent passes its lease to
 children it spawns (via `RunAndAwait` or a step that shells out to
-`sparkwing run`), and the child attaches to the parent's lease instead
+`sparkwing run`), and each child attaches to the parent's lease instead
 of re-admitting.
 
-The gate is host-local. Two laptops pointed at the same shared state
-backend (Mode 2 / 3 / 4) each keep their own daemon; nothing
-coordinates CPU across machines (global-scope `.Concurrency()` groups
-pool across the fleet through the shared backend instead). Cluster
-runner pods skip the gate because their CPU is already capped by
-Kubernetes and the warm-runner pool's own concurrency budget.
+### Declare nothing; sparkwing measures
+
+The daemon measures the machine's real cores and memory and admits into
+the headroom that is actually free, counting non-sparkwing load against
+capacity. It also measures each pipeline's own cost over its first few
+runs, so "one heavy build at a time" emerges from measurement with no
+configuration. Declare nothing and it works.
+
+A pipeline may pass a cold-start hint with
+`.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an
+explicit cost when it must -- but a pin is policed, not trusted blindly:
+when it drifts from what the pipeline actually uses, `sparkwing queue`
+flags the gap so the pin can be corrected or dropped. The posture is
+declare nothing and let sparkwing measure; pin sparingly, and sparkwing
+polices the pin.
+
+`.Concurrency(group)` is for *logical* mutual exclusion only -- a deploy
+lock, a shared fixture -- never host sizing. A run- or box-scoped group
+is local to the machine; a global-scoped group pools across the whole
+fleet through the controller's shared state (see [sdk.md](sdk.md)).
+
+### Operating it
+
+There are exactly two operational commands, and neither can hurt the
+machine:
+
+- `sparkwing queue` -- the truthful view of local admission: every
+  holder with how long it has held and its cost, every waiter in arrival
+  order with its position and estimated start, and a flag on any holder
+  that is alive but idle while runs wait behind it. It also names the
+  serving daemon's version and uptime, and warns when an older-pinned
+  pipeline binary is admitting outside the daemon.
+- `sparkwing doctor` -- the one repair verb. It removes only provably-
+  dead state (an interrupted run's leftover row, an orphaned lock file
+  whose owner is gone) and reports what it found and did. It never kills
+  a process and never touches live admission, so it is safe to run at any
+  time; on a healthy machine it finds nothing and says so.
+
+The daemon writes an operational log to `wingd/d.log` under the sparkwing
+home (`~/.sparkwing/wingd/d.log` by default) for when you want to see
+what it did.
+
+### Whoever owns the machine owns admission
+
+The gate is host-local by design: two laptops pointed at the same shared
+backend (Mode 2 / 3 / 4) each run their own daemon, and nothing
+coordinates raw CPU across machines. On a Kubernetes runner the pod's CPU
+is already bounded by the kube scheduler and the warm-runner pool's own
+budget, so admission there belongs to the cluster, not to a sparkwing
+daemon -- runner pods do not start one. Cross-machine coordination is the
+job of global-scope `.Concurrency()` groups, which pool through the
+controller's shared state.
 
 ## Pipeline configuration
 

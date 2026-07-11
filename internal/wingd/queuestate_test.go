@@ -45,6 +45,36 @@ func waiterByRun(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
 	return wingwire.Waiter{}, false
 }
 
+func TestQueueState_CarriesDaemonVersionAndUptime(t *testing.T) {
+	home := shortHome(t)
+	base := time.Unix(1_700_000_000, 0)
+	var mu sync.Mutex
+	elapsed := time.Duration(0)
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Version:          "v9.9.9",
+		HeadroomFraction: -1,
+		Now: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			elapsed += 250 * time.Millisecond
+			return base.Add(elapsed)
+		},
+	})
+
+	q := ensure(t, home, "")
+	qs, err := q.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+	if qs.DaemonVersion != "v9.9.9" {
+		t.Errorf("DaemonVersion = %q, want v9.9.9", qs.DaemonVersion)
+	}
+	if qs.DaemonUptimeMS <= 0 {
+		t.Errorf("DaemonUptimeMS = %d, want > 0", qs.DaemonUptimeMS)
+	}
+}
+
 func TestQueueState_ReportsHoldersWaitersPositionsAndPipelines(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{

@@ -116,6 +116,10 @@ type ConcurrencyWaiter struct {
 
 	Position int
 }
+type CostSource string
+const CostSourceDefault CostSource = "default"
+const CostSourceMeasured CostSource = "measured"
+const CostSourcePin CostSource = "pin"
 type DebugPause struct {
 	RunID       string
 	NodeID      string
@@ -252,7 +256,25 @@ const PauseReasonBefore = "pause-before"
 const PauseReasonOnFailure = "pause-on-failure"
 const PauseReleaseManual = "manual"
 const PauseReleaseTimeout = "timeout-released"
+type PipelineProfile struct {
+	Pipeline        string
+	NodeID          string
+	P50Duration     time.Duration
+	P99Duration     time.Duration
+	PeakCores       float64
+	PeakMemoryBytes int64
+	SampleCount     int
+	UpdatedAt       time.Time
+
+	PinnedCores       float64
+	PinnedMemoryBytes int64
+}
 const PrefixLen = 12
+type ProfileObservation struct {
+	Duration        time.Duration
+	PeakCores       float64
+	PeakMemoryBytes int64
+}
 const RetrySourceAuto = "auto"
 const RetrySourceManual = "manual"
 type Run struct {
@@ -351,6 +373,7 @@ func (s *Store) Close() error
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
 func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error)
+func (s *Store) CountDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
 func (s *Store) CountUsers() (int, error)
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error
@@ -384,6 +407,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
+func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error)
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
 func (s *Store) GetSecret(name string) (*Secret, error)
@@ -400,6 +424,7 @@ func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, e
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error)
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error)
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
+func (s *Store) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
 func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error)
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (s *Store) ListSecrets() ([]Secret, error)
@@ -415,7 +440,9 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
+func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
+func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
@@ -429,6 +456,7 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
+func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error

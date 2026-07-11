@@ -46,6 +46,7 @@ type Daemon struct {
 	draining     bool
 	shuttingDown bool
 	lastActivity time.Time
+	startedAt    time.Time
 
 	loadInit     bool
 	smoothedLoad float64
@@ -113,6 +114,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer d.releaseLock()
 	defer func() { _ = os.Remove(d.layout.sock) }()
 
+	d.startedAt = d.now()
 	if err := d.initLedger(); err != nil {
 		return err
 	}

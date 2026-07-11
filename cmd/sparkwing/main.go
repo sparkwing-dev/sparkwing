@@ -248,10 +248,8 @@ func runSparkwing(args []string) error {
 
 	case "cluster":
 		return runCluster(args[1:])
-	case "maintenance":
-		return runMaintenance(args[1:])
-	case "box-slots":
-		return runBoxSlots(args[1:])
+	case "doctor":
+		return runDoctor(args[1:])
 	case "secrets":
 		return runSecret(args[1:])
 

@@ -23,6 +23,10 @@ func stallRecoveryCommand(runID string) string {
 func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	snap := d.ledger.Snapshot()
 	var qs wingwire.QueueState
+	qs.DaemonVersion = d.cfg.Version
+	if !d.startedAt.IsZero() {
+		qs.DaemonUptimeMS = d.now().Sub(d.startedAt).Milliseconds()
+	}
 
 	var usedMilli int64
 	var usedMem uint64

@@ -48,13 +48,32 @@ func runQueue(args []string) error {
 	// safety: empty Version keeps this read-only view from ever draining
 	// or replacing a running daemon during the version handshake.
 	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home})
+	legacy, _ := liveLegacyBoxSlots(*home)
+
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
-			return renderNoDaemon(os.Stdout, format)
+			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
+				return rerr
+			}
+			warnLegacy(os.Stderr, len(legacy))
+			return nil
 		}
 		return fmt.Errorf("queue: %w", err)
 	}
-	return renderQueue(os.Stdout, qs, format)
+	if rerr := renderQueue(os.Stdout, qs, format); rerr != nil {
+		return rerr
+	}
+	warnLegacy(os.Stderr, len(legacy))
+	return nil
+}
+
+// warnLegacy prints the legacy-coexistence warning to stderr when
+// older-pinned pipeline binaries are still admitting outside the daemon.
+// It goes to stderr so JSON and plain stdout stay machine-clean.
+func warnLegacy(w io.Writer, n int) {
+	if line := legacyWarningLine(n); line != "" {
+		fmt.Fprintf(w, "warning: %s\n", line)
+	}
 }
 
 // renderNoDaemon reports the calm truth that nothing is queued: no daemon
@@ -109,6 +128,9 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	clear := ""
 	if qs.ExpectedClearMS != nil {
 		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
+	}
+	if d := fmtDaemonHeader(qs); d != "" {
+		fmt.Fprintln(out, d)
 	}
 	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n\n", len(qs.Holders), len(qs.Waiters), clear)
 
@@ -189,6 +211,24 @@ func queueDriftNotes(qs wingwire.QueueState) []queueDriftNote {
 		}
 	}
 	return notes
+}
+
+// fmtDaemonHeader renders the daemon identity line above the queue: its
+// binary version and how long it has been up. Empty when the daemon
+// reported neither (an older daemon, or no daemon at all).
+func fmtDaemonHeader(qs wingwire.QueueState) string {
+	if qs.DaemonVersion == "" && qs.DaemonUptimeMS <= 0 {
+		return ""
+	}
+	version := qs.DaemonVersion
+	if version == "" {
+		version = "unknown"
+	}
+	up := "just started"
+	if qs.DaemonUptimeMS > 0 {
+		up = "up " + (time.Duration(qs.DaemonUptimeMS) * time.Millisecond).Round(time.Second).String()
+	}
+	return fmt.Sprintf("daemon %s, %s", version, up)
 }
 
 // fmtETA renders a waiter's estimated start offset: "now" when it is

@@ -25,7 +25,7 @@ for agent-facing discovery.
 - `version` -- Show + update versions
 - `update` -- Self-update the CLI binary
 - `dashboard` -- Local dashboard server
-- `box-slots` -- Show or live-tune the host run-concurrency cap
+- `doctor` -- Diagnose and repair provably-dead local state
 - `cluster` -- Cluster ops
 - `secrets` -- Manage secrets
 - `configure` -- Laptop-local config
@@ -54,249 +54,6 @@ sparkwing pipeline new --name release
 
 # Start the local dashboard
 sparkwing dashboard start
-```
-
-## `sparkwing box-slots`
-
-Show or live-tune the host run-concurrency cap
-
-Inspect or tune the box-slot lock directory. Local runs are admitted
-by the local admission daemon and do not take box slots; these verbs
-read and write the on-disk box-slot state itself, which is normally
-empty.
-
-'show' reports the configured cap and where it came from (the live
-control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic
-default) plus any holders and waiters recorded on disk. 'set' writes
-the host control; 'list', 'release', and 'sweep' inspect and clean the
-lock files.
-
-### Subcommands
-
-- `show` -- Print the cap in force, its source, and live holders + waiters
-- `set` -- Write the live host cap (--to N \| off \| default)
-- `list` -- One row per holder: pid, claim time, run id, liveness, lock path
-- `release` -- Remove a holder's lock file (--force SIGKILLs a live owner)
-- `sweep` -- Report live holders whose run went silent (--reap kills them)
-
-### Examples
-
-```sh
-# What's the cap and who's holding slots?
-sparkwing box-slots show
-
-# Machine-readable
-sparkwing box-slots show -o json
-
-# Raise the cap so queued runs unblock
-sparkwing box-slots set --to 4
-
-# Disable the semaphore on this host
-sparkwing box-slots set --to off
-
-# Revert to the heuristic default
-sparkwing box-slots set --to default
-
-# Who holds a slot right now, for which run?
-sparkwing box-slots list
-
-# Free a wedged holder's slot
-sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force
-
-# Which live holders look wedged?
-sparkwing box-slots sweep
-
-# Kill the wedged holders
-sparkwing box-slots sweep --reap
-```
-
-## `sparkwing box-slots list`
-
-List box-slot holders: pid, claim time, run id, liveness
-
-Prints one row per holder lock file in the box-slot directory: the
-owner pid and claim time (parsed from the filename), the run id the
-owner recorded after admission (empty until the run starts), whether
-the owner is live or stale (a non-blocking flock probe -- the kernel
-releases a dead owner's lock), and the lock file path.
-
-Reads only the filesystem and flock state, never the state database,
-so it works while state.db is wedged -- exactly when you need to know
-which run is sitting on a slot. Stale rows are left in place; admission
-sweeps them, or remove one explicitly with 'release'.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-
-### Examples
-
-```sh
-# Human-readable
-sparkwing box-slots list
-
-# Agent-readable
-sparkwing box-slots list -o json
-```
-
-## `sparkwing box-slots release`
-
-Remove a holder's lock file, freeing its box slot
-
-Removes one holder lock file named by its basename (as printed by
-'box-slots list'), freeing the slot it occupies. A stale file -- its
-owner already dead, flock released by the kernel -- is removed
-outright. A live holder is refused unless --force is given, in which
-case the owner process is SIGKILLed first and the file then removed;
-the kill only fires when the named file is still the owner pid's
-current holder file, so a recycled pid is never killed by mistake.
-
-Operates on the filesystem and flock state only, never the state
-database, so it works while state.db is wedged. Removal is serialized
-against run admission, and the freed slot admits the next waiter on
-its next poll.
-
-### Arguments
-
-- `<lockfile>` (required) -- Holder lock file basename, as printed by 'box-slots list'
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--force` | SIGKILL a live holder's owner before removing its lock file |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-
-### Examples
-
-```sh
-# Remove a stale holder file
-sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock
-
-# Evict a live holder (SIGKILL)
-sparkwing box-slots release holder-pid4242-1700000000000000000-1.lock --force
-```
-
-## `sparkwing box-slots set`
-
-Write the live host run-concurrency cap
-
-Writes the live host box-slot control. Waiting and running runs
-re-read it on their next acquire poll, so a change takes effect without
-restarting in-flight work: raising the cap lets queued runs acquire
-immediately; lowering it drains as current holders finish (they are
-never evicted).
-
---to takes a positive integer (the new cap), 'off' (also 'none' / '0',
-disabling the semaphore), or 'default' (clear the control and fall back
-to SPARKWING_BOX_SLOTS or the heuristic).
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--to VALUE` | New cap: a positive integer, 'off', or 'default' (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-
-### Examples
-
-```sh
-# Raise the cap to 4
-sparkwing box-slots set --to 4
-
-# Disable the semaphore
-sparkwing box-slots set --to off
-
-# Revert to the heuristic default
-sparkwing box-slots set --to default
-```
-
-## `sparkwing box-slots show`
-
-Print the cap in force, its source, and live holders + waiters
-
-Reports the configured box-slot cap, where that value came from -- the
-live control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic
-default of max(1, NumCPU/workers) -- and the semaphore state recorded
-on disk: how many holder and waiter markers exist. Local runs are
-admitted by the local admission daemon and do not take box slots, so
-the state is normally empty.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-
-### Examples
-
-```sh
-# Human-readable
-sparkwing box-slots show
-
-# Agent-readable
-sparkwing box-slots show -o json
-```
-
-## `sparkwing box-slots sweep`
-
-Report stalled box-slot holders; --reap kills their owners
-
-Finds live holders that look wedged: the owner process still holds
-its lock file's flock, but its annotated run's envelope log has not
-been written for longer than the stall threshold (default 30m,
-overridable via the SPARKWING_BOX_SLOT_STALL_TTL duration). The
-envelope moves on run-level events and stdout tees, so a silent
-envelope from a live process usually marks a holder that is alive but
-stuck -- typically wedged against the state database. A holder that
-never annotated a run counts by its claim time instead. A process
-heartbeat could not tell these apart -- a live process with frozen
-database work keeps beating; the envelope moves only with progress.
-
-The envelope signal has a blind spot: a healthy run inside one long
-output-quiet node (a buffered subprocess, a silent computation past
-the threshold) also reads as stalled. Each row therefore carries a
-corroborating NEWEST-WRITE column -- the mtime age of the newest file
-under the run's directory. Recent node-file writes under a silent
-envelope mean the run is likely alive: check that column, and raise
-SPARKWING_BOX_SLOT_STALL_TTL above your longest expected quiet node,
-before trusting --reap.
-
-Without --reap this only reports: pid, claim time, run, envelope-write
-age, the newest-file age, and the evidence behind the verdict. With --reap each
-stalled owner gets SIGTERM, a grace window to exit, then SIGKILL if it
-still holds its flock; a fresh flock probe immediately before each
-signal re-verifies the same lock file is still held by the same pid,
-so a recycled pid is never killed. The lock file itself is left in
-place -- the kernel drops the flock with the process, and run
-admission garbage-collects the stale file.
-
-Reads only the filesystem and flock state, never the state database,
-so it works while state.db is wedged -- exactly when you need it.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--reap` | SIGTERM each stalled holder's owner, then SIGKILL after a grace window |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-
-### Examples
-
-```sh
-# Who looks wedged?
-sparkwing box-slots sweep
-
-# Machine-readable
-sparkwing box-slots sweep -o json
-
-# Kill the wedged holders
-sparkwing box-slots sweep --reap
-
-# Tighter threshold for this sweep
-SPARKWING_BOX_SLOT_STALL_TTL=10m sparkwing box-slots sweep
 ```
 
 ## `sparkwing cluster`
@@ -2093,6 +1850,50 @@ sparkwing docs versions --web
 sparkwing docs versions --web -o json
 ```
 
+## `sparkwing doctor`
+
+Diagnose and repair provably-dead local state
+
+Checks the sparkwing home for state that is safe to
+remove because the process behind it is provably gone, repairs what it
+finds, and reports everything -- so it is safe to run at any time and a
+healthy machine reports a clean bill. It never kills a process, never
+touches the admission daemon's live state, and never touches
+cluster-scoped (global) rows.
+
+It cleans four things: local run rows still marked running whose process
+is gone and which the daemon does not know about; leftover box-slot lock
+files from older binaries (a file whose owner is still alive is reported,
+never removed); local-scope concurrency rows whose run has ended; and
+run directories on disk whose run row no longer exists.
+
+If an older-pinned pipeline binary is still admitting outside the daemon
+through a held box-slot lock, doctor reports it and points at the fix --
+bump that repo's sparkwing pin -- rather than deleting live state.
+
+Use --dry-run to report what it would repair without changing anything.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Report what would be repaired without changing anything |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
+| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
+
+### Examples
+
+```sh
+# Diagnose and repair now
+sparkwing doctor
+
+# Report without changing anything
+sparkwing doctor --dry-run
+
+# Agent-readable report
+sparkwing doctor -o json
+```
+
 ## `sparkwing info`
 
 Self-describe sparkwing + the current project (agent entrypoint)
@@ -2131,40 +1932,6 @@ sparkwing info --for-agent >> CLAUDE.md
 
 # Reprint the post-install onboarding card
 sparkwing info --first-time
-```
-
-## `sparkwing maintenance`
-
-Sweep the local concurrency tables without a controller
-
-Runs the janitorial pass the controller normally runs on a
-schedule, but against the local state database with no controller
-required. Reaps lease-expired concurrency holders and promotes the next
-queued waiters, deletes stale and orphaned waiters, sweeps expired and
-over-cap cache rows, and reconciles keys with idle capacity.
-
-Local runs trigger this pass inline, throttled to once every few minutes.
-Run this command to force a full pass now -- from cron, or to reclaim a
-database that grew while the box sat idle. It touches only finished or
-expired rows, so it is safe to run alongside live runs.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-
-### Examples
-
-```sh
-# Sweep now
-sparkwing maintenance
-
-# Machine-readable summary
-sparkwing maintenance -o json
-
-# Hourly from cron
-0 * * * * sparkwing maintenance
 ```
 
 ## `sparkwing pipeline`

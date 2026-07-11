@@ -269,6 +269,12 @@ type QueueState struct {
 	// in milliseconds from now. Nil when the estimate is unavailable
 	// because some queued or holding run lacks a measured duration.
 	ExpectedClearMS *int64 `json:"expected_clear_ms,omitempty"`
+	// DaemonVersion is the serving daemon's binary version, for the
+	// queue header. Empty when the daemon predates this field.
+	DaemonVersion string `json:"daemon_version,omitempty"`
+	// DaemonUptimeMS is how long the serving daemon has been up, in
+	// milliseconds. Zero when unknown.
+	DaemonUptimeMS int64 `json:"daemon_uptime_ms,omitempty"`
 }
 
 func (*Hello) wireType() MessageType            { return TypeHello }

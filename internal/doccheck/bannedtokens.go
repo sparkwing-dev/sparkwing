@@ -55,6 +55,12 @@ var banned = []bannedPattern{
 		"removed; children inherit admission by attaching to the parent's daemon lease (SPARKWING_LEASE_TOKEN)"},
 	{regexp.MustCompile(`\bHostAdmission\b`),
 		"removed from the SDK; host admission is universal and implicit, never a flag"},
+	{regexp.MustCompile(`\bbox-slots\b`),
+		"removed; the admission daemon owns host admission -- read it with `sparkwing queue` and clear leftovers with `sparkwing doctor`"},
+	{regexp.MustCompile(`sparkwing maintenance\b`),
+		"removed; the admission daemon converges local state without a sweep -- `sparkwing doctor` clears provably-dead leftovers"},
+	{regexp.MustCompile(`SPARKWING_BOX_SLOT`),
+		"removed; the admission daemon measures host capacity, so there is no box-slot cap or stall-ttl env to set"},
 }
 
 // narrativeExempt names the one doc where change/deprecation vocabulary
