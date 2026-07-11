@@ -38,8 +38,11 @@ type ConcurrencyMaintenanceOptions struct {
 	// Lease is the promotion lease handed to waiters reclaimed during the
 	// pass. Zero uses DefaultConcurrencyLease.
 	Lease time.Duration
-	// WaiterMaxAge drops queued waiters older than this. Zero uses twice
-	// DefaultConcurrencyLease, lining up with the node-level queue timeout.
+	// WaiterMaxAge is the age at which maintenance may reclaim a waiter
+	// whose owning run is missing, terminal, or no longer heartbeating.
+	// Live running runs keep their waiters until they are promoted,
+	// cancelled, or the queue policy times out. Zero uses twice
+	// DefaultConcurrencyLease.
 	WaiterMaxAge time.Duration
 	// CacheCap is the row ceiling for concurrency_cache after LRU eviction.
 	// Zero uses DefaultConcurrencyCacheCap.

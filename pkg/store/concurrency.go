@@ -2158,7 +2158,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 }
 
 // reapStaleConcurrencyWaiters drops orphan coalesce followers (leader
-// gone) and any waiter older than maxAge.
+// gone) and old waiters whose owning run is not live.
 func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	if maxAge <= 0 {
 		return nil, nil
@@ -2169,8 +2169,10 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	nowNS := time.Now().UnixNano()
-	cutoff := time.Now().Add(-maxAge).UnixNano()
+	now := time.Now()
+	nowNS := now.UnixNano()
+	cutoff := now.Add(-maxAge).UnixNano()
+	heartbeatCutoff := now.Add(-DefaultLeaseDuration).UnixNano()
 
 	orphanRows, err := tx.QueryContext(
 		ctx,
@@ -2206,9 +2208,16 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 
 	ageRows, err := tx.QueryContext(
 		ctx,
-		`SELECT `+waiterColumns+`
-		   FROM concurrency_waiters WHERE arrived_at < ?`+s.forUpdateSkipLocked(),
-		cutoff,
+		`SELECT `+prefixColumns(waiterColumns, "w.")+`
+		   FROM concurrency_waiters w
+		  WHERE w.arrived_at < ?
+		    AND NOT EXISTS (
+		      SELECT 1 FROM runs r
+		       WHERE r.id = w.run_id
+		         AND r.status = ?
+		         AND r.last_heartbeat_at >= ?
+		    )`+s.forUpdateSkipLocked(),
+		cutoff, runStatusRunning, heartbeatCutoff,
 	)
 	if err != nil {
 		return nil, err
