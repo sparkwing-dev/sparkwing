@@ -463,7 +463,8 @@ func (h *Harness) hammerCLI() {
 	if h.sparkBin == "" {
 		return
 	}
-	verb := [][]string{{"runs", "list", "--limit", "5"}, {"info"}}[h.rng.Intn(2)]
+	verbs := [][]string{{"runs", "list", "--limit", "5"}, {"info"}, {"queue"}}
+	verb := verbs[h.rng.Intn(len(verbs))]
 	cmd := exec.Command(h.sparkBin, verb...)
 	cmd.Env = append(os.Environ(), "SPARKWING_HOME="+h.home)
 	_ = cmd.Run()
