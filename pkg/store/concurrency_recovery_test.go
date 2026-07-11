@@ -203,6 +203,47 @@ func TestConcurrency_PromoteUsesRunningRunCreatedBeforeHeartbeatLoop(t *testing.
 	}
 }
 
+func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        "queued",
+		Pipeline:  "queued-pipeline",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := s.DB().ExecContext(ctx,
+		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, "queued"); err != nil {
+		t.Fatalf("clear heartbeat: %v", err)
+	}
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued", RunID: "queued", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+
+	if _, err := s.DB().ExecContext(ctx,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		"k", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+	promoted, err := s.PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || promoted[0].HolderID != "queued" {
+		t.Fatalf("promoted = %+v, want queued", promoted)
+	}
+}
+
 func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
