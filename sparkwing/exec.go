@@ -22,6 +22,8 @@ import (
 // ran (chdir failure, ENOENT-on-binary, pipe setup error).
 const ExitNotStarted = -1
 
+const exitStartedUnknown = -2
+
 // WorkDir returns the pipeline working directory (the repo root).
 func WorkDir() string { return runtime.WorkDir }
 
@@ -53,7 +55,14 @@ func (e *ExecError) Error() string {
 		}
 		return b.String()
 	}
-	fmt.Fprintf(&b, "command failed (exit %d): %s", e.ExitCode, e.Command)
+	switch {
+	case errors.Is(e.Cause, context.Canceled):
+		fmt.Fprintf(&b, "command cancelled: %s: %v", e.Command, context.Canceled)
+	case errors.Is(e.Cause, context.DeadlineExceeded):
+		fmt.Fprintf(&b, "command deadline exceeded: %s: %v", e.Command, context.DeadlineExceeded)
+	default:
+		fmt.Fprintf(&b, "command failed (exit %d): %s", e.ExitCode, e.Command)
+	}
 	out := strings.TrimSpace(e.Stderr)
 	if out == "" {
 		out = strings.TrimSpace(e.Stdout)
@@ -140,15 +149,10 @@ func commandEnvFromContext(ctx context.Context) map[string]string {
 // that genuinely need shell features (pipes, redirects, globs,
 // conditionals).
 //
-// Signal propagation: the child runs under exec.CommandContext, which
-// kills the direct child (SIGKILL) when ctx is cancelled. Bash spawns
-// a shell that may fork further; those grandchildren are NOT signaled
-// by ctx cancellation and can outlive the run if the bash script
-// backgrounds work or wraps a long-lived helper. Terminal SIGINT
-// (Ctrl-C) goes to the whole foreground process group and DOES reach
-// grandchildren via the OS. Authors who need clean tree teardown on
-// programmatic cancel should use Exec on a single binary, or run the
-// shell program through `setsid` / `exec` and reap explicitly.
+// Signal propagation: on Unix, Sparkwing starts each command in a
+// command-owned process group. Cancelling ctx asks the whole group to
+// terminate and then force-kills it if it does not exit. On Windows,
+// cancellation kills the direct child process.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
@@ -161,14 +165,10 @@ func Bash(ctx context.Context, line string) *Cmd {
 //	sparkwing.Exec(ctx, "kubectl", "apply", "-f", manifestPath).Run()
 //	sparkwing.Exec(ctx, "docker", "push", tag).Run()
 //
-// Signal propagation: the binary runs under exec.CommandContext, which
-// sends SIGKILL to the direct child when ctx is cancelled. Most CLIs
-// (go, kubectl, docker, git) are single-process and terminate cleanly
-// on that signal. If the binary forks long-lived children of its own,
-// those grandchildren are NOT signaled by ctx cancellation -- the
-// same caveat as [Bash]. Terminal SIGINT (Ctrl-C) reaches the whole
-// foreground process group via the OS, so interactive cancel does
-// teardown the tree.
+// Signal propagation: on Unix, Sparkwing starts each command in a
+// command-owned process group. Cancelling ctx asks the whole group to
+// terminate and then force-kills it if it does not exit. On Windows,
+// cancellation kills the direct child process.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }
@@ -327,6 +327,8 @@ func mergeCommandEnv(contextEnv, explicitEnv map[string]string) map[string]strin
 
 type silentKey struct{}
 
+const commandCancelGrace = 2 * time.Second
+
 func withSilent(ctx context.Context) context.Context {
 	return context.WithValue(ctx, silentKey{}, true)
 }
@@ -372,8 +374,9 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	prepareCommandForRun(cmd)
 	if len(extraEnv) > 0 {
 		cmd.Env = os.Environ()
 		for k, v := range extraEnv {
@@ -413,35 +416,66 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	go streamLines(ctx, &wg, stdout, "info", logger, &outBuf)
 	go streamLines(ctx, &wg, stderr, "info", logger, &errBuf)
 
-	waitErr := cmd.Wait()
+	waitErr := waitForCommand(ctx, cmd)
 	wg.Wait()
 
+	exitCode := ExitNotStarted
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+		if exitCode == ExitNotStarted && waitErr != nil {
+			exitCode = exitStartedUnknown
+		}
+	} else if waitErr != nil {
+		exitCode = exitStartedUnknown
+	}
 	res := ExecResult{
 		Command:  display,
 		Stdout:   outBuf.String(),
 		Stderr:   errBuf.String(),
-		ExitCode: cmd.ProcessState.ExitCode(),
+		ExitCode: exitCode,
 	}
 	Debug(ctx, "exec done: exit=%d bytes_stdout=%d bytes_stderr=%d",
 		res.ExitCode, len(res.Stdout), len(res.Stderr))
 	if waitErr != nil {
-		var ee *exec.ExitError
-		if errors.As(waitErr, &ee) {
-			return res, &ExecError{
-				Command:  display,
-				Stdout:   res.Stdout,
-				Stderr:   res.Stderr,
-				ExitCode: res.ExitCode,
-				Cause:    waitErr,
-			}
-		}
 		return res, &ExecError{
 			Command:  display,
-			ExitCode: ExitNotStarted,
+			Stdout:   res.Stdout,
+			Stderr:   res.Stderr,
+			ExitCode: res.ExitCode,
 			Cause:    waitErr,
 		}
 	}
 	return res, nil
+}
+
+func waitForCommand(ctx context.Context, cmd *exec.Cmd) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		requestCommandStop(cmd)
+	}
+
+	select {
+	case err := <-done:
+		forceCommandStop(cmd)
+		if err != nil {
+			return errors.Join(ctx.Err(), err)
+		}
+		return ctx.Err()
+	case <-time.After(commandCancelGrace):
+		forceCommandStop(cmd)
+		err := <-done
+		if err != nil {
+			return errors.Join(ctx.Err(), err)
+		}
+		return ctx.Err()
+	}
 }
 
 // streamLines reads r line-by-line, tees to buf, and pushes each line
