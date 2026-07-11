@@ -14,6 +14,14 @@ import (
 func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 	var out []delivery
 	qlen := d.waiterCountLocked()
+	// safety: the ledger emits a grant's eviction events before the grant
+	// itself, so the lease-to-run map must be seeded up front for an
+	// Evicted frame to name its superseder.
+	for _, ev := range events {
+		if ev.Kind == admission.EventGranted || ev.Kind == admission.EventPromoted {
+			d.leaseRun[ev.Lease] = ev.RequestID
+		}
+	}
 	queue := append([]admission.Event(nil), events...)
 	for len(queue) > 0 {
 		ev := queue[0]

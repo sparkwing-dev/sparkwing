@@ -15,6 +15,9 @@ type Lease struct {
 	RunID     string
 	Token     string
 	Resources wingwire.HostResources
+	// Semaphores names the semaphores the lease holds; on a child
+	// attach it is the parent lease's set.
+	Semaphores []string
 }
 
 // Acquire submits an all-or-nothing admission request and blocks until
@@ -36,7 +39,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 		}
 		switch m := msg.(type) {
 		case *wingwire.Grant:
-			return &Lease{cl: cl, RunID: m.RunID, Token: m.LeaseToken, Resources: m.Resources}, nil
+			return &Lease{cl: cl, RunID: m.RunID, Token: m.LeaseToken, Resources: m.Resources, Semaphores: m.Semaphores}, nil
 		case *wingwire.Queued:
 			if onQueued != nil {
 				onQueued(*m)
@@ -77,6 +80,26 @@ func (cl *Client) Reattach(ctx context.Context, token string) (*Lease, error) {
 func (l *Lease) Release() error {
 	_ = l.cl.write(&wingwire.Release{LeaseToken: l.Token})
 	return l.cl.Close()
+}
+
+// Watch reads the held connection until it closes, invoking onEvicted
+// when the daemon pushes an eviction (a cancel_others requester
+// superseded this lease). It returns when the connection ends --
+// [Lease.Release] and Close both terminate it -- so run it on its own
+// goroutine for the lease's lifetime.
+//
+// safety: the connection has exactly one reader; after Acquire returns,
+// Watch is that reader, so nothing else may read until it exits.
+func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
+	for {
+		msg, err := l.cl.dec.read()
+		if err != nil {
+			return
+		}
+		if ev, ok := msg.(*wingwire.Evicted); ok && onEvicted != nil {
+			onEvicted(*ev)
+		}
+	}
 }
 
 // cancelOnDone arranges for a blocked read to fail once ctx is cancelled,

@@ -161,64 +161,6 @@ func TestPlanConcurrency_ReplacesSameGroup(t *testing.T) {
 	}
 }
 
-func TestConcurrencyGroup_HostAdmissionRequiresScopeBox(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	sparkwing.NewConcurrencyGroup("host", sparkwing.ConcurrencyLimit{HostAdmission: true})
-}
-
-func TestNodeConcurrency_RejectsHostAdmissionGroup(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	g := sparkwing.NewConcurrencyGroup("host", sparkwing.ConcurrencyLimit{
-		Capacity:      1,
-		Scope:         sparkwing.ScopeBox,
-		HostAdmission: true,
-	})
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	sparkwing.Job(plan, "x", &buildJob{}).Concurrency(g)
-}
-
-func TestPlanConcurrency_HostAdmissionRecorded(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	g := sparkwing.NewConcurrencyGroup("host", sparkwing.ConcurrencyLimit{
-		Capacity:      1,
-		Scope:         sparkwing.ScopeBox,
-		HostAdmission: true,
-	})
-	plan.Concurrency(g)
-	if !plan.HostAdmission() {
-		t.Fatalf("plan HostAdmission = false, want true")
-	}
-}
-
-func TestPlanConcurrency_RejectsMultipleHostAdmissionGroups(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	first := sparkwing.NewConcurrencyGroup("host-a", sparkwing.ConcurrencyLimit{
-		Capacity:      1,
-		Scope:         sparkwing.ScopeBox,
-		HostAdmission: true,
-	})
-	second := sparkwing.NewConcurrencyGroup("host-b", sparkwing.ConcurrencyLimit{
-		Capacity:      1,
-		Scope:         sparkwing.ScopeBox,
-		HostAdmission: true,
-	})
-	plan.Concurrency(first)
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	plan.Concurrency(second)
-}
-
 func TestPlanConcurrency_ExplicitCost(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	g := sparkwing.NewConcurrencyGroup("box-budget", sparkwing.ConcurrencyLimit{Capacity: 8})

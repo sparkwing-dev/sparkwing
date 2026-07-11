@@ -47,6 +47,39 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **orchestrator:** (Breaking) Local runs are admitted by the local
+  admission daemon (`sparkwingd`) instead of box slots and store-side
+  concurrency slots. At run start the process submits one all-or-nothing
+  admission request (host resources from `.Resources()` hints plus every
+  box- and run-scoped plan-level `.Concurrency()` group) and holds the
+  granted lease on an open daemon connection for the run's lifetime; a
+  queued run prints a single stderr queue-position line. Child runs
+  inherit by attaching to the parent's lease via `SPARKWING_LEASE_TOKEN`;
+  the `SPARKWING_PLAN_ADMISSION_*` trigger-env chain is removed. Node-
+  level box/run-scoped groups become short-lived daemon acquisitions;
+  global-scope groups keep the shared-store path. When a run process
+  dies without releasing, the daemon frees its lease immediately and
+  finalizes the run row as cancelled with an interrupted reason.
+  Cluster runner pods are unaffected: work admitted by the Kubernetes
+  scheduler never engages the daemon.
+- **cli:** (Breaking) `sparkwing run` drops `--sw-box-slots` and
+  `--sw-no-wait` (with the `SPARKWING_BOX_SLOTS_PIN` /
+  `SPARKWING_BOX_NO_WAIT` variables): local runs no longer take box
+  slots, so there is no per-run cap to pin and queue waits cancel
+  cleanly with Ctrl-C. The `box-slots` verbs remain for inspecting the
+  on-disk lock directory.
+- **sdk:** (Breaking) `ConcurrencyLimit.HostAdmission` and
+  `Plan.HostAdmission()` are removed: host admission is universal and
+  implicit under the daemon, and `ScopeBox` means locality only.
+- **sdk:** (Breaking) Local runs handle SIGINT/SIGTERM: the run cancels
+  cleanly and its row finalizes as `cancelled` naming the signal,
+  instead of exiting with the row stuck `running`.
+- **controller:** (Breaking) The trigger API drops the `plan_admission`
+  request block; spawned children no longer inherit plan-level
+  concurrency holders through the controller.
+
 ### Added
 
 - **sdk:** `Plan.Resources(...)` and `JobNode.Resources(...)` (plus the

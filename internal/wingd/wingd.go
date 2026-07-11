@@ -94,6 +94,13 @@ type Config struct {
 	GraceWindow time.Duration
 	// SampleInterval overrides [DefaultSampleInterval] when non-zero.
 	SampleInterval time.Duration
+	// FinalizeRun, when set, is called with a run ID whose client
+	// disconnected while still holding or awaiting admission -- the
+	// process died without releasing (SIGKILL, panic). The callee
+	// finalizes the orphaned run row so it does not sit in a running
+	// state forever; it must tolerate rows that are already terminal or
+	// absent. Called on its own goroutine, never under daemon locks.
+	FinalizeRun func(runID string)
 	// Logf, when set, receives one-line operational messages. Nil
 	// discards them.
 	Logf func(format string, args ...any)

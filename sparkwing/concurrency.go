@@ -63,11 +63,6 @@ type ConcurrencyLimit struct {
 	// Scope is how far the budget reaches (see [Scope]). The zero value
 	// is [ScopeGlobal].
 	Scope Scope
-	// HostAdmission marks a plan-level ScopeBox group as the host execution
-	// admission budget for the whole run. ScopeBox alone only says the key
-	// is per-machine; HostAdmission says this budget replaces the default
-	// host process semaphore while the plan waits for admission.
-	HostAdmission bool
 	// OnLimit is what a member does when the group is full. The zero
 	// value is [Queue].
 	OnLimit OnLimit
@@ -120,12 +115,6 @@ func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup 
 			name, limit.Scope,
 		))
 	}
-	if limit.HostAdmission && limit.Scope != ScopeBox {
-		panic(fmt.Sprintf(
-			"sparkwing: NewConcurrencyGroup(%q): HostAdmission requires ScopeBox",
-			name,
-		))
-	}
 	switch limit.OnLimit {
 	case "", Queue, Fail, Skip, CancelOthers:
 	default:
@@ -157,12 +146,6 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 	if g == nil {
 		n.concurrency = nil
 		return n
-	}
-	if g.limit.HostAdmission {
-		panic(fmt.Sprintf(
-			"sparkwing: node %q cannot join host-admission group %q; HostAdmission is plan-level only",
-			n.id, g.name,
-		))
 	}
 	c := concurrencyCost(g, "node "+strconv.Quote(n.id), cost...)
 	n.concurrency = &concurrencyMembership{group: g, cost: c}
@@ -227,14 +210,6 @@ func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan {
 		return p
 	}
 	c := concurrencyCost(g, "plan", cost...)
-	for _, existing := range p.planConcurrency {
-		if existing.Group.limit.HostAdmission && g.limit.HostAdmission && !sameConcurrencyGroup(existing.Group, g) {
-			panic(fmt.Sprintf(
-				"sparkwing: Plan.Concurrency(%q): only one plan-level group can own HostAdmission",
-				g.name,
-			))
-		}
-	}
 	membership := PlanConcurrency{Group: g, Cost: c}
 	for i, existing := range p.planConcurrency {
 		if sameConcurrencyGroup(existing.Group, g) {
@@ -244,19 +219,6 @@ func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan {
 	}
 	p.planConcurrency = append(p.planConcurrency, membership)
 	return p
-}
-
-// HostAdmission reports whether the plan-level concurrency group owns
-// host execution admission for this run.
-func (p *Plan) HostAdmission() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, membership := range p.planConcurrency {
-		if membership.Group != nil && membership.Group.limit.HostAdmission {
-			return true
-		}
-	}
-	return false
 }
 
 // PlanConcurrency returns every whole-run gate declared via [Plan.Concurrency].

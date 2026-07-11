@@ -131,54 +131,35 @@ sparkwing to block them.
 ## Per-host concurrency
 
 Two `sparkwing run` invocations on the same machine compete for the
-same CPU. By default the host admits at most `max(1, NumCPU /
-workers-per-run)` concurrent runs, so the admitted runs sum to about
-`NumCPU` worker goroutines instead of oversubscribing the box. A single
-run never blocks on itself. Overlapping runs against a shared local
-SQLite backend especially benefit: without the cap, enough overlap
-saturates the single SQLite writer until lease heartbeats fail and runs
-collapse; the host cap prevents that saturation at the source.
+same CPU. Local runs are arbitrated by a per-host admission daemon
+(`sparkwingd`) that starts on demand -- no installation or setup step.
+At run start the process connects to the daemon and submits one
+admission request covering everything the run needs: host CPU and
+memory (from the plan's optional `.Resources()` hints, or a
+conservative default when none are declared) plus any box- or
+run-scoped `.Concurrency()` groups the plan claims. The grant is
+all-or-nothing, and the lease is held by the open connection for the
+run's lifetime.
 
-Tune or disable the cap:
+While a run waits for capacity it prints a single queue-position line
+on stderr (`queued for local admission: position 2 of 3 ...`); Ctrl-C
+cancels the wait cleanly. When a run process dies -- crash, kill, or
+power event -- the kernel closes its daemon connection and the daemon
+releases the lease immediately, finalizes the orphaned run record, and
+admits the next waiter. There are no heartbeats, leases to tune, or
+polling loops.
 
-- `sparkwing run X --sw-box-slots N` (or `SPARKWING_BOX_SLOTS=N`) admits
-  at most `N` concurrent runs per host; extra invocations queue FIFO
-  with a periodic `waiting for box slot (N active, max M)` line on
-  stderr. Ctrl-C cancels the wait cleanly.
-- `sparkwing run X --sw-box-slots off` (or `SPARKWING_BOX_SLOTS=off`)
-  disables the cap entirely, restoring uncapped overlap.
-- `sparkwing run X --sw-no-wait` fails immediately with `box slots full`
-  instead of queueing -- the shape CI runners want when they would
-  rather decline overlap than block. With the cap disabled, there is
-  nothing to gate.
-
-### Live tuning
-
-The cap is a host control that queued and running runs re-read on each
-acquire poll, so you can rebalance concurrency without restarting
-in-flight work:
-
-- `sparkwing box-slots show` reports the cap in force, where it came
-  from (the live control, the `SPARKWING_BOX_SLOTS` env baseline, or the
-  heuristic default), and how many runs currently hold a slot versus
-  wait for one.
-- `sparkwing box-slots set --to N` raises or lowers the cap live.
-  Raising it lets queued runs acquire on their next poll; lowering it
-  drains as current holders finish -- running work is never evicted.
-  `--to off` disables the semaphore; `--to default` reverts to the
-  env/heuristic.
-
-Precedence, highest first: an explicit per-run `--sw-box-slots` pins
-that one run above everything else; then the live `box-slots set`
-control; then `SPARKWING_BOX_SLOTS`; then the heuristic default. So an
-operator can retune the host with `box-slots set` while a run that
-deliberately pinned its own cap keeps it.
+Nested runs never double-charge the host: a parent passes its lease to
+children it spawns (via `RunAndAwait` or a step that shells out to
+`sparkwing run`), and the child attaches to the parent's lease instead
+of re-admitting.
 
 The gate is host-local. Two laptops pointed at the same shared state
-backend (Mode 2 / 3 / 4) each keep their own slot count; nothing
-coordinates CPU across machines. Cluster runner pods skip the gate
-because their CPU is already capped by Kubernetes and the warm-runner
-pool's own concurrency budget.
+backend (Mode 2 / 3 / 4) each keep their own daemon; nothing
+coordinates CPU across machines (global-scope `.Concurrency()` groups
+pool across the fleet through the shared backend instead). Cluster
+runner pods skip the gate because their CPU is already capped by
+Kubernetes and the warm-runner pool's own concurrency budget.
 
 ## Pipeline configuration
 

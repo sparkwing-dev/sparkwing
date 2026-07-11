@@ -45,6 +45,16 @@ var banned = []bannedPattern{
 		"the skip-resolve flag is --sw-no-update, not --no-update"},
 	{regexp.MustCompile(`tokens (?:revoke|lookup|rotate) [^-\s]`),
 		"token verbs are flag-only: pass --prefix <prefix>, not a positional argument"},
+	{regexp.MustCompile(`--sw-box-slots\b`),
+		"removed; local host admission is owned by the admission daemon, not a per-run box-slot cap"},
+	{regexp.MustCompile(`--sw-no-wait\b`),
+		"removed; runs queue in the admission daemon and Ctrl-C cancels the wait cleanly"},
+	{regexp.MustCompile(`SPARKWING_BOX_SLOTS_PIN|SPARKWING_BOX_NO_WAIT`),
+		"removed; local host admission is owned by the admission daemon"},
+	{regexp.MustCompile(`SPARKWING_PLAN_ADMISSION`),
+		"removed; children inherit admission by attaching to the parent's daemon lease (SPARKWING_LEASE_TOKEN)"},
+	{regexp.MustCompile(`\bHostAdmission\b`),
+		"removed from the SDK; host admission is universal and implicit, never a flag"},
 }
 
 // narrativeExempt names the one doc where change/deprecation vocabulary

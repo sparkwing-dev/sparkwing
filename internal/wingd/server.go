@@ -370,6 +370,9 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	charged := chargedResources(req.Resources)
+	if req.SemaphoresOnly {
+		charged = wingwire.HostResources{}
+	}
 	ar := requestFromWire(req.RunID, charged, req.Semaphores)
 
 	d.mu.Lock()
@@ -381,6 +384,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.runID = req.RunID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
+	c.finalizable = !req.SemaphoresOnly
+	c.startAt = d.now()
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
 	if err != nil {
@@ -435,6 +440,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.leaseID = leaseID
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
+	c.finalizable = true
 	d.byRun[req.RunID] = c
 	if existing, ok := d.leaseMembers[leaseID]; ok {
 		d.leaseMembers[leaseID] = append(existing, req.RunID)
@@ -445,7 +451,19 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	if err := writeState(d.layout.state, snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
-	_ = c.send(&wingwire.Grant{RunID: req.RunID, LeaseToken: lease.Token})
+	_ = c.send(&wingwire.Grant{RunID: req.RunID, LeaseToken: lease.Token, Semaphores: leaseSemaphores(snap, leaseID)})
+}
+
+// leaseSemaphores names every semaphore a lease holds, read from a
+// ledger snapshot.
+func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
+	for _, ls := range snap.Leases {
+		if ls.ID != id {
+			continue
+		}
+		return claimKeys(ls.Claims)
+	}
+	return nil
 }
 
 // handleReattach reclaims a lease that survived a restart or takeover by
@@ -546,6 +564,15 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			d.mu.Unlock()
 			return
 		}
+		var orphaned []string
+		if c.finalizable && d.cfg.FinalizeRun != nil {
+			switch c.role {
+			case roleHolder:
+				orphaned = append(orphaned, c.members...)
+			case roleWaiter:
+				orphaned = append(orphaned, c.runID)
+			}
+		}
 		var events []admission.Event
 		switch c.role {
 		case roleHolder:
@@ -557,6 +584,9 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		snap := d.ledger.Snapshot()
 		d.touchLocked()
 		d.mu.Unlock()
+		for _, runID := range orphaned {
+			go d.cfg.FinalizeRun(runID)
+		}
 		d.flush(deliveries, snap)
 	})
 }

@@ -168,8 +168,7 @@ func TestMirrorState_EnqueueTriggerWithEnvCanonicalOnly(t *testing.T) {
 	triggerID, err := m.EnqueueTriggerWithEnv(ctx,
 		"demo", nil, "parent-run", "spawn", "", "await-pipeline", "tester", "", "",
 		map[string]string{
-			triggerEnvPlanAdmissionKey:      "g:plan-key",
-			triggerEnvPlanAdmissionHolderID: "parent-run/-",
+			"CHILD_CONTEXT": "from-parent",
 		},
 	)
 	if err != nil {
@@ -179,8 +178,8 @@ func TestMirrorState_EnqueueTriggerWithEnvCanonicalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canonical GetTrigger: %v", err)
 	}
-	if trigger.TriggerEnv[triggerEnvPlanAdmissionKey] != "g:plan-key" {
-		t.Fatalf("canonical trigger admission key = %q", trigger.TriggerEnv[triggerEnvPlanAdmissionKey])
+	if trigger.TriggerEnv["CHILD_CONTEXT"] != "from-parent" {
+		t.Fatalf("canonical trigger env = %q", trigger.TriggerEnv["CHILD_CONTEXT"])
 	}
 	localTriggers, err := local.ListTriggers(ctx, store.TriggerFilter{})
 	if err != nil {
@@ -198,42 +197,12 @@ func (mirrorOKPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 	return nil
 }
 
-type mirrorPlanAdmissionChildPipe struct{ sparkwing.Base }
-
-func (mirrorPlanAdmissionChildPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Concurrency(sparkwing.NewConcurrencyGroup("mirror-plan-admission", sparkwing.ConcurrencyLimit{
-		Capacity: 1,
-		OnLimit:  sparkwing.Queue,
-	}))
-	sparkwing.Job(plan, "work", func(context.Context) error { return nil })
-	return nil
-}
-
-type mirrorPlanAdmissionParentPipe struct{ sparkwing.Base }
-
-func (mirrorPlanAdmissionParentPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Concurrency(sparkwing.NewConcurrencyGroup("mirror-plan-admission", sparkwing.ConcurrencyLimit{
-		Capacity: 1,
-		OnLimit:  sparkwing.Queue,
-	}))
-	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
-		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
-			ctx, "mirror-plan-admission-child", "work", sparkwing.WithFreshTimeout(time.Millisecond))
-		return err
-	})
-	return nil
-}
-
 var mirrorRegisterOnce sync.Once
 
 func registerMirrorTestPipelines() {
 	mirrorRegisterOnce.Do(func() {
 		sparkwing.Register[sparkwing.NoInputs]("mirror-ok",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &mirrorOKPipe{} })
-		sparkwing.Register[sparkwing.NoInputs]("mirror-plan-admission-parent",
-			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &mirrorPlanAdmissionParentPipe{} })
-		sparkwing.Register[sparkwing.NoInputs]("mirror-plan-admission-child",
-			func() sparkwing.Pipeline[sparkwing.NoInputs] { return &mirrorPlanAdmissionChildPipe{} })
 	})
 }
 
@@ -279,55 +248,5 @@ func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 	defer reader.Close()
 	if run, err := reader.GetRun(context.Background(), res.RunID); err != nil || run == nil {
 		t.Fatalf("local shadow missing the run: %v %#v", err, run)
-	}
-}
-
-func TestRunLocal_MirrorRunAndAwaitPreservesPlanAdmissionEnv(t *testing.T) {
-	registerMirrorTestPipelines()
-	ctx := context.Background()
-	ctrlStore, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
-	if err != nil {
-		t.Fatalf("controller store: %v", err)
-	}
-	t.Cleanup(func() { _ = ctrlStore.Close() })
-	srv := httptest.NewServer(controller.New(ctrlStore, nil).Handler())
-	t.Cleanup(srv.Close)
-
-	paths := Paths{Root: t.TempDir()}
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatalf("ensure root: %v", err)
-	}
-	local, err := store.Open(paths.StateDB())
-	if err != nil {
-		t.Fatalf("local store: %v", err)
-	}
-	t.Cleanup(func() { _ = local.Close() })
-
-	res, err := RunLocal(ctx, paths, Options{
-		Pipeline:    "mirror-plan-admission-parent",
-		RunID:       "mirror-parent",
-		State:       client.NewWithToken(srv.URL, nil, ""),
-		MirrorLocal: local,
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed from child timeout", res.Status)
-	}
-
-	childID, err := ctrlStore.FindSpawnedChildTriggerID(ctx, "mirror-parent", "spawn", "mirror-plan-admission-child")
-	if err != nil {
-		t.Fatalf("FindSpawnedChildTriggerID: %v", err)
-	}
-	trigger, err := ctrlStore.GetTrigger(ctx, childID)
-	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
-	}
-	if trigger.TriggerEnv[triggerEnvPlanAdmissionKey] != "g:mirror-plan-admission" {
-		t.Fatalf("child admission key = %q, want g:mirror-plan-admission", trigger.TriggerEnv[triggerEnvPlanAdmissionKey])
-	}
-	if trigger.TriggerEnv[triggerEnvPlanAdmissionHolderID] != "mirror-parent/-" {
-		t.Fatalf("child admission holder = %q, want mirror-parent/-", trigger.TriggerEnv[triggerEnvPlanAdmissionHolderID])
 	}
 }

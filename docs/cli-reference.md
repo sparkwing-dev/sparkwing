@@ -59,20 +59,16 @@ sparkwing dashboard start
 
 Show or live-tune the host run-concurrency cap
 
-The box-slot semaphore caps how many `sparkwing run` orchestrator
-processes run at once on this machine, so overlapping invocations
-don't oversubscribe the box's CPU. The cap used to be fixed when each
-run started; this command makes it a live host control runs re-read
-while they wait or hold.
+Inspect or tune the box-slot lock directory. Local runs are admitted
+by the local admission daemon and do not take box slots; these verbs
+read and write the on-disk box-slot state itself, which is normally
+empty.
 
-'show' reports the cap in force, where it came from (the live control,
-the SPARKWING_BOX_SLOTS env baseline, or the heuristic default), and how
-many runs currently hold a slot versus wait for one. 'set' writes the
-host control: raising it lets queued runs acquire on their next poll;
-lowering it drains as holders finish (running work is never evicted).
-
-An explicit per-run --sw-box-slots still pins that one run above the
-control. Reset to the env/heuristic default with 'set --to default'.
+'show' reports the configured cap and where it came from (the live
+control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic
+default) plus any holders and waiters recorded on disk. 'set' writes
+the host control; 'list', 'release', and 'sweep' inspect and clean the
+lock files.
 
 ### Subcommands
 
@@ -193,10 +189,8 @@ immediately; lowering it drains as current holders finish (they are
 never evicted).
 
 --to takes a positive integer (the new cap), 'off' (also 'none' / '0',
-disabling the semaphore so runs never queue), or 'default' (clear the
-control and fall back to SPARKWING_BOX_SLOTS or the heuristic). An
-explicit per-run --sw-box-slots still outranks this control for that
-run.
+disabling the semaphore), or 'default' (clear the control and fall back
+to SPARKWING_BOX_SLOTS or the heuristic).
 
 ### Flags
 
@@ -222,12 +216,12 @@ sparkwing box-slots set --to default
 
 Print the cap in force, its source, and live holders + waiters
 
-Reports the host box-slot cap a new run would resolve to (with no
-per-run --sw-box-slots pin), where that value came from -- the live
-control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic default
-of max(1, NumCPU/workers) -- and the live semaphore state: how many runs
-hold a slot and how many are blocked waiting. A cap of 0 means the
-semaphore is disabled (unlimited concurrency).
+Reports the configured box-slot cap, where that value came from -- the
+live control, the SPARKWING_BOX_SLOTS env baseline, or the heuristic
+default of max(1, NumCPU/workers) -- and the semaphore state recorded
+on disk: how many holder and waiter markers exist. Local runs are
+admitted by the local admission daemon and do not take box slots, so
+the state is normally empty.
 
 ### Flags
 
@@ -2684,8 +2678,6 @@ Args.
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
-| `--sw-box-slots N` | Pin this run's host concurrency cap, outranking the live `box-slots set` control (default: that control, else max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable) |
-| `--sw-no-wait` | Fail immediately when box slots are full instead of queueing |
 
 ### Examples
 
@@ -3097,8 +3089,6 @@ the default for managed git hooks.
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
-| `--sw-box-slots N` | Pin this run's host concurrency cap, outranking the live `box-slots set` control (default: that control, else max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable) |
-| `--sw-no-wait` | Fail immediately when box slots are full instead of queueing |
 
 ### Examples
 

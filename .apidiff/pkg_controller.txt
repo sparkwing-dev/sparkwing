@@ -46,18 +46,13 @@ type Principal struct {
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
 type RunRequest struct {
-	RunID                            string
-	Pipeline                         string
-	Args                             map[string]string
-	Trigger                          sparkwing.TriggerInfo
-	Git                              *sparkwing.Git
-	ParentRunID                      string
-	RetryOf                          string
-	InheritedPlanConcurrencyKey      string
-	InheritedPlanConcurrencyHolderID string
-	InheritedPlanConcurrencyHolders  map[string]string
-	InheritedPlanHostAdmission       bool
-	InheritedPlanHostAdmissionKey    string
+	RunID       string
+	Pipeline    string
+	Args        map[string]string
+	Trigger     sparkwing.TriggerInfo
+	Git         *sparkwing.Git
+	ParentRunID string
+	RetryOf     string
 }
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = "approvals.write"

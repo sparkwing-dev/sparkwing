@@ -56,11 +56,6 @@ func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunReq
 			Trigger:                          req.Trigger,
 			Git:                              req.Git,
 			ParentRunID:                      req.ParentRunID,
-			InheritedPlanConcurrencyKey:      req.InheritedPlanConcurrencyKey,
-			InheritedPlanConcurrencyHolderID: req.InheritedPlanConcurrencyHolderID,
-			InheritedPlanConcurrencyHolders:  req.InheritedPlanConcurrencyHolders,
-			InheritedPlanHostAdmission:       req.InheritedPlanHostAdmission,
-			InheritedPlanHostAdmissionKey:    req.InheritedPlanHostAdmissionKey,
 			RetryOf:                          req.RetryOf,
 			MaxParallel:                      d.MaxParallel,
 		})

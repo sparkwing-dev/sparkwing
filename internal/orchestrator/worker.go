@@ -95,19 +95,13 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		r = opts.RunnerFactory(backends, trigger)
 	}
 	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
-	inheritedAdmission := planAdmissionFromTriggerEnv(trigger.TriggerEnv)
 	res, err := Run(runCtx, backends, Options{
-		Pipeline:                         trigger.Pipeline,
-		RunID:                            trigger.ID,
-		Args:                             args,
-		ParentRunID:                      trigger.ParentRunID,
-		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
-		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
-		InheritedPlanConcurrencyHolders:  inheritedAdmission.HolderIDs,
-		InheritedPlanHostAdmission:       inheritedAdmission.HostAdmission,
-		InheritedPlanHostAdmissionKey:    inheritedAdmission.HostAdmissionKey,
-		RetryOf:                          trigger.RetryOf,
-		RetrySource:                      trigger.RetrySource,
+		Pipeline:    trigger.Pipeline,
+		RunID:       trigger.ID,
+		Args:        args,
+		ParentRunID: trigger.ParentRunID,
+		RetryOf:     trigger.RetryOf,
+		RetrySource: trigger.RetrySource,
 		Trigger: sparkwing.TriggerInfo{
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,
@@ -155,6 +149,10 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 // HandleClaimedTrigger adopts an already-claimed trigger and runs it
 // to terminal state. Caller's lease is still live; this function's
 // heartbeat extends it.
+//
+// This is a cluster entry point: the run executes in a pod the
+// Kubernetes scheduler already admitted, so Options.Admission stays nil
+// and the local admission daemon is never contacted.
 func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {
 	if opts.ControllerURL == "" {
 		return errors.New("WorkerOptions.ControllerURL is required")

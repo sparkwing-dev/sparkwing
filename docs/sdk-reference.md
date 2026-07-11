@@ -275,11 +275,6 @@ type ConcurrencyLimit struct {
     // Scope is how far the budget reaches (see [Scope]). The zero value
     // is [ScopeGlobal].
     Scope Scope
-    // HostAdmission marks a plan-level ScopeBox group as the host execution
-    // admission budget for the whole run. ScopeBox alone only says the key
-    // is per-machine; HostAdmission says this budget replaces the default
-    // host process semaphore while the plan waits for admission.
-    HostAdmission bool
     // OnLimit is what a member does when the group is full. The zero
     // value is [Queue].
     OnLimit OnLimit
@@ -924,7 +919,6 @@ type Plan struct {
 - `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the first group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.
 - `func (p *Plan) Expansions() []Expansion` -- Expansions returns the registered ExpandFrom generators.
 - `func (p *Plan) GroupSourceIDs(id string) []string` -- GroupSourceIDs returns the ids of the source nodes backing any ExpandFrom Groups this node waits on via Needs(group).
-- `func (p *Plan) HostAdmission() bool` -- HostAdmission reports whether the plan-level concurrency group owns host execution admission for this run.
 - `func (p *Plan) Inputs() any` -- Inputs returns the parsed Inputs value the orchestrator handed to this pipeline's Plan() method, or nil for a Plan built directly (outside the registration path).
 - `func (p *Plan) IsDynamicNode(id string) bool` -- IsDynamicNode reports whether the node sources runtime-variable downstream work -- i.e.
 - `func (p *Plan) Job(id string) *JobNode` -- Job returns the node with the given ID, or nil if absent.

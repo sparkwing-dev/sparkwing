@@ -90,16 +90,6 @@ type runFlags struct {
 	// Postgres, unreachable controller, broken bucket policy) and the
 	// operator wants to run against the laptop only.
 	localOnly bool
-	// boxSlots overrides the host-local concurrency semaphore's cap.
-	// String (not int) so empty means "fall back to the heuristic"
-	// (which defaults to 0 / disabled). Explicit values (1, 2, ...)
-	// enable the semaphore with that cap. Forwarded to the inner
-	// pipeline binary as SPARKWING_BOX_SLOTS.
-	boxSlots string
-	// boxNoWait flips the box-slot semaphore from queueing to
-	// fail-fast. CI runners that would rather decline overlap than
-	// block enable this. Forwarded as SPARKWING_BOX_NO_WAIT.
-	boxNoWait bool
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -289,20 +279,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--sw-cd="):
 			wf.changeDir = strings.TrimPrefix(a, "--sw-cd=")
-			i++
-		case a == "--sw-box-slots":
-			if i+1 < len(args) {
-				wf.boxSlots = args[i+1]
-				i += 2
-				continue
-			}
-			pass = append(pass, a)
-			i++
-		case strings.HasPrefix(a, "--sw-box-slots="):
-			wf.boxSlots = strings.TrimPrefix(a, "--sw-box-slots=")
-			i++
-		case a == "--sw-no-wait":
-			wf.boxNoWait = true
 			i++
 		default:
 			pass = append(pass, a)

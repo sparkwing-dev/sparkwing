@@ -14,6 +14,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -54,6 +55,7 @@ func runWingdRun(args []string) error {
 		Home:             *home,
 		Version:          v,
 		HeadroomFraction: *headroom,
+		FinalizeRun:      orchestrator.NewOrphanRunFinalizer(*home),
 	})
 	if err != nil {
 		return err

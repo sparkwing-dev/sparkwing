@@ -41,6 +41,12 @@ type conn struct {
 	resources wingwire.HostResources
 	sems      []string
 	startAt   time.Time
+
+	// finalizable marks a connection whose run row the daemon must
+	// finalize when the connection drops while still holding or awaiting
+	// admission: top-level run requests and child attaches, but never
+	// semaphores-only sub-acquisitions from inside an admitted run.
+	finalizable bool
 }
 
 func newConn(d *Daemon, nc net.Conn) *conn {

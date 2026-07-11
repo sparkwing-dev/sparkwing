@@ -78,6 +78,12 @@ type AdmissionRequest struct {
 	// [LeaseTokenEnv]) so nested runs are not double-charged. Empty for
 	// top-level runs.
 	ParentLeaseToken string `json:"parent_lease_token,omitempty"`
+	// SemaphoresOnly marks a request that draws no host budget even when
+	// Resources is zero: the daemon must not substitute its conservative
+	// default charge. Used for short-lived semaphore acquisitions made
+	// from inside an already-admitted run (node-level concurrency
+	// groups).
+	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
@@ -91,6 +97,11 @@ type Grant struct {
 	// declared resources, or the daemon's default where the request
 	// declared none.
 	Resources HostResources `json:"resources"`
+	// Semaphores names the semaphores the granted lease holds. On a
+	// child attach this is the parent lease's full set, so the child
+	// knows which of its own claims are already covered by the lease and
+	// which it must acquire separately.
+	Semaphores []string `json:"semaphores,omitempty"`
 }
 
 // Queued reports a waiting run's position whenever it changes. Key
@@ -174,6 +185,8 @@ type Waiter struct {
 	RunID      string        `json:"run_id"`
 	Resources  HostResources `json:"resources"`
 	Semaphores []string      `json:"semaphores,omitempty"`
+	// WaitingMS is how long the run has been queued, in milliseconds.
+	WaitingMS int64 `json:"waiting_ms,omitempty"`
 }
 
 // QueueState is the daemon's full accounting snapshot: every capacity

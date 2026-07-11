@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -66,20 +67,18 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
-	inheritedAdmission := planAdmissionFromTriggerEnv(trigger.TriggerEnv)
 	res, err := Run(ctx, backends, Options{
-		Pipeline:                         trigger.Pipeline,
-		RunID:                            trigger.ID,
-		Args:                             args,
-		ParentRunID:                      trigger.ParentRunID,
-		InheritedPlanConcurrencyKey:      inheritedAdmission.Key,
-		InheritedPlanConcurrencyHolderID: inheritedAdmission.HolderID,
-		InheritedPlanConcurrencyHolders:  inheritedAdmission.HolderIDs,
-		InheritedPlanHostAdmission:       inheritedAdmission.HostAdmission,
-		InheritedPlanHostAdmissionKey:    inheritedAdmission.HostAdmissionKey,
-		RetryOf:                          trigger.RetryOf,
-		RetrySource:                      trigger.RetrySource,
-		Full:                             trigger.Full,
+		Pipeline:    trigger.Pipeline,
+		RunID:       trigger.ID,
+		Args:        args,
+		ParentRunID: trigger.ParentRunID,
+		Admission: &LocalAdmission{
+			Version:          sparkwingModuleVersion(),
+			ParentLeaseToken: trigger.TriggerEnv[wingwire.LeaseTokenEnv],
+		},
+		RetryOf:     trigger.RetryOf,
+		RetrySource: trigger.RetrySource,
+		Full:        trigger.Full,
 		Trigger: sparkwing.TriggerInfo{
 			Source: trigger.TriggerSource,
 			User:   trigger.TriggerUser,

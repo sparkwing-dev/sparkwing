@@ -251,10 +251,21 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 	case hasMemo:
 		return r.acquireAndRun(ctx, req, memoParamsFor(cacheHash, cacheTTL)), true
 	case group != nil:
-		return r.acquireAndRun(ctx, req, concParamsFor(node, group, req.RunID)), true
+		return r.runUnderGroup(ctx, req, group), true
 	default:
 		return runner.Result{}, false
 	}
+}
+
+// runUnderGroup routes a node's concurrency-group admission: box- and
+// run-scoped groups on the local run path go through the admission
+// daemon, while global-scope groups (and every group on cluster paths,
+// which carry no local daemon) keep the shared-store acquire.
+func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup) runner.Result {
+	if la, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
+		return r.runNodeUnderDaemonSem(ctx, req, la, group)
+	}
+	return r.acquireAndRun(ctx, req, concParamsFor(req.Node, group, req.RunID))
 }
 
 // resolveCacheHash evaluates the node's content key, returning the hash
@@ -362,7 +373,7 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 		var lostWedge atomic.Pointer[string]
 		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, &lostWedge, cancel, wedgeBudget)
 
-		result := r.acquireAndRun(execCtx, req, concParamsFor(node, group, req.RunID))
+		result := r.runUnderGroup(execCtx, req, group)
 
 		stopHB()
 		bg, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)

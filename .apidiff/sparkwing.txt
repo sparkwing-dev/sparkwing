@@ -87,8 +87,6 @@ type ConcurrencyLimit struct {
 
 	Scope Scope
 
-	HostAdmission bool
-
 	OnLimit OnLimit
 
 	QueueTimeout time.Duration
@@ -430,7 +428,6 @@ func (p *Plan) ConcurrencyCost() int
 func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup
 func (p *Plan) Expansions() []Expansion
 func (p *Plan) GroupSourceIDs(id string) []string
-func (p *Plan) HostAdmission() bool
 func (p *Plan) Inputs() any
 func (p *Plan) IsDynamicNode(id string) bool
 func (p *Plan) Job(id string) *JobNode

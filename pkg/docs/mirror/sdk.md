@@ -760,8 +760,6 @@ prefixing every one of them with `sw-`:
     --sw-local-only       // force local state/cache/logs
     --sw-dry-run          // run each step's dry-run probe
     --sw-allow LABEL,...  // authorize risk-labeled steps
-    --sw-box-slots N      // max concurrent run processes on this host
-    --sw-no-wait          // fail instead of queueing when slots are full
     --sw-no-update        // skip the sparks auto-resolve step
 ```
 

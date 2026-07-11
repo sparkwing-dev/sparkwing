@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	"golang.org/x/term"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -60,6 +60,13 @@ func Main() {
 	if len(os.Args) > 1 && os.Args[1] == "replay-node" {
 		if err := runReplayNodeCLI(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "replay-node:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "wingd" {
+		if err := runWingdCLI(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "wingd:", err)
 			os.Exit(1)
 		}
 		return
@@ -143,12 +150,9 @@ func Main() {
 		PipelineYAML:        pipelineYAML,
 		SparkwingDir:        sparkwingDir,
 	}
-	if inheritedAdmission := planAdmissionFromEnv(); len(inheritedAdmission.HolderIDs) > 0 {
-		opts.InheritedPlanConcurrencyKey = inheritedAdmission.Key
-		opts.InheritedPlanConcurrencyHolderID = inheritedAdmission.HolderID
-		opts.InheritedPlanConcurrencyHolders = inheritedAdmission.HolderIDs
-		opts.InheritedPlanHostAdmission = inheritedAdmission.HostAdmission
-		opts.InheritedPlanHostAdmissionKey = inheritedAdmission.HostAdmissionKey
+	opts.Admission = &LocalAdmission{
+		Version:          sparkwingModuleVersion(),
+		ParentLeaseToken: os.Getenv(wingwire.LeaseTokenEnv),
 	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
@@ -189,47 +193,9 @@ func Main() {
 		opts.SecretSource = src
 	}
 
-	ctx, stopBoxWait := context.WithCancel(context.Background())
-	defer stopBoxWait()
-	release, err := acquireBoxSlot(ctx, paths, workersHintForBoxSlot())
+	res, err := RunLocal(context.Background(), paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
-		os.Exit(1)
-	}
-	var boxSlotMu sync.Mutex
-	currentBoxSlotRelease := release
-	releaseBoxSlot := func() {
-		boxSlotMu.Lock()
-		release := currentBoxSlotRelease
-		currentBoxSlotRelease = nil
-		boxSlotMu.Unlock()
-		if release != nil {
-			release()
-		}
-	}
-	reacquireBoxSlot := func(runID string) error {
-		release, err := acquireBoxSlot(ctx, paths, workersHintForBoxSlot())
-		if err != nil {
-			return err
-		}
-		annotateBoxSlotHolder(paths, runID)
-		boxSlotMu.Lock()
-		previous := currentBoxSlotRelease
-		currentBoxSlotRelease = release
-		boxSlotMu.Unlock()
-		if previous != nil {
-			previous()
-		}
-		return nil
-	}
-	defer releaseBoxSlot()
-
-	opts.BoxSlotRelease = releaseBoxSlot
-	opts.BoxSlotAcquire = reacquireBoxSlot
-	res, err := RunLocal(ctx, paths, opts)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "run:", err)
-		releaseBoxSlot()
 		os.Exit(1)
 	}
 	_ = delegate
@@ -237,7 +203,6 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}
 	if res != nil && res.Status != "success" {
-		releaseBoxSlot()
 		os.Exit(1)
 	}
 }

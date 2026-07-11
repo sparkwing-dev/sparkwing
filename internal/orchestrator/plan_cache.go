@@ -27,20 +27,25 @@ const (
 	planCacheEvicted planCacheOutcome = "evicted" // superseded mid-run
 )
 
+// planAdmissionEvictedError reports a run losing its admission to a
+// cancel_others requester, naming the contested key, the policy, and
+// the run that superseded it. The run finalizes as cancelled, never as
+// a generic execution failure.
 type planAdmissionEvictedError struct {
-	groupName string
+	groupName    string
+	policy       string
+	supersededBy string
+	runID        string
 }
 
 func (e *planAdmissionEvictedError) Error() string {
+	if e.supersededBy != "" {
+		return fmt.Sprintf("admission on %q lost under %s: superseded by run %s", e.groupName, e.policy, e.supersededBy)
+	}
 	return fmt.Sprintf("plan concurrency group %q: evicted before dispatch", e.groupName)
 }
 
-var inheritedPlanObserveInterval = store.DefaultConcurrencyHeartbeatInterval
-
-func planConcurrencyResource(group *sparkwing.ConcurrencyGroup) string {
-	if group.Limit().HostAdmission {
-		return "host_admission"
-	}
+func planConcurrencyResource(*sparkwing.ConcurrencyGroup) string {
 	return "plan_admission"
 }
 
@@ -64,26 +69,36 @@ func planConcurrencyAcquireOrder(plan *sparkwing.Plan, runID string) []sparkwing
 	return memberships
 }
 
-// acquirePlanSlot handles plan-level Concurrency() coordination. Caller
-// invokes release() at plan terminal. release uses a fresh context so
-// it survives a cancelled run. The coordination key is scope-qualified
-// through the same scopedGroupKey the node-level path uses, so a
-// ScopeBox group and a global group sharing a name never alias, and a
-// plan group and a node group with the same name and scope share one
-// budget.
+// acquirePlanSlot handles plan-level Concurrency() coordination through
+// the shared store. Caller invokes release() at plan terminal. release
+// uses a fresh context so it survives a cancelled run. The coordination
+// key is scope-qualified through the same scopedGroupKey the node-level
+// path uses, so groups with the same name and different scopes never
+// alias, and a plan group and a node group with the same name and scope
+// share one budget. With daemonHandlesLocalScopes set (the local run
+// path), box- and run-scoped groups are excluded here -- they ride the
+// run's daemon lease -- and only global-scope groups touch the store.
 func acquirePlanSlot(
 	ctx context.Context,
 	backends Backends,
 	runID string,
 	plan *sparkwing.Plan,
-	inheritedAdmission planAdmission,
-	cancelRun context.CancelCauseFunc,
-) (release func(outcome string), outcome planCacheOutcome, outcomeGroup string, activeAdmission planAdmission, err error) {
+	daemonHandlesLocalScopes bool,
+) (release func(outcome string), outcome planCacheOutcome, outcomeGroup string, err error) {
 	memberships := planConcurrencyAcquireOrder(plan, runID)
-	if len(memberships) == 0 {
-		return func(string) {}, planCacheProceed, "", inheritedAdmission, nil
+	if daemonHandlesLocalScopes {
+		storeOnly := memberships[:0:0]
+		for _, membership := range memberships {
+			if membership.Group != nil && groupUsesLocalDaemon(membership.Group) {
+				continue
+			}
+			storeOnly = append(storeOnly, membership)
+		}
+		memberships = storeOnly
 	}
-	activeAdmission = inheritedAdmission.normalized()
+	if len(memberships) == 0 {
+		return func(string) {}, planCacheProceed, "", nil
+	}
 	releases := make([]func(string), 0, len(memberships))
 	defer func() {
 		if err != nil || outcome != planCacheProceed {
@@ -94,14 +109,12 @@ func acquirePlanSlot(
 	}()
 	for _, membership := range memberships {
 		var groupRelease func(string)
-		groupRelease, outcome, activeAdmission, err = acquireOnePlanSlot(
-			ctx, backends, runID, membership, activeAdmission, cancelRun,
-		)
+		groupRelease, outcome, err = acquireOnePlanSlot(ctx, backends, runID, membership)
 		if err != nil || outcome != planCacheProceed {
 			if membership.Group != nil {
 				outcomeGroup = membership.Group.Name()
 			}
-			return nil, outcome, outcomeGroup, planAdmission{}, err
+			return nil, outcome, outcomeGroup, err
 		}
 		releases = append(releases, groupRelease)
 	}
@@ -109,7 +122,7 @@ func acquirePlanSlot(
 		for i := len(releases) - 1; i >= 0; i-- {
 			releases[i](outcome)
 		}
-	}, planCacheProceed, "", activeAdmission, nil
+	}, planCacheProceed, "", nil
 }
 
 func acquireOnePlanSlot(
@@ -117,66 +130,20 @@ func acquireOnePlanSlot(
 	backends Backends,
 	runID string,
 	membership sparkwing.PlanConcurrency,
-	inheritedAdmission planAdmission,
-	cancelRun context.CancelCauseFunc,
-) (release func(outcome string), outcome planCacheOutcome, activeAdmission planAdmission, err error) {
+) (release func(outcome string), outcome planCacheOutcome, err error) {
 	group := membership.Group
 	key := scopedGroupKey(group, runID)
 	limit := group.Limit()
 	cost := membership.Cost
 	if backends.Concurrency == nil {
-		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", group.Name())
+		return nil, "", fmt.Errorf("plan Concurrency(%q) declared but Backends.Concurrency is nil", group.Name())
 	}
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {
-		return nil, "", planAdmission{}, err
-	}
-
-	inheritedAdmission = inheritedAdmission.normalized()
-	if len(inheritedAdmission.HolderIDs) > 0 {
-		if inheritedAdmission.Key == "" || inheritedAdmission.HolderID == "" {
-			return nil, "", planAdmission{}, errors.New("plan Concurrency inherited admission is incomplete")
-		}
-		if inheritedHolderID, ok := inheritedAdmission.holderFor(key); ok {
-			resp, err := backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
-				Key:               key,
-				HolderID:          fmt.Sprintf("%s/-", runID),
-				InheritedHolderID: inheritedHolderID,
-				RunID:             runID,
-				NodeID:            "",
-				Capacity:          limit.Capacity,
-				Cost:              cost,
-				Policy:            string(limit.OnLimit),
-			})
-			if err != nil {
-				if errors.Is(err, store.ErrConcurrencySuperseded) {
-					return nil, planCacheEvicted, planAdmission{}, nil
-				}
-				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission: %w", err)
-			}
-			if resp.Kind != store.AcquireGranted {
-				return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency inherited admission got %q from acquire", resp.Kind)
-			}
-			activeAdmission = inheritedAdmission.with(key, resp.HolderID)
-			if limit.HostAdmission {
-				activeAdmission, err = activeAdmission.withHostAdmission(key)
-				if err != nil {
-					return nil, "", planAdmission{}, err
-				}
-			}
-			return makeInheritedPlanSlotRelease(backends, key, resp.HolderID, cancelRun),
-				planCacheProceed, activeAdmission, nil
-		}
+		return nil, "", err
 	}
 
 	holderID := fmt.Sprintf("%s/-", runID)
-	admission := inheritedAdmission.with(key, holderID)
-	if limit.HostAdmission {
-		admission, err = admission.withHostAdmission(key)
-		if err != nil {
-			return nil, "", planAdmission{}, err
-		}
-	}
 	req := store.AcquireSlotRequest{
 		Key:      key,
 		HolderID: holderID,
@@ -189,7 +156,7 @@ func acquireOnePlanSlot(
 
 	resp, err := backends.Concurrency.AcquireSlot(ctx, req)
 	if err != nil {
-		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency acquire(%q): %w", key, err)
+		return nil, "", fmt.Errorf("plan Concurrency acquire(%q): %w", key, err)
 	}
 
 	if resp.DriftNote != "" {
@@ -205,15 +172,15 @@ func acquireOnePlanSlot(
 
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, admission, nil
+		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, nil
 
 	case store.AcquireSkipped:
 		appendPlanEvent(ctx, backends, runID, "plan_skipped_concurrent", nil)
-		return nil, planCacheSkipped, planAdmission{}, nil
+		return nil, planCacheSkipped, nil
 
 	case store.AcquireFailed:
 		appendPlanEvent(ctx, backends, runID, "plan_failed_concurrent", nil)
-		return nil, planCacheFailed, planAdmission{}, nil
+		return nil, planCacheFailed, nil
 
 	case store.AcquireQueued, store.AcquireCancellingOthers:
 		resource := planConcurrencyResource(group)
@@ -234,71 +201,18 @@ func acquireOnePlanSlot(
 		}
 		promoted, err := waitForPlanSlot(ctx, backends, key, group.Name(), resource, runID, holderID, queueTimeout, wedgeBudget)
 		if err != nil {
-			return nil, "", planAdmission{}, err
+			return nil, "", err
 		}
 		if !promoted {
-			return nil, planCacheEvicted, planAdmission{}, nil
+			return nil, planCacheEvicted, nil
 		}
-		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, admission, nil
+		return makePlanSlotRelease(backends, key, holderID, string(limit.OnLimit), wedgeBudget), planCacheProceed, nil
 
 	case store.AcquireCoalesced, store.AcquireCached:
-		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
+		return nil, "", fmt.Errorf("plan Concurrency(%q) unexpectedly got %q from acquire", key, resp.Kind)
 	}
 
-	return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency acquire returned unknown kind %q", resp.Kind)
-}
-
-func makeInheritedPlanSlotRelease(
-	backends Backends,
-	key string,
-	holderID string,
-	cancelRun context.CancelCauseFunc,
-) func(outcome string) {
-	hbCtx, hbCancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		t := time.NewTicker(inheritedPlanObserveInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-hbCtx.Done():
-				return
-			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
-				_, superseded, err := backends.Concurrency.HeartbeatSlot(ctx, key, holderID, 0)
-				cancel()
-				if err != nil {
-					err = fmt.Errorf("plan Concurrency inherited admission lost for key %q: %w", key, err)
-					slog.Warn("inherited plan concurrency heartbeat failed",
-						"key", key, "holder_id", holderID, "err", err)
-					cancelRun(err)
-					return
-				}
-				if superseded {
-					err := fmt.Errorf("plan Concurrency inherited admission superseded for key %q", key)
-					slog.Warn("inherited plan concurrency holder superseded",
-						"key", key, "holder_id", holderID)
-					cancelRun(err)
-					return
-				}
-			}
-		}
-	}()
-	var once sync.Once
-	return func(outcome string) {
-		once.Do(func() {
-			hbCancel()
-			wg.Wait()
-			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := backends.Concurrency.ReleaseSlot(bg, key, holderID, outcome, "", "", 0); err != nil {
-				slog.Warn("inherited plan concurrency release failed; relying on reaper",
-					"key", key, "holder_id", holderID, "err", err)
-			}
-		})
-	}
+	return nil, "", fmt.Errorf("plan Concurrency acquire returned unknown kind %q", resp.Kind)
 }
 
 type planConcurrencyEventPayload struct {

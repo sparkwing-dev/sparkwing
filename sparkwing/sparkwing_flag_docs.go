@@ -62,8 +62,6 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop)", Group: "System", Hot: true},
 	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
-	{Name: "sw-box-slots", Argument: "N", Desc: "Pin this run's host concurrency cap, outranking the live `box-slots set` control (default: that control, else max(1, NumCPU/SPARKWING_WORKERS); use 0 or off to disable)", Group: "System"},
-	{Name: "sw-no-wait", Desc: "Fail immediately when box slots are full instead of queueing", Group: "System"},
 }
 
 // SparkwingFlagDocs returns the canonical sparkwing-owned flag

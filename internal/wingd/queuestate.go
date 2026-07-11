@@ -67,14 +67,18 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 
 	for _, w := range snap.Waiters {
-		qs.Waiters = append(qs.Waiters, wingwire.Waiter{
+		waiter := wingwire.Waiter{
 			RunID: w.RequestID,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
 			},
 			Semaphores: claimKeys(w.Claims),
-		})
+		}
+		if c := d.byRun[w.RequestID]; c != nil && !c.startAt.IsZero() {
+			waiter.WaitingMS = now.Sub(c.startAt).Milliseconds()
+		}
+		qs.Waiters = append(qs.Waiters, waiter)
 	}
 	return qs
 }

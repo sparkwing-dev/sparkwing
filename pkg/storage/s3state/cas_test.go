@@ -386,8 +386,8 @@ func TestS3CAS_EnqueueTriggerWithEnvStoresTriggerEnv(t *testing.T) {
 	id, err := b.EnqueueTriggerWithEnv(ctx,
 		"deploy", nil, "parent-run", "node-1", "", "await-pipeline", "", "", "",
 		map[string]string{
-			"SPARKWING_PLAN_ADMISSION_KEY":       "g:deploy",
-			"SPARKWING_PLAN_ADMISSION_HOLDER_ID": "parent-run/-",
+			"CHILD_CONTEXT": "from-parent",
+			"CHILD_BRANCH":  "main",
 		},
 	)
 	if err != nil {
@@ -397,11 +397,11 @@ func TestS3CAS_EnqueueTriggerWithEnvStoresTriggerEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
-	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"] != "g:deploy" {
-		t.Fatalf("admission key = %q, want g:deploy", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_KEY"])
+	if trigger.TriggerEnv["CHILD_CONTEXT"] != "from-parent" {
+		t.Fatalf("trigger env CHILD_CONTEXT = %q, want from-parent", trigger.TriggerEnv["CHILD_CONTEXT"])
 	}
-	if trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"] != "parent-run/-" {
-		t.Fatalf("admission holder = %q, want parent-run/-", trigger.TriggerEnv["SPARKWING_PLAN_ADMISSION_HOLDER_ID"])
+	if trigger.TriggerEnv["CHILD_BRANCH"] != "main" {
+		t.Fatalf("trigger env CHILD_BRANCH = %q, want main", trigger.TriggerEnv["CHILD_BRANCH"])
 	}
 }
 

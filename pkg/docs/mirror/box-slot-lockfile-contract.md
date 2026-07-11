@@ -1,11 +1,16 @@
 # Box-slot lock file contract
 
-The host box-slot semaphore (see [local execution](local-execution.md))
-is implemented entirely with lock files and OS file locks -- no state
-database involvement. That makes the on-disk layout an operational
-interface: `sparkwing box-slots list` and `release` read it, and so can
-you with `ls` and `cat` while everything else is wedged. This page is
-the contract for that layout.
+Local runs no longer acquire box slots: host admission is owned by the
+local admission daemon (see [local execution](local-execution.md)), so
+this layout is normally empty on current installs. The `box-slots` CLI
+verbs still read and write it, and this contract remains authoritative
+for whatever markers exist on disk.
+
+The host box-slot semaphore is implemented entirely with lock files and
+OS file locks -- no state database involvement. That makes the on-disk
+layout an operational interface: `sparkwing box-slots list` and
+`release` read it, and so can you with `ls` and `cat` while everything
+else is wedged. This page is the contract for that layout.
 
 **Contract version: 1.** The layout below is a stable interface. Any
 change to the directory, filename shape, or file contents bumps the

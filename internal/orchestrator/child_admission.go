@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -30,6 +31,18 @@ type childPlanAdmission struct {
 }
 
 func childPlanAdmissionStatusForRun(ctx context.Context, state StateBackend, concurrency ConcurrencyBackend, runID string) (childPlanAdmission, error) {
+	return childPlanAdmissionScan(ctx, state, concurrency, runID, false)
+}
+
+// childPlanAdmissionStatusForGlobalKeys is the store-driven check
+// restricted to global-scope plan concurrency keys. The local run path
+// uses it: box- and run-scoped keys live in the daemon, so only global
+// keys can be queued in the store.
+func childPlanAdmissionStatusForGlobalKeys(ctx context.Context, state StateBackend, concurrency ConcurrencyBackend, runID string) (childPlanAdmission, error) {
+	return childPlanAdmissionScan(ctx, state, concurrency, runID, true)
+}
+
+func childPlanAdmissionScan(ctx context.Context, state StateBackend, concurrency ConcurrencyBackend, runID string, globalOnly bool) (childPlanAdmission, error) {
 	run, err := state.GetRun(ctx, runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -40,6 +53,9 @@ func childPlanAdmissionStatusForRun(ctx context.Context, state StateBackend, con
 	keys, err := planConcurrencyKeys(run.PlanSnapshot)
 	if err != nil {
 		return childPlanAdmission{Status: childPlanAdmissionUnknown}, err
+	}
+	if globalOnly {
+		keys = filterGlobalScopeKeys(keys)
 	}
 	if len(keys) == 0 {
 		return childPlanAdmission{Status: childPlanAdmissionAdmitted}, nil
@@ -117,6 +133,18 @@ func planConcurrencyKeys(raw []byte) ([]string, error) {
 		seen[group.Key] = true
 	}
 	return keys, nil
+}
+
+// filterGlobalScopeKeys keeps the coordination keys whose scheme tag
+// marks global scope.
+func filterGlobalScopeKeys(keys []string) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if strings.HasPrefix(key, scopeKeyGlobalPrefix) {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 func planAdmissionWaiterQueuedAt(state *store.ConcurrencyState, runID string) (time.Time, bool) {

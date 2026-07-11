@@ -18,11 +18,6 @@ type RunRequest struct {
 	Git                              *sparkwing.Git
 	ParentRunID                      string
 	RetryOf                          string
-	InheritedPlanConcurrencyKey      string
-	InheritedPlanConcurrencyHolderID string
-	InheritedPlanConcurrencyHolders  map[string]string
-	InheritedPlanHostAdmission       bool
-	InheritedPlanHostAdmissionKey    string
 }
 
 // Dispatcher decides what happens to a triggered run. Implementations

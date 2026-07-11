@@ -75,9 +75,7 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}
 	trigger, err := stateClient.GetTrigger(ctx, runID)
-	if err == nil && trigger != nil {
-		ctx = withPlanAdmission(ctx, planAdmissionFromTriggerEnv(trigger.TriggerEnv))
-	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
@@ -192,8 +190,7 @@ func RunNodeOnce(
 
 			childRunID, err := stateClient.EnqueueTriggerWithEnv(innerCtx,
 				req.Pipeline, req.Args, runID, currentNode, childRetryOf,
-				"await-pipeline", "", req.Repo, req.Branch,
-				planAdmissionTriggerEnv(innerCtx))
+				"await-pipeline", "", req.Repo, req.Branch, nil)
 			if err != nil {
 				return nil, fmt.Errorf("enqueue trigger: %w", err)
 			}

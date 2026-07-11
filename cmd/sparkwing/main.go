@@ -220,15 +220,6 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	if wf.boxSlots != "" {
-		env = setEnv(env, "SPARKWING_BOX_SLOTS_PIN", wf.boxSlots)
-		// hack: also set legacy SPARKWING_BOX_SLOTS so older pinned SDKs that only read it honor the pin.
-		env = setEnv(env, "SPARKWING_BOX_SLOTS", wf.boxSlots)
-	}
-	if wf.boxNoWait {
-		env = setEnv(env, "SPARKWING_BOX_NO_WAIT", "1")
-	}
-
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
 		compileOptions{NoUpdate: wf.noUpdate})
 }

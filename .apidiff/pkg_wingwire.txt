@@ -7,6 +7,8 @@ type AdmissionRequest struct {
 	Semaphores []SemaphoreClaim
 
 	ParentLeaseToken string
+
+	SemaphoresOnly bool
 }
 func Decode(line []byte) (Message, error)
 type DrainAck struct {
@@ -32,6 +34,8 @@ type Grant struct {
 	LeaseToken string
 
 	Resources HostResources
+
+	Semaphores []string
 }
 type Hello struct {
 	ProtocolMajor int
@@ -113,4 +117,6 @@ type Waiter struct {
 	RunID      string
 	Resources  HostResources
 	Semaphores []string
+
+	WaitingMS int64
 }

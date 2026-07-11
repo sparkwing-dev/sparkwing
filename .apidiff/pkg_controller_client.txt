@@ -183,19 +183,11 @@ type TriggerMeta struct {
 	User   string
 	Env    map[string]string
 }
-type TriggerPlanAdmission struct {
-	Key              string
-	HolderID         string
-	Admissions       map[string]string
-	HostAdmission    bool
-	HostAdmissionKey string
-}
 type TriggerRequest struct {
-	Pipeline      string
-	Args          map[string]string
-	Trigger       TriggerMeta
-	Git           GitMeta
-	PlanAdmission TriggerPlanAdmission
+	Pipeline string
+	Args     map[string]string
+	Trigger  TriggerMeta
+	Git      GitMeta
 
 	ParentRunID string
 
