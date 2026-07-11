@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.7] - 2026-07-11
 ### Fixed
 
 - **store:** Concurrency maintenance and waiter promotion now preserve queued
