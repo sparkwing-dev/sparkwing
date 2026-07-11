@@ -151,6 +151,45 @@ func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
 	if got := waiterCount(t, s, "k"); got != 0 {
 		t.Fatalf("waiters = %d, want 0 after age sweep", got)
 	}
+	if holderExists(t, s, "k", "rB/n") {
+		t.Fatalf("abandoned waiter was promoted into a holder")
+	}
+}
+
+func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue, Lease: 30 * time.Millisecond,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
+	); err != nil {
+		t.Fatalf("age waiter: %v", err)
+	}
+	time.Sleep(60 * time.Millisecond)
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Millisecond})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if len(res.StaleHolders) != 1 {
+		t.Fatalf("StaleHolders = %d, want 1", len(res.StaleHolders))
+	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("abandoned waiter was promoted after holder reap")
+	}
+	if got := waiterCount(t, s, "k"); got != 0 {
+		t.Fatalf("waiters = %d, want abandoned waiter dropped", got)
+	}
 }
 
 func TestMaintainConcurrency_DropsAgedWaiterForTerminalRun(t *testing.T) {
@@ -294,6 +333,9 @@ func TestMaintainConcurrency_DropsAgedWaiterForStaleRun(t *testing.T) {
 	if got := waiterCount(t, s, "k"); got != 0 {
 		t.Fatalf("waiters = %d, want stale waiter dropped", got)
 	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("stale waiter was promoted into a holder")
+	}
 }
 
 func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaiterAge(t *testing.T) {
@@ -340,6 +382,9 @@ func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaite
 	}
 	if got := waiterCount(t, s, "k"); got != 0 {
 		t.Fatalf("waiters = %d, want stale-heartbeat waiter dropped", got)
+	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("stale-heartbeat waiter was promoted into a holder")
 	}
 }
 
