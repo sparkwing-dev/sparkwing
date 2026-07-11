@@ -5,12 +5,72 @@ package wingd
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// linuxClockTicks is the kernel's USER_HZ. It is fixed at 100 on every
+// mainstream Linux build, so the stall heuristic reads /proc directly
+// rather than pulling in a sysconf dependency for a threshold check.
+const linuxClockTicks = 100.0
+
+// sample derives a process's CPU as a fraction of one core from the
+// change in its cumulative user+system time between two /proc readings.
+// The first reading for a pid has no baseline and reports not-sampled.
+func (p *procSampler) sample(pid int) (float64, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		p.forget(pid)
+		return 0, false
+	}
+	line := string(data)
+	rparen := strings.LastIndexByte(line, ')')
+	if rparen < 0 || rparen+2 >= len(line) {
+		return 0, false
+	}
+	fields := strings.Fields(line[rparen+2:])
+	if len(fields) < 13 {
+		return 0, false
+	}
+	utime, err1 := strconv.ParseFloat(fields[11], 64)
+	stime, err2 := strconv.ParseFloat(fields[12], 64)
+	if err1 != nil || err2 != nil {
+		return 0, false
+	}
+	cpuSeconds := (utime + stime) / linuxClockTicks
+	now := time.Now()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	prev, ok := p.last[pid]
+	p.last[pid] = cpuSample{cpuSeconds: cpuSeconds, at: now}
+	if !ok {
+		return 0, false
+	}
+	wall := now.Sub(prev.at).Seconds()
+	if wall <= 0 {
+		return 0, false
+	}
+	frac := (cpuSeconds - prev.cpuSeconds) / wall
+	if frac < 0 {
+		frac = 0
+	}
+	return frac, true
+}
+
+// forget drops a dead pid's baseline so the map does not grow without
+// bound as runs come and go.
+func (p *procSampler) forget(pid int) {
+	p.mu.Lock()
+	delete(p.last, pid)
+	p.mu.Unlock()
+}
 
 func sampleHost() (HostStat, error) {
 	stat := HostStat{TotalCores: float64(runtime.NumCPU())}

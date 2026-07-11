@@ -38,6 +38,7 @@ for agent-facing discovery.`,
 		{"pipeline", "This repo's pipelines"},
 		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
 		{"runs", "Inspect or manage runs"},
+		{"queue", "The truthful view of local admission: holders + waiters"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
@@ -317,6 +318,38 @@ plain emits one path per line for shell consumption.`,
 		{"Full CLI surface (agent self-discovery)", "sparkwing commands"},
 		{"Just the pipelines subtree", "sparkwing commands --path \"sparkwing pipeline\""},
 		{"All paths, one per line", "sparkwing commands -o plain"},
+	},
+}
+
+var cmdQueue = Command{
+	Path:     "sparkwing queue",
+	Synopsis: "The truthful view of local admission: holders, waiters, and why",
+	Description: `Reads the local admission daemon and prints one honest picture of
+where every run stands: each resource (host cores, memory, and every
+named concurrency semaphore) with its capacity and how much is in use;
+every run currently holding admission, with how long it has held and
+what it is charged; and every waiter in arrival order, with its
+position, its cost, and exactly what it is waiting on.
+
+A holder that is alive but has burned near-zero CPU while runs queue
+behind it is flagged as stalled, together with the exact command to
+clear it -- 'sparkwing runs cancel --run <id>'. The queue never kills a
+run for you and never points at a host-wide destructive verb.
+
+Pretty on a terminal, JSON when piped (add -o json to force it), and
+one tab-separated record per line with -o plain for shell pipelines.
+
+When no daemon is running there is nothing to arbitrate: the command
+reports an empty queue and exits 0 rather than erroring.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+	},
+	GroupOrder: []string{"Output", "System", "Other"},
+	Examples: []Example{
+		{"Show the current queue", "sparkwing queue"},
+		{"Agent-readable snapshot", "sparkwing queue -o json"},
+		{"One record per line for shell pipelines", "sparkwing queue -o plain"},
 	},
 }
 

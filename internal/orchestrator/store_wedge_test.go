@@ -28,7 +28,7 @@ func TestStoreWedgeGuard_TripsAfterContinuousFailureBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("failure past budget did not trip")
 	}
-	for _, want := range []string{"resolve waiter", "5m30s", "database is locked", "box-slots list", "3 consecutive failures"} {
+	for _, want := range []string{"resolve waiter", "5m30s", "database is locked", "sparkwing queue", "3 consecutive failures"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("terminal error %q missing %q", err, want)
 		}
@@ -64,7 +64,7 @@ func TestStoreWedgeGuard_LockingProtocolIsImmediatelyTerminal(t *testing.T) {
 	if err == nil {
 		t.Fatal("locking protocol error was not immediately terminal")
 	}
-	for _, want := range []string{"heartbeat", "locking protocol", "box-slots list"} {
+	for _, want := range []string{"heartbeat", "locking protocol", "sparkwing queue"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("terminal error %q missing %q", err, want)
 		}

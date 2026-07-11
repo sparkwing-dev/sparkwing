@@ -98,7 +98,7 @@ func (g *storeWedgeGuard) success() {
 // which only clears when the conflicting process goes away, or when
 // every call has failed continuously for longer than the budget. The
 // terminal error names the condition, the elapsed duration, the last
-// store error, and the box-slots command that locates the wedging
+// store error, and the read-only queue command that locates the wedging
 // process. Each terminal verdict also emits one "store wedged"
 // structured event -- fields op, kind (budget|protocol), elapsed, and
 // failures are a stable interface soak dashboards count.
@@ -110,11 +110,11 @@ func (g *storeWedgeGuard) fail(op string, err error) error {
 	elapsed := g.now().Sub(g.firstFailure)
 	if store.IsProtocolErr(err) {
 		g.emitWedged(op, "protocol", elapsed)
-		return fmt.Errorf("%s: %w -- SQLite's WAL lock range is saturated by another live process and retrying cannot clear it; run `sparkwing box-slots list` to find the conflicting holder", op, err)
+		return fmt.Errorf("%s: %w -- SQLite's WAL lock range is saturated by another live process and retrying cannot clear it; run `sparkwing queue` to see which runs are holding admission", op, err)
 	}
 	if g.budget > 0 && elapsed >= g.budget {
 		g.emitWedged(op, "budget", elapsed)
-		return fmt.Errorf("%s: every store call for %s has failed (%d consecutive failures, budget %s, last error: %w) -- the state database looks wedged by another live process; run `sparkwing box-slots list` to find the conflicting holder", op, elapsed.Round(time.Second), g.failures, g.budget, err)
+		return fmt.Errorf("%s: every store call for %s has failed (%d consecutive failures, budget %s, last error: %w) -- the state database looks wedged by another live process; run `sparkwing queue` to see which runs are holding admission", op, elapsed.Round(time.Second), g.failures, g.budget, err)
 	}
 	return nil
 }

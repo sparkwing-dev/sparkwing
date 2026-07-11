@@ -64,6 +64,15 @@ const (
 	// DefaultHeadroomFraction is the share of host capacity reserved and
 	// never offered to admission.
 	DefaultHeadroomFraction = 0.20
+	// DefaultStallInterval is how often a holder's process CPU is
+	// sampled while runs are queued behind it.
+	DefaultStallInterval = 10 * time.Second
+	// DefaultStallWindow is how long a holder must stay below the CPU
+	// threshold, with waiters present, before it is flagged stalled.
+	DefaultStallWindow = 60 * time.Second
+	// DefaultStallCPUFraction is the per-core CPU fraction below which a
+	// holder counts as idle for stall detection.
+	DefaultStallCPUFraction = 0.02
 )
 
 // Config parameterizes a [Daemon]. Only Home is required; every other
@@ -83,6 +92,10 @@ type Config struct {
 	// Sampler reads host capacity and pressure. Nil uses the real
 	// platform sampler.
 	Sampler HostSampler
+	// ProcSampler reads a holder process's CPU for stall flagging. Nil
+	// uses the real platform sampler; a sampler that reports not-sampled
+	// (unsupported platforms) simply leaves holders unflagged.
+	ProcSampler ProcSampler
 	// Now returns the current time; nil uses time.Now. Injected so tests
 	// can measure elapsed hold time deterministically.
 	Now func() time.Time
@@ -94,6 +107,13 @@ type Config struct {
 	GraceWindow time.Duration
 	// SampleInterval overrides [DefaultSampleInterval] when non-zero.
 	SampleInterval time.Duration
+	// StallInterval overrides [DefaultStallInterval] when non-zero.
+	StallInterval time.Duration
+	// StallWindow overrides [DefaultStallWindow] when non-zero.
+	StallWindow time.Duration
+	// StallCPUFraction overrides [DefaultStallCPUFraction] when non-zero;
+	// a negative value disables stall flagging entirely.
+	StallCPUFraction float64
 	// FinalizeRun, when set, is called with a run ID whose client
 	// disconnected while still holding or awaiting admission -- the
 	// process died without releasing (SIGKILL, panic). The callee
@@ -128,6 +148,32 @@ func (c Config) sampleInterval() time.Duration {
 		return c.SampleInterval
 	}
 	return DefaultSampleInterval
+}
+
+func (c Config) stallInterval() time.Duration {
+	if c.StallInterval > 0 {
+		return c.StallInterval
+	}
+	return DefaultStallInterval
+}
+
+func (c Config) stallWindow() time.Duration {
+	if c.StallWindow > 0 {
+		return c.StallWindow
+	}
+	return DefaultStallWindow
+}
+
+// stallCPUFraction is the idle threshold; a negative config value returns
+// zero, which disables flagging because no reading is ever below it.
+func (c Config) stallCPUFraction() float64 {
+	if c.StallCPUFraction < 0 {
+		return 0
+	}
+	if c.StallCPUFraction == 0 {
+		return DefaultStallCPUFraction
+	}
+	return c.StallCPUFraction
 }
 
 func (c Config) headroomFraction() float64 {

@@ -69,6 +69,15 @@ type SemaphoreClaim struct {
 // by a [Grant], or an [Evicted] terminal event, per the policies.
 type AdmissionRequest struct {
 	RunID string `json:"run_id"`
+	// Pipeline is the pipeline name behind the run, carried purely for
+	// display in the queue view. Empty for requests that have no
+	// pipeline (a semaphores-only node acquisition inherits the run's).
+	Pipeline string `json:"pipeline,omitempty"`
+	// PID is the run process's operating-system process id. The daemon
+	// samples this process's CPU at a slow cadence to flag a holder that
+	// is alive but idle while waiters queue behind it. Zero disables
+	// stall sampling for the holder.
+	PID int `json:"pid,omitempty"`
 	// Resources is the host capacity the run is expected to occupy.
 	// A zero value means the run declared no hints and the daemon
 	// charges its conservative default.
@@ -170,6 +179,9 @@ type ResourceState struct {
 // [QueueState].
 type Holder struct {
 	RunID string `json:"run_id"`
+	// Pipeline is the pipeline name behind the run, for display. Empty
+	// when the run did not report one.
+	Pipeline string `json:"pipeline,omitempty"`
 	// ElapsedMS is how long the run has held its lease, in
 	// milliseconds.
 	ElapsedMS int64 `json:"elapsed_ms"`
@@ -177,14 +189,34 @@ type Holder struct {
 	Resources HostResources `json:"resources"`
 	// Semaphores names the semaphores the holder occupies.
 	Semaphores []string `json:"semaphores,omitempty"`
+	// Stalled marks a holder that is alive but has consumed near-zero
+	// CPU for a sustained window while runs wait behind it -- a likely
+	// wedge. It is a flag only; the daemon never kills a holder.
+	Stalled bool `json:"stalled,omitempty"`
+	// Recovery is the exact command an operator runs to clear a stalled
+	// holder. Set only when Stalled is true; it never names a
+	// destructive host verb.
+	Recovery string `json:"recovery,omitempty"`
 }
 
 // Waiter is one run queued for admission, as reported in a
-// [QueueState].
+// [QueueState]. Waiters appear in arrival order; Position is its
+// 1-based place in that order.
 type Waiter struct {
-	RunID      string        `json:"run_id"`
+	RunID string `json:"run_id"`
+	// Pipeline is the pipeline name behind the run, for display. Empty
+	// when the run did not report one.
+	Pipeline string `json:"pipeline,omitempty"`
+	// Position is the waiter's 1-based place in arrival order; 1 is
+	// admitted next.
+	Position   int           `json:"position"`
 	Resources  HostResources `json:"resources"`
 	Semaphores []string      `json:"semaphores,omitempty"`
+	// WaitingOn names the resources the waiter lacks room for right now
+	// -- host dimensions ("cores", "memory") and full semaphore keys.
+	// Empty means the waiter is held only by arrival order behind a
+	// heavier request ahead of it.
+	WaitingOn []string `json:"waiting_on,omitempty"`
 	// WaitingMS is how long the run has been queued, in milliseconds.
 	WaitingMS int64 `json:"waiting_ms,omitempty"`
 }

@@ -117,15 +117,18 @@ func (la *LocalAdmission) admitRun(
 	ctx context.Context,
 	backends Backends,
 	runID string,
+	pipeline string,
 	plan *sparkwing.Plan,
 	workers int,
 	onEvicted func(error),
 ) (*runLease, admitOutcome, error) {
 	if la.ParentLeaseToken != "" {
-		return la.attachChildRun(ctx, backends, runID, plan, onEvicted)
+		return la.attachChildRun(ctx, backends, runID, pipeline, plan, onEvicted)
 	}
 	req := wingwire.AdmissionRequest{
 		RunID:      runID,
+		Pipeline:   pipeline,
+		PID:        os.Getpid(),
 		Resources:  hostResourcesForPlan(plan, workers),
 		Semaphores: planSemaphoreClaims(plan, runID),
 	}
@@ -145,6 +148,7 @@ func (la *LocalAdmission) attachChildRun(
 	ctx context.Context,
 	backends Backends,
 	runID string,
+	pipeline string,
 	plan *sparkwing.Plan,
 	onEvicted func(error),
 ) (*runLease, admitOutcome, error) {
@@ -154,6 +158,8 @@ func (la *LocalAdmission) attachChildRun(
 	}
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID:            runID,
+		Pipeline:         pipeline,
+		PID:              os.Getpid(),
 		ParentLeaseToken: la.ParentLeaseToken,
 	}, nil)
 	if err != nil {
@@ -205,12 +211,12 @@ func (la *LocalAdmission) acquireBlocking(
 	if key, timeout := tightestQueueTimeout(req.Semaphores); timeout > 0 {
 		var cancel context.CancelFunc
 		acquireCtx, cancel = context.WithTimeoutCause(ctx, timeout,
-			fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue", key, timeout))
+			fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue; run `sparkwing queue` to see who holds it", key, timeout))
 		defer cancel()
 	}
 	cl, err := wingdclient.EnsureDaemon(acquireCtx, la.clientOptions())
 	if err != nil {
-		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
+		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)
 	}
 	waited := false
 	lease, err := cl.Acquire(acquireCtx, req, func(q wingwire.Queued) {
@@ -256,7 +262,7 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 		noun = "run"
 	}
 	fmt.Fprintf(la.stderr(),
-		"queued for local admission: position %d of %d (%d %s ahead)\n",
+		"queued for local admission: position %d of %d (%d %s ahead); run `sparkwing queue` to see the full queue\n",
 		q.Position, q.QueueLength, ahead, noun)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d}`, q.Position, q.QueueLength)
 	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
@@ -270,7 +276,7 @@ func admissionFailure(admErr *wingdclient.AdmissionError) error {
 	case "duplicate", "invalid", "parent", "reattach":
 		return fmt.Errorf("local admission: %w", admErr)
 	default:
-		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail", admErr.Key)
+		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail; run `sparkwing queue` to see who holds it", admErr.Key)
 	}
 }
 

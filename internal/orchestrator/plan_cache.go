@@ -40,9 +40,9 @@ type planAdmissionEvictedError struct {
 
 func (e *planAdmissionEvictedError) Error() string {
 	if e.supersededBy != "" {
-		return fmt.Sprintf("admission on %q lost under %s: superseded by run %s", e.groupName, e.policy, e.supersededBy)
+		return fmt.Sprintf("admission on %q lost under %s: superseded by run %s; run `sparkwing queue` to inspect the queue", e.groupName, e.policy, e.supersededBy)
 	}
-	return fmt.Sprintf("plan concurrency group %q: evicted before dispatch", e.groupName)
+	return fmt.Sprintf("plan concurrency group %q: evicted before dispatch; run `sparkwing queue` to inspect the queue", e.groupName)
 }
 
 func planConcurrencyResource(*sparkwing.ConcurrencyGroup) string {

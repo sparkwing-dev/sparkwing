@@ -6,9 +6,28 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
+
+// darwinFScale is the fixed-point scale (1<<FSHIFT, FSHIFT=11) that the
+// kernel applies to ExternProc.P_pctcpu. Dividing by it yields the
+// process's CPU as a fraction of one core, the same figure ps derives
+// for its %CPU column.
+const darwinFScale = 1 << 11
+
+// sample reads the process's decaying CPU-percentage estimate from its
+// kinfo_proc and converts it to a fraction of one core. It reports
+// not-sampled when the process is gone or the sysctl buffer is short.
+func (p *procSampler) sample(pid int) (float64, bool) {
+	raw, err := unix.SysctlRaw("kern.proc.pid", pid)
+	if err != nil || len(raw) < int(unsafe.Sizeof(unix.KinfoProc{})) {
+		return 0, false
+	}
+	kp := (*unix.KinfoProc)(unsafe.Pointer(&raw[0]))
+	return float64(kp.Proc.P_pctcpu) / float64(darwinFScale), true
+}
 
 func sampleHost() (HostStat, error) {
 	stat := HostStat{TotalCores: float64(runtime.NumCPU())}

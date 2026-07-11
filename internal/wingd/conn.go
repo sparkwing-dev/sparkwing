@@ -35,12 +35,21 @@ type conn struct {
 	disconnectOnce sync.Once
 
 	runID     string
+	pipeline  string
+	pid       int
 	role      connRole
 	leaseID   admission.LeaseID
 	members   []string
 	resources wingwire.HostResources
 	sems      []string
 	startAt   time.Time
+
+	// stalled and lowSince track the holder-idle verdict, guarded by the
+	// owning Daemon's mutex. lowSince is when the holder's CPU first fell
+	// below the stall threshold with waiters present; stalled latches once
+	// that has held for the stall window.
+	stalled  bool
+	lowSince time.Time
 
 	// finalizable marks a connection whose run row the daemon must
 	// finalize when the connection drops while still holding or awaiting

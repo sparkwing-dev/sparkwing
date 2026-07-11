@@ -89,7 +89,7 @@ func TestWaitThenRun_ContinuousResolveFailureTripsWedgeBudget(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
-	for _, want := range []string{"wedge-lock", "database is locked", "box-slots list", "budget 250ms"} {
+	for _, want := range []string{"wedge-lock", "database is locked", "sparkwing queue", "budget 250ms"} {
 		if !strings.Contains(state.nodeErr("gated"), want) {
 			t.Errorf("node error %q missing %q", state.nodeErr("gated"), want)
 		}
@@ -115,7 +115,7 @@ func TestWaitThenRun_LockingProtocolIsImmediatelyTerminal(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
-	for _, want := range []string{"locking protocol", "box-slots list"} {
+	for _, want := range []string{"locking protocol", "sparkwing queue"} {
 		if !strings.Contains(state.nodeErr("gated"), want) {
 			t.Errorf("node error %q missing %q", state.nodeErr("gated"), want)
 		}
