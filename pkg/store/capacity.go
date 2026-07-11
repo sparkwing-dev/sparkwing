@@ -38,6 +38,12 @@ const profileWindow = 50
 // percentiles and peak host usage. The pipeline-level rollup used by
 // admission and ETA carries the empty node id; per-node rows record where
 // the numbers came from.
+//
+// The resource distribution fields (CPUP50/CPUP95, MemoryP50Bytes/
+// MemoryP95Bytes) describe how spiky the pipeline is; they inform the
+// reader and never gate admission. Admission charges PeakCores and
+// PeakMemoryBytes: under-reserving a spiky pipeline recreates the
+// oversubscription the daemon exists to prevent.
 type PipelineProfile struct {
 	Pipeline        string        `json:"pipeline"`
 	NodeID          string        `json:"node_id"`
@@ -46,6 +52,24 @@ type PipelineProfile struct {
 	PeakCores       float64       `json:"peak_cores"`
 	PeakMemoryBytes int64         `json:"peak_memory_bytes"`
 	SampleCount     int           `json:"sample_count"`
+	// CPUP50 and CPUP95 are the median and 95th-percentile per-run CPU
+	// peaks across the window, recomputed from the stored samples on
+	// read. Display-only; admission charges PeakCores.
+	CPUP50 float64 `json:"cpu_p50,omitempty"`
+	CPUP95 float64 `json:"cpu_p95,omitempty"`
+	// MemoryP50Bytes and MemoryP95Bytes are the median and
+	// 95th-percentile per-run memory peaks across the window. Display-
+	// only; admission charges PeakMemoryBytes.
+	MemoryP50Bytes int64 `json:"memory_p50_bytes,omitempty"`
+	MemoryP95Bytes int64 `json:"memory_p95_bytes,omitempty"`
+	// WaitP50 and WaitP99 are the median and 99th-percentile admission
+	// queue waits (submit to grant) over a bounded window of recent
+	// runs. Meaningful only on the rollup row; run durations exclude
+	// this interval.
+	WaitP50 time.Duration `json:"wait_p50_ns,omitempty"`
+	WaitP99 time.Duration `json:"wait_p99_ns,omitempty"`
+	// WaitSampleCount is how many wait observations back WaitP50/WaitP99.
+	WaitSampleCount int `json:"wait_sample_count,omitempty"`
 	// CPUMeasured records whether the sampler that produced these
 	// observations could actually measure CPU on this platform. A healthy
 	// sampler sets it true even when the peak is a genuine near-zero (a
@@ -157,6 +181,82 @@ func (s *Store) loadProfileWindow(ctx context.Context, pipeline, nodeID string) 
 	return doc.Samples, nil
 }
 
+// waitWindowDoc is the versioned envelope wait_samples_json holds:
+// per-run admission waits in milliseconds, oldest first.
+type waitWindowDoc struct {
+	Schema  int     `json:"schema"`
+	Samples []int64 `json:"samples"`
+}
+
+// waitSchemaCurrent stamps the meaning of the stored wait samples.
+const waitSchemaCurrent = 1
+
+// RecordWaitObservation folds one run's admission wait (submit to grant)
+// into the pipeline's rollup profile, aging out samples beyond
+// profileWindow and recomputing the persisted wait percentiles. It is
+// observability only: nothing in admission reads the wait columns.
+func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
+	if pipeline == "" {
+		return nil
+	}
+	if wait < 0 {
+		wait = 0
+	}
+	window, err := s.loadWaitWindow(ctx, pipeline)
+	if err != nil {
+		return err
+	}
+	window = append(window, wait.Milliseconds())
+	if len(window) > profileWindow {
+		window = window[len(window)-profileWindow:]
+	}
+	xs := make([]float64, len(window))
+	for i, ms := range window {
+		xs[i] = float64(ms)
+	}
+	p50 := int64(percentile(xs, 0.50))
+	p99 := int64(percentile(xs, 0.99))
+	raw, err := json.Marshal(waitWindowDoc{Schema: waitSchemaCurrent, Samples: window})
+	if err != nil {
+		return err
+	}
+	return retryOnBusy(func() error {
+		_, err := s.exec(ctx, `
+INSERT INTO pipeline_profiles
+    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at,
+     wait_samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count)
+VALUES (?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?)
+ON CONFLICT (pipeline, node_id) DO UPDATE SET
+    wait_samples_json = excluded.wait_samples_json,
+    wait_p50_ms       = excluded.wait_p50_ms,
+    wait_p99_ms       = excluded.wait_p99_ms,
+    wait_sample_count = excluded.wait_sample_count`,
+			pipeline, "", time.Now().UnixNano(), raw, p50, p99, len(window))
+		return err
+	})
+}
+
+func (s *Store) loadWaitWindow(ctx context.Context, pipeline string) ([]int64, error) {
+	var raw []byte
+	err := s.queryRow(ctx,
+		`SELECT wait_samples_json FROM pipeline_profiles WHERE pipeline = ? AND node_id = ''`,
+		pipeline).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var doc waitWindowDoc
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != waitSchemaCurrent {
+		return nil, nil
+	}
+	return doc.Samples, nil
+}
+
 // SetProfilePin records the explicit .Resources() pin last seen for a
 // (pipeline, node), so a reader can judge the pin against the measured
 // peaks. It updates only the pin columns of an existing profile row and is
@@ -170,11 +270,15 @@ UPDATE pipeline_profiles SET pinned_cores = ?, pinned_memory_bytes = ?
 	})
 }
 
+// profileColumns is the shared SELECT column list every profile read
+// uses, kept in one place so scanProfile stays in lockstep with it.
+const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count`
+
 // GetPipelineProfile returns the (pipeline, node) profile, or nil when no
 // runs have been measured for it yet.
 func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error) {
 	row := s.queryRow(ctx, `
-SELECT p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes
+SELECT `+profileColumns+`
   FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, nodeID)
 	prof, err := scanProfile(row, pipeline, nodeID)
 	if err != nil {
@@ -191,7 +295,7 @@ SELECT p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_c
 // rollup id sorts first). A non-empty pipeline restricts the result.
 func (s *Store) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error) {
 	q := `
-SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes
+SELECT pipeline, node_id, ` + profileColumns + `
   FROM pipeline_profiles`
 	var args []any
 	if pipeline != "" {
@@ -205,33 +309,14 @@ SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_mem
 	defer func() { _ = rows.Close() }()
 	out := []PipelineProfile{}
 	for rows.Next() {
-		var (
-			p, n         string
-			p50, p99     int64
-			cores        float64
-			mem          int64
-			count        int
-			cpuMeasured  int
-			updatedNanos int64
-			pinCores     float64
-			pinMem       int64
-		)
-		if err := rows.Scan(&p, &n, &p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos, &pinCores, &pinMem); err != nil {
+		var p, n string
+		prof, err := scanProfileInto(rows.Scan, &p, &n)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, PipelineProfile{
-			Pipeline:          p,
-			NodeID:            n,
-			P50Duration:       time.Duration(p50) * time.Millisecond,
-			P99Duration:       time.Duration(p99) * time.Millisecond,
-			PeakCores:         cores,
-			PeakMemoryBytes:   mem,
-			SampleCount:       count,
-			CPUMeasured:       cpuMeasured != 0,
-			UpdatedAt:         time.Unix(0, updatedNanos),
-			PinnedCores:       pinCores,
-			PinnedMemoryBytes: pinMem,
-		})
+		prof.Pipeline = p
+		prof.NodeID = n
+		out = append(out, *prof)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -246,22 +331,40 @@ SELECT pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_mem
 }
 
 func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, error) {
-	var (
-		p50, p99     int64
-		cores        float64
-		mem          int64
-		count        int
-		cpuMeasured  int
-		updatedNanos int64
-		pinCores     float64
-		pinMem       int64
-	)
-	if err := row.Scan(&p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos, &pinCores, &pinMem); err != nil {
+	prof, err := scanProfileInto(row.Scan)
+	if err != nil {
 		return nil, err
 	}
-	return &PipelineProfile{
-		Pipeline:          pipeline,
-		NodeID:            nodeID,
+	prof.Pipeline = pipeline
+	prof.NodeID = nodeID
+	return prof, nil
+}
+
+// scanProfileInto scans one profileColumns row, prepending any leading
+// destinations (the pipeline and node id columns when the query selects
+// them), and derives the display-only resource percentiles from the
+// stored samples.
+func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, error) {
+	var (
+		p50, p99         int64
+		cores            float64
+		mem              int64
+		count            int
+		cpuMeasured      int
+		updatedNanos     int64
+		pinCores         float64
+		pinMem           int64
+		samplesRaw       []byte
+		waitP50, waitP99 int64
+		waitCount        int
+	)
+	dests := append(lead,
+		&p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos,
+		&pinCores, &pinMem, &samplesRaw, &waitP50, &waitP99, &waitCount)
+	if err := scan(dests...); err != nil {
+		return nil, err
+	}
+	prof := &PipelineProfile{
 		P50Duration:       time.Duration(p50) * time.Millisecond,
 		P99Duration:       time.Duration(p99) * time.Millisecond,
 		PeakCores:         cores,
@@ -271,7 +374,35 @@ func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, err
 		UpdatedAt:         time.Unix(0, updatedNanos),
 		PinnedCores:       pinCores,
 		PinnedMemoryBytes: pinMem,
-	}, nil
+		WaitP50:           time.Duration(waitP50) * time.Millisecond,
+		WaitP99:           time.Duration(waitP99) * time.Millisecond,
+		WaitSampleCount:   waitCount,
+	}
+	annotateResourcePercentiles(prof, samplesRaw)
+	return prof, nil
+}
+
+// annotateResourcePercentiles fills the display-only CPU and memory
+// distribution fields from the persisted sample window. Missing or
+// older-format samples leave the fields zero.
+func annotateResourcePercentiles(prof *PipelineProfile, raw []byte) {
+	if len(raw) == 0 {
+		return
+	}
+	var doc profileWindowDoc
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != profileSchemaCurrent || len(doc.Samples) == 0 {
+		return
+	}
+	cores := make([]float64, len(doc.Samples))
+	mems := make([]float64, len(doc.Samples))
+	for i, s := range doc.Samples {
+		cores[i] = s.C
+		mems[i] = float64(s.M)
+	}
+	prof.CPUP50 = percentile(cores, 0.50)
+	prof.CPUP95 = percentile(cores, 0.95)
+	prof.MemoryP50Bytes = int64(percentile(mems, 0.50))
+	prof.MemoryP95Bytes = int64(percentile(mems, 0.95))
 }
 
 func profileFromWindow(window []profileSample) PipelineProfile {

@@ -114,13 +114,13 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			h.RunID, orDash(h.Pipeline), fmtElapsed(h.ElapsedMS), fmtCost(h.Resources),
-			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h))
+		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			h.RunID, orDash(h.Pipeline), orDash(h.Repo), fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
+			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(h.Parent))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			wt.Position, wt.RunID, orDash(wt.Pipeline), fmtCost(wt.Resources),
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			wt.Position, wt.RunID, orDash(wt.Pipeline), orDash(wt.Repo), fmtCost(wt.Resources),
 			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
 	}
@@ -135,7 +135,11 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	if d := fmtDaemonHeader(qs); d != "" {
 		fmt.Fprintln(out, d)
 	}
-	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n\n", len(qs.Holders), len(qs.Waiters), clear)
+	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", len(qs.Holders), len(qs.Waiters), clear)
+	if line := fmtEventsLine(qs.Events); line != "" {
+		fmt.Fprintln(out, line)
+	}
+	fmt.Fprintln(out)
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RESOURCE\tCAPACITY\tIN USE\tRESERVED\tEXTERNAL\tAVAILABLE")
@@ -156,29 +160,32 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
+	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
 	if len(qs.Holders) == 0 {
-		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t")
+		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t")
 	}
 	for _, h := range qs.Holders {
 		run := h.RunID
+		if h.Parent != "" {
+			run = "  " + run + " (attached)"
+		}
 		if h.Stalled {
 			run += " (stalled)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline),
-			fmtElapsed(h.ElapsedMS), fmtCost(h.Resources), orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
+			fmtElapsed(h.ElapsedMS), fmtHolderCost(h), orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
 	}
 	_ = tw.Flush()
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
-			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
+			orDash(wt.Repo), fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
@@ -285,6 +292,86 @@ func fmtDaemonHeader(qs wingwire.QueueState) string {
 		up = "up " + (time.Duration(qs.DaemonUptimeMS) * time.Millisecond).Round(time.Second).String()
 	}
 	return fmt.Sprintf("daemon %s, %s", version, up)
+}
+
+// fmtEventsLine renders the one-line recent-events health summary from
+// the daemon's rolling window: run count with median wait, then only the
+// trouble categories that actually occurred. Empty when the daemon sent
+// no window or nothing happened in it.
+func fmtEventsLine(ev *wingwire.EventsWindow) string {
+	if ev == nil || (ev.Runs == 0 && len(ev.Evictions) == 0 && ev.QueueTimeouts == 0 && ev.Cancellations == 0) {
+		return ""
+	}
+	span := (time.Duration(ev.WindowMS) * time.Millisecond).Round(time.Hour)
+	label := span.String()
+	if h := int(span.Hours()); h > 0 {
+		label = fmt.Sprintf("%dh", h)
+	}
+	parts := []string{fmt.Sprintf("%d %s", ev.Runs, pluralWord(ev.Runs, "run", "runs"))}
+	if ev.Runs > 0 {
+		parts = append(parts, fmt.Sprintf("median wait %s",
+			(time.Duration(ev.MedianWaitMS)*time.Millisecond).Round(time.Second)))
+	}
+	if n := totalEvictions(ev.Evictions); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s (%s)", n, pluralWord(n, "eviction", "evictions"),
+			evictionKeys(ev.Evictions)))
+	}
+	if ev.QueueTimeouts > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", ev.QueueTimeouts,
+			pluralWord(ev.QueueTimeouts, "queue-timeout", "queue-timeouts")))
+	}
+	if ev.Cancellations > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", ev.Cancellations,
+			pluralWord(ev.Cancellations, "cancellation", "cancellations")))
+	}
+	out := "last " + label + ": "
+	for i, p := range parts {
+		if i > 0 {
+			out += ", "
+		}
+		out += p
+	}
+	return out
+}
+
+func totalEvictions(counts []wingwire.EvictionCount) int {
+	n := 0
+	for _, c := range counts {
+		n += c.Count
+	}
+	return n
+}
+
+// evictionKeys names the contested keys behind an eviction tally:
+// "key: land" for one key, "keys: deploy, land" for several.
+func evictionKeys(counts []wingwire.EvictionCount) string {
+	if len(counts) == 1 {
+		return "key: " + counts[0].Key
+	}
+	out := "keys: "
+	for i, c := range counts {
+		if i > 0 {
+			out += ", "
+		}
+		out += c.Key
+	}
+	return out
+}
+
+func pluralWord(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// fmtHolderCost renders a holder's charge, or a dash for an attached
+// child, which rides its parent's lease and is charged nothing.
+func fmtHolderCost(h wingwire.Holder) string {
+	if h.Parent != "" {
+		return "-"
+	}
+	return fmtCost(h.Resources)
 }
 
 // fmtETA renders a waiter's estimated start offset: "now" when it is

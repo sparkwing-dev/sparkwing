@@ -39,6 +39,17 @@ func withStore(t *testing.T, p paths.Paths, fn func(st *store.Store)) {
 	fn(st)
 }
 
+// backdateHeartbeat rewinds a run's heartbeat so it reads as a process
+// that died, since CreateRun stamps a fresh heartbeat on running rows.
+func backdateHeartbeat(t *testing.T, st *store.Store, runID string, age time.Duration) {
+	t.Helper()
+	if _, err := st.DB().Exec(
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+		time.Now().Add(-age).UnixNano(), runID); err != nil {
+		t.Fatalf("backdate heartbeat: %v", err)
+	}
+}
+
 func TestDiagnose_CleanHomeFindsNothing(t *testing.T) {
 	p := doctorHome(t)
 	rep, err := diagnose(context.Background(), p, p.Root, false)
@@ -60,6 +71,7 @@ func TestDiagnose_FinalizesOrphanedRunKeepsRecent(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		backdateHeartbeat(t, st, "run-orphan", 10*time.Minute)
 		if err := st.CreateRun(ctx, store.Run{
 			ID: "run-fresh", Pipeline: "demo", Status: "running",
 			StartedAt: time.Now(),
@@ -174,6 +186,7 @@ func TestDiagnose_DryRunChangesNothing(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		backdateHeartbeat(t, st, "run-orphan", 10*time.Minute)
 	})
 	rep, err := diagnose(ctx, p, p.Root, true)
 	if err != nil {

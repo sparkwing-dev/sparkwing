@@ -38,10 +38,18 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 				continue
 			}
 			lease, _ := d.ledger.LeaseByID(ev.Lease)
+			now := d.now()
+			if c.finalizable {
+				wait := int64(0)
+				if !c.startAt.IsZero() {
+					wait = now.Sub(c.startAt).Milliseconds()
+				}
+				d.events.record(now, admissionEvent{Kind: eventGrant, WaitMS: wait})
+			}
 			c.role = roleHolder
 			c.leaseID = ev.Lease
 			c.members = []string{ev.RequestID}
-			c.startAt = d.now()
+			c.startAt = now
 			d.leaseCharge[ev.Lease] = c.resources
 			out = append(out, delivery{c, &wingwire.Grant{
 				RunID:      ev.RequestID,
@@ -58,6 +66,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 				}})
 			}
 		case admission.EventEvicted:
+			d.events.record(d.now(), admissionEvent{Kind: eventEviction, Key: ev.Key})
 			if c := d.byRun[ev.RequestID]; c != nil {
 				out = append(out, delivery{c, &wingwire.Evicted{
 					RunID:        ev.RequestID,

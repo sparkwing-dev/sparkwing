@@ -17,17 +17,21 @@ const stateSchema = 1
 // persistedState is the durable form of the ledger. Only granted leases
 // survive a restart: waiters hold nothing and no re-attach token, so a
 // queued run simply re-submits on reconnect instead of being restored
-// into a lease nobody can claim.
+// into a lease nobody can claim. Events is the rolling admission-outcome
+// window behind the queue view's health line; state files written before
+// the window existed simply restore it empty.
 type persistedState struct {
 	Schema   int                `json:"schema"`
 	Snapshot admission.Snapshot `json:"snapshot"`
+	Events   []admissionEvent   `json:"events,omitempty"`
 }
 
-// writeState writes snap to path by atomic rename, stripping waiters so a
-// restored ledger contains only reclaimable leases.
-func writeState(path string, snap admission.Snapshot) error {
+// writeState writes snap and the event window to path by atomic rename,
+// stripping waiters so a restored ledger contains only reclaimable
+// leases.
+func writeState(path string, snap admission.Snapshot, events []admissionEvent) error {
 	snap.Waiters = nil
-	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap})
+	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events})
 	if err != nil {
 		return fmt.Errorf("wingd: marshal state: %w", err)
 	}
@@ -58,22 +62,23 @@ func writeState(path string, snap admission.Snapshot) error {
 	return nil
 }
 
-// readState loads a persisted snapshot. It returns (nil, nil) when no
-// state file exists, so a fresh daemon starts empty.
-func readState(path string) (*admission.Snapshot, error) {
+// readState loads a persisted snapshot and event window. It returns
+// (nil, nil, nil) when no state file exists, so a fresh daemon starts
+// empty.
+func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("wingd: read state: %w", err)
+		return nil, nil, fmt.Errorf("wingd: read state: %w", err)
 	}
 	var st persistedState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return nil, fmt.Errorf("wingd: parse state: %w", err)
+		return nil, nil, fmt.Errorf("wingd: parse state: %w", err)
 	}
 	if st.Schema != stateSchema {
-		return nil, fmt.Errorf("wingd: state schema %d, want %d", st.Schema, stateSchema)
+		return nil, nil, fmt.Errorf("wingd: state schema %d, want %d", st.Schema, stateSchema)
 	}
-	return &st.Snapshot, nil
+	return &st.Snapshot, st.Events, nil
 }

@@ -51,15 +51,15 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tPEAK CPU\tPEAK MEM\tSAMPLES")
+	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%.1f\t%s\t%d\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
 			s.Pipeline, s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
-			s.Rollup.PeakCores, humanBytes(s.Rollup.PeakMemoryBytes), s.Rollup.SampleCount)
+			fmtCPUCells(s.Rollup), fmtMemCells(s.Rollup), fmtWaitCells(s.Rollup), s.Rollup.SampleCount)
 		for _, n := range s.Nodes {
-			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%.1f\t%s\t%d\n",
+			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\n",
 				n.NodeID, fmtDur(n.P50Duration), fmtDur(n.P99Duration),
-				n.PeakCores, humanBytes(n.PeakMemoryBytes), n.SampleCount)
+				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount)
 		}
 	}
 	if err := tw.Flush(); err != nil {
@@ -71,6 +71,27 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		}
 	}
 	return nil
+}
+
+// fmtCPUCells renders a profile's CPU distribution as p50/p95/peak. The
+// percentiles describe spikiness; PEAK is what admission charges.
+func fmtCPUCells(p store.PipelineProfile) string {
+	return fmt.Sprintf("%.1f/%.1f/%.1f", p.CPUP50, p.CPUP95, p.PeakCores)
+}
+
+// fmtMemCells renders a profile's memory distribution as p50/p95/peak.
+func fmtMemCells(p store.PipelineProfile) string {
+	return fmt.Sprintf("%s/%s/%s",
+		humanBytes(p.MemoryP50Bytes), humanBytes(p.MemoryP95Bytes), humanBytes(p.PeakMemoryBytes))
+}
+
+// fmtWaitCells renders a rollup's queue-wait percentiles as p50/p99, or
+// a dash before any wait has been observed.
+func fmtWaitCells(p store.PipelineProfile) string {
+	if p.WaitSampleCount == 0 {
+		return "-"
+	}
+	return fmtDur(p.WaitP50) + "/" + fmtDur(p.WaitP99)
 }
 
 // groupCapacityStats folds the flat profile rows into per-pipeline stats,

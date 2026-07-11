@@ -35,6 +35,8 @@ type Daemon struct {
 	shutdownOne sync.Once
 	graceTimer  *time.Timer
 
+	events eventWindow
+
 	mu           sync.Mutex
 	ledger       *admission.Ledger
 	conns        map[*conn]struct{}
@@ -202,16 +204,17 @@ func (d *Daemon) finalShutdown() {
 	for _, c := range toClose {
 		c.close()
 	}
-	if err := writeState(d.layout.state, snap); err != nil {
+	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
 }
 
 func (d *Daemon) initLedger() error {
-	snap, err := readState(d.layout.state)
+	snap, events, err := readState(d.layout.state)
 	if err != nil {
 		return err
 	}
+	d.events.restore(d.now(), events)
 	stat, serr := d.sampler.Sample()
 	if serr != nil {
 		d.cfg.logf("initial host sample: %v", serr)
@@ -407,6 +410,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	c.runID = req.RunID
 	c.pipeline = req.Pipeline
+	c.repo = req.Repo
 	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
@@ -415,6 +419,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.costSource = req.CostSource
 	c.expectedDurationMS = req.ExpectedDurationMS
 	c.driftWarning = req.DriftWarning
+	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
 	if err != nil {
@@ -445,6 +450,22 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
 	}
+}
+
+// tightestQueueTimeoutMS returns the smallest positive queue timeout
+// declared by an OnLimit:Queue claim in the request, or zero when every
+// wait is unbounded.
+func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
+	var t int64
+	for _, s := range sems {
+		if s.QueueTimeoutMS <= 0 || (s.Policy != "" && s.Policy != wingwire.PolicyQueue) {
+			continue
+		}
+		if t == 0 || s.QueueTimeoutMS < t {
+			t = s.QueueTimeoutMS
+		}
+	}
+	return t
 }
 
 // cancelTimeoutFor returns the smallest positive CancelTimeout declared
@@ -527,12 +548,14 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
 	c.pipeline = req.Pipeline
+	c.repo = req.Repo
 	c.pid = req.PID
 	c.role = roleHolder
 	c.leaseID = leaseID
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
 	c.finalizable = true
+	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
 	if existing, ok := d.leaseMembers[leaseID]; ok {
 		d.leaseMembers[leaseID] = append(existing, req.RunID)
@@ -540,7 +563,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap); err != nil {
+	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	_ = c.send(&wingwire.Grant{RunID: req.RunID, LeaseToken: lease.Token, Semaphores: leaseSemaphores(snap, leaseID)})
@@ -588,7 +611,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap); err != nil {
+	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("reattach: run %s reclaimed lease %s", requestID, leaseID)
@@ -619,7 +642,7 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	remaining := len(d.leaseRun)
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap); err != nil {
+	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("draining for successor %s", req.SuccessorVersion)
@@ -653,6 +676,7 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	var deliveries []delivery
 	var snap admission.Snapshot
 	if waiter {
+		d.events.record(d.now(), admissionEvent{Kind: eventCancellation})
 		events := d.cancelWaiterLocked(req.RunID)
 		delete(d.byRun, req.RunID)
 		target.role = roleNone
@@ -714,6 +738,9 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		case roleHolder:
 			events = d.releaseConnLocked(c)
 		case roleWaiter:
+			if c.finalizable {
+				d.events.record(d.now(), admissionEvent{Kind: waiterDepartureKindLocked(c, d.now())})
+			}
 			events = d.cancelWaiterLocked(c.runID)
 		}
 		deliveries := d.routeLocked(events)
@@ -726,6 +753,18 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		}
 		d.flush(deliveries, snap)
 	})
+}
+
+// waiterDepartureKindLocked classifies why a queued run left without a
+// grant: a waiter whose declared bounded queue wait had elapsed timed
+// out; every other departure (operator cancel, interrupt, process death)
+// is a cancellation. The caller holds d.mu.
+func waiterDepartureKindLocked(c *conn, now time.Time) string {
+	if c.queueTimeoutMS > 0 && !c.startAt.IsZero() &&
+		now.Sub(c.startAt).Milliseconds() >= c.queueTimeoutMS {
+		return eventQueueTimeout
+	}
+	return eventCancellation
 }
 
 // releaseConnLocked releases every member the connection owns and clears
@@ -747,7 +786,7 @@ func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
 // State is written before grants are announced so a re-attach token is
 // durable before any client can act on it.
 func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
-	if err := writeState(d.layout.state, snap); err != nil {
+	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	for _, dl := range deliveries {

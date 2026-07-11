@@ -5,6 +5,8 @@ type AdmissionRequest struct {
 
 	Pipeline string
 
+	Repo string
+
 	PID int
 
 	Resources  HostResources
@@ -42,12 +44,29 @@ type Envelope struct {
 	Type    MessageType
 	Payload json.RawMessage
 }
+type EventsWindow struct {
+	WindowMS int64
+
+	Runs int
+
+	MedianWaitMS int64
+
+	Evictions []EvictionCount
+
+	QueueTimeouts int
+
+	Cancellations int
+}
 type Evicted struct {
 	RunID string
 	Key   string
 
 	SupersededBy string
 	Policy       Policy
+}
+type EvictionCount struct {
+	Key   string
+	Count int
 }
 type Grant struct {
 	RunID      string
@@ -70,6 +89,10 @@ type Holder struct {
 	RunID string
 
 	Pipeline string
+
+	Repo string
+
+	Parent string
 
 	ElapsedMS int64
 
@@ -113,6 +136,8 @@ type QueueState struct {
 	DaemonVersion string
 
 	DaemonUptimeMS int64
+
+	Events *EventsWindow
 }
 type Queued struct {
 	RunID string
@@ -168,6 +193,8 @@ type Waiter struct {
 	RunID string
 
 	Pipeline string
+
+	Repo string
 
 	Position   int
 	Resources  HostResources

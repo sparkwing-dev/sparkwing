@@ -61,11 +61,25 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 			continue
 		}
 		sawHolder = true
-		if len(qs.Holders) != 1 {
-			t.Fatalf("want exactly 1 holder (children share the lease), got %d: %+v", len(qs.Holders), qs.Holders)
+		var parents, children int
+		for _, h := range qs.Holders {
+			if h.Parent == "" {
+				parents++
+				if h.RunID != "p" {
+					t.Fatalf("top-level holder run id %q, want parent p", h.RunID)
+				}
+				continue
+			}
+			children++
+			if h.Parent != "p" {
+				t.Fatalf("attached child %q names parent %q, want p", h.RunID, h.Parent)
+			}
+			if h.Resources.Cores != 0 || h.Resources.MemoryBytes != 0 {
+				t.Fatalf("attached child %q charged %+v, want zero", h.RunID, h.Resources)
+			}
 		}
-		if qs.Holders[0].RunID != "p" {
-			t.Fatalf("holder run id %q, want parent p", qs.Holders[0].RunID)
+		if parents != 1 {
+			t.Fatalf("want exactly 1 top-level holder (children share the lease), got %d: %+v", parents, qs.Holders)
 		}
 		if held := resourceHeld(qs, "cores"); held != 1 {
 			t.Fatalf("cores held %g, want 1 (children must not double-charge)", held)

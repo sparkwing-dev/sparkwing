@@ -163,6 +163,15 @@ capacity. It also measures each pipeline's own cost over its first few
 runs, so "one heavy build at a time" emerges from measurement with no
 configuration. Declare nothing and it works.
 
+`sparkwing runs stats --capacity` shows what was learned: each
+pipeline's duration percentiles, its CPU and memory distributions
+(p50/p95/peak across recent runs), and its queue-wait p50/p99. The
+distributions tell you whether a pipeline is steady or spiky and whether
+the box is too small; admission always charges the measured peak, never
+a percentile, because under-reserving a spiky pipeline recreates exactly
+the oversubscription the daemon exists to prevent. Percentiles inform,
+peak admits.
+
 A pipeline may pass a cold-start hint with
 `.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an
 explicit cost when it must -- but a pin is policed, not trusted blindly:
@@ -182,11 +191,16 @@ There are exactly two operational commands, and neither can hurt the
 machine:
 
 - `sparkwing queue` -- the truthful view of local admission: every
-  holder with how long it has held and its cost, every waiter in arrival
-  order with its position and estimated start, and a flag on any holder
-  that is alive but idle while runs wait behind it. It also names the
-  serving daemon's version and uptime, and warns when an older-pinned
-  pipeline binary is admitting outside the daemon.
+  holder with the repo it came from, how long it has held, and its cost,
+  every waiter in arrival order with its position and estimated start,
+  and a flag on any holder that is alive but idle while runs wait behind
+  it. A child run riding its parent's lease renders indented under that
+  parent. The header summarizes the last day of admission outcomes in
+  one line -- runs granted, median wait, evictions by key, queue
+  timeouts -- so a chronic pattern shows up before it becomes an
+  incident. It also names the serving daemon's version and uptime, and
+  warns when an older-pinned pipeline binary is admitting outside the
+  daemon.
 - `sparkwing doctor` -- the one repair verb. It removes only provably-
   dead state (an interrupted run's leftover row, an orphaned lock file
   whose owner is gone) and reports what it found and did. It never kills

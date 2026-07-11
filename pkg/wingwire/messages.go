@@ -78,6 +78,11 @@ type AdmissionRequest struct {
 	// display in the queue view. Empty for requests that have no
 	// pipeline (a semaphores-only node acquisition inherits the run's).
 	Pipeline string `json:"pipeline,omitempty"`
+	// Repo is the short name of the repository the run was launched
+	// from (the git toplevel basename), carried purely for display so a
+	// shared daemon's queue can say whose work each row is. Empty when
+	// the run started outside any repository.
+	Repo string `json:"repo,omitempty"`
 	// PID is the run process's operating-system process id. The daemon
 	// samples this process's CPU at a slow cadence to flag a holder that
 	// is alive but idle while waiters queue behind it. Zero disables
@@ -220,6 +225,13 @@ type Holder struct {
 	// Pipeline is the pipeline name behind the run, for display. Empty
 	// when the run did not report one.
 	Pipeline string `json:"pipeline,omitempty"`
+	// Repo is the short repo name the run was launched from, for
+	// display. Empty when the run did not report one (a non-git launch
+	// directory, or a lease that survived a daemon restart).
+	Repo string `json:"repo,omitempty"`
+	// Parent, when non-empty, names the holder this run is attached to:
+	// the run rides its parent's lease and draws no budget of its own.
+	Parent string `json:"parent,omitempty"`
 	// ElapsedMS is how long the run has held its lease, in
 	// milliseconds.
 	ElapsedMS int64 `json:"elapsed_ms"`
@@ -255,6 +267,9 @@ type Waiter struct {
 	// Pipeline is the pipeline name behind the run, for display. Empty
 	// when the run did not report one.
 	Pipeline string `json:"pipeline,omitempty"`
+	// Repo is the short repo name the run was launched from, for
+	// display. Empty when the run did not report one.
+	Repo string `json:"repo,omitempty"`
 	// Position is the waiter's 1-based place in arrival order; 1 is
 	// admitted next.
 	Position   int           `json:"position"`
@@ -307,6 +322,40 @@ type QueueState struct {
 	// DaemonUptimeMS is how long the serving daemon has been up, in
 	// milliseconds. Zero when unknown.
 	DaemonUptimeMS int64 `json:"daemon_uptime_ms,omitempty"`
+	// Events summarizes the daemon's recent admission outcomes. Nil for
+	// older daemons that do not keep the window.
+	Events *EventsWindow `json:"events,omitempty"`
+}
+
+// EventsWindow summarizes the daemon's rolling window of admission
+// outcomes -- the data behind the queue view's one-line health summary.
+// Counts cover the window's span ending now; zero-valued categories
+// simply did not occur.
+type EventsWindow struct {
+	// WindowMS is the span the window covers, in milliseconds.
+	WindowMS int64 `json:"window_ms"`
+	// Runs is how many admissions were granted in the window.
+	Runs int `json:"runs"`
+	// MedianWaitMS is the median submit-to-grant wait across those
+	// grants, in milliseconds.
+	MedianWaitMS int64 `json:"median_wait_ms"`
+	// Evictions counts holders superseded under cancel_others, per
+	// contested key.
+	Evictions []EvictionCount `json:"evictions,omitempty"`
+	// QueueTimeouts is how many waiters abandoned the queue when a
+	// bounded OnLimit:Queue wait elapsed.
+	QueueTimeouts int `json:"queue_timeouts,omitempty"`
+	// Cancellations is how many queued or running admissions were
+	// cancelled (operator cancel, interrupt, or a waiter's process
+	// going away).
+	Cancellations int `json:"cancellations,omitempty"`
+}
+
+// EvictionCount is one contested key's eviction tally in an
+// [EventsWindow].
+type EvictionCount struct {
+	Key   string `json:"key"`
+	Count int    `json:"count"`
 }
 
 // CancelLease asks the daemon to cancel a local run it is arbitrating,

@@ -90,6 +90,32 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `sparkwing runs stats --capacity` now shows each pipeline's
+  CPU and memory distributions (p50/p95/peak across the same window of
+  recent runs that backs the duration percentiles) instead of a lone
+  peak, so a steady pipeline and a spiky one no longer look alike. The
+  percentiles are informational; admission still charges the measured
+  peak, because under-reserving a spiky pipeline recreates the
+  oversubscription admission exists to prevent.
+- **cli:** capacity stats gain per-pipeline queue-wait percentiles: the
+  daemon-admission wait (submit to grant, the exact interval run
+  durations exclude) is recorded per run and shown as a WAIT p50/p99
+  column. "p50 duration 8m, p50 wait 3m" answers "is this box too
+  small" with a measurement instead of a guess. Observability only --
+  no admission behavior changes.
+- **cli:** `sparkwing queue` names the repo each holder and waiter came
+  from (a REPO column in pretty output, a `repo` field in JSON), so a
+  queue full of identically-named pipelines from different checkouts
+  stays readable on a shared machine. Runs launched outside a git
+  repository show a dash.
+- **cli:** `sparkwing queue` renders a one-line recent-events summary in
+  its header ("last 24h: 142 runs, median wait 4s, 3 evictions (key:
+  land), 1 queue-timeout" -- zero categories are omitted), backed by a
+  bounded rolling window the daemon persists across restarts; JSON
+  carries the structured window in an `events` field. Attached child
+  runs now render indented under their parent holder with an attached
+  marker and a `parent` field in JSON, instead of appearing as runs
+  that hold nothing.
 - **cli:** `sparkwing doctor` -- the one safe repair verb. It removes
   only provably-dead local state (run rows left `running` with no live
   process or daemon lease, leftover box-slot lock files whose owner is
@@ -129,6 +155,12 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** Upgrading a database whose `pipeline_profiles` table
+  predates the `cpu_measured` column now backfills the flag for carried
+  rows with a positive measured peak, matching how admission qualifies
+  them: a legacy positive peak could only have come from a sampler that
+  measured CPU. Rows survive the migration column-add; a version bump
+  no longer risks resetting learned capacity to cold start.
 - **orchestrator:** A node-level `OnLimit:CancelOthers` concurrency group
   now preempts across runs through the daemon instead of silently
   queueing: the newest arrival evicts the older holder, the superseded

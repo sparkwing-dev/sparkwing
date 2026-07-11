@@ -44,11 +44,21 @@ type conn struct {
 	sems      []string
 	startAt   time.Time
 
-	// costSource, expectedDurationMS, and driftWarning are display
+	// parentRun names the holder this connection's run attached to, for
+	// child leases riding a parent's grant. Empty for top-level runs.
+	parentRun string
+
+	// queueTimeoutMS is the tightest bounded OnLimit:Queue wait the
+	// request declared, kept so a waiter disconnect can be classified as
+	// a queue timeout rather than a cancellation. Zero means unbounded.
+	queueTimeoutMS int64
+
+	// costSource, repo, expectedDurationMS, and driftWarning are display
 	// metadata carried from the admission request into the queue view and
 	// the ETA simulation. They are live-only: a daemon restart clears them
 	// for reattached holders.
 	costSource         string
+	repo               string
 	expectedDurationMS int64
 	driftWarning       string
 

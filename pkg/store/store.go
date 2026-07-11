@@ -580,7 +580,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 8
+const expectedSchemaVersion = 9
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -825,7 +825,13 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		_, err := s.exec(ctx, pipelineProfilesTableSQLite)
 		return err
 	case 8:
-		return s.ensureColumns("pipeline_profiles", pipelineProfilesCPUMeasuredCols)
+		if err := s.ensureColumns("pipeline_profiles", pipelineProfilesCPUMeasuredCols); err != nil {
+			return err
+		}
+		_, err := s.exec(ctx, pipelineProfilesCPUMeasuredBackfill)
+		return err
+	case 9:
+		return s.ensureColumns("pipeline_profiles", pipelineProfilesWaitCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -855,19 +861,31 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		_, err := tx.ExecContext(ctx, pipelineProfilesTablePostgres)
 		return err
 	case 8:
-		for name, typ := range pipelineProfilesCPUMeasuredCols {
-			stmt := fmt.Sprintf(
-				`ALTER TABLE %q ADD COLUMN IF NOT EXISTS %q %s`,
-				"pipeline_profiles", name, translateColumnType(typ),
-			)
-			if _, err := tx.ExecContext(ctx, stmt); err != nil {
-				return fmt.Errorf("add column pipeline_profiles.%s: %w", name, err)
-			}
+		if err := addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesCPUMeasuredCols); err != nil {
+			return err
 		}
-		return nil
+		_, err := tx.ExecContext(ctx, pipelineProfilesCPUMeasuredBackfill)
+		return err
+	case 9:
+		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesWaitCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+// addColumnsTx applies one table's additive column set inside an open
+// Postgres migration transaction.
+func addColumnsTx(ctx context.Context, tx *storeTx, table string, cols map[string]string) error {
+	for name, typ := range cols {
+		stmt := fmt.Sprintf(
+			`ALTER TABLE %q ADD COLUMN IF NOT EXISTS %q %s`,
+			table, name, translateColumnType(typ),
+		)
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("add column %s.%s: %w", table, name, err)
+		}
+	}
+	return nil
 }
 
 // columnMigrations enumerates the additive column changes that have
@@ -956,6 +974,22 @@ var columnMigrations = []columnSpec{
 // table.
 var pipelineProfilesCPUMeasuredCols = map[string]string{
 	"cpu_measured": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// pipelineProfilesCPUMeasuredBackfill marks rows carried across the v8
+// upgrade as CPU-measured when they recorded a positive peak, matching
+// the qualification rule: a legacy positive peak could only have come
+// from a sampler that measured CPU. Zero-peak rows stay conservative.
+const pipelineProfilesCPUMeasuredBackfill = `UPDATE pipeline_profiles SET cpu_measured = 1 WHERE peak_cores > 0`
+
+// pipelineProfilesWaitCols is the additive column set v9 adds for
+// per-pipeline queue-wait observations: the windowed samples and the
+// percentiles recomputed from them, meaningful only on the rollup row.
+var pipelineProfilesWaitCols = map[string]string{
+	"wait_samples_json": "BLOB",
+	"wait_p50_ms":       "INTEGER NOT NULL DEFAULT 0",
+	"wait_p99_ms":       "INTEGER NOT NULL DEFAULT 0",
+	"wait_sample_count": "INTEGER NOT NULL DEFAULT 0",
 }
 
 func (s *Store) ensureColumnsAll() error {

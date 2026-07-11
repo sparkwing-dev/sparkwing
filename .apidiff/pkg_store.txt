@@ -265,6 +265,17 @@ type PipelineProfile struct {
 	PeakMemoryBytes int64
 	SampleCount     int
 
+	CPUP50 float64
+	CPUP95 float64
+
+	MemoryP50Bytes int64
+	MemoryP95Bytes int64
+
+	WaitP50 time.Duration
+	WaitP99 time.Duration
+
+	WaitSampleCount int
+
 	CPUMeasured bool
 	UpdatedAt   time.Time
 
@@ -447,6 +458,7 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
+func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error

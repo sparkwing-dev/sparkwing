@@ -3,6 +3,7 @@ package wingd
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -91,6 +92,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		}
 		if c := d.byRun[ls.RequestID]; c != nil {
 			h.Pipeline = c.pipeline
+			h.Repo = c.repo
 			if !c.startAt.IsZero() {
 				h.ElapsedMS = now.Sub(c.startAt).Milliseconds()
 			}
@@ -103,7 +105,9 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			}
 		}
 		qs.Holders = append(qs.Holders, h)
+		qs.Holders = append(qs.Holders, d.attachedChildHoldersLocked(ls, now)...)
 	}
+	qs.Events = d.events.summary(now)
 
 	remaining := map[string]float64{}
 	for _, r := range qs.Resources {
@@ -127,6 +131,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		}
 		if c := d.byRun[w.RequestID]; c != nil {
 			waiter.Pipeline = c.pipeline
+			waiter.Repo = c.repo
 			if !c.startAt.IsZero() {
 				waiter.WaitingMS = now.Sub(c.startAt).Milliseconds()
 			}
@@ -139,6 +144,30 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 
 	annotateETA(&qs, snap)
 	return qs
+}
+
+// attachedChildHoldersLocked renders the child runs riding a lease as
+// zero-cost holders under their parent, so an attached child appears in
+// the queue as what it is rather than a run holding nothing. Members are
+// walked in the lease's stored order; the lease's own requester is
+// skipped. The caller holds d.mu.
+func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Time) []wingwire.Holder {
+	var out []wingwire.Holder
+	for _, member := range ls.Members {
+		if member == ls.RequestID {
+			continue
+		}
+		child := wingwire.Holder{RunID: member, Parent: ls.RequestID}
+		if c := d.byRun[member]; c != nil {
+			child.Pipeline = c.pipeline
+			child.Repo = c.repo
+			if !c.startAt.IsZero() {
+				child.ElapsedMS = now.Sub(c.startAt).Milliseconds()
+			}
+		}
+		out = append(out, child)
+	}
+	return out
 }
 
 // annotateETA fills each waiter's ExpectedStartMS and the queue's

@@ -134,6 +134,7 @@ func (la *LocalAdmission) admitRun(
 	req := wingwire.AdmissionRequest{
 		RunID:              runID,
 		Pipeline:           pipeline,
+		Repo:               currentRepoShortName(),
 		PID:                os.Getpid(),
 		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
 		Semaphores:         planSemaphoreClaims(plan, runID),
@@ -143,9 +144,13 @@ func (la *LocalAdmission) admitRun(
 	if drift != nil {
 		req.DriftWarning = drift.Message
 	}
+	submitted := time.Now()
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
 	if err != nil || outcome != admitProceed {
 		return nil, outcome, err
+	}
+	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
+		_ = st.RecordWaitObservation(ctx, pipeline, time.Since(submitted))
 	}
 	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
 	if drift != nil {
@@ -173,6 +178,7 @@ func (la *LocalAdmission) attachChildRun(
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID:            runID,
 		Pipeline:         pipeline,
+		Repo:             currentRepoShortName(),
 		PID:              os.Getpid(),
 		ParentLeaseToken: la.ParentLeaseToken,
 	}, nil)

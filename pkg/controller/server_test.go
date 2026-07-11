@@ -157,6 +157,13 @@ func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *t
 	defer cleanup()
 	ctx := context.Background()
 
+	for _, id := range []string{"leader", "waiter"} {
+		if err := st.CreateRun(ctx, store.Run{
+			ID: id, Pipeline: "p", Status: "running", StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("seed run %s: %v", id, err)
+		}
+	}
 	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "state-promoted-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
