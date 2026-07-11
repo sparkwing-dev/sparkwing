@@ -173,6 +173,18 @@ func (p wingdHoldPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
+// wingdUnpinnedHoldPipe declares no .Resources() pin, so admission
+// resolves its cost from measurement (or the cold-start default).
+type wingdUnpinnedHoldPipe struct{ sparkwing.Base }
+
+func (wingdUnpinnedHoldPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	runID := rc.RunID
+	sparkwing.Job(plan, "hold", func(ctx context.Context) error {
+		return wingdE2EGate.Load().run(ctx, runID)
+	})
+	return nil
+}
+
 type wingdQuickPipe struct{ sparkwing.Base }
 
 func (wingdQuickPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -267,6 +279,8 @@ func registerWingdE2EPipelines() {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdHoldPipe{cores: 1.5} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-quick",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdQuickPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-unpinned",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdUnpinnedHoldPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-attach-parent",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdAttachParentPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-evict-victim",
@@ -299,6 +313,114 @@ func awaitWaiter(t *testing.T, home, runID string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("run %q never appeared in the daemon queue", runID)
+}
+
+func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
+	t.Helper()
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		for _, h := range queryWingd(t, home).Holders {
+			if h.RunID == runID {
+				return h
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run %q never appeared as a holder", runID)
+	return wingwire.Holder{}
+}
+
+func seedProfile(t *testing.T, st *store.Store, pipeline string, obs store.ProfileObservation, runs int) {
+	t.Helper()
+	for range runs {
+		if err := st.RecordProfileObservation(context.Background(), pipeline, "", obs); err != nil {
+			t.Fatalf("seed profile: %v", err)
+		}
+	}
+}
+
+func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 8)
+	backends, st, _ := openWingdBackends(t, home)
+	seedProfile(t, st, "wingd-e2e-unpinned", store.ProfileObservation{
+		Duration: 20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
+	}, 3)
+
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	done := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-unpinned",
+			RunID:     "measured-run",
+			Admission: testWingdAdmission(home, nil),
+		})
+		done <- res
+	}()
+	gate.awaitStarted(t, "measured-run")
+
+	h := findWingdHolder(t, home, "measured-run")
+	if h.CostSource != "measured" {
+		t.Errorf("CostSource = %q, want measured", h.CostSource)
+	}
+	if h.Resources.Cores != 1.5 {
+		t.Errorf("admitted cores = %v, want the measured peak 1.5", h.Resources.Cores)
+	}
+	if h.ExpectedDurationMS != (20 * time.Second).Milliseconds() {
+		t.Errorf("ExpectedDurationMS = %d, want 20000", h.ExpectedDurationMS)
+	}
+	if qs := queryWingd(t, home); qs.ExpectedClearMS == nil {
+		t.Error("ExpectedClearMS is nil; a measured holder should yield a clear estimate")
+	}
+
+	close(gate.release)
+	select {
+	case res := <-done:
+		if res == nil || res.Status != "success" {
+			t.Fatalf("run result = %+v, want success", res)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("run did not finish")
+	}
+}
+
+func TestWingd_UnderPinnedRunCarriesDriftWarning(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 8)
+	backends, st, _ := openWingdBackends(t, home)
+	seedProfile(t, st, "wingd-e2e-hold", store.ProfileObservation{
+		Duration: 10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
+	}, 4)
+
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	done := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "drift-run",
+			Admission: testWingdAdmission(home, nil),
+		})
+		done <- res
+	}()
+	gate.awaitStarted(t, "drift-run")
+
+	h := findWingdHolder(t, home, "drift-run")
+	if h.CostSource != "pin" {
+		t.Errorf("CostSource = %q, want pin (the pin is authoritative)", h.CostSource)
+	}
+	if h.Resources.Cores != 1.5 {
+		t.Errorf("admitted cores = %v, want the pinned 1.5", h.Resources.Cores)
+	}
+	if !strings.Contains(h.DriftWarning, "resource pin") || !strings.Contains(h.DriftWarning, "measured p99") {
+		t.Errorf("DriftWarning = %q, want the under-pinned note with the exact fix", h.DriftWarning)
+	}
+
+	close(gate.release)
+	<-done
 }
 
 func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {

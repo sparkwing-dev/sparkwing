@@ -92,20 +92,25 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\n", r.Key, fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held))
 	}
 	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			h.RunID, orDash(h.Pipeline), fmtElapsed(h.ElapsedMS), fmtCost(h.Resources),
-			joinKeys(h.Semaphores), stalledWord(h))
+			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			wt.Position, wt.RunID, orDash(wt.Pipeline), fmtCost(wt.Resources),
+			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS))
 	}
 	return nil
 }
 
 func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
-	fmt.Fprintf(out, "local admission: %d holding, %d queued\n\n", len(qs.Holders), len(qs.Waiters))
+	clear := ""
+	if qs.ExpectedClearMS != nil {
+		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
+	}
+	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n\n", len(qs.Holders), len(qs.Waiters), clear)
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RESOURCE\tCAPACITY\tIN USE\tFREE")
@@ -124,29 +129,30 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tELAPSED\tCOST\tSEMAPHORES")
+	fmt.Fprintln(tw, "RUN\tPIPELINE\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
 	if len(qs.Holders) == 0 {
-		fmt.Fprintln(tw, "(none holding)\t\t\t\t")
+		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t")
 	}
 	for _, h := range qs.Holders {
 		run := h.RunID
 		if h.Stalled {
 			run += " (stalled)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline),
-			fmtElapsed(h.ElapsedMS), fmtCost(h.Resources), orDash(joinKeys(h.Semaphores)))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline),
+			fmtElapsed(h.ElapsedMS), fmtCost(h.Resources), orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
 	}
 	_ = tw.Flush()
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tCOST\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t")
+		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
-			fmtCost(wt.Resources), orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
+			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
+			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
 
@@ -155,7 +161,47 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", h.RunID, h.Recovery)
 		}
 	}
+	for _, d := range queueDriftNotes(qs) {
+		fmt.Fprintf(out, "\n%s: %s\n", d.runID, d.warning)
+	}
 	return nil
+}
+
+// queueDriftNote pairs a run with its pin-drift warning for the bottom-of-
+// view callout.
+type queueDriftNote struct {
+	runID   string
+	warning string
+}
+
+// queueDriftNotes collects the pin-drift warnings across holders and
+// waiters so the pretty view surfaces the exact fix once per run.
+func queueDriftNotes(qs wingwire.QueueState) []queueDriftNote {
+	var notes []queueDriftNote
+	for _, h := range qs.Holders {
+		if h.DriftWarning != "" {
+			notes = append(notes, queueDriftNote{h.RunID, h.DriftWarning})
+		}
+	}
+	for _, wt := range qs.Waiters {
+		if wt.DriftWarning != "" {
+			notes = append(notes, queueDriftNote{wt.RunID, wt.DriftWarning})
+		}
+	}
+	return notes
+}
+
+// fmtETA renders a waiter's estimated start offset: "now" when it is
+// admitted immediately, a rounded duration when it must wait, or "-" when
+// no estimate is available.
+func fmtETA(ms *int64) string {
+	if ms == nil {
+		return "-"
+	}
+	if *ms <= 0 {
+		return "now"
+	}
+	return (time.Duration(*ms) * time.Millisecond).Round(time.Second).String()
 }
 
 // fmtAmount renders a resource amount: memory keys as human bytes, every

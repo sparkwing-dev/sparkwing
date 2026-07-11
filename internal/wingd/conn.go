@@ -44,6 +44,14 @@ type conn struct {
 	sems      []string
 	startAt   time.Time
 
+	// costSource, expectedDurationMS, and driftWarning are display
+	// metadata carried from the admission request into the queue view and
+	// the ETA simulation. They are live-only: a daemon restart clears them
+	// for reattached holders.
+	costSource         string
+	expectedDurationMS int64
+	driftWarning       string
+
 	// stalled and lowSince track the holder-idle verdict, guarded by the
 	// owning Daemon's mutex. lowSince is when the holder's CPU first fell
 	// below the stall threshold with waiters present; stalled latches once

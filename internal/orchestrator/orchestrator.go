@@ -495,7 +495,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.Admission != nil {
 		var outcome admitOutcome
 		var admitErr error
-		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, runID, opts.Pipeline, plan, opts.MaxParallel, cancelRun)
+		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
 		if admitErr != nil {
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
@@ -528,7 +528,22 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if runErr != nil {
 		errMsg = runErr.Error()
 	}
-	_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, finalStatus, errMsg)
+	finishCtx := context.WithoutCancel(ctx)
+	_ = backends.State.FinishRun(finishCtx, runID, finalStatus, errMsg)
+
+	if !skipDispatch {
+		if st := canonicalLocalStore(backends.State); st != nil {
+			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), rc.StartedAt, time.Now())
+		}
+	}
+	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {
+		opts.Delegate.Emit(sparkwing.LogRecord{
+			TS:    time.Now(),
+			Level: "warn",
+			Event: "resource_pin_drift",
+			Msg:   lease.driftWarning,
+		})
+	}
 
 	if opts.Delegate != nil {
 		level := "info"

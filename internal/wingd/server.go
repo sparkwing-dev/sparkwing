@@ -395,6 +395,9 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.sems = semNames(req.Semaphores)
 	c.finalizable = !req.SemaphoresOnly
 	c.startAt = d.now()
+	c.costSource = req.CostSource
+	c.expectedDurationMS = req.ExpectedDurationMS
+	c.driftWarning = req.DriftWarning
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
 	if err != nil {

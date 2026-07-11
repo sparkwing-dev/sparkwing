@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -16,8 +17,9 @@ func stallRecoveryCommand(runID string) string {
 
 // buildQueueStateLocked renders the current admission picture for the
 // read-only queue view: capacity rows with held amounts, holders with
-// elapsed time and cost, and waiters in admission order. The caller holds
-// d.mu.
+// elapsed time and cost, and waiters in admission order, each annotated
+// with its cost source, drift warning, and -- for waiters -- an estimated
+// start time. The caller holds d.mu.
 func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	snap := d.ledger.Snapshot()
 	var qs wingwire.QueueState
@@ -74,6 +76,9 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			if !c.startAt.IsZero() {
 				h.ElapsedMS = now.Sub(c.startAt).Milliseconds()
 			}
+			h.CostSource = c.costSource
+			h.ExpectedDurationMS = c.expectedDurationMS
+			h.DriftWarning = c.driftWarning
 			if c.stalled {
 				h.Stalled = true
 				h.Recovery = stallRecoveryCommand(ls.RequestID)
@@ -102,10 +107,183 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			if !c.startAt.IsZero() {
 				waiter.WaitingMS = now.Sub(c.startAt).Milliseconds()
 			}
+			waiter.CostSource = c.costSource
+			waiter.ExpectedDurationMS = c.expectedDurationMS
+			waiter.DriftWarning = c.driftWarning
 		}
 		qs.Waiters = append(qs.Waiters, waiter)
 	}
+
+	annotateETA(&qs, snap)
 	return qs
+}
+
+// annotateETA fills each waiter's ExpectedStartMS and the queue's
+// ExpectedClearMS by simulating the FIFO queue with measured durations and
+// costs. Capacity is the grantable ceiling (total capped by headroom).
+// Only host-drawing runs are simulated: a semaphore-only hold or wait
+// (zero cores and memory) draws no host budget, so it neither gates host
+// admission nor bounds the clear time. A run whose duration is unknown
+// never finishes in the simulation, so any estimate that would depend on
+// it is left nil rather than fabricated.
+func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
+	capCores := float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)) / 1000.0
+	capMem := float64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes))
+
+	var holders []simRun
+	for _, h := range qs.Holders {
+		if h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 {
+			continue
+		}
+		holders = append(holders, simRun{
+			cores:  h.Resources.Cores,
+			mem:    float64(h.Resources.MemoryBytes),
+			finish: remainingMS(h.ExpectedDurationMS, h.ElapsedMS),
+		})
+	}
+	var waiters []simRun
+	var waiterIdx []int
+	for i, w := range qs.Waiters {
+		if w.Resources.Cores <= 0 && w.Resources.MemoryBytes <= 0 {
+			continue
+		}
+		waiters = append(waiters, simRun{
+			cores:    w.Resources.Cores,
+			mem:      float64(w.Resources.MemoryBytes),
+			duration: durationMS(w.ExpectedDurationMS),
+		})
+		waiterIdx = append(waiterIdx, i)
+	}
+
+	starts, clear := simulateQueue(capCores, capMem, holders, waiters)
+	for j, orig := range waiterIdx {
+		if !math.IsInf(starts[j], 1) {
+			ms := int64(starts[j])
+			qs.Waiters[orig].ExpectedStartMS = &ms
+		}
+	}
+	if !math.IsInf(clear, 1) {
+		ms := int64(clear)
+		qs.ExpectedClearMS = &ms
+	}
+}
+
+// simRun is one run in the ETA simulation. finish is a holder's remaining
+// milliseconds; duration is a waiter's run length. Either is +Inf when the
+// run's duration is unmeasured.
+type simRun struct {
+	cores    float64
+	mem      float64
+	finish   float64
+	duration float64
+}
+
+// simEvent is a scheduled resource release at a point in simulated time.
+type simEvent struct {
+	at    float64
+	cores float64
+	mem   float64
+}
+
+// simulateQueue advances a FIFO admission queue in simulated time and
+// returns each waiter's estimated start offset (ms from now) and the time
+// the queue fully clears. An unmeasured duration propagates as +Inf: a
+// waiter that must wait behind it starts at +Inf, and the clear time is
+// +Inf when any run never finishes.
+func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts []float64, clear float64) {
+	const eps = 1e-9
+	freeCores := capCores
+	freeMem := capMem
+	var events []simEvent
+	clear = 0
+	for _, h := range holders {
+		freeCores -= h.cores
+		freeMem -= h.mem
+		events = append(events, simEvent{at: h.finish, cores: h.cores, mem: h.mem})
+		clear = math.Max(clear, h.finish)
+	}
+
+	starts = make([]float64, len(waiters))
+	now := 0.0
+	for i, w := range waiters {
+		if w.cores > capCores+eps || w.mem > capMem+eps {
+			starts[i] = math.Inf(1)
+			continue
+		}
+		for w.cores > freeCores+eps || w.mem > freeMem+eps {
+			e, ok := popEarliest(&events)
+			if !ok {
+				now = math.Inf(1)
+				break
+			}
+			now = e.at
+			freeCores += e.cores
+			freeMem += e.mem
+		}
+		starts[i] = now
+		if math.IsInf(now, 1) {
+			clear = math.Inf(1)
+			continue
+		}
+		freeCores -= w.cores
+		freeMem -= w.mem
+		finish := now + w.duration
+		events = append(events, simEvent{at: finish, cores: w.cores, mem: w.mem})
+		clear = math.Max(clear, finish)
+	}
+	return starts, clear
+}
+
+// popEarliest removes and returns the event with the smallest time.
+func popEarliest(events *[]simEvent) (simEvent, bool) {
+	es := *events
+	if len(es) == 0 {
+		return simEvent{}, false
+	}
+	minIdx := 0
+	for i, e := range es {
+		if e.at < es[minIdx].at {
+			minIdx = i
+		}
+	}
+	e := es[minIdx]
+	*events = append(es[:minIdx], es[minIdx+1:]...)
+	return e, true
+}
+
+// remainingMS is a holder's estimated milliseconds left: its measured p50
+// minus elapsed, floored at zero. An unmeasured duration is +Inf.
+func remainingMS(expectedMS, elapsedMS int64) float64 {
+	if expectedMS <= 0 {
+		return math.Inf(1)
+	}
+	rem := float64(expectedMS - elapsedMS)
+	if rem < 0 {
+		return 0
+	}
+	return rem
+}
+
+// durationMS is a waiter's measured run length, or +Inf when unmeasured.
+func durationMS(expectedMS int64) float64 {
+	if expectedMS <= 0 {
+		return math.Inf(1)
+	}
+	return float64(expectedMS)
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func minU64(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // waitingOn names the resources a waiter cannot fit into right now: host

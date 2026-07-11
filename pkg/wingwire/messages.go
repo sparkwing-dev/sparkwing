@@ -93,6 +93,18 @@ type AdmissionRequest struct {
 	// from inside an already-admitted run (node-level concurrency
 	// groups).
 	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
+	// CostSource names how Resources was resolved -- "pin", "measured", or
+	// "default" -- so the queue view can show where a charge came from. The
+	// daemon treats it as opaque display metadata.
+	CostSource string `json:"cost_source,omitempty"`
+	// ExpectedDurationMS is the pipeline's measured p50 run duration in
+	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
+	// no measured duration exists yet, so the run contributes no ETA.
+	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
+	// DriftWarning, when set, is a one-line note that this run's explicit
+	// pin has drifted from its measured profile. The daemon echoes it into
+	// the queue view; it never affects admission.
+	DriftWarning string `json:"drift_warning,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
@@ -189,6 +201,16 @@ type Holder struct {
 	Resources HostResources `json:"resources"`
 	// Semaphores names the semaphores the holder occupies.
 	Semaphores []string `json:"semaphores,omitempty"`
+	// CostSource names how Resources was resolved ("pin", "measured",
+	// "default"). Empty for leases whose source did not survive a daemon
+	// restart.
+	CostSource string `json:"cost_source,omitempty"`
+	// ExpectedDurationMS is the holder's measured p50 run duration; zero
+	// when unknown. ETA uses it to estimate when the holder frees capacity.
+	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
+	// DriftWarning, when set, notes that the holder's pin has drifted from
+	// its measured profile.
+	DriftWarning string `json:"drift_warning,omitempty"`
 	// Stalled marks a holder that is alive but has consumed near-zero
 	// CPU for a sustained window while runs wait behind it -- a likely
 	// wedge. It is a flag only; the daemon never kills a holder.
@@ -219,6 +241,20 @@ type Waiter struct {
 	WaitingOn []string `json:"waiting_on,omitempty"`
 	// WaitingMS is how long the run has been queued, in milliseconds.
 	WaitingMS int64 `json:"waiting_ms,omitempty"`
+	// CostSource names how Resources was resolved ("pin", "measured",
+	// "default").
+	CostSource string `json:"cost_source,omitempty"`
+	// ExpectedDurationMS is the waiter's measured p50 run duration; zero
+	// when unknown.
+	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
+	// DriftWarning, when set, notes that the waiter's pin has drifted from
+	// its measured profile.
+	DriftWarning string `json:"drift_warning,omitempty"`
+	// ExpectedStartMS is the estimated wait until this run is admitted, in
+	// milliseconds from now, computed by simulating the queue with measured
+	// durations and costs. Nil when any run ahead lacks a measured duration,
+	// so no fabricated ETA is shown.
+	ExpectedStartMS *int64 `json:"expected_start_ms,omitempty"`
 }
 
 // QueueState is the daemon's full accounting snapshot: every capacity
@@ -229,6 +265,10 @@ type QueueState struct {
 	Resources []ResourceState `json:"resources,omitempty"`
 	Holders   []Holder        `json:"holders,omitempty"`
 	Waiters   []Waiter        `json:"waiters,omitempty"`
+	// ExpectedClearMS is the estimated time until the queue fully drains,
+	// in milliseconds from now. Nil when the estimate is unavailable
+	// because some queued or holding run lacks a measured duration.
+	ExpectedClearMS *int64 `json:"expected_clear_ms,omitempty"`
 }
 
 func (*Hello) wireType() MessageType            { return TypeHello }

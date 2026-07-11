@@ -271,6 +271,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	on := fs.String("profile", "", "profile name (default: current default)")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only runs newer than this (e.g. 7d)")
+	capacityView := fs.Bool("capacity", false, "show measured capacity profiles")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdJobsStats, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -283,6 +284,9 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		return rerr
 	}
 	emitJSON := resolvedFmt == "json"
+	if *capacityView {
+		return runCapacityStats(ctx, paths, *pipeline, emitJSON)
+	}
 	var runs []*store.Run
 	var err error
 	if *on != "" {

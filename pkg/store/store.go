@@ -580,7 +580,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 6
+const expectedSchemaVersion = 7
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -609,6 +609,31 @@ const metaTableSQLite = `CREATE TABLE IF NOT EXISTS sparkwing_meta (
 );`
 
 var metaTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(metaTableSQLite)
+
+// pipelineProfilesTableSQLite backs learned capacity: one row per
+// (pipeline, node) with duration percentiles and peak host usage over a
+// bounded window of recent runs. Created in migration v7 so existing
+// databases gain it without a full reschema; the empty node id carries
+// the pipeline-level rollup admission and ETA read.
+const pipelineProfilesTableSQLite = `CREATE TABLE IF NOT EXISTS pipeline_profiles (
+    pipeline            TEXT    NOT NULL,
+    node_id             TEXT    NOT NULL,
+    p50_duration_ms     INTEGER NOT NULL,
+    p99_duration_ms     INTEGER NOT NULL,
+    peak_cores          REAL    NOT NULL,
+    peak_memory_bytes   INTEGER NOT NULL,
+    sample_count        INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+    samples_json        BLOB,
+    pinned_cores        REAL    NOT NULL DEFAULT 0,
+    pinned_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pipeline, node_id)
+);`
+
+var pipelineProfilesTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+	"BLOB", "BYTEA",
+).Replace(pipelineProfilesTableSQLite)
 
 // SkewError is returned by Open when the database is at a schema
 // version newer than the binary understands. Callers can use
@@ -795,6 +820,9 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumnsAll()
 	case 6:
 		return s.ensureColumnsAll()
+	case 7:
+		_, err := s.exec(ctx, pipelineProfilesTableSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -820,6 +848,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return s.ensureColumnsAllTx(ctx, tx)
 	case 6:
 		return s.ensureColumnsAllTx(ctx, tx)
+	case 7:
+		_, err := tx.ExecContext(ctx, pipelineProfilesTablePostgres)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

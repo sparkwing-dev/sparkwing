@@ -3873,12 +3873,15 @@ Aggregate run counts, success %, avg + p95 duration
 
 Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
 
+--capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, peak cores, peak memory, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--pipeline NAME` | Restrict to one pipeline |
 | `--since DURATION` | Only runs newer than this (e.g. 7d) |
+| `--capacity` | Show measured capacity profiles instead of run aggregates |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
 
@@ -3890,6 +3893,9 @@ sparkwing runs stats --since 7d
 
 # Prod stats as JSON
 sparkwing runs stats --profile prod -o json
+
+# Measured capacity per pipeline
+sparkwing runs stats --capacity
 ```
 
 ## `sparkwing runs status`

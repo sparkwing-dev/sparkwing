@@ -2195,12 +2195,15 @@ var cmdJobsFailures = Command{
 }
 
 var cmdJobsStats = Command{
-	Path:        "sparkwing runs stats",
-	Synopsis:    "Aggregate run counts, success %, avg + p95 duration",
-	Description: `Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.`,
+	Path:     "sparkwing runs stats",
+	Synopsis: "Aggregate run counts, success %, avg + p95 duration",
+	Description: `Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
+
+--capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, peak cores, peak memory, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (e.g. 7d)", Group: "Filter"},
+		{Name: "capacity", Desc: "Show measured capacity profiles instead of run aggregates", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
@@ -2208,6 +2211,7 @@ var cmdJobsStats = Command{
 	Examples: []Example{
 		{"7-day local stats", "sparkwing runs stats --since 7d"},
 		{"Prod stats as JSON", "sparkwing runs stats --profile prod -o json"},
+		{"Measured capacity per pipeline", "sparkwing runs stats --capacity"},
 	},
 }
 

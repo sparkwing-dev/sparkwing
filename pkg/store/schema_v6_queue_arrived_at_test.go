@@ -23,7 +23,7 @@ func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
 	if _, err := st.DB().Exec(`ALTER TABLE concurrency_holders DROP COLUMN queue_arrived_at`); err != nil {
 		t.Fatalf("drop queue_arrived_at: %v", err)
 	}
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version = 6`); err != nil {
+	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 6`); err != nil {
 		t.Fatalf("reset version to 5: %v", err)
 	}
 	if v := readSchemaVersion(t, st.DB()); v != 5 {

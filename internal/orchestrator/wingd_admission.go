@@ -12,7 +12,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -85,6 +87,9 @@ const localPlanSemsID = "/plan"
 type runLease struct {
 	token  string
 	leases []*wingdclient.Lease
+	// driftWarning, when set, is the one-line note that this run's explicit
+	// pin has drifted from its measured profile, surfaced at run end.
+	driftWarning string
 }
 
 // release returns every held lease and closes the daemon connections.
@@ -116,8 +121,8 @@ const (
 func (la *LocalAdmission) admitRun(
 	ctx context.Context,
 	backends Backends,
-	runID string,
 	pipeline string,
+	runID string,
 	plan *sparkwing.Plan,
 	workers int,
 	onEvicted func(error),
@@ -125,18 +130,27 @@ func (la *LocalAdmission) admitRun(
 	if la.ParentLeaseToken != "" {
 		return la.attachChildRun(ctx, backends, runID, pipeline, plan, onEvicted)
 	}
+	res, drift := resolveHostCost(ctx, backends, pipeline, plan)
 	req := wingwire.AdmissionRequest{
-		RunID:      runID,
-		Pipeline:   pipeline,
-		PID:        os.Getpid(),
-		Resources:  hostResourcesForPlan(plan, workers),
-		Semaphores: planSemaphoreClaims(plan, runID),
+		RunID:              runID,
+		Pipeline:           pipeline,
+		PID:                os.Getpid(),
+		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
+		Semaphores:         planSemaphoreClaims(plan, runID),
+		CostSource:         string(res.Source),
+		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
+	}
+	if drift != nil {
+		req.DriftWarning = drift.Message
 	}
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
 	if err != nil || outcome != admitProceed {
 		return nil, outcome, err
 	}
 	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
+	if drift != nil {
+		rl.driftWarning = drift.Message
+	}
 	go lease.Watch(evictionHandler(runID, onEvicted))
 	return rl, admitProceed, nil
 }
@@ -313,14 +327,30 @@ func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Durati
 	return key, timeout
 }
 
-// hostResourcesForPlan composes the run's host charge: the plan-level
-// Resources() hints when declared, else the largest node-level hint,
-// else a conservative default of min(workers, half the machine's cores)
-// so an unhinted run occupies real capacity without ever exceeding what
-// the daemon's reserved headroom can grant.
-func hostResourcesForPlan(plan *sparkwing.Plan, workers int) wingwire.HostResources {
+// resolveHostCost resolves a run's host charge and its provenance:
+// an explicit .Resources() pin wins, else the measured profile once it
+// has enough samples, else the conservative cold-start default. It also
+// returns a drift warning when a pin has diverged far from measurement.
+// A missing local store (cluster and remote paths) simply means no
+// measured profile, so the pin-or-default order still holds.
+func resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *capacity.Drift) {
+	pin := planPin(plan)
+	var profile *store.PipelineProfile
+	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
+		if p, err := st.GetPipelineProfile(ctx, pipeline, ""); err == nil {
+			profile = p
+		}
+	}
+	res := capacity.Resolve(pin, profile, runtime.NumCPU())
+	return res, capacity.CheckDrift(pin, profile)
+}
+
+// planPin flattens the run's explicit .Resources() declaration to a
+// capacity.Pin: the plan-level hint when declared, else the largest
+// node-level hint, else nil for a pipeline that declared nothing.
+func planPin(plan *sparkwing.Plan) *capacity.Pin {
 	if rh := plan.ResourceHints(); rh != nil && (rh.Cores > 0 || rh.MemoryBytes > 0) {
-		return wingwire.HostResources{Cores: rh.Cores, MemoryBytes: rh.MemoryBytes}
+		return &capacity.Pin{Cores: rh.Cores, MemoryBytes: rh.MemoryBytes}
 	}
 	var cores float64
 	var mem int64
@@ -331,22 +361,9 @@ func hostResourcesForPlan(plan *sparkwing.Plan, workers int) wingwire.HostResour
 		}
 	}
 	if cores > 0 || mem > 0 {
-		return wingwire.HostResources{Cores: cores, MemoryBytes: mem}
+		return &capacity.Pin{Cores: cores, MemoryBytes: mem}
 	}
-	return wingwire.HostResources{Cores: defaultRunCores(workers)}
-}
-
-// defaultRunCores is the conservative host charge for a run with no
-// resource hints: the dispatcher's worker cap, bounded by half the
-// machine so the charge always fits under the daemon's reserved
-// headroom, and never below one core.
-func defaultRunCores(workers int) float64 {
-	half := math.Ceil(float64(runtime.NumCPU()) / 2)
-	cores := half
-	if workers > 0 {
-		cores = math.Min(float64(workers), half)
-	}
-	return math.Max(1, cores)
+	return nil
 }
 
 // planSemaphoreClaims maps the plan-level Concurrency() groups with
