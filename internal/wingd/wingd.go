@@ -33,10 +33,13 @@
 package wingd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -199,12 +202,18 @@ func (c Config) logf(format string, args ...any) {
 	}
 }
 
-// layout resolves the on-disk paths a daemon uses under a sparkwing home.
+// layout resolves the on-disk paths a daemon uses for a sparkwing home.
+// The lock, state, log, and socket-pointer record live under the home
+// directory, which has no length limit; only the socket itself is placed
+// on a short hashed path so a deep home cannot push it past the OS
+// sun_path limit and break bind.
 type layout struct {
-	dir   string
-	lock  string
-	sock  string
-	state string
+	dir    string
+	lock   string
+	sock   string
+	state  string
+	log    string
+	record string
 }
 
 func resolveLayout(home string) (layout, error) {
@@ -217,16 +226,66 @@ func resolveLayout(home string) (layout, error) {
 	}
 	dir := filepath.Join(home, "wingd")
 	return layout{
-		dir:   dir,
-		lock:  filepath.Join(dir, "d.lock"),
-		sock:  filepath.Join(dir, "d.sock"),
-		state: filepath.Join(dir, "state.json"),
+		dir:    dir,
+		lock:   filepath.Join(dir, "d.lock"),
+		sock:   socketPathForHome(home),
+		state:  filepath.Join(dir, "state.json"),
+		log:    filepath.Join(dir, "d.log"),
+		record: filepath.Join(dir, "socket"),
 	}, nil
 }
 
 func (l layout) ensureDir() error {
 	if err := os.MkdirAll(l.dir, 0o700); err != nil {
 		return fmt.Errorf("wingd: prepare %s: %w", l.dir, err)
+	}
+	return nil
+}
+
+// socketPathForHome maps a home to a short, collision-free socket path
+// independent of the home's depth: a per-user, per-home hashed directory
+// under the system socket base. Distinct homes hash to distinct
+// directories, so each keeps its own daemon.
+func socketPathForHome(home string) string {
+	sum := sha256.Sum256([]byte(home))
+	hash := hex.EncodeToString(sum[:])[:12]
+	uid := os.Getuid()
+	if uid < 0 {
+		uid = 0
+	}
+	dir := filepath.Join(socketBaseDir(), fmt.Sprintf("sparkwing-%d-%s", uid, hash))
+	return filepath.Join(dir, "d.sock")
+}
+
+// socketBaseDir is the short directory family unix sockets live under.
+// /tmp is short and world-writable-with-sticky-bit on every unix; only
+// Windows (where AF_UNIX has no sun_path limit) falls back to the
+// possibly-long system temp dir.
+func socketBaseDir() string {
+	if runtime.GOOS == "windows" {
+		return os.TempDir()
+	}
+	return "/tmp"
+}
+
+// maxSunPath is the OS limit on a unix socket path in bytes: 104 on
+// darwin, 108 on linux and other unix. A bind past it fails with a bare
+// EINVAL, so both daemon and client validate against it first and report
+// the limit and path instead.
+func maxSunPath() int {
+	if runtime.GOOS == "darwin" {
+		return 104
+	}
+	return 108
+}
+
+// ValidateSocketPath reports an error when sock is at or over the OS
+// sun_path limit, naming both the limit and the path. Daemon bind and
+// client connect both call it so an over-length path fails with a clear
+// message rather than an opaque bind error.
+func ValidateSocketPath(sock string) error {
+	if m := maxSunPath(); len(sock) >= m {
+		return fmt.Errorf("wingd: socket path %q is %d bytes, over the %d-byte OS limit; use a shorter SPARKWING_HOME", sock, len(sock), m)
 	}
 	return nil
 }
@@ -249,6 +308,27 @@ func LockPath(home string) (string, error) {
 		return "", err
 	}
 	return l.lock, nil
+}
+
+// StateDir returns the per-home directory holding the daemon's lock,
+// state file, log, and socket-pointer record. It stays under the home and
+// is where discovery tools and tests look for the daemon's bookkeeping.
+func StateDir(home string) (string, error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return "", err
+	}
+	return l.dir, nil
+}
+
+// LogPath returns the daemon's log file path under home. The client
+// surfaces its tail when a spawned daemon dies before serving.
+func LogPath(home string) (string, error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return "", err
+	}
+	return l.log, nil
 }
 
 // ProtocolMajor is the wire protocol major this daemon speaks; it mirrors

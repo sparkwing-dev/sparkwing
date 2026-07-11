@@ -61,6 +61,45 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 }
 
+// TestRecordRunProfile_DurationExcludesQueueWait pins BW-652: the rollup
+// duration measures grant-to-finish (execStart..execEnd), so a run that
+// waited in admission before executing records only its execution time.
+func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	submit := time.Now()
+	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: submit}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+		TS: submit.Add(10 * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	queueWait := 10 * time.Second
+	execTime := 10 * time.Second
+	execStart := submit.Add(queueWait)
+	recordRunProfile(ctx, st, "demo", "r1", nil, execStart, execStart.Add(execTime))
+
+	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || rollup == nil {
+		t.Fatalf("rollup profile missing: %v", err)
+	}
+	if got := rollup.P50Duration; got < 9*time.Second || got > 11*time.Second {
+		t.Errorf("rollup P50Duration = %s, want ~%s (execution only, not %s incl. queue wait)",
+			got, execTime, queueWait+execTime)
+	}
+}
+
 func TestRecordRunProfile_NoSamplesWritesNothing(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {

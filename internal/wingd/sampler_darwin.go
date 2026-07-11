@@ -52,6 +52,16 @@ func sampleHost() (HostStat, error) {
 		stat.FreeMemoryBytes += uint64(spec) * pageSize
 	}
 
+	// hack: page_free_count counts only truly free pages, so on macOS -- which
+	// parks most of RAM in reclaimable cache and the compressor -- it reads as
+	// near-zero even with gigabytes available, which would pin memory headroom
+	// at zero and wedge every memory-costed admission. memorystatus_level is
+	// the kernel's own percent-available figure (the darwin analog of Linux
+	// MemAvailable), so prefer it when sane.
+	if level, err := unix.SysctlUint32("kern.memorystatus_level"); err == nil && level > 0 && level <= 100 {
+		stat.FreeMemoryBytes = uint64(float64(stat.TotalMemoryBytes) * float64(level) / 100.0)
+	}
+
 	if stat.TotalMemoryBytes == 0 {
 		return stat, fmt.Errorf("wingd: hw.memsize unavailable")
 	}

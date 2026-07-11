@@ -13,8 +13,12 @@ import (
 // pipeline's stored profiles: a per-(pipeline, node) row plus the
 // pipeline-level rollup that admission and ETA read. It is best-effort --
 // a profile write never fails a run -- and skips runs with no samples, so
-// the measured profile only ever reflects real observations.
-func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, runStart, runEnd time.Time) {
+// the measured profile only ever reflects real observations. execStart is
+// the moment admission granted the run, not its submission: the rollup
+// duration measures execution and excludes any admission queue wait, so a
+// busy box cannot inflate its own ETAs by folding past congestion into the
+// profile.
+func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, execStart, execEnd time.Time) {
 	if st == nil || pipeline == "" {
 		return
 	}
@@ -52,7 +56,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	if !measured {
 		return
 	}
-	runDur := runEnd.Sub(runStart)
+	runDur := execEnd.Sub(execStart)
 	if runDur < 0 {
 		runDur = 0
 	}

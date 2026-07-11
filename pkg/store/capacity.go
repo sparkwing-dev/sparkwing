@@ -70,6 +70,21 @@ type profileSample struct {
 	M int64   `json:"m"`
 }
 
+// profileSchemaCurrent stamps the meaning of a profile's stored samples.
+// Schema 2 measures rollup duration from admission grant to finish;
+// schema 1 (and the older bare-array format) folded admission queue wait
+// into the duration, so those samples are discarded on load rather than
+// contaminating percentiles until they age out.
+const profileSchemaCurrent = 2
+
+// profileWindowDoc is the versioned envelope samples_json holds. The
+// bare-array format written before versioning fails to decode into it and
+// is treated as an empty, ignorable window.
+type profileWindowDoc struct {
+	Schema  int             `json:"schema"`
+	Samples []profileSample `json:"samples"`
+}
+
 // RecordProfileObservation folds one run's observation into the
 // (pipeline, node) profile, aging out samples beyond profileWindow and
 // recomputing the persisted percentiles. Peaks are the p99 across the
@@ -84,7 +99,7 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 		window = window[len(window)-profileWindow:]
 	}
 	prof := profileFromWindow(window)
-	raw, err := json.Marshal(window)
+	raw, err := json.Marshal(profileWindowDoc{Schema: profileSchemaCurrent, Samples: window})
 	if err != nil {
 		return err
 	}
@@ -123,11 +138,11 @@ func (s *Store) loadProfileWindow(ctx context.Context, pipeline, nodeID string) 
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var window []profileSample
-	if err := json.Unmarshal(raw, &window); err != nil {
+	var doc profileWindowDoc
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != profileSchemaCurrent {
 		return nil, nil
 	}
-	return window, nil
+	return doc.Samples, nil
 }
 
 // SetProfilePin records the explicit .Resources() pin last seen for a

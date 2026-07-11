@@ -514,6 +514,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 	}
 
+	execStart := time.Now()
 	var runErr error
 	if !skipDispatch {
 		runErr = dispatch(
@@ -533,7 +534,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	if !skipDispatch {
 		if st := canonicalLocalStore(backends.State); st != nil {
-			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), rc.StartedAt, time.Now())
+			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), execStart, time.Now())
 		}
 	}
 	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {

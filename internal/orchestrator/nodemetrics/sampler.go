@@ -4,10 +4,9 @@ package nodemetrics
 
 import (
 	"context"
-	"os"
+	"log"
 	"runtime"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,19 +22,23 @@ type Sink interface {
 	Push(ctx context.Context, sample Sample) error
 }
 
+// blindOnce guards the single log line emitted when the platform offers
+// no CPU accounting, so a blind sampler announces itself instead of
+// masquerading as a healthy one reporting genuine zeros.
+var blindOnce sync.Once
+
 // Run samples until ctx cancels; blocks. Sink errors are swallowed.
 func Run(ctx context.Context, interval time.Duration, sink Sink) {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
-	var (
-		prevCPUJiffies int64
-		prevWall       time.Time
-	)
-	if jiffies, ok := readCPUJiffies(); ok {
-		prevCPUJiffies = jiffies
-		prevWall = time.Now()
+	prevCPU, havePrev := readCPUTime()
+	if !havePrev {
+		blindOnce.Do(func() {
+			log.Printf("nodemetrics: CPU accounting unavailable on %s; CPU samples will be zero", runtime.GOOS)
+		})
 	}
+	prevWall := time.Now()
 
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -45,15 +48,13 @@ func Run(ctx context.Context, interval time.Duration, sink Sink) {
 			return
 		case now := <-t.C:
 			sample := Sample{TS: now, MemoryBytes: readMemoryBytes()}
-			if jiffies, ok := readCPUJiffies(); ok && !prevWall.IsZero() {
+			if cpu, ok := readCPUTime(); ok && havePrev {
 				dWall := now.Sub(prevWall).Seconds()
-				dJiffies := jiffies - prevCPUJiffies
 				if dWall > 0 {
-					cpuSeconds := float64(dJiffies) / 100.0
-					millicores := int64((cpuSeconds / dWall) * 1000.0)
+					millicores := int64((cpu - prevCPU).Seconds() / dWall * 1000.0)
 					sample.CPUMillicores = max(millicores, 0)
 				}
-				prevCPUJiffies = jiffies
+				prevCPU = cpu
 				prevWall = now
 			}
 			_ = sink.Push(ctx, sample)
@@ -61,41 +62,13 @@ func Run(ctx context.Context, interval time.Duration, sink Sink) {
 	}
 }
 
-// readMemoryBytes returns RSS, falling back to runtime.MemStats.Sys.
+// readMemoryBytes returns process RSS from the platform source, falling
+// back to runtime.MemStats.Sys where no per-process RSS is available.
 func readMemoryBytes() int64 {
-	if data, err := os.ReadFile("/proc/self/statm"); err == nil {
-		fields := strings.Fields(string(data))
-		if len(fields) >= 2 {
-			if rssPages, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
-				return rssPages * int64(os.Getpagesize())
-			}
-		}
+	if rss, ok := processRSS(); ok {
+		return rss
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return int64(m.Sys)
-}
-
-// readCPUJiffies returns utime+stime from /proc/self/stat (Linux).
-func readCPUJiffies() (int64, bool) {
-	data, err := os.ReadFile("/proc/self/stat")
-	if err != nil {
-		return 0, false
-	}
-	// hack: walk past the last ')' because a process name with spaces would misalign field indices
-	s := string(data)
-	end := strings.LastIndex(s, ")")
-	if end < 0 {
-		return 0, false
-	}
-	fields := strings.Fields(s[end+1:])
-	if len(fields) < 13 {
-		return 0, false
-	}
-	utime, err1 := strconv.ParseInt(fields[11], 10, 64)
-	stime, err2 := strconv.ParseInt(fields[12], 10, 64)
-	if err1 != nil || err2 != nil {
-		return 0, false
-	}
-	return utime + stime, true
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -68,26 +69,17 @@ func runDaemon(args []string) {
 // recordWin appends this process's pid to a log the election test reads
 // to prove exactly one daemon ever served.
 func recordWin(home string) {
-	sock, err := wingd.SocketPath(home)
+	dir, err := wingd.StateDir(home)
 	if err != nil {
 		return
 	}
-	path := sockDir(sock) + "/daemons.log"
+	path := filepath.Join(dir, "daemons.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
 	defer func() { _ = f.Close() }()
 	fmt.Fprintf(f, "%d\n", os.Getpid())
-}
-
-func sockDir(sock string) string {
-	for i := len(sock) - 1; i >= 0; i-- {
-		if sock[i] == '/' {
-			return sock[:i]
-		}
-	}
-	return "."
 }
 
 func runHold(args []string) {

@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -110,26 +111,17 @@ func finalizeLogger(home string) func(string) {
 func recordPid(home string) { appendLine(home, "daemons.log", strconv.Itoa(os.Getpid())) }
 
 func appendLine(home, name, line string) {
-	sock, err := wingd.SocketPath(home)
+	dir, err := wingd.StateDir(home)
 	if err != nil {
 		return
 	}
-	path := dirOf(sock) + "/" + name
+	path := filepath.Join(dir, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
 	defer func() { _ = f.Close() }()
 	fmt.Fprintln(f, line)
-}
-
-func dirOf(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[:i]
-		}
-	}
-	return "."
 }
 
 type holdFlags struct {

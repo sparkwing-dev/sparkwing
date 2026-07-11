@@ -98,29 +98,80 @@ func (e *AdmissionError) Error() string {
 	return fmt.Sprintf("wingd: %s on %q", e.Policy, e.Key)
 }
 
+// dialsPerSpawn is how many times connect is retried after a spawn before
+// the daemon is presumed dead and respawned; maxSpawnAttempts bounds the
+// respawns so a daemon that dies at startup fails fast with its own logged
+// cause rather than spinning until a fork exhaustion error masks it.
+const (
+	dialsPerSpawn    = 5
+	maxSpawnAttempts = 4
+)
+
+// spawnFailed reports a spawn-syscall failure, folding in the daemon log
+// tail when a prior attempt left one so a bind-time death is visible even
+// when the final spawn is what erred.
+func spawnFailed(home string, serr error) error {
+	if tail := daemonLogTail(home); tail != "" {
+		path, _ := wingd.LogPath(home)
+		return fmt.Errorf("wingd/client: spawn daemon: %w; daemon log %s:\n%s", serr, path, tail)
+	}
+	return fmt.Errorf("wingd/client: spawn daemon: %w", serr)
+}
+
+// daemonUnreachable reports that no daemon became reachable. When one was
+// spawned it distinguishes a daemon that started then exited before
+// serving (surfacing the tail of its log) from a plain timeout, and always
+// names the log path so the real cause is one file away.
+func daemonUnreachable(home string, spawns int, cause error) error {
+	path, _ := wingd.LogPath(home)
+	if spawns > 0 {
+		if tail := daemonLogTail(home); tail != "" {
+			return fmt.Errorf("wingd/client: admission daemon started but exited before serving; daemon log %s:\n%s", path, tail)
+		}
+		return fmt.Errorf("wingd/client: admission daemon did not become reachable after %d start attempts; see %s: %w", spawns, path, cause)
+	}
+	return fmt.Errorf("wingd/client: could not reach admission daemon: %w", cause)
+}
+
 // EnsureDaemon connects to Home's daemon, spawning one and retrying with
 // backoff when none is reachable. When this client's version is ahead of
 // the daemon's it drains the old daemon and brings up its own binary as
 // the successor before returning a connection to it. The returned Client
 // speaks the same protocol major and is ready for [Client.Acquire],
-// [Client.Reattach], or [Client.QueueState].
+// [Client.Reattach], or [Client.QueueState]. When a spawned daemon dies at
+// startup, the returned error carries the tail of its log and names the
+// log path rather than reporting an unrelated spawn-layer failure.
 func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 	sock, err := wingd.SocketPath(opts.Home)
 	if err != nil {
 		return nil, err
 	}
+	if err := wingd.ValidateSocketPath(sock); err != nil {
+		return nil, err
+	}
+	spawns := 0
+	dialsSinceSpawn := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, daemonUnreachable(opts.Home, spawns, err)
 		}
 		nc, derr := dial(ctx, sock, opts.dialTimeout())
 		if derr != nil {
-			_, _ = wingd.RemoveStaleSocket(opts.Home)
-			if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
-				return nil, fmt.Errorf("wingd/client: spawn daemon: %w", serr)
+			if spawns == 0 || dialsSinceSpawn >= dialsPerSpawn {
+				if spawns >= maxSpawnAttempts {
+					return nil, daemonUnreachable(opts.Home, spawns, derr)
+				}
+				_, _ = wingd.RemoveStaleSocket(opts.Home)
+				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
+					return nil, spawnFailed(opts.Home, serr)
+				}
+				spawns++
+				dialsSinceSpawn = 0
+			} else {
+				dialsSinceSpawn++
 			}
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return nil, err
+				return nil, daemonUnreachable(opts.Home, spawns, err)
 			}
 			continue
 		}
@@ -129,7 +180,7 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 		if herr != nil {
 			cl.Close()
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return nil, err
+				return nil, daemonUnreachable(opts.Home, spawns, err)
 			}
 			continue
 		}

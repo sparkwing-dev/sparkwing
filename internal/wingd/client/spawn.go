@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
+
+// daemonLogTailLines is how many trailing daemon-log lines the client
+// folds into an error when a spawned daemon dies before serving.
+const daemonLogTailLines = 8
 
 // defaultSpawn re-execs this binary as a detached `sparkwing wingd run`
 // for home. The daemon's stdout and stderr go to a log file beside its
@@ -52,9 +56,28 @@ func defaultSpawn(home, version string) error {
 }
 
 func daemonLogPath(home string) (string, error) {
-	sock, err := wingd.SocketPath(home)
+	return wingd.LogPath(home)
+}
+
+// daemonLogTail returns the last few non-empty lines of home's daemon log,
+// or "" when it is absent or empty. It lets the client attach a
+// startup-death cause the daemon wrote to its own log.
+func daemonLogTail(home string) string {
+	path, err := wingd.LogPath(home)
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return filepath.Join(filepath.Dir(sock), "d.log"), nil
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed == "" {
+		return ""
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > daemonLogTailLines {
+		lines = lines[len(lines)-daemonLogTailLines:]
+	}
+	return strings.Join(lines, "\n")
 }

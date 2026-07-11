@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -697,7 +698,11 @@ func (h *Harness) daemonSpawn() func(home, version string) error {
 }
 
 func (h *Harness) sockPath() string {
-	return filepath.Join(h.home, "wingd", "d.sock")
+	sock, err := wingd.SocketPath(h.home)
+	if err != nil {
+		return filepath.Join(h.home, "wingd", "d.sock")
+	}
+	return sock
 }
 
 // currentDaemonPid reads the newest pid the daemons recorded on election.
