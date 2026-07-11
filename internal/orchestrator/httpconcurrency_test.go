@@ -231,14 +231,14 @@ func TestParity_QueuedAcquire_Position_QueueLength_Holders(t *testing.T) {
 }
 
 func TestParity_ResolveWaiter_Position_QueueLength_Holders(t *testing.T) {
-	b, _ := newHTTPConcurrency(t)
-	if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+	b, st := newHTTPConcurrency(t)
+	if r := acquireHTTPLive(t, st, b, store.AcquireSlotRequest{
 		Key: "resolve-k", HolderID: "rA/n", RunID: "rA", NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireGranted {
 		t.Fatalf("A: want Granted got %s", r.Kind)
 	}
 	for _, runID := range []string{"rB", "rC"} {
-		if r := acquireHTTP(t, b, store.AcquireSlotRequest{
+		if r := acquireHTTPLive(t, st, b, store.AcquireSlotRequest{
 			Key: "resolve-k", HolderID: runID + "/n", RunID: runID, NodeID: "n", Capacity: 1, Policy: store.OnLimitQueue,
 		}); r.Kind != store.AcquireQueued {
 			t.Fatalf("%s: want Queued got %s", runID, r.Kind)
