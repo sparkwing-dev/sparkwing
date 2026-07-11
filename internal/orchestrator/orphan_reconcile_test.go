@@ -19,6 +19,14 @@ func openTestStore(t *testing.T) *store.Store {
 	return s
 }
 
+func clearRunHeartbeat(t *testing.T, st *store.Store, runID string) {
+	t.Helper()
+	if _, err := st.DB().ExecContext(context.Background(),
+		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, runID); err != nil {
+		t.Fatalf("clear run heartbeat: %v", err)
+	}
+}
+
 // TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed verifies the
 // core promise: a "running" run whose orchestrator process is dead
 // (no heartbeat past the threshold, started long ago) gets
@@ -35,6 +43,7 @@ func TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
+	clearRunHeartbeat(t, st, "run-stale")
 	if err := st.CreateNode(ctx, store.Node{
 		RunID: "run-stale", NodeID: "build", Status: "running",
 	}); err != nil {
@@ -72,10 +81,8 @@ func TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed(t *testing.T) {
 }
 
 // TestReconcileOrphanedLocalRuns_FreshRunUntouched guards against the
-// false-positive case: a "running" run that started a moment ago has
-// no heartbeat YET (the orchestrator hasn't had time to stamp one),
-// but it shouldn't get marked failed -- the cutoff filter sees
-// started_at after the threshold and skips it.
+// false-positive case: a "running" run that started a moment ago
+// should not get marked failed.
 func TestReconcileOrphanedLocalRuns_FreshRunUntouched(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -119,6 +126,7 @@ func TestReconcileOrphanedLocalRuns_CascadesToPendingNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
+	clearRunHeartbeat(t, st, "run-cascade")
 	if err := st.CreateNode(ctx, store.Node{
 		RunID: "run-cascade", NodeID: "build", Status: "running",
 	}); err != nil {
@@ -312,6 +320,7 @@ func TestReconcileOrphanedLocalRuns_NodelessRunWithoutHeartbeatReaped(t *testing
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
+	clearRunHeartbeat(t, st, "run-dead")
 
 	n, err := ReconcileOrphanedLocalRuns(ctx, st, 60*time.Second)
 	if err != nil {

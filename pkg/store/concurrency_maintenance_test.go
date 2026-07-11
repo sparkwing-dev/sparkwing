@@ -55,12 +55,13 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
-	if r := acquireT(t, s, store.AcquireSlotRequest{
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("B: want Queued, got %s", r.Kind)
 	}
+	createLiveRunT(t, s, "rB")
 	time.Sleep(80 * time.Millisecond)
 
 	res, err := s.MaintainConcurrency(ctxT(t), store.ConcurrencyMaintenanceOptions{})
@@ -126,15 +127,15 @@ func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
 	}
 }
 
-// Finished and abandoned runs leave waiter rows behind; the age sweep must
-// drop any waiter older than the configured max age.
+// A waiter without an owning run row is abandoned; once it is old enough,
+// the maintenance pass can remove it.
 func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if r := acquireT(t, s, store.AcquireSlotRequest{
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
@@ -150,6 +151,241 @@ func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
 	}
 	if got := waiterCount(t, s, "k"); got != 0 {
 		t.Fatalf("waiters = %d, want 0 after age sweep", got)
+	}
+	if holderExists(t, s, "k", "rB/n") {
+		t.Fatalf("abandoned waiter was promoted into a holder")
+	}
+}
+
+func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue, Lease: 30 * time.Millisecond,
+	})
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
+	); err != nil {
+		t.Fatalf("age waiter: %v", err)
+	}
+	time.Sleep(60 * time.Millisecond)
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Millisecond})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if len(res.StaleHolders) != 1 {
+		t.Fatalf("StaleHolders = %d, want 1", len(res.StaleHolders))
+	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("abandoned waiter was promoted after holder reap")
+	}
+	if got := waiterCount(t, s, "k"); got != 0 {
+		t.Fatalf("waiters = %d, want abandoned waiter dropped", got)
+	}
+}
+
+func TestMaintainConcurrency_DropsAgedWaiterForTerminalRun(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        "queued",
+		Pipeline:  "queued-plan",
+		Status:    "running",
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := s.FinishRun(ctx, "queued", "failed", "test terminal run"); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
+	); err != nil {
+		t.Fatalf("age waiter: %v", err)
+	}
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Millisecond})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if len(res.StaleWaiters) > 1 {
+		t.Fatalf("StaleWaiters = %d, want at most 1 for terminal run", len(res.StaleWaiters))
+	}
+	if got := waiterCount(t, s, "k"); got != 0 {
+		t.Fatalf("waiters = %d, want terminal waiter dropped", got)
+	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("terminal waiter was promoted into a holder")
+	}
+}
+
+func TestMaintainConcurrency_PreservesAgedWaiterForLiveRun(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        "queued",
+		Pipeline:  "queued-plan",
+		Status:    "running",
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := s.TouchRunHeartbeat(ctx, "queued"); err != nil {
+		t.Fatalf("TouchRunHeartbeat: %v", err)
+	}
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
+	); err != nil {
+		t.Fatalf("age waiter: %v", err)
+	}
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Millisecond})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if len(res.StaleWaiters) != 0 {
+		t.Fatalf("StaleWaiters = %d, want 0 for live run", len(res.StaleWaiters))
+	}
+	if got := waiterCount(t, s, "k"); got != 1 {
+		t.Fatalf("waiters = %d, want live waiter retained", got)
+	}
+	resolution, err := s.ResolveWaiter(ctx, "k", "queued", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if resolution.Status != store.WaiterStillWaiting {
+		t.Fatalf("resolution = %s, want still_waiting", resolution.Status)
+	}
+}
+
+func TestMaintainConcurrency_DropsAgedWaiterForStaleRun(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        "queued",
+		Pipeline:  "queued-plan",
+		Status:    "running",
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	stale := time.Now().Add(-10 * time.Minute).UnixNano()
+	if _, err := s.DB().Exec(
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+		stale, "queued",
+	); err != nil {
+		t.Fatalf("stale run heartbeat: %v", err)
+	}
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+		stale, "k", "queued", "",
+	); err != nil {
+		t.Fatalf("age waiter: %v", err)
+	}
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Millisecond})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if len(res.StaleWaiters) != 1 {
+		t.Fatalf("StaleWaiters = %d, want 1 for stale run", len(res.StaleWaiters))
+	}
+	if got := waiterCount(t, s, "k"); got != 0 {
+		t.Fatalf("waiters = %d, want stale waiter dropped", got)
+	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("stale waiter was promoted into a holder")
+	}
+}
+
+func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaiterAge(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("queued run: want Queued, got %s", r.Kind)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        "queued",
+		Pipeline:  "queued-plan",
+		Status:    "running",
+		StartedAt: time.Now().Add(-20 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	staleHeartbeat := time.Now().Add(-(store.DefaultLeaseDuration + time.Minute)).UnixNano()
+	if _, err := s.DB().Exec(
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+		staleHeartbeat, "queued",
+	); err != nil {
+		t.Fatalf("stale run heartbeat: %v", err)
+	}
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+		time.Now().Add(-20*time.Minute).UnixNano(), "k", "queued", "",
+	); err != nil {
+		t.Fatalf("age waiter: %v", err)
+	}
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if len(res.StaleWaiters) != 1 {
+		t.Fatalf("StaleWaiters = %d, want 1 for stale heartbeat", len(res.StaleWaiters))
+	}
+	if got := waiterCount(t, s, "k"); got != 0 {
+		t.Fatalf("waiters = %d, want stale-heartbeat waiter dropped", got)
+	}
+	if holderExists(t, s, "k", "queued/-") {
+		t.Fatalf("stale-heartbeat waiter was promoted into a holder")
 	}
 }
 

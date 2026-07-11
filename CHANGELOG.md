@@ -170,6 +170,14 @@ code change to unlock.
   records election, headroom transitions, reattach-grace outcomes,
   evictions, orphan finalizations, and drains -- the log is no longer
   empty exactly when someone needs it to debug the daemon.
+
+## [v0.15.7] - 2026-07-11
+### Fixed
+
+- **store:** Concurrency maintenance and waiter promotion now preserve queued
+  waiters whose runs are still live, while reclaiming abandoned waiters before
+  they can consume a freed slot. This keeps queued plan and node admission from
+  being evicted by a maintenance sweep or by an abandoned FIFO head.
 - **cli:** A pipeline scaffolded by a source-built `sparkwing` (one with no
   release version stamp, e.g. `go install`ed from a checkout) now pins the
   current SDK release in its generated `.sparkwing/go.mod` instead of a stale

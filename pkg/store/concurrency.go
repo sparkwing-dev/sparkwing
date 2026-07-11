@@ -375,7 +375,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	if reaped, err := txReapTerminalConcurrencyHolders(ctx, tx, req.Key); err != nil {
 		return AcquireSlotResponse{}, err
 	} else if len(reaped) > 0 {
-		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano()); err != nil {
+		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano(), livePollingWaiter{}); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 	}
@@ -811,10 +811,26 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
 		return nil, err
 	}
-	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS)
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, livePollingWaiter{})
 }
 
-func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+func txPromotePollingWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
+		return nil, err
+	}
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, livePollingWaiter{runID: runID, nodeID: nodeID})
+}
+
+type livePollingWaiter struct {
+	runID  string
+	nodeID string
+}
+
+func (p livePollingWaiter) matches(waiter ConcurrencyWaiter) bool {
+	return p.runID != "" && waiter.RunID == p.runID && waiter.NodeID == p.nodeID
+}
+
+func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64, polling livePollingWaiter) ([]ConcurrencyWaiter, error) {
 	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -850,14 +866,14 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 	for _, w := range candidates {
 		ids = append(ids, w.RunID)
 	}
-	finished, err := txFinishedRunIDs(ctx, tx, ids)
+	live, err := txLiveRunningRunIDs(ctx, tx, ids, time.Unix(0, nowNS).Add(-DefaultLeaseDuration).UnixNano())
 	if err != nil {
 		return nil, err
 	}
 
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
-		if finished[w.RunID] {
+		if !live[w.RunID] && !polling.matches(w) {
 			if _, derr := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); derr != nil {
 				return nil, derr
 			}
@@ -911,13 +927,9 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 	return promoted, nil
 }
 
-// txFinishedRunIDs returns the subset of ids whose runs row exists and has a
-// non-NULL finished_at. Empty and missing ids are absent from the result: a
-// run with no row is not reported finished, since concurrency keys are
-// decoupled from the runs table and absence carries no liveness meaning here.
-func txFinishedRunIDs(ctx context.Context, tx *storeTx, ids []string) (map[string]bool, error) {
+func txLiveRunningRunIDs(ctx context.Context, tx *storeTx, ids []string, heartbeatCutoff int64) (map[string]bool, error) {
 	seen := make(map[string]bool, len(ids))
-	args := make([]any, 0, len(ids))
+	args := make([]any, 0, len(ids)+3)
 	for _, id := range ids {
 		if id == "" || seen[id] {
 			continue
@@ -932,25 +944,31 @@ func txFinishedRunIDs(ctx context.Context, tx *storeTx, ids []string) (map[strin
 	for i := range placeholders {
 		placeholders[i] = "?"
 	}
+	args = append(args, runStatusRunning, heartbeatCutoff, heartbeatCutoff)
 	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT id FROM runs
-		  WHERE finished_at IS NOT NULL AND id IN (`+strings.Join(placeholders, ",")+`)`,
+		  WHERE id IN (`+strings.Join(placeholders, ",")+`)
+		    AND status = ?
+		    AND (
+		      last_heartbeat_at >= ?
+		      OR (last_heartbeat_at IS NULL AND started_at >= ?)
+		    )`,
 		args...,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	finished := make(map[string]bool)
+	live := make(map[string]bool)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		finished[id] = true
+		live[id] = true
 	}
-	return finished, rows.Err()
+	return live, rows.Err()
 }
 
 // concurrencyInvariantFailFast selects how a violated concurrency
@@ -1811,7 +1829,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		}
 		if shouldPromote {
 			now := time.Now()
-			promoted, err := txPromoteWaiters(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+			promoted, err := txPromotePollingWaiter(ctx, tx, key, runID, nodeID, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
 			if err != nil {
 				return WaiterResolution{}, err
 			}
@@ -2158,7 +2176,7 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 }
 
 // reapStaleConcurrencyWaiters drops orphan coalesce followers (leader
-// gone) and any waiter older than maxAge.
+// gone) and old waiters whose owning run is not live.
 func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	if maxAge <= 0 {
 		return nil, nil
@@ -2169,8 +2187,10 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	nowNS := time.Now().UnixNano()
-	cutoff := time.Now().Add(-maxAge).UnixNano()
+	now := time.Now()
+	nowNS := now.UnixNano()
+	cutoff := now.Add(-maxAge).UnixNano()
+	heartbeatCutoff := now.Add(-DefaultLeaseDuration).UnixNano()
 
 	orphanRows, err := tx.QueryContext(
 		ctx,
@@ -2206,9 +2226,19 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 
 	ageRows, err := tx.QueryContext(
 		ctx,
-		`SELECT `+waiterColumns+`
-		   FROM concurrency_waiters WHERE arrived_at < ?`+s.forUpdateSkipLocked(),
-		cutoff,
+		`SELECT `+prefixColumns(waiterColumns, "w.")+`
+		   FROM concurrency_waiters w
+		  WHERE w.arrived_at < ?
+		    AND NOT EXISTS (
+		      SELECT 1 FROM runs r
+		       WHERE r.id = w.run_id
+		         AND r.status = ?
+		         AND (
+		           r.last_heartbeat_at >= ?
+		           OR (r.last_heartbeat_at IS NULL AND r.started_at >= ?)
+		         )
+		    )`+s.forUpdateSkipLocked(),
+		cutoff, runStatusRunning, heartbeatCutoff, heartbeatCutoff,
 	)
 	if err != nil {
 		return nil, err

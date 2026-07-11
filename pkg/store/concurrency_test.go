@@ -21,11 +21,35 @@ func ctxT(t *testing.T) context.Context {
 
 func acquireT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) store.AcquireSlotResponse {
 	t.Helper()
+	if req.RunID != "" {
+		createLiveRunT(t, s, req.RunID)
+	}
+	return acquireBareT(t, s, req)
+}
+
+func acquireBareT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) store.AcquireSlotResponse {
+	t.Helper()
 	resp, err := s.AcquireConcurrencySlot(ctxT(t), req)
 	if err != nil {
 		t.Fatalf("AcquireConcurrencySlot(%+v): %v", req, err)
 	}
 	return resp
+}
+
+func createLiveRunT(t *testing.T, s *store.Store, runID string) {
+	t.Helper()
+	ctx := ctxT(t)
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        runID,
+		Pipeline:  "test-pipeline",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun(%s): %v", runID, err)
+	}
+	if err := s.TouchRunHeartbeat(ctx, runID); err != nil {
+		t.Fatalf("TouchRunHeartbeat(%s): %v", runID, err)
+	}
 }
 
 func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {
@@ -372,6 +396,7 @@ func TestConcurrency_PromoteNextWaiters(t *testing.T) {
 		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
+	createLiveRunT(t, s, "r2")
 	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
 	if err != nil || !released {
 		t.Fatalf("release r1: released=%v err=%v", released, err)

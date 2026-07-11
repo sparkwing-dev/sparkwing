@@ -38,8 +38,11 @@ type ConcurrencyMaintenanceOptions struct {
 	// Lease is the promotion lease handed to waiters reclaimed during the
 	// pass. Zero uses DefaultConcurrencyLease.
 	Lease time.Duration
-	// WaiterMaxAge drops queued waiters older than this. Zero uses twice
-	// DefaultConcurrencyLease, lining up with the node-level queue timeout.
+	// WaiterMaxAge is the age at which maintenance may reclaim a waiter
+	// whose owning run is missing, terminal, or no longer heartbeating.
+	// Live running runs keep their waiters until they are promoted,
+	// cancelled, or the queue policy times out. Zero uses twice
+	// DefaultConcurrencyLease.
 	WaiterMaxAge time.Duration
 	// CacheCap is the row ceiling for concurrency_cache after LRU eviction.
 	// Zero uses DefaultConcurrencyCacheCap.
@@ -74,6 +77,12 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 	var res ConcurrencyMaintenanceResult
 	var errs []error
 
+	if dropped, err := s.reapStaleConcurrencyWaiters(ctx, opts.WaiterMaxAge); err != nil {
+		errs = append(errs, fmt.Errorf("reap stale waiters: %w", err))
+	} else {
+		res.StaleWaiters = dropped
+	}
+
 	if n, err := s.reconcileConcurrencyKeys(ctx, opts.Lease); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile keys: %w", err))
 	} else {
@@ -97,12 +106,6 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 		errs = append(errs, fmt.Errorf("sweep expired cache: %w", err))
 	} else {
 		res.CacheExpired = n
-	}
-
-	if dropped, err := s.reapStaleConcurrencyWaiters(ctx, opts.WaiterMaxAge); err != nil {
-		errs = append(errs, fmt.Errorf("reap stale waiters: %w", err))
-	} else {
-		res.StaleWaiters = dropped
 	}
 
 	if n, err := s.sweepLRUConcurrencyCache(ctx, opts.CacheCap); err != nil {
