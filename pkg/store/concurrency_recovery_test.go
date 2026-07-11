@@ -128,6 +128,44 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
 	}
 }
 
+func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireBareT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "abandoned", RunID: "abandoned", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "live", RunID: "live", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if _, err := s.DB().ExecContext(ctx,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+		"k", "leader"); err != nil {
+		t.Fatalf("manual drop: %v", err)
+	}
+
+	resolution, err := s.ResolveWaiter(ctx, "k", "live", "n", "", "", "", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "live" {
+		t.Fatalf("resolution = %+v, want live promoted", resolution)
+	}
+	if holderExists(t, s, "k", "abandoned") {
+		t.Fatalf("abandoned FIFO head was promoted into a holder")
+	}
+	state, _ := s.GetConcurrencyState(ctx, "k")
+	if len(state.Waiters) != 0 {
+		t.Fatalf("waiters = %+v", state.Waiters)
+	}
+}
+
 func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
