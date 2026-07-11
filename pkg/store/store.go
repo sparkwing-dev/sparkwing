@@ -1149,10 +1149,14 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if created.IsZero() {
 		created = r.StartedAt
 	}
+	var heartbeat sql.NullInt64
+	if r.Status == runStatusRunning {
+		heartbeat = sql.NullInt64{Int64: time.Now().UnixNano(), Valid: true}
+	}
 	_, err := s.exec(
 		ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -1172,13 +1176,14 @@ ON CONFLICT(id) DO UPDATE SET
     retry_source    = excluded.retry_source,
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
-    invocation_json   = excluded.invocation_json
+    invocation_json   = excluded.invocation_json,
+    last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at)
 WHERE runs.status = '`+runStatusPending+`'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.ReplayOfRunID, r.ReplayOfNodeID,
-		invocationJSON,
+		invocationJSON, heartbeat,
 	)
 	return err
 }

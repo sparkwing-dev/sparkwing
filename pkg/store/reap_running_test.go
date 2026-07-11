@@ -128,6 +128,10 @@ func TestReapStaleRunningRuns_IgnoresNullHeartbeat(t *testing.T) {
 
 	const runID, nodeID = "run-noheartbeat", "node-a"
 	seedRunAndNode(t, s, runID, nodeID)
+	if _, err := s.DB().ExecContext(ctx,
+		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, runID); err != nil {
+		t.Fatalf("clear heartbeat: %v", err)
+	}
 	ids, err := store.Maintenance.ReapStaleRunningRuns(s, ctx,
 		1*time.Nanosecond, "test reason")
 	if err != nil {
