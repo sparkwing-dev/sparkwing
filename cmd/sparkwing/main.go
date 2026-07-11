@@ -280,6 +280,8 @@ func runSparkwing(args []string) error {
 
 	case "handle-trigger":
 		return dispatchRun(args)
+	case "wingd":
+		return runWingd(args[1:])
 	case "__dashboard-supervise":
 		return runDashboardSupervise(args[1:])
 	case "_complete-profiles":
