@@ -28,7 +28,7 @@ import (
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Pre-push gate: lint, test -race, vuln, freshness, api-snapshot, no replace + no go.work"
+	return "Pre-push gate: lint, test -race, chaos, vuln, freshness, api-snapshot, no replace + no go.work"
 }
 
 func (PrePush) Help() string {
@@ -36,7 +36,10 @@ func (PrePush) Help() string {
 		"`go test -race ./...`, `govulncheck ./...`, the " +
 		"sparkwing-ecosystem version-freshness check (deps must be at " +
 		"the latest released tag, or replaced with a not-behind local " +
-		"path), the public API-surface drift gate (the `pkg/` snapshot " +
+		"path), the chaos gate (the adversarial admission suite in " +
+		"internal/chaos, which fault-injects a real daemon and asserts " +
+		"the concurrency invariants), the public API-surface drift gate " +
+		"(the `pkg/` snapshot " +
 		"under .apidiff/ must match HEAD), refuses to push if any " +
 		"committed go.mod contains a `replace` line, and refuses to push " +
 		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
@@ -108,6 +111,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		failures = append(failures, fmt.Sprintf("go test -race: %v", err))
 	} else {
 		sparkwing.Info(ctx, "go test -race: passed")
+	}
+
+	if _, err := sparkwing.Bash(ctx, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("chaos gate: %v", err))
+	} else {
+		sparkwing.Info(ctx, "chaos gate: admission invariants held under fault injection")
 	}
 
 	// hack: package scan not symbol scan -- symbol scan panics on go1.26 generics (x/tools TypeParam)
