@@ -151,7 +151,7 @@ func (la *LocalAdmission) admitRun(
 	if drift != nil {
 		rl.driftWarning = drift.Message
 	}
-	go lease.Watch(evictionHandler(runID, onEvicted))
+	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
 	return rl, admitProceed, nil
 }
 
@@ -181,7 +181,7 @@ func (la *LocalAdmission) attachChildRun(
 		return nil, admitProceed, fmt.Errorf("local admission: attach to parent lease: %w", err)
 	}
 	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
-	go lease.Watch(evictionHandler(runID, onEvicted))
+	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
 
 	inherited := make(map[string]bool, len(lease.Semaphores))
 	for _, name := range lease.Semaphores {
@@ -275,9 +275,13 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 	if ahead == 1 {
 		noun = "run"
 	}
+	reason := ""
+	if q.BlockingReason != "" {
+		reason = "; " + q.BlockingReason
+	}
 	fmt.Fprintf(la.stderr(),
-		"queued for local admission: position %d of %d (%d %s ahead); run `sparkwing queue` to see the full queue\n",
-		q.Position, q.QueueLength, ahead, noun)
+		"queued for local admission: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
+		q.Position, q.QueueLength, ahead, noun, reason)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d}`, q.Position, q.QueueLength)
 	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
 }
@@ -307,6 +311,22 @@ func evictionHandler(runID string, onEvicted func(error)) func(wingwire.Evicted)
 			supersededBy: ev.SupersededBy,
 			runID:        runID,
 		})
+	}
+}
+
+// cancelHandler adapts a daemon operator-cancel push into the
+// run-cancelling error, so `sparkwing runs cancel` winds the run down on
+// the same context-cancel path an interrupt uses.
+func cancelHandler(onEvicted func(error)) func(wingwire.Cancel) {
+	return func(c wingwire.Cancel) {
+		if onEvicted == nil {
+			return
+		}
+		reason := c.Reason
+		if reason == "" {
+			reason = "cancelled via the admission daemon"
+		}
+		onEvicted(&runDaemonCanceledError{reason: reason})
 	}
 }
 
@@ -385,11 +405,12 @@ func planSemaphoreClaims(plan *sparkwing.Plan, runID string) []wingwire.Semaphor
 		seen[key] = true
 		limit := group.Limit()
 		claims = append(claims, wingwire.SemaphoreClaim{
-			Name:           key,
-			Cost:           membership.Cost,
-			Capacity:       limit.Capacity,
-			Policy:         wingwire.Policy(limit.OnLimit),
-			QueueTimeoutMS: limit.QueueTimeout.Milliseconds(),
+			Name:            key,
+			Cost:            membership.Cost,
+			Capacity:        limit.Capacity,
+			Policy:          wingwire.Policy(limit.OnLimit),
+			QueueTimeoutMS:  limit.QueueTimeout.Milliseconds(),
+			CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
 		})
 	}
 	sort.Slice(claims, func(i, j int) bool { return claims[i].Name < claims[j].Name })

@@ -91,15 +91,51 @@ func (l *Lease) Release() error {
 // safety: the connection has exactly one reader; after Acquire returns,
 // Watch is that reader, so nothing else may read until it exits.
 func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
+	l.WatchControl(onEvicted, nil)
+}
+
+// WatchControl is [Lease.Watch] that also delivers an operator cancel
+// pushed by the daemon (from `sparkwing runs cancel`) to onCancel. Either
+// callback may be nil. Like Watch it is the connection's sole reader and
+// returns when the connection ends.
+func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) {
 	for {
 		msg, err := l.cl.dec.read()
 		if err != nil {
 			return
 		}
-		if ev, ok := msg.(*wingwire.Evicted); ok && onEvicted != nil {
-			onEvicted(*ev)
+		switch m := msg.(type) {
+		case *wingwire.Evicted:
+			if onEvicted != nil {
+				onEvicted(*m)
+			}
+		case *wingwire.Cancel:
+			if onCancel != nil {
+				onCancel(*m)
+			}
 		}
 	}
+}
+
+// CancelLease asks the daemon to cancel a local run it arbitrates, by run
+// id. It returns whether the daemon knew the run and signalled it; a
+// false return means the caller should fall back to the controller. Use
+// it on a dedicated control connection, not one holding a lease.
+func (cl *Client) CancelLease(ctx context.Context, runID string) (bool, error) {
+	stop := cl.cancelOnDone(ctx)
+	defer stop()
+	if err := cl.write(&wingwire.CancelLease{RunID: runID}); err != nil {
+		return false, err
+	}
+	msg, err := cl.dec.read()
+	if err != nil {
+		return false, err
+	}
+	ack, ok := msg.(*wingwire.CancelLeaseAck)
+	if !ok {
+		return false, fmt.Errorf("wingd/client: expected cancel_lease_ack, got %T", msg)
+	}
+	return ack.Found, nil
 }
 
 // cancelOnDone arranges for a blocked read to fail once ctx is cancelled,

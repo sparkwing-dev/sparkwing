@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -37,7 +38,8 @@ func runWingdCLI(args []string) error {
 		Version:     v,
 		FinalizeRun: NewOrphanRunFinalizer(*home),
 		Logf: func(format string, a ...any) {
-			fmt.Fprintf(os.Stderr, "wingd: "+format+"\n", a...)
+			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
+				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
 		},
 	})
 	if err != nil {

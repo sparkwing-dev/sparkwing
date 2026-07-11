@@ -61,6 +61,9 @@ const (
 	TypeDrainRequest     MessageType = "drain_request"
 	TypeDrainAck         MessageType = "drain_ack"
 	TypeQueueState       MessageType = "queue_state"
+	TypeCancelLease      MessageType = "cancel_lease"
+	TypeCancelLeaseAck   MessageType = "cancel_lease_ack"
+	TypeCancel           MessageType = "cancel"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -141,6 +144,12 @@ func emptyMessage(t MessageType) (Message, error) {
 		return &DrainAck{}, nil
 	case TypeQueueState:
 		return &QueueState{}, nil
+	case TypeCancelLease:
+		return &CancelLease{}, nil
+	case TypeCancelLeaseAck:
+		return &CancelLeaseAck{}, nil
+	case TypeCancel:
+		return &Cancel{}, nil
 	default:
 		return nil, fmt.Errorf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", t, ProtocolMajor)
 	}

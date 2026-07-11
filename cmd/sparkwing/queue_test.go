@@ -75,6 +75,49 @@ func TestRenderQueue_PrettyShowsHoldersWaitersAndCapacity(t *testing.T) {
 	}
 }
 
+func TestRenderQueue_PrettyExplainsHostPressureWait(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 10, Held: 0, Reserved: 2, External: 3.2, Available: 4.8},
+		},
+		Waiters: []wingwire.Waiter{
+			{RunID: "run-waiter", Position: 1, Resources: wingwire.HostResources{Cores: 5},
+				WaitingOn: []string{"cores"}, BlockingReason: "needs 5.0 cores; 4.8 available (external load 3.2)"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := renderQueue(&buf, qs, "pretty"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"RESERVED", "EXTERNAL", "AVAILABLE",
+		"needs 5.0 cores; 4.8 available (external load 3.2)",
+		"external (non-sparkwing) load is the binding constraint",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pretty output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderQueue_PrettyToleratesOlderDaemonWithoutHeadroom pins that a
+// queue payload with no headroom fields (an older daemon) still renders a
+// sane AVAILABLE column from capacity minus held.
+func TestRenderQueue_PrettyToleratesOlderDaemonWithoutHeadroom(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderQueue(&buf, sampleQueueState(), "pretty"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "AVAILABLE") {
+		t.Fatalf("AVAILABLE column missing:\n%s", out)
+	}
+	if strings.Contains(out, "binding constraint") {
+		t.Fatalf("no external field should mean no external-pressure note:\n%s", out)
+	}
+}
+
 func TestRenderQueue_PrettyFlagsStalledHolderWithRecovery(t *testing.T) {
 	qs := sampleQueueState()
 	qs.Holders[0].Stalled = true

@@ -108,7 +108,10 @@ func renderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 // kind so a shell pipeline can filter with grep/awk.
 func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 	for _, r := range qs.Resources {
-		fmt.Fprintf(w, "resource\t%s\t%s\t%s\n", r.Key, fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held))
+		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
+			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
+			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
+			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	for _, h := range qs.Holders {
 		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -116,10 +119,10 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			wt.Position, wt.RunID, orDash(wt.Pipeline), fmtCost(wt.Resources),
 			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
-			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS))
+			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
 	}
 	return nil
 }
@@ -135,19 +138,21 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n\n", len(qs.Holders), len(qs.Waiters), clear)
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RESOURCE\tCAPACITY\tIN USE\tFREE")
+	fmt.Fprintln(tw, "RESOURCE\tCAPACITY\tIN USE\tRESERVED\tEXTERNAL\tAVAILABLE")
 	if len(qs.Resources) == 0 {
-		fmt.Fprintln(tw, "(none)\t\t\t")
+		fmt.Fprintln(tw, "(none)\t\t\t\t\t")
 	}
 	for _, r := range qs.Resources {
-		free := r.Capacity - r.Held
-		if free < 0 {
-			free = 0
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.Key,
-			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held), fmtAmount(r.Key, free))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
+			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
+			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
+			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	_ = tw.Flush()
+
+	if note := externalPressureNote(qs); note != "" {
+		fmt.Fprintf(out, "\n%s\n", note)
+	}
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
@@ -178,6 +183,11 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 	_ = tw.Flush()
 
+	for _, wt := range qs.Waiters {
+		if wt.BlockingReason != "" {
+			fmt.Fprintf(out, "\n%s waiting: %s\n", wt.RunID, wt.BlockingReason)
+		}
+	}
 	for _, h := range qs.Holders {
 		if h.Stalled && h.Recovery != "" {
 			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", h.RunID, h.Recovery)
@@ -187,6 +197,52 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintf(out, "\n%s: %s\n", d.runID, d.warning)
 	}
 	return nil
+}
+
+// resourceAvailable is the grantable amount to show for a resource row:
+// the daemon's headroom-aware Available for the host dimensions, or plain
+// capacity-minus-held for a semaphore row (and for older daemons that
+// sent no Available).
+func resourceAvailable(r wingwire.ResourceState) float64 {
+	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0) {
+		return r.Available
+	}
+	free := r.Capacity - r.Held
+	if free < 0 {
+		free = 0
+	}
+	return free
+}
+
+// fmtHeadroomCell renders a reserve/external cell: a dash for semaphore
+// rows, which have no headroom decomposition.
+func fmtHeadroomCell(key string, v float64) string {
+	if !isHostResource(key) {
+		return "-"
+	}
+	return fmtAmount(key, v)
+}
+
+func isHostResource(key string) bool { return key == "cores" || key == "memory" }
+
+// externalPressureNote returns a one-line callout when non-sparkwing load
+// is what is holding runs back -- a queue that looks idle (free capacity,
+// no holders) but refuses work because the machine is busy with other
+// processes. Empty when external load is not the binding constraint.
+func externalPressureNote(qs wingwire.QueueState) string {
+	if len(qs.Waiters) == 0 {
+		return ""
+	}
+	for _, r := range qs.Resources {
+		if isHostResource(r.Key) && r.External > 0 && r.Held < r.Capacity {
+			for _, wt := range qs.Waiters {
+				if wt.BlockingReason != "" {
+					return "note: external (non-sparkwing) load is the binding constraint; free capacity above is reserved or already in use by other processes"
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // queueDriftNote pairs a run with its pin-drift warning for the bottom-of-

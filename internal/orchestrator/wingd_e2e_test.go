@@ -39,11 +39,17 @@ type stubSampler struct{ stat wingd.HostStat }
 
 func (s stubSampler) Sample() (wingd.HostStat, error) { return s.stat, nil }
 
+// idleProcSampler reports every holder process as consuming no CPU, so
+// stall flagging fires deterministically for a blocked holder.
+type idleProcSampler struct{}
+
+func (idleProcSampler) CPUFraction(int) (float64, bool) { return 0, true }
+
 // startWingd runs a real daemon in-process for home with a fixed host
 // capacity, wired to the same orphan-run finalizer production uses.
 func startWingd(t *testing.T, home string, cores float64) {
 	t.Helper()
-	d, err := wingd.New(wingd.Config{
+	startWingdCfg(t, wingd.Config{
 		Home:    home,
 		Version: "test",
 		Sampler: stubSampler{wingd.HostStat{
@@ -55,6 +61,16 @@ func startWingd(t *testing.T, home string, cores float64) {
 		GraceWindow:      -1,
 		FinalizeRun:      NewOrphanRunFinalizer(home),
 	})
+}
+
+// startWingdCfg runs a daemon in-process for the given config, ensuring
+// the orphan finalizer is wired and cleaning it up at test end.
+func startWingdCfg(t *testing.T, cfg wingd.Config) {
+	t.Helper()
+	if cfg.FinalizeRun == nil {
+		cfg.FinalizeRun = NewOrphanRunFinalizer(cfg.Home)
+	}
+	d, err := wingd.New(cfg)
 	if err != nil {
 		t.Fatalf("wingd.New: %v", err)
 	}
@@ -273,6 +289,35 @@ func (wingdNodeSemPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwin
 	return nil
 }
 
+func wingdNodeEvictGroup(onLimit sparkwing.OnLimit) *sparkwing.ConcurrencyGroup {
+	return sparkwing.NewConcurrencyGroup("wingd-e2e-node-evict", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		Scope:         sparkwing.ScopeBox,
+		OnLimit:       onLimit,
+		CancelTimeout: 5 * time.Second,
+	})
+}
+
+type wingdNodeEvictVictimPipe struct{ sparkwing.Base }
+
+func (wingdNodeEvictVictimPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Resources(sparkwing.Cores(1))
+	runID := rc.RunID
+	sparkwing.Job(plan, "locked", func(ctx context.Context) error {
+		return wingdE2EGate.Load().run(ctx, runID)
+	}).Concurrency(wingdNodeEvictGroup(sparkwing.CancelOthers))
+	return nil
+}
+
+type wingdNodeEvictAggressorPipe struct{ sparkwing.Base }
+
+func (wingdNodeEvictAggressorPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	plan.Resources(sparkwing.Cores(1))
+	sparkwing.Job(plan, "locked", func(context.Context) error { return nil }).
+		Concurrency(wingdNodeEvictGroup(sparkwing.CancelOthers))
+	return nil
+}
+
 func registerWingdE2EPipelines() {
 	wingdE2ERegister.Do(func() {
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-hold",
@@ -289,6 +334,10 @@ func registerWingdE2EPipelines() {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdEvictAggressorPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-node-sem",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdNodeSemPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-node-evict-victim",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdNodeEvictVictimPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-node-evict-aggressor",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdNodeEvictAggressorPipe{} })
 	})
 }
 
@@ -669,6 +718,150 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 	}
 	if got := gate.peak.Load(); got != 1 {
 		t.Fatalf("peak concurrent locked nodes = %d, want the daemon semaphore to serialize them", got)
+	}
+}
+
+func TestWingd_NodeGroupCancelOthersEvictsAcrossRuns(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 8)
+	backends, st, _ := openWingdBackends(t, home)
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+
+	victim := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-node-evict-victim",
+			RunID:     "wingd-node-victim",
+			Admission: testWingdAdmission(home, nil),
+		})
+		victim <- res
+	}()
+	gate.awaitStarted(t, "wingd-node-victim")
+
+	aggressor, err := Run(context.Background(), backends, Options{
+		Pipeline:  "wingd-e2e-node-evict-aggressor",
+		RunID:     "wingd-node-aggressor",
+		Admission: testWingdAdmission(home, nil),
+	})
+	if err != nil {
+		t.Fatalf("aggressor run: %v", err)
+	}
+	if aggressor.Status != "success" {
+		t.Fatalf("aggressor status = %q (err=%v), want success (newest wins)", aggressor.Status, aggressor.Error)
+	}
+
+	select {
+	case res := <-victim:
+		if res.Status != "cancelled" {
+			t.Fatalf("victim run status = %q (err=%v), want cancelled (preempted, not a job fault)", res.Status, res.Error)
+		}
+		node, nerr := st.GetNode(context.Background(), "wingd-node-victim", "locked")
+		if nerr != nil {
+			t.Fatalf("get victim node: %v", nerr)
+		}
+		if node.Error == "" || !strings.Contains(node.Error, "wingd-e2e-node-evict") || !strings.Contains(node.Error, "wingd-node-aggressor") {
+			t.Fatalf("victim node error = %q, want the contested key and superseding run named", node.Error)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("victim never finished after node-level eviction")
+	}
+}
+
+func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingdCfg(t, wingd.Config{
+		Home:    home,
+		Version: "test",
+		Sampler: stubSampler{wingd.HostStat{
+			TotalCores: 2, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30,
+		}},
+		HeadroomFraction: -1,
+		GraceWindow:      -1,
+		ProcSampler:      idleProcSampler{},
+		StallInterval:    20 * time.Millisecond,
+		StallWindow:      40 * time.Millisecond,
+	})
+	backends, st, _ := openWingdBackends(t, home)
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	ctx := context.Background()
+
+	holder := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "stall-holder",
+			Admission: testWingdAdmission(home, nil),
+		})
+		holder <- res
+	}()
+	gate.awaitStarted(t, "stall-holder")
+
+	waiter := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(ctx, backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "stall-waiter",
+			Admission: testWingdAdmission(home, nil),
+		})
+		waiter <- res
+	}()
+	awaitWaiter(t, home, "stall-waiter")
+
+	var recovery string
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		h := findWingdHolder(t, home, "stall-holder")
+		if h.Stalled && h.Recovery != "" {
+			recovery = h.Recovery
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if recovery == "" {
+		t.Fatal("stalled holder was never flagged with a recovery command")
+	}
+	if recovery != "sparkwing runs cancel --run stall-holder" {
+		t.Fatalf("recovery command = %q, want the daemon-first cancel", recovery)
+	}
+
+	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, "stall-holder")
+	if err != nil {
+		t.Fatalf("daemon-first cancel: %v", err)
+	}
+	if !found {
+		t.Fatal("daemon did not know the local run; recovery would dead-end at a dashboard")
+	}
+
+	select {
+	case res := <-holder:
+		if res.Status != "cancelled" {
+			t.Fatalf("holder status = %q (err=%v), want cancelled after daemon-first cancel", res.Status, res.Error)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("stalled holder never wound down after cancel")
+	}
+
+	gate.awaitStarted(t, "stall-waiter")
+	close(gate.release)
+	select {
+	case res := <-waiter:
+		if res.Status != "success" {
+			t.Fatalf("promoted waiter status = %q, want success", res.Status)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("waiter never promoted after the holder released")
+	}
+
+	run, err := st.GetRun(ctx, "stall-holder")
+	if err != nil {
+		t.Fatalf("get holder run: %v", err)
+	}
+	if run.Status != "cancelled" {
+		t.Fatalf("stored holder status = %q, want cancelled", run.Status)
 	}
 }
 

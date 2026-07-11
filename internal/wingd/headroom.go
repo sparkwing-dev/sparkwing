@@ -66,7 +66,13 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 		targetCores = 0
 	}
 
+	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
 	targetMem := memHeadroom(stat, usedMem, frac)
+
+	d.reservedCores = reservedCores
+	d.externalCores = externalCores
+	d.reservedMem = reservedMem
+	d.externalMem = externalMem
 
 	coresBand := math.Max(0.5, 0.05*stat.TotalCores)
 	memBand := uint64(0.05 * float64(stat.TotalMemoryBytes))
@@ -90,25 +96,33 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	deliveries := d.routeLocked(events)
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
+	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %.1f)", targetCores, reservedCores, externalCores)
 	d.flush(deliveries, snap)
 }
 
 // memHeadroom is the memory ceiling: total minus the reserve minus memory
 // consumed by processes the daemon did not admit.
 func memHeadroom(stat HostStat, usedMem uint64, frac float64) uint64 {
-	reserved := uint64(frac * float64(stat.TotalMemoryBytes))
-	var external uint64
+	reserved, external := memReserveAndExternal(stat, usedMem, frac)
+	avail := int64(stat.TotalMemoryBytes) - int64(reserved) - int64(external)
+	if avail < 0 {
+		return 0
+	}
+	return uint64(avail)
+}
+
+// memReserveAndExternal decomposes the memory headroom into its reserve
+// margin and the memory consumed by processes the daemon did not admit,
+// for the queue view.
+func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserved, external uint64) {
+	reserved = uint64(frac * float64(stat.TotalMemoryBytes))
 	if stat.TotalMemoryBytes >= stat.FreeMemoryBytes {
 		consumed := stat.TotalMemoryBytes - stat.FreeMemoryBytes
 		if consumed > usedMem {
 			external = consumed - usedMem
 		}
 	}
-	avail := int64(stat.TotalMemoryBytes) - int64(reserved) - int64(external)
-	if avail < 0 {
-		return 0
-	}
-	return uint64(avail)
+	return reserved, external
 }
 
 // usedLocked sums the host resources currently held across all leases.

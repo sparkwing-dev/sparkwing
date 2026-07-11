@@ -29,12 +29,46 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon(os.Args[2:])
+	case "wingd":
+		runWingdMode(os.Args[2:])
 	case "hold":
 		runHold(os.Args[2:])
 	case "reattach":
 		runReattach(os.Args[2:])
 	default:
 		fail("unknown mode %q", os.Args[1])
+	}
+}
+
+// runWingdMode serves the `wingd run` subcommand the client's default
+// spawn re-execs, mirroring the shipped daemon's log wiring: operational
+// lines go to stderr, which the spawn points at the daemon log file.
+func runWingdMode(args []string) {
+	if len(args) == 0 || args[0] != "run" {
+		fail("usage: wingd run [--home DIR]")
+	}
+	fs := flag.NewFlagSet("wingd run", flag.ExitOnError)
+	home := fs.String("home", "", "")
+	version := fs.String("version", "v1.0.0", "")
+	idleMS := fs.Int("idle-ms", 800, "")
+	_ = fs.Parse(args[1:])
+
+	d, err := wingd.New(wingd.Config{
+		Home:        *home,
+		Version:     *version,
+		IdleTimeout: time.Duration(*idleMS) * time.Millisecond,
+		Logf: func(format string, a ...any) {
+			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
+				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
+		},
+	})
+	if err != nil {
+		fail("new daemon: %v", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := d.Run(ctx); err != nil && err != wingd.ErrNotElected {
+		fail("run: %v", err)
 	}
 }
 
@@ -87,15 +121,22 @@ func runHold(args []string) {
 	home := fs.String("home", "", "")
 	run := fs.String("run", "run", "")
 	sem := fs.String("sem", "", "")
+	policy := fs.String("sem-policy", "queue", "")
+	cancelTimeoutMS := fs.Int64("cancel-timeout-ms", 0, "")
 	cores := fs.Float64("cores", 0, "")
 	graceMS := fs.Int("daemon-grace-ms", 3000, "")
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
+	semaphoresOnly := fs.Bool("semaphores-only", false, "")
+	realSpawn := fs.Bool("real-spawn", false, "")
 	_ = fs.Parse(args)
 
 	opts := client.Options{
 		Home:    *home,
 		Spawn:   daemonSpawner(*graceMS, *idleMS),
 		Backoff: 30 * time.Millisecond,
+	}
+	if *realSpawn {
+		opts.Spawn = nil
 	}
 	cl, err := client.EnsureDaemon(context.Background(), opts)
 	if err != nil {
@@ -104,8 +145,16 @@ func runHold(args []string) {
 
 	req := wingwire.AdmissionRequest{RunID: *run}
 	if *sem != "" {
-		req.Semaphores = []wingwire.SemaphoreClaim{{Name: *sem, Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}
-		req.Resources = wingwire.HostResources{Cores: 0.1}
+		req.Semaphores = []wingwire.SemaphoreClaim{{
+			Name: *sem, Capacity: 1, Cost: 1,
+			Policy:          wingwire.Policy(*policy),
+			CancelTimeoutMS: *cancelTimeoutMS,
+		}}
+		if *semaphoresOnly {
+			req.SemaphoresOnly = true
+		} else {
+			req.Resources = wingwire.HostResources{Cores: 0.1}
+		}
 	} else {
 		req.Resources = wingwire.HostResources{Cores: *cores}
 	}
@@ -114,7 +163,17 @@ func runHold(args []string) {
 		fail("acquire: %v", err)
 	}
 	announce(lease.Token)
-	block()
+
+	evicted := make(chan wingwire.Evicted, 1)
+	go lease.Watch(func(ev wingwire.Evicted) { evicted <- ev })
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	select {
+	case ev := <-evicted:
+		fmt.Printf("EVICTED %s %s\n", ev.Key, ev.SupersededBy)
+		_ = os.Stdout.Sync()
+	case <-ch:
+	}
 }
 
 func runReattach(args []string) {

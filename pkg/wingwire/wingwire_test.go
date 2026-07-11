@@ -32,9 +32,12 @@ func roundTripMessages() []Message {
 		&Reattach{LeaseToken: "lease-def456"},
 		&DrainRequest{SuccessorVersion: "v0.16.0"},
 		&DrainAck{HoldersRemaining: 3},
+		&CancelLease{RunID: "deploy-20260710-120000"},
+		&CancelLeaseAck{Found: true},
+		&Cancel{RunID: "deploy-20260710-120000", Reason: "cancelled via sparkwing runs cancel"},
 		&QueueState{
 			Resources: []ResourceState{
-				{Key: "cores", Capacity: 10, Held: 6.5},
+				{Key: "cores", Capacity: 10, Held: 6.5, Reserved: 2, External: 1.5, Available: 0.5},
 				{Key: "memory", Capacity: 32 << 30, Held: 12 << 30},
 				{Key: "deploy-lock", Capacity: 1, Held: 1},
 			},
@@ -44,7 +47,7 @@ func roundTripMessages() []Message {
 			},
 			Waiters: []Waiter{
 				{RunID: "r3", Resources: HostResources{Cores: 1}},
-				{RunID: "r4", Resources: HostResources{Cores: 8, MemoryBytes: 16 << 30}, Semaphores: []string{"db"}},
+				{RunID: "r4", Resources: HostResources{Cores: 8, MemoryBytes: 16 << 30}, Semaphores: []string{"db"}, BlockingReason: "needs 8.0 cores; 0.5 available (external load 1.5)"},
 			},
 		},
 	}
@@ -83,6 +86,7 @@ func TestEncode_CoversEveryDeclaredType(t *testing.T) {
 		TypeHello, TypeHelloAck, TypeAdmissionRequest, TypeGrant,
 		TypeQueued, TypeEvicted, TypeRelease, TypeReattach,
 		TypeDrainRequest, TypeDrainAck, TypeQueueState,
+		TypeCancelLease, TypeCancelLeaseAck, TypeCancel,
 	}
 	for _, mt := range all {
 		if !seen[mt] {

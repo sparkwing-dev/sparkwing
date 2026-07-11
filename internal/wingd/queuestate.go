@@ -45,16 +45,30 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		semHeld[ss.Key] = held
 	}
 
+	grantCores := float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)-usedMilli) / 1000.0
+	if grantCores < 0 {
+		grantCores = 0
+	}
+	grantMem := float64(int64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes)) - int64(usedMem))
+	if grantMem < 0 {
+		grantMem = 0
+	}
 	qs.Resources = append(qs.Resources,
 		wingwire.ResourceState{
-			Key:      "cores",
-			Capacity: float64(snap.TotalMilliCores) / 1000.0,
-			Held:     float64(usedMilli) / 1000.0,
+			Key:       "cores",
+			Capacity:  float64(snap.TotalMilliCores) / 1000.0,
+			Held:      float64(usedMilli) / 1000.0,
+			Reserved:  d.reservedCores,
+			External:  d.externalCores,
+			Available: grantCores,
 		},
 		wingwire.ResourceState{
-			Key:      "memory",
-			Capacity: float64(snap.TotalMemoryBytes),
-			Held:     float64(usedMem),
+			Key:       "memory",
+			Capacity:  float64(snap.TotalMemoryBytes),
+			Held:      float64(usedMem),
+			Reserved:  float64(d.reservedMem),
+			External:  float64(d.externalMem),
+			Available: grantMem,
 		},
 	)
 	for _, ss := range snap.Semaphores {
@@ -95,6 +109,10 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	for _, r := range qs.Resources {
 		remaining[r.Key] = r.Capacity - r.Held
 	}
+	available := map[string]wingwire.ResourceState{}
+	for _, r := range qs.Resources {
+		available[r.Key] = r
+	}
 	for i, w := range snap.Waiters {
 		waiter := wingwire.Waiter{
 			RunID:    w.RequestID,
@@ -103,8 +121,9 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
 			},
-			Semaphores: claimKeys(w.Claims),
-			WaitingOn:  waitingOn(w, remaining),
+			Semaphores:     claimKeys(w.Claims),
+			WaitingOn:      waitingOn(w, remaining),
+			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available),
 		}
 		if c := d.byRun[w.RequestID]; c != nil {
 			waiter.Pipeline = c.pipeline
@@ -326,6 +345,82 @@ func effectiveCapacity(ss admission.SemaphoreState) int {
 		return ss.LastCapacity
 	}
 	return eff
+}
+
+// hostBlockingReasonLocked renders the host-pressure blocking reason for a
+// run charged res against the daemon's current headroom. Empty when host
+// capacity is not what holds the run back. The caller holds d.mu.
+func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources) string {
+	if res.Cores <= 0 && res.MemoryBytes <= 0 {
+		return ""
+	}
+	snap := d.ledger.Snapshot()
+	var usedMilli int64
+	var usedMem uint64
+	for _, ls := range snap.Leases {
+		usedMilli += ls.MilliCores
+		usedMem += ls.MemoryBytes
+	}
+	grantCores := float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)-usedMilli) / 1000.0
+	if grantCores < 0 {
+		grantCores = 0
+	}
+	grantMem := float64(int64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes)) - int64(usedMem))
+	if grantMem < 0 {
+		grantMem = 0
+	}
+	avail := map[string]wingwire.ResourceState{
+		"cores":  {Key: "cores", Available: grantCores, External: d.externalCores},
+		"memory": {Key: "memory", Available: grantMem, External: float64(d.externalMem)},
+	}
+	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail)
+}
+
+// hostBlockingReason renders the one-line reason a run cannot be admitted
+// on host capacity right now, comparing what it needs against what is
+// grantable and naming external load when it is the binding constraint.
+// Cores bind before memory. Empty when neither host dimension blocks the
+// run (a pure semaphore or arrival-order wait).
+func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState) string {
+	if needCores > 0 {
+		if r, ok := available["cores"]; ok && r.Available < needCores {
+			ext := ""
+			if r.External > 0 {
+				ext = fmt.Sprintf(" (external load %s)", trimCores(r.External))
+			}
+			return fmt.Sprintf("needs %s cores; %s available%s", trimCores(needCores), trimCores(r.Available), ext)
+		}
+	}
+	if needMem > 0 {
+		if r, ok := available["memory"]; ok && r.Available < needMem {
+			ext := ""
+			if r.External > 0 {
+				ext = fmt.Sprintf(" (external load %s)", humanBytesShort(r.External))
+			}
+			return fmt.Sprintf("needs %s; %s available%s", humanBytesShort(needMem), humanBytesShort(r.Available), ext)
+		}
+	}
+	return ""
+}
+
+// trimCores formats a core count with a single decimal place.
+func trimCores(v float64) string { return fmt.Sprintf("%.1f", v) }
+
+// humanBytesShort renders a byte count in the largest binary unit that
+// keeps it readable, for blocking-reason strings.
+func humanBytesShort(v float64) string {
+	const unit = 1024.0
+	if v < unit {
+		return fmt.Sprintf("%.0fB", v)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	n := v
+	i := -1
+	for n >= unit && i < len(units)-1 {
+		n /= unit
+		i++
+	}
+	return fmt.Sprintf("%.1f%s", n, units[i])
 }
 
 func claimKeys(claims []admission.ClaimState) []string {

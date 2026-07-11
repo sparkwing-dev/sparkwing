@@ -95,6 +95,24 @@ func (ph *procHandle) waitOK(timeout time.Duration) string {
 	}
 }
 
+func (ph *procHandle) waitLine(prefix string, timeout time.Duration) string {
+	ph.t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case line, ok := <-ph.lines:
+			if !ok {
+				ph.t.Fatalf("process exited before printing %q", prefix)
+			}
+			if rest, found := strings.CutPrefix(line, prefix); found {
+				return strings.TrimSpace(rest)
+			}
+		case <-deadline:
+			ph.t.Fatalf("timed out waiting for %q", prefix)
+		}
+	}
+}
+
 func (ph *procHandle) mustStayQueued(within time.Duration) {
 	ph.t.Helper()
 	select {
@@ -189,6 +207,64 @@ func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
 
 	a.kill(syscall.SIGKILL)
 	b.waitOK(5 * time.Second)
+}
+
+// TestProcess_CancelOthersEvictsHolderAcrossProcesses starts two real
+// processes contending on a capacity-1 semaphore under cancel_others: the
+// newer arrival must evict the older holder (newest wins), the holder
+// must observe the eviction naming the contested key and superseding run,
+// and the aggressor must be admitted -- never queued behind the holder.
+func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("process test skipped in -short")
+	}
+	home := shortHome(t)
+	victim := startProc(t, "hold", "--home", home, "--run", "victim",
+		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only",
+		"--cancel-timeout-ms", "5000", "--daemon-idle-ms", "3000")
+	victim.waitOK(10 * time.Second)
+
+	aggressor := startProc(t, "hold", "--home", home, "--run", "aggressor",
+		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only",
+		"--cancel-timeout-ms", "5000", "--daemon-idle-ms", "3000")
+	aggressor.waitOK(10 * time.Second)
+
+	got := victim.waitLine("EVICTED ", 10*time.Second)
+	if !strings.Contains(got, "lock") || !strings.Contains(got, "aggressor") {
+		t.Fatalf("victim eviction = %q, want the contested key and superseding run named", got)
+	}
+}
+
+// TestProcess_SelfSpawnedDaemonWritesLogFile exercises the real default
+// spawn path (no injected spawner): a client that finds no daemon
+// re-execs the binary as `wingd run`, which must reliably create the
+// documented log file and record its history there -- the log is the only
+// witness when the invisible daemon misbehaves.
+func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("process test skipped in -short")
+	}
+	home := shortHome(t)
+	h := startProc(t, "hold", "--home", home, "--run", "r", "--cores", "0.1", "--real-spawn")
+	h.waitOK(10 * time.Second)
+
+	logPath := filepath.Join(home, "wingd", "d.log")
+	var data []byte
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := os.ReadFile(logPath)
+		if err == nil && len(b) > 0 {
+			data = b
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(data) == 0 {
+		t.Fatalf("self-spawned daemon wrote no log file at %s", logPath)
+	}
+	if !strings.Contains(string(data), "wingd:") || !strings.Contains(string(data), "elected") {
+		t.Fatalf("daemon log lacks a meaningful history line:\n%s", data)
+	}
 }
 
 // TestProcess_DaemonKillRestoresAndReattaches SIGKILLs the daemon, then a

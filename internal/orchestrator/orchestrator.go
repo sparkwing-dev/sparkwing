@@ -590,16 +590,40 @@ func (e *runInterruptedError) Error() string {
 	return fmt.Sprintf("interrupted by %s", e.signal)
 }
 
+// nodeSupersededError reports that a run's only non-passing nodes were
+// superseded by a newer arrival under OnLimit:CancelOthers. It maps the
+// run to cancelled -- the same terminal category as a plan-level
+// eviction -- so a preempted run never reads as a job that broke.
+type nodeSupersededError struct {
+	nodes []string
+}
+
+func (e *nodeSupersededError) Error() string {
+	return fmt.Sprintf("nodes superseded by a newer arrival: %v", e.nodes)
+}
+
+// runDaemonCanceledError reports that the admission daemon signalled this
+// run to wind down in response to `sparkwing runs cancel`. It maps the run
+// to cancelled, the same terminal category as an operator interrupt.
+type runDaemonCanceledError struct {
+	reason string
+}
+
+func (e *runDaemonCanceledError) Error() string { return e.reason }
+
 // statusForRunError maps a run's terminal error to the stored status:
-// an admission eviction or an operator interrupt is cancelled, any
-// other error failed, nil success.
+// an admission eviction (plan- or node-level), an operator interrupt, or
+// a daemon cancel is cancelled, any other error failed, nil success.
 func statusForRunError(err error) string {
 	if err == nil {
 		return "success"
 	}
 	var evicted *planAdmissionEvictedError
 	var interrupted *runInterruptedError
-	if errors.As(err, &evicted) || errors.As(err, &interrupted) {
+	var superseded *nodeSupersededError
+	var canceled *runDaemonCanceledError
+	if errors.As(err, &evicted) || errors.As(err, &interrupted) ||
+		errors.As(err, &superseded) || errors.As(err, &canceled) {
 		return "cancelled"
 	}
 	return "failed"
@@ -819,6 +843,7 @@ func dispatch(
 	}
 
 	var failed []string
+	var superseded []string
 	for _, n := range plan.Nodes() {
 		oc, ok := state.getOutcome(n.ID())
 		if !ok || oc.OK() {
@@ -827,14 +852,22 @@ func dispatch(
 		if n.IsOptional() {
 			continue
 		}
+		if oc == sparkwing.Superseded {
+			superseded = append(superseded, n.ID())
+			continue
+		}
 		failed = append(failed, n.ID())
 	}
 
-	emitRunSummary(delegate, plan, state, runStart, len(failed) == 0)
+	emitRunSummary(delegate, plan, state, runStart, len(failed) == 0 && len(superseded) == 0)
 
 	if len(failed) > 0 {
 		planReleaseOutcome = "failed"
 		return fmt.Errorf("nodes failed: %v", failed)
+	}
+	if len(superseded) > 0 {
+		planReleaseOutcome = "superseded"
+		return &nodeSupersededError{nodes: superseded}
 	}
 	return nil
 }

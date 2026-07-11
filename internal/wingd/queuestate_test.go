@@ -2,13 +2,65 @@ package wingd_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+// TestQueueState_HostPressureExplainsWait sets a host under heavy external
+// (non-sparkwing) load and admits a run that needs more than the remaining
+// headroom. The queue view must carry the headroom decomposition (reserve,
+// external, available) and a per-waiter blocking reason naming the
+// external load -- the queue is not silent about a host-pressure wait.
+func TestQueueState_HostPressureExplainsWait(t *testing.T) {
+	home := shortHome(t)
+	sampler := newFakeSampler(10, 64<<30)
+	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+
+	cl := ensure(t, home, "v1")
+	_, result := acquireAsync(cl, wingwire.AdmissionRequest{
+		RunID:     "heavy",
+		Resources: wingwire.HostResources{Cores: 5},
+	})
+	select {
+	case r := <-result:
+		t.Fatalf("run was admitted (%v); it should queue on host pressure", r.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var cores *wingwire.ResourceState
+	for i := range qs.Resources {
+		if qs.Resources[i].Key == "cores" {
+			cores = &qs.Resources[i]
+		}
+	}
+	if cores == nil {
+		t.Fatal("no cores resource row")
+	}
+	if cores.Reserved <= 0 || cores.External <= 0 {
+		t.Fatalf("cores headroom = reserved %v external %v, want both positive", cores.Reserved, cores.External)
+	}
+	if cores.Available >= 5 {
+		t.Fatalf("cores available = %v, want under the 5 the run needs (external load consumed it)", cores.Available)
+	}
+	if len(qs.Waiters) != 1 {
+		t.Fatalf("waiters = %d, want 1", len(qs.Waiters))
+	}
+	reason := qs.Waiters[0].BlockingReason
+	if !strings.Contains(reason, "needs") || !strings.Contains(reason, "available") || !strings.Contains(reason, "external load") {
+		t.Fatalf("blocking reason = %q, want it to name needed, available, and external load", reason)
+	}
+}
 
 // fakeProcSampler feeds controllable per-pid CPU fractions so stall
 // flagging is exercised without a real busy or idle process.

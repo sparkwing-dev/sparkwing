@@ -51,9 +51,10 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 		case admission.EventQueued:
 			if c := d.byRun[ev.RequestID]; c != nil {
 				out = append(out, delivery{c, &wingwire.Queued{
-					RunID:       ev.RequestID,
-					Position:    ev.Position + 1,
-					QueueLength: qlen,
+					RunID:          ev.RequestID,
+					Position:       ev.Position + 1,
+					QueueLength:    qlen,
+					BlockingReason: d.hostBlockingReasonLocked(c.resources),
 				}})
 			}
 		case admission.EventEvicted:

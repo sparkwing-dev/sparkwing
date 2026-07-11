@@ -20,6 +20,16 @@ type AdmissionRequest struct {
 
 	DriftWarning string
 }
+type Cancel struct {
+	RunID  string
+	Reason string
+}
+type CancelLease struct {
+	RunID string
+}
+type CancelLeaseAck struct {
+	Found bool
+}
 func Decode(line []byte) (Message, error)
 type DrainAck struct {
 	HoldersRemaining int
@@ -110,6 +120,8 @@ type Queued struct {
 
 	Position    int
 	QueueLength int
+
+	BlockingReason string
 }
 type Reattach struct {
 	LeaseToken string
@@ -121,6 +133,12 @@ type ResourceState struct {
 	Key      string
 	Capacity float64
 	Held     float64
+
+	Reserved float64
+
+	External float64
+
+	Available float64
 }
 type SemaphoreClaim struct {
 	Name     string
@@ -129,8 +147,13 @@ type SemaphoreClaim struct {
 	Policy   Policy
 
 	QueueTimeoutMS int64
+
+	CancelTimeoutMS int64
 }
 const TypeAdmissionRequest MessageType = "admission_request"
+const TypeCancel MessageType = "cancel"
+const TypeCancelLease MessageType = "cancel_lease"
+const TypeCancelLeaseAck MessageType = "cancel_lease_ack"
 const TypeDrainAck MessageType = "drain_ack"
 const TypeDrainRequest MessageType = "drain_request"
 const TypeEvicted MessageType = "evicted"
@@ -151,6 +174,8 @@ type Waiter struct {
 	Semaphores []string
 
 	WaitingOn []string
+
+	BlockingReason string
 
 	WaitingMS int64
 

@@ -60,6 +60,11 @@ type SemaphoreClaim struct {
 	// QueueTimeoutMS bounds a PolicyQueue wait in milliseconds; zero
 	// waits indefinitely.
 	QueueTimeoutMS int64 `json:"queue_timeout_ms,omitempty"`
+	// CancelTimeoutMS bounds, in milliseconds, how long a
+	// PolicyCancelOthers requester waits for the holders it superseded to
+	// wind down cooperatively before the daemon force-releases their
+	// leases. Zero leaves a non-cooperating holder to release on its own.
+	CancelTimeoutMS int64 `json:"cancel_timeout_ms,omitempty"`
 }
 
 // AdmissionRequest asks the daemon for everything a run needs in one
@@ -134,6 +139,11 @@ type Queued struct {
 	// Position is 1-based; 1 is next to be admitted.
 	Position    int `json:"position"`
 	QueueLength int `json:"queue_length"`
+	// BlockingReason is a one-line explanation of what the run is waiting
+	// on -- naming needed versus available host capacity and external
+	// load when host pressure is the cause. Empty for a pure arrival-order
+	// wait or an older daemon.
+	BlockingReason string `json:"blocking_reason,omitempty"`
 }
 
 // Evicted reports that a holder lost its lease to a
@@ -180,11 +190,27 @@ type DrainAck struct {
 
 // ResourceState is one capacity row in a [QueueState]: a host resource
 // dimension ("cores", "memory") or a semaphore name, with its total
-// capacity and the amount currently held.
+// capacity and the amount currently held. For the host dimensions it also
+// carries the live headroom arithmetic -- the reserved margin, the
+// measured non-sparkwing load, and what remains grantable right now --
+// so the queue view can explain a wait that free capacity alone cannot.
+// These headroom fields are zero for semaphore rows and for older daemons
+// that predate them.
 type ResourceState struct {
 	Key      string  `json:"key"`
 	Capacity float64 `json:"capacity"`
 	Held     float64 `json:"held"`
+	// Reserved is the margin held back from admission (the headroom
+	// reserve). Zero for semaphore rows.
+	Reserved float64 `json:"reserved,omitempty"`
+	// External is the measured load from processes the daemon did not
+	// admit -- other apps, the OS. Zero for semaphore rows.
+	External float64 `json:"external,omitempty"`
+	// Available is what a new run can actually draw right now: capacity
+	// minus the reserve, minus external load, minus what sparkwing
+	// already holds, floored at zero. This, not Capacity-Held, is what
+	// gates host admission. Zero for semaphore rows.
+	Available float64 `json:"available,omitempty"`
 }
 
 // Holder is one run currently holding admission, as reported in a
@@ -239,6 +265,12 @@ type Waiter struct {
 	// Empty means the waiter is held only by arrival order behind a
 	// heavier request ahead of it.
 	WaitingOn []string `json:"waiting_on,omitempty"`
+	// BlockingReason is a one-line, human explanation of why this waiter
+	// is not yet admitted, naming what it needs against what is available
+	// and any external load ("needs 5.0 cores; 4.8 available (external
+	// load 3.2)"). Empty when the wait is pure arrival-order queueing or
+	// the daemon predates this field.
+	BlockingReason string `json:"blocking_reason,omitempty"`
 	// WaitingMS is how long the run has been queued, in milliseconds.
 	WaitingMS int64 `json:"waiting_ms,omitempty"`
 	// CostSource names how Resources was resolved ("pin", "measured",
@@ -277,6 +309,34 @@ type QueueState struct {
 	DaemonUptimeMS int64 `json:"daemon_uptime_ms,omitempty"`
 }
 
+// CancelLease asks the daemon to cancel a local run it is arbitrating,
+// by run id, on a dedicated control connection. The daemon signals the
+// run's holding connection to wind down cleanly (the same path as an
+// operator interrupt) and answers with [CancelLeaseAck]. It is the
+// dashboard-free recovery path: the daemon, not a controller, knows the
+// run and holds its connection.
+type CancelLease struct {
+	RunID string `json:"run_id"`
+}
+
+// CancelLeaseAck answers a [CancelLease]. Found reports whether the
+// daemon knew the run and signalled it; when false the caller should
+// fall back to the controller (the run is not local, or already done).
+type CancelLeaseAck struct {
+	Found bool `json:"found"`
+}
+
+// Cancel is the daemon's push to a run's holding connection telling it to
+// wind down cleanly, as if it had received an operator interrupt. Reason
+// is a short human phrase for the run's terminal record.
+type Cancel struct {
+	RunID  string `json:"run_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func (*CancelLease) wireType() MessageType      { return TypeCancelLease }
+func (*CancelLeaseAck) wireType() MessageType   { return TypeCancelLeaseAck }
+func (*Cancel) wireType() MessageType           { return TypeCancel }
 func (*Hello) wireType() MessageType            { return TypeHello }
 func (*HelloAck) wireType() MessageType         { return TypeHelloAck }
 func (*AdmissionRequest) wireType() MessageType { return TypeAdmissionRequest }

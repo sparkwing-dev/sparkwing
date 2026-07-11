@@ -19,6 +19,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
@@ -197,6 +198,7 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
 	on := fs.String("profile", "", "profile name (default: current default)")
+	home := fs.String("home", "", "sparkwing home whose local daemon arbitrates (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -213,12 +215,21 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsCancel.Path)
 	}
+
+	var results []runResult
+	remaining := ids
+	if *on == "" {
+		results, remaining = cancelLocalRunsViaDaemon(ctx, *home, ids)
+	}
+	if len(remaining) == 0 {
+		return reportResults(os.Stdout, "cancel", results)
+	}
+
 	c, _, err := resolveRunsClient(*on, cmdJobsCancel.Path)
 	if err != nil {
 		return err
 	}
-	results := make([]runResult, 0, len(ids))
-	for _, id := range ids {
+	for _, id := range remaining {
 		if err := c.CancelRun(ctx, id); err != nil {
 			results = append(results, runResult{RunID: id, Error: err.Error()})
 			continue
@@ -226,6 +237,24 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		results = append(results, runResult{RunID: id, OK: true})
 	}
 	return reportResults(os.Stdout, "cancel", results)
+}
+
+// cancelLocalRunsViaDaemon cancels each id through the local admission
+// daemon, which holds every local run's connection, and returns the ids
+// it did not hold so the caller can fall back to the controller. This is
+// the dashboard-free recovery path: a laptop with no dashboard and no
+// profile still cancels a wedged local run cleanly. Cluster runs and
+// already-finished runs are not known to the daemon and fall through.
+func cancelLocalRunsViaDaemon(ctx context.Context, home string, ids []string) (done []runResult, remaining []string) {
+	for _, id := range ids {
+		found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home}, id)
+		if err == nil && found {
+			done = append(done, runResult{RunID: id, OK: true})
+			continue
+		}
+		remaining = append(remaining, id)
+	}
+	return done, remaining
 }
 
 func runRunsPrune(ctx context.Context, args []string) error {

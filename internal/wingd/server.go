@@ -53,6 +53,13 @@ type Daemon struct {
 	headroomInit bool
 	appliedCores float64
 	appliedMem   uint64
+	// reservedCores/externalCores and their memory counterparts hold the
+	// most recent headroom decomposition for the queue view: the reserve
+	// margin and the measured non-sparkwing load per host dimension.
+	reservedCores float64
+	externalCores float64
+	reservedMem   uint64
+	externalMem   uint64
 }
 
 // delivery pairs a framed message with the connection it belongs to.
@@ -127,6 +134,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.ln = ln
 	d.startGrace()
 	close(d.ready)
+	d.cfg.logf("elected; serving %s (version %q)", d.layout.sock, d.cfg.Version)
 
 	go d.watchContext(ctx)
 	go d.sampleLoop(ctx)
@@ -258,6 +266,7 @@ func (d *Daemon) expireGrace() {
 		return
 	}
 	var events []admission.Event
+	released := 0
 	for id := range d.reattachWait {
 		for _, m := range d.leaseMembers[id] {
 			evs, err := d.ledger.Release(id, m)
@@ -266,11 +275,15 @@ func (d *Daemon) expireGrace() {
 			}
 		}
 		delete(d.reattachWait, id)
+		released++
 	}
 	deliveries := d.routeLocked(events)
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
+	if released > 0 {
+		d.cfg.logf("grace expired: released %d unreclaimed lease(s)", released)
+	}
 	d.flush(deliveries, snap)
 }
 
@@ -327,6 +340,8 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleRelease(c, m)
 	case *wingwire.QueueState:
 		d.handleQueueState(c)
+	case *wingwire.CancelLease:
+		d.handleCancelLease(c, m)
 	case *wingwire.DrainRequest:
 		d.handleDrain(c, m)
 		return true
@@ -426,6 +441,67 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.touchLocked()
 	d.mu.Unlock()
 	d.flush(deliveries, snap)
+	if len(dec.Evicted) > 0 {
+		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
+		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
+	}
+}
+
+// cancelTimeoutFor returns the smallest positive CancelTimeout declared
+// by a cancel_others claim in the request, or zero when none bound the
+// wind-down.
+func cancelTimeoutFor(sems []wingwire.SemaphoreClaim) time.Duration {
+	var t time.Duration
+	for _, s := range sems {
+		if s.Policy != wingwire.PolicyCancelOthers || s.CancelTimeoutMS <= 0 {
+			continue
+		}
+		d := time.Duration(s.CancelTimeoutMS) * time.Millisecond
+		if t == 0 || d < t {
+			t = d
+		}
+	}
+	return t
+}
+
+// armCancelTimeout schedules a force-release of the leases a
+// cancel_others grant superseded: a holder that has not wound down
+// within the timeout has its connection dropped, which releases its
+// lease and promotes any waiter. A holder that released cooperatively
+// before the timeout is already gone and is skipped.
+func (d *Daemon) armCancelTimeout(evicted []admission.LeaseID, timeout time.Duration) {
+	if timeout <= 0 || len(evicted) == 0 {
+		return
+	}
+	leases := append([]admission.LeaseID(nil), evicted...)
+	time.AfterFunc(timeout, func() { d.forceReleaseSuperseded(leases) })
+}
+
+// forceReleaseSuperseded drops the connection of any still-holding
+// superseded lease so a non-cooperating holder cannot pin the daemon
+// open indefinitely. The reused disconnect path releases the lease,
+// promotes waiters, and finalizes an orphaned run row.
+func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
+	d.mu.Lock()
+	if d.shuttingDown {
+		d.mu.Unlock()
+		return
+	}
+	var toClose []*conn
+	for _, id := range leases {
+		rid, ok := d.leaseRun[id]
+		if !ok {
+			continue
+		}
+		if c := d.byRun[rid]; c != nil && c.leaseID == id && c.role == roleHolder {
+			toClose = append(toClose, c)
+		}
+	}
+	d.mu.Unlock()
+	for _, c := range toClose {
+		d.cfg.logf("cancel timeout: force-releasing superseded holder %s", c.runID)
+		go d.handleDisconnect(c)
+	}
 }
 
 // handleChildAttach joins a child run to its parent's live lease so
@@ -515,6 +591,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	if err := writeState(d.layout.state, snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
+	d.cfg.logf("reattach: run %s reclaimed lease %s", requestID, leaseID)
 	_ = c.send(&wingwire.Grant{RunID: requestID, LeaseToken: lease.Token, Resources: c.resources})
 }
 
@@ -548,6 +625,23 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	d.cfg.logf("draining for successor %s", req.SuccessorVersion)
 	_ = c.send(&wingwire.DrainAck{HoldersRemaining: remaining})
 	d.shutdown()
+}
+
+// handleCancelLease answers a control client's cancel-by-run-id request:
+// it signals the run's holding connection to wind down cleanly (the same
+// terminal path as an operator interrupt) and reports whether the run was
+// found. A run the daemon does not hold returns not-found so the caller
+// falls back to the controller.
+func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
+	d.mu.Lock()
+	holder := d.byRun[req.RunID]
+	found := holder != nil && holder.role == roleHolder && holder.finalizable
+	d.mu.Unlock()
+	if found {
+		d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
+		_ = holder.send(&wingwire.Cancel{RunID: req.RunID, Reason: "cancelled via sparkwing runs cancel"})
+	}
+	_ = c.send(&wingwire.CancelLeaseAck{Found: found})
 }
 
 // handleQueueState answers a read-only state query. It creates no lease
@@ -601,6 +695,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		d.touchLocked()
 		d.mu.Unlock()
 		for _, runID := range orphaned {
+			d.cfg.logf("orphan: run %s connection lost without release; finalizing", runID)
 			go d.cfg.FinalizeRun(runID)
 		}
 		d.flush(deliveries, snap)

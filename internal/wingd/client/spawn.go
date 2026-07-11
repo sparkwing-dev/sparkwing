@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -12,6 +13,11 @@ import (
 // daemonLogTailLines is how many trailing daemon-log lines the client
 // folds into an error when a spawned daemon dies before serving.
 const daemonLogTailLines = 8
+
+// daemonLogCapBytes is the size past which the daemon log is rotated once
+// (to d.log.1) at spawn, so a long-lived home cannot grow it without
+// bound. One rotation keeps the previous run's tail for a post-mortem.
+const daemonLogCapBytes = 1 << 20
 
 // defaultSpawn re-execs this binary as a detached `sparkwing wingd run`
 // for home. The daemon's stdout and stderr go to a log file beside its
@@ -30,11 +36,7 @@ func defaultSpawn(home, version string) error {
 		args = append(args, "--version", version)
 	}
 
-	logPath, lerr := daemonLogPath(home)
-	var logF *os.File
-	if lerr == nil {
-		logF, _ = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	}
+	logF := openDaemonLog(home)
 
 	cmd := exec.Command(self, args...)
 	cmd.Stdin = nil
@@ -57,6 +59,33 @@ func defaultSpawn(home, version string) error {
 
 func daemonLogPath(home string) (string, error) {
 	return wingd.LogPath(home)
+}
+
+// openDaemonLog prepares the daemon's log file for a detached spawn: it
+// creates the daemon directory (which the spawned daemon has not yet made
+// when the client opens the file), rotates the log once if it has grown
+// past the cap, and opens it append-only. The spawned daemon's stdout and
+// stderr are pointed at the returned file, so its operational log and any
+// early crash both land at the documented path. Nil on failure leaves the
+// daemon's output discarded rather than blocking the spawn.
+func openDaemonLog(home string) *os.File {
+	path, err := wingd.LogPath(home)
+	if err != nil {
+		return nil
+	}
+	if dir, derr := wingd.StateDir(home); derr == nil {
+		_ = os.MkdirAll(dir, 0o700)
+	} else {
+		_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	}
+	if fi, serr := os.Stat(path); serr == nil && fi.Size() > daemonLogCapBytes {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+	return f
 }
 
 // daemonLogTail returns the last few non-empty lines of home's daemon log,

@@ -104,6 +104,14 @@ code change to unlock.
   warn when an older-pinned pipeline binary is admitting outside the
   daemon through a held box-slot lock -- with the fix (bump that repo's
   sparkwing pin) so a mixed machine cannot silently oversubscribe.
+- **cli:** `sparkwing queue` now explains a host-pressure wait instead of
+  looking idle: the resource table shows each host dimension's reserved
+  margin, measured external (non-sparkwing) load, and what remains
+  grantable, and every queued run carries a one-line blocking reason
+  ("needs 5.0 cores; 4.8 available (external load 3.2)"). The waiting
+  run's stderr queue line and the dashboard queue endpoint carry the same
+  fields, so a queue with free capacity but no holders no longer reads as
+  a bug.
 - **sdk:** `Plan.Resources(...)` and `JobNode.Resources(...)` (plus the
   `JobGroup` equivalent) declare optional cold-start cost hints via
   `sparkwing.Cores(n)` and `sparkwing.MemoryGB(n)`: advisory estimates of
@@ -121,6 +129,24 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** A node-level `OnLimit:CancelOthers` concurrency group
+  now preempts across runs through the daemon instead of silently
+  queueing: the newest arrival evicts the older holder, the superseded
+  run finalizes as cancelled naming the contested key and the superseding
+  run, and a holder that ignores the eviction is force-released once its
+  `CancelTimeout` elapses.
+- **cli:** `sparkwing runs cancel` cancels a local run through the
+  admission daemon first, so the recovery command the queue view
+  recommends for a stalled holder works on a bare machine with no
+  dashboard and no profile. The daemon signals the run to wind down on the
+  same clean path an operator interrupt uses; cluster runs and runs the
+  daemon does not hold still route through the controller.
+- **wingd:** A self-spawned admission daemon reliably writes its log at
+  `<home>/wingd/d.log`. The spawn now creates the daemon directory before
+  opening the log and rotates the log once past a size cap, and the daemon
+  records election, headroom transitions, reattach-grace outcomes,
+  evictions, orphan finalizations, and drains -- the log is no longer
+  empty exactly when someone needs it to debug the daemon.
 - **cli:** A pipeline scaffolded by a source-built `sparkwing` (one with no
   release version stamp, e.g. `go install`ed from a checkout) now pins the
   current SDK release in its generated `.sparkwing/go.mod` instead of a stale

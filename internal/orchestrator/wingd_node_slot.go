@@ -32,10 +32,11 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 	limit := group.Limit()
 	key := scopedGroupKey(group, req.RunID)
 	claim := wingwire.SemaphoreClaim{
-		Name:     key,
-		Cost:     node.ConcurrencyCost(),
-		Capacity: limit.Capacity,
-		Policy:   wingwire.Policy(limit.OnLimit),
+		Name:            key,
+		Cost:            node.ConcurrencyCost(),
+		Capacity:        limit.Capacity,
+		Policy:          wingwire.Policy(limit.OnLimit),
+		CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
 	}
 
 	acquireCtx := ctx

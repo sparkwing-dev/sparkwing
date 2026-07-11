@@ -9,7 +9,62 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+func semReqCancel(runID, key string, cancelTimeoutMS int64) wingwire.AdmissionRequest {
+	return wingwire.AdmissionRequest{
+		RunID:          runID,
+		SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{
+			Name: key, Capacity: 1, Cost: 1,
+			Policy:          wingwire.PolicyCancelOthers,
+			CancelTimeoutMS: cancelTimeoutMS,
+		}},
+	}
+}
+
+// TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder holds a
+// cancel_others semaphore on a connection that never reads its eviction
+// push (a holder ignoring the cancel), then supersedes it. The daemon
+// must force-release the wedged holder within the aggressor's
+// CancelTimeout so it cannot pin the slot open.
+func TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1})
+
+	vcl := ensure(t, home, "v1")
+	if _, err := vcl.Acquire(context.Background(), semReqCancel("victim", "lock", 200), nil); err != nil {
+		t.Fatalf("victim acquire: %v", err)
+	}
+
+	acl := ensure(t, home, "v1")
+	if _, err := acl.Acquire(context.Background(), semReqCancel("aggressor", "lock", 200), nil); err != nil {
+		t.Fatalf("aggressor acquire: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if !holdsRun(qs, "victim") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("victim was never force-released after its cancel timeout")
+}
+
+func holdsRun(qs wingwire.QueueState, runID string) bool {
+	for _, h := range qs.Holders {
+		if h.RunID == runID {
+			return true
+		}
+	}
+	return false
+}
 
 func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 	home := shortHome(t)
