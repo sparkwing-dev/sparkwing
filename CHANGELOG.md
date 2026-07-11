@@ -48,6 +48,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.15.8] - 2026-07-11
+### Fixed
+
+- **sdk:** Cancelling `sparkwing.Bash` or `sparkwing.Exec` now terminates
+  the command's process group on Unix, so shells and tools that spawn
+  children do not leave work running after the Sparkwing command is
+  cancelled. Windows continues to cancel the direct child process.
+
 ## [v0.15.7] - 2026-07-11
 ### Fixed
 
