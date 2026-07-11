@@ -155,6 +155,10 @@ code change to unlock.
 
 ### Fixed
 
+- **sdk:** Cancelling `sparkwing.Bash` or `sparkwing.Exec` now terminates
+  the command's process group on Unix, so shells and tools that spawn
+  children do not leave work running after the Sparkwing command is
+  cancelled. Windows continues to cancel the direct child process.
 - **store:** Upgrading a database whose `pipeline_profiles` table
   predates the `cpu_measured` column now backfills the flag for carried
   rows with a positive measured peak, matching how admission qualifies
