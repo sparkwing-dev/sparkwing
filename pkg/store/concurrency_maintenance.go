@@ -77,6 +77,12 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 	var res ConcurrencyMaintenanceResult
 	var errs []error
 
+	if dropped, err := s.reapStaleConcurrencyWaiters(ctx, opts.WaiterMaxAge); err != nil {
+		errs = append(errs, fmt.Errorf("reap stale waiters: %w", err))
+	} else {
+		res.StaleWaiters = dropped
+	}
+
 	if n, err := s.reconcileConcurrencyKeys(ctx, opts.Lease); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile keys: %w", err))
 	} else {
@@ -100,12 +106,6 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 		errs = append(errs, fmt.Errorf("sweep expired cache: %w", err))
 	} else {
 		res.CacheExpired = n
-	}
-
-	if dropped, err := s.reapStaleConcurrencyWaiters(ctx, opts.WaiterMaxAge); err != nil {
-		errs = append(errs, fmt.Errorf("reap stale waiters: %w", err))
-	} else {
-		res.StaleWaiters = dropped
 	}
 
 	if n, err := s.sweepLRUConcurrencyCache(ctx, opts.CacheCap); err != nil {

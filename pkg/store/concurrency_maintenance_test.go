@@ -55,12 +55,13 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
-	if r := acquireT(t, s, store.AcquireSlotRequest{
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("B: want Queued, got %s", r.Kind)
 	}
+	createLiveRunT(t, s, "rB")
 	time.Sleep(80 * time.Millisecond)
 
 	res, err := s.MaintainConcurrency(ctxT(t), store.ConcurrencyMaintenanceOptions{})
@@ -134,7 +135,7 @@ func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if r := acquireT(t, s, store.AcquireSlotRequest{
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
@@ -163,7 +164,7 @@ func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *tes
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 30 * time.Millisecond,
 	})
-	if r := acquireT(t, s, store.AcquireSlotRequest{
+	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {

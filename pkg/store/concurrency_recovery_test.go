@@ -68,6 +68,7 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
+	createLiveRunT(t, s, "r1")
 	if _, err := s.DB().ExecContext(ctx,
 		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
 		"k", "leader"); err != nil {
@@ -221,7 +222,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	acquireT(t, s, store.AcquireSlotRequest{
+	acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
@@ -241,7 +242,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		t.Fatalf("expected 1 reaped, got %d", len(dropped))
 	}
 
-	acquireT(t, s, store.AcquireSlotRequest{
+	acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})

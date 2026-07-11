@@ -21,6 +21,10 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 	const N = 20
 	const key = "burst-key"
 
+	for i := 0; i <= N; i++ {
+		createLiveRunT(t, s, fmt.Sprintf("run-%d", i))
+	}
+
 	resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: key, HolderID: "holder-0", RunID: "run-0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -94,6 +98,8 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
+	createLiveRunT(t, s, "r1")
+	createLiveRunT(t, s, "r2")
 
 	_, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader-id", RunID: "r1", NodeID: "n",
@@ -134,6 +140,9 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 	const N = 20
 	var wg sync.WaitGroup
 	errs := make(chan error, N)
+	for i := range N {
+		createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
+	}
 
 	for i := range N {
 		wg.Add(1)

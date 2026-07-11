@@ -375,7 +375,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	if reaped, err := txReapTerminalConcurrencyHolders(ctx, tx, req.Key); err != nil {
 		return AcquireSlotResponse{}, err
 	} else if len(reaped) > 0 {
-		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano()); err != nil {
+		if _, err := txPromoteWaitersLocked(ctx, tx, req.Key, nowNS, now.Add(req.Lease).UnixNano(), true); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 	}
@@ -811,10 +811,17 @@ func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expir
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
 		return nil, err
 	}
-	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS)
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, true)
 }
 
-func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+func txPromotePollingWaiter(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
+	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
+		return nil, err
+	}
+	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, false)
+}
+
+func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64, requireLiveRun bool) ([]ConcurrencyWaiter, error) {
 	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -850,14 +857,23 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 	for _, w := range candidates {
 		ids = append(ids, w.RunID)
 	}
-	finished, err := txFinishedRunIDs(ctx, tx, ids)
-	if err != nil {
-		return nil, err
+	var live map[string]bool
+	var finished map[string]bool
+	if requireLiveRun {
+		live, err = txLiveRunningRunIDs(ctx, tx, ids, time.Unix(0, nowNS).Add(-DefaultLeaseDuration).UnixNano())
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		finished, err = txFinishedRunIDs(ctx, tx, ids)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
-		if finished[w.RunID] {
+		if (requireLiveRun && !live[w.RunID]) || (!requireLiveRun && finished[w.RunID]) {
 			if _, derr := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); derr != nil {
 				return nil, derr
 			}
@@ -909,6 +925,47 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 		promoted[i].HolderID = newHolder
 	}
 	return promoted, nil
+}
+
+func txLiveRunningRunIDs(ctx context.Context, tx *storeTx, ids []string, heartbeatCutoff int64) (map[string]bool, error) {
+	seen := make(map[string]bool, len(ids))
+	args := make([]any, 0, len(ids)+2)
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(args))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	args = append(args, runStatusRunning, heartbeatCutoff)
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT id FROM runs
+		  WHERE id IN (`+strings.Join(placeholders, ",")+`)
+		    AND status = ?
+		    AND last_heartbeat_at >= ?`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	live := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		live[id] = true
+	}
+	return live, rows.Err()
 }
 
 // txFinishedRunIDs returns the subset of ids whose runs row exists and has a
@@ -1811,7 +1868,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		}
 		if shouldPromote {
 			now := time.Now()
-			promoted, err := txPromoteWaiters(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+			promoted, err := txPromotePollingWaiter(ctx, tx, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
 			if err != nil {
 				return WaiterResolution{}, err
 			}
