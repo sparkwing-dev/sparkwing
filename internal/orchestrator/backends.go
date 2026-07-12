@@ -530,6 +530,10 @@ func (l localState) AppendEvent(ctx context.Context, runID, nodeID, kind string,
 	return err
 }
 
+func (l localState) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	return l.st.ListEventsAfter(ctx, runID, afterSeq, limit)
+}
+
 type localLogs struct {
 	paths Paths
 }
