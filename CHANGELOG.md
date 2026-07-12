@@ -47,6 +47,11 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Weighted queue admission now backfills smaller waiters when
+  the oldest waiter cannot currently fit, without allowing younger backfilled
+  holders to starve that older waiter.
 
 ## [v0.15.11] - 2026-07-12
 ### Fixed
