@@ -103,6 +103,10 @@ type ResourceSample struct {
 	// MemoryBytes is the peak resident set size of the command's process
 	// subtree, in bytes.
 	MemoryBytes int64
+	// CPUTime is the raw user+system CPU the command's reaped subtree drew.
+	// The same usage lands in the process's RUSAGE_CHILDREN at reap, so the
+	// orchestrator subtracts this from the node sampler to count it once.
+	CPUTime time.Duration
 }
 
 // ResourceReporter absorbs a [ResourceSample] measured when a spawned

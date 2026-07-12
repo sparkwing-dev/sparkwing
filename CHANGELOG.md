@@ -126,10 +126,13 @@ code change to unlock.
   or a shell step is costed by what those subprocesses actually drew
   rather than the near-zero the orchestrator itself uses. Admission
   therefore stops over-admitting subprocess-heavy runs onto one box.
-  Measured costs change materially: existing capacity profiles re-learn
-  from the runs after upgrade. Each spawned command also runs in its own
-  process group, so cancelling a node tears down the whole subtree
-  instead of orphaning forked grandchildren.
+  Measurement also covers subprocesses a pipeline spawns directly, outside
+  the `sparkwing.Bash` / `sparkwing.Exec` wrapper: their CPU is read from
+  the run's `RUSAGE_CHILDREN` so raw `os/exec` work is costed too and no
+  longer measures as zero. Measured costs change materially: existing
+  capacity profiles re-learn from the runs after upgrade. Each spawned
+  command also runs in its own process group, so cancelling a node tears
+  down the whole subtree instead of orphaning forked grandchildren.
 
 ### Added
 

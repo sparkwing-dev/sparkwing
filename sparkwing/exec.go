@@ -460,7 +460,7 @@ func emitCommandResources(ctx context.Context, cmd *exec.Cmd, wall time.Duration
 	if millicores < 0 {
 		millicores = 0
 	}
-	reportResource(ctx, ResourceSample{CPUMillicores: millicores, MemoryBytes: maxRSS})
+	reportResource(ctx, ResourceSample{CPUMillicores: millicores, MemoryBytes: maxRSS, CPUTime: cpu})
 }
 
 // streamLines reads r line-by-line, tees to buf, and pushes each line

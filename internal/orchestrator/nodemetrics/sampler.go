@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +31,23 @@ type Sink interface {
 func CPUAccountingAvailable() bool {
 	_, ok := readCPUTime()
 	return ok
+}
+
+// reportedChildCPU is the cumulative user+system CPU that the per-command
+// wait4 path has already attributed to finished SDK commands. RUSAGE_CHILDREN
+// counts every reaped child, so the sampler subtracts this to avoid counting
+// an SDK command twice; children spawned outside the SDK wrapper leave no
+// entry here and so still surface through the RUSAGE_CHILDREN delta.
+var reportedChildCPU atomic.Int64
+
+// AddReportedChildCPU records CPU a per-command resource report has already
+// accounted for, so the sampler does not re-count the same usage when it
+// lands in RUSAGE_CHILDREN at reap. It is process-wide, matching the scope of
+// RUSAGE_CHILDREN and the v0 sampler.
+func AddReportedChildCPU(d time.Duration) {
+	if d > 0 {
+		reportedChildCPU.Add(int64(d))
+	}
 }
 
 // blindOnce guards the single log line emitted when the platform offers

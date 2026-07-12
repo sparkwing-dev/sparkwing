@@ -531,6 +531,8 @@ type ResourceSample struct {
 	CPUMillicores int64
 
 	MemoryBytes int64
+
+	CPUTime time.Duration
 }
 func RetryAuto() RetryOption
 func RetryBackoff(d time.Duration) RetryOption

@@ -2,6 +2,7 @@ package nodemetrics
 
 import (
 	"context"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +55,71 @@ func TestRun_ReportsNonzeroCPUUnderLoad(t *testing.T) {
 
 	if peak := sink.peakCPU(); peak <= 0 {
 		t.Fatalf("peak CPU millicores = %d, want > 0 after burning a core", peak)
+	}
+}
+
+// TestRun_CountsRawExecChildrenCPU verifies that CPU burned by a child
+// spawned with os/exec outside the SDK command wrapper surfaces in the
+// sampled peak through RUSAGE_CHILDREN, so a raw-exec pipeline cannot measure
+// zero and be over-admitted at the floor. The parent stays near idle while
+// each child burns, so the peak reflects the children rather than self.
+func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
+	if _, ok := readCPUTime(); !ok {
+		t.Skip("no CPU accounting on this platform")
+	}
+	sink := &captureSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		Run(ctx, 40*time.Millisecond, sink)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		cmd := exec.Command("sh", "-c", "while :; do :; done")
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start burner: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+	cancel()
+	<-done
+
+	if peak := sink.peakCPU(); peak <= 300 {
+		t.Fatalf("peak CPU millicores = %d, want > 300 from raw-exec child burn", peak)
+	}
+}
+
+// TestReadCPUTime_SubtractsReportedChildCPU pins the reconciliation: a reaped
+// child raises the cumulative reading through RUSAGE_CHILDREN, and reporting
+// its CPU (as the SDK per-command path does) brings the reading back down, so
+// the same usage is not counted twice.
+func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
+	base, ok := readCPUTime()
+	if !ok {
+		t.Skip("no CPU accounting on this platform")
+	}
+	cmd := exec.Command("sh", "-c", "while :; do :; done")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start burner: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+
+	withChild, _ := readCPUTime()
+	childCPU := withChild - base
+	if childCPU < 100*time.Millisecond {
+		t.Fatalf("reaped child raised reading by %s, want a clear burn via RUSAGE_CHILDREN", childCPU)
+	}
+
+	AddReportedChildCPU(childCPU)
+	reconciled, _ := readCPUTime()
+	if reconciled >= withChild-childCPU/2 {
+		t.Fatalf("reading after reporting = %s, want the child's %s subtracted back out", reconciled, childCPU)
 	}
 }
 
