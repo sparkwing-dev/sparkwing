@@ -258,6 +258,70 @@ func TestEnsureBranchContainsRemote(t *testing.T) {
 	}
 }
 
+func TestWriteSelfModuleSums(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"go.mod":              "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.0\n",
+		"main.go":             "package sparkwing\n",
+		".sparkwing/go.sum":   "github.com/sparkwing-dev/sparkwing v0.1.0 h1:stale\n",
+		".sparkwing/go.mod":   "module sparkwing-pipelines\n\ngo 1.26.0\n",
+		".gitignore":          "",
+		"docs/placeholder.md": "# Placeholder\n",
+	}
+	for name, body := range files {
+		path := filepath.Join(repo, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runTestGit(t, repo, "init")
+	runTestGit(t, repo, "config", "user.name", "Test User")
+	runTestGit(t, repo, "config", "user.email", "test@example.com")
+	runTestGit(t, repo, "add", ".")
+	runTestGit(t, repo, "commit", "-m", "initial")
+
+	const version = "v0.1.0"
+	zipHash, goModHash, err := selfModuleSums(repo, version)
+	if err != nil {
+		t.Fatalf("selfModuleSums: %v", err)
+	}
+	if err := writeSelfModuleSums(repo, version); err != nil {
+		t.Fatalf("writeSelfModuleSums: %v", err)
+	}
+	first, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		sparkwingModulePath + " " + version + " " + zipHash,
+		sparkwingModulePath + " " + version + "/go.mod " + goModHash,
+	} {
+		if !strings.Contains(string(first), want) {
+			t.Fatalf(".sparkwing/go.sum missing %q:\n%s", want, first)
+		}
+	}
+	if strings.Contains(string(first), "h1:stale") {
+		t.Fatalf(".sparkwing/go.sum kept stale self-module sum:\n%s", first)
+	}
+
+	if err := writeSelfModuleSums(repo, version); err != nil {
+		t.Fatalf("repeat writeSelfModuleSums: %v", err)
+	}
+	second, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("second write changed go.sum:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
 func runTestGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

@@ -1,17 +1,23 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
+	"golang.org/x/mod/sumdb/dirhash"
+	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -389,6 +395,9 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
+	if err := writeSelfModuleSums(j.RepoDir, version); err != nil {
+		return err
+	}
 	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
 		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
@@ -417,6 +426,75 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod pin to %s and strip self-replace", version)
 	}
 	return nil
+}
+
+func writeSelfModuleSums(repoDir, version string) error {
+	zipHash, goModHash, err := selfModuleSums(repoDir, version)
+	if err != nil {
+		return fmt.Errorf("release: compute .sparkwing self-module sums: %w", err)
+	}
+	sumPath := filepath.Join(repoDir, ".sparkwing", "go.sum")
+	body, err := os.ReadFile(sumPath)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.sum: %w", err)
+	}
+	linesByText := map[string]struct{}{}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, sparkwingModulePath+" "+version+" ") ||
+			strings.HasPrefix(line, sparkwingModulePath+" "+version+"/go.mod ") {
+			continue
+		}
+		linesByText[line] = struct{}{}
+	}
+	linesByText[fmt.Sprintf("%s %s %s", sparkwingModulePath, version, zipHash)] = struct{}{}
+	linesByText[fmt.Sprintf("%s %s/go.mod %s", sparkwingModulePath, version, goModHash)] = struct{}{}
+
+	lines := make([]string, 0, len(linesByText))
+	for line := range linesByText {
+		lines = append(lines, line)
+	}
+	sort.Strings(lines)
+	if err := os.WriteFile(sumPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("release: write .sparkwing/go.sum: %w", err)
+	}
+	return nil
+}
+
+func selfModuleSums(repoDir, version string) (string, string, error) {
+	tmp, err := os.CreateTemp("", "sparkwing-release-module-*.zip")
+	if err != nil {
+		return "", "", err
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() { _ = tmp.Close() }()
+
+	if err := modzip.CreateFromVCS(tmp, module.Version{Path: sparkwingModulePath, Version: version}, repoDir, "HEAD", ""); err != nil {
+		return "", "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", "", err
+	}
+	zipHash, err := dirhash.HashZip(tmpPath, dirhash.Hash1)
+	if err != nil {
+		return "", "", err
+	}
+
+	goMod, err := os.ReadFile(filepath.Join(repoDir, "go.mod"))
+	if err != nil {
+		return "", "", err
+	}
+	goModHash, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(goMod)), nil
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return zipHash, goModHash, nil
 }
 
 // restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
