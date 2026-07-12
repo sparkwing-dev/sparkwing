@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.12] - 2026-07-12
 ### Fixed
 
 - **admission:** Weighted queue admission now backfills smaller waiters when
