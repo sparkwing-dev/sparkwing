@@ -177,6 +177,8 @@ type ExecError struct {
 	Stderr   string
 	ExitCode int
 	Cause    error
+
+	Terminated string
 }
 func (e *ExecError) Error() string
 func (e *ExecError) Unwrap() error

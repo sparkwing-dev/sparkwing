@@ -479,6 +479,13 @@ type ExecError struct {
     Stderr   string
     ExitCode int
     Cause    error
+    // Terminated names why a started process was killed rather than
+    // exiting on its own: "cancellation" when the run's context ended,
+    // "signal" for any other kill. Empty for a normal exit or a process
+    // that never started. A signalled process reports ExitCode -1, which
+    // collides with ExitNotStarted, so this field -- not ExitCode -- is
+    // what tells a kill apart from a failed launch.
+    Terminated string
 }
 ```
 
