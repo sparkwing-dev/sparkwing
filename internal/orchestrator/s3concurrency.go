@@ -320,6 +320,42 @@ func fitsBudget(used, cost, capacity int) bool {
 	return used <= capacity && cost <= capacity-used
 }
 
+func s3WaiterBudget(w s3Waiter, entryCap, holderMin int) (int, int) {
+	cost := w.Cost
+	if cost <= 0 {
+		cost = 1
+	}
+	capacity := w.DeclaredCapacity
+	if capacity <= 0 {
+		capacity = entryCap
+	}
+	if holderMin > 0 && holderMin < capacity {
+		capacity = holderMin
+	}
+	return cost, capacity
+}
+
+func s3BlockedByYoungerHolders(holders []s3Holder, waiterArrivedNS int64, cost, capacity int, nowNS int64) bool {
+	usedWithoutYounger := 0
+	for _, h := range holders {
+		if h.Superseded || h.LeaseExpiresNS <= nowNS {
+			continue
+		}
+		if s3HolderAdmissionOrderNS(h) > waiterArrivedNS {
+			continue
+		}
+		usedWithoutYounger += h.budgetCost()
+	}
+	return fitsBudget(usedWithoutYounger, cost, capacity)
+}
+
+func s3HolderAdmissionOrderNS(h s3Holder) int64 {
+	if h.QueueArrivedAtNS > 0 {
+		return h.QueueArrivedAtNS
+	}
+	return h.ClaimedAtNS
+}
+
 func findHolder(doc *s3SlotDoc, holderID string) *s3Holder {
 	for i := range doc.Holders {
 		if doc.Holders[i].HolderID == holderID {
@@ -552,9 +588,10 @@ func prune(doc *s3SlotDoc, nowNS int64) {
 	}
 }
 
-// promoteWaiters admits queue/cancel_others waiters in arrival order
-// until the head of line no longer fits, mirroring the store's
-// head-of-line-blocking promotion. Returns whether any were promoted.
+// promoteWaiters admits queue/cancel_others waiters in arrival order. A
+// waiter that does not fit may be bypassed only while older holders are what
+// block it; once younger backfilled holders are the blocker, promotion stops
+// behind that waiter. Returns whether any were promoted.
 func promoteWaiters(doc *s3SlotDoc, now time.Time, lease time.Duration) bool {
 	nowNS := now.UnixNano()
 	entryCap := doc.Capacity
@@ -577,19 +614,12 @@ func promoteWaiters(doc *s3SlotDoc, now time.Time, lease time.Duration) bool {
 	remove := make(map[int]bool)
 	for _, idx := range order {
 		w := doc.Waiters[idx]
-		cost := w.Cost
-		if cost <= 0 {
-			cost = 1
-		}
-		candCap := w.DeclaredCapacity
-		if candCap <= 0 {
-			candCap = entryCap
-		}
-		if holderMin > 0 && holderMin < candCap {
-			candCap = holderMin
-		}
+		cost, candCap := s3WaiterBudget(w, entryCap, holderMin)
 		if !fitsBudget(used, cost, candCap) {
-			break
+			if s3BlockedByYoungerHolders(doc.Holders, w.ArrivedAtNS, cost, candCap, nowNS) {
+				break
+			}
+			continue
 		}
 		hid := w.HolderID
 		if hid == "" {
@@ -735,17 +765,29 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 			effPolicy = store.OnLimitQueue
 		}
 
-		fifoBlocked := false
+		queueBlocked := false
 		if effPolicy == store.OnLimitQueue {
+			currentArrivedNS := int64(0)
+			if current := findWaiter(doc, req.RunID, req.NodeID); current != nil && current.Policy == store.OnLimitQueue {
+				currentArrivedNS = current.ArrivedAtNS
+			}
 			for _, w := range doc.Waiters {
-				if w.Policy == store.OnLimitQueue && (w.RunID != req.RunID || w.NodeID != req.NodeID) {
-					fifoBlocked = true
+				if w.Policy != store.OnLimitQueue || (w.RunID == req.RunID && w.NodeID == req.NodeID) {
+					continue
+				}
+				if currentArrivedNS > 0 && w.ArrivedAtNS >= currentArrivedNS {
+					continue
+				}
+				waiterCost, waiterCap := s3WaiterBudget(w, entryCap, floor)
+				if fitsBudget(used, waiterCost, waiterCap) ||
+					s3BlockedByYoungerHolders(doc.Holders, w.ArrivedAtNS, waiterCost, waiterCap, nowNS) {
+					queueBlocked = true
 					break
 				}
 			}
 		}
 
-		if !fifoBlocked && fitsBudget(used, cost, effCap) {
+		if !queueBlocked && fitsBudget(used, cost, effCap) {
 			expires := now.Add(lease).UnixNano()
 			upsertHolder(doc, s3Holder{
 				HolderID:         holderID,
@@ -821,11 +863,15 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 			resp.LeaseExpiresAt = time.Unix(0, expires)
 			return true, nil
 		default:
+			arrivedNS := nowNS
+			if current := findWaiter(doc, req.RunID, req.NodeID); current != nil && current.Policy == store.OnLimitQueue {
+				arrivedNS = current.ArrivedAtNS
+			}
 			parkWaiter(doc, s3Waiter{
 				RunID:            req.RunID,
 				NodeID:           req.NodeID,
 				HolderID:         holderID,
-				ArrivedAtNS:      nowNS,
+				ArrivedAtNS:      arrivedNS,
 				Policy:           store.OnLimitQueue,
 				CacheKeyHash:     req.CacheKeyHash,
 				Cost:             cost,

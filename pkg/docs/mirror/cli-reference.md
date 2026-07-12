@@ -158,9 +158,10 @@ sparkwing cluster agents list --profile prod -q
 Inspect a concurrency namespace: holders + queue
 
 Shows who currently holds a concurrency namespace's slots
-and the queue of waiters behind it, each with its position
-(0 == next in line). Use it to tell whether a node is wedged
-or simply waiting its turn for a full OnLimit:Queue slot.
+and the queue of waiters behind it, each with its arrival-rank
+position. Weighted admission can run a later fitting waiter before
+an earlier non-fitting waiter, so position is not always run order.
+Use it to tell whether a node is wedged or waiting for budget.
 
 Hits GET /api/v1/concurrency/{namespace}/state on the
 selected profile's controller.
@@ -629,10 +630,10 @@ Calls 'gh api /repos/OWNER/NAME/hooks' and prints id, derived
 pipeline, active flag, last-delivery status, and URL.
 
 The PIPELINE column is parsed from the hook URL path
-(/webhooks/github/<pipeline>). Hooks posting to the legacy
-unscoped /webhooks/github endpoint render as "(unscoped,
-legacy)" so operators can spot them for cleanup. Non-sparkwing
-hooks render as "(non-sparkwing)".
+(/webhooks/github/<pipeline>). Hooks posting to the older
+unscoped /webhooks/github endpoint render as "(unscoped)"
+so operators can spot them for cleanup. Non-sparkwing hooks
+render as "(non-sparkwing)".
 
 ### Flags
 
@@ -4289,4 +4290,3 @@ sparkwing version update --sdk
 # Pin the SDK to a specific release
 sparkwing version update --sdk --version v0.44.0
 ```
-
