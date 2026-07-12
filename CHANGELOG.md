@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.0] - 2026-07-12
 ### Added
 
 - **orchestrator:** The local admission daemon detects its own cgroup
