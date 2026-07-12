@@ -54,6 +54,8 @@ code change to unlock.
   result, instead of inheriting a synthetic cancellation or executor-loss
   failure. Live followers also survive the maintenance sweep long enough to
   promote and re-run the work.
+- **cli:** Source-built `sparkwing pipeline new` scaffolds now fall back to
+  the current SDK release when no build-version stamp is available.
 
 ## [v0.15.8] - 2026-07-11
 ### Fixed
