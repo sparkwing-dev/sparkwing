@@ -36,6 +36,7 @@ func (e *planAdmissionEvictedError) Error() string {
 }
 
 var inheritedPlanObserveInterval = store.DefaultConcurrencyHeartbeatInterval
+var planAdmissionAcquireTimeout = time.Duration(store.DefaultBusyTimeoutMS)*time.Millisecond + 15*time.Second
 
 func planConcurrencyResource(group *sparkwing.ConcurrencyGroup) string {
 	if group.Limit().HostAdmission {
@@ -49,6 +50,12 @@ func appendPlanEvent(ctx context.Context, backends Backends, runID, kind string,
 		return
 	}
 	_ = backends.State.AppendEvent(ctx, runID, "", kind, payload)
+}
+
+func acquirePlanAdmission(ctx context.Context, backends Backends, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	acquireCtx, cancel := context.WithTimeout(ctx, planAdmissionAcquireTimeout)
+	defer cancel()
+	return backends.Concurrency.AcquireSlot(acquireCtx, req)
 }
 
 func planConcurrencyAcquireOrder(plan *sparkwing.Plan, runID string) []sparkwing.PlanConcurrency {
@@ -138,7 +145,7 @@ func acquireOnePlanSlot(
 			return nil, "", planAdmission{}, errors.New("plan Concurrency inherited admission is incomplete")
 		}
 		if inheritedHolderID, ok := inheritedAdmission.holderFor(key); ok {
-			resp, err := backends.Concurrency.AcquireSlot(ctx, store.AcquireSlotRequest{
+			resp, err := acquirePlanAdmission(ctx, backends, store.AcquireSlotRequest{
 				Key:               key,
 				HolderID:          fmt.Sprintf("%s/-", runID),
 				InheritedHolderID: inheritedHolderID,
@@ -187,7 +194,7 @@ func acquireOnePlanSlot(
 		Policy:   string(limit.OnLimit),
 	}
 
-	resp, err := backends.Concurrency.AcquireSlot(ctx, req)
+	resp, err := acquirePlanAdmission(ctx, backends, req)
 	if err != nil {
 		return nil, "", planAdmission{}, fmt.Errorf("plan Concurrency acquire(%q): %w", key, err)
 	}
