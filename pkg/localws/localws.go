@@ -88,14 +88,9 @@ func Run(ctx context.Context, opts Options) error {
 		opts.Addr = "127.0.0.1:4343"
 	}
 
-	if opts.Home != "" {
-		if err := os.Setenv("SPARKWING_HOME", opts.Home); err != nil {
-			return err
-		}
-	}
-	paths, err := orchestrator.DefaultPaths()
+	paths, err := localPaths(opts.Home)
 	if err != nil {
-		return fmt.Errorf("resolve sparkwing home: %w", err)
+		return err
 	}
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure %s: %w", paths.Root, err)
@@ -241,6 +236,17 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		return err
 	}
+}
+
+func localPaths(home string) (orchestrator.Paths, error) {
+	if home != "" {
+		return orchestrator.PathsAt(home), nil
+	}
+	paths, err := orchestrator.DefaultPaths()
+	if err != nil {
+		return orchestrator.Paths{}, fmt.Errorf("resolve sparkwing home: %w", err)
+	}
+	return paths, nil
 }
 
 // backendCapabilitiesStorage builds the storage portion of the

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 )
+
+func TestLocalPaths_ExplicitHomeDoesNotMutateEnvironment(t *testing.T) {
+	original := filepath.Join(t.TempDir(), "original-home")
+	t.Setenv("SPARKWING_HOME", original)
+	explicit := filepath.Join(t.TempDir(), "explicit-home")
+
+	paths, err := localPaths(explicit)
+	if err != nil {
+		t.Fatalf("localPaths: %v", err)
+	}
+	if paths.Root != explicit {
+		t.Fatalf("paths.Root = %q, want explicit home %q", paths.Root, explicit)
+	}
+	if got := os.Getenv("SPARKWING_HOME"); got != original {
+		t.Fatalf("SPARKWING_HOME = %q, want unchanged %q", got, original)
+	}
+}
 
 func TestRun_LogStore_EndToEnd(t *testing.T) {
 	t.Parallel()
