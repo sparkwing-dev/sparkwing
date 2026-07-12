@@ -72,12 +72,13 @@ code change to unlock.
   `broken` with the actual error plus the crossed migration guides.
   Dry-run by default; `--apply` commits per repo, `--verify` runs each
   repo's pre-commit gate, `--repo` scopes to one.
-- **store:** the state database records the minimum sparkwing version
-  required for its schema. A binary meeting a newer database refuses
-  with `this state database needs sparkwing >= vX; you have vY; run
-  sparkwing version update --cli` instead of a bare schema number,
-  falling back to schema numbers for databases stamped before this
-  shipped.
+- **store:** (Breaking) the runs-store schema changes from 6 to 10 and
+  records the minimum sparkwing version required for its schema. A binary
+  meeting a newer database refuses with `this state database needs
+  sparkwing >= vX; you have vY; run sparkwing version update --cli`
+  instead of a bare schema number, falling back to schema numbers for
+  databases stamped before this shipped. See
+  [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md#upgrade-every-pinned-binary-on-a-machine-in-one-sitting).
 
 ### Changed
 
