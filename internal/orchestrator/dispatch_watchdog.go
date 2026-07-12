@@ -60,21 +60,44 @@ func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResu
 	}
 }
 
-// stuckNodeIDs lists plan nodes with no recorded outcome at the
+// stuckNodeIDs lists known nodes with no recorded outcome at the
 // moment the watchdog fired -- the dispatcher's view of "which
-// goroutines never reported back." A node that emitted node_end in
-// the envelope but whose state-store write didn't commit (the SQLite
-// snapshot-conflict failure mode) shows up here too, which is
+// goroutines never reported back." The known set is the static plan
+// plus runtime-scheduled dynamic and recovery nodes, so a wedged
+// fan-out member is named too. A node that emitted node_end in the
+// envelope but whose state-store write didn't commit (the SQLite
+// snapshot-conflict failure mode) shows up here as well, which is
 // exactly the signal an on-call wants: log says done, dispatcher
 // disagrees, here are the candidates.
 func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 	var stuck []string
-	for _, n := range plan.Nodes() {
+	for _, n := range watchdogKnownNodes(plan, state) {
 		if _, ok := state.getOutcome(n.ID()); !ok {
 			stuck = append(stuck, n.ID())
 		}
 	}
 	return stuck
+}
+
+// watchdogKnownNodes unions the static plan with the nodes the
+// dispatcher scheduled at runtime (dynamic fan-out members, recovery
+// runners) that never appear in Plan.Nodes(), deduped by ID.
+func watchdogKnownNodes(plan *sparkwing.Plan, state *dispatchState) []*sparkwing.JobNode {
+	known := plan.Nodes()
+	seen := make(map[string]struct{}, len(known))
+	for _, n := range known {
+		seen[n.ID()] = struct{}{}
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	for id, n := range state.scheduled {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		known = append(known, n)
+	}
+	return known
 }
 
 // parseDispatchWaitTimeout reads SPARKWING_DISPATCH_WAIT_TIMEOUT into

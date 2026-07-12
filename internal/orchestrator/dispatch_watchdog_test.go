@@ -91,6 +91,14 @@ func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 	if !found {
 		t.Errorf("no dispatch_wait_timeout event in run stream")
 	}
+
+	node, gerr := st.GetNode(context.Background(), res.RunID, "wedged")
+	if gerr != nil {
+		t.Fatalf("GetNode wedged: %v", gerr)
+	}
+	if node.Status != "done" || node.Outcome != "cancelled" {
+		t.Errorf("wedged node status/outcome = %q/%q, want done/cancelled after dispatch timeout", node.Status, node.Outcome)
+	}
 }
 
 // TestDispatchWatchdog_NegativeDisables: a negative timeout opts out

@@ -308,6 +308,46 @@ code change to unlock.
   evictions, orphan finalizations, and drains -- the log is no longer
   empty exactly when someone needs it to debug the daemon.
 
+## [v0.15.11] - 2026-07-12
+### Fixed
+
+- **orchestrator:** Dispatch wait timeouts now distinguish bounded
+  admission queue waits from wedged node dispatch, so queued work is not
+  failed while it is still waiting within its configured queue policy.
+- **release:** Release branches can now cut maintenance tags with a remote
+  branch freshness fence, and release commits include the `.sparkwing`
+  module checksums needed for the pinned SDK version.
+
+## [v0.15.10] - 2026-07-12
+### Fixed
+
+- **cli:** `sparkwing runs cancel` without `--profile` now cancels runs in the
+  local state store and releases any local concurrency budget they held or were
+  waiting on, so orphaned daemonless runs no longer leave phantom admission
+  pressure behind.
+- **store:** Added `Store.CancelRun` for local run cancellation that marks the
+  run and unfinished nodes cancelled, then releases concurrency waiters and
+  holders through the same promotion path used by normal waiter cancellation.
+
+## [v0.15.9] - 2026-07-12
+### Fixed
+
+- **store:** Coalesced cache followers now execute fresh when their leader is
+  cancelled, superseded, lost, or otherwise exits without an inheritable node
+  result, instead of inheriting a synthetic cancellation or executor-loss
+  failure. Live followers also survive the maintenance sweep long enough to
+  promote and re-run the work.
+- **cli:** Source-built `sparkwing pipeline new` scaffolds now fall back to
+  the current SDK release when no build-version stamp is available.
+
+## [v0.15.8] - 2026-07-11
+### Fixed
+
+- **sdk:** Cancelling `sparkwing.Bash` or `sparkwing.Exec` now terminates
+  the command's process group on Unix, so shells and tools that spawn
+  children do not leave work running after the Sparkwing command is
+  cancelled. Windows continues to cancel the direct child process.
+
 ## [v0.15.7] - 2026-07-11
 ### Fixed
 

@@ -7,7 +7,7 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 		name   string
 		pinned string
 		latest string
-		wantOK bool // true == no problem reported
+		wantOK bool
 	}{
 		{"current", "v0.15.3", "v0.15.3", true},
 		{"ahead", "v0.15.4", "v0.15.3", true},
@@ -24,6 +24,64 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 			}
 			if !c.wantOK && got == "" {
 				t.Errorf("scaffoldFallbackProblem(%q, %q) reported no problem, want one", c.pinned, c.latest)
+			}
+		})
+	}
+}
+
+func TestShouldCheckLocalReplaceFreshness(t *testing.T) {
+	repoRoot := t.TempDir()
+	cases := []struct {
+		name      string
+		relMod    string
+		module    string
+		local     string
+		options   VersionFreshnessOptions
+		wantCheck bool
+	}{
+		{
+			name:      "regular push checks self replace",
+			relMod:    ".sparkwing/go.mod",
+			module:    sdkModulePath,
+			local:     repoRoot,
+			wantCheck: true,
+		},
+		{
+			name:   "release pipeline allows same-checkout self replace",
+			relMod: ".sparkwing/go.mod",
+			module: sdkModulePath,
+			local:  repoRoot,
+			options: VersionFreshnessOptions{
+				AllowReleaseLineSelfReplace: true,
+			},
+			wantCheck: false,
+		},
+		{
+			name:   "release pipeline still checks other local replaces",
+			relMod: "examples/go.mod",
+			module: sdkModulePath,
+			local:  repoRoot,
+			options: VersionFreshnessOptions{
+				AllowReleaseLineSelfReplace: true,
+			},
+			wantCheck: true,
+		},
+		{
+			name:   "release pipeline still checks other modules",
+			relMod: ".sparkwing/go.mod",
+			module: "github.com/sparkwing-dev/sparks-core",
+			local:  repoRoot,
+			options: VersionFreshnessOptions{
+				AllowReleaseLineSelfReplace: true,
+			},
+			wantCheck: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := shouldCheckLocalReplaceFreshness(c.relMod, c.module, c.local, repoRoot, c.options)
+			if got != c.wantCheck {
+				t.Errorf("shouldCheckLocalReplaceFreshness() = %v, want %v", got, c.wantCheck)
 			}
 		})
 	}

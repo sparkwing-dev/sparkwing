@@ -1,17 +1,23 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
+	"golang.org/x/mod/sumdb/dirhash"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -90,7 +96,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gatePreCommit.Needs(clean)
 
 	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
-		return (&PrePush{}).run(ctx)
+		return (&PrePush{AllowReleaseLineSelfReplace: true}).run(ctx)
 	})
 	gatePrePush.Needs(clean)
 
@@ -355,7 +361,7 @@ const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
 const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
 
 // prepareSelfReplaceJob bumps the sparkwing pin in `.sparkwing/go.mod`
-// to the release version and strips the dogfood self-replace. Runs
+// to the release version and strips the local self-replace. Runs
 // pre-tag so the shipped commit's `.sparkwing/go.mod` is in
 // ready-to-ship shape (no relative-path replace, real version pin).
 // Pairs with restoreSelfReplaceJob which puts the replace back after
@@ -389,12 +395,15 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
-		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	if err := writeSelfModuleSums(ctx, j.RepoDir, version); err != nil {
+		return err
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
-		"release: pin .sparkwing/ to "+version+", drop dogfood self-replace"); err != nil {
-		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+		"release: pin .sparkwing/ to "+version+", drop local self-replace"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
 	}
 	sparkwing.Info(ctx, "bumped .sparkwing/go.mod sparkwing pin -> %s, removed self-replace", version)
 	return nil
@@ -417,6 +426,103 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod pin to %s and strip self-replace", version)
 	}
 	return nil
+}
+
+func writeSelfModuleSums(ctx context.Context, repoDir, version string) error {
+	zipHash, goModHash, err := selfModuleSums(ctx, repoDir, version)
+	if err != nil {
+		return fmt.Errorf("release: compute .sparkwing self-module sums: %w", err)
+	}
+	sumPath := filepath.Join(repoDir, ".sparkwing", "go.sum")
+	body, err := os.ReadFile(sumPath)
+	if err != nil {
+		return fmt.Errorf("release: read .sparkwing/go.sum: %w", err)
+	}
+	linesByText := map[string]struct{}{}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, sparkwingModulePath+" "+version+" ") ||
+			strings.HasPrefix(line, sparkwingModulePath+" "+version+"/go.mod ") {
+			continue
+		}
+		linesByText[line] = struct{}{}
+	}
+	linesByText[fmt.Sprintf("%s %s %s", sparkwingModulePath, version, zipHash)] = struct{}{}
+	linesByText[fmt.Sprintf("%s %s/go.mod %s", sparkwingModulePath, version, goModHash)] = struct{}{}
+
+	lines := make([]string, 0, len(linesByText))
+	for line := range linesByText {
+		lines = append(lines, line)
+	}
+	sort.Strings(lines)
+	if err := os.WriteFile(sumPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("release: write .sparkwing/go.sum: %w", err)
+	}
+	return nil
+}
+
+func selfModuleSums(ctx context.Context, repoDir, version string) (string, string, error) {
+	tmp, err := os.CreateTemp("", "sparkwing-release-module-*.zip")
+	if err != nil {
+		return "", "", err
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() { _ = tmp.Close() }()
+
+	moduleZip, err := createSelfModuleZip(ctx, repoDir, version)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := tmp.Write(moduleZip); err != nil {
+		return "", "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", "", err
+	}
+	zipHash, err := dirhash.HashZip(tmpPath, dirhash.Hash1)
+	if err != nil {
+		return "", "", err
+	}
+
+	goMod, err := os.ReadFile(filepath.Join(repoDir, "go.mod"))
+	if err != nil {
+		return "", "", err
+	}
+	goModHash, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(goMod)), nil
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return zipHash, goModHash, nil
+}
+
+func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, error) {
+	escapedPath, err := module.EscapePath(sparkwingModulePath)
+	if err != nil {
+		return nil, err
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "archive", "--format=zip", "--prefix="+escapedPath+"@"+escapedVersion+"/", "HEAD")
+	cmd.Dir = repoDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return nil, fmt.Errorf("git archive HEAD: %w", err)
+		}
+		return nil, fmt.Errorf("git archive HEAD: %w: %s", err, msg)
+	}
+	return out, nil
 }
 
 // restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
@@ -449,12 +555,12 @@ func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
-		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
-		"chore: restore .sparkwing/ dogfood self-replace for next dev cycle"); err != nil {
-		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+		"chore: restore .sparkwing/ local self-replace for next dev cycle"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
 	}
 	branch, err := currentBranch(ctx, j.RepoDir)
 	if err != nil {
@@ -722,8 +828,10 @@ func (j *pushTagJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: detect current branch: %w", err)
 	}
 	if branch != "main" {
-		return fmt.Errorf("release: refusing to push from branch %q -- release pipeline expects to run on main "+
-			"so the changelog-rewrite commit and the tag land on the default branch", branch)
+		sparkwing.Info(ctx, "release: tagging from branch %q", branch)
+	}
+	if err := ensureBranchContainsRemote(ctx, j.RepoDir, branch); err != nil {
+		return err
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
 		return fmt.Errorf("release: push branch: %w", err)
@@ -750,14 +858,31 @@ func (j *pushTagJob) dryRun(ctx context.Context) error {
 }
 
 // currentBranch returns the abbreviated ref name (e.g. "main") of
-// HEAD. Detached HEAD returns "HEAD" -- the caller refuses the
-// release in that case via the `!= "main"` check.
+// HEAD. Detached HEAD returns "HEAD"; the release branch fence refuses
+// that before pushing a branch or tag.
 func currentBranch(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGitIn(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func ensureBranchContainsRemote(ctx context.Context, repoDir, branch string) error {
+	if branch == "" || branch == "HEAD" {
+		return fmt.Errorf("release: refusing to push from detached HEAD")
+	}
+	if _, err := runGitIn(ctx, repoDir, "fetch", "--quiet", "origin", branch); err != nil {
+		return fmt.Errorf("release: fetch origin/%s before tag push: %w", branch, err)
+	}
+	remoteRef := "origin/" + branch
+	if _, err := runGitIn(ctx, repoDir, "rev-parse", "--verify", "--quiet", remoteRef); err != nil {
+		return fmt.Errorf("release: remote branch %s does not exist; push the branch before releasing", remoteRef)
+	}
+	if _, err := runGitIn(ctx, repoDir, "merge-base", "--is-ancestor", remoteRef, "HEAD"); err != nil {
+		return fmt.Errorf("release: local %s does not contain %s; pull/rebase before releasing", branch, remoteRef)
+	}
+	return nil
 }
 
 func validateReleaseVersion(v string) error {

@@ -861,6 +861,9 @@ func dispatch(
 				},
 			})
 		}
+		for _, nodeID := range stuck {
+			state.markRunCancelled(nodeID)
+		}
 		planReleaseOutcome = "failed"
 		return fmt.Errorf("dispatch_wait_timeout: %d node(s) did not terminate within %s: %v",
 			len(stuck), dispatchWaitTimeout, stuck)
@@ -1320,11 +1323,12 @@ type dispatchState struct {
 	outputs   map[string]any           // per-node typed output (in-process runner)
 	outputsJS map[string][]byte        // per-node raw JSON output (cluster runner)
 	outcomes  map[string]sparkwing.Outcome
-	errors    map[string]string            // per-node error message, set when runner.Result.Err is non-nil
-	failures  map[string]sparkwing.Failure // per-node failure (stage + err), set when a node fails
-	starts    map[string]time.Time         // per-node wall-clock start, stamped at runOneNode entry
-	durations map[string]time.Duration     // per-node wall-clock duration, computed when outcome is recorded
-	claimedBy map[string]string            // recoveryID -> parentID (OnFailure)
+	errors    map[string]string             // per-node error message, set when runner.Result.Err is non-nil
+	failures  map[string]sparkwing.Failure  // per-node failure (stage + err), set when a node fails
+	starts    map[string]time.Time          // per-node wall-clock start, stamped at runOneNode entry
+	durations map[string]time.Duration      // per-node wall-clock duration, computed when outcome is recorded
+	claimedBy map[string]string             // recoveryID -> parentID (OnFailure)
+	scheduled map[string]*sparkwing.JobNode // every node handed to scheduleNode, including runtime-scheduled dynamic and recovery nodes
 
 	// inlineRunner routes Node.IsInline nodes regardless of the
 	// configured Options.Runner so glue work skips pod spin-up.
@@ -1396,6 +1400,7 @@ func newDispatchState(
 		starts:    map[string]time.Time{},
 		durations: map[string]time.Duration{},
 		claimedBy: map[string]string{},
+		scheduled: map[string]*sparkwing.JobNode{},
 		debug:     debug,
 	}
 	if ipr, ok := r.(*InProcessRunner); ok {
@@ -1830,6 +1835,9 @@ func (s *dispatchState) lookupDoneCh(id string) (chan struct{}, bool) {
 
 // scheduleNode spawns the per-node dispatch goroutine.
 func (s *dispatchState) scheduleNode(node *sparkwing.JobNode) {
+	s.mu.Lock()
+	s.scheduled[node.ID()] = node
+	s.mu.Unlock()
 	done := s.ensureDoneCh(node.ID())
 	s.wg.Add(1)
 	go func() {

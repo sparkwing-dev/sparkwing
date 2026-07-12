@@ -23,7 +23,7 @@ changelog.Needs(discover, gatePreCommit, gatePrePush)   // was: discover, clean
 bumpSelf.Needs(discover, gatePreCommit, gatePrePush)    // was: discover, clean
 ```
 
-Total addition: 4 lines of wire-up. No new job type. The gate nodes use the exact same `PreCommit.Work` / `PrePush.run` implementations a human invocation does -- single source of truth, zero drift risk.
+Total addition: 4 lines of wire-up. No new job type. The gate nodes use the same `PreCommit.Work` / `PrePush.run` check set a human invocation does -- single source of truth, zero drift risk. Release-line tags also fence the current branch against its remote ref before pushing the tag, so an intentional maintenance release is checked against the branch it will publish rather than unrelated newer default-branch work.
 
 ### Resulting DAG
 
