@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.3] - 2026-07-12
 ### Added
 
 - **orchestrator:** Operator recovery controls for bad measurements.
