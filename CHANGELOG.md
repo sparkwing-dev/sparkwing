@@ -253,6 +253,10 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** Plan-level concurrency admission now bounds the initial
+  store acquire call before dispatch. A wedged local store or admission
+  backend surfaces as a concrete plan-concurrency acquire error instead
+  of leaving a run heartbeat alive with every node still pending.
 - **orchestrator:** A same-repo child trigger (a `RunAndAwait` to a
   sibling pipeline) now dispatches from the running parent's own compiled
   binary, so it works from a project directory that has no git identity
