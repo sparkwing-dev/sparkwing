@@ -47,6 +47,22 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **orchestrator:** Operator recovery controls for bad measurements.
+  `SPARKWING_BUDGET` gains an `ignore-external` term (usable alone or with
+  a cap) that tells admission to stop subtracting measured non-sparkwing
+  load -- the escape hatch for a misreading host sensor. `sparkwing queue`
+  still shows the real external reading and adds an `external: ignored
+  (operator setting)` line, and contention detection keeps using the real
+  saturation, so observability stays truthful. `sparkwing runs stats
+  --reset --pipeline <name>` clears a pipeline's learned capacity profile
+  (samples, peaks, waits, contention tally) so it re-learns from a cold
+  start after one freak run poisoned it, preserving any `.Resources()` pin
+  and printing what it dropped; `--reset --all --yes` resets every
+  pipeline. The daemon now logs a one-line note when a requested budget
+  exceeds machine capacity and is clamped.
+
 ### Fixed
 
 - **admission:** A run held in local admission now re-emits its wait
@@ -111,19 +127,6 @@ changes and upgrade steps.
 
 ### Added
 
-- **orchestrator:** Operator recovery controls for bad measurements.
-  `SPARKWING_BUDGET` gains an `ignore-external` term (usable alone or with
-  a cap) that tells admission to stop subtracting measured non-sparkwing
-  load -- the escape hatch for a misreading host sensor. `sparkwing queue`
-  still shows the real external reading and adds an `external: ignored
-  (operator setting)` line, and contention detection keeps using the real
-  saturation, so observability stays truthful. `sparkwing runs stats
-  --reset --pipeline <name>` clears a pipeline's learned capacity profile
-  (samples, peaks, waits, contention tally) so it re-learns from a cold
-  start after one freak run poisoned it, preserving any `.Resources()` pin
-  and printing what it dropped; `--reset --all --yes` resets every
-  pipeline. The daemon now logs a one-line note when a requested budget
-  exceeds machine capacity and is clamped.
 - **orchestrator:** The local admission daemon detects its own cgroup
   limits at startup and clamps capacity to the container it runs in, so a
   6 GiB container on a 24 GiB host plans against 6 GiB rather than the host
