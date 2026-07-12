@@ -191,7 +191,7 @@ func TestRunPoolHeartbeat_ReapedCancelsNode(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		runPoolHeartbeat(ctx, cli, "run-1", "node-1", "holder-1",
-			time.Minute, 5*time.Millisecond, killNode, "test", discardSlog())
+			time.Minute, 5*time.Millisecond, killNode, "test", nil, discardSlog())
 		close(done)
 	}()
 
@@ -228,7 +228,7 @@ func TestRunPoolHeartbeat_SilenceCancelsNode(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		runPoolHeartbeat(ctx, cli, "run-1", "node-1", "holder-1",
-			time.Minute, 10*time.Millisecond, killNode, "test", discardSlog())
+			time.Minute, 10*time.Millisecond, killNode, "test", nil, discardSlog())
 		close(done)
 	}()
 

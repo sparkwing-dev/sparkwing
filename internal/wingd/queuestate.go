@@ -99,6 +99,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			h.CostSource = c.costSource
 			h.ExpectedDurationMS = c.expectedDurationMS
 			h.DriftWarning = c.driftWarning
+			h.Origin = c.origin
 			if c.stalled {
 				h.Stalled = true
 				h.Recovery = stallRecoveryCommand(ls.RequestID)
@@ -154,6 +155,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			waiter.CostSource = c.costSource
 			waiter.ExpectedDurationMS = c.expectedDurationMS
 			waiter.DriftWarning = c.driftWarning
+			waiter.Origin = c.origin
 		}
 		qs.Waiters = append(qs.Waiters, waiter)
 	}
@@ -177,6 +179,7 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		if c := d.byRun[member]; c != nil {
 			child.Pipeline = c.pipeline
 			child.Repo = c.repo
+			child.Origin = c.origin
 			if !c.startAt.IsZero() {
 				child.ElapsedMS = now.Sub(c.startAt).Milliseconds()
 			}

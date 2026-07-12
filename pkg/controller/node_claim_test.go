@@ -48,7 +48,7 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	c := client.New(srv.URL, nil)
 	ctx := context.Background()
 
-	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second)
+	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second, nil)
 	if err != nil || n != nil {
 		t.Fatalf("expected (nil, nil) on empty queue, got (%v, %v)", n, err)
 	}
@@ -58,7 +58,7 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
 
-	n, err = c.ClaimNode(ctx, "pod-1", nil, 30*time.Second)
+	n, err = c.ClaimNode(ctx, "pod-1", nil, 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
@@ -69,11 +69,11 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 		t.Fatalf("claimed_by: %q", n.ClaimedBy)
 	}
 
-	if err := c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-1", 30*time.Second); err != nil {
+	if err := c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-1", 30*time.Second, nil); err != nil {
 		t.Fatalf("HeartbeatNodeClaim (holder): %v", err)
 	}
 
-	err = c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 30*time.Second)
+	err = c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 30*time.Second, nil)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
 	if !revoked {
 		t.Fatal("revoke should succeed on ready, unclaimed node")
 	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second)
+	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n, err := c.ClaimNode(ctx, "plain-runner", nil, 30*time.Second)
+	n, err := c.ClaimNode(ctx, "plain-runner", nil, 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("ClaimNode plain: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 		t.Fatalf("plain runner claim: %+v", n)
 	}
 
-	n, err = c.ClaimNode(ctx, "special-runner", []string{"special"}, 30*time.Second)
+	n, err = c.ClaimNode(ctx, "special-runner", []string{"special"}, 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("ClaimNode labeled: %v", err)
 	}

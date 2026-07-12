@@ -490,6 +490,7 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 type Token struct {

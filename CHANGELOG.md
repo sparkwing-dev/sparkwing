@@ -133,6 +133,29 @@ code change to unlock.
 
 ### Added
 
+- **runner:** A registered runner on a box that also runs local pipelines
+  can route controller-dispatched work through the box's local admission
+  daemon, so both work sources share one FIFO queue and one arbiter
+  instead of competing blindly. Set `local_admission: true` in
+  `agent.yaml` (or `--local-admission` on `sparkwing-runner runner`);
+  each claimed node then submits the same admission request a local run
+  does. The runner advertises the daemon's live free capacity (cores,
+  memory, queue depth) to the controller on every claim and heartbeat --
+  surfaced in the agents view -- so the scheduler mostly dispatches work
+  that fits, with local admission as the backstop. `local_reserve`
+  (`SPARKWING_LOCAL_RESERVE`, e.g. `2,4gb` or `10%`) holds capacity back
+  from what the runner advertises. Leases carry an origin (local vs
+  controller) shown as an `ORIGIN` column in `sparkwing queue`.
+- **controller:** In cluster/runner-pod mode, runner pod requests and
+  limits are sized from the same resolution the local daemon uses: an
+  explicit `.Resources()` pin wins, else the node's measured peak
+  cores/memory, else a conservative default. Limits follow a policy of
+  generous CPU headroom (compressible) and tight memory headroom (OOMs).
+  The controller folds finished cluster runs' measured metrics into
+  per-node and rollup profiles and records a `resource_pin_drift` event
+  when an applied pin has drifted far from the measured peak -- the same
+  under-/over-pinned warning the local system emits, now load-bearing
+  where the kube scheduler believes the declaration.
 - **cli:** The admission daemon detects and surfaces *contended* runs --
   a run measurably slower than its own measured p99 while the host is
   saturated by non-sparkwing load, distinguished from a wedged holder

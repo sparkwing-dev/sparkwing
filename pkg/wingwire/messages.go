@@ -1,5 +1,22 @@
 package wingwire
 
+// Origin identifies who dispatched a run competing for admission on a
+// box, so a shared daemon's queue can say whether a row is the operator's
+// own local work or work a controller sent to a registered runner. It is
+// display metadata only; every requester is equal before the ledger.
+type Origin string
+
+const (
+	// OriginLocal marks a run launched on this box directly -- a CLI
+	// `sparkwing run` or a local trigger. The default when a request names
+	// no origin.
+	OriginLocal Origin = "local"
+	// OriginController marks controller-dispatched work claimed by a
+	// registered runner on this box, admitted through the same daemon as
+	// local work.
+	OriginController Origin = "controller"
+)
+
 // Hello is the client's opening message on a fresh connection: its
 // protocol major and binary version. The daemon answers with
 // [HelloAck]. A client whose ProtocolMajor is ahead of the daemon's
@@ -125,6 +142,11 @@ type AdmissionRequest struct {
 	// pin has drifted from its measured profile. The daemon echoes it into
 	// the queue view; it never affects admission.
 	DriftWarning string `json:"drift_warning,omitempty"`
+	// Origin names who dispatched this run -- the operator's own local work
+	// or a controller that sent it to a registered runner on this box. Empty
+	// is treated as [OriginLocal]. Display metadata only; the daemon treats
+	// every requester equally.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
@@ -280,6 +302,10 @@ type Holder struct {
 	// backs the end-of-run attribution regardless of the contended verdict;
 	// zero for reattached holders whose accounting did not survive a restart.
 	SaturatedShare float64 `json:"saturated_share,omitempty"`
+	// Origin names who dispatched this holder's run -- local work or
+	// controller-dispatched work on a registered runner. Empty for local
+	// runs and for leases whose origin did not survive a daemon restart.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // Waiter is one run queued for admission, as reported in a
@@ -325,6 +351,9 @@ type Waiter struct {
 	// durations and costs. Nil when any run ahead lacks a measured duration,
 	// so no fabricated ETA is shown.
 	ExpectedStartMS *int64 `json:"expected_start_ms,omitempty"`
+	// Origin names who dispatched this waiter's run -- local work or
+	// controller-dispatched work on a registered runner. Empty is local.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // QueueState is the daemon's full accounting snapshot: every capacity

@@ -15,6 +15,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// RunWingd serves the `wingd run` subcommand for any binary that engages
+// local admission. The wingd client spawns the daemon by re-execing the
+// current binary, so a binary that requests admission -- including the
+// cluster runner and laptop agent when they route controller work through
+// the local daemon -- must be able to serve `wingd run` too.
+func RunWingd(args []string) error {
+	return runWingdCLI(args)
+}
+
 // runWingdCLI serves the hidden `<binary> wingd run` subcommand of
 // compiled pipeline binaries. The wingd client library spawns the local
 // admission daemon by re-execing the current binary, so any binary that

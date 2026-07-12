@@ -289,6 +289,27 @@ UPDATE pipeline_profiles SET pinned_cores = ?, pinned_memory_bytes = ?
 	})
 }
 
+// UpsertProfilePin records a pin for a (pipeline, node), creating a
+// measurement-less row when none exists yet so a cluster runner can report
+// what it applied before any run has been profiled. A later
+// [Store.RecordProfileObservation] folds measurements into the same row
+// without disturbing the pin; a pin-only row (zero samples) never trips a
+// drift warning, which needs measured peaks. Unlike [Store.SetProfilePin],
+// this is never a no-op.
+func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	return retryOnBusy(func() error {
+		_, err := s.exec(ctx, `
+INSERT INTO pipeline_profiles
+    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes)
+VALUES (?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?)
+ON CONFLICT (pipeline, node_id) DO UPDATE SET
+    pinned_cores        = excluded.pinned_cores,
+    pinned_memory_bytes = excluded.pinned_memory_bytes`,
+			pipeline, nodeID, time.Now().UnixNano(), cores, memoryBytes)
+		return err
+	})
+}
+
 // profileColumns is the shared SELECT column list every profile read
 // uses, kept in one place so scanProfile stays in lockstep with it.
 const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count`

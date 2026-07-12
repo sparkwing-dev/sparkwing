@@ -31,11 +31,19 @@ import (
 // holderID is the lock/claim holder id (e.g. "pod:<runID>:<nodeID>"
 // or "runner:<hostname>"). token is the bearer for controller + logs;
 // empty = no auth header.
+//
+// admission is non-nil only for a registered runner on a box that also
+// owns a local admission daemon: the claimed node is submitted to that
+// daemon and held under a lease for its whole execution, exactly like a
+// local run, so controller work and local work share one arbiter. In a
+// Kubernetes pod the scheduler already admitted the work, so the pod's
+// run-node entrypoint passes nil and the daemon is never engaged.
 func RunNodeOnce(
 	ctx context.Context,
 	controllerURL, logsURL, runID, nodeID, holderID, token string,
 	delegate sparkwing.Logger,
 	logger *slog.Logger,
+	admission *LocalAdmission,
 ) (runner.Result, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -385,6 +393,14 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("node %q not found in plan for %s (static nodes + all ExpandFrom generators exhausted)", nodeID, run.Pipeline)
 	}
 
+	if admission != nil {
+		lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node)
+		if aerr != nil {
+			return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
+		}
+		defer lease.release()
+	}
+
 	r := NewInProcessRunner(backends)
 	start := time.Now()
 	res := r.RunNode(ctx, runner.Request{
@@ -448,7 +464,7 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
-		selectLocalRenderer(), slog.Default())
+		selectLocalRenderer(), slog.Default(), nil)
 	if err != nil {
 		return err
 	}

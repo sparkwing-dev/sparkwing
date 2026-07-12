@@ -45,6 +45,12 @@ type LocalAdmission struct {
 	// run's live lease (zero additional host budget) instead of
 	// submitting a fresh admission request.
 	ParentLeaseToken string
+	// Origin names who dispatched the run this admission covers -- the
+	// operator's own local work or a controller that sent it to a
+	// registered runner on this box. Empty is treated as local; the
+	// runner-mode path sets it to [wingwire.OriginController] so the shared
+	// daemon's queue attributes contended work to whoever launched it.
+	Origin wingwire.Origin
 	// Stderr receives the single-line queue status while the run waits
 	// for admission. Nil uses os.Stderr.
 	Stderr io.Writer
@@ -171,6 +177,7 @@ func (la *LocalAdmission) admitRun(
 		Semaphores:         planSemaphoreClaims(plan, runID),
 		CostSource:         string(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
+		Origin:             la.Origin,
 	}
 	if prof != nil {
 		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
@@ -195,6 +202,70 @@ func (la *LocalAdmission) admitRun(
 	return rl, admitProceed, nil
 }
 
+// admitNode submits one host-resource admission request for a single
+// node claimed from a controller and blocks until the local daemon grants
+// it. It is the runner-mode counterpart of admitRun: a box that both runs
+// local pipelines and serves a controller routes controller-dispatched
+// nodes through the same daemon and queue as its own work, tagged with
+// [wingwire.OriginController]. The charge is resolved from the node's own
+// .Resources() pin, else the measured profile, else the conservative
+// default; the node draws no plan semaphores, so its at-limit behaviour is
+// always FIFO queueing. The returned lease is held until node end.
+func (la *LocalAdmission) admitNode(
+	ctx context.Context,
+	backends Backends,
+	pipeline, runID, nodeID string,
+	node *sparkwing.JobNode,
+) (*runLease, error) {
+	res, _, _ := resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	req := wingwire.AdmissionRequest{
+		RunID:              runID + "/" + nodeID,
+		Pipeline:           pipeline,
+		Repo:               currentRepoShortName(),
+		PID:                os.Getpid(),
+		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
+		CostSource:         string(res.Source),
+		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
+		Origin:             la.Origin,
+	}
+	lease, outcome, err := la.acquireBlocking(ctx, backends, req.RunID, req)
+	if err != nil || outcome != admitProceed {
+		return nil, err
+	}
+	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
+	return rl, nil
+}
+
+// resolveNodeHostCost resolves the host charge and provenance for one
+// node: its explicit .Resources() pin wins, else the node's measured
+// profile once it has enough samples, else the conservative default. A
+// missing local store (the common runner-mode case, where state is a
+// controller client) simply means no measured profile, so the pin-or-
+// default order still holds.
+func resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift) {
+	pin := nodePin(node)
+	var profile *store.PipelineProfile
+	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
+		if p, err := st.GetPipelineProfile(ctx, pipeline, nodeID); err == nil {
+			profile = p
+		}
+	}
+	res := capacity.Resolve(pin, profile, runtime.NumCPU())
+	return res, profile, capacity.CheckDrift(pin, profile)
+}
+
+// nodePin flattens a single node's explicit .Resources() declaration to a
+// capacity.Pin, or nil when the node declared nothing.
+func nodePin(node *sparkwing.JobNode) *capacity.Pin {
+	if node == nil {
+		return nil
+	}
+	if h := node.ResourceHints(); h != nil && (h.Cores > 0 || h.MemoryBytes > 0) {
+		return &capacity.Pin{Cores: h.Cores, MemoryBytes: h.MemoryBytes}
+	}
+	return nil
+}
+
 // attachChildRun joins the parent's live lease (zero budget), then
 // acquires any plan-level semaphores the parent lease does not already
 // hold through a second, semaphores-only request.
@@ -216,6 +287,7 @@ func (la *LocalAdmission) attachChildRun(
 		Repo:             currentRepoShortName(),
 		PID:              os.Getpid(),
 		ParentLeaseToken: la.ParentLeaseToken,
+		Origin:           la.Origin,
 	}, nil)
 	if err != nil {
 		cl.Close()

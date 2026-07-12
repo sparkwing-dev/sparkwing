@@ -25,6 +25,8 @@ type AdmissionRequest struct {
 	SampleCount int
 
 	DriftWarning string
+
+	Origin Origin
 }
 type BudgetState struct {
 	Cores float64
@@ -132,6 +134,8 @@ type Holder struct {
 	ContentionReason string
 
 	SaturatedShare float64
+
+	Origin Origin
 }
 type HostResources struct {
 	Cores float64
@@ -143,6 +147,9 @@ type Message interface {
 	wireType() MessageType
 }
 type MessageType string
+type Origin string
+const OriginController Origin = "controller"
+const OriginLocal Origin = "local"
 type Policy string
 const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
@@ -238,4 +245,6 @@ type Waiter struct {
 	DriftWarning string
 
 	ExpectedStartMS *int64
+
+	Origin Origin
 }

@@ -443,6 +443,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.expectedP99MS = req.ExpectedP99MS
 	c.sampleCount = req.SampleCount
 	c.driftWarning = req.DriftWarning
+	c.origin = req.Origin
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
@@ -579,6 +580,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
 	c.finalizable = true
+	c.origin = req.Origin
 	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
 	if existing, ok := d.leaseMembers[leaseID]; ok {

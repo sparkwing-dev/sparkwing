@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -25,7 +26,7 @@ type claimResp struct {
 	err  error
 }
 
-func (s *stubClaimer) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error) {
+func (s *stubClaimer) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error) {
 	idx := int(s.calls.Add(1)) - 1
 	if idx >= len(s.responses) {
 		<-ctx.Done()
@@ -70,7 +71,7 @@ func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := runPoolLoop(ctx, cfg, stub, exec, discardLogger()); err != nil {
+	if err := runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger()); err != nil {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 
@@ -106,7 +107,7 @@ func TestRunPoolLoop_MaxClaimsZeroIsUnlimited(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	if err := runPoolLoop(ctx, cfg, stub, exec, discardLogger()); err != nil {
+	if err := runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger()); err != nil {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 
@@ -139,7 +140,7 @@ func TestRunPoolLoop_EmptyPollsDoNotTickCounter(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := runPoolLoop(ctx, cfg, stub, exec, discardLogger()); err != nil {
+	if err := runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger()); err != nil {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 

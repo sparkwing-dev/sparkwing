@@ -8,6 +8,13 @@ type Agent struct {
 	Status        string
 	ActiveJobs    []string
 	MaxConcurrent int
+
+	Headroom *AgentHeadroom
+}
+type AgentHeadroom struct {
+	Cores       float64
+	MemoryBytes int64
+	QueueDepth  int
 }
 func AuditFields(ctx context.Context) []slog.Attr
 type Authenticator struct {

@@ -31,6 +31,15 @@ type AgentConfig struct {
 	Poll          time.Duration `yaml:"poll"`
 	Lease         time.Duration `yaml:"lease"`
 	Heartbeat     time.Duration `yaml:"heartbeat"`
+	// LocalAdmission routes controller-dispatched nodes through this box's
+	// local admission daemon, so they share one FIFO queue with the
+	// operator's own local runs. Set it on a box that both runs local
+	// pipelines and serves this controller.
+	LocalAdmission bool `yaml:"local_admission"`
+	// LocalReserve is host capacity held back from what the agent
+	// advertises to the controller (daemon budget grammar, e.g. "2,4gb" or
+	// "10%"), so local work keeps room the controller will not fill.
+	LocalReserve string `yaml:"local_reserve"`
 }
 
 // LoadAgentConfig reads an agent.yaml from path. Missing file is an
@@ -66,6 +75,9 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 		return out, fmt.Errorf("agent.yaml: spawn_policy %q is not implemented yet (only return-to-queue is supported in v0)", out.SpawnPolicy)
 	default:
 		return out, fmt.Errorf("agent.yaml: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
+	}
+	if _, err := parseReserve(out.LocalReserve); err != nil {
+		return out, fmt.Errorf("agent.yaml: local_reserve: %w", err)
 	}
 	if out.MaxConcurrent < 1 {
 		out.MaxConcurrent = 1
@@ -165,5 +177,7 @@ func RunAgentCLI(args []string) error {
 		Lease:             cfg.Lease,
 		HeartbeatInterval: cfg.Heartbeat,
 		SourceName:        "agent",
+		LocalAdmission:    cfg.LocalAdmission,
+		LocalReserve:      cfg.LocalReserve,
 	}, logger)
 }

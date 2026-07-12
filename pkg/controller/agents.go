@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// runnerHeadroomStale bounds how old an advertised-headroom report may be
+// before the agents view drops it: a runner that stopped heartbeating is
+// no longer a trustworthy source of free-capacity figures. It matches the
+// 1h agents window so a runner that still shows active claims but stopped
+// advertising simply loses its headroom line.
+const runnerHeadroomStale = time.Hour
+
 // Agent matches web/src/lib/api.ts:Agent. There's no explicit agent
 // registration yet, so presence is inferred from recent node claims.
 type Agent struct {
@@ -17,6 +24,19 @@ type Agent struct {
 	Status        string            `json:"status"` // "busy" | "idle"
 	ActiveJobs    []string          `json:"active_jobs"`
 	MaxConcurrent int               `json:"max_concurrent"`
+	// Headroom is the runner's most recently advertised free capacity --
+	// the local admission daemon's grantable cores/memory after the
+	// operator's reserve, plus the daemon's queue depth. Nil for a runner
+	// that never advertised (it engages no local daemon, or predates the
+	// headroom protocol), or when its last report has gone stale.
+	Headroom *AgentHeadroom `json:"headroom,omitempty"`
+}
+
+// AgentHeadroom is a runner's advertised free capacity in the agents view.
+type AgentHeadroom struct {
+	Cores       float64 `json:"cores"`
+	MemoryBytes int64   `json:"memory_bytes"`
+	QueueDepth  int     `json:"queue_depth"`
 }
 
 // handleAgents returns agents inferred from the nodes table's
@@ -93,7 +113,7 @@ SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(le
 		for r := range h.activeRuns {
 			active = append(active, r)
 		}
-		out = append(out, Agent{
+		agent := Agent{
 			Name:          h.name,
 			Type:          h.kind,
 			Labels:        map[string]string{},
@@ -101,7 +121,15 @@ SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(le
 			Status:        status,
 			ActiveJobs:    active,
 			MaxConcurrent: 0,
-		})
+		}
+		if hr, ok := s.runnerHeadroom.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
+			agent.Headroom = &AgentHeadroom{
+				Cores:       hr.Cores,
+				MemoryBytes: hr.MemoryBytes,
+				QueueDepth:  hr.QueueDepth,
+			}
+		}
+		out = append(out, agent)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

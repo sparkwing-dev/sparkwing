@@ -131,6 +131,10 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if runErr == nil && run != nil {
 		observeRunFinish(run.Pipeline, body.Status, time.Since(run.StartedAt))
+		refreshed, rerr := s.store.GetRun(r.Context(), runID)
+		if rerr == nil {
+			s.foldRunProfiles(r.Context(), refreshed)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -410,10 +414,10 @@ type triggerReqGit struct {
 }
 
 type triggerReq struct {
-	Pipeline      string                  `json:"pipeline"`
-	Args          map[string]string       `json:"args,omitempty"`
-	Trigger       triggerReqMeta          `json:"trigger,omitempty"` // see triggerReqMeta below
-	Git           triggerReqGit           `json:"git,omitempty"`
+	Pipeline string            `json:"pipeline"`
+	Args     map[string]string `json:"args,omitempty"`
+	Trigger  triggerReqMeta    `json:"trigger,omitempty"` // see triggerReqMeta below
+	Git      triggerReqGit     `json:"git,omitempty"`
 	// ParentRunID identifies the run that spawned this trigger via
 	// sparkwing.RunAndAwait; the controller walks the parent
 	// chain to reject cycles before persisting.
@@ -432,7 +436,6 @@ type triggerResp struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
 }
-
 
 func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	if len(env) == 0 {
@@ -932,6 +935,35 @@ type claimNodeReq struct {
 	// candidate nodes whose needs_labels is a subset of this set
 	// (AND). Empty/absent => only unlabeled nodes are claimable.
 	Labels []string `json:"labels,omitempty"`
+	// Headroom, when present, is the runner's live free capacity as its
+	// local admission daemon reports it (after the operator's reserve).
+	// The controller records it for the agents view; it never gates the
+	// claim, so an older runner that omits it claims exactly as before.
+	Headroom *claimHeadroom `json:"headroom,omitempty"`
+}
+
+// claimHeadroom is a runner's advertised free capacity carried on a node
+// claim or heartbeat: grantable cores and memory plus the daemon's queue
+// depth.
+type claimHeadroom struct {
+	Cores       float64 `json:"cores"`
+	MemoryBytes int64   `json:"memory_bytes"`
+	QueueDepth  int     `json:"queue_depth"`
+}
+
+// recordAdvertisedHeadroom folds a claim/heartbeat body's headroom, when
+// present, into the runner headroom registry keyed by the holder's name.
+func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
+	if h == nil {
+		return
+	}
+	name, _ := holderName(holderID)
+	s.runnerHeadroom.record(name, runnerHeadroom{
+		Cores:       h.Cores,
+		MemoryBytes: h.MemoryBytes,
+		QueueDepth:  h.QueueDepth,
+		UpdatedAt:   time.Now(),
+	})
 }
 
 // handleClaimNode atomically hands the oldest ready, unclaimed node
@@ -947,6 +979,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
+	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	n, err := s.store.ClaimNextReadyNode(r.Context(), body.HolderID, lease, body.Labels)
 	if err != nil {
@@ -1016,6 +1049,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
+	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, body.HolderID, lease); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {

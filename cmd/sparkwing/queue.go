@@ -120,14 +120,15 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce)
 	}
 	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			h.RunID, orDash(h.Pipeline), orDash(h.Repo), fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
+		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			h.RunID, orDash(h.Pipeline), orDash(h.Repo), orDash(originWord(h.Origin)),
+			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
 			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(h.Parent))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			wt.Position, wt.RunID, orDash(wt.Pipeline), orDash(wt.Repo), fmtCost(wt.Resources),
-			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			wt.Position, wt.RunID, orDash(wt.Pipeline), orDash(wt.Repo), orDash(originWord(wt.Origin)),
+			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
 	}
 	return nil
@@ -169,9 +170,9 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
+	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
 	if len(qs.Holders) == 0 {
-		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t")
 	}
 	for _, h := range qs.Holders {
 		run := h.RunID
@@ -184,21 +185,22 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		if h.Contended {
 			run += " (contended)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
-			fmtElapsed(h.ElapsedMS), fmtHolderCost(h), orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
+			orDash(originWord(h.Origin)), fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
+			orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
 	}
 	_ = tw.Flush()
 
 	fmt.Fprintln(out)
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
-			orDash(wt.Repo), fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
-			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
+			orDash(wt.Repo), orDash(originWord(wt.Origin)), fmtCost(wt.Resources), orDash(wt.CostSource),
+			fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
 
@@ -478,6 +480,16 @@ func joinKeys(keys []string) string {
 		out += k
 	}
 	return out
+}
+
+// originWord renders a run's dispatch origin for the queue view. An empty
+// origin means the run was launched locally, so it reads "local"; an
+// unrecognized value passes through verbatim rather than being hidden.
+func originWord(o wingwire.Origin) string {
+	if o == "" {
+		return string(wingwire.OriginLocal)
+	}
+	return string(o)
 }
 
 // stalledWord is the holder's health word for the plain view: stalled
