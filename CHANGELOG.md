@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** Dispatch wait timeouts now distinguish bounded
+  admission queue waits from wedged node dispatch, so queued work is not
+  failed while it is still waiting within its configured queue policy.
+- **release:** Release branches can now cut maintenance tags with a remote
+  branch freshness fence, and release commits include the `.sparkwing`
+  module checksums needed for the pinned SDK version.
 
 ## [v0.15.10] - 2026-07-12
 ### Fixed
