@@ -1106,3 +1106,105 @@ export async function releaseNode(
     throw new Error(`release failed: ${res.status}`);
   }
 }
+
+// --- Local admission queue ---
+//
+// Mirrors the Go wingwire.QueueState shape that GET /api/v1/queue
+// returns -- the same payload behind `sparkwing queue -o json`. Field
+// names track the Go json tags. Every field beyond the core rows is
+// optional so an older daemon that predates a field still decodes; a
+// consumer that doesn't recognize a field ignores it.
+
+// HostResources is the CPU/memory charge a run draws.
+export interface HostResources {
+  cores?: number;
+  memory_bytes?: number;
+}
+
+// QueueResource is one capacity row: a host dimension ("cores",
+// "memory") or a semaphore, with capacity and the amount held. The
+// headroom fields (reserved margin, measured external load, grantable
+// available) are present only for the host dimensions and only on
+// daemons new enough to report them.
+export interface QueueResource {
+  key: string;
+  capacity: number;
+  held: number;
+  reserved?: number;
+  external?: number;
+  available?: number;
+}
+
+// QueueHolder is one run currently holding admission. An attached child
+// (parent set) rides its parent's lease and draws no budget of its own.
+export interface QueueHolder {
+  run_id: string;
+  pipeline?: string;
+  repo?: string;
+  parent?: string;
+  elapsed_ms: number;
+  resources: HostResources;
+  semaphores?: string[];
+  cost_source?: string;
+  expected_duration_ms?: number;
+  drift_warning?: string;
+  stalled?: boolean;
+  recovery?: string;
+}
+
+// QueueWaiter is one run queued for admission. Waiters appear in arrival
+// order; position is the 1-based place, 1 admitted next.
+export interface QueueWaiter {
+  run_id: string;
+  pipeline?: string;
+  repo?: string;
+  position: number;
+  resources: HostResources;
+  semaphores?: string[];
+  waiting_on?: string[];
+  blocking_reason?: string;
+  waiting_ms?: number;
+  cost_source?: string;
+  expected_duration_ms?: number;
+  drift_warning?: string;
+  // Estimated wait until admission, in ms from now. Null when a run
+  // ahead lacks a measured duration, so no ETA is fabricated.
+  expected_start_ms?: number | null;
+}
+
+// QueueEvents summarizes the daemon's rolling window of admission
+// outcomes -- the data behind the panel's one-line health summary.
+export interface QueueEvents {
+  window_ms: number;
+  runs: number;
+  median_wait_ms: number;
+  evictions?: { key: string; count: number }[];
+  queue_timeouts?: number;
+  cancellations?: number;
+}
+
+// QueueState is the daemon's full accounting snapshot. The endpoint
+// returns a well-formed empty QueueState with 200 when no daemon is
+// running, so an empty payload is the "nothing queued" signal, not an
+// error.
+export interface QueueState {
+  resources?: QueueResource[];
+  holders?: QueueHolder[];
+  waiters?: QueueWaiter[];
+  expected_clear_ms?: number | null;
+  daemon_version?: string;
+  daemon_uptime_ms?: number;
+  events?: QueueEvents | null;
+}
+
+// getQueue reads the local admission daemon's queue state. Returns null
+// only when the dashboard endpoint itself is unreachable; a running
+// daemon with nothing queued, and no daemon at all, both return a
+// (possibly empty) QueueState.
+export async function getQueue(): Promise<QueueState | null> {
+  const res = await authFetch(`${API_URL}/api/v1/queue`, {
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
+}
