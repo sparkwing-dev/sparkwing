@@ -1584,7 +1584,15 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	if err != nil {
 		return false, nil, nil, err
 	}
-	if released && coalesceFollowersCanInherit(outcome, "") {
+	leaderFailureReason := ""
+	if released && outcome == "failed" {
+		if _, reason, _, err := txNodeOutcome(ctx, tx, runID, nodeID); err != nil {
+			return false, nil, nil, err
+		} else {
+			leaderFailureReason = reason
+		}
+	}
+	if released && coalesceFollowersCanInherit(outcome, leaderFailureReason) {
 		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
 			return false, nil, nil, err
@@ -1666,7 +1674,7 @@ func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID
 
 func coalesceFollowersCanInherit(outcome, failureReason string) bool {
 	switch outcome {
-	case "success", "failed", "skipped", "skipped_concurrent", "cached":
+	case "success", "failed", "satisfied", "skipped", "skipped-concurrent", "cached":
 		if failureReason == FailureAgentLost {
 			return false
 		}
@@ -1674,6 +1682,21 @@ func coalesceFollowersCanInherit(outcome, failureReason string) bool {
 	default:
 		return false
 	}
+}
+
+func txNodeOutcome(ctx context.Context, tx *storeTx, runID, nodeID string) (outcome, failureReason string, found bool, err error) {
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT outcome, failure_reason FROM nodes WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID,
+	).Scan(&outcome, &failureReason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return outcome, failureReason, true, nil
 }
 
 // txPark parks an arrival as a waiter -- the single site that writes
@@ -1902,13 +1925,8 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		if waiter.Policy == OnLimitCoalesce {
 			leaderRun := waiter.LeaderRunID
 			leaderNode := waiter.LeaderNodeID
-			var leaderOutcome, leaderReason string
-			err := tx.QueryRowContext(
-				ctx,
-				`SELECT outcome, failure_reason FROM nodes WHERE run_id = ? AND node_id = ?`,
-				leaderRun, leaderNode,
-			).Scan(&leaderOutcome, &leaderReason)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			leaderOutcome, leaderReason, _, err := txNodeOutcome(ctx, tx, leaderRun, leaderNode)
+			if err != nil {
 				return WaiterResolution{}, err
 			}
 			if coalesceFollowersCanInherit(leaderOutcome, leaderReason) {
@@ -2013,14 +2031,15 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 	}
 
 	if leaderRunID != "" {
-		var leaderOutcome, leaderReason string
-		err := tx.QueryRowContext(
-			ctx,
-			`SELECT outcome, failure_reason FROM nodes WHERE run_id = ? AND node_id = ?`,
-			leaderRunID, leaderNodeID,
-		).Scan(&leaderOutcome, &leaderReason)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		leaderOutcome, leaderReason, _, err := txNodeOutcome(ctx, tx, leaderRunID, leaderNodeID)
+		if err != nil {
 			return WaiterResolution{}, err
+		}
+		if !coalesceFollowersCanInherit(leaderOutcome, leaderReason) {
+			if err := tx.Commit(); err != nil {
+				return WaiterResolution{}, err
+			}
+			return WaiterResolution{Status: WaiterCancelled}, nil
 		}
 		if err := tx.Commit(); err != nil {
 			return WaiterResolution{}, err
