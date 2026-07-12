@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.10] - 2026-07-12
 ### Fixed
 
 - **cli:** `sparkwing runs cancel` without `--profile` now cancels runs in the
