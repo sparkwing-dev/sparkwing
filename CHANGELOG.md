@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.4] - 2026-07-12
 ### Fixed
 
 - **admission:** Measured host costs that exceed the largest request the
