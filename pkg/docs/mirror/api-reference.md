@@ -27,6 +27,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
+| `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
+| `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `nodes.claim` |
 | `GET` | `/api/v1/pool` | `runs.read` |
 | `POST` | `/api/v1/pool/checkout` | `admin` |
 | `POST` | `/api/v1/pool/heartbeat` | `admin` |

@@ -167,7 +167,7 @@ func coreDrift(pinCores, measuredCores float64, samples int) *Drift {
 		MeasuredCores: measuredCores,
 		SampleCount:   samples,
 		Message: fmt.Sprintf(
-			"resource pin: %s cores; measured p99 %s cores over %d runs — update or remove the pin",
+			"resource pin: %s cores; measured p99 %s cores over %d runs - update or remove the pin",
 			trimFloat(pinCores), trimFloat(measuredCores), samples),
 	}
 }
@@ -182,7 +182,7 @@ func memoryDrift(pinBytes, measuredBytes int64, samples int) *Drift {
 		Class:       class,
 		SampleCount: samples,
 		Message: fmt.Sprintf(
-			"resource pin: %s memory; measured p99 %s over %d runs — update or remove the pin",
+			"resource pin: %s memory; measured p99 %s over %d runs - update or remove the pin",
 			gib(pinBytes), gib(measuredBytes), samples),
 	}
 }

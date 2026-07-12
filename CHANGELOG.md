@@ -49,11 +49,6 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
-- **admission:** Weighted queue admission for store-backed concurrency
-  groups regains the backfill fix that shipped in v0.15.12 and was absent
-  from the v0.16.0 tag line: smaller waiters backfill when the oldest
-  waiter cannot currently fit, and younger backfilled holders cannot
-  starve that older waiter.
 - **admission:** The local admission daemon now backfills a smaller run
   past a queued heavier one when the free budget fits it, and stops
   backfilling once a holder younger than the waiting run is what keeps it
@@ -63,14 +58,28 @@ code change to unlock.
 - **docs:** The v0.16.0 migration guide now documents the runs-store
   schema move to version 10 (one-way migration; an older binary refuses
   a newer database by naming the version it needs), which the published
-  v0.16.0 tag's embedded copy lacked.
+  v0.16.0 and v0.16.1 tags' embedded copies lack.
+
+## [v0.16.1] - 2026-07-12
+
+Published from the same release line as v0.16.0, so this tag also predates
+the daemon-ledger backfill extension and the reconciliation entries above;
+the next release is a strict superset.
+
+### Fixed
+
+- **admission:** Weighted queue admission can backfill a later runnable
+  waiter behind an earlier waiter that is too large for the current
+  remaining budget, while still stopping once a younger backfilled holder
+  is what blocks the older waiter. Re-arriving queued work also preserves
+  its original arrival order, so a polling waiter does not lose its place.
 
 ## [v0.16.0] - 2026-07-12
 
 Published from a release line that branched before the weighted-queue-capacity
-backfill fix reached the mainline, so this tag ships without it; that fix, and
-its extension to the local admission daemon's ledger, land in the next release,
-which is a strict superset of everything below.
+backfill fix reached the mainline, so this tag ships without it. That fix
+landed in v0.16.1; its extension to the local admission daemon's ledger lands
+in the next release, which is a strict superset of everything below.
 
 This release carried the concurrency rebuild. Local runs are admitted by the
 local admission daemon (`sparkwingd`) instead of box slots and store-side

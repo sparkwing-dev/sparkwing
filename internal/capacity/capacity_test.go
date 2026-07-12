@@ -169,7 +169,7 @@ func TestCheckDrift_MessageCarriesExactFix(t *testing.T) {
 	if d == nil {
 		t.Fatal("expected drift")
 	}
-	want := "resource pin: 2 cores; measured p99 9.1 cores over 12 runs — update or remove the pin"
+	want := "resource pin: 2 cores; measured p99 9.1 cores over 12 runs - update or remove the pin"
 	if d.Message != want {
 		t.Errorf("Message = %q, want %q", d.Message, want)
 	}
