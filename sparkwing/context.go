@@ -88,7 +88,44 @@ const (
 	keyStep
 	keyPipelineConfig
 	keyPipelineSecrets
+	keyResourceReporter
 )
+
+// ResourceSample is one measured resource reading for a spawned command:
+// the CPU it drew, averaged over its wall-clock span, and the peak resident
+// memory of its process subtree. Reported to the orchestrator so a node's
+// profile reflects the work its child processes did, not just the
+// orchestrator's own goroutine.
+type ResourceSample struct {
+	// CPUMillicores is the command's average CPU draw over its run, in
+	// thousandths of a core (1000 == one core busy for the whole span).
+	CPUMillicores int64
+	// MemoryBytes is the peak resident set size of the command's process
+	// subtree, in bytes.
+	MemoryBytes int64
+}
+
+// ResourceReporter absorbs a [ResourceSample] measured when a spawned
+// command finishes. The orchestrator installs one per node so subprocess
+// cost folds into the node's measured profile.
+type ResourceReporter func(ResourceSample)
+
+// WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec
+// report each finished command's measured CPU and memory. The orchestrator
+// wires this per node; pipeline authors do not call it.
+func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, keyResourceReporter, fn)
+}
+
+// reportResource delivers a sample to the installed reporter, if any.
+func reportResource(ctx context.Context, sample ResourceSample) {
+	if fn, ok := ctx.Value(keyResourceReporter).(ResourceReporter); ok && fn != nil {
+		fn(sample)
+	}
+}
 
 // LoggerFromContext returns the active logger or a no-op if none is set.
 func LoggerFromContext(ctx context.Context) Logger {

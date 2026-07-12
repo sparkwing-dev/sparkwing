@@ -87,6 +87,18 @@ code change to unlock.
 - **controller:** (Breaking) The trigger API drops the `plan_admission`
   request block; spawned children no longer inherit plan-level
   concurrency holders through the controller.
+- **sdk:** Resource measurement now covers a run's whole process tree,
+  not just the orchestrator. Each `sparkwing.Bash` / `sparkwing.Exec`
+  command's CPU and peak memory -- read from its `wait4` rusage, which
+  aggregates the command's entire reaped subtree -- fold into the node's
+  measured profile, so a pipeline whose work is a test suite, a linter,
+  or a shell step is costed by what those subprocesses actually drew
+  rather than the near-zero the orchestrator itself uses. Admission
+  therefore stops over-admitting subprocess-heavy runs onto one box.
+  Measured costs change materially: existing capacity profiles re-learn
+  from the runs after upgrade. Each spawned command also runs in its own
+  process group, so cancelling a node tears down the whole subtree
+  instead of orphaning forked grandchildren.
 
 ### Added
 
