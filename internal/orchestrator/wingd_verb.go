@@ -15,6 +15,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// RunWingd serves the `wingd run` subcommand for any binary that engages
+// local admission. The wingd client spawns the daemon by re-execing the
+// current binary, so a binary that requests admission -- including the
+// cluster runner and laptop agent when they route controller work through
+// the local daemon -- must be able to serve `wingd run` too.
+func RunWingd(args []string) error {
+	return runWingdCLI(args)
+}
+
 // runWingdCLI serves the hidden `<binary> wingd run` subcommand of
 // compiled pipeline binaries. The wingd client library spawns the local
 // admission daemon by re-execing the current binary, so any binary that
@@ -26,6 +35,7 @@ func runWingdCLI(args []string) error {
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: the compiled SDK version)")
+	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -33,9 +43,18 @@ func runWingdCLI(args []string) error {
 	if v == "" {
 		v = sparkwingModuleVersion()
 	}
+	budgetStr := *budget
+	if budgetStr == "" {
+		budgetStr = os.Getenv("SPARKWING_BUDGET")
+	}
+	parsedBudget, err := wingd.ParseBudget(budgetStr)
+	if err != nil {
+		return err
+	}
 	d, err := wingd.New(wingd.Config{
 		Home:        *home,
 		Version:     v,
+		Budget:      parsedBudget,
 		FinalizeRun: NewOrphanRunFinalizer(*home),
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",

@@ -43,6 +43,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
 - `func WithFailure(ctx context.Context, f Failure) context.Context` -- WithFailure returns a context carrying f, read back by a failure-aware recovery callback via FailureFromContext.
 - `func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context` -- WithResolvedArgs installs a resolved-args map on the context so sparkwing.Arg[T] / ArgOrDefault can read it from any step body.
+- `func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context` -- WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec report each finished command's measured CPU and memory.
 - `func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context` -- WithSecretResolver returns a derived ctx carrying the given resolver.
 - `func WithStep(ctx context.Context, stepID string) context.Context` -- WithStep installs the active step ID into ctx so the breadcrumb on records emitted *inside* the step body carries it.
 - `func WorkDir() string` -- WorkDir returns the pipeline working directory (the repo root).
@@ -1182,6 +1183,31 @@ type ResourceHints struct {
     // MemoryBytes is the pinned peak resident memory in bytes. Authors
     // express this via [MemoryGB]; it is stored in bytes. Zero means
     // memory was not pinned.
+    MemoryBytes int64
+}
+```
+
+
+### type ResourceReporter
+
+ResourceReporter absorbs a ResourceSample measured when a spawned command finishes.
+
+```
+type ResourceReporter func(ResourceSample)
+```
+
+
+### type ResourceSample
+
+ResourceSample is one measured resource reading for a spawned command: the CPU it drew, averaged over its wall-clock span, and the peak resident memory of its process subtree.
+
+```
+type ResourceSample struct {
+    // CPUMillicores is the command's average CPU draw over its run, in
+    // thousandths of a core (1000 == one core busy for the whole span).
+    CPUMillicores int64
+    // MemoryBytes is the peak resident set size of the command's process
+    // subtree, in bytes.
     MemoryBytes int64
 }
 ```

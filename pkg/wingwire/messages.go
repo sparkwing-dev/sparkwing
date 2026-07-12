@@ -1,5 +1,22 @@
 package wingwire
 
+// Origin identifies who dispatched a run competing for admission on a
+// box, so a shared daemon's queue can say whether a row is the operator's
+// own local work or work a controller sent to a registered runner. It is
+// display metadata only; every requester is equal before the ledger.
+type Origin string
+
+const (
+	// OriginLocal marks a run launched on this box directly -- a CLI
+	// `sparkwing run` or a local trigger. The default when a request names
+	// no origin.
+	OriginLocal Origin = "local"
+	// OriginController marks controller-dispatched work claimed by a
+	// registered runner on this box, admitted through the same daemon as
+	// local work.
+	OriginController Origin = "controller"
+)
+
 // Hello is the client's opening message on a fresh connection: its
 // protocol major and binary version. The daemon answers with
 // [HelloAck]. A client whose ProtocolMajor is ahead of the daemon's
@@ -111,10 +128,25 @@ type AdmissionRequest struct {
 	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
 	// no measured duration exists yet, so the run contributes no ETA.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
+	// ExpectedP99MS is the pipeline's measured p99 run duration in
+	// milliseconds. The daemon flags a holder as contended only once its
+	// elapsed time runs well past this baseline, so a run that is merely at
+	// the slow end of its own distribution is never mistaken for throttled.
+	// Zero means no measured p99, which disqualifies the run from flagging.
+	ExpectedP99MS int64 `json:"expected_p99_ms,omitempty"`
+	// SampleCount is how many runs back the duration percentiles. The
+	// contention detector requires a minimum count so an unprofiled or
+	// barely-profiled run is never flagged.
+	SampleCount int `json:"sample_count,omitempty"`
 	// DriftWarning, when set, is a one-line note that this run's explicit
 	// pin has drifted from its measured profile. The daemon echoes it into
 	// the queue view; it never affects admission.
 	DriftWarning string `json:"drift_warning,omitempty"`
+	// Origin names who dispatched this run -- the operator's own local work
+	// or a controller that sent it to a registered runner on this box. Empty
+	// is treated as [OriginLocal]. Display metadata only; the daemon treats
+	// every requester equally.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
@@ -257,6 +289,23 @@ type Holder struct {
 	// holder. Set only when Stalled is true; it never names a
 	// destructive host verb.
 	Recovery string `json:"recovery,omitempty"`
+	// Contended marks a holder that is measurably slower than its profile
+	// while the host is saturated -- throttled by contention rather than
+	// wedged (which is Stalled) or legitimately long. It is a flag only;
+	// the daemon never acts on a contended holder.
+	Contended bool `json:"contended,omitempty"`
+	// ContentionReason is a one-line explanation set when Contended is
+	// true ("elapsed 12m0s past p99 8m30s; host saturated 62% of the run").
+	ContentionReason string `json:"contention_reason,omitempty"`
+	// SaturatedShare is the fraction (0..1) of this holder's observed host
+	// samples during which the host was saturated by external load. It
+	// backs the end-of-run attribution regardless of the contended verdict;
+	// zero for reattached holders whose accounting did not survive a restart.
+	SaturatedShare float64 `json:"saturated_share,omitempty"`
+	// Origin names who dispatched this holder's run -- local work or
+	// controller-dispatched work on a registered runner. Empty for local
+	// runs and for leases whose origin did not survive a daemon restart.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // Waiter is one run queued for admission, as reported in a
@@ -302,6 +351,9 @@ type Waiter struct {
 	// durations and costs. Nil when any run ahead lacks a measured duration,
 	// so no fabricated ETA is shown.
 	ExpectedStartMS *int64 `json:"expected_start_ms,omitempty"`
+	// Origin names who dispatched this waiter's run -- local work or
+	// controller-dispatched work on a registered runner. Empty is local.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // QueueState is the daemon's full accounting snapshot: every capacity
@@ -325,6 +377,28 @@ type QueueState struct {
 	// Events summarizes the daemon's recent admission outcomes. Nil for
 	// older daemons that do not keep the window.
 	Events *EventsWindow `json:"events,omitempty"`
+	// Budget describes the machine budget capping the ledger below the
+	// host total, so the queue view can show the constraint. Nil when no
+	// budget is set (the full machine is available).
+	Budget *BudgetState `json:"budget,omitempty"`
+}
+
+// BudgetState reports the machine budget behind a [QueueState]: the
+// capped host capacity the ledger admits into, against the machine total
+// it was measured from. It is present only when a budget is configured.
+type BudgetState struct {
+	// Cores is the budgeted core cap the ledger admits into.
+	Cores float64 `json:"cores"`
+	// MachineCores is the host's full measured core count.
+	MachineCores float64 `json:"machine_cores"`
+	// MemoryBytes is the budgeted memory cap the ledger admits into.
+	MemoryBytes int64 `json:"memory_bytes"`
+	// MachineMemoryBytes is the host's full measured memory.
+	MachineMemoryBytes int64 `json:"machine_memory_bytes"`
+	// Enforce reports whether the budget is hardened at the OS level
+	// (a cgroup on Linux, background scheduling on macOS) in addition to
+	// capping admission.
+	Enforce bool `json:"enforce,omitempty"`
 }
 
 // EventsWindow summarizes the daemon's rolling window of admission
@@ -349,6 +423,9 @@ type EventsWindow struct {
 	// cancelled (operator cancel, interrupt, or a waiter's process
 	// going away).
 	Cancellations int `json:"cancellations,omitempty"`
+	// Contended is how many runs the daemon flagged as throttled by host
+	// contention while they held admission in the window.
+	Contended int `json:"contended,omitempty"`
 }
 
 // EvictionCount is one contested key's eviction tally in an

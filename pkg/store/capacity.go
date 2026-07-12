@@ -84,6 +84,11 @@ type PipelineProfile struct {
 	// the pipeline's source. Meaningful only on the rollup row.
 	PinnedCores       float64 `json:"pinned_cores,omitempty"`
 	PinnedMemoryBytes int64   `json:"pinned_memory_bytes,omitempty"`
+	// ContendedCount is how many of this pipeline's runs the admission
+	// daemon flagged as throttled by host contention. Against SampleCount
+	// it gives the pipeline's contended share. Meaningful only on the
+	// rollup row.
+	ContendedCount int `json:"contended_count,omitempty"`
 }
 
 // ProfileObservation is one run's contribution to a profile: how long the
@@ -257,6 +262,20 @@ func (s *Store) loadWaitWindow(ctx context.Context, pipeline string) ([]int64, e
 	return doc.Samples, nil
 }
 
+// RecordContention increments a pipeline's tally of runs the admission
+// daemon flagged as throttled by host contention. It updates the rollup
+// row only and is a no-op when no profile exists yet -- a run cannot be
+// flagged contended without the measured baseline that first creates the
+// row, so the increment always lands.
+func (s *Store) RecordContention(ctx context.Context, pipeline string) error {
+	return retryOnBusy(func() error {
+		_, err := s.exec(ctx,
+			`UPDATE pipeline_profiles SET contended_count = contended_count + 1
+			  WHERE pipeline = ? AND node_id = ''`, pipeline)
+		return err
+	})
+}
+
 // SetProfilePin records the explicit .Resources() pin last seen for a
 // (pipeline, node), so a reader can judge the pin against the measured
 // peaks. It updates only the pin columns of an existing profile row and is
@@ -270,9 +289,30 @@ UPDATE pipeline_profiles SET pinned_cores = ?, pinned_memory_bytes = ?
 	})
 }
 
+// UpsertProfilePin records a pin for a (pipeline, node), creating a
+// measurement-less row when none exists yet so a cluster runner can report
+// what it applied before any run has been profiled. A later
+// [Store.RecordProfileObservation] folds measurements into the same row
+// without disturbing the pin; a pin-only row (zero samples) never trips a
+// drift warning, which needs measured peaks. Unlike [Store.SetProfilePin],
+// this is never a no-op.
+func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	return retryOnBusy(func() error {
+		_, err := s.exec(ctx, `
+INSERT INTO pipeline_profiles
+    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes)
+VALUES (?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?)
+ON CONFLICT (pipeline, node_id) DO UPDATE SET
+    pinned_cores        = excluded.pinned_cores,
+    pinned_memory_bytes = excluded.pinned_memory_bytes`,
+			pipeline, nodeID, time.Now().UnixNano(), cores, memoryBytes)
+		return err
+	})
+}
+
 // profileColumns is the shared SELECT column list every profile read
 // uses, kept in one place so scanProfile stays in lockstep with it.
-const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count`
+const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count`
 
 // GetPipelineProfile returns the (pipeline, node) profile, or nil when no
 // runs have been measured for it yet.
@@ -357,10 +397,11 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		samplesRaw       []byte
 		waitP50, waitP99 int64
 		waitCount        int
+		contendedCount   int
 	)
 	dests := append(lead,
 		&p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos,
-		&pinCores, &pinMem, &samplesRaw, &waitP50, &waitP99, &waitCount)
+		&pinCores, &pinMem, &samplesRaw, &waitP50, &waitP99, &waitCount, &contendedCount)
 	if err := scan(dests...); err != nil {
 		return nil, err
 	}
@@ -377,6 +418,7 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		WaitP50:           time.Duration(waitP50) * time.Millisecond,
 		WaitP99:           time.Duration(waitP99) * time.Millisecond,
 		WaitSampleCount:   waitCount,
+		ContendedCount:    contendedCount,
 	}
 	annotateResourcePercentiles(prof, samplesRaw)
 	return prof, nil

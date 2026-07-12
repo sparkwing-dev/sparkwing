@@ -27,6 +27,44 @@ func sampleQueueState() wingwire.QueueState {
 	}
 }
 
+func TestRenderQueue_PrettyShowsOrigin(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{RunID: "local-run", Pipeline: "build", Origin: wingwire.OriginLocal,
+				Resources: wingwire.HostResources{Cores: 2}},
+			{RunID: "ctrl-run", Pipeline: "deploy", Origin: wingwire.OriginController,
+				Resources: wingwire.HostResources{Cores: 4}},
+		},
+		Waiters: []wingwire.Waiter{
+			{RunID: "ctrl-waiter", Pipeline: "test", Position: 1, Origin: wingwire.OriginController,
+				Resources: wingwire.HostResources{Cores: 8}},
+		},
+	}
+	var buf bytes.Buffer
+	if err := renderQueue(&buf, qs, "pretty"); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ORIGIN") {
+		t.Errorf("pretty view missing ORIGIN column:\n%s", out)
+	}
+	if !strings.Contains(out, "controller") {
+		t.Errorf("controller origin not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "local") {
+		t.Errorf("local origin not rendered:\n%s", out)
+	}
+}
+
+func TestOriginWord_EmptyIsLocal(t *testing.T) {
+	if got := originWord(""); got != "local" {
+		t.Errorf(`originWord(""): got %q want "local"`, got)
+	}
+	if got := originWord(wingwire.OriginController); got != "controller" {
+		t.Errorf("originWord(controller): got %q want controller", got)
+	}
+}
+
 func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	want := sampleQueueState()
 	var buf bytes.Buffer

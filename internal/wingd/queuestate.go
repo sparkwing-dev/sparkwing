@@ -99,15 +99,32 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			h.CostSource = c.costSource
 			h.ExpectedDurationMS = c.expectedDurationMS
 			h.DriftWarning = c.driftWarning
+			h.Origin = c.origin
 			if c.stalled {
 				h.Stalled = true
 				h.Recovery = stallRecoveryCommand(ls.RequestID)
+			}
+			if c.contended {
+				h.Contended = true
+				h.ContentionReason = c.contentionReason
+			}
+			if c.holdSampledMS > 0 {
+				h.SaturatedShare = float64(c.holdSaturatedMS) / float64(c.holdSampledMS)
 			}
 		}
 		qs.Holders = append(qs.Holders, h)
 		qs.Holders = append(qs.Holders, d.attachedChildHoldersLocked(ls, now)...)
 	}
 	qs.Events = d.events.summary(now)
+	if d.cfg.Budget.HasCap() {
+		qs.Budget = &wingwire.BudgetState{
+			Cores:              d.budgetCores,
+			MachineCores:       d.machineCores,
+			MemoryBytes:        int64(d.budgetMemory),
+			MachineMemoryBytes: int64(d.machineMemory),
+			Enforce:            d.cfg.Budget.Enforcing(),
+		}
+	}
 
 	remaining := map[string]float64{}
 	for _, r := range qs.Resources {
@@ -138,6 +155,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			waiter.CostSource = c.costSource
 			waiter.ExpectedDurationMS = c.expectedDurationMS
 			waiter.DriftWarning = c.driftWarning
+			waiter.Origin = c.origin
 		}
 		qs.Waiters = append(qs.Waiters, waiter)
 	}
@@ -161,6 +179,7 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		if c := d.byRun[member]; c != nil {
 			child.Pipeline = c.pipeline
 			child.Repo = c.repo
+			child.Origin = c.origin
 			if !c.startAt.IsZero() {
 				child.ElapsedMS = now.Sub(c.startAt).Milliseconds()
 			}

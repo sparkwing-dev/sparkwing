@@ -3,6 +3,8 @@ package cluster
 import (
 	"fmt"
 	"os"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 // Main is the entry point for the sparkwing-runner binary
@@ -21,6 +23,8 @@ func Main() {
 		err = runRunnerCLI(os.Args[2:])
 	case "agent":
 		err = RunAgentCLI(os.Args[2:])
+	case "wingd":
+		err = orchestrator.RunWingd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return

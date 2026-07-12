@@ -47,7 +47,38 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing repos` lists the machine's fleet of sparkwing
+  repos -- derived from observed runs unioned with `repos.yaml` -- with
+  each repo's SDK pin, last run, and how many migration guides it is
+  behind. Linked git worktrees fold into their primary checkout; a
+  worktree pinned differently is reported as a detail line.
+- **cli:** `sparkwing repos update` bumps the fleet's SDK pins in one
+  sitting with a compiled per-repo verdict: `clean` when the bump
+  compiled and every pipeline plan is byte-identical, `plan-differs`
+  with a structured node/dep/step diff when a plan changed shape, and
+  `broken` with the actual error plus the crossed migration guides.
+  Dry-run by default; `--apply` commits per repo, `--verify` runs each
+  repo's pre-commit gate, `--repo` scopes to one.
+- **store:** the state database records the minimum sparkwing version
+  required for its schema. A binary meeting a newer database refuses
+  with `this state database needs sparkwing >= vX; you have vY; run
+  sparkwing version update --cli` instead of a bare schema number,
+  falling back to schema numbers for databases stamped before this
+  shipped.
+
 ### Changed
+
+- **cli:** `sparkwing dashboard start` handshakes a running dashboard
+  over a new unauthenticated version endpoint: a newer CLI drains and
+  replaces an older resident dashboard, while an older CLI refuses to
+  replace a newer one and leaves it running. A resident dashboard that
+  observes the shared database migrate past the schema it understands
+  now exits cleanly with a logged reason instead of serving 500s. The
+  startup deadline is generous under load, fails fast when the
+  supervisor exits early, and reports the new instance's own startup
+  log on timeout.
 
 - **orchestrator:** (Breaking) Local runs are admitted by the local
   admission daemon (`sparkwingd`) instead of box slots and store-side
@@ -102,6 +133,49 @@ code change to unlock.
 
 ### Added
 
+- **runner:** A registered runner on a box that also runs local pipelines
+  can route controller-dispatched work through the box's local admission
+  daemon, so both work sources share one FIFO queue and one arbiter
+  instead of competing blindly. Set `local_admission: true` in
+  `agent.yaml` (or `--local-admission` on `sparkwing-runner runner`);
+  each claimed node then submits the same admission request a local run
+  does. The runner advertises the daemon's live free capacity (cores,
+  memory, queue depth) to the controller on every claim and heartbeat --
+  surfaced in the agents view -- so the scheduler mostly dispatches work
+  that fits, with local admission as the backstop. `local_reserve`
+  (`SPARKWING_LOCAL_RESERVE`, e.g. `2,4gb` or `10%`) holds capacity back
+  from what the runner advertises. Leases carry an origin (local vs
+  controller) shown as an `ORIGIN` column in `sparkwing queue`.
+- **controller:** In cluster/runner-pod mode, runner pod requests and
+  limits are sized from the same resolution the local daemon uses: an
+  explicit `.Resources()` pin wins, else the node's measured peak
+  cores/memory, else a conservative default. Limits follow a policy of
+  generous CPU headroom (compressible) and tight memory headroom (OOMs).
+  The controller folds finished cluster runs' measured metrics into
+  per-node and rollup profiles and records a `resource_pin_drift` event
+  when an applied pin has drifted far from the measured peak -- the same
+  under-/over-pinned warning the local system emits, now load-bearing
+  where the kube scheduler believes the declaration.
+- **cli:** The admission daemon detects and surfaces *contended* runs --
+  a run measurably slower than its own measured p99 while the host is
+  saturated by non-sparkwing load, distinguished from a wedged holder
+  (`stalled`) and a legitimately long one. `sparkwing queue` marks the
+  holder `(contended)` with a one-line explanation, a finished contended
+  run prints an end-of-run attribution (`took 12m vs p50 8m30s; host
+  saturated 62% of the run`), the queue's recent-events line counts
+  contended runs, and `sparkwing runs stats --capacity` shows each
+  pipeline's contended share. Detection is sample-gated (an unprofiled
+  run is never flagged) and observability-only -- it never changes an
+  admission decision.
+- **cli:** A single machine budget caps how much of the host sparkwing
+  may use. Set `SPARKWING_BUDGET` to a core count, a percentage, or a
+  cores-and-memory pair (`6`, `50%`, `6,8gb`); it caps the admission
+  ledger below the machine total, and `sparkwing queue` shows the cap as
+  its own headroom row (`budget 6.0 cores (machine 10.0)`). Appending
+  `enforce` hardens the cap at the OS level -- a cgroup v2 wall on Linux,
+  background QoS scheduling on macOS -- in addition to admission.
+  Measured admission remains the primary mechanism; the budget is the one
+  machine-level knob that complements it.
 - **cli:** `sparkwing runs stats --capacity` now shows each pipeline's
   CPU and memory distributions (p50/p95/peak across the same window of
   recent runs that backs the duration percentiles) instead of a lone
@@ -167,6 +241,13 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** A same-repo child trigger (a `RunAndAwait` to a
+  sibling pipeline) now dispatches from the running parent's own compiled
+  binary, so it works from a project directory that has no git identity
+  instead of failing. When a child genuinely cannot be located the error
+  names the real cause (no git identity to resolve a sibling checkout
+  from) and real fixes, and no longer recommends `sparkwing pipeline add`,
+  a verb the CLI does not have.
 - **store:** Upgrading a database whose `pipeline_profiles` table
   predates the `cpu_measured` column now backfills the flag for carried
   rows with a positive measured peak, matching how admission qualifies

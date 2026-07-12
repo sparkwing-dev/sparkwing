@@ -281,6 +281,8 @@ type PipelineProfile struct {
 
 	PinnedCores       float64
 	PinnedMemoryBytes int64
+
+	ContendedCount int
 }
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -357,9 +359,12 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+func SetBinaryVersion(v string)
 type SkewError struct {
-	DBVersion     int
-	BinaryVersion int
+	DBVersion        int
+	BinaryVersion    int
+	MinVersion       string
+	InstalledVersion string
 }
 func (e *SkewError) Error() string
 type SpawnedChild struct {
@@ -401,6 +406,7 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, now time.Time) (*User, error)
+func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name string) error
@@ -457,6 +463,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
+func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
@@ -483,6 +490,7 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 type Token struct {

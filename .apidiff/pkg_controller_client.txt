@@ -42,7 +42,7 @@ func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
-func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error)
+func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) Close() error
@@ -93,11 +93,12 @@ func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
 func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
 func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
+func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error)
 func (c *Client) GetRun(ctx context.Context, runID string) (*store.Run, error)
 func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error)
 func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
-func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error
+func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
 func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error)
@@ -121,6 +122,7 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
+func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
@@ -147,6 +149,11 @@ type GitMeta struct {
 	RepoURL     string
 	GithubOwner string
 	GithubRepo  string
+}
+type Headroom struct {
+	Cores       float64
+	MemoryBytes int64
+	QueueDepth  int
 }
 type HeartbeatSlotResponse struct {
 	LeaseExpiresAt   time.Time

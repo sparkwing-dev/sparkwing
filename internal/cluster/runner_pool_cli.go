@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // PoolLoopConfig is the parameter set shared by every caller of
@@ -45,6 +46,24 @@ type PoolLoopConfig struct {
 	// ("pool runner", "agent"). Lets operators distinguish the two
 	// shapes at a glance in mixed log output.
 	SourceName string
+	// LocalAdmission engages the box's local admission daemon: every
+	// claimed node is submitted to the same daemon and FIFO queue as the
+	// operator's own local runs, tagged [wingwire.OriginController], and
+	// the runner advertises the daemon's live headroom to the controller.
+	// Off by default -- an in-cluster warm pod is admitted by the
+	// Kubernetes scheduler and must never engage a daemon.
+	LocalAdmission bool
+	// LocalReserve is the host capacity held back from what the runner
+	// advertises to the controller, in the daemon budget grammar (e.g.
+	// "2,4gb" or "10%"). Empty reserves nothing. Ignored unless
+	// LocalAdmission is set.
+	LocalReserve string
+	// Home is the sparkwing home whose local daemon arbitrates. Empty
+	// resolves the default. Meaningful only with LocalAdmission.
+	Home string
+	// Version is this binary's version for the daemon handshake. Empty
+	// never triggers a version takeover.
+	Version string
 }
 
 // nodeClaimer is the narrow subset of controller-client methods
@@ -52,7 +71,7 @@ type PoolLoopConfig struct {
 // tests can drive the loop with a stub without spinning up an HTTP
 // server or the full client.
 type nodeClaimer interface {
-	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error)
+	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
 }
 
 // poolExecFn is the per-claim executor. The real implementation
@@ -76,11 +95,28 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token)
 
+	var admission *orchestrator.LocalAdmission
+	var provider headroomProvider
+	if cfg.LocalAdmission {
+		rv, err := parseReserve(cfg.LocalReserve)
+		if err != nil {
+			return fmt.Errorf("pool loop: local reserve: %w", err)
+		}
+		admission = &orchestrator.LocalAdmission{
+			Home:    cfg.Home,
+			Version: cfg.Version,
+			Origin:  wingwire.OriginController,
+		}
+		provider = newHeadroomProvider(cfg.Home, rv)
+		logger.Info("local admission engaged; controller work shares the local daemon",
+			"reserve", cfg.LocalReserve, "source", cfg.SourceName)
+	}
+
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
 		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.Token,
-			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger)
+			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
-	return runPoolLoop(ctx, cfg, ctrl, exec, logger)
+	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
 }
 
 // normalizePoolLoopConfig fills defaults. Split out so the testable
@@ -111,7 +147,7 @@ func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
 
 // runPoolLoop is the testable core. cfg must already be normalized.
 // claimer + exec are injected so tests don't need an HTTP stack.
-func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, logger *slog.Logger) error {
+func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, provider headroomProvider, logger *slog.Logger) error {
 	logger.Info(
 		cfg.SourceName+" started",
 		"controller", cfg.ControllerURL,
@@ -147,7 +183,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		}
 
 		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
-		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease)
+		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, currentHeadroom(ctx, provider))
 		if err != nil {
 			<-sem
 			if errors.Is(err, context.Canceled) {
@@ -213,6 +249,10 @@ func runRunnerCLI(args []string) error {
 		"sparkwing-cache URL for the trigger-loop (required when --also-claim-triggers is set)")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
+	localAdmission := fs.Bool("local-admission", false,
+		"route claimed nodes through this box's local admission daemon (for a runner on a box that also runs local pipelines; off for in-cluster pods)")
+	localReserve := fs.String("local-reserve", os.Getenv("SPARKWING_LOCAL_RESERVE"),
+		"host capacity held back from advertised headroom in the daemon budget grammar, e.g. 2,4gb or 10% (env: SPARKWING_LOCAL_RESERVE)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -281,7 +321,19 @@ func runRunnerCLI(args []string) error {
 		HeartbeatInterval: *heartbeat,
 		MaxClaims:         *maxClaims,
 		SourceName:        "pool runner",
+		LocalAdmission:    *localAdmission,
+		LocalReserve:      *localReserve,
 	}, slog.Default())
+}
+
+// currentHeadroom evaluates the provider, tolerating a nil provider (no
+// local admission engaged) so callers pass its result straight to the
+// claim/heartbeat calls.
+func currentHeadroom(ctx context.Context, provider headroomProvider) *client.Headroom {
+	if provider == nil {
+		return nil
+	}
+	return provider(ctx)
 }
 
 // executePooledNode runs one claimed node to terminal state. Spawns a
@@ -296,6 +348,8 @@ func executePooledNode(
 	lease, hbInterval time.Duration,
 	source string,
 	logger *slog.Logger,
+	admission *orchestrator.LocalAdmission,
+	provider headroomProvider,
 ) {
 	if hbInterval <= 0 {
 		hbInterval = poolHeartbeatDefaultInterval
@@ -311,11 +365,11 @@ func executePooledNode(
 	hbWG.Add(1)
 	go func() {
 		defer hbWG.Done()
-		runPoolHeartbeat(execCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, logger)
+		runPoolHeartbeat(execCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger)
+		&stdoutLogger{}, logger, admission)
 	cancel()
 	hbWG.Wait()
 
@@ -364,6 +418,7 @@ func runPoolHeartbeat(
 	lease, interval time.Duration,
 	killNode context.CancelFunc,
 	source string,
+	provider headroomProvider,
 	logger *slog.Logger,
 ) {
 	t := time.NewTicker(interval)
@@ -375,7 +430,7 @@ func runPoolHeartbeat(
 			return
 		case <-t.C:
 			hbCtx, cancel := context.WithTimeout(ctx, poolHeartbeatTimeout)
-			err := ctrl.HeartbeatNodeClaim(hbCtx, runID, nodeID, holderID, lease)
+			err := ctrl.HeartbeatNodeClaim(hbCtx, runID, nodeID, holderID, lease, currentHeadroom(hbCtx, provider))
 			cancel()
 			if err == nil {
 				lastOK = time.Now()

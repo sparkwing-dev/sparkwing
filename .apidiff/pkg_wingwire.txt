@@ -20,7 +20,24 @@ type AdmissionRequest struct {
 
 	ExpectedDurationMS int64
 
+	ExpectedP99MS int64
+
+	SampleCount int
+
 	DriftWarning string
+
+	Origin Origin
+}
+type BudgetState struct {
+	Cores float64
+
+	MachineCores float64
+
+	MemoryBytes int64
+
+	MachineMemoryBytes int64
+
+	Enforce bool
 }
 type Cancel struct {
 	RunID  string
@@ -56,6 +73,8 @@ type EventsWindow struct {
 	QueueTimeouts int
 
 	Cancellations int
+
+	Contended int
 }
 type Evicted struct {
 	RunID string
@@ -109,6 +128,14 @@ type Holder struct {
 	Stalled bool
 
 	Recovery string
+
+	Contended bool
+
+	ContentionReason string
+
+	SaturatedShare float64
+
+	Origin Origin
 }
 type HostResources struct {
 	Cores float64
@@ -120,6 +147,9 @@ type Message interface {
 	wireType() MessageType
 }
 type MessageType string
+type Origin string
+const OriginController Origin = "controller"
+const OriginLocal Origin = "local"
 type Policy string
 const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
@@ -138,6 +168,8 @@ type QueueState struct {
 	DaemonUptimeMS int64
 
 	Events *EventsWindow
+
+	Budget *BudgetState
 }
 type Queued struct {
 	RunID string
@@ -213,4 +245,6 @@ type Waiter struct {
 	DriftWarning string
 
 	ExpectedStartMS *int64
+
+	Origin Origin
 }

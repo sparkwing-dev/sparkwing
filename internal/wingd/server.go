@@ -62,6 +62,19 @@ type Daemon struct {
 	externalCores float64
 	reservedMem   uint64
 	externalMem   uint64
+
+	// machineCores/machineMemory are the host's full measured capacity,
+	// retained so the queue view can show the budget against the machine
+	// total even after the ledger is capped to the budget.
+	machineCores  float64
+	machineMemory uint64
+	budgetCores   float64
+	budgetMemory  uint64
+
+	// cgroup enforces a Linux CPU/memory wall for admitted runs when the
+	// budget opts in; nil on other platforms or when enforcement is off or
+	// unavailable.
+	cgroup *cgroupLimiter
 }
 
 // delivery pairs a framed message with the connection it belongs to.
@@ -127,6 +140,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.initLedger(); err != nil {
 		return err
 	}
+	d.setupEnforcement()
 	d.refreshHeadroom()
 
 	ln, err := d.bindListener()
@@ -219,10 +233,18 @@ func (d *Daemon) initLedger() error {
 	if serr != nil {
 		d.cfg.logf("initial host sample: %v", serr)
 	}
+	d.machineCores = stat.TotalCores
+	d.machineMemory = stat.TotalMemoryBytes
+	d.budgetCores = d.cfg.Budget.CapCores(stat.TotalCores)
+	d.budgetMemory = d.cfg.Budget.CapMemory(stat.TotalMemoryBytes)
+	if d.cfg.Budget.HasCap() {
+		d.cfg.logf("budget: %.1f cores, %s (machine %.1f cores, %s)",
+			d.budgetCores, humanBytesLog(d.budgetMemory), stat.TotalCores, humanBytesLog(stat.TotalMemoryBytes))
+	}
 	if snap == nil {
 		lg, err := admission.New(admission.Config{
-			TotalCores:       stat.TotalCores,
-			TotalMemoryBytes: stat.TotalMemoryBytes,
+			TotalCores:       d.budgetCores,
+			TotalMemoryBytes: d.budgetMemory,
 		})
 		if err != nil {
 			return fmt.Errorf("wingd: new ledger: %w", err)
@@ -418,7 +440,10 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.startAt = d.now()
 	c.costSource = req.CostSource
 	c.expectedDurationMS = req.ExpectedDurationMS
+	c.expectedP99MS = req.ExpectedP99MS
+	c.sampleCount = req.SampleCount
 	c.driftWarning = req.DriftWarning
+	c.origin = req.Origin
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
@@ -555,6 +580,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
 	c.finalizable = true
+	c.origin = req.Origin
 	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
 	if existing, ok := d.leaseMembers[leaseID]; ok {

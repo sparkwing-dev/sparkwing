@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -151,7 +152,7 @@ var _ runner.Runner = (*Runner)(nil)
 // controller, and maps to Result.
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
-	job := r.buildJob(name, req)
+	job := r.buildJob(name, req, r.resolveResources(ctx, req))
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -350,7 +351,63 @@ func JobName(runID, nodeID string, attempt int) string {
 	return truncate(name, 63)
 }
 
-func (r *Runner) buildJob(name string, req runner.Request) *batchv1.Job {
+const (
+	// podCPULimitFactor sizes a runner pod's CPU limit above its request.
+	// CPU is compressible -- the kernel throttles rather than kills -- so a
+	// generous ceiling lets a bursty node use spare cores without letting a
+	// runaway starve its neighbours.
+	podCPULimitFactor = 2.0
+	// podMemoryLimitFactor sizes a runner pod's memory limit above its
+	// request. Memory is not compressible: overshoot means an OOM kill, so
+	// the ceiling stays tight, just enough headroom to absorb a modest spike
+	// past the measured peak.
+	podMemoryLimitFactor = 1.25
+	// podDefaultRefCPU is the machine size handed to capacity.Resolve for
+	// the cold-start default tier. Its cores are unused -- the pod default
+	// falls back to the configured request rather than a share of some
+	// machine -- so any positive value serves.
+	podDefaultRefCPU = 1
+)
+
+// resolveResources sizes a node's pod from the same resolution the local
+// daemon uses: an explicit .Resources() pin wins, else the node's measured
+// profile once it has enough samples, else the conservative configured
+// default. It reports an applied pin back to the controller so cluster-side
+// drift can judge it against measured peaks. Every controller lookup is
+// best-effort: a failed profile read simply falls back to the pin or the
+// default rather than failing the node.
+func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capacity.Resolution {
+	pipeline := req.Pipeline
+	if pipeline == "" {
+		if run, err := r.ctrl.GetRun(ctx, req.RunID); err == nil && run != nil {
+			pipeline = run.Pipeline
+		}
+	}
+	pin := nodePin(req.Node)
+	var profile *store.PipelineProfile
+	if pipeline != "" {
+		profile, _ = r.ctrl.GetPipelineProfile(ctx, pipeline, req.NodeID)
+	}
+	if !pin.Empty() && pipeline != "" {
+		_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
+	}
+	return capacity.Resolve(pin, profile, podDefaultRefCPU)
+}
+
+// nodePin flattens a node's explicit .Resources() declaration to a
+// capacity.Pin, or nil when the node (or its plan) declared none.
+func nodePin(node *sparkwing.JobNode) *capacity.Pin {
+	if node == nil {
+		return nil
+	}
+	h := node.ResourceHints()
+	if h == nil || (h.Cores <= 0 && h.MemoryBytes <= 0) {
+		return nil
+	}
+	return &capacity.Pin{Cores: h.Cores, MemoryBytes: h.MemoryBytes}
+}
+
+func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution) *batchv1.Job {
 	env := []corev1.EnvVar{
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
 		{Name: "SPARKWING_RUN_ID", Value: req.RunID},
@@ -375,7 +432,7 @@ func (r *Runner) buildJob(name string, req runner.Request) *batchv1.Job {
 		Command:         []string{"sparkwing"},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
-		Resources:       r.resources(),
+		Resources:       podResources(res, r.cfg),
 	}
 
 	podSpec := corev1.PodSpec{
@@ -417,20 +474,41 @@ func (r *Runner) buildJob(name string, req runner.Request) *batchv1.Job {
 	}
 }
 
-func (r *Runner) resources() corev1.ResourceRequirements {
+// podResources maps a resolved admission cost onto a runner pod's
+// requests and limits, so one .Resources() declaration drives both the
+// laptop daemon and the kube scheduler. Per dimension: an explicit pin or a
+// measured peak becomes the request, with a limit set by the policy
+// (generous for compressible CPU, tight for memory that OOMs); the
+// cold-start default tier, and any dimension a pin or profile leaves
+// unset, falls back to the configured conservative request and limit so an
+// unprofiled pipeline's first pods still carry sane figures.
+func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
 	req := corev1.ResourceList{}
 	lim := corev1.ResourceList{}
-	if r.cfg.CPURequest != "" {
-		req[corev1.ResourceCPU] = resource.MustParse(r.cfg.CPURequest)
+	measured := res.Source != store.CostSourceDefault
+
+	if measured && res.Cores > 0 {
+		req[corev1.ResourceCPU] = *resource.NewMilliQuantity(int64(res.Cores*1000), resource.DecimalSI)
+		lim[corev1.ResourceCPU] = *resource.NewMilliQuantity(int64(res.Cores*1000*podCPULimitFactor), resource.DecimalSI)
+	} else {
+		if cfg.CPURequest != "" {
+			req[corev1.ResourceCPU] = resource.MustParse(cfg.CPURequest)
+		}
+		if cfg.CPULimit != "" {
+			lim[corev1.ResourceCPU] = resource.MustParse(cfg.CPULimit)
+		}
 	}
-	if r.cfg.MemoryRequest != "" {
-		req[corev1.ResourceMemory] = resource.MustParse(r.cfg.MemoryRequest)
-	}
-	if r.cfg.CPULimit != "" {
-		lim[corev1.ResourceCPU] = resource.MustParse(r.cfg.CPULimit)
-	}
-	if r.cfg.MemoryLimit != "" {
-		lim[corev1.ResourceMemory] = resource.MustParse(r.cfg.MemoryLimit)
+
+	if measured && res.MemoryBytes > 0 {
+		req[corev1.ResourceMemory] = *resource.NewQuantity(res.MemoryBytes, resource.BinarySI)
+		lim[corev1.ResourceMemory] = *resource.NewQuantity(int64(float64(res.MemoryBytes)*podMemoryLimitFactor), resource.BinarySI)
+	} else {
+		if cfg.MemoryRequest != "" {
+			req[corev1.ResourceMemory] = resource.MustParse(cfg.MemoryRequest)
+		}
+		if cfg.MemoryLimit != "" {
+			lim[corev1.ResourceMemory] = resource.MustParse(cfg.MemoryLimit)
+		}
 	}
 	return corev1.ResourceRequirements{Requests: req, Limits: lim}
 }

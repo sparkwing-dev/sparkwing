@@ -61,6 +61,8 @@ var banned = []bannedPattern{
 		"removed; the admission daemon converges local state without a sweep -- `sparkwing doctor` clears provably-dead leftovers"},
 	{regexp.MustCompile(`SPARKWING_BOX_SLOT`),
 		"removed; the admission daemon measures host capacity, so there is no box-slot cap or stall-ttl env to set"},
+	{regexp.MustCompile(`sparkwing pipeline add\b`),
+		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`"},
 }
 
 // narrativeExempt names the one doc where change/deprecation vocabulary

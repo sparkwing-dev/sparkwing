@@ -56,7 +56,7 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	if err := authed.MarkNodeReady(ctx, "run-1", "only"); err != nil {
 		t.Fatalf("authed MarkNodeReady: %v", err)
 	}
-	n, err := authed.ClaimNode(ctx, "agent-1", nil, 30*time.Second)
+	n, err := authed.ClaimNode(ctx, "agent-1", nil, 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("authed ClaimNode: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	}
 
 	wrong := client.NewWithToken(srv.URL, nil, "swu_bogusvaluetrailing00000000000000000000000")
-	if _, err := wrong.ClaimNode(ctx, "agent-bad", nil, 30*time.Second); err == nil {
+	if _, err := wrong.ClaimNode(ctx, "agent-bad", nil, 30*time.Second, nil); err == nil {
 		t.Fatal("expected wrong-token claim to fail")
 	}
 }

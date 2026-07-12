@@ -80,6 +80,11 @@ type Server struct {
 	// reconciler. Errors are swallowed so a transient sweep failure
 	// never blocks a read.
 	reconcileHook func(context.Context) error
+
+	// runnerHeadroom holds each registered runner's most recently
+	// advertised free capacity, refreshed on node claims and heartbeats
+	// and surfaced in the agents view. Soft state; never gates admission.
+	runnerHeadroom *runnerHeadroomRegistry
 }
 
 // New constructs a Server bound to the given store. A nil dispatcher
@@ -95,6 +100,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		logger:              logger,
 		queueTimeout:        15 * time.Minute,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
+		runnerHeadroom:      newRunnerHeadroomRegistry(),
 	}
 }
 
@@ -314,6 +320,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
+	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
+	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetPipelinePin)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAddNodeMetric)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeMetrics)))

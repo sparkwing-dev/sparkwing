@@ -33,6 +33,7 @@ const (
 	eventEviction     = "eviction"
 	eventQueueTimeout = "queue_timeout"
 	eventCancellation = "cancellation"
+	eventContended    = "contended"
 )
 
 // eventWindow is the daemon's bounded rolling record of admission
@@ -106,6 +107,8 @@ func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 			out.QueueTimeouts++
 		case eventCancellation:
 			out.Cancellations++
+		case eventContended:
+			out.Contended++
 		}
 	}
 	if len(waits) > 0 {

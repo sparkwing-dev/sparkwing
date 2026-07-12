@@ -406,6 +406,63 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 	return c.post(ctx, path, body, http.StatusNoContent, nil)
 }
 
+// GetPipelineProfile fetches the measured profile a cluster runner sizes a
+// pod from: the (pipeline, node) profile, or the pipeline rollup when
+// nodeID is empty. Returns (nil, nil) when nothing has been measured yet,
+// so the caller falls back to its pin or a conservative default.
+func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
+	u := fmt.Sprintf("%s/api/v1/pipelines/%s/profile", c.baseURL, url.PathEscape(pipeline))
+	if nodeID != "" {
+		u += "?node=" + url.QueryEscape(nodeID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var prof store.PipelineProfile
+		if err := json.NewDecoder(resp.Body).Decode(&prof); err != nil {
+			return nil, err
+		}
+		return &prof, nil
+	case http.StatusNotFound:
+		return nil, nil
+	default:
+		return nil, readHTTPError(resp)
+	}
+}
+
+// SetPipelinePin reports the explicit .Resources() charge a cluster runner
+// applied for a (pipeline, node), so the controller can judge it against
+// measured peaks and surface drift. nodeID empty targets the rollup.
+func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	u := fmt.Sprintf("%s/api/v1/pipelines/%s/profile/pin", c.baseURL, url.PathEscape(pipeline))
+	if nodeID != "" {
+		u += "?node=" + url.QueryEscape(nodeID)
+	}
+	buf, _ := json.Marshal(map[string]any{"cores": cores, "memory_bytes": memoryBytes})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return readHTTPError(resp)
+	}
+	return nil
+}
+
 // HeartbeatStatus is the structured response from a heartbeat call.
 type HeartbeatStatus struct {
 	CancelRequested bool `json:"cancel_requested"`
@@ -444,10 +501,10 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 
 // TriggerRequest is the body of POST /api/v1/triggers.
 type TriggerRequest struct {
-	Pipeline      string               `json:"pipeline"`
-	Args          map[string]string    `json:"args,omitempty"`
-	Trigger       TriggerMeta          `json:"trigger"`
-	Git           GitMeta              `json:"git"`
+	Pipeline string            `json:"pipeline"`
+	Args     map[string]string `json:"args,omitempty"`
+	Trigger  TriggerMeta       `json:"trigger"`
+	Git      GitMeta           `json:"git"`
 	// ParentRunID threads cross-pipeline ancestry so the controller
 	// can reject cycles.
 	ParentRunID string `json:"parent_run_id,omitempty"`
@@ -902,12 +959,25 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	}
 }
 
+// Headroom is a registered runner's live free capacity, advertised to
+// the controller on each node claim and heartbeat so the scheduler can
+// see whose box has room. It is the local admission daemon's grantable
+// cores and memory after subtracting the operator's local reserve, plus
+// the daemon's current queue depth. A nil *Headroom means the runner is
+// not advertising (it engages no local daemon).
+type Headroom struct {
+	Cores       float64 `json:"cores"`
+	MemoryBytes int64   `json:"memory_bytes"`
+	QueueDepth  int     `json:"queue_depth"`
+}
+
 // ClaimNode atomically claims the oldest ready, unclaimed node for
-// holderID. Returns (nil, nil) when the queue is empty.
+// holderID. Returns (nil, nil) when the queue is empty. A non-nil
+// headroom advertises the box's live free capacity to the controller.
 //
 // The controller filters candidates so a returned node's needs_labels
 // is a subset of labels (AND semantics).
-func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration) (*store.Node, error) {
+func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error) {
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		secs := int(lease.Seconds())
@@ -918,6 +988,9 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 	}
 	if len(labels) > 0 {
 		body["labels"] = labels
+	}
+	if headroom != nil {
+		body["headroom"] = headroom
 	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -968,9 +1041,10 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 	return resp.Revoked, nil
 }
 
-// HeartbeatNodeClaim extends the claim lease for holderID. ErrLockHeld
-// when the caller isn't the current claim holder.
-func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error {
+// HeartbeatNodeClaim extends the claim lease for holderID, optionally
+// refreshing the box's advertised headroom. ErrLockHeld when the caller
+// isn't the current claim holder.
+func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/heartbeat",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	body := map[string]any{"holder_id": holderID}
@@ -980,6 +1054,9 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 			secs = 1
 		}
 		body["lease_secs"] = secs
+	}
+	if headroom != nil {
+		body["headroom"] = headroom
 	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,

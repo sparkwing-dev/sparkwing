@@ -27,7 +27,12 @@ import (
 // state, since the child handler defaults to sqlite otherwise. The
 // caller resolves (and error-checks) wedgeBudget before spawning the
 // loop.
-func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName string, logger *slog.Logger, wedgeBudget time.Duration) {
+// parentRepoDir, when non-empty, is the directory of the running
+// parent's .sparkwing/ tree. A same-repo child (RunAndAwait to a
+// sibling pipeline) is dispatched straight from that already-compiled
+// binary, so the dispatch needs no repo registry entry and no git
+// identity on the project directory.
+func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -69,7 +74,7 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, profileName, cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, profileName, parentRepoDir, cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				_ = st.CreateRun(ctx, store.Run{
@@ -148,7 +153,7 @@ func consumeLocalTriggers(ctx context.Context, st *store.Store, logger *slog.Log
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, "", cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, "", "", cache, logger); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				_ = st.CreateRun(ctx, store.Run{
@@ -190,22 +195,11 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 // is forwarded as --profile <name> so the child opens the same
 // backends as the parent (matters for postgres/non-local state).
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
-	profileName string, cache *localCompileCache, logger *slog.Logger,
+	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger,
 ) error {
-	var repoDir string
-	if path, err := repos.ResolveRepoForPipeline(trig.Pipeline); err == nil {
-		repoDir = path
-	} else if trig.Repo != "" {
-		path, lerr := LocalRepoDir(trig.Repo)
-		if lerr != nil {
-			return fmt.Errorf("locate %q: registry miss + slug fallback failed: registry=%w slug=%w",
-				trig.Pipeline, err, lerr)
-		}
-		repoDir = path
-	} else {
-		return fmt.Errorf("locate %q: not in repos registry and trigger carries no repo slug "+
-			"(register the repo with `sparkwing pipeline add <path>` or pass WithFreshRepo at the call site)",
-			trig.Pipeline)
+	repoDir, err := locateTriggerRepo(trig, parentRepoDir)
+	if err != nil {
+		return err
 	}
 	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
@@ -239,6 +233,60 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		return fmt.Errorf("child exec: %w", err)
 	}
 	return nil
+}
+
+// locateTriggerRepo maps a claimed trigger to the repo directory whose
+// .sparkwing/ defines it. A same-repo child (no explicit repo slug)
+// resolves against the running parent's own tree first, so it needs
+// neither a registry entry nor a git identity on the project directory.
+// Only when that fast path does not apply does it consult the cross-repo
+// registry and the "owner/name" slug fallback.
+func locateTriggerRepo(trig *store.Trigger, parentRepoDir string) (string, error) {
+	if parentRepoDir != "" && trig.Repo == "" && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
+		return parentRepoDir, nil
+	}
+	path, err := repos.ResolveRepoForPipelineCached(trig.Pipeline)
+	if err == nil {
+		return path, nil
+	}
+	if trig.Repo != "" {
+		slugPath, lerr := LocalRepoDir(trig.Repo)
+		if lerr != nil {
+			return "", fmt.Errorf("locate %q: registry miss + slug fallback failed: registry=%w slug=%w",
+				trig.Pipeline, err, lerr)
+		}
+		return slugPath, nil
+	}
+	return "", unlocatableChildError(trig.Pipeline)
+}
+
+// unlocatableChildError describes a same-repo child that resolved
+// nowhere: it names the real cause (no git identity to inherit a repo
+// slug from) and three concrete fixes, and deliberately never mentions a
+// verb the CLI does not have.
+func unlocatableChildError(pipeline string) error {
+	return fmt.Errorf("locate %q: not declared by the running project, absent from the repo "+
+		"registry, and this run has no git identity to resolve a sibling checkout from. Give the "+
+		"project a git remote, register the defining repo with `sparkwing configure xrepo add <path>`, "+
+		"or pass sparkwing.WithFreshRepo(\"owner/name\") for a cross-repo await.",
+		pipeline)
+}
+
+// repoDeclaresPipeline reports whether repoDir's compiled .sparkwing/
+// binary registers a pipeline by this name. The parent's binary is
+// already in the compile cache, so the same-repo check is a cache hit
+// rather than a fresh build even under host contention.
+func repoDeclaresPipeline(repoDir, pipeline string) bool {
+	names, err := repos.PipelineNamesForRepo(repoDir)
+	if err != nil {
+		return false
+	}
+	for _, n := range names {
+		if n == pipeline {
+			return true
+		}
+	}
+	return false
 }
 
 // localCompileCache memoizes sparkwingDir -> binPath for the loop's

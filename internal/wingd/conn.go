@@ -61,6 +61,7 @@ type conn struct {
 	repo               string
 	expectedDurationMS int64
 	driftWarning       string
+	origin             wingwire.Origin
 
 	// stalled and lowSince track the holder-idle verdict, guarded by the
 	// owning Daemon's mutex. lowSince is when the holder's CPU first fell
@@ -68,6 +69,24 @@ type conn struct {
 	// that has held for the stall window.
 	stalled  bool
 	lowSince time.Time
+
+	// expectedP99MS and sampleCount carry the run's measured duration p99
+	// and how many runs back it, from the admission request. The contention
+	// detector requires a real p99 and a minimum sample count, so an
+	// unprofiled or pinned-only run is never flagged. Display-metadata:
+	// cleared for reattached holders after a daemon restart.
+	expectedP99MS int64
+	sampleCount   int
+
+	// holdSampledMS and holdSaturatedMS accumulate, while this connection
+	// holds admission, the host-sample time observed and the share of it
+	// the host was saturated. contended latches the throttled verdict and
+	// contentionReason explains it. All guarded by the owning Daemon's
+	// mutex.
+	holdSampledMS    int64
+	holdSaturatedMS  int64
+	contended        bool
+	contentionReason string
 
 	// finalizable marks a connection whose run row the daemon must
 	// finalize when the connection drops while still holding or awaiting

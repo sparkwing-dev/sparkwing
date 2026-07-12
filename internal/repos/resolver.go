@@ -144,8 +144,40 @@ func PipelineNamesForRepo(absPath string) ([]string, error) {
 			return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
 		}
 	}
+	return describePipelineNames(binPath, absPath)
+}
+
+// pipelineNamesIfBuilt returns a repo's declared pipeline names only when
+// its pipeline binary is already in the cache; it never triggers a build,
+// so a locate scan over many registered repos cannot stall on compiling
+// unrelated projects. ok is false when the repo has no .sparkwing/, its
+// binary is not yet built, or the describe fails -- all treated as "not a
+// match here" so the scan moves on immediately.
+func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
+	sparkwingDir := filepath.Join(absPath, ".sparkwing")
+	if _, err := os.Stat(sparkwingDir); err != nil {
+		return nil, false
+	}
+	hash, err := bincache.PipelineCacheKey(sparkwingDir)
+	if err != nil {
+		return nil, false
+	}
+	binPath := bincache.CachedBinaryPath(hash)
+	if _, err := os.Stat(binPath); err != nil {
+		return nil, false
+	}
+	got, err := describePipelineNames(binPath, absPath)
+	if err != nil {
+		return nil, false
+	}
+	return got, true
+}
+
+// describePipelineNames execs `<binary> --describe` and returns the
+// non-empty pipeline names it reports.
+func describePipelineNames(binPath, workDir string) ([]string, error) {
 	cmd := exec.Command(binPath, "--describe")
-	cmd.Dir = absPath
+	cmd.Dir = workDir
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -162,4 +194,36 @@ func PipelineNamesForRepo(absPath string) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// ResolveRepoForPipelineCached resolves a pipeline name against only the
+// registered repos whose binary is already built, never compiling one to
+// answer. Same-host child dispatch uses it so an unlocatable pipeline
+// fails fast regardless of host load, instead of building every candidate
+// to describe it. Priority order matches [ResolveRepoForPipeline].
+func ResolveRepoForPipelineCached(name string) (string, error) {
+	if name == "" {
+		return "", errors.New("ResolveRepoForPipelineCached: empty name")
+	}
+	cands, err := CandidatePaths()
+	if err != nil {
+		return "", err
+	}
+	for _, pass := range []bool{false, true} {
+		for _, c := range cands {
+			if c.Worktree != pass {
+				continue
+			}
+			names, ok := pipelineNamesIfBuilt(c.Path)
+			if !ok {
+				continue
+			}
+			for _, n := range names {
+				if n == name {
+					return c.Path, nil
+				}
+			}
+		}
+	}
+	return "", ErrNotFound
 }

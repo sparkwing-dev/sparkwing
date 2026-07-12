@@ -20,3 +20,14 @@ type Options struct {
 	Version string
 }
 func Run(ctx context.Context, opts Options) error
+type VersionInfo struct {
+	Version string
+	Schema  int
+	PID     int
+}
+
+# methods on un-declared receiver types (likely a bug)
+func (s *statusRecorder) Flush()
+func (s *statusRecorder) Unwrap() http.ResponseWriter
+func (s *statusRecorder) Write(b []byte) (int, error)
+func (s *statusRecorder) WriteHeader(code int)

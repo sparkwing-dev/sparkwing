@@ -38,6 +38,7 @@ for agent-facing discovery.`,
 		{"pipeline", "This repo's pipelines"},
 		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
 		{"runs", "Inspect or manage runs"},
+		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
 		{"queue", "The truthful view of local admission: holders + waiters"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
@@ -3128,5 +3129,76 @@ preserved as the dashboard renders them.`,
 	Examples: []Example{
 		{"Note something on a node", "sparkwing runs annotations add --run run-... --node deploy -m 'agent: retried after 502'"},
 		{"Note something on a step inside a node", "sparkwing runs annotations add --run run-... --node deploy --step canary -m 'rolled out 5%'"},
+	},
+}
+
+var cmdRepos = Command{
+	Path:     "sparkwing repos",
+	Synopsis: "The machine's fleet of sparkwing repos and their SDK pins",
+	Description: `Lists every repo on this machine that carries sparkwing
+pipelines -- derived from the repos this laptop has run pipelines
+for, unioned with the explicit repos.yaml registry. No manual
+registration: a repo shows up once it has run a pipeline or been
+added to repos.yaml.
+
+Each row reports the repo, its .sparkwing SDK pin, the last run
+observed, and how many migration guides sit between its pin and
+the latest release. Linked git worktrees are folded into their
+primary checkout; a worktree pinned differently from its primary
+is reported as a detail line, not a separate repo.
+
+Use 'sparkwing repos update' to bump the whole fleet in one
+sitting with a compiled per-repo verdict.`,
+	Subcommands: []SubcommandRef{
+		{"update", "Bump every repo's SDK pin with a compiled per-repo verdict"},
+	},
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"List the fleet", "sparkwing repos"},
+		{"Agent-readable record", "sparkwing repos -o json"},
+	},
+}
+
+var cmdReposUpdate = Command{
+	Path:     "sparkwing repos update",
+	Synopsis: "Bump the fleet's SDK pins with a compiled per-repo verdict",
+	Description: `Bumps every tracked repo's .sparkwing SDK pin to a target
+release and reports a compiled verdict per repo. For each repo with
+a clean working tree it bumps the pin, runs go mod tidy, and
+plan-constructs every registered pipeline before and after the
+bump:
+
+  - clean: the bump compiled and every plan is byte-identical --
+    a guaranteed no-behavior-change upgrade.
+  - plan-differs: the bump compiled but a plan changed shape; the
+    structured node/dep/step diff is shown.
+  - broken: the bump failed to apply, compile, or verify; the
+    actual error is shown with the crossed migration guides.
+
+Dirty or missing repos are skipped and named rather than guessed
+at. Dry-run by default: nothing is written. --apply commits the
+bump per repo with a conventional message (no pushes). --verify
+additionally runs each repo's pre-commit gate after the bump.
+--repo scopes to one repo by name or path.
+
+Because a shared state database refuses an older pin against a
+migrated schema, the fleet is meant to move together; the report
+leads with that when pins would diverge.`,
+	Flags: []FlagSpec{
+		{Name: "version", Argument: "TAG", Desc: "Target SDK release (e.g. v0.16.0). Default: latest.", Group: "Input"},
+		{Name: "apply", Desc: "Write the bumps and commit per repo (default is a dry run)", Group: "Behavior"},
+		{Name: "verify", Desc: "Run each repo's pre-commit gate after the bump", Group: "Behavior"},
+		{Name: "repo", Argument: "NAME_OR_PATH", Desc: "Scope to a single repo by name or checkout path", Group: "Filter"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Behavior", "Filter", "Output", "Other"},
+	Examples: []Example{
+		{"Preview a fleet-wide bump to latest (dry run)", "sparkwing repos update"},
+		{"Preview a bump to a specific release", "sparkwing repos update --version v0.16.0"},
+		{"Apply the bump and commit per repo", "sparkwing repos update --version v0.16.0 --apply"},
+		{"Scope to one repo and run its gate", "sparkwing repos update --repo my-app --verify"},
 	},
 }
