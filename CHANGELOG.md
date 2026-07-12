@@ -308,6 +308,22 @@ code change to unlock.
   evictions, orphan finalizations, and drains -- the log is no longer
   empty exactly when someone needs it to debug the daemon.
 
+### Fixed
+
+- **admission:** The local admission daemon now backfills a smaller run
+  past a queued heavier one when the free budget fits it, and stops
+  backfilling once a holder younger than the waiting run is what keeps it
+  from fitting. Weighted local groups and host cores no longer idle
+  capacity behind a run that cannot currently fit, matching the
+  controller's weighted-queue admission.
+
+## [v0.15.12] - 2026-07-12
+### Fixed
+
+- **admission:** Weighted queue admission now backfills smaller waiters when
+  the oldest waiter cannot currently fit, without allowing younger backfilled
+  holders to starve that older waiter.
+
 ## [v0.15.11] - 2026-07-12
 ### Fixed
 

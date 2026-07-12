@@ -131,10 +131,13 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	}
 }
 
-// TestWaiterDisconnect_UnblocksLighterWaiter kills the head-of-line
-// waiter and asserts the lighter waiter it was blocking is promoted --
-// the case the ledger's snapshot-rebuild cancellation must get right.
-func TestWaiterDisconnect_UnblocksLighterWaiter(t *testing.T) {
+// TestWaiterDisconnect_UnblocksProtectedFollower drives the weighted
+// backfill guard end to end: a lighter run backfills past a queued heavy
+// head, which protects the head from being starved, so a later waiter
+// stays queued behind it. Disconnecting the heavy head lifts the
+// protection and promotes the follower -- the snapshot-rebuild
+// cancellation the daemon must get right when a queued waiter drops.
+func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
 		Home:             home,
@@ -142,25 +145,34 @@ func TestWaiterDisconnect_UnblocksLighterWaiter(t *testing.T) {
 		HeadroomFraction: -1,
 	})
 
-	h := ensure(t, home, "")
-	mustAcquire(t, h, coreReq("h", 3))
+	older := ensure(t, home, "")
+	mustAcquire(t, older, semReq("older", "k", 10, 5, wingwire.PolicyQueue))
 
-	w1 := ensure(t, home, "")
-	pos1, _ := acquireAsync(w1, coreReq("w1", 2))
-	waitForQueue(t, pos1)
+	heavy := ensure(t, home, "")
+	heavyPos, _ := acquireAsync(heavy, semReq("heavy", "k", 10, 8, wingwire.PolicyQueue))
+	waitForQueue(t, heavyPos)
 
-	w2 := ensure(t, home, "")
-	pos2, result2 := acquireAsync(w2, coreReq("w2", 1))
-	waitForQueue(t, pos2)
+	light1 := ensure(t, home, "")
+	mustAcquire(t, light1, semReq("light-1", "k", 10, 5, wingwire.PolicyQueue))
 
-	w1.Close()
+	light2 := ensure(t, home, "")
+	light2Pos, light2Result := acquireAsync(light2, semReq("light-2", "k", 10, 5, wingwire.PolicyQueue))
+	waitForQueue(t, light2Pos)
 
-	r := waitResult(t, result2, 2*time.Second)
-	if r.err != nil {
-		t.Fatalf("w2 should promote once w1 leaves, got %v", r.err)
+	older.Close()
+	select {
+	case r := <-light2Result:
+		t.Fatalf("light-2 jumped the protected heavy head: %+v", r)
+	case <-time.After(300 * time.Millisecond):
 	}
-	if r.lease.RunID != "w2" {
-		t.Fatalf("promoted %q, want w2", r.lease.RunID)
+
+	heavy.Close()
+	r := waitResult(t, light2Result, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("light-2 should promote once the heavy head leaves, got %v", r.err)
+	}
+	if r.lease.RunID != "light-2" {
+		t.Fatalf("promoted %q, want light-2", r.lease.RunID)
 	}
 }
 

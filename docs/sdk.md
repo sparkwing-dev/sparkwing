@@ -841,7 +841,10 @@ sw.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Concurren
 
 What a member does when its group is at capacity:
 
-- `Queue` (default) -- wait FIFO for room, then run.
+- `Queue` (default) -- wait for room, then run. Waiters that fit run
+  oldest-first; a waiter that cannot fit in the currently available
+  weighted budget does not block later waiters that do fit unless younger
+  backfilled holders are what keep the older waiter from fitting.
 - `Fail` -- error immediately.
 - `Skip` -- resolve as a no-op without running.
 - `CancelOthers` -- evict running members oldest-first until this one
@@ -894,9 +897,12 @@ fires so the skew is visible.
 When several runs contend for one shared resource -- a deploy slot, a
 migration lock, a single-writer index -- reach for a capacity-1 group
 with `OnLimit: Queue`, not `Fail`. `Fail` pushes a poll-and-retry loop
-onto every caller and aborts the loser with "slot full". `Queue` lines
-arrivals up FIFO and runs them one at a time, with `QueueTimeout` as the
-bounded way out.
+onto every caller and aborts the loser with "slot full". With capacity
+1, `Queue` lines arrivals up FIFO and runs them one at a time, with
+`QueueTimeout` as the bounded way out. With weighted capacities, it can
+backfill later smaller waiters when the head waiter cannot currently fit,
+while stopping behind that older waiter once younger backfilled holders are
+what keep it from fitting.
 
 ### Whole-run coordination
 

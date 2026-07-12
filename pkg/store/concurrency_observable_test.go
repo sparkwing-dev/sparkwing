@@ -25,7 +25,7 @@ func TestConcurrency_QueuedResponseCarriesPositionAndHolders(t *testing.T) {
 		t.Fatalf("q1: want Queued got %s", q1.Kind)
 	}
 	if q1.Position != 0 {
-		t.Fatalf("q1 position = %d, want 0 (next in line)", q1.Position)
+		t.Fatalf("q1 position = %d, want 0 (arrival rank)", q1.Position)
 	}
 	if q1.QueueLength != 1 {
 		t.Fatalf("q1 queue length = %d, want 1", q1.QueueLength)

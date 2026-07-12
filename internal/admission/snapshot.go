@@ -18,6 +18,7 @@ type Snapshot struct {
 	HeadroomMemoryBytes uint64           `json:"headroom_memory_bytes"`
 	LeaseSeq            uint64           `json:"lease_seq"`
 	ArrivalSeq          uint64           `json:"arrival_seq"`
+	AdmitSeq            uint64           `json:"admit_seq,omitempty"`
 	EventSeq            uint64           `json:"event_seq"`
 	Leases              []LeaseState     `json:"leases,omitempty"`
 	Semaphores          []SemaphoreState `json:"semaphores,omitempty"`
@@ -27,6 +28,7 @@ type Snapshot struct {
 // LeaseState is one live lease in a [Snapshot], in grant order.
 type LeaseState struct {
 	Seq         uint64       `json:"seq"`
+	Admit       uint64       `json:"admit,omitempty"`
 	ID          LeaseID      `json:"id"`
 	Token       string       `json:"token"`
 	RequestID   string       `json:"request_id"`
@@ -66,6 +68,7 @@ type HoldState struct {
 // WaiterState is one queued request in a [Snapshot], in arrival order.
 type WaiterState struct {
 	Arrival     uint64       `json:"arrival"`
+	Admit       uint64       `json:"admit,omitempty"`
 	RequestID   string       `json:"request_id"`
 	MilliCores  int64        `json:"milli_cores"`
 	MemoryBytes uint64       `json:"memory_bytes"`
@@ -86,6 +89,7 @@ func (l *Ledger) Snapshot() Snapshot {
 		HeadroomMemoryBytes: l.headroomMemory,
 		LeaseSeq:            l.leaseSeq,
 		ArrivalSeq:          l.arrivalSeq,
+		AdmitSeq:            l.admitSeq,
 		EventSeq:            l.eventSeq,
 	}
 	for _, id := range l.sortedLeaseIDs() {
@@ -97,6 +101,7 @@ func (l *Ledger) Snapshot() Snapshot {
 		sort.Strings(members)
 		snap.Leases = append(snap.Leases, LeaseState{
 			Seq:         le.seq,
+			Admit:       le.admit,
 			ID:          le.id,
 			Token:       le.token,
 			RequestID:   le.requestID,
@@ -128,6 +133,7 @@ func (l *Ledger) Snapshot() Snapshot {
 	for _, w := range l.waiters {
 		snap.Waiters = append(snap.Waiters, WaiterState{
 			Arrival:     w.arrival,
+			Admit:       w.spec.admit,
 			RequestID:   w.spec.id,
 			MilliCores:  w.spec.milliCores,
 			MemoryBytes: w.spec.memory,
@@ -167,6 +173,7 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		memberOf:           map[string]LeaseID{},
 		leaseSeq:           snap.LeaseSeq,
 		arrivalSeq:         snap.ArrivalSeq,
+		admitSeq:           snap.AdmitSeq,
 		eventSeq:           snap.EventSeq,
 		tokenGen:           tokenGen,
 	}
@@ -213,6 +220,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	}
 	le := &lease{
 		seq:        ls.Seq,
+		admit:      ls.Admit,
 		id:         ls.ID,
 		token:      ls.Token,
 		requestID:  ls.RequestID,
@@ -280,6 +288,7 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 		arrival: ws.Arrival,
 		spec: spec{
 			id:         ws.RequestID,
+			admit:      ws.Admit,
 			milliCores: ws.MilliCores,
 			memory:     ws.MemoryBytes,
 			claims:     claims,

@@ -51,7 +51,7 @@ func busyLedger(t *testing.T) (*Ledger, Lease, Lease) {
 		t.Fatalf("winner = %+v", d)
 	}
 	mustQueue(t, l, Request{ID: "waiter-1", Cores: 4})
-	mustQueue(t, l, Request{ID: "waiter-2", Cores: 1, Semaphores: []SemaphoreClaim{sem("deploy", 2, 1, PolicyFail)}})
+	mustQueue(t, l, Request{ID: "waiter-2", Cores: 4, Semaphores: []SemaphoreClaim{sem("deploy", 2, 1, PolicyFail)}})
 	if _, err := l.SetHeadroom(3, 512); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}

@@ -53,6 +53,42 @@ func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
 	}
 }
 
+func TestConcurrency_ReacquireKeepsQueuedArrivalOrder(t *testing.T) {
+	s := newStoreT(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/n", RunID: "holder", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "old/n", RunID: "old", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("old: want Queued got %s", r.Kind)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "new/n", RunID: "new", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("new: want Queued got %s", r.Kind)
+	}
+	if _, err := s.ReleaseConcurrencySlot(ctxT(t), "k", "holder/n", "success", "", "", 0); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "old/n", RunID: "old", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("old re-acquire: want Granted before newer waiter, got %s", r.Kind)
+	}
+	state, err := s.GetConcurrencyState(ctxT(t), "k")
+	if err != nil {
+		t.Fatalf("GetConcurrencyState: %v", err)
+	}
+	if len(state.Waiters) != 1 || state.Waiters[0].RunID != "new" {
+		t.Fatalf("waiters after old grant = %+v, want only new", state.Waiters)
+	}
+}
+
 func fuzzSeeds(t *testing.T) []int64 {
 	t.Helper()
 	if env := os.Getenv("SPARKWING_CONC_FUZZ_SEED"); env != "" {

@@ -1,7 +1,7 @@
 // `sparkwing cluster concurrency` -- inspect a concurrency namespace's
 // holders and queue. The dashboard reads the same /api/v1/concurrency/
 // {key}/state endpoint; this subcommand reuses it so an operator can
-// tell "wedged" from "waiting its turn" without a browser.
+// tell wedged work from work waiting for budget without a browser.
 package main
 
 import (

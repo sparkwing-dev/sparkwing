@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 )
 
@@ -44,12 +45,14 @@ type Ledger struct {
 	waiters            []*waiter
 	leaseSeq           uint64
 	arrivalSeq         uint64
+	admitSeq           uint64
 	eventSeq           uint64
 	tokenGen           func() string
 }
 
 type spec struct {
 	id         string
+	admit      uint64
 	milliCores int64
 	memory     uint64
 	claims     []claim
@@ -64,6 +67,7 @@ type claim struct {
 
 type lease struct {
 	seq        uint64
+	admit      uint64
 	id         LeaseID
 	token      string
 	requestID  string
@@ -170,6 +174,8 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	}
 
 	if !l.fifoBlocked(s) && l.fits(s) {
+		l.admitSeq++
+		s.admit = l.admitSeq
 		grantedLease, evicted, events := l.grant(s, EventGranted)
 		events = append(events, l.promote()...)
 		l.mustHoldInvariants()
@@ -190,6 +196,8 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 		}
 	}
 
+	l.admitSeq++
+	s.admit = l.admitSeq
 	position := l.queuePosition(s)
 	l.arrivalSeq++
 	l.waiters = append(l.waiters, &waiter{arrival: l.arrivalSeq, spec: s})
@@ -388,14 +396,123 @@ func (s spec) fifoResources() []resource {
 	return rs
 }
 
+// fifoBlocked reports whether a fresh arrival must queue behind the
+// existing waiters rather than backfill ahead of them. It touches a
+// blocked resource when an earlier waiter is either currently runnable or
+// starved on that resource by holders younger than the waiter; a resource
+// held only against older holders is left open for backfill.
 func (l *Ledger) fifoBlocked(s spec) bool {
-	mine := resourceSet(s.fifoResources())
-	for _, w := range l.waiters {
-		if touchesAny(w.spec, mine) {
-			return true
+	_, blocked := l.scanWaiters(false)
+	return anyIn(blocked, s.fifoResources())
+}
+
+// scanWaiters walks queued waiters in arrival order and computes the set
+// of resources on which promotion is blocked. A waiter that does not fit
+// blocks only the resources on which holders younger than it are what keep
+// it from fitting, so a later waiter can backfill a resource that only
+// older holders occupy. A waiter that touches an already-blocked resource
+// yields all its resources to preserve per-resource FIFO order. When
+// findFit is set, the index of the first waiter that both fits and is not
+// blocked is returned; otherwise the accumulated blocked set is returned.
+func (l *Ledger) scanWaiters(findFit bool) (int, map[resource]bool) {
+	blocked := map[resource]bool{}
+	for i, w := range l.waiters {
+		rs := w.spec.fifoResources()
+		if anyIn(blocked, rs) {
+			markAll(blocked, rs)
+			continue
+		}
+		if l.fits(w.spec) {
+			if findFit {
+				return i, blocked
+			}
+			markAll(blocked, rs)
+			continue
+		}
+		for _, r := range rs {
+			if l.starvedByYounger(w.spec, r) {
+				blocked[r] = true
+			}
 		}
 	}
-	return false
+	return -1, blocked
+}
+
+// starvedByYounger reports whether waiter w cannot currently claim
+// resource r, yet would fit if holders admitted after w arrived were set
+// aside. When true, younger backfilled holders -- not older ones w queued
+// behind -- are what keep w from running, so w's claim on r is protected
+// and later waiters must not backfill past it.
+func (l *Ledger) starvedByYounger(w spec, r resource) bool {
+	demand, used, usedOlder, capacity, ok := l.resourceBudget(w, r)
+	if !ok {
+		return false
+	}
+	return !fitsCost(used, demand, capacity) && fitsCost(usedOlder, demand, capacity)
+}
+
+// resourceBudget returns waiter w's demand on resource r, the live cost
+// against it, the cost owed only to holders no younger than w, and r's
+// effective capacity. ok is false for a resource w does not weigh on
+// (a cancel_others claim, or a semaphore w does not queue on).
+func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, capacity int64, ok bool) {
+	switch r {
+	case resourceCores:
+		capacity = min(l.totalMilliCores, l.headroomMilliCores)
+		used = l.usedMilliCores
+		for _, le := range l.leases {
+			if le.admit <= w.admit {
+				usedOlder += le.milliCores
+			}
+		}
+		return w.milliCores, used, usedOlder, capacity, true
+	case resourceMemory:
+		capacity = int64(min(l.totalMemory, l.headroomMemory))
+		used = int64(l.usedMemory)
+		for _, le := range l.leases {
+			if le.admit <= w.admit {
+				usedOlder += int64(le.memory)
+			}
+		}
+		return int64(w.memory), used, usedOlder, capacity, true
+	default:
+		key := semKeyOf(r)
+		c, found := w.claim(key)
+		if !found || c.policy == PolicyCancelOthers {
+			return 0, 0, 0, 0, false
+		}
+		capacity = int64(l.semEffectiveCapacity(key, c.capacity))
+		if sem := l.sems[key]; sem != nil {
+			for _, h := range sem.holds {
+				if h.superseded {
+					continue
+				}
+				used += int64(h.cost)
+				if le, live := l.leases[h.lease]; live && le.admit <= w.admit {
+					usedOlder += int64(h.cost)
+				}
+			}
+		}
+		return int64(c.cost), used, usedOlder, capacity, true
+	}
+}
+
+// fitsCost reports whether a demand of cost fits in capacity given used,
+// comparing by subtraction so a large declared cost cannot overflow the
+// sum into a false fit.
+func fitsCost(used, cost, capacity int64) bool {
+	return used <= capacity && cost <= capacity-used
+}
+
+func semKeyOf(r resource) string { return strings.TrimPrefix(string(r), "semaphore:") }
+
+func (s spec) claim(key string) (claim, bool) {
+	for _, c := range s.claims {
+		if c.key == key {
+			return c, true
+		}
+	}
+	return claim{}, false
 }
 
 func (l *Ledger) fifoBlockedOnKey(key string) bool {
@@ -532,6 +649,7 @@ func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
 	l.usedMemory += s.memory
 	l.leases[id] = &lease{
 		seq:        l.leaseSeq,
+		admit:      s.admit,
 		id:         id,
 		token:      token,
 		requestID:  s.id,
@@ -601,11 +719,11 @@ func (l *Ledger) dropHold(key string, id LeaseID) {
 	}
 }
 
-// promote grants waiters until no further waiter is admissible. Each
-// pass scans in arrival order with head-of-line blocking: a waiter that
-// cannot be granted marks every resource it queues on as blocked, and a
-// later waiter touching any blocked resource is passed over regardless
-// of fit, so per-resource FIFO order is never violated.
+// promote grants waiters until no further waiter is admissible. Each pass
+// scans in arrival order and grants the oldest waiter that fits and is not
+// blocked: a waiter that does not fit is backfilled past only while older
+// holders are what block it, and once holders younger than it are the
+// blocker its resources are protected so no later waiter starves it.
 func (l *Ledger) promote() []Event {
 	var events []Event
 	for {
@@ -621,19 +739,8 @@ func (l *Ledger) promote() []Event {
 }
 
 func (l *Ledger) nextPromotable() int {
-	blocked := map[resource]bool{}
-	for i, w := range l.waiters {
-		rs := w.spec.fifoResources()
-		if anyIn(blocked, rs) {
-			markAll(blocked, rs)
-			continue
-		}
-		if l.fits(w.spec) {
-			return i
-		}
-		markAll(blocked, rs)
-	}
-	return -1
+	i, _ := l.scanWaiters(true)
+	return i
 }
 
 func anyIn(set map[resource]bool, rs []resource) bool {

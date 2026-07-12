@@ -47,8 +47,8 @@ func holderCountsForBudget(superseded bool, leaseExpiresNS, nowNS int64) bool {
 
 // declaredCapacityFloorTerm is one live holder's contribution to the
 // capacity floor: its own declaration, or the most-restrictive capacity
-// (1) when the row predates declared-capacity tracking (zero or
-// negative), so a legacy holder constrains admission instead of
+// (1) when the row has no declared capacity (zero or negative), so the
+// holder constrains admission instead of
 // vanishing from the floor and inflating it into over-admission.
 func declaredCapacityFloorTerm(declared int) int {
 	if declared > 0 {
@@ -206,10 +206,10 @@ type AcquireSlotResponse struct {
 	DriftNote        string
 
 	// Observability for a queued arrival (Kind == AcquireQueued):
-	// Position is the number of queue-policy waiters that arrived
-	// earlier (0 == next in line), QueueLength is the total queued for
-	// the key, and Holders are the slots currently held. Zero/empty for
-	// other kinds.
+	// Position is the number of queue-policy waiters that arrived earlier,
+	// QueueLength is the total queued for the key, and Holders are the slots
+	// currently held. Weighted admission may backfill a later waiter that fits
+	// while an earlier waiter stays queued. Zero/empty for other kinds.
 	Position    int
 	QueueLength int
 	Holders     []ConcurrencyHolder
@@ -253,9 +253,10 @@ type ConcurrencyWaiter struct {
 	Cost             int
 	DeclaredCapacity int
 
-	// Position is the waiter's 0-based rank among queue-policy waiters
-	// for the key, in arrival order, as derived by GetConcurrencyState.
-	// Zero for non-queue waiters.
+	// Position is the waiter's 0-based arrival rank among queue-policy
+	// waiters for the key, as derived by GetConcurrencyState. Weighted
+	// admission may backfill later waiters that fit ahead of earlier waiters
+	// that do not. Zero for non-queue waiters.
 	Position int
 }
 
@@ -522,20 +523,15 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 		policy = OnLimitQueue
 	}
 
-	fifoBlocked := false
+	queueBlocked := false
 	if policy == OnLimitQueue {
-		var earlier int
-		if err := tx.QueryRowContext(
-			ctx,
-			`SELECT COUNT(*) FROM concurrency_waiters
-			  WHERE key = ? AND policy = ? AND (run_id != ? OR node_id != ?)`,
-			req.Key, OnLimitQueue, req.RunID, req.NodeID,
-		).Scan(&earlier); err != nil {
+		blocked, err := txEarlierRunnableQueueWaiter(ctx, tx, req.Key, req.RunID, req.NodeID, nowNS, acct)
+		if err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		fifoBlocked = earlier > 0
+		queueBlocked = blocked
 	}
-	if !fifoBlocked && fitsBudget(activeCost, req.Cost, effCap) {
+	if !queueBlocked && fitsBudget(activeCost, req.Cost, effCap) {
 		expiresNS := now.Add(req.Lease).UnixNano()
 		if err := txInsertHolder(ctx, tx, holderRow{
 			key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
@@ -640,18 +636,24 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	case OnLimitQueue:
 		fallthrough
 	default:
+		arrivedNS := nowNS
+		if queuedArrivedNS, queued, err := txQueueWaiterArrivedAt(ctx, tx, req.Key, req.RunID, req.NodeID); err != nil {
+			return AcquireSlotResponse{}, err
+		} else if queued {
+			arrivedNS = queuedArrivedNS
+		}
 		if err := txPark(ctx, tx, ConcurrencyWaiter{
 			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
 			Policy: OnLimitQueue, CacheKeyHash: req.CacheKeyHash,
 			Cost: req.Cost, DeclaredCapacity: req.Capacity,
-		}, nowNS); err != nil {
+		}, arrivedNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		var position, queueLen int
 		if err := tx.QueryRowContext(
 			ctx,
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy = ? AND arrived_at < ?`,
-			req.Key, OnLimitQueue, nowNS,
+			req.Key, OnLimitQueue, arrivedNS,
 		).Scan(&position); err != nil {
 			return AcquireSlotResponse{}, err
 		}
@@ -762,6 +764,119 @@ func txConcurrencyAccounting(ctx context.Context, tx *storeTx, key string, nowNS
 	return a, nil
 }
 
+func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string, nowNS int64, acct concurrencyAccounting) (bool, error) {
+	currentArrivedNS, currentQueued, err := txQueueWaiterArrivedAt(ctx, tx, key, runID, nodeID)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT `+waiterColumns+`
+		   FROM concurrency_waiters
+		  WHERE key = ? AND policy = ? AND (run_id != ? OR node_id != ?)
+		  ORDER BY arrived_at ASC`,
+		key, OnLimitQueue, runID, nodeID,
+	)
+	if err != nil {
+		return false, err
+	}
+	var waiters []ConcurrencyWaiter
+	for rows.Next() {
+		w, serr := scanWaiter(rows)
+		if serr != nil {
+			_ = rows.Close()
+			return false, serr
+		}
+		waiters = append(waiters, w)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+
+	ids := make([]string, 0, len(waiters))
+	for _, w := range waiters {
+		ids = append(ids, w.RunID)
+	}
+	live, err := txLiveRunningRunIDs(ctx, tx, ids, time.Unix(0, nowNS).Add(-DefaultLeaseDuration).UnixNano())
+	if err != nil {
+		return false, err
+	}
+
+	used := acct.used
+	holderMin := acct.floor
+	for _, w := range waiters {
+		if currentQueued && w.ArrivedAt.UnixNano() >= currentArrivedNS {
+			continue
+		}
+		if !live[w.RunID] {
+			if _, derr := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); derr != nil {
+				return false, derr
+			}
+			continue
+		}
+		cost, capacity := waiterBudget(w, acct.entryCap, holderMin)
+		if fitsBudget(used, cost, capacity) {
+			return true, nil
+		}
+		if blockedByYoungerHolders(acct.holders, w.ArrivedAt.UnixNano(), cost, capacity) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func txQueueWaiterArrivedAt(ctx context.Context, tx *storeTx, key, runID, nodeID string) (int64, bool, error) {
+	var arrivedNS int64
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT arrived_at FROM concurrency_waiters
+		  WHERE key = ? AND run_id = ? AND node_id = ? AND policy = ?`,
+		key, runID, nodeID, OnLimitQueue,
+	).Scan(&arrivedNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return arrivedNS, true, nil
+}
+
+func waiterBudget(w ConcurrencyWaiter, entryCap, holderMin int) (int, int) {
+	cost := w.Cost
+	if cost <= 0 {
+		cost = 1
+	}
+	capacity := w.DeclaredCapacity
+	if capacity <= 0 {
+		capacity = entryCap
+	}
+	if holderMin > 0 && holderMin < capacity {
+		capacity = holderMin
+	}
+	return cost, capacity
+}
+
+func blockedByYoungerHolders(holders []ConcurrencyHolder, waiterArrivedNS int64, cost, capacity int) bool {
+	usedWithoutYounger := 0
+	for _, h := range holders {
+		if holderAdmissionOrderNS(h) > waiterArrivedNS {
+			continue
+		}
+		usedWithoutYounger += holderBudgetCost(h.Cost, h.DeclaredCapacity)
+	}
+	return fitsBudget(usedWithoutYounger, cost, capacity)
+}
+
+func holderAdmissionOrderNS(h ConcurrencyHolder) int64 {
+	if !h.QueueArrivedAt.IsZero() {
+		return h.QueueArrivedAt.UnixNano()
+	}
+	return h.ClaimedAt.UnixNano()
+}
+
 // txLockEntry serializes the transaction on the key's entries row --
 // the same lock the acquire path takes -- so every budget-mutating
 // path (admission, promotion, lease extension) runs under per-key
@@ -800,12 +915,12 @@ func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) 
 	return entryCap, nil
 }
 
-// txPromoteWaiters grants holder rows to FIFO queue / cancel_others
-// waiters, summing each waiter's declared cost against the open budget
-// (effective capacity minus live holder cost). A heavy waiter at the
-// head of the queue is not skipped by a cheaper one behind it: when the
-// head no longer fits, promotion stops. Coalesce waiters resolve via
-// the leader path, not here. Returns the promoted waiters with their
+// txPromoteWaiters grants holder rows to queue / cancel_others waiters,
+// scanning oldest-first and summing each promoted waiter's declared cost
+// against the open budget. A waiter that does not fit may be bypassed only
+// while older holders are what block it; once younger backfilled holders are
+// the blocker, promotion stops behind that waiter. Coalesce waiters resolve
+// via the leader path, not here. Returns the promoted waiters with their
 // assigned HolderID set.
 func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
@@ -953,19 +1068,12 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, key string, nowNS,
 			}
 			continue
 		}
-		c := w.Cost
-		if c <= 0 {
-			c = 1
-		}
-		candCap := w.DeclaredCapacity
-		if candCap <= 0 {
-			candCap = entryCap
-		}
-		if holderMin > 0 && holderMin < candCap {
-			candCap = holderMin
-		}
+		c, candCap := waiterBudget(w, entryCap, holderMin)
 		if !fitsBudget(used, c, candCap) {
-			break
+			if blockedByYoungerHolders(acct.holders, w.ArrivedAt.UnixNano(), c, candCap) {
+				break
+			}
+			continue
 		}
 		used += c
 		if holderMin == 0 || candCap < holderMin {
@@ -1771,8 +1879,10 @@ func txDeleteWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string)
 	return n > 0, nil
 }
 
-// PromoteNextWaiters grants holder rows to FIFO queue/cancel-others
-// waiters up to capacity. Coalesce waiters resolve via the leader path.
+// PromoteNextWaiters scans queue/cancel-others waiters oldest-first and
+// promotes fitting waiters up to capacity. A non-fitting waiter may be
+// bypassed until younger backfilled holders become the blocker. Coalesce
+// waiters resolve via the leader path.
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error) {
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease

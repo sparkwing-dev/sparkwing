@@ -255,13 +255,27 @@ func TestFailPolicy_QueuesWhenOnlyHostBlocks(t *testing.T) {
 	}
 }
 
-func TestFailPolicy_FailsWhenSemaphoreFIFOBlocked(t *testing.T) {
+func TestFailPolicy_BackfillsPastWaiterBlockedByOlderHolder(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyQueue)}})
 	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 2, 2, PolicyQueue)}})
-	d, _ := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyFail)}})
+	d, events := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyFail)}})
+	if d.Kind != DecisionGranted {
+		t.Fatalf("decision = %+v, want granted: budget fits and the heavy head waits only on an older holder", d)
+	}
+	wantKinds(t, events, EventGranted)
+}
+
+func TestFailPolicy_FailsBehindProtectedWaiter(t *testing.T) {
+	l := testLedger(t, 0, 0)
+	older := mustGrant(t, l, Request{ID: "older", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
+	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 10, 8, PolicyQueue)}})
+	mustGrant(t, l, Request{ID: "younger", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
+	events := mustRelease(t, l, older.ID, "older")
+	wantKinds(t, events, EventReleased)
+	d, _ := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 10, 3, PolicyFail)}})
 	if d.Kind != DecisionFailed || d.Key != "k" {
-		t.Fatalf("decision = %+v, want failed on k despite free budget", d)
+		t.Fatalf("decision = %+v, want failed: the heavy head is protected by a younger holder", d)
 	}
 }
 
@@ -392,26 +406,26 @@ func TestAllOrNothing_WaiterHoldsNothingWhileQueued(t *testing.T) {
 	}
 }
 
-func TestFIFO_HeadOfLineBlocksSmallerLaterArrivals(t *testing.T) {
+func TestWeighted_LightArrivalBackfillsPastHeavyHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	leaseA := mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 3, 2, PolicyQueue)}})
-	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 3, 3, PolicyQueue)}})
+	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 3, 3, PolicyQueue)}})
 
-	posC := mustQueue(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 3, 1, PolicyQueue)}})
-	if posC != 1 {
-		t.Fatalf("c position = %d, want 1 behind the heavy head", posC)
+	d, events := submit(t, l, Request{ID: "light", Semaphores: []SemaphoreClaim{sem("k", 3, 1, PolicyQueue)}})
+	if d.Kind != DecisionGranted {
+		t.Fatalf("light = %+v, want granted as backfill past the heavy head", d)
+	}
+	wantKinds(t, events, EventGranted)
+	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "heavy" {
+		t.Fatalf("waiters = %+v, want only the heavy head still queued", snap.Waiters)
 	}
 
-	events := mustRelease(t, l, leaseA.ID, "a")
+	events = mustRelease(t, l, leaseA.ID, "a")
+	wantKinds(t, events, EventReleased)
+	events = mustRelease(t, l, d.Lease.ID, "light")
 	wantKinds(t, events, EventReleased, EventPromoted)
-	if events[1].RequestID != "b" {
-		t.Fatalf("promoted %q, want the heavy head b", events[1].RequestID)
-	}
-
-	events = mustRelease(t, l, events[1].Lease, "b")
-	wantKinds(t, events, EventReleased, EventPromoted)
-	if events[1].RequestID != "c" {
-		t.Fatalf("promoted %q, want c", events[1].RequestID)
+	if events[1].RequestID != "heavy" {
+		t.Fatalf("promoted %q, want the heavy head once budget frees", events[1].RequestID)
 	}
 }
 
@@ -422,19 +436,17 @@ func TestFIFO_DisjointResourcesBypassBlockedQueue(t *testing.T) {
 	mustGrant(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("j", 1, 1, PolicyQueue)}})
 }
 
-func TestFIFO_ZeroCostClaimQueuesBehindEarlierWaiters(t *testing.T) {
+func TestWeighted_ZeroCostClaimBackfillsPastBlockedWaiter(t *testing.T) {
 	l := testLedger(t, 0, 0)
-	leaseA := mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyQueue)}})
+	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyQueue)}})
 	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyQueue)}})
-	pos := mustQueue(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 1, 0, PolicyQueue)}})
-	if pos != 1 {
-		t.Fatalf("zero-cost position = %d, want 1", pos)
+	d, events := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 1, 0, PolicyQueue)}})
+	if d.Kind != DecisionGranted {
+		t.Fatalf("zero-cost c = %+v, want granted: it draws no budget and never delays b", d)
 	}
-
-	events := mustRelease(t, l, leaseA.ID, "a")
-	wantKinds(t, events, EventReleased, EventPromoted, EventPromoted)
-	if events[1].RequestID != "b" || events[2].RequestID != "c" {
-		t.Fatalf("promotion order = %q, %q; want b then c", events[1].RequestID, events[2].RequestID)
+	wantKinds(t, events, EventGranted)
+	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "b" {
+		t.Fatalf("waiters = %+v, want only b queued", snap.Waiters)
 	}
 }
 

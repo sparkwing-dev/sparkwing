@@ -193,9 +193,9 @@ func runWebhooksList(args []string) error {
 
 // derivePipelineFromHookURL extracts the pipeline name from a
 // sparkwing webhook URL. The controller routes POST
-// /webhooks/github/<pipeline>; unscoped legacy hooks (pre-#8) posted
-// to /webhooks/github with no path segment, so they render as
-// "(unscoped, legacy)" to flag them for cleanup.
+// /webhooks/github/<pipeline>; older unscoped hooks posted to
+// /webhooks/github with no path segment, so they render as "(unscoped)"
+// to flag them for cleanup.
 func derivePipelineFromHookURL(rawURL string) string {
 	u, err := neturl.Parse(rawURL)
 	if err != nil {
@@ -207,7 +207,7 @@ func derivePipelineFromHookURL(rawURL string) string {
 		return "(non-sparkwing)"
 	}
 	if strings.HasSuffix(path, prefix) {
-		return "(unscoped, legacy)"
+		return "(unscoped)"
 	}
 	idx := strings.Index(path, prefix+"/")
 	if idx < 0 {
