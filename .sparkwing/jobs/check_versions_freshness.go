@@ -18,6 +18,10 @@ import (
 // fallback pin is measured against.
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
+type VersionFreshnessOptions struct {
+	AllowReleaseLineSelfReplace bool
+}
+
 // CheckVersionsFreshness verifies every sparkwing-ecosystem dependency
 // in every go.mod under repoRoot is current:
 //
@@ -32,6 +36,10 @@ const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 // Watched module prefixes are listed in watchedModulePrefixes. Add
 // more there as the ecosystem grows.
 func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
+	return CheckVersionsFreshnessWithOptions(ctx, repoRoot, VersionFreshnessOptions{})
+}
+
+func CheckVersionsFreshnessWithOptions(ctx context.Context, repoRoot string, options VersionFreshnessOptions) error {
 	mods, err := findGoModFiles(repoRoot)
 	if err != nil {
 		return fmt.Errorf("scan go.mod files: %w", err)
@@ -63,6 +71,9 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 					problems = append(problems, fmt.Sprintf("%s: replace -> %s: %v", relMod, replace.New.Path, err))
 					continue
 				}
+				if !shouldCheckLocalReplaceFreshness(relMod, req.Mod.Path, localPath, repoRoot, options) {
+					continue
+				}
 				behind, behindBy, err := localBehindRemote(ctx, localPath)
 				if err != nil {
 					problems = append(problems, fmt.Sprintf("%s: replace -> %s: %v", relMod, localPath, err))
@@ -88,6 +99,24 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 		return fmt.Errorf("version freshness:\n  - %s", strings.Join(problems, "\n  - "))
 	}
 	return nil
+}
+
+func shouldCheckLocalReplaceFreshness(relMod, modulePath, localPath, repoRoot string, options VersionFreshnessOptions) bool {
+	if !options.AllowReleaseLineSelfReplace {
+		return true
+	}
+	if relMod != ".sparkwing/go.mod" || modulePath != sdkModulePath {
+		return true
+	}
+	absRepoRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return true
+	}
+	absLocalPath, err := filepath.Abs(localPath)
+	if err != nil {
+		return true
+	}
+	return filepath.Clean(absLocalPath) != filepath.Clean(absRepoRoot)
 }
 
 // checkScaffoldFallbackPin verifies the SDK version baked into the

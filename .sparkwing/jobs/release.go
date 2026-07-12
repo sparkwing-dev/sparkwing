@@ -90,7 +90,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gatePreCommit.Needs(clean)
 
 	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
-		return (&PrePush{}).run(ctx)
+		return (&PrePush{AllowReleaseLineSelfReplace: true}).run(ctx)
 	})
 	gatePrePush.Needs(clean)
 

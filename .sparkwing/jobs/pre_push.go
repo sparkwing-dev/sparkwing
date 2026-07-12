@@ -25,7 +25,10 @@ import (
 // `sparkwing pipeline hooks install`. Tooling assumed on PATH:
 // golangci-lint, staticcheck (called by golangci-lint), govulncheck,
 // terraform (for the Mode 3 module gate; .tool-versions pins it).
-type PrePush struct{ sparkwing.Base }
+type PrePush struct {
+	sparkwing.Base
+	AllowReleaseLineSelfReplace bool
+}
 
 func (PrePush) ShortHelp() string {
 	return "Pre-push gate: lint, test -race, vuln, freshness, api-snapshot, no replace + no go.work"
@@ -79,7 +82,10 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "go mod tidy: no drift")
 	}
 
-	if err := CheckVersionsFreshness(ctx, sparkwing.WorkDir()); err != nil {
+	versionOptions := VersionFreshnessOptions{
+		AllowReleaseLineSelfReplace: p.AllowReleaseLineSelfReplace,
+	}
+	if err := CheckVersionsFreshnessWithOptions(ctx, sparkwing.WorkDir(), versionOptions); err != nil {
 		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(ctx, "version freshness: current")

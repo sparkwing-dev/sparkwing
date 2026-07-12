@@ -4,13 +4,13 @@ package scaffold
 
 // FallbackSDKVersion is the SDK version pinned into a fresh
 // .sparkwing/go.mod when the running CLI's own version can't be detected
-// (a source build with no release ldflag stamp). Agents dogfooding a
-// source-built binary hit this path, so the value must name an actual
-// published tag on github.com/sparkwing-dev/sparkwing that is recent
-// enough for the built-in templates (which use Job.Verify, Failure, ...)
-// to compile against.
+// (a source build with no release ldflag stamp). Source-built binaries
+// hit this path, so the value must name an actual published tag on
+// github.com/sparkwing-dev/sparkwing that is recent enough for the
+// built-in templates (which use Job.Verify, Failure, ...) to compile
+// against.
 //
 // Keep it current: the version-freshness gate (CheckVersionsFreshness)
 // fails when this pin falls behind the latest released SDK, so a fresh
 // scaffold never emits a go.mod that can't build the current templates.
-const FallbackSDKVersion = "v0.15.9"
+const FallbackSDKVersion = "v0.15.10"
