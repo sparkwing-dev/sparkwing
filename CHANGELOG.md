@@ -87,9 +87,41 @@ code change to unlock.
 - **controller:** (Breaking) The trigger API drops the `plan_admission`
   request block; spawned children no longer inherit plan-level
   concurrency holders through the controller.
+- **sdk:** Resource measurement now covers a run's whole process tree,
+  not just the orchestrator. Each `sparkwing.Bash` / `sparkwing.Exec`
+  command's CPU and peak memory -- read from its `wait4` rusage, which
+  aggregates the command's entire reaped subtree -- fold into the node's
+  measured profile, so a pipeline whose work is a test suite, a linter,
+  or a shell step is costed by what those subprocesses actually drew
+  rather than the near-zero the orchestrator itself uses. Admission
+  therefore stops over-admitting subprocess-heavy runs onto one box.
+  Measured costs change materially: existing capacity profiles re-learn
+  from the runs after upgrade. Each spawned command also runs in its own
+  process group, so cancelling a node tears down the whole subtree
+  instead of orphaning forked grandchildren.
 
 ### Added
 
+- **cli:** The admission daemon detects and surfaces *contended* runs --
+  a run measurably slower than its own measured p99 while the host is
+  saturated by non-sparkwing load, distinguished from a wedged holder
+  (`stalled`) and a legitimately long one. `sparkwing queue` marks the
+  holder `(contended)` with a one-line explanation, a finished contended
+  run prints an end-of-run attribution (`took 12m vs p50 8m30s; host
+  saturated 62% of the run`), the queue's recent-events line counts
+  contended runs, and `sparkwing runs stats --capacity` shows each
+  pipeline's contended share. Detection is sample-gated (an unprofiled
+  run is never flagged) and observability-only -- it never changes an
+  admission decision.
+- **cli:** A single machine budget caps how much of the host sparkwing
+  may use. Set `SPARKWING_BUDGET` to a core count, a percentage, or a
+  cores-and-memory pair (`6`, `50%`, `6,8gb`); it caps the admission
+  ledger below the machine total, and `sparkwing queue` shows the cap as
+  its own headroom row (`budget 6.0 cores (machine 10.0)`). Appending
+  `enforce` hardens the cap at the OS level -- a cgroup v2 wall on Linux,
+  background QoS scheduling on macOS -- in addition to admission.
+  Measured admission remains the primary mechanism; the budget is the one
+  machine-level knob that complements it.
 - **cli:** `sparkwing runs stats --capacity` now shows each pipeline's
   CPU and memory distributions (p50/p95/peak across the same window of
   recent runs that backs the duration percentiles) instead of a lone
@@ -155,6 +187,13 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** A same-repo child trigger (a `RunAndAwait` to a
+  sibling pipeline) now dispatches from the running parent's own compiled
+  binary, so it works from a project directory that has no git identity
+  instead of failing. When a child genuinely cannot be located the error
+  names the real cause (no git identity to resolve a sibling checkout
+  from) and real fixes, and no longer recommends `sparkwing pipeline add`,
+  a verb the CLI does not have.
 - **store:** Upgrading a database whose `pipeline_profiles` table
   predates the `cpu_measured` column now backfills the flag for carried
   rows with a positive measured peak, matching how admission qualifies

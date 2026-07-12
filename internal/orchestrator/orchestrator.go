@@ -479,7 +479,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, nil, wedgeBudget)
+		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -545,6 +545,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			Event: "resource_pin_drift",
 			Msg:   lease.driftWarning,
 		})
+	}
+	if lease != nil && !skipDispatch && opts.Admission != nil {
+		if note := opts.Admission.contentionAttribution(finishCtx, runID); note != "" {
+			if st := canonicalLocalStore(backends.State); st != nil && opts.Pipeline != "" {
+				_ = st.RecordContention(finishCtx, opts.Pipeline)
+			}
+			if opts.Delegate != nil {
+				opts.Delegate.Emit(sparkwing.LogRecord{
+					TS:    time.Now(),
+					Level: "info",
+					Event: "run_contended",
+					Msg:   note,
+				})
+			}
+		}
 	}
 
 	if opts.Delegate != nil {
@@ -924,6 +939,20 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 // read carries the same shape). Adding a new context field is a
 // one-line edit here -- no schema migration, no separate emit-vs-
 // store divergence.
+// parentTriggerRepoDir returns the running pipeline's own working
+// directory, whose .sparkwing/ tree lets a same-repo child trigger
+// dispatch from the parent's already-compiled binary without a repo
+// registry entry or a git identity. Empty when it can't be determined.
+func parentTriggerRepoDir() string {
+	if wd := sparkwing.WorkDir(); wd != "" {
+		return wd
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return ""
+}
+
 func buildRunInvocation(opts Options, runID string) map[string]any {
 	inv := map[string]any{
 		"run_id":   runID,

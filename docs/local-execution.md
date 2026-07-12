@@ -180,6 +180,20 @@ flags the gap so the pin can be corrected or dropped. The posture is
 declare nothing and let sparkwing measure; pin sparingly, and sparkwing
 polices the pin.
 
+The same measurements answer the murkiest recurring question on a shared
+box: is sparkwing slow, or is the machine busy? A holder is flagged
+`(contended)` only when three things line up at once -- its elapsed time
+has run well past its own measured p99, the host has been saturated by
+non-sparkwing load for a sustained share of the run, and it has enough
+duration samples to have a trustworthy baseline. An unprofiled run, a run
+that is merely at the slow end of its own distribution, and a run on an
+idle host are all left unflagged. When a contended run finishes it prints
+a one-line attribution (`took 12m vs p50 8m30s; host saturated 62% of the
+run`), and `sparkwing runs stats --capacity` shows each pipeline's
+contended share, so "the tool is slow" becomes a measurement instead of a
+guess. Detection is observability only; it never changes an admission
+decision.
+
 `.Concurrency(group)` is for *logical* mutual exclusion only -- a deploy
 lock, a shared fixture -- never host sizing. A run- or box-scoped group
 is local to the machine; a global-scoped group pools across the whole
@@ -193,14 +207,16 @@ machine:
 - `sparkwing queue` -- the truthful view of local admission: every
   holder with the repo it came from, how long it has held, and its cost,
   every waiter in arrival order with its position and estimated start,
-  and a flag on any holder that is alive but idle while runs wait behind
-  it. A child run riding its parent's lease renders indented under that
-  parent. The header summarizes the last day of admission outcomes in
-  one line -- runs granted, median wait, evictions by key, queue
-  timeouts -- so a chronic pattern shows up before it becomes an
-  incident. It also names the serving daemon's version and uptime, and
-  warns when an older-pinned pipeline binary is admitting outside the
-  daemon.
+  and a health flag on any holder that is not running cleanly:
+  `(stalled)` for one that is alive but idle while runs wait behind it,
+  and `(contended)` for one that is measurably slower than its profile
+  while the host is saturated. A child run riding its parent's lease
+  renders indented under that parent. The header summarizes the last day
+  of admission outcomes in one line -- runs granted, median wait,
+  evictions by key, queue timeouts, and how many runs were contended --
+  so a chronic pattern shows up before it becomes an incident. It also
+  names the serving daemon's version and uptime, and warns when an
+  older-pinned pipeline binary is admitting outside the daemon.
 - `sparkwing doctor` -- the one repair verb. It removes only provably-
   dead state (an interrupted run's leftover row, an orphaned lock file
   whose owner is gone) and reports what it found and did. It never kills
@@ -210,6 +226,42 @@ machine:
 The daemon writes an operational log to `wingd/d.log` under the sparkwing
 home (`~/.sparkwing/wingd/d.log` by default) for when you want to see
 what it did.
+
+### Capping sparkwing's share of the machine
+
+Measured admission is the primary mechanism, and for most machines it is
+the only one you need. When you want a hard ceiling -- "CI may use at most
+half my laptop" -- set one machine budget with the `SPARKWING_BUDGET`
+environment variable. It takes a core count, a percentage, or both a core
+and a memory term:
+
+```
+SPARKWING_BUDGET=6           # at most 6 cores
+SPARKWING_BUDGET=50%         # at most half the machine's cores
+SPARKWING_BUDGET=6,8gb       # 6 cores and 8 GiB
+SPARKWING_BUDGET=50%,enforce # half the cores, hardened at the OS level
+```
+
+The budget caps the admission ledger below the machine total, so it holds
+everywhere admission already runs, with no other change to how runs are
+scheduled. `sparkwing queue` shows it as its own row in the headroom
+arithmetic (`budget 6.0 cores (machine 10.0)`) so the constraint is
+visible rather than mysterious.
+
+Add `enforce` to harden the cap at the operating-system level as well as
+in admission:
+
+- **Linux** places admitted run processes in a daemon-managed cgroup v2
+  with `cpu.max` and `memory.max` matching the budget, a kernel wall. When
+  the cgroup filesystem is absent or unwritable (an unprivileged laptop),
+  the daemon logs a note and the admission cap still applies.
+- **macOS** has no cgroups, so it demotes admitted runs to background QoS
+  (the `taskpolicy -b` equivalent: efficiency-core scheduling and
+  throttled I/O) and raises their scheduler nice. This is advisory
+  scheduling that yields to foreground work, not a hard cap.
+
+This is the one machine-level knob. It complements measured admission; it
+does not replace it.
 
 ### Whoever owns the machine owns admission
 

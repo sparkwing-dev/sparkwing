@@ -50,7 +50,14 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			c.leaseID = ev.Lease
 			c.members = []string{ev.RequestID}
 			c.startAt = now
+			c.holdSampledMS = 0
+			c.holdSaturatedMS = 0
+			c.contended = false
+			c.contentionReason = ""
 			d.leaseCharge[ev.Lease] = c.resources
+			if d.cfg.Budget.Enforcing() && c.finalizable && c.pid > 0 {
+				go d.enforceHolderProcess(c.pid, ev.RequestID)
+			}
 			out = append(out, delivery{c, &wingwire.Grant{
 				RunID:      ev.RequestID,
 				LeaseToken: lease.Token,

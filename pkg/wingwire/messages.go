@@ -111,6 +111,16 @@ type AdmissionRequest struct {
 	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
 	// no measured duration exists yet, so the run contributes no ETA.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
+	// ExpectedP99MS is the pipeline's measured p99 run duration in
+	// milliseconds. The daemon flags a holder as contended only once its
+	// elapsed time runs well past this baseline, so a run that is merely at
+	// the slow end of its own distribution is never mistaken for throttled.
+	// Zero means no measured p99, which disqualifies the run from flagging.
+	ExpectedP99MS int64 `json:"expected_p99_ms,omitempty"`
+	// SampleCount is how many runs back the duration percentiles. The
+	// contention detector requires a minimum count so an unprofiled or
+	// barely-profiled run is never flagged.
+	SampleCount int `json:"sample_count,omitempty"`
 	// DriftWarning, when set, is a one-line note that this run's explicit
 	// pin has drifted from its measured profile. The daemon echoes it into
 	// the queue view; it never affects admission.
@@ -257,6 +267,19 @@ type Holder struct {
 	// holder. Set only when Stalled is true; it never names a
 	// destructive host verb.
 	Recovery string `json:"recovery,omitempty"`
+	// Contended marks a holder that is measurably slower than its profile
+	// while the host is saturated -- throttled by contention rather than
+	// wedged (which is Stalled) or legitimately long. It is a flag only;
+	// the daemon never acts on a contended holder.
+	Contended bool `json:"contended,omitempty"`
+	// ContentionReason is a one-line explanation set when Contended is
+	// true ("elapsed 12m0s past p99 8m30s; host saturated 62% of the run").
+	ContentionReason string `json:"contention_reason,omitempty"`
+	// SaturatedShare is the fraction (0..1) of this holder's observed host
+	// samples during which the host was saturated by external load. It
+	// backs the end-of-run attribution regardless of the contended verdict;
+	// zero for reattached holders whose accounting did not survive a restart.
+	SaturatedShare float64 `json:"saturated_share,omitempty"`
 }
 
 // Waiter is one run queued for admission, as reported in a
@@ -325,6 +348,28 @@ type QueueState struct {
 	// Events summarizes the daemon's recent admission outcomes. Nil for
 	// older daemons that do not keep the window.
 	Events *EventsWindow `json:"events,omitempty"`
+	// Budget describes the machine budget capping the ledger below the
+	// host total, so the queue view can show the constraint. Nil when no
+	// budget is set (the full machine is available).
+	Budget *BudgetState `json:"budget,omitempty"`
+}
+
+// BudgetState reports the machine budget behind a [QueueState]: the
+// capped host capacity the ledger admits into, against the machine total
+// it was measured from. It is present only when a budget is configured.
+type BudgetState struct {
+	// Cores is the budgeted core cap the ledger admits into.
+	Cores float64 `json:"cores"`
+	// MachineCores is the host's full measured core count.
+	MachineCores float64 `json:"machine_cores"`
+	// MemoryBytes is the budgeted memory cap the ledger admits into.
+	MemoryBytes int64 `json:"memory_bytes"`
+	// MachineMemoryBytes is the host's full measured memory.
+	MachineMemoryBytes int64 `json:"machine_memory_bytes"`
+	// Enforce reports whether the budget is hardened at the OS level
+	// (a cgroup on Linux, background scheduling on macOS) in addition to
+	// capping admission.
+	Enforce bool `json:"enforce,omitempty"`
 }
 
 // EventsWindow summarizes the daemon's rolling window of admission
@@ -349,6 +394,9 @@ type EventsWindow struct {
 	// cancelled (operator cancel, interrupt, or a waiter's process
 	// going away).
 	Cancellations int `json:"cancellations,omitempty"`
+	// Contended is how many runs the daemon flagged as throttled by host
+	// contention while they held admission in the window.
+	Contended int `json:"contended,omitempty"`
 }
 
 // EvictionCount is one contested key's eviction tally in an

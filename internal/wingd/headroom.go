@@ -74,6 +74,10 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.reservedMem = reservedMem
 	d.externalMem = externalMem
 
+	grantable := stat.TotalCores - reservedCores
+	saturated := grantable > 0 && externalCores >= contentionSaturationFraction*grantable
+	d.updateContentionLocked(saturated, d.cfg.sampleInterval().Milliseconds(), d.now())
+
 	coresBand := math.Max(0.5, 0.05*stat.TotalCores)
 	memBand := uint64(0.05 * float64(stat.TotalMemoryBytes))
 	changed := !d.headroomInit ||

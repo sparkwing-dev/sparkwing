@@ -92,6 +92,10 @@ type Config struct {
 	// uses [DefaultHeadroomFraction]; a negative value disables the
 	// reserve.
 	HeadroomFraction float64
+	// Budget caps the admission ledger below the machine total and,
+	// when it opts in, hardens the cap at the OS level. A zero Budget
+	// leaves the full machine available, the historical behavior.
+	Budget Budget
 	// Sampler reads host capacity and pressure. Nil uses the real
 	// platform sampler.
 	Sampler HostSampler

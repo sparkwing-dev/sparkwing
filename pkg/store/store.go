@@ -580,7 +580,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 9
+const expectedSchemaVersion = 10
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -832,6 +832,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return err
 	case 9:
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesWaitCols)
+	case 10:
+		return s.ensureColumns("pipeline_profiles", pipelineProfilesContendedCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -868,6 +870,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 9:
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesWaitCols)
+	case 10:
+		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesContendedCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -990,6 +994,13 @@ var pipelineProfilesWaitCols = map[string]string{
 	"wait_p50_ms":       "INTEGER NOT NULL DEFAULT 0",
 	"wait_p99_ms":       "INTEGER NOT NULL DEFAULT 0",
 	"wait_sample_count": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// pipelineProfilesContendedCols is the additive column v10 adds: a tally
+// of runs the admission daemon flagged as throttled by host contention,
+// kept on the rollup row so capacity stats can show a per-pipeline share.
+var pipelineProfilesContendedCols = map[string]string{
+	"contended_count": "INTEGER NOT NULL DEFAULT 0",
 }
 
 func (s *Store) ensureColumnsAll() error {

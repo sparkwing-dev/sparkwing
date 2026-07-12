@@ -75,6 +75,37 @@ func (la *LocalAdmission) stderr() io.Writer {
 	return os.Stderr
 }
 
+// contentionAttribution asks the daemon, before the run's lease is
+// released, whether it flagged this run as throttled by host contention.
+// When it did, it returns a one-line end-of-run attribution comparing the
+// run's duration to its measured p50 and naming the host-saturation share.
+// It returns "" when no daemon answers, the run is not flagged, or there
+// is no measured baseline to compare against -- never a fabricated verdict.
+func (la *LocalAdmission) contentionAttribution(ctx context.Context, runID string) string {
+	qs, err := wingdclient.Query(ctx, la.clientOptions())
+	if err != nil {
+		return ""
+	}
+	for _, h := range qs.Holders {
+		if h.RunID != runID || !h.Contended {
+			continue
+		}
+		sat := int(h.SaturatedShare*100 + 0.5)
+		if h.ExpectedDurationMS > 0 {
+			return fmt.Sprintf("took %s vs p50 %s; host saturated %d%% of the run",
+				fmtAdmissionDur(h.ElapsedMS), fmtAdmissionDur(h.ExpectedDurationMS), sat)
+		}
+		return h.ContentionReason
+	}
+	return ""
+}
+
+// fmtAdmissionDur renders a millisecond duration to the nearest second for
+// the end-of-run contention attribution.
+func fmtAdmissionDur(ms int64) string {
+	return (time.Duration(ms) * time.Millisecond).Round(time.Second).String()
+}
+
 // localPlanSemsID suffixes the participant ID a child run uses for the
 // semaphores its plan claims beyond what the inherited parent lease
 // already holds.
@@ -130,7 +161,7 @@ func (la *LocalAdmission) admitRun(
 	if la.ParentLeaseToken != "" {
 		return la.attachChildRun(ctx, backends, runID, pipeline, plan, onEvicted)
 	}
-	res, drift := resolveHostCost(ctx, backends, pipeline, plan)
+	res, prof, drift := resolveHostCost(ctx, backends, pipeline, plan)
 	req := wingwire.AdmissionRequest{
 		RunID:              runID,
 		Pipeline:           pipeline,
@@ -140,6 +171,10 @@ func (la *LocalAdmission) admitRun(
 		Semaphores:         planSemaphoreClaims(plan, runID),
 		CostSource:         string(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
+	}
+	if prof != nil {
+		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
+		req.SampleCount = prof.SampleCount
 	}
 	if drift != nil {
 		req.DriftWarning = drift.Message
@@ -368,7 +403,7 @@ func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Durati
 // returns a drift warning when a pin has diverged far from measurement.
 // A missing local store (cluster and remote paths) simply means no
 // measured profile, so the pin-or-default order still holds.
-func resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *capacity.Drift) {
+func resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift) {
 	pin := planPin(plan)
 	var profile *store.PipelineProfile
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
@@ -377,7 +412,7 @@ func resolveHostCost(ctx context.Context, backends Backends, pipeline string, pl
 		}
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU())
-	return res, capacity.CheckDrift(pin, profile)
+	return res, profile, capacity.CheckDrift(pin, profile)
 }
 
 // planPin flattens the run's explicit .Resources() declaration to a

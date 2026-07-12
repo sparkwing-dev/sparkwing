@@ -199,6 +199,13 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 
 	nodeCtx := sparkwingruntime.WithLogger(ctx, nlog)
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
+	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
+		_ = r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
+			TS:            time.Now(),
+			CPUMillicores: s.CPUMillicores,
+			MemoryBytes:   s.MemoryBytes,
+		})
+	})
 
 	if err := r.writeDispatchSnapshot(nodeCtx, runID, node); err != nil {
 		sparkwing.Debug(nodeCtx, "dispatch snapshot: %v", err)

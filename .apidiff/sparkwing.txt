@@ -526,6 +526,12 @@ type ResourceHints struct {
 
 	MemoryBytes int64
 }
+type ResourceReporter func(ResourceSample)
+type ResourceSample struct {
+	CPUMillicores int64
+
+	MemoryBytes int64
+}
 func RetryAuto() RetryOption
 func RetryBackoff(d time.Duration) RetryOption
 type RetryConfig struct {
@@ -741,6 +747,7 @@ func WithFreshInputs[T any](in T) AwaitOption
 func WithFreshRepo(repo string) AwaitOption
 func WithFreshTimeout(d time.Duration) AwaitOption
 func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context
+func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context
 func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context
 func WithStep(ctx context.Context, stepID string) context.Context
 type Work struct {

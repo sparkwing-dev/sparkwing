@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -113,6 +114,11 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
+	if qs.Budget != nil {
+		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%t\n",
+			qs.Budget.Cores, qs.Budget.MachineCores,
+			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce)
+	}
 	for _, h := range qs.Holders {
 		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			h.RunID, orDash(h.Pipeline), orDash(h.Repo), fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
@@ -154,6 +160,9 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 	_ = tw.Flush()
 
+	if b := budgetNote(qs.Budget); b != "" {
+		fmt.Fprintf(out, "%s\n", b)
+	}
 	if note := externalPressureNote(qs); note != "" {
 		fmt.Fprintf(out, "\n%s\n", note)
 	}
@@ -171,6 +180,9 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		}
 		if h.Stalled {
 			run += " (stalled)"
+		}
+		if h.Contended {
+			run += " (contended)"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
 			fmtElapsed(h.ElapsedMS), fmtHolderCost(h), orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
@@ -198,6 +210,11 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	for _, h := range qs.Holders {
 		if h.Stalled && h.Recovery != "" {
 			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", h.RunID, h.Recovery)
+		}
+	}
+	for _, h := range qs.Holders {
+		if h.Contended && h.ContentionReason != "" {
+			fmt.Fprintf(out, "\n%s is contended (%s).\n", h.RunID, h.ContentionReason)
 		}
 	}
 	for _, d := range queueDriftNotes(qs) {
@@ -236,6 +253,32 @@ func isHostResource(key string) bool { return key == "cores" || key == "memory" 
 // is what is holding runs back -- a queue that looks idle (free capacity,
 // no holders) but refuses work because the machine is busy with other
 // processes. Empty when external load is not the binding constraint.
+// budgetNote renders the machine-budget row for the queue's headroom
+// arithmetic: the capped capacity against the machine total, per capped
+// dimension, so the constraint is never a mystery. Empty when no budget
+// caps anything below the machine.
+func budgetNote(b *wingwire.BudgetState) string {
+	if b == nil {
+		return ""
+	}
+	var parts []string
+	if b.MachineCores > 0 && b.Cores < b.MachineCores {
+		parts = append(parts, fmt.Sprintf("%.1f cores (machine %.1f)", b.Cores, b.MachineCores))
+	}
+	if b.MachineMemoryBytes > 0 && b.MemoryBytes < b.MachineMemoryBytes {
+		parts = append(parts, fmt.Sprintf("%s memory (machine %s)",
+			humanBytes(b.MemoryBytes), humanBytes(b.MachineMemoryBytes)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	note := "budget " + strings.Join(parts, ", ")
+	if b.Enforce {
+		note += "; OS-enforced"
+	}
+	return note
+}
+
 func externalPressureNote(qs wingwire.QueueState) string {
 	if len(qs.Waiters) == 0 {
 		return ""
@@ -299,7 +342,8 @@ func fmtDaemonHeader(qs wingwire.QueueState) string {
 // trouble categories that actually occurred. Empty when the daemon sent
 // no window or nothing happened in it.
 func fmtEventsLine(ev *wingwire.EventsWindow) string {
-	if ev == nil || (ev.Runs == 0 && len(ev.Evictions) == 0 && ev.QueueTimeouts == 0 && ev.Cancellations == 0) {
+	if ev == nil || (ev.Runs == 0 && len(ev.Evictions) == 0 && ev.QueueTimeouts == 0 &&
+		ev.Cancellations == 0 && ev.Contended == 0) {
 		return ""
 	}
 	span := (time.Duration(ev.WindowMS) * time.Millisecond).Round(time.Hour)
@@ -323,6 +367,9 @@ func fmtEventsLine(ev *wingwire.EventsWindow) string {
 	if ev.Cancellations > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", ev.Cancellations,
 			pluralWord(ev.Cancellations, "cancellation", "cancellations")))
+	}
+	if ev.Contended > 0 {
+		parts = append(parts, fmt.Sprintf("%d contended", ev.Contended))
 	}
 	out := "last " + label + ": "
 	for i, p := range parts {
@@ -433,9 +480,16 @@ func joinKeys(keys []string) string {
 	return out
 }
 
+// stalledWord is the holder's health word for the plain view: stalled
+// (wedged) takes precedence over contended (throttled); a healthy holder
+// is live.
 func stalledWord(h wingwire.Holder) string {
-	if h.Stalled {
+	switch {
+	case h.Stalled:
 		return "stalled"
+	case h.Contended:
+		return "contended"
+	default:
+		return "live"
 	}
-	return "live"
 }

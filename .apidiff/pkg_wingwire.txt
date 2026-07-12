@@ -20,7 +20,22 @@ type AdmissionRequest struct {
 
 	ExpectedDurationMS int64
 
+	ExpectedP99MS int64
+
+	SampleCount int
+
 	DriftWarning string
+}
+type BudgetState struct {
+	Cores float64
+
+	MachineCores float64
+
+	MemoryBytes int64
+
+	MachineMemoryBytes int64
+
+	Enforce bool
 }
 type Cancel struct {
 	RunID  string
@@ -56,6 +71,8 @@ type EventsWindow struct {
 	QueueTimeouts int
 
 	Cancellations int
+
+	Contended int
 }
 type Evicted struct {
 	RunID string
@@ -109,6 +126,12 @@ type Holder struct {
 	Stalled bool
 
 	Recovery string
+
+	Contended bool
+
+	ContentionReason string
+
+	SaturatedShare float64
 }
 type HostResources struct {
 	Cores float64
@@ -138,6 +161,8 @@ type QueueState struct {
 	DaemonUptimeMS int64
 
 	Events *EventsWindow
+
+	Budget *BudgetState
 }
 type Queued struct {
 	RunID string

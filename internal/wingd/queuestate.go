@@ -103,11 +103,27 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 				h.Stalled = true
 				h.Recovery = stallRecoveryCommand(ls.RequestID)
 			}
+			if c.contended {
+				h.Contended = true
+				h.ContentionReason = c.contentionReason
+			}
+			if c.holdSampledMS > 0 {
+				h.SaturatedShare = float64(c.holdSaturatedMS) / float64(c.holdSampledMS)
+			}
 		}
 		qs.Holders = append(qs.Holders, h)
 		qs.Holders = append(qs.Holders, d.attachedChildHoldersLocked(ls, now)...)
 	}
 	qs.Events = d.events.summary(now)
+	if d.cfg.Budget.HasCap() {
+		qs.Budget = &wingwire.BudgetState{
+			Cores:              d.budgetCores,
+			MachineCores:       d.machineCores,
+			MemoryBytes:        int64(d.budgetMemory),
+			MachineMemoryBytes: int64(d.machineMemory),
+			Enforce:            d.cfg.Budget.Enforcing(),
+		}
+	}
 
 	remaining := map[string]float64{}
 	for _, r := range qs.Resources {

@@ -140,15 +140,11 @@ func commandEnvFromContext(ctx context.Context) map[string]string {
 // that genuinely need shell features (pipes, redirects, globs,
 // conditionals).
 //
-// Signal propagation: the child runs under exec.CommandContext, which
-// kills the direct child (SIGKILL) when ctx is cancelled. Bash spawns
-// a shell that may fork further; those grandchildren are NOT signaled
-// by ctx cancellation and can outlive the run if the bash script
-// backgrounds work or wraps a long-lived helper. Terminal SIGINT
-// (Ctrl-C) goes to the whole foreground process group and DOES reach
-// grandchildren via the OS. Authors who need clean tree teardown on
-// programmatic cancel should use Exec on a single binary, or run the
-// shell program through `setsid` / `exec` and reap explicitly.
+// Signal propagation: the child runs in its own process group, and ctx
+// cancellation SIGKILLs the whole group. A bash pipeline that forks
+// further -- backgrounded work, a wrapped long-lived helper -- is torn
+// down with it, so grandchildren do not outlive a cancelled run. Terminal
+// SIGINT (Ctrl-C) also reaches the group via the OS.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
@@ -161,14 +157,11 @@ func Bash(ctx context.Context, line string) *Cmd {
 //	sparkwing.Exec(ctx, "kubectl", "apply", "-f", manifestPath).Run()
 //	sparkwing.Exec(ctx, "docker", "push", tag).Run()
 //
-// Signal propagation: the binary runs under exec.CommandContext, which
-// sends SIGKILL to the direct child when ctx is cancelled. Most CLIs
-// (go, kubectl, docker, git) are single-process and terminate cleanly
-// on that signal. If the binary forks long-lived children of its own,
-// those grandchildren are NOT signaled by ctx cancellation -- the
-// same caveat as [Bash]. Terminal SIGINT (Ctrl-C) reaches the whole
-// foreground process group via the OS, so interactive cancel does
-// teardown the tree.
+// Signal propagation: the binary runs in its own process group, and ctx
+// cancellation SIGKILLs the whole group. Single-process CLIs (go, kubectl,
+// docker, git) terminate cleanly; a binary that forks long-lived children
+// has them torn down too, since the group -- not just the direct child --
+// is signalled. Terminal SIGINT (Ctrl-C) reaches the group via the OS.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }
@@ -380,6 +373,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 	}
+	configureProcessGroup(cmd)
 
 	logger := LoggerFromContext(ctx)
 	logger.Emit(recordEnvelope(ctx, LogRecord{
@@ -403,6 +397,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}
 
+	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}
@@ -414,7 +409,10 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	go streamLines(ctx, &wg, stderr, "info", logger, &errBuf)
 
 	waitErr := cmd.Wait()
+	wall := time.Since(startedAt)
 	wg.Wait()
+
+	emitCommandResources(ctx, cmd, wall)
 
 	res := ExecResult{
 		Command:  display,
@@ -442,6 +440,27 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 	return res, nil
+}
+
+// emitCommandResources measures the finished command's CPU and peak memory
+// from its wait4 rusage and reports them to the node's resource reporter, so
+// subprocess cost lands in the run's measured profile. cpu/wall gives the
+// command's average core draw over its span; wall is the command's real
+// duration, so a subtree that ran for many seconds is not mistaken for a
+// same-cost burst. Best-effort: a missing rusage or reporter is a no-op.
+func emitCommandResources(ctx context.Context, cmd *exec.Cmd, wall time.Duration) {
+	cpu, maxRSS, ok := commandResourceUsage(cmd)
+	if !ok {
+		return
+	}
+	var millicores int64
+	if wall > 0 {
+		millicores = int64(cpu.Seconds() / wall.Seconds() * 1000.0)
+	}
+	if millicores < 0 {
+		millicores = 0
+	}
+	reportResource(ctx, ResourceSample{CPUMillicores: millicores, MemoryBytes: maxRSS})
 }
 
 // streamLines reads r line-by-line, tees to buf, and pushes each line

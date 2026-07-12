@@ -51,15 +51,16 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES")
+	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			s.Pipeline, s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
-			fmtCPUCells(s.Rollup), fmtMemCells(s.Rollup), fmtWaitCells(s.Rollup), s.Rollup.SampleCount)
+			fmtCPUCells(s.Rollup), fmtMemCells(s.Rollup), fmtWaitCells(s.Rollup), s.Rollup.SampleCount,
+			fmtContendedCell(s.Rollup))
 		for _, n := range s.Nodes {
-			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 				n.NodeID, fmtDur(n.P50Duration), fmtDur(n.P99Duration),
-				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount)
+				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount, "-")
 		}
 	}
 	if err := tw.Flush(); err != nil {
@@ -83,6 +84,20 @@ func fmtCPUCells(p store.PipelineProfile) string {
 func fmtMemCells(p store.PipelineProfile) string {
 	return fmt.Sprintf("%s/%s/%s",
 		humanBytes(p.MemoryP50Bytes), humanBytes(p.MemoryP95Bytes), humanBytes(p.PeakMemoryBytes))
+}
+
+// fmtContendedCell renders a pipeline's contended share: the count of
+// runs the daemon flagged as throttled by host contention over its
+// measured runs, with the percentage. A dash before any run is flagged.
+func fmtContendedCell(p store.PipelineProfile) string {
+	if p.ContendedCount == 0 {
+		return "-"
+	}
+	if p.SampleCount <= 0 {
+		return fmt.Sprintf("%d", p.ContendedCount)
+	}
+	pct := int(float64(p.ContendedCount)/float64(p.SampleCount)*100 + 0.5)
+	return fmt.Sprintf("%d/%d (%d%%)", p.ContendedCount, p.SampleCount, pct)
 }
 
 // fmtWaitCells renders a rollup's queue-wait percentiles as p50/p99, or

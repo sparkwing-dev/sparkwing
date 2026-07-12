@@ -281,6 +281,8 @@ type PipelineProfile struct {
 
 	PinnedCores       float64
 	PinnedMemoryBytes int64
+
+	ContendedCount int
 }
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -457,6 +459,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
+func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
