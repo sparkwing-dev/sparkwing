@@ -53,6 +53,9 @@ code change to unlock.
   local state store and releases any local concurrency budget they held or were
   waiting on, so orphaned daemonless runs no longer leave phantom admission
   pressure behind.
+- **store:** Added `Store.CancelRun` for local run cancellation that marks the
+  run and unfinished nodes cancelled, then releases concurrency waiters and
+  holders through the same promotion path used by normal waiter cancellation.
 
 ## [v0.15.9] - 2026-07-12
 ### Fixed
