@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -199,6 +200,58 @@ func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
 	}
 	if !strings.Contains(msg, "command failed to start") {
 		t.Fatalf("missing failed-to-start prefix: %q", msg)
+	}
+}
+
+// A process killed after it started (exit code -1, colliding with the
+// ExitNotStarted sentinel) must render as terminated, not as a launch
+// failure -- the Terminated field, not ExitCode, decides.
+func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
+	e := &sparkwing.ExecError{
+		Command:    "go test ./...",
+		ExitCode:   sparkwing.ExitNotStarted,
+		Cause:      errors.New("signal: killed"),
+		Terminated: "cancellation",
+	}
+	msg := e.Error()
+	if strings.Contains(msg, "command failed to start") {
+		t.Fatalf("a terminated process must not read as a start failure: %q", msg)
+	}
+	want := "command terminated by cancellation: go test ./... (signal: killed)"
+	if msg != want {
+		t.Fatalf("Error() = %q, want %q", msg, want)
+	}
+}
+
+// A command SIGKILLed mid-run by run-context cancellation had started;
+// its error must read as a cancellation-kill, not "failed to start".
+func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
+	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	_, err := sparkwing.Bash(ctx, "sleep 30").Run()
+	if err == nil {
+		t.Fatal("expected error for a cancelled command")
+	}
+	var ee *sparkwing.ExecError
+	if !errors.As(err, &ee) {
+		t.Fatalf("error is not *ExecError: %T", err)
+	}
+	if ee.Terminated != "cancellation" {
+		t.Fatalf("Terminated = %q, want cancellation", ee.Terminated)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "command failed to start") {
+		t.Fatalf("a killed-mid-run command must not read as a start failure: %q", msg)
+	}
+	if !strings.Contains(msg, "command terminated by cancellation") {
+		t.Fatalf("want cancellation wording: %q", msg)
+	}
+	if !strings.Contains(msg, "signal: killed") {
+		t.Fatalf("want the underlying signal in the message: %q", msg)
 	}
 }
 

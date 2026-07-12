@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
@@ -62,6 +63,21 @@ type LocalAdmission struct {
 	// the client defaults.
 	DialTimeout time.Duration
 	Backoff     time.Duration
+	// QueueHeartbeat is how often a still-queued run re-emits its wait
+	// status on stderr so a long admission wait never reads as a hang.
+	// Zero uses defaultQueueHeartbeat.
+	QueueHeartbeat time.Duration
+}
+
+// defaultQueueHeartbeat is the re-emit cadence for a queued run's wait
+// status when [LocalAdmission.QueueHeartbeat] is unset.
+const defaultQueueHeartbeat = 30 * time.Second
+
+func (la *LocalAdmission) heartbeatInterval() time.Duration {
+	if la.QueueHeartbeat > 0 {
+		return la.QueueHeartbeat
+	}
+	return defaultQueueHeartbeat
 }
 
 func (la *LocalAdmission) clientOptions() wingdclient.Options {
@@ -345,11 +361,10 @@ func (la *LocalAdmission) acquireBlocking(
 	if err != nil {
 		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)
 	}
-	waited := false
-	lease, err := cl.Acquire(acquireCtx, req, func(q wingwire.Queued) {
-		waited = true
-		la.reportQueued(ctx, backends, runID, q)
-	})
+	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID}
+	stopHeartbeat := reporter.startHeartbeat(acquireCtx)
+	lease, err := cl.Acquire(acquireCtx, req, reporter.onQueued)
+	stopHeartbeat()
 	if err != nil {
 		cl.Close()
 		if cause := context.Cause(acquireCtx); cause != nil && ctx.Err() == nil {
@@ -379,33 +394,121 @@ func (la *LocalAdmission) acquireBlocking(
 		}
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
-	if waited {
+	if reporter.waited() {
 		appendPlanEvent(ctx, backends, runID, "admission_granted", nil)
 		fmt.Fprintf(la.stderr(), "admitted; starting run\n")
 	}
 	return lease, admitProceed, nil
 }
 
+// queueWaitReporter renders a run's admission wait: a fresh line on each
+// daemon position push, plus a heartbeat re-emit of the last-known
+// position on an interval so a long silent wait never reads as a hang.
+type queueWaitReporter struct {
+	la       *LocalAdmission
+	ctx      context.Context
+	backends Backends
+	runID    string
+
+	mu     sync.Mutex
+	latest wingwire.Queued
+	seen   bool
+	since  time.Time
+}
+
+// onQueued handles a daemon position push: it records the latest state
+// (starting the wait clock on the first push) and emits the full line.
+func (r *queueWaitReporter) onQueued(q wingwire.Queued) {
+	r.mu.Lock()
+	if !r.seen {
+		r.seen = true
+		r.since = time.Now()
+	}
+	r.latest = q
+	r.mu.Unlock()
+	r.la.reportQueued(r.ctx, r.backends, r.runID, q)
+}
+
+// waited reports whether the run was ever queued, gating the terminal
+// "admitted; starting run" line to runs that actually waited.
+func (r *queueWaitReporter) waited() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.seen
+}
+
+// startHeartbeat re-emits the last-known queue position every
+// heartbeat interval until ctx ends or the returned stop is called. It
+// stays silent until the first daemon push has been seen.
+func (r *queueWaitReporter) startHeartbeat(ctx context.Context) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(r.la.heartbeatInterval())
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-t.C:
+				r.emitHeartbeat()
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+func (r *queueWaitReporter) emitHeartbeat() {
+	r.mu.Lock()
+	if !r.seen {
+		r.mu.Unlock()
+		return
+	}
+	q := r.latest
+	waited := time.Since(r.since)
+	r.mu.Unlock()
+	r.la.reportStillQueued(q, waited)
+}
+
 // reportQueued renders one queue-position update: a single stderr line
 // plus an admission_wait event on the run row.
 func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID string, q wingwire.Queued) {
-	ahead := q.Position - 1
-	if ahead < 0 {
-		ahead = 0
-	}
-	noun := "runs"
-	if ahead == 1 {
-		noun = "run"
-	}
-	reason := ""
-	if q.BlockingReason != "" {
-		reason = "; " + q.BlockingReason
-	}
+	ahead, noun, reason := queuePositionParts(q)
 	fmt.Fprintf(la.stderr(),
 		"queued for local admission: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
 		q.Position, q.QueueLength, ahead, noun, reason)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d}`, q.Position, q.QueueLength)
 	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
+}
+
+// reportStillQueued re-emits the last-known position as a heartbeat,
+// naming how long the run has waited so a stalled-looking queue reads as
+// healthy backpressure. Stderr only -- no run-row event, to avoid
+// flooding the row with duplicate waits.
+func (la *LocalAdmission) reportStillQueued(q wingwire.Queued, waited time.Duration) {
+	ahead, noun, reason := queuePositionParts(q)
+	fmt.Fprintf(la.stderr(),
+		"still queued for local admission after %s: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
+		waited.Round(time.Second), q.Position, q.QueueLength, ahead, noun, reason)
+}
+
+// queuePositionParts derives the shared pieces of a queue-position line:
+// the count of runs ahead, its singular/plural noun, and the "; reason"
+// suffix naming what the run is blocked on.
+func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
+	ahead = q.Position - 1
+	if ahead < 0 {
+		ahead = 0
+	}
+	noun = "runs"
+	if ahead == 1 {
+		noun = "run"
+	}
+	if q.BlockingReason != "" {
+		reason = "; " + q.BlockingReason
+	}
+	return ahead, noun, reason
 }
 
 // admissionFailure maps a terminal fail-policy answer to a named error.

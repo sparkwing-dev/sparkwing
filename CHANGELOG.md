@@ -47,6 +47,21 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** A run held in local admission now re-emits its wait
+  status on a heartbeat (every 30s by default) instead of going silent
+  after the first "queued for local admission" line, so a long wait reads
+  as healthy backpressure rather than a hang. The "admitted; starting run"
+  line prints after any wait.
+- **runs cancel:** Cancelling a run that already finished now reports the
+  truth ("already finished (success) -- nothing to cancel") as a no-op
+  success instead of a misleading "not found"; a genuinely-unknown run id
+  still fails as not found.
+- **exec:** A command killed mid-run by cancellation now reports "command
+  terminated by cancellation (signal: killed)" instead of "command failed
+  to start"; the started process's exit code of -1 no longer collides with
+  the never-started sentinel. Genuine launch failures keep their wording.
 
 ## [v0.16.2] - 2026-07-12
 ### Fixed

@@ -106,7 +106,11 @@ type runResult struct {
 	RunID    string `json:"run_id"`
 	OK       bool   `json:"ok"`
 	NewRunID string `json:"new_run_id,omitempty"`
-	Error    string `json:"error,omitempty"`
+	// Note carries a one-line explanation for a successful no-op row --
+	// e.g. a cancel of an already-terminal run -- so the reader sees why
+	// nothing happened without it reading as a failure.
+	Note  string `json:"note,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // reportResults prints per-id rows + a final summary; returns an error
@@ -117,6 +121,8 @@ func reportResults(out io.Writer, action string, results []runResult) error {
 		switch {
 		case r.OK && r.NewRunID != "":
 			fmt.Fprintf(out, "ok   %s -> %s\n", r.RunID, r.NewRunID)
+		case r.OK && r.Note != "":
+			fmt.Fprintf(out, "ok   %s: %s\n", r.RunID, r.Note)
 		case r.OK:
 			fmt.Fprintf(out, "ok   %s\n", r.RunID)
 		default:
@@ -230,13 +236,46 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		return err
 	}
 	for _, id := range remaining {
-		if err := c.CancelRun(ctx, id); err != nil {
-			results = append(results, runResult{RunID: id, Error: err.Error()})
-			continue
-		}
-		results = append(results, runResult{RunID: id, OK: true})
+		results = append(results, cancelOne(ctx, c, id))
 	}
 	return reportResults(os.Stdout, "cancel", results)
+}
+
+// runCanceler is the slice of the controller client cancelOne needs: the
+// cancel request plus a run lookup to tell an already-terminal run apart
+// from a genuinely-unknown id.
+type runCanceler interface {
+	CancelRun(ctx context.Context, id string) error
+	GetRun(ctx context.Context, id string) (*store.Run, error)
+}
+
+// cancelOne cancels one run through the controller and renders an honest
+// outcome. The controller answers not-found both for an id it never knew
+// and for a run that already reached a terminal state; cancelOne resolves
+// the ambiguity with a run lookup so a finished run reports a no-op
+// success ("already finished (success)") instead of a misleading
+// "not found", while a truly-unknown id stays a not-found failure.
+func cancelOne(ctx context.Context, c runCanceler, id string) runResult {
+	err := c.CancelRun(ctx, id)
+	if err == nil {
+		return runResult{RunID: id, OK: true}
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return runResult{RunID: id, Error: err.Error()}
+	}
+	if run, gerr := c.GetRun(ctx, id); gerr == nil && run != nil && isTerminalRunStatus(run.Status) {
+		return runResult{RunID: id, OK: true, Note: terminalCancelNote(run.Status)}
+	}
+	return runResult{RunID: id, Error: fmt.Sprintf("run %s not found", id)}
+}
+
+// terminalCancelNote phrases the no-op explanation for a cancel of a run
+// that already finished.
+func terminalCancelNote(status string) string {
+	if status == "cancelled" {
+		return "already cancelled -- nothing to cancel"
+	}
+	return fmt.Sprintf("already finished (%s) -- nothing to cancel", status)
 }
 
 // cancelLocalRunsViaDaemon cancels each id through the local admission

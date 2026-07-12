@@ -602,6 +602,93 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 	}
 }
 
+// syncBuffer is a concurrency-safe stderr sink so a test can poll the
+// queue output a run goroutine writes while the run is still blocked.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *syncBuffer) count(sub string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.Count(b.buf.String(), sub)
+}
+
+func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	backends, _, _ := openWingdBackends(t, home)
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+
+	runA := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "wingd-hb-a",
+			Admission: testWingdAdmission(home, nil),
+		})
+		runA <- res
+	}()
+	gate.awaitStarted(t, "wingd-hb-a")
+
+	stderrB := &syncBuffer{}
+	adm := testWingdAdmission(home, stderrB)
+	adm.QueueHeartbeat = 20 * time.Millisecond
+	runB := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "wingd-hb-b",
+			Admission: adm,
+		})
+		runB <- res
+	}()
+	awaitWaiter(t, home, "wingd-hb-b")
+
+	deadline := time.Now().Add(wingdTestWait)
+	for stderrB.count("still queued for local admission after") < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("queued run never re-emitted its wait status; stderr = %q", stderrB.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(gate.release)
+	for _, ch := range []chan *Result{runA, runB} {
+		select {
+		case res := <-ch:
+			if res == nil || res.Status != "success" {
+				t.Fatalf("run result = %+v, want success", res)
+			}
+		case <-time.After(wingdTestWait):
+			t.Fatal("run did not finish after release")
+		}
+	}
+
+	out := stderrB.String()
+	if !strings.Contains(out, "queued for local admission: position") {
+		t.Fatalf("missing the initial queue-position line: %q", out)
+	}
+	if !strings.Contains(out, "admitted; starting run") {
+		t.Fatalf("admitted line must print unconditionally after any wait: %q", out)
+	}
+}
+
 func TestWingd_ChildRunAttachesToParentLease(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)

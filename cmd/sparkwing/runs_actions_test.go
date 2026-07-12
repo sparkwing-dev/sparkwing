@@ -2,9 +2,77 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+type fakeCanceler struct {
+	cancelErr map[string]error
+	runs      map[string]*store.Run
+}
+
+func (f *fakeCanceler) CancelRun(_ context.Context, id string) error {
+	return f.cancelErr[id]
+}
+
+func (f *fakeCanceler) GetRun(_ context.Context, id string) (*store.Run, error) {
+	if r, ok := f.runs[id]; ok {
+		return r, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func TestCancelOne_TerminalRunReportsNoOpNotNotFound(t *testing.T) {
+	c := &fakeCanceler{
+		cancelErr: map[string]error{"run-done": store.ErrNotFound},
+		runs:      map[string]*store.Run{"run-done": {ID: "run-done", Status: "success"}},
+	}
+	got := cancelOne(context.Background(), c, "run-done")
+	if !got.OK {
+		t.Fatalf("cancel of a finished run should be a no-op success, got %+v", got)
+	}
+	if got.Error != "" {
+		t.Fatalf("finished run must not carry an error: %q", got.Error)
+	}
+	if !strings.Contains(got.Note, "already finished (success)") {
+		t.Fatalf("note = %q, want it to name the terminal state", got.Note)
+	}
+}
+
+func TestCancelOne_UnknownRunStaysNotFoundFailure(t *testing.T) {
+	c := &fakeCanceler{cancelErr: map[string]error{"run-ghost": store.ErrNotFound}}
+	got := cancelOne(context.Background(), c, "run-ghost")
+	if got.OK {
+		t.Fatalf("cancel of an unknown id must fail, got %+v", got)
+	}
+	if !strings.Contains(got.Error, "not found") {
+		t.Fatalf("error = %q, want a not-found message", got.Error)
+	}
+}
+
+func TestCancelOne_LiveRunCancelsCleanly(t *testing.T) {
+	c := &fakeCanceler{cancelErr: map[string]error{"run-live": nil}}
+	got := cancelOne(context.Background(), c, "run-live")
+	if !got.OK || got.Note != "" || got.Error != "" {
+		t.Fatalf("live cancel should be a plain ok, got %+v", got)
+	}
+}
+
+func TestReportResults_PrintsNoteForNoOpCancel(t *testing.T) {
+	var buf bytes.Buffer
+	err := reportResults(&buf, "cancel", []runResult{
+		{RunID: "run-done", OK: true, Note: "already finished (success) -- nothing to cancel"},
+	})
+	if err != nil {
+		t.Fatalf("a no-op cancel row must not fail the batch: %v", err)
+	}
+	if !strings.Contains(buf.String(), "ok   run-done: already finished (success) -- nothing to cancel") {
+		t.Fatalf("missing note row in:\n%s", buf.String())
+	}
+}
 
 func TestCollectRunIDs_FlagsAndStdinDash(t *testing.T) {
 	stdin := strings.NewReader("run-stdin-1\nrun-stdin-2\n")

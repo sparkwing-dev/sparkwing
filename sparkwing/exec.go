@@ -42,10 +42,24 @@ type ExecError struct {
 	Stderr   string
 	ExitCode int
 	Cause    error
+	// Terminated names why a started process was killed rather than
+	// exiting on its own: "cancellation" when the run's context ended,
+	// "signal" for any other kill. Empty for a normal exit or a process
+	// that never started. A signalled process reports ExitCode -1, which
+	// collides with ExitNotStarted, so this field -- not ExitCode -- is
+	// what tells a kill apart from a failed launch.
+	Terminated string
 }
 
 func (e *ExecError) Error() string {
 	var b strings.Builder
+	if e.Terminated != "" {
+		fmt.Fprintf(&b, "command terminated by %s: %s", e.Terminated, e.Command)
+		if e.Cause != nil {
+			fmt.Fprintf(&b, " (%v)", e.Cause)
+		}
+		return b.String()
+	}
 	if e.ExitCode == ExitNotStarted {
 		fmt.Fprintf(&b, "command failed to start: %s", e.Command)
 		if e.Cause != nil {
@@ -426,11 +440,12 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		var ee *exec.ExitError
 		if errors.As(waitErr, &ee) {
 			return res, &ExecError{
-				Command:  display,
-				Stdout:   res.Stdout,
-				Stderr:   res.Stderr,
-				ExitCode: res.ExitCode,
-				Cause:    waitErr,
+				Command:    display,
+				Stdout:     res.Stdout,
+				Stderr:     res.Stderr,
+				ExitCode:   res.ExitCode,
+				Cause:      waitErr,
+				Terminated: terminationReason(ctx, ee),
 			}
 		}
 		return res, &ExecError{
@@ -440,6 +455,22 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 	return res, nil
+}
+
+// terminationReason classifies a process that its ExitError says was
+// killed rather than exited: "cancellation" when the run's context has
+// ended (exec.CommandContext SIGKILLed the child on teardown), "signal"
+// for any other kill (an external SIGKILL, an OOM). It returns "" for a
+// process that exited on its own, so a genuine non-zero exit keeps the
+// "command failed (exit N)" wording.
+func terminationReason(ctx context.Context, ee *exec.ExitError) string {
+	if ee.Exited() {
+		return ""
+	}
+	if ctx.Err() != nil {
+		return "cancellation"
+	}
+	return "signal"
 }
 
 // emitCommandResources measures the finished command's CPU and peak memory
