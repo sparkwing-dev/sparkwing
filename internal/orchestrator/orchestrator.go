@@ -896,7 +896,7 @@ func dispatch(
 	})
 	if dispatchWait == dispatchWaitAborted {
 		planReleaseOutcome = "failed"
-		state.markStartedUnresolvedRunCancelled()
+		state.markScheduledUnresolvedRunCancelled()
 		if cause := context.Cause(dispatchCtx); cause != nil {
 			return cause
 		}
@@ -917,6 +917,7 @@ func dispatch(
 			"stack_bytes": len(stack),
 		})
 		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_wait_timeout", summary)
+		state.markScheduledUnresolvedRunCancelled()
 		if delegate != nil {
 			delegate.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
@@ -2677,16 +2678,26 @@ func (s *dispatchState) markRunCancelled(nodeID string) {
 	s.setOutcome(nodeID, sparkwing.Cancelled)
 }
 
-func (s *dispatchState) markStartedUnresolvedRunCancelled() {
+func (s *dispatchState) markScheduledUnresolvedRunCancelled() {
 	s.mu.Lock()
-	nodeIDs := make([]string, 0, len(s.starts))
+	nodeIDs := make([]string, 0, len(s.scheduled))
 	for nodeID := range s.starts {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	for nodeID := range s.scheduled {
+		if _, started := s.starts[nodeID]; started {
+			continue
+		}
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	unresolved := make([]string, 0, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
 		if _, ok := s.outcomes[nodeID]; !ok {
-			nodeIDs = append(nodeIDs, nodeID)
+			unresolved = append(unresolved, nodeID)
 		}
 	}
 	s.mu.Unlock()
-	for _, nodeID := range nodeIDs {
+	for _, nodeID := range unresolved {
 		s.markRunCancelled(nodeID)
 	}
 }

@@ -355,7 +355,7 @@ const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
 const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
 
 // prepareSelfReplaceJob bumps the sparkwing pin in `.sparkwing/go.mod`
-// to the release version and strips the dogfood self-replace. Runs
+// to the release version and strips the local self-replace. Runs
 // pre-tag so the shipped commit's `.sparkwing/go.mod` is in
 // ready-to-ship shape (no relative-path replace, real version pin).
 // Pairs with restoreSelfReplaceJob which puts the replace back after
@@ -389,12 +389,12 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
-		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
-		"release: pin .sparkwing/ to "+version+", drop dogfood self-replace"); err != nil {
-		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+		"release: pin .sparkwing/ to "+version+", drop local self-replace"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
 	}
 	sparkwing.Info(ctx, "bumped .sparkwing/go.mod sparkwing pin -> %s, removed self-replace", version)
 	return nil
@@ -449,12 +449,12 @@ func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod"); err != nil {
-		return fmt.Errorf("release: git add .sparkwing/go.mod: %w", err)
+	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
-		"chore: restore .sparkwing/ dogfood self-replace for next dev cycle"); err != nil {
-		return fmt.Errorf("release: git commit .sparkwing/go.mod: %w", err)
+		"chore: restore .sparkwing/ local self-replace for next dev cycle"); err != nil {
+		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
 	}
 	branch, err := currentBranch(ctx, j.RepoDir)
 	if err != nil {

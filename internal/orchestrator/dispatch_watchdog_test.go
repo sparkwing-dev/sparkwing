@@ -307,6 +307,13 @@ func TestDispatchWatchdog_FiresForUnboundedConcurrencyQueueWait(t *testing.T) {
 		!strings.Contains(result.res.Error.Error(), "dispatch_wait_timeout") {
 		t.Fatalf("unbounded queued waiter result = %+v, want dispatch_wait_timeout failure", result.res)
 	}
+	waiterNode, err := state.GetNode(context.Background(), "dispatch-watchdog-unbounded-waiter", "queued")
+	if err != nil {
+		t.Fatalf("GetNode queued: %v", err)
+	}
+	if waiterNode.Status != "done" || waiterNode.Outcome != "cancelled" {
+		t.Fatalf("queued node status/outcome = %q/%q, want done/cancelled after dispatch timeout", waiterNode.Status, waiterNode.Outcome)
+	}
 
 	close(watchdogQueueRelease)
 	holder := waitForHolderResult(t, holderDone)
