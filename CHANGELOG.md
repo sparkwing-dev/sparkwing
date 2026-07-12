@@ -47,6 +47,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **store:** Coalesced cache followers now execute fresh when their leader is
+  cancelled, superseded, lost, or otherwise exits without an inheritable node
+  result, instead of inheriting a synthetic cancellation or executor-loss
+  failure. Live followers also survive the maintenance sweep long enough to
+  promote and re-run the work.
 
 ## [v0.15.8] - 2026-07-11
 ### Fixed
