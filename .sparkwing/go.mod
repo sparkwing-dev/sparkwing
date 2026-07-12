@@ -3,7 +3,7 @@ module sparkwing-pipelines
 go 1.26.0
 
 require (
-	github.com/sparkwing-dev/sparkwing v0.15.10
+	github.com/sparkwing-dev/sparkwing v0.15.11
 	golang.org/x/mod v0.35.0
 )
 
@@ -80,8 +80,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.50.0 // indirect
 )
-
-// The release pipelines import Sparkwing by module path while running
-// from inside this checkout, so local builds resolve that module to the
-// repository root.
-replace github.com/sparkwing-dev/sparkwing => ..
