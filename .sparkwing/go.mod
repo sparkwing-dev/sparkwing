@@ -80,3 +80,8 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.50.0 // indirect
 )
+
+// The release pipelines import Sparkwing by module path while running
+// from inside this checkout, so local builds resolve that module to the
+// repository root.
+replace github.com/sparkwing-dev/sparkwing => ..
