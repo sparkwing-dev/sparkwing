@@ -111,6 +111,80 @@ func TestHolderDisconnect_ReleasesAndPromotes(t *testing.T) {
 	}
 }
 
+func TestMeasuredRequestAboveIdleGrantableCapacityIsAdmitted(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+	cl := ensure(t, home, "")
+	lease := mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:      "measured-heavy",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources: wingwire.HostResources{
+			Cores:       10,
+			MemoryBytes: 20 << 30,
+		},
+	})
+	if lease.Resources.Cores != 6.4 {
+		t.Fatalf("admitted cores = %v, want idle grantable ceiling 6.4", lease.Resources.Cores)
+	}
+	totalMemory := int64(16 << 30)
+	wantMemory := int64(float64(totalMemory) * 0.8)
+	if lease.Resources.MemoryBytes != wantMemory {
+		t.Fatalf("admitted memory = %d, want idle grantable ceiling %d", lease.Resources.MemoryBytes, wantMemory)
+	}
+}
+
+func TestPinnedRequestAboveTotalCapacityStillFails(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+	cl := ensure(t, home, "")
+	_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID:      "pinned-heavy",
+		CostSource: wingwire.CostSourcePin,
+		Resources:  wingwire.HostResources{Cores: 10},
+	}, nil)
+	if err == nil {
+		t.Fatal("oversized pinned request admitted, want never-admissible failure")
+	}
+}
+
+func TestUnknownCostSourceFails(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+	cl := ensure(t, home, "")
+	_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID:      "unknown-source",
+		CostSource: wingwire.CostSource("typo"),
+		Resources:  wingwire.HostResources{Cores: 1},
+	}, nil)
+	if err == nil {
+		t.Fatal("unknown cost source admitted, want invalid request failure")
+	}
+}
+
+func TestUnknownCostSourceFailsOnChildAttach(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+	parentClient := ensure(t, home, "")
+	parent := mustAcquire(t, parentClient, wingwire.AdmissionRequest{
+		RunID:     "parent",
+		Resources: wingwire.HostResources{Cores: 1},
+	})
+
+	childClient := ensure(t, home, "")
+	_, err := childClient.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID:            "child",
+		ParentLeaseToken: parent.Token,
+		CostSource:       wingwire.CostSource("typo"),
+	}, nil)
+	if err == nil {
+		t.Fatal("child attach with unknown cost source admitted, want invalid request failure")
+	}
+}
+
 func TestExplicitRelease_Promotes(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})

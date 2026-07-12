@@ -420,6 +420,52 @@ func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	return r
 }
 
+func (d *Daemon) clampMeasuredResourcesLocked(r wingwire.HostResources, costSource wingwire.CostSource) wingwire.HostResources {
+	if costSource != wingwire.CostSourceMeasured {
+		return r
+	}
+	if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
+		r.Cores = maxCores
+	}
+	if maxMemory := d.idleGrantableMemoryLocked(); maxMemory > 0 && r.MemoryBytes > int64(maxMemory) {
+		r.MemoryBytes = int64(maxMemory)
+	}
+	return r
+}
+
+func (d *Daemon) idleGrantableCoresLocked() float64 {
+	machineCores := d.machineCores
+	if machineCores <= 0 {
+		machineCores = d.budgetCores
+	}
+	if machineCores <= 0 {
+		return 0
+	}
+	grantable := machineCores * (1 - d.cfg.headroomFraction())
+	if d.budgetCores > 0 && d.budgetCores < grantable {
+		grantable = d.budgetCores
+	}
+	if grantable < 0 {
+		return 0
+	}
+	return grantable
+}
+
+func (d *Daemon) idleGrantableMemoryLocked() uint64 {
+	machineMemory := d.machineMemory
+	if machineMemory == 0 {
+		machineMemory = d.budgetMemory
+	}
+	if machineMemory == 0 {
+		return 0
+	}
+	grantable := uint64(float64(machineMemory) * (1 - d.cfg.headroomFraction()))
+	if d.budgetMemory > 0 && d.budgetMemory < grantable {
+		grantable = d.budgetMemory
+	}
+	return grantable
+}
+
 func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim) admission.Request {
 	req := admission.Request{ID: runID, Cores: res.Cores}
 	if res.MemoryBytes > 0 {
@@ -451,15 +497,15 @@ func semNames(sems []wingwire.SemaphoreClaim) []string {
 // queued outcome is delivered through the event stream; fail and skip
 // terminate the request with an [wingwire.Evicted] carrying the policy.
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
+	if !validCostSource(req.CostSource) {
+		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail})
+		return
+	}
 	if req.ParentLeaseToken != "" {
 		d.handleChildAttach(c, req)
 		return
 	}
 	charged := chargedResources(req.Resources)
-	if req.SemaphoresOnly {
-		charged = wingwire.HostResources{}
-	}
-	ar := requestFromWire(req.RunID, charged, req.Semaphores)
 
 	d.mu.Lock()
 	if d.draining {
@@ -467,6 +513,12 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
 		return
 	}
+	if req.SemaphoresOnly {
+		charged = wingwire.HostResources{}
+	} else {
+		charged = d.clampMeasuredResourcesLocked(charged, req.CostSource)
+	}
+	ar := requestFromWire(req.RunID, charged, req.Semaphores)
 	c.runID = req.RunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo
@@ -475,7 +527,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.sems = semNames(req.Semaphores)
 	c.finalizable = !req.SemaphoresOnly
 	c.startAt = d.now()
-	c.costSource = req.CostSource
+	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS
 	c.expectedP99MS = req.ExpectedP99MS
 	c.sampleCount = req.SampleCount
@@ -511,6 +563,15 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
+	}
+}
+
+func validCostSource(source wingwire.CostSource) bool {
+	switch source {
+	case "", wingwire.CostSourcePin, wingwire.CostSourceMeasured, wingwire.CostSourceDefault:
+		return true
+	default:
+		return false
 	}
 }
 

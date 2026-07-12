@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -58,6 +59,47 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 	if node.PeakMemoryBytes != 3<<30 {
 		t.Errorf("node PeakMemoryBytes = %d, want %d", node.PeakMemoryBytes, 3<<30)
+	}
+}
+
+func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	start := time.Now()
+	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+		TS:            start,
+		CPUMillicores: int64(runtime.NumCPU()+4) * 1000,
+		MemoryBytes:   1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recordRunProfile(ctx, st, "demo", "r1", nil, start, start.Add(time.Second))
+
+	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || rollup == nil {
+		t.Fatalf("rollup profile missing: %v", err)
+	}
+	if want := float64(runtime.NumCPU()); rollup.PeakCores != want {
+		t.Errorf("rollup PeakCores = %v, want host capacity %v", rollup.PeakCores, want)
+	}
+	node, err := st.GetPipelineProfile(ctx, "demo", "build")
+	if err != nil || node == nil {
+		t.Fatalf("node profile missing: %v", err)
+	}
+	if want := float64(runtime.NumCPU()); node.PeakCores != want {
+		t.Errorf("node PeakCores = %v, want host capacity %v", node.PeakCores, want)
 	}
 }
 

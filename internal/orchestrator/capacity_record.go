@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"math"
+	"runtime"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
@@ -40,7 +41,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		var peakCores float64
 		var peakMem int64
 		for _, s := range samples {
-			peakCores = math.Max(peakCores, float64(s.CPUMillicores)/1000.0)
+			peakCores = math.Max(peakCores, capLocalPeakCores(float64(s.CPUMillicores)/1000.0))
 			if s.MemoryBytes > peakMem {
 				peakMem = s.MemoryBytes
 			}
@@ -72,6 +73,14 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	if !pin.Empty() {
 		_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
 	}
+}
+
+func capLocalPeakCores(cores float64) float64 {
+	hostCores := float64(runtime.NumCPU())
+	if hostCores > 0 && cores > hostCores {
+		return hostCores
+	}
+	return cores
 }
 
 // nodeDuration is a node's wall time: its recorded start-to-finish span

@@ -48,6 +48,16 @@ type HostResources struct {
 	MemoryBytes int64 `json:"memory_bytes,omitempty"`
 }
 
+// CostSource names how a request's host resources were resolved before
+// reaching the daemon.
+type CostSource string
+
+const (
+	CostSourcePin      CostSource = "pin"
+	CostSourceMeasured CostSource = "measured"
+	CostSourceDefault  CostSource = "default"
+)
+
 // Policy is what a run does when a resource or semaphore it needs is
 // at capacity. The values mirror the SDK's OnLimit set.
 type Policy string
@@ -120,10 +130,10 @@ type AdmissionRequest struct {
 	// from inside an already-admitted run (node-level concurrency
 	// groups).
 	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
-	// CostSource names how Resources was resolved -- "pin", "measured", or
-	// "default" -- so the queue view can show where a charge came from. The
-	// daemon treats it as opaque display metadata.
-	CostSource string `json:"cost_source,omitempty"`
+	// CostSource names how Resources was resolved so the queue view can show
+	// where a charge came from. The daemon may cap measured costs to the
+	// largest idle-grantable request.
+	CostSource CostSource `json:"cost_source,omitempty"`
 	// ExpectedDurationMS is the pipeline's measured p50 run duration in
 	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
 	// no measured duration exists yet, so the run contributes no ETA.
@@ -157,8 +167,8 @@ type Grant struct {
 	RunID      string `json:"run_id"`
 	LeaseToken string `json:"lease_token"`
 	// Resources is what the daemon actually charged: the request's
-	// declared resources, or the daemon's default where the request
-	// declared none.
+	// declared resources, a capped measured charge, or the daemon's
+	// default where the request declared none.
 	Resources HostResources `json:"resources"`
 	// Semaphores names the semaphores the granted lease holds. On a
 	// child attach this is the parent lease's full set, so the child

@@ -191,7 +191,7 @@ func (la *LocalAdmission) admitRun(
 		PID:                os.Getpid(),
 		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
 		Semaphores:         planSemaphoreClaims(plan, runID),
-		CostSource:         string(res.Source),
+		CostSource:         wingwire.CostSource(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
 	}
@@ -240,7 +240,7 @@ func (la *LocalAdmission) admitNode(
 		Repo:               currentRepoShortName(),
 		PID:                os.Getpid(),
 		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
-		CostSource:         string(res.Source),
+		CostSource:         wingwire.CostSource(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
 	}
