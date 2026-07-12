@@ -48,6 +48,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **admission:** Weighted queue admission can backfill a later runnable
+  waiter behind an earlier waiter that is too large for the current
+  remaining budget, while still stopping once a younger backfilled holder
+  is what blocks the older waiter. Re-arriving queued work also preserves
+  its original arrival order, so a polling waiter does not lose its place.
+
 ## [v0.16.0] - 2026-07-12
 ### Added
 
