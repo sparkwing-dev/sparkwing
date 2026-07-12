@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -147,6 +148,30 @@ func TestDispatchContinuationFollowsReadyDynamicGroupMembers(t *testing.T) {
 	}
 	if !continuation.Continue {
 		t.Fatalf("continuation = %+v, want downstream %q covered by dynamic member %q admission wait", continuation, downstream.ID(), queued.ID())
+	}
+}
+
+func TestStuckNodeIDsIncludesScheduledDynamicMembers(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	source := sparkwing.Job(plan, "source", &watchdogDynamicSource{})
+	dynamicGroup := sparkwing.JobFanOutDynamic[string](plan, "dynamic", source, func(item string) (string, any) {
+		return item, func(ctx context.Context) error { return nil }
+	})
+	queued := sparkwing.Job(plan, "queued", func(ctx context.Context) error { return nil })
+	sparkwing.Job(plan, "downstream", func(ctx context.Context) error { return nil }).Needs(dynamicGroup)
+	sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(dynamicGroup, []*sparkwing.JobNode{queued}, nil)
+
+	state := &dispatchState{
+		outcomes:  map[string]sparkwing.Outcome{source.ID(): sparkwing.Success},
+		scheduled: map[string]*sparkwing.JobNode{queued.ID(): queued},
+	}
+
+	got := stuckNodeIDs(plan, state)
+	if !slices.Contains(got, queued.ID()) {
+		t.Fatalf("stuckNodeIDs = %v, want scheduled dynamic node %q", got, queued.ID())
+	}
+	if slices.Contains(got, source.ID()) {
+		t.Fatalf("stuckNodeIDs = %v, completed source %q should not be reported", got, source.ID())
 	}
 }
 

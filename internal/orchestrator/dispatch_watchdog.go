@@ -83,16 +83,13 @@ func waitForDispatch(ctx context.Context, wg *sync.WaitGroup, timeout time.Durat
 	}
 }
 
-// stuckNodeIDs lists plan nodes with no recorded outcome at the
-// moment the watchdog fired -- the dispatcher's view of "which
-// goroutines never reported back." A node that emitted node_end in
-// the envelope but whose state-store write didn't commit (the SQLite
-// snapshot-conflict failure mode) shows up here too, which is
-// exactly the signal an on-call wants: log says done, dispatcher
-// disagrees, here are the candidates.
+// stuckNodeIDs lists known nodes with no recorded outcome at the
+// moment the watchdog fired. The known set includes the static plan
+// plus runtime-scheduled dynamic and recovery nodes, which is the
+// dispatcher's view of "which goroutines never reported back."
 func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 	var stuck []string
-	for _, n := range plan.Nodes() {
+	for _, n := range watchdogKnownNodes(plan, state) {
 		if _, ok := state.getOutcome(n.ID()); !ok {
 			stuck = append(stuck, n.ID())
 		}
