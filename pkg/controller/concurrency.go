@@ -185,8 +185,9 @@ type releaseSlotReq struct {
 
 // handleReleaseSlot drops the holder row, optionally writes a cache
 // entry on success, and resolves any coalesce followers + promotes
-// the next FIFO waiter. Returns 204 whether or not a row was removed
-// so idempotent release paths don't have to handle 404.
+// eligible queued waiters within the available budget. Returns 204
+// whether or not a row was removed so idempotent release paths don't
+// have to handle 404.
 func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	var body releaseSlotReq
@@ -258,8 +259,8 @@ type stateWaiterResp struct {
 	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
 	CancelTimeout string    `json:"cancel_timeout,omitempty"`
 	Cost          int       `json:"cost,omitempty"`
-	// Position is the queue-policy waiter's 0-based rank in arrival
-	// order (0 == next in line).
+	// Position is the queue-policy waiter's 0-based arrival rank. Weighted
+	// admission may backfill later waiters that fit.
 	Position int `json:"position"`
 }
 
