@@ -49,11 +49,19 @@ func planConcurrencyResource(*sparkwing.ConcurrencyGroup) string {
 	return "plan_admission"
 }
 
+var planAdmissionAcquireTimeout = time.Duration(store.DefaultBusyTimeoutMS)*time.Millisecond + 15*time.Second
+
 func appendPlanEvent(ctx context.Context, backends Backends, runID, kind string, payload []byte) {
 	if backends.State == nil {
 		return
 	}
 	_ = backends.State.AppendEvent(ctx, runID, "", kind, payload)
+}
+
+func acquirePlanAdmission(ctx context.Context, backends Backends, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	acquireCtx, cancel := context.WithTimeout(ctx, planAdmissionAcquireTimeout)
+	defer cancel()
+	return backends.Concurrency.AcquireSlot(acquireCtx, req)
 }
 
 func planConcurrencyAcquireOrder(plan *sparkwing.Plan, runID string) []sparkwing.PlanConcurrency {
@@ -154,7 +162,7 @@ func acquireOnePlanSlot(
 		Policy:   string(limit.OnLimit),
 	}
 
-	resp, err := backends.Concurrency.AcquireSlot(ctx, req)
+	resp, err := acquirePlanAdmission(ctx, backends, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("plan Concurrency acquire(%q): %w", key, err)
 	}

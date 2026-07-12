@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,78 @@ func (f *planAcquireFake) ForceReleaseSuperseded(ctx context.Context, key string
 
 func (f *planAcquireFake) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
 	return false, errors.New("unexpected cancel waiter")
+}
+
+type deadlineCheckingPlanAcquireFake struct {
+	planAcquireFake
+}
+
+func (f *deadlineCheckingPlanAcquireFake) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		return store.AcquireSlotResponse{}, errors.New("missing plan admission acquire deadline")
+	}
+	return f.planAcquireFake.AcquireSlot(ctx, req)
+}
+
+func TestAcquirePlanSlotBoundsAcquireContext(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("shared", sparkwing.ConcurrencyLimit{Capacity: 10}))
+	fake := &deadlineCheckingPlanAcquireFake{}
+
+	release, outcome, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: fake},
+		"child",
+		plan,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("acquirePlanSlot: %v", err)
+	}
+	defer release("success")
+	if outcome != planCacheProceed {
+		t.Fatalf("outcome = %q, want proceed", outcome)
+	}
+}
+
+type blockedPlanAcquireFake struct {
+	planAcquireFake
+}
+
+func (f *blockedPlanAcquireFake) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	<-ctx.Done()
+	return store.AcquireSlotResponse{}, ctx.Err()
+}
+
+func TestAcquirePlanSlotFailsWhenAdmissionAcquireBlocks(t *testing.T) {
+	oldTimeout := planAdmissionAcquireTimeout
+	planAdmissionAcquireTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { planAdmissionAcquireTimeout = oldTimeout })
+
+	plan := sparkwing.NewPlan()
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("blocked", sparkwing.ConcurrencyLimit{Capacity: 1}))
+
+	release, outcome, _, err := acquirePlanSlot(
+		context.Background(),
+		Backends{Concurrency: &blockedPlanAcquireFake{}},
+		"blocked-run",
+		plan,
+		false,
+	)
+	if err == nil {
+		t.Fatal("acquirePlanSlot succeeded, want deadline failure")
+	}
+	if release != nil {
+		t.Fatal("release is non-nil after failed acquire")
+	}
+	if outcome != "" {
+		t.Fatalf("outcome = %q, want empty on acquire error", outcome)
+	}
+	for _, want := range []string{"plan Concurrency acquire", context.DeadlineExceeded.Error()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
 }
 
 func TestAcquirePlanSlot_ComposesMultiplePlanGates(t *testing.T) {

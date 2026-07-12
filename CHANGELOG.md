@@ -47,6 +47,7 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
 ### Added
 
 - **orchestrator:** The local admission daemon detects its own cgroup
@@ -77,73 +78,6 @@ code change to unlock.
   falling back to schema numbers for databases stamped before this
   shipped.
 
-### Changed
-
-- **cli:** `sparkwing dashboard start` handshakes a running dashboard
-  over a new unauthenticated version endpoint: a newer CLI drains and
-  replaces an older resident dashboard, while an older CLI refuses to
-  replace a newer one and leaves it running. A resident dashboard that
-  observes the shared database migrate past the schema it understands
-  now exits cleanly with a logged reason instead of serving 500s. The
-  startup deadline is generous under load, fails fast when the
-  supervisor exits early, and reports the new instance's own startup
-  log on timeout.
-
-- **orchestrator:** (Breaking) Local runs are admitted by the local
-  admission daemon (`sparkwingd`) instead of box slots and store-side
-  concurrency slots. At run start the process submits one all-or-nothing
-  admission request (host resources from `.Resources()` hints plus every
-  box- and run-scoped plan-level `.Concurrency()` group) and holds the
-  granted lease on an open daemon connection for the run's lifetime; a
-  queued run prints a single stderr queue-position line. Child runs
-  inherit by attaching to the parent's lease via `SPARKWING_LEASE_TOKEN`;
-  the `SPARKWING_PLAN_ADMISSION_*` trigger-env chain is removed. Node-
-  level box/run-scoped groups become short-lived daemon acquisitions;
-  global-scope groups keep the shared-store path. When a run process
-  dies without releasing, the daemon frees its lease immediately and
-  finalizes the run row as cancelled with an interrupted reason.
-  Cluster runner pods are unaffected: work admitted by the Kubernetes
-  scheduler never engages the daemon.
-- **cli:** (Breaking) `sparkwing run` drops `--sw-box-slots` and
-  `--sw-no-wait` (with the `SPARKWING_BOX_SLOTS_PIN` /
-  `SPARKWING_BOX_NO_WAIT` variables): local runs no longer take box
-  slots, so there is no per-run cap to pin and queue waits cancel
-  cleanly with Ctrl-C.
-- **cli:** (Breaking) The `box-slots` command tree
-  (`show`/`list`/`set`/`release`/`sweep`) and `sparkwing maintenance` are
-  removed, along with the `SPARKWING_BOX_SLOTS` cap baseline and the
-  `SPARKWING_BOX_SLOT_STALL_TTL` override. The admission daemon owns host
-  admission and converges local state on its own, so the inspect-and-tune
-  and manual-sweep verbs have no remaining purpose. Read live admission
-  with `sparkwing queue`; clear provably-dead leftovers with the new
-  `sparkwing doctor`. See
-  [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md).
-- **sdk:** (Breaking) `ConcurrencyLimit.HostAdmission` and
-  `Plan.HostAdmission()` are removed: host admission is universal and
-  implicit under the daemon, and `ScopeBox` means locality only.
-- **sdk:** (Breaking) Local runs handle SIGINT/SIGTERM: the run cancels
-  cleanly and its row finalizes as `cancelled` naming the signal,
-  instead of exiting with the row stuck `running`.
-- **controller:** (Breaking) The trigger API drops the `plan_admission`
-  request block; spawned children no longer inherit plan-level
-  concurrency holders through the controller.
-- **sdk:** Resource measurement now covers a run's whole process tree,
-  not just the orchestrator. Each `sparkwing.Bash` / `sparkwing.Exec`
-  command's CPU and peak memory -- read from its `wait4` rusage, which
-  aggregates the command's entire reaped subtree -- fold into the node's
-  measured profile, so a pipeline whose work is a test suite, a linter,
-  or a shell step is costed by what those subprocesses actually drew
-  rather than the near-zero the orchestrator itself uses. Admission
-  therefore stops over-admitting subprocess-heavy runs onto one box.
-  Measurement also covers subprocesses a pipeline spawns directly, outside
-  the `sparkwing.Bash` / `sparkwing.Exec` wrapper: their CPU is read from
-  the run's `RUSAGE_CHILDREN` so raw `os/exec` work is costed too and no
-  longer measures as zero. Measured costs change materially: existing
-  capacity profiles re-learn from the runs after upgrade. Each spawned
-  command also runs in its own process group, so cancelling a node tears
-  down the whole subtree instead of orphaning forked grandchildren.
-
-### Added
 
 - **runner:** A registered runner on a box that also runs local pipelines
   can route controller-dispatched work through the box's local admission
@@ -251,8 +185,91 @@ code change to unlock.
   a parent run will use to pass its lease to child runs. Data types
   only -- the daemon and its transport ship separately.
 
+### Changed
+
+- **orchestrator (Breaking):** Local runs are admitted by the local
+  admission daemon (`sparkwingd`) instead of box slots and store-side
+  concurrency slots. At run start the process submits one all-or-nothing
+  admission request (host resources from `.Resources()` hints plus every
+  box- and run-scoped plan-level `.Concurrency()` group) and holds the
+  granted lease on an open daemon connection for the run's lifetime; a
+  queued run prints a single stderr queue-position line. Child runs
+  inherit by attaching to the parent's lease via `SPARKWING_LEASE_TOKEN`;
+  the `SPARKWING_PLAN_ADMISSION_*` trigger-env chain is removed. Node-
+  level box/run-scoped groups become short-lived daemon acquisitions;
+  global-scope groups keep the shared-store path. When a run process
+  dies without releasing, the daemon frees its lease immediately and
+  finalizes the run row as cancelled with an interrupted reason.
+  Cluster runner pods are unaffected: work admitted by the Kubernetes
+  scheduler never engages the daemon. See
+  [migration](docs/migrations/v0.16.0.md#removed-cli-verbs-flags-and-environment-variables).
+- **cli:** `sparkwing dashboard start` handshakes a running dashboard
+  over a new unauthenticated version endpoint: a newer CLI drains and
+  replaces an older resident dashboard, while an older CLI refuses to
+  replace a newer one and leaves it running. A resident dashboard that
+  observes the shared database migrate past the schema it understands
+  now exits cleanly with a logged reason instead of serving 500s. The
+  startup deadline is generous under load, fails fast when the
+  supervisor exits early, and reports the new instance's own startup
+  log on timeout.
+- **cli (Breaking):** `sparkwing run` drops `--sw-box-slots` and
+  `--sw-no-wait` (with the `SPARKWING_BOX_SLOTS_PIN` /
+  `SPARKWING_BOX_NO_WAIT` variables): local runs no longer take box
+  slots, so there is no per-run cap to pin and queue waits cancel
+  cleanly with Ctrl-C. See
+  [migration](docs/migrations/v0.16.0.md#removed-cli-verbs-flags-and-environment-variables).
+- **cli (Breaking):** The `box-slots` command tree
+  (`show`/`list`/`set`/`release`/`sweep`) and `sparkwing maintenance` are
+  removed, along with the `SPARKWING_BOX_SLOTS` cap baseline and the
+  `SPARKWING_BOX_SLOT_STALL_TTL` override. The admission daemon owns host
+  admission and converges local state on its own, so the inspect-and-tune
+  and manual-sweep verbs have no remaining purpose. Read live admission
+  with `sparkwing queue`; clear provably-dead leftovers with the new
+  `sparkwing doctor`. See
+  [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md#removed-cli-verbs-flags-and-environment-variables).
+- **sdk (Breaking):** `ConcurrencyLimit.HostAdmission` and
+  `Plan.HostAdmission()` are removed: host admission is universal and
+  implicit under the daemon, and `ScopeBox` means locality only. See
+  [migration](docs/migrations/v0.16.0.md#hostadmission-removed-from-the-sdk).
+- **sdk (Breaking):** Local runs handle SIGINT/SIGTERM: the run cancels
+  cleanly and its row finalizes as `cancelled` naming the signal,
+  instead of exiting with the row stuck `running`. See
+  [migration](docs/migrations/v0.16.0.md#interrupted-runs-finalize-themselves).
+- **controller (Breaking):** The trigger API drops the `plan_admission`
+  request block; spawned children no longer inherit plan-level
+  concurrency holders through the controller. See
+  [migration](docs/migrations/v0.16.0.md#the-trigger-api-drops-plan_admission).
+- **store (Breaking):** The runs-store schema advances from version 6 to
+  10 for the concurrency rebuild -- the admission ledger, measured
+  per-command CPU and memory columns, queue-wait and contended-run
+  bookkeeping, and a minimum-version stamp. The store migrates a database
+  forward on first open by a newer binary and the step is one-way; a
+  binary older than the database needs refuses to open it by name rather
+  than printing a bare schema number. Bump every sparkwing pin that
+  shares the machine in one sitting. See
+  [migration](docs/migrations/v0.16.0.md#runs-store-schema-moves-to-version-10).
+- **sdk:** Resource measurement now covers a run's whole process tree,
+  not just the orchestrator. Each `sparkwing.Bash` / `sparkwing.Exec`
+  command's CPU and peak memory -- read from its `wait4` rusage, which
+  aggregates the command's entire reaped subtree -- fold into the node's
+  measured profile, so a pipeline whose work is a test suite, a linter,
+  or a shell step is costed by what those subprocesses actually drew
+  rather than the near-zero the orchestrator itself uses. Admission
+  therefore stops over-admitting subprocess-heavy runs onto one box.
+  Measurement also covers subprocesses a pipeline spawns directly, outside
+  the `sparkwing.Bash` / `sparkwing.Exec` wrapper: their CPU is read from
+  the run's `RUSAGE_CHILDREN` so raw `os/exec` work is costed too and no
+  longer measures as zero. Measured costs change materially: existing
+  capacity profiles re-learn from the runs after upgrade. Each spawned
+  command also runs in its own process group, so cancelling a node tears
+  down the whole subtree instead of orphaning forked grandchildren.
+
 ### Fixed
 
+- **orchestrator:** Plan-level concurrency admission now bounds the initial
+  store acquire call before dispatch. A wedged local store or admission
+  backend surfaces as a concrete plan-concurrency acquire error instead
+  of leaving a run heartbeat alive with every node still pending.
 - **orchestrator:** A same-repo child trigger (a `RunAndAwait` to a
   sibling pipeline) now dispatches from the running parent's own compiled
   binary, so it works from a project directory that has no git identity
@@ -307,15 +324,30 @@ code change to unlock.
   records election, headroom transitions, reattach-grace outcomes,
   evictions, orphan finalizations, and drains -- the log is no longer
   empty exactly when someone needs it to debug the daemon.
-
-### Fixed
-
 - **admission:** The local admission daemon now backfills a smaller run
   past a queued heavier one when the free budget fits it, and stops
   backfilling once a holder younger than the waiting run is what keeps it
   from fitting. Weighted local groups and host cores no longer idle
   capacity behind a run that cannot currently fit, matching the
   controller's weighted-queue admission.
+
+## [v0.16.0] - 2026-07-12
+
+Published from a release line that branched before the weighted-queue-capacity
+backfill fix reached the mainline, so this tag ships without it; that fix, and
+its extension to the local admission daemon's ledger, land in the next release,
+which is a strict superset of everything below.
+
+This release carried the concurrency rebuild. Local runs are admitted by the
+local admission daemon (`sparkwingd`) instead of box slots and store-side
+concurrency slots; the `box-slots` and `maintenance` command trees are removed
+in favor of `sparkwing queue` and the new `sparkwing doctor`; the runs-store
+schema advances from 6 to 10 and stamps the minimum sparkwing version it needs;
+and resource measurement now costs a run by its whole process tree. It also
+bounded the plan-level concurrency admission acquire, so a wedged store surfaces
+a concrete error rather than a run left heartbeating with every node pending.
+See [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md) for the breaking
+changes and upgrade steps.
 
 ## [v0.15.12] - 2026-07-12
 ### Fixed
@@ -394,7 +426,7 @@ code change to unlock.
   admission state queries read it, and exported concurrency state structs now
   carry queue-arrival timestamps. The store auto-migrates on open; upgrade all
   Sparkwing binaries that share a state database before running mixed-version
-  admission workloads. See [the migration guide](docs/migrations/v0.15.5.md).
+  admission workloads. See [the migration guide](docs/migrations/v0.15.5.md#runs-store-schema-5-to-6).
 - **orchestrator:** Parent node timeouts now pause while `RunAndAwait` children
   are queued for plan-level admission, then resume once admission clears, when
   the await uses the parent job timeout. Explicit `WithFreshTimeout` values
