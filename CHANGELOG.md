@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.9] - 2026-07-12
 ### Fixed
 
 - **store:** Coalesced cache followers now execute fresh when their leader is
