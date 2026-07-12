@@ -293,6 +293,98 @@ func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
 	}
 }
 
+func TestConcurrency_CoalesceFollowerPromotesWhenLeaderRunEndsWithoutNodeVerdict(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	leader := acquireT(t, s, store.AcquireSlotRequest{
+		Key:          "memo-vacate-terminal",
+		HolderID:     "leader/node",
+		RunID:        "leader",
+		NodeID:       "node",
+		Capacity:     1,
+		Policy:       store.OnLimitQueue,
+		CacheKeyHash: "same-content",
+		Lease:        time.Hour,
+	})
+	if leader.Kind != store.AcquireGranted {
+		t.Fatalf("leader: want Granted got %s", leader.Kind)
+	}
+	follower := acquireT(t, s, store.AcquireSlotRequest{
+		Key:          "memo-vacate-terminal",
+		HolderID:     "follower/node",
+		RunID:        "follower",
+		NodeID:       "node",
+		Capacity:     1,
+		Policy:       store.OnLimitCoalesce,
+		CacheKeyHash: "same-content",
+	})
+	if follower.Kind != store.AcquireCoalesced {
+		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
+	}
+	if err := s.FinishRun(ctx, "leader", "cancelled", "executor cancelled before node verdict"); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+
+	resolution, err := s.ResolveWaiter(ctx, "memo-vacate-terminal", "follower", "node", "same-content", "leader", "node", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "follower/node" {
+		t.Fatalf("resolution = %+v, want follower promoted to execute", resolution)
+	}
+}
+
+func TestConcurrency_CoalesceFollowerPromotesAfterCancelledLeaderRelease(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	leader := acquireT(t, s, store.AcquireSlotRequest{
+		Key:          "memo-vacate-release",
+		HolderID:     "leader/node",
+		RunID:        "leader",
+		NodeID:       "node",
+		Capacity:     1,
+		Policy:       store.OnLimitQueue,
+		CacheKeyHash: "same-content",
+		Lease:        time.Hour,
+	})
+	if leader.Kind != store.AcquireGranted {
+		t.Fatalf("leader: want Granted got %s", leader.Kind)
+	}
+	follower := acquireT(t, s, store.AcquireSlotRequest{
+		Key:          "memo-vacate-release",
+		HolderID:     "follower/node",
+		RunID:        "follower",
+		NodeID:       "node",
+		Capacity:     1,
+		Policy:       store.OnLimitCoalesce,
+		CacheKeyHash: "same-content",
+	})
+	if follower.Kind != store.AcquireCoalesced {
+		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
+	}
+
+	released, followers, _, err := s.ReleaseAndNotify(ctx, "memo-vacate-release", "leader/node", "cancelled", "", "same-content", time.Hour, 0)
+	if err != nil {
+		t.Fatalf("ReleaseAndNotify: %v", err)
+	}
+	if !released {
+		t.Fatalf("ReleaseAndNotify released=false")
+	}
+	if len(followers) != 0 {
+		t.Fatalf("cancelled leader must vacate memo instead of resolving followers, got %+v", followers)
+	}
+
+	resolution, err := s.ResolveWaiter(ctx, "memo-vacate-release", "follower", "node", "same-content", "leader", "node", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "follower/node" {
+		t.Fatalf("resolution = %+v, want follower promoted to execute", resolution)
+	}
+}
+
 // Orphan coalesce followers get reaped when their leader is gone.
 func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	s := newStoreT(t)
