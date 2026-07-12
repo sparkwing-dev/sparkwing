@@ -26,14 +26,20 @@ type Budget struct {
 	// Enforce opts into OS-level hardening of the budget in addition to
 	// capping admission.
 	Enforce bool
+	// IgnoreExternal makes admission stop subtracting measured non-sparkwing
+	// load from its headroom -- the operator's escape hatch for a misreading
+	// host sensor. Contention detection keeps using the real saturation, so
+	// observability stays truthful. It is usable with or without a numeric
+	// budget.
+	IgnoreExternal bool
 	// Raw is the setting string as supplied, for display.
 	Raw string
 }
 
-// IsSet reports whether the budget caps any dimension or requests
-// enforcement.
+// IsSet reports whether the budget caps any dimension, requests
+// enforcement, or ignores external load.
 func (b Budget) IsSet() bool {
-	return b.HasCap() || b.Enforce
+	return b.HasCap() || b.Enforce || b.IgnoreExternal
 }
 
 // HasCap reports whether the budget caps cores or memory.
@@ -110,11 +116,14 @@ func humanBytesLog(v uint64) string {
 //	6,8gb        6 cores and 8 GiB of memory
 //	50%,50%      half the cores and half the memory
 //	6,8gb,enforce  the above, plus OS-level hardening
+//	ignore-external  ignore measured non-sparkwing load in admission
 //
 // A cores term is a bare number (optionally suffixed c/core/cores) or a
 // percent; the first percent or plain number is read as cores, a second
 // as memory. A memory term carries a byte-size suffix (kb/mb/gb/tb or the
-// ib/bare forms). An empty string yields a zero Budget with no error.
+// ib/bare forms). The literals "enforce" and "ignore-external" are option
+// terms usable alone or alongside a cap. An empty string yields a zero
+// Budget with no error.
 func ParseBudget(s string) (Budget, error) {
 	b := Budget{Raw: strings.TrimSpace(s)}
 	if b.Raw == "" {
@@ -128,6 +137,10 @@ func ParseBudget(s string) (Budget, error) {
 		}
 		if strings.EqualFold(tok, "enforce") {
 			b.Enforce = true
+			continue
+		}
+		if strings.EqualFold(tok, "ignore-external") {
+			b.IgnoreExternal = true
 			continue
 		}
 		if strings.HasSuffix(tok, "%") {

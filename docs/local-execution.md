@@ -199,6 +199,29 @@ lock, a shared fixture -- never host sizing. A run- or box-scoped group
 is local to the machine; a global-scoped group pools across the whole
 fleet through the controller's shared state (see [sdk.md](sdk.md)).
 
+### Recovering from bad measurements
+
+Measurement drives admission, so a wrong reading needs an escape hatch
+that does not mean "wait for the window to age out." There are two:
+
+- **A misreading host sensor.** If the external-load reading is wrong and
+  admission is queuing runs against phantom pressure, add `ignore-external`
+  to `SPARKWING_BUDGET`. Admission then plans against total capacity minus
+  the reserve, subtracting no external load. The `EXTERNAL` column in
+  `sparkwing queue` still shows the real reading -- observability stays
+  truthful -- with an `external: ignored (operator setting)` line stating
+  that admission is not acting on it, and contention detection keeps using
+  the real saturation. Use it alone (`SPARKWING_BUDGET=ignore-external`) or
+  alongside a cap (`SPARKWING_BUDGET=50%,ignore-external`).
+- **A poisoned learned profile.** One freak run can record an absurd peak
+  that inflates a pipeline's charge for the rest of the window. Reset it
+  with `sparkwing runs stats --reset --pipeline <name>`: the learned
+  samples, peaks, waits, and contention tally are dropped so the pipeline
+  re-learns from a cold start, and the command prints what it removed. An
+  explicit `.Resources()` pin is preserved -- admission keeps charging the
+  pin while the profile re-learns. To reset every pipeline at once, use
+  `sparkwing runs stats --reset --all --yes`.
+
 ### Operating it
 
 There are exactly two operational commands, and neither can hurt the
@@ -233,20 +256,22 @@ Measured admission is the primary mechanism, and for most machines it is
 the only one you need. When you want a hard ceiling -- "CI may use at most
 half my laptop" -- set one machine budget with the `SPARKWING_BUDGET`
 environment variable. It takes a core count, a percentage, or both a core
-and a memory term:
+and a memory term, plus optional `enforce` and `ignore-external` terms:
 
 ```
-SPARKWING_BUDGET=6           # at most 6 cores
-SPARKWING_BUDGET=50%         # at most half the machine's cores
-SPARKWING_BUDGET=6,8gb       # 6 cores and 8 GiB
-SPARKWING_BUDGET=50%,enforce # half the cores, hardened at the OS level
+SPARKWING_BUDGET=6               # at most 6 cores
+SPARKWING_BUDGET=50%             # at most half the machine's cores
+SPARKWING_BUDGET=6,8gb           # 6 cores and 8 GiB
+SPARKWING_BUDGET=50%,enforce     # half the cores, hardened at the OS level
+SPARKWING_BUDGET=ignore-external # admit against total capacity, ignoring external load
 ```
 
 The budget caps the admission ledger below the machine total, so it holds
 everywhere admission already runs, with no other change to how runs are
 scheduled. `sparkwing queue` shows it as its own row in the headroom
 arithmetic (`budget 6.0 cores (machine 10.0)`) so the constraint is
-visible rather than mysterious.
+visible rather than mysterious. A requested cap above the machine total is
+clamped to the machine, and the daemon logs a one-line note when it does.
 
 ### Containers: the daemon respects its own cgroup
 

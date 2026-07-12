@@ -272,6 +272,9 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := fs.Duration("since", 0, "only runs newer than this (e.g. 7d)")
 	capacityView := fs.Bool("capacity", false, "show measured capacity profiles")
+	reset := fs.Bool("reset", false, "delete a pipeline's learned capacity profile so it re-learns (keeps pins)")
+	resetAll := fs.Bool("all", false, "with --reset, reset every pipeline")
+	yes := fs.Bool("yes", false, "confirm --reset --all")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdJobsStats, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -284,6 +287,9 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		return rerr
 	}
 	emitJSON := resolvedFmt == "json"
+	if *reset {
+		return runCapacityReset(ctx, paths, *pipeline, *resetAll, *yes, emitJSON)
+	}
 	if *capacityView {
 		return runCapacityStats(ctx, paths, *pipeline, emitJSON)
 	}

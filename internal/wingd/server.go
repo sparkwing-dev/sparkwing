@@ -269,6 +269,15 @@ func (d *Daemon) initLedger() error {
 		d.cfg.logf("budget: %.1f cores, %s (machine %.1f cores, %s)",
 			d.budgetCores, humanBytesLog(d.budgetMemory), d.machineCores, humanBytesLog(d.machineMemory))
 	}
+	if c := d.cfg.Budget.Cores; c > 0 && c > d.machineCores {
+		d.cfg.logf("budget: requested %.1f cores exceeds machine %.1f; clamped to machine", c, d.machineCores)
+	}
+	if m := d.cfg.Budget.MemoryBytes; m > 0 && m > d.machineMemory {
+		d.cfg.logf("budget: requested %s memory exceeds machine %s; clamped to machine", humanBytesLog(m), humanBytesLog(d.machineMemory))
+	}
+	if d.cfg.Budget.IgnoreExternal {
+		d.cfg.logf("budget: ignoring external load in admission headroom (operator setting)")
+	}
 	if snap == nil {
 		lg, err := admission.New(admission.Config{
 			TotalCores:       d.budgetCores,

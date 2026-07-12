@@ -74,6 +74,62 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	return nil
 }
 
+// runCapacityReset clears learned capacity profiles so a pipeline whose
+// measurement went wrong -- a freak run that recorded an absurd peak --
+// re-learns from a cold start. Pins are preserved; only the learned
+// samples, peaks, waits, and contention tally are dropped. Exactly one of
+// pipeline or resetAll selects the scope; the machine-wide reset requires
+// yes as a deliberate confirmation.
+func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline string, resetAll, yes, emitJSON bool) error {
+	switch {
+	case resetAll && pipeline != "":
+		return fmt.Errorf("runs stats --reset: pass --pipeline NAME or --all, not both")
+	case !resetAll && pipeline == "":
+		return fmt.Errorf("runs stats --reset: name a pipeline with --pipeline NAME, or reset every pipeline with --all --yes")
+	case resetAll && !yes:
+		return fmt.Errorf("runs stats --reset --all resets every pipeline's learned profile; re-run with --yes to confirm")
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		return err
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+
+	var summary store.ProfileResetSummary
+	if resetAll {
+		summary, err = st.ResetAllProfiles(ctx)
+	} else {
+		summary, err = st.ResetPipelineProfile(ctx, pipeline)
+	}
+	if err != nil {
+		return err
+	}
+	if emitJSON {
+		return jsonEncode(os.Stdout, summary)
+	}
+	if summary.RowsDeleted == 0 && summary.RowsCleared == 0 {
+		if resetAll {
+			fmt.Println("no measured capacity profiles to reset")
+		} else {
+			fmt.Printf("no measured capacity profile for %q to reset\n", pipeline)
+		}
+		return nil
+	}
+	scope := pipeline
+	if resetAll {
+		scope = fmt.Sprintf("%d pipeline(s)", len(summary.Pipelines))
+	}
+	fmt.Printf("reset %s: dropped %d row(s) and cleared %d pinned row(s), discarding %d learned sample(s)\n",
+		scope, summary.RowsDeleted, summary.RowsCleared, summary.SamplesDropped)
+	if summary.RowsCleared > 0 {
+		fmt.Println("pins were kept; those pipelines re-learn from cold start while admission keeps charging the pin")
+	}
+	return nil
+}
+
 // fmtCPUCells renders a profile's CPU distribution as p50/p95/peak. The
 // percentiles describe spikiness; PEAK is what admission charges.
 func fmtCPUCells(p store.PipelineProfile) string {

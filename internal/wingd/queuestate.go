@@ -133,6 +133,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			Enforce:            d.cfg.Budget.Enforcing(),
 		}
 	}
+	qs.IgnoreExternal = d.cfg.Budget.IgnoreExternal
 
 	remaining := map[string]float64{}
 	for _, r := range qs.Resources {
@@ -140,6 +141,9 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 	available := map[string]wingwire.ResourceState{}
 	for _, r := range qs.Resources {
+		if qs.IgnoreExternal {
+			r.External = 0
+		}
 		available[r.Key] = r
 	}
 	for i, w := range snap.Waiters {
@@ -425,9 +429,13 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources) string {
 	if grantMem < 0 {
 		grantMem = 0
 	}
+	extCores, extMem := d.externalCores, float64(d.externalMem)
+	if d.cfg.Budget.IgnoreExternal {
+		extCores, extMem = 0, 0
+	}
 	avail := map[string]wingwire.ResourceState{
-		"cores":  {Key: "cores", Available: grantCores, External: d.externalCores},
-		"memory": {Key: "memory", Available: grantMem, External: float64(d.externalMem)},
+		"cores":  {Key: "cores", Available: grantCores, External: extCores},
+		"memory": {Key: "memory", Available: grantMem, External: extMem},
 	}
 	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail)
 }

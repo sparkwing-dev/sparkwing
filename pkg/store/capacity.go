@@ -310,6 +310,117 @@ ON CONFLICT (pipeline, node_id) DO UPDATE SET
 	})
 }
 
+// ProfileResetSummary reports what a profile reset removed. RowsDeleted
+// counts (pipeline, node) rows removed outright -- those with no pin to
+// preserve. RowsCleared counts rows whose learned samples, peaks, and
+// waits were zeroed but whose pin was kept, so admission keeps honoring
+// the pin while it re-learns. SamplesDropped is the total windowed
+// duration samples discarded across both.
+type ProfileResetSummary struct {
+	Pipelines      []string `json:"pipelines"`
+	RowsDeleted    int      `json:"rows_deleted"`
+	RowsCleared    int      `json:"rows_cleared"`
+	SamplesDropped int      `json:"samples_dropped"`
+}
+
+// ResetPipelineProfile clears one pipeline's learned capacity profile --
+// its windowed samples, duration and peak percentiles, queue waits, and
+// contention tally across the rollup and every node row -- so it re-learns
+// from a cold start. An explicit .Resources() pin is preserved: a pinned
+// row is zeroed in place rather than deleted, so admission keeps charging
+// the pin meanwhile. Resetting a pipeline with no stored profile is a
+// no-op that reports zero counts.
+func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
+	return s.resetProfiles(ctx, pipeline)
+}
+
+// ResetAllProfiles clears every pipeline's learned capacity profile,
+// preserving pins, with the same semantics as [Store.ResetPipelineProfile].
+func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
+	return s.resetProfiles(ctx, "")
+}
+
+// resetProfiles clears learned profile data. An empty pipeline resets
+// every pipeline; a non-empty one restricts the reset to that pipeline.
+func (s *Store) resetProfiles(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
+	summary := ProfileResetSummary{Pipelines: []string{}}
+	andPipeline := ""
+	var args []any
+	if pipeline != "" {
+		andPipeline = " AND pipeline = ?"
+		args = append(args, pipeline)
+	}
+	selWhere := ""
+	if pipeline != "" {
+		selWhere = " WHERE pipeline = ?"
+	}
+	rows, err := s.query(ctx, `SELECT pipeline, sample_count, pinned_cores, pinned_memory_bytes FROM pipeline_profiles`+selWhere, args...)
+	if err != nil {
+		return ProfileResetSummary{}, err
+	}
+	seen := map[string]bool{}
+	for rows.Next() {
+		var p string
+		var samples int
+		var pinCores float64
+		var pinMem int64
+		if err := rows.Scan(&p, &samples, &pinCores, &pinMem); err != nil {
+			_ = rows.Close()
+			return ProfileResetSummary{}, err
+		}
+		summary.SamplesDropped += samples
+		if pinCores != 0 || pinMem != 0 {
+			summary.RowsCleared++
+		} else {
+			summary.RowsDeleted++
+		}
+		if !seen[p] {
+			seen[p] = true
+			summary.Pipelines = append(summary.Pipelines, p)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return ProfileResetSummary{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return ProfileResetSummary{}, err
+	}
+	sort.Strings(summary.Pipelines)
+	if summary.RowsDeleted == 0 && summary.RowsCleared == 0 {
+		return summary, nil
+	}
+	if err := retryOnBusy(func() error {
+		_, derr := s.exec(ctx, `DELETE FROM pipeline_profiles WHERE pinned_cores = 0 AND pinned_memory_bytes = 0`+andPipeline, args...)
+		return derr
+	}); err != nil {
+		return ProfileResetSummary{}, err
+	}
+	clearArgs := append([]any{time.Now().UnixNano()}, args...)
+	if err := retryOnBusy(func() error {
+		_, uerr := s.exec(ctx, `
+UPDATE pipeline_profiles SET
+    p50_duration_ms   = 0,
+    p99_duration_ms   = 0,
+    peak_cores        = 0,
+    peak_memory_bytes = 0,
+    sample_count      = 0,
+    cpu_measured      = 0,
+    samples_json      = NULL,
+    wait_samples_json = NULL,
+    wait_p50_ms       = 0,
+    wait_p99_ms       = 0,
+    wait_sample_count = 0,
+    contended_count   = 0,
+    updated_at        = ?
+ WHERE (pinned_cores != 0 OR pinned_memory_bytes != 0)`+andPipeline, clearArgs...)
+		return uerr
+	}); err != nil {
+		return ProfileResetSummary{}, err
+	}
+	return summary, nil
+}
+
 // profileColumns is the shared SELECT column list every profile read
 // uses, kept in one place so scanProfile stays in lockstep with it.
 const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count`

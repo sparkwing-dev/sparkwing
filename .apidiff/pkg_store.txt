@@ -292,6 +292,12 @@ type ProfileObservation struct {
 
 	CPUMeasured bool
 }
+type ProfileResetSummary struct {
+	Pipelines      []string
+	RowsDeleted    int
+	RowsCleared    int
+	SamplesDropped int
+}
 const RetrySourceAuto = "auto"
 const RetrySourceManual = "manual"
 type Run struct {
@@ -470,6 +476,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error
+func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
+func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)

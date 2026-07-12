@@ -65,6 +65,59 @@ func TestOriginWord_EmptyIsLocal(t *testing.T) {
 	}
 }
 
+func TestRenderQueue_IgnoreExternalLabeledInAllModes(t *testing.T) {
+	qs := sampleQueueState()
+	qs.IgnoreExternal = true
+
+	pretty := renderQueueTo(t, qs, "pretty")
+	if !strings.Contains(pretty, "external: ignored (operator setting)") {
+		t.Errorf("pretty view missing the ignored-external line:\n%s", pretty)
+	}
+
+	plain := renderQueueTo(t, qs, "plain")
+	if !strings.Contains(plain, "external\tignored") {
+		t.Errorf("plain view missing the ignored-external record:\n%s", plain)
+	}
+
+	jsonOut := renderQueueTo(t, qs, "json")
+	var got wingwire.QueueState
+	if err := json.Unmarshal([]byte(jsonOut), &got); err != nil {
+		t.Fatalf("json invalid: %v\n%s", err, jsonOut)
+	}
+	if !got.IgnoreExternal {
+		t.Errorf("json dropped ignore_external field:\n%s", jsonOut)
+	}
+}
+
+// TestRenderQueue_IgnoreExternalSuppressesPressureNote pins that the
+// "external is the binding constraint" callout never fires when the
+// operator has told admission to ignore external load -- it would blame a
+// constraint the daemon is no longer enforcing.
+func TestRenderQueue_IgnoreExternalSuppressesPressureNote(t *testing.T) {
+	qs := wingwire.QueueState{
+		IgnoreExternal: true,
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 8, Held: 2, External: 5},
+		},
+		Waiters: []wingwire.Waiter{
+			{RunID: "w", Position: 1, Resources: wingwire.HostResources{Cores: 4},
+				BlockingReason: "needs 4.0 cores; 1.0 available"},
+		},
+	}
+	if note := externalPressureNote(qs); note != "" {
+		t.Errorf("external pressure note should be suppressed under ignore-external, got %q", note)
+	}
+}
+
+func renderQueueTo(t *testing.T, qs wingwire.QueueState, format string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := renderQueue(&buf, qs, format); err != nil {
+		t.Fatalf("render %s: %v", format, err)
+	}
+	return buf.String()
+}
+
 func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	want := sampleQueueState()
 	var buf bytes.Buffer

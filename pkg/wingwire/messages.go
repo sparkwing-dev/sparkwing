@@ -385,6 +385,11 @@ type QueueState struct {
 	// so a daemon in a resource-limited container shows the true ceiling.
 	// Nil when no container limit binds (the host total stands).
 	Container *ContainerLimit `json:"container,omitempty"`
+	// IgnoreExternal reports that the operator has told admission to ignore
+	// measured non-sparkwing load: the External column still shows the real
+	// reading, but admission does not subtract it. False for older daemons
+	// and the default configuration.
+	IgnoreExternal bool `json:"ignore_external,omitempty"`
 }
 
 // ContainerLimit reports the cgroup capacity ceiling a daemon runs under

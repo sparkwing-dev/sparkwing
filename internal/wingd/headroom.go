@@ -61,13 +61,17 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	if externalCores < 0 {
 		externalCores = 0
 	}
-	targetCores := stat.TotalCores - reservedCores - externalCores
+	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
+
+	admitExternalCores, admitExternalMem := externalCores, externalMem
+	if d.cfg.Budget.IgnoreExternal {
+		admitExternalCores, admitExternalMem = 0, 0
+	}
+	targetCores := stat.TotalCores - reservedCores - admitExternalCores
 	if targetCores < 0 {
 		targetCores = 0
 	}
-
-	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
-	targetMem := memHeadroom(stat, usedMem, frac)
+	targetMem := headroomFromReserveExternal(stat.TotalMemoryBytes, reservedMem, admitExternalMem)
 
 	d.reservedCores = reservedCores
 	d.externalCores = externalCores
@@ -104,11 +108,11 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.flush(deliveries, snap)
 }
 
-// memHeadroom is the memory ceiling: total minus the reserve minus memory
-// consumed by processes the daemon did not admit.
-func memHeadroom(stat HostStat, usedMem uint64, frac float64) uint64 {
-	reserved, external := memReserveAndExternal(stat, usedMem, frac)
-	avail := int64(stat.TotalMemoryBytes) - int64(reserved) - int64(external)
+// headroomFromReserveExternal is the memory ceiling: total minus the
+// reserve minus the external memory admission subtracts. The external term
+// is zero when the operator has set ignore-external.
+func headroomFromReserveExternal(total, reserved, external uint64) uint64 {
+	avail := int64(total) - int64(reserved) - int64(external)
 	if avail < 0 {
 		return 0
 	}

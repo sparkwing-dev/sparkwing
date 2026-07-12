@@ -181,6 +181,8 @@ type QueueState struct {
 	Budget *BudgetState
 
 	Container *ContainerLimit
+
+	IgnoreExternal bool
 }
 type Queued struct {
 	RunID string

@@ -4,22 +4,29 @@ import "testing"
 
 func TestParseBudget_Forms(t *testing.T) {
 	tests := []struct {
-		in      string
-		cores   float64
-		coresFr float64
-		mem     uint64
-		memFr   float64
-		enforce bool
+		in        string
+		cores     float64
+		coresFr   float64
+		mem       uint64
+		memFr     float64
+		enforce   bool
+		ignoreExt bool
+		isSet     bool
 	}{
 		{in: ""},
-		{in: "6", cores: 6},
-		{in: "6cores", cores: 6},
-		{in: "50%", coresFr: 0.5},
-		{in: "6,8gb", cores: 6, mem: 8 << 30},
-		{in: "50%,50%", coresFr: 0.5, memFr: 0.5},
-		{in: "6,8gib,enforce", cores: 6, mem: 8 << 30, enforce: true},
-		{in: "enforce,4", cores: 4, enforce: true},
-		{in: "512mb", mem: 512 << 20},
+		{in: "6", cores: 6, isSet: true},
+		{in: "6cores", cores: 6, isSet: true},
+		{in: "50%", coresFr: 0.5, isSet: true},
+		{in: "6,8gb", cores: 6, mem: 8 << 30, isSet: true},
+		{in: "50%,50%", coresFr: 0.5, memFr: 0.5, isSet: true},
+		{in: "6,8gib,enforce", cores: 6, mem: 8 << 30, enforce: true, isSet: true},
+		{in: "enforce,4", cores: 4, enforce: true, isSet: true},
+		{in: "512mb", mem: 512 << 20, isSet: true},
+		{in: "ignore-external", ignoreExt: true, isSet: true},
+		{in: "IGNORE-EXTERNAL", ignoreExt: true, isSet: true},
+		{in: "6,ignore-external", cores: 6, ignoreExt: true, isSet: true},
+		{in: "50%,8gb,enforce,ignore-external", coresFr: 0.5, mem: 8 << 30, enforce: true, ignoreExt: true, isSet: true},
+		{in: "ignore-external,6", cores: 6, ignoreExt: true, isSet: true},
 	}
 	for _, tc := range tests {
 		b, err := ParseBudget(tc.in)
@@ -28,9 +35,13 @@ func TestParseBudget_Forms(t *testing.T) {
 			continue
 		}
 		if b.Cores != tc.cores || b.CoresFraction != tc.coresFr ||
-			b.MemoryBytes != tc.mem || b.MemoryFraction != tc.memFr || b.Enforce != tc.enforce {
-			t.Errorf("ParseBudget(%q) = %+v, want cores=%v coresFr=%v mem=%v memFr=%v enforce=%v",
-				tc.in, b, tc.cores, tc.coresFr, tc.mem, tc.memFr, tc.enforce)
+			b.MemoryBytes != tc.mem || b.MemoryFraction != tc.memFr ||
+			b.Enforce != tc.enforce || b.IgnoreExternal != tc.ignoreExt {
+			t.Errorf("ParseBudget(%q) = %+v, want cores=%v coresFr=%v mem=%v memFr=%v enforce=%v ignoreExt=%v",
+				tc.in, b, tc.cores, tc.coresFr, tc.mem, tc.memFr, tc.enforce, tc.ignoreExt)
+		}
+		if b.IsSet() != tc.isSet {
+			t.Errorf("ParseBudget(%q).IsSet() = %v, want %v", tc.in, b.IsSet(), tc.isSet)
 		}
 	}
 }

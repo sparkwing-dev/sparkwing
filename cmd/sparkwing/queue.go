@@ -123,6 +123,9 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			qs.Budget.Cores, qs.Budget.MachineCores,
 			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce)
 	}
+	if qs.IgnoreExternal {
+		fmt.Fprintln(w, "external\tignored")
+	}
 	for _, h := range qs.Holders {
 		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			h.RunID, orDash(h.Pipeline), orDash(h.Repo), orDash(originWord(h.Origin)),
@@ -170,6 +173,9 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 	if b := budgetNote(qs.Budget); b != "" {
 		fmt.Fprintf(out, "%s\n", b)
+	}
+	if qs.IgnoreExternal {
+		fmt.Fprintln(out, "external: ignored (operator setting)")
 	}
 	if note := externalPressureNote(qs); note != "" {
 		fmt.Fprintf(out, "\n%s\n", note)
@@ -311,7 +317,7 @@ func budgetNote(b *wingwire.BudgetState) string {
 }
 
 func externalPressureNote(qs wingwire.QueueState) string {
-	if len(qs.Waiters) == 0 {
+	if qs.IgnoreExternal || len(qs.Waiters) == 0 {
 		return ""
 	}
 	for _, r := range qs.Resources {

@@ -119,6 +119,51 @@ func TestApplyHeadroom_AdmitsWithHeadroom(t *testing.T) {
 	}
 }
 
+func TestApplyHeadroom_IgnoreExternalAdmitsUnderLoad(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	d.cfg.Budget = Budget{IgnoreExternal: true}
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, FreeMemoryBytes: 16 << 30})
+
+	dec, _, err := d.ledger.Submit(admission.Request{ID: "ok", Cores: 2})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if dec.Kind != admission.DecisionGranted {
+		t.Fatalf("with ignore-external a 2-core request should be granted under load, got %s", dec.Kind)
+	}
+	if d.externalCores < 7.0 {
+		t.Errorf("externalCores = %.2f, want the real ~7.5 reading kept for observability", d.externalCores)
+	}
+}
+
+// TestApplyHeadroom_IgnoreExternalStillDetectsSaturation pins that
+// ignore-external only relaxes admission: contention accounting keeps
+// folding the real saturation into a holder, so observability stays
+// truthful while admission stops subtracting external load.
+func TestApplyHeadroom_IgnoreExternalStillDetectsSaturation(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	d.cfg.Budget = Budget{IgnoreExternal: true}
+	holder := &conn{role: roleHolder, finalizable: true}
+	d.conns[holder] = struct{}{}
+
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, FreeMemoryBytes: 16 << 30})
+
+	if holder.holdSampledMS <= 0 {
+		t.Fatalf("holder should have accrued a sampled interval, got %d", holder.holdSampledMS)
+	}
+	if holder.holdSaturatedMS <= 0 {
+		t.Errorf("ignore-external must not blind contention: holder saturated time = %d, want > 0", holder.holdSaturatedMS)
+	}
+
+	dec, _, err := d.ledger.Submit(admission.Request{ID: "ok", Cores: 2})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if dec.Kind != admission.DecisionGranted {
+		t.Fatalf("admission should ignore external and grant, got %s", dec.Kind)
+	}
+}
+
 func TestApplyHeadroom_Hysteresis(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0, FreeMemoryBytes: 16 << 30})

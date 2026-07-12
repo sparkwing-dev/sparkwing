@@ -1,11 +1,68 @@
 package main
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestRunCapacityReset_RejectsAmbiguousScope(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	ctx := context.Background()
+	if err := runCapacityReset(ctx, paths, "build", true, true, false); err == nil {
+		t.Error("both --pipeline and --all should be rejected")
+	}
+	if err := runCapacityReset(ctx, paths, "", false, false, false); err == nil {
+		t.Error("neither --pipeline nor --all should be rejected")
+	}
+	if err := runCapacityReset(ctx, paths, "", true, false, false); err == nil {
+		t.Error("--reset --all without --yes should be rejected")
+	}
+}
+
+func TestRunCapacityReset_DropsProfileAndReportsCounts(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	ctx := context.Background()
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := st.RecordProfileObservation(ctx, "build", "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	_ = st.Close()
+
+	out := captureStdout(t, func() {
+		if err := runCapacityReset(ctx, paths, "build", false, false, false); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dropped 1 row(s)") || !strings.Contains(out, "3 learned sample(s)") {
+		t.Errorf("reset output should name the dropped counts, got:\n%s", out)
+	}
+
+	st2, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st2.Close() }()
+	prof, err := st2.GetPipelineProfile(ctx, "build", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prof != nil {
+		t.Errorf("profile should be gone after reset, got %+v", prof)
+	}
+}
 
 func TestFmtCPUCells_ShowsDistributionThenPeak(t *testing.T) {
 	got := fmtCPUCells(store.PipelineProfile{CPUP50: 0.5, CPUP95: 1.25, PeakCores: 2})
