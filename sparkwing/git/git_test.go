@@ -15,6 +15,7 @@ import (
 // longer chdir.
 func withRepo(t *testing.T) string {
 	t.Helper()
+	isolateGitConfig(t)
 
 	dir := t.TempDir()
 	runIn(t, dir, "git", "init", "--initial-branch=main", ".")
@@ -23,6 +24,15 @@ func withRepo(t *testing.T) string {
 	runIn(t, dir, "git", "config", "commit.gpgsign", "false")
 	runIn(t, dir, "git", "config", "tag.gpgsign", "false")
 	return dir
+}
+
+func isolateGitConfig(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "global.gitconfig")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write empty git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", path)
 }
 
 func runIn(t *testing.T, dir, name string, args ...string) {
