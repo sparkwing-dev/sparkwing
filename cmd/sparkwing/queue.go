@@ -114,6 +114,10 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
+	if c := qs.Container; c != nil {
+		fmt.Fprintf(w, "container\t%.3f\t%.3f\t%d\t%d\n",
+			c.Cores, c.HostCores, c.MemoryBytes, c.HostMemoryBytes)
+	}
 	if qs.Budget != nil {
 		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%t\n",
 			qs.Budget.Cores, qs.Budget.MachineCores,
@@ -161,6 +165,9 @@ func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 	_ = tw.Flush()
 
+	if c := containerNote(qs.Container); c != "" {
+		fmt.Fprintf(out, "%s\n", c)
+	}
 	if b := budgetNote(qs.Budget); b != "" {
 		fmt.Fprintf(out, "%s\n", b)
 	}
@@ -259,6 +266,28 @@ func isHostResource(key string) bool { return key == "cores" || key == "memory" 
 // arithmetic: the capped capacity against the machine total, per capped
 // dimension, so the constraint is never a mystery. Empty when no budget
 // caps anything below the machine.
+// containerNote renders the container-limit row for the queue's headroom
+// arithmetic: the cgroup ceiling against the host it sits on, per clamped
+// dimension, so a daemon in a limited container shows why capacity is
+// below the machine total. Empty when no container limit binds.
+func containerNote(c *wingwire.ContainerLimit) string {
+	if c == nil {
+		return ""
+	}
+	var parts []string
+	if c.Cores > 0 && c.HostCores > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f cores (host %.1f)", c.Cores, c.HostCores))
+	}
+	if c.MemoryBytes > 0 && c.HostMemoryBytes > 0 {
+		parts = append(parts, fmt.Sprintf("%s memory (host %s)",
+			humanBytes(c.MemoryBytes), humanBytes(c.HostMemoryBytes)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "container limit: " + strings.Join(parts, ", ")
+}
+
 func budgetNote(b *wingwire.BudgetState) string {
 	if b == nil {
 		return ""

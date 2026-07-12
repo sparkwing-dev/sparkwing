@@ -116,6 +116,14 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		qs.Holders = append(qs.Holders, d.attachedChildHoldersLocked(ls, now)...)
 	}
 	qs.Events = d.events.summary(now)
+	if d.containerCores > 0 || d.containerMemory > 0 {
+		qs.Container = &wingwire.ContainerLimit{
+			Cores:           d.containerCores,
+			MemoryBytes:     int64(d.containerMemory),
+			HostCores:       d.hostCores,
+			HostMemoryBytes: int64(d.hostMemory),
+		}
+	}
 	if d.cfg.Budget.HasCap() {
 		qs.Budget = &wingwire.BudgetState{
 			Cores:              d.budgetCores,

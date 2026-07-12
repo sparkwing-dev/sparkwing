@@ -248,6 +248,18 @@ scheduled. `sparkwing queue` shows it as its own row in the headroom
 arithmetic (`budget 6.0 cores (machine 10.0)`) so the constraint is
 visible rather than mysterious.
 
+### Containers: the daemon respects its own cgroup
+
+You do not have to set a budget to keep sparkwing inside a container. On
+Linux the daemon reads its own cgroup v2 limits at startup (`cpu.max` and
+`memory.max`, with a cgroup v1 fallback) and clamps capacity to them, so a
+6 GiB container on a 24 GiB host plans against 6 GiB, never the host it
+sits on. External-load sensing follows suit, measuring the container's own
+CPU and memory usage rather than the machine's. `sparkwing queue` shows the
+clamp as a `container limit: 6.0 cores (host 24.0), 6.0 GiB (host 24.0 GiB)`
+row, and a `SPARKWING_BUDGET` still caps below the detected limit. macOS has
+no cgroups and so no container path -- capacity there is always the host.
+
 Add `enforce` to harden the cap at the operating-system level as well as
 in admission:
 

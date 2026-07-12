@@ -99,6 +99,12 @@ type Config struct {
 	// Sampler reads host capacity and pressure. Nil uses the real
 	// platform sampler.
 	Sampler HostSampler
+	// ContainerRoot is the filesystem root under which the daemon reads its
+	// own cgroup limits to clamp capacity to the container it runs in. Empty
+	// reads the real filesystem at "/" for the real platform sampler and
+	// disables detection when a Sampler is injected; a test points it at a
+	// fixture cgroup tree to exercise container-aware capacity.
+	ContainerRoot string
 	// ProcSampler reads a holder process's CPU for stall flagging. Nil
 	// uses the real platform sampler; a sampler that reports not-sampled
 	// (unsupported platforms) simply leaves holders unflagged.

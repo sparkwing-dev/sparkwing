@@ -63,13 +63,24 @@ type Daemon struct {
 	reservedMem   uint64
 	externalMem   uint64
 
-	// machineCores/machineMemory are the host's full measured capacity,
-	// retained so the queue view can show the budget against the machine
-	// total even after the ledger is capped to the budget.
-	machineCores  float64
-	machineMemory uint64
-	budgetCores   float64
-	budgetMemory  uint64
+	// machineCores/machineMemory are the effective capacity the budget and
+	// ledger are sized against: the host total, lowered to the container's
+	// cgroup limit when one binds. hostCores/hostMemory keep the unclamped
+	// host total, and containerCores/containerMemory the cgroup ceiling when
+	// it clamps below the host, so the queue view can show each tier.
+	machineCores    float64
+	machineMemory   uint64
+	hostCores       float64
+	hostMemory      uint64
+	containerCores  float64
+	containerMemory uint64
+	budgetCores     float64
+	budgetMemory    uint64
+
+	// container reads this process's own cgroup limits so admission plans
+	// against the container it runs in, not the host. Nil disables
+	// detection (host totals stand).
+	container *containerSensor
 
 	// cgroup enforces a Linux CPU/memory wall for admitted runs when the
 	// budget opts in; nil on other platforms or when enforcement is off or
@@ -103,6 +114,7 @@ func New(cfg Config) (*Daemon, error) {
 		layout:       lay,
 		sampler:      sampler,
 		procSampler:  procSampler,
+		container:    containerSensorFor(cfg),
 		ready:        make(chan struct{}),
 		quit:         make(chan struct{}),
 		conns:        map[*conn]struct{}{},
@@ -233,13 +245,29 @@ func (d *Daemon) initLedger() error {
 	if serr != nil {
 		d.cfg.logf("initial host sample: %v", serr)
 	}
+	d.hostCores = stat.TotalCores
+	d.hostMemory = stat.TotalMemoryBytes
 	d.machineCores = stat.TotalCores
 	d.machineMemory = stat.TotalMemoryBytes
-	d.budgetCores = d.cfg.Budget.CapCores(stat.TotalCores)
-	d.budgetMemory = d.cfg.Budget.CapMemory(stat.TotalMemoryBytes)
+	if ccores, cmem := d.container.capacityLimits(); ccores > 0 || cmem > 0 {
+		if ccores > 0 && ccores < d.machineCores {
+			d.containerCores = ccores
+			d.machineCores = ccores
+		}
+		if cmem > 0 && cmem < d.machineMemory {
+			d.containerMemory = cmem
+			d.machineMemory = cmem
+		}
+		if d.containerCores > 0 || d.containerMemory > 0 {
+			d.cfg.logf("container limit: %.1f cores, %s (host %.1f cores, %s)",
+				d.machineCores, humanBytesLog(d.machineMemory), d.hostCores, humanBytesLog(d.hostMemory))
+		}
+	}
+	d.budgetCores = d.cfg.Budget.CapCores(d.machineCores)
+	d.budgetMemory = d.cfg.Budget.CapMemory(d.machineMemory)
 	if d.cfg.Budget.HasCap() {
 		d.cfg.logf("budget: %.1f cores, %s (machine %.1f cores, %s)",
-			d.budgetCores, humanBytesLog(d.budgetMemory), stat.TotalCores, humanBytesLog(stat.TotalMemoryBytes))
+			d.budgetCores, humanBytesLog(d.budgetMemory), d.machineCores, humanBytesLog(d.machineMemory))
 	}
 	if snap == nil {
 		lg, err := admission.New(admission.Config{

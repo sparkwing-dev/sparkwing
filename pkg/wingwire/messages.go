@@ -381,6 +381,27 @@ type QueueState struct {
 	// host total, so the queue view can show the constraint. Nil when no
 	// budget is set (the full machine is available).
 	Budget *BudgetState `json:"budget,omitempty"`
+	// Container reports the cgroup limit clamping capacity below the host,
+	// so a daemon in a resource-limited container shows the true ceiling.
+	// Nil when no container limit binds (the host total stands).
+	Container *ContainerLimit `json:"container,omitempty"`
+}
+
+// ContainerLimit reports the cgroup capacity ceiling a daemon runs under
+// when it is smaller than the host: inside a 6 GiB container on a 24 GiB
+// host, capacity is the container's, not the machine's. Each dimension is
+// present only when the container constrains it below the host.
+type ContainerLimit struct {
+	// Cores is the container's core ceiling, zero when CPU is unconstrained.
+	Cores float64 `json:"cores,omitempty"`
+	// MemoryBytes is the container's memory ceiling, zero when memory is
+	// unconstrained.
+	MemoryBytes int64 `json:"memory_bytes,omitempty"`
+	// HostCores is the host's full core count, for showing the container
+	// ceiling against the machine it sits on.
+	HostCores float64 `json:"host_cores,omitempty"`
+	// HostMemoryBytes is the host's full memory.
+	HostMemoryBytes int64 `json:"host_memory_bytes,omitempty"`
 }
 
 // BudgetState reports the machine budget behind a [QueueState]: the

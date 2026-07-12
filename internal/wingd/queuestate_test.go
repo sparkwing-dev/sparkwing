@@ -2,6 +2,8 @@ package wingd_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -124,6 +126,101 @@ func TestQueueState_CarriesDaemonVersionAndUptime(t *testing.T) {
 	}
 	if qs.DaemonUptimeMS <= 0 {
 		t.Errorf("DaemonUptimeMS = %d, want > 0", qs.DaemonUptimeMS)
+	}
+}
+
+// writeContainerFixture lays a minimal cgroup v2 tree under a fresh temp
+// root, so a daemon pointed at it clamps capacity to the container limit.
+func writeContainerFixture(t *testing.T, cpuMax, memMax string) string {
+	t.Helper()
+	root := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join("proc", "self", "cgroup"), "0::/\n")
+	write(filepath.Join("sys", "fs", "cgroup", "cpu.max"), cpuMax)
+	write(filepath.Join("sys", "fs", "cgroup", "memory.max"), memMax)
+	return root
+}
+
+// TestQueueState_ClampsCapacityToContainerLimit points a daemon on a
+// 24-core, 24 GiB host at a 6-core, 6 GiB cgroup and asserts the ledger,
+// the container row, and an explicit budget compose: capacity is the
+// container's, and a budget below it caps further.
+func TestQueueState_ClampsCapacityToContainerLimit(t *testing.T) {
+	home := shortHome(t)
+	root := writeContainerFixture(t, "600000 100000", "6442450944")
+	budget, err := wingd.ParseBudget("4,4gb")
+	if err != nil {
+		t.Fatalf("parse budget: %v", err)
+	}
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(24, 24<<30),
+		ContainerRoot:    root,
+		Budget:           budget,
+		HeadroomFraction: -1,
+	})
+
+	q := ensure(t, home, "")
+	qs, err := q.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+
+	if qs.Container == nil {
+		t.Fatal("Container nil; want the cgroup limit reported")
+	}
+	if qs.Container.Cores != 6 || qs.Container.HostCores != 24 {
+		t.Errorf("Container cores = %v (host %v), want 6 (host 24)", qs.Container.Cores, qs.Container.HostCores)
+	}
+	if qs.Container.MemoryBytes != 6<<30 || qs.Container.HostMemoryBytes != 24<<30 {
+		t.Errorf("Container memory = %d (host %d), want %d (host %d)",
+			qs.Container.MemoryBytes, qs.Container.HostMemoryBytes, int64(6)<<30, int64(24)<<30)
+	}
+	if qs.Budget == nil || qs.Budget.MachineCores != 6 {
+		t.Errorf("Budget.MachineCores = %v, want 6 (container-clamped, not host 24)", qs.Budget)
+	}
+	if qs.Budget != nil && qs.Budget.Cores != 4 {
+		t.Errorf("Budget.Cores = %v, want 4 (clamps below container)", qs.Budget.Cores)
+	}
+	for _, r := range qs.Resources {
+		if r.Key == "cores" && r.Capacity != 4 {
+			t.Errorf("cores capacity = %v, want 4 (budget below container below host)", r.Capacity)
+		}
+	}
+}
+
+// TestQueueState_NoContainerWhenUnlimited confirms a daemon whose cgroup
+// imposes no limit reports the host totals and no container row.
+func TestQueueState_NoContainerWhenUnlimited(t *testing.T) {
+	home := shortHome(t)
+	root := writeContainerFixture(t, "max 100000", "max")
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(8, 8<<30),
+		ContainerRoot:    root,
+		HeadroomFraction: -1,
+	})
+
+	q := ensure(t, home, "")
+	qs, err := q.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+	if qs.Container != nil {
+		t.Fatalf("Container = %+v, want nil (unlimited cgroup)", qs.Container)
+	}
+	for _, r := range qs.Resources {
+		if r.Key == "cores" && r.Capacity != 8 {
+			t.Errorf("cores capacity = %v, want host 8", r.Capacity)
+		}
 	}
 }
 

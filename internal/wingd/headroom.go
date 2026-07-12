@@ -35,7 +35,7 @@ func (d *Daemon) refreshHeadroom() {
 		d.cfg.logf("host sample: %v", err)
 		return
 	}
-	d.applyHeadroom(stat)
+	d.applyHeadroom(d.container.apply(stat))
 }
 
 // applyHeadroom converts a host reading into a ledger headroom ceiling:

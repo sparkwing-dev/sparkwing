@@ -49,6 +49,15 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **orchestrator:** The local admission daemon detects its own cgroup
+  limits at startup and clamps capacity to the container it runs in, so a
+  6 GiB container on a 24 GiB host plans against 6 GiB rather than the host
+  total -- the oversubscription that quietly returned inside CI containers.
+  External-load sensing measures the container's own CPU and memory usage
+  where the cgroup provides it, an explicit `SPARKWING_BUDGET` still caps
+  below the detected limit, and `sparkwing queue` shows a `container limit`
+  row against the host. Linux reads cgroup v2 (with a v1 fallback); macOS
+  has no container path and uses the host.
 - **cli:** `sparkwing repos` lists the machine's fleet of sparkwing
   repos -- derived from observed runs unioned with `repos.yaml` -- with
   each repo's SDK pin, last run, and how many migration guides it is

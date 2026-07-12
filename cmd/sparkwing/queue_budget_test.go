@@ -38,3 +38,25 @@ func TestBudgetNote_NilAndUncapped(t *testing.T) {
 		t.Errorf("a budget equal to the machine renders no note, got %q", got)
 	}
 }
+
+func TestContainerNote_ShowsLimitAgainstHost(t *testing.T) {
+	note := containerNote(&wingwire.ContainerLimit{
+		Cores: 6, HostCores: 24,
+		MemoryBytes: 6 << 30, HostMemoryBytes: 24 << 30,
+	})
+	for _, want := range []string{"container limit:", "6.0 cores (host 24.0)", "6.0 GiB memory (host 24.0 GiB)"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("container note %q missing %q", note, want)
+		}
+	}
+}
+
+func TestContainerNote_NilAndMemoryOnly(t *testing.T) {
+	if containerNote(nil) != "" {
+		t.Error("nil container limit must render no note")
+	}
+	note := containerNote(&wingwire.ContainerLimit{MemoryBytes: 2 << 30, HostMemoryBytes: 16 << 30})
+	if !strings.Contains(note, "memory") || strings.Contains(note, "cores") {
+		t.Errorf("memory-only container note = %q, want memory without cores", note)
+	}
+}

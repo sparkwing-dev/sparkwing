@@ -49,6 +49,15 @@ type CancelLease struct {
 type CancelLeaseAck struct {
 	Found bool
 }
+type ContainerLimit struct {
+	Cores float64
+
+	MemoryBytes int64
+
+	HostCores float64
+
+	HostMemoryBytes int64
+}
 func Decode(line []byte) (Message, error)
 type DrainAck struct {
 	HoldersRemaining int
@@ -170,6 +179,8 @@ type QueueState struct {
 	Events *EventsWindow
 
 	Budget *BudgetState
+
+	Container *ContainerLimit
 }
 type Queued struct {
 	RunID string
