@@ -47,6 +47,41 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Weighted queue admission for store-backed concurrency
+  groups regains the backfill fix that shipped in v0.15.12 and was absent
+  from the v0.16.0 tag line: smaller waiters backfill when the oldest
+  waiter cannot currently fit, and younger backfilled holders cannot
+  starve that older waiter.
+- **admission:** The local admission daemon now backfills a smaller run
+  past a queued heavier one when the free budget fits it, and stops
+  backfilling once a holder younger than the waiting run is what keeps it
+  from fitting. Weighted local groups and host cores no longer idle
+  capacity behind a run that cannot currently fit, matching the
+  controller's weighted-queue admission.
+- **docs:** The v0.16.0 migration guide now documents the runs-store
+  schema move to version 10 (one-way migration; an older binary refuses
+  a newer database by naming the version it needs), which the published
+  v0.16.0 tag's embedded copy lacked.
+
+## [v0.16.0] - 2026-07-12
+
+Published from a release line that branched before the weighted-queue-capacity
+backfill fix reached the mainline, so this tag ships without it; that fix, and
+its extension to the local admission daemon's ledger, land in the next release,
+which is a strict superset of everything below.
+
+This release carried the concurrency rebuild. Local runs are admitted by the
+local admission daemon (`sparkwingd`) instead of box slots and store-side
+concurrency slots; the `box-slots` and `maintenance` command trees are removed
+in favor of `sparkwing queue` and the new `sparkwing doctor`; the runs-store
+schema advances from 6 to 10 and stamps the minimum sparkwing version it needs;
+and resource measurement now costs a run by its whole process tree. It also
+bounded the plan-level concurrency admission acquire, so a wedged store surfaces
+a concrete error rather than a run left heartbeating with every node pending.
+See [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md) for the breaking
+changes and upgrade steps.
 
 ### Added
 
@@ -324,30 +359,6 @@ code change to unlock.
   records election, headroom transitions, reattach-grace outcomes,
   evictions, orphan finalizations, and drains -- the log is no longer
   empty exactly when someone needs it to debug the daemon.
-- **admission:** The local admission daemon now backfills a smaller run
-  past a queued heavier one when the free budget fits it, and stops
-  backfilling once a holder younger than the waiting run is what keeps it
-  from fitting. Weighted local groups and host cores no longer idle
-  capacity behind a run that cannot currently fit, matching the
-  controller's weighted-queue admission.
-
-## [v0.16.0] - 2026-07-12
-
-Published from a release line that branched before the weighted-queue-capacity
-backfill fix reached the mainline, so this tag ships without it; that fix, and
-its extension to the local admission daemon's ledger, land in the next release,
-which is a strict superset of everything below.
-
-This release carried the concurrency rebuild. Local runs are admitted by the
-local admission daemon (`sparkwingd`) instead of box slots and store-side
-concurrency slots; the `box-slots` and `maintenance` command trees are removed
-in favor of `sparkwing queue` and the new `sparkwing doctor`; the runs-store
-schema advances from 6 to 10 and stamps the minimum sparkwing version it needs;
-and resource measurement now costs a run by its whole process tree. It also
-bounded the plan-level concurrency admission acquire, so a wedged store surfaces
-a concrete error rather than a run left heartbeating with every node pending.
-See [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md) for the breaking
-changes and upgrade steps.
 
 ## [v0.15.12] - 2026-07-12
 ### Fixed
