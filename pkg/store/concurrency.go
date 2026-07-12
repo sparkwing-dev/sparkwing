@@ -1584,7 +1584,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	if err != nil {
 		return false, nil, nil, err
 	}
-	if released && coalesceFollowersCanInherit(outcome) {
+	if released && coalesceFollowersCanInherit(outcome, "") {
 		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
 			return false, nil, nil, err
@@ -1664,12 +1664,15 @@ func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID
 	return out, nil
 }
 
-func coalesceFollowersCanInherit(outcome string) bool {
+func coalesceFollowersCanInherit(outcome, failureReason string) bool {
 	switch outcome {
-	case "", "cancelled", "superseded", "timed_out":
-		return false
-	default:
+	case "success", "failed", "skipped", "skipped_concurrent", "cached":
+		if failureReason == FailureAgentLost {
+			return false
+		}
 		return true
+	default:
+		return false
 	}
 }
 
@@ -1908,7 +1911,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return WaiterResolution{}, err
 			}
-			if coalesceFollowersCanInherit(leaderOutcome) {
+			if coalesceFollowersCanInherit(leaderOutcome, leaderReason) {
 				if err := txCommitChecked(ctx, tx, nowNS, key); err != nil {
 					return WaiterResolution{}, err
 				}
@@ -2309,8 +2312,9 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 	return out, nil
 }
 
-// reapStaleConcurrencyWaiters drops orphan coalesce followers (leader
-// gone) and old waiters whose owning run is not live.
+// reapStaleConcurrencyWaiters drops coalesce followers only after both
+// their leader and owning run are gone, and drops old waiters whose
+// owning run is not live.
 func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	if maxAge <= 0 {
 		return nil, nil
@@ -2338,8 +2342,17 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 		         AND h.run_id = w.leader_run_id
 		         AND h.node_id = w.leader_node_id
 		         AND `+holderLiveSQL("h.")+`
+		    )
+		    AND NOT EXISTS (
+		      SELECT 1 FROM runs r
+		       WHERE r.id = w.run_id
+		         AND r.status = ?
+		         AND (
+		           r.last_heartbeat_at >= ?
+		           OR (r.last_heartbeat_at IS NULL AND r.started_at >= ?)
+		         )
 		    )`+s.forUpdateSkipLocked(),
-		OnLimitCoalesce, nowNS,
+		OnLimitCoalesce, nowNS, runStatusRunning, heartbeatCutoff, heartbeatCutoff,
 	)
 	if err != nil {
 		return nil, err
