@@ -2439,20 +2439,21 @@ only when at least one id failed.`,
 var cmdJobsCancel = Command{
 	Path:     "sparkwing runs cancel",
 	Synopsis: "Request cancellation of in-flight runs",
-	Description: `Sends a cancel request per run to the controller. Each run
-transitions to 'cancelling' and then 'cancelled' once the runner
-acknowledges. Already-finished runs surface a per-id error but
-don't abort the batch.
+	Description: `Cancels runs by id. With --profile, sends the request to the
+selected controller. Without --profile, cancels rows in the local state
+store and releases any local concurrency budget held by those runs.
+Already-finished runs surface a per-id error but don't abort the batch.
 
 Pass --run once per id (repeatable). Use --run - to read ids
 from stdin, one per line.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omitted cancels in the local state store", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Cancel one run", "sparkwing runs cancel --run run-... --profile prod"},
+		{"Cancel one local run", "sparkwing runs cancel --run run-..."},
+		{"Cancel one controller run", "sparkwing runs cancel --run run-... --profile prod"},
 		{"Cancel every running prod run", "sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod"},
 	},
 }

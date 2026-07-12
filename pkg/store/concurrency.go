@@ -379,6 +379,14 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 			return AcquireSlotResponse{}, err
 		}
 	}
+	if terminal, err := txRunIsTerminal(ctx, tx, req.RunID); err != nil {
+		return AcquireSlotResponse{}, err
+	} else if terminal {
+		if err := txCommitChecked(ctx, tx, nowNS, req.Key); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+		return AcquireSlotResponse{Kind: AcquireFailed}, nil
+	}
 
 	hit, err := txCacheLookup(ctx, tx, req.Key, req.CacheKeyHash, nowNS, req.BypassRead, true)
 	if err != nil {
@@ -2232,6 +2240,28 @@ func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, key stri
 		}
 	}
 	return stale, nil
+}
+
+func txRunIsTerminal(ctx context.Context, tx *storeTx, runID string) (bool, error) {
+	if runID == "" {
+		return false, nil
+	}
+	forUpdate := ""
+	if tx.dialect == DialectPostgres {
+		forUpdate = " FOR UPDATE"
+	}
+	var terminal int
+	err := tx.QueryRowContext(ctx,
+		`SELECT CASE WHEN `+runTerminalIn+` THEN 1 ELSE 0 END FROM runs WHERE id = ?`+forUpdate,
+		runID,
+	).Scan(&terminal)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return terminal == 1, nil
 }
 
 // reapStaleConcurrencyHolders deletes lease-expired holders; caller

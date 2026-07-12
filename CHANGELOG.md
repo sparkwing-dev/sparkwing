@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** `sparkwing runs cancel` without `--profile` now cancels runs in the
+  local state store and releases any local concurrency budget they held or were
+  waiting on, so orphaned daemonless runs no longer leave phantom admission
+  pressure behind.
 
 ## [v0.15.9] - 2026-07-12
 ### Fixed

@@ -1190,12 +1190,134 @@ WHERE runs.status = '`+runStatusPending+`'`,
 
 // FinishRun marks a run terminal with the given status and optional error.
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	_, err := s.exec(ctx, `
+	res, err := s.exec(ctx, `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ?`,
+ WHERE id = ?
+   AND NOT (`+runTerminalIn+`)`,
 		status, errMsg, time.Now().UnixNano(), runID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err = s.GetRun(ctx, runID)
 	return err
+}
+
+// CancelRun marks an active run cancelled, cancels unfinished nodes,
+// and releases any concurrency budget owned by the run.
+func (s *Store) CancelRun(ctx context.Context, runID, reason string) error {
+	if reason == "" {
+		reason = "cancelled"
+	}
+	run, err := s.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	switch run.Status {
+	case runStatusCancelled:
+		if err := s.cancelUnfinishedNodes(ctx, runID, reason); err != nil {
+			return err
+		}
+		return s.cancelConcurrencyForRun(ctx, runID)
+	case "success", runStatusFailed:
+		if err := s.cancelConcurrencyForRun(ctx, runID); err != nil {
+			return err
+		}
+		return fmt.Errorf("run %s is already terminal with status %s", runID, run.Status)
+	}
+	res, err := s.exec(ctx, `
+UPDATE runs
+   SET status = ?, error = ?, finished_at = ?
+ WHERE id = ?
+   AND NOT (`+runTerminalIn+`)`,
+		runStatusCancelled, reason, time.Now().UnixNano(), runID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		run, err := s.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if run.Status == runStatusCancelled {
+			if err := s.cancelUnfinishedNodes(ctx, runID, reason); err != nil {
+				return err
+			}
+			return s.cancelConcurrencyForRun(ctx, runID)
+		}
+		if err := s.cancelConcurrencyForRun(ctx, runID); err != nil {
+			return err
+		}
+		return fmt.Errorf("run %s is already terminal with status %s", runID, run.Status)
+	}
+	if err := s.cancelUnfinishedNodes(ctx, runID, reason); err != nil {
+		return err
+	}
+	return s.cancelConcurrencyForRun(ctx, runID)
+}
+
+func (s *Store) cancelUnfinishedNodes(ctx context.Context, runID, reason string) error {
+	now := time.Now().UnixNano()
+	_, err := s.exec(ctx, `
+UPDATE nodes
+   SET status         = ?,
+       outcome        = 'cancelled',
+       error          = COALESCE(NULLIF(error, ''), ?),
+       failure_reason = COALESCE(NULLIF(failure_reason, ''), 'cancelled'),
+       finished_at    = ?
+ WHERE run_id = ?
+   AND `+nodeNotDone,
+		nodeStatusDone, reason, now, runID)
+	return err
+}
+
+type concurrencyClaim struct {
+	Key    string
+	NodeID string
+}
+
+func (s *Store) cancelConcurrencyForRun(ctx context.Context, runID string) error {
+	rows, err := s.query(ctx, `
+SELECT DISTINCT key, node_id
+  FROM (
+        SELECT key, node_id FROM concurrency_waiters WHERE run_id = ?
+        UNION
+        SELECT key, node_id FROM concurrency_holders WHERE run_id = ?
+       )
+ ORDER BY key, node_id`, runID, runID)
+	if err != nil {
+		return err
+	}
+	var claims []concurrencyClaim
+	for rows.Next() {
+		var claim concurrencyClaim
+		if err := rows.Scan(&claim.Key, &claim.NodeID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		claims = append(claims, claim)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, claim := range claims {
+		if _, err := s.CancelWaiter(ctx, claim.Key, runID, claim.NodeID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The

@@ -3374,10 +3374,10 @@ sparkwing runs approvals list -o json
 
 Request cancellation of in-flight runs
 
-Sends a cancel request per run to the controller. Each run
-transitions to 'cancelling' and then 'cancelled' once the runner
-acknowledges. Already-finished runs surface a per-id error but
-don't abort the batch.
+Cancels runs by id. With --profile, sends the request to the
+selected controller. Without --profile, cancels rows in the local state
+store and releases any local concurrency budget held by those runs.
+Already-finished runs surface a per-id error but don't abort the batch.
 
 Pass --run once per id (repeatable). Use --run - to read ids
 from stdin, one per line.
@@ -3387,12 +3387,15 @@ from stdin, one per line.
 | Flag | Description |
 |---|---|
 | `--run RUN_ID` | Run id to cancel (repeatable; use --run - to read ids from stdin) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name; omitted cancels in the local state store |
 
 ### Examples
 
 ```sh
-# Cancel one run
+# Cancel one local run
+sparkwing runs cancel --run run-...
+
+# Cancel one controller run
 sparkwing runs cancel --run run-... --profile prod
 
 # Cancel every running prod run

@@ -193,10 +193,10 @@ func profileSuffix(on string) string {
 	return " --profile " + on
 }
 
-func runRunsCancel(ctx context.Context, args []string) error {
+func runRunsCancel(ctx context.Context, paths orchestrator.Paths, out io.Writer, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omitted cancels in the local state store")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -213,6 +213,9 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsCancel.Path)
 	}
+	if *on == "" {
+		return cancelLocalRuns(ctx, paths, out, ids)
+	}
 	c, _, err := resolveRunsClient(*on, cmdJobsCancel.Path)
 	if err != nil {
 		return err
@@ -225,7 +228,25 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		}
 		results = append(results, runResult{RunID: id, OK: true})
 	}
-	return reportResults(os.Stdout, "cancel", results)
+	return reportResults(out, "cancel", results)
+}
+
+func cancelLocalRuns(ctx context.Context, paths orchestrator.Paths, out io.Writer, ids []string) error {
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	results := make([]runResult, 0, len(ids))
+	for _, id := range ids {
+		if err := st.CancelRun(ctx, id, "cancelled by operator"); err != nil {
+			results = append(results, runResult{RunID: id, Error: err.Error()})
+			continue
+		}
+		results = append(results, runResult{RunID: id, OK: true})
+	}
+	return reportResults(out, "cancel", results)
 }
 
 func runRunsPrune(ctx context.Context, args []string) error {

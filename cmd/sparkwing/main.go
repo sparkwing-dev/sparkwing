@@ -627,7 +627,7 @@ func runJobs(args []string) error {
 		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
 
 	case "cancel":
-		return runRunsCancel(ctx, args[1:])
+		return runRunsCancel(ctx, paths, os.Stdout, args[1:])
 	case "retry":
 		return runRunsRetry(ctx, args[1:])
 	case "prune":

@@ -157,6 +157,8 @@ func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *t
 	defer cleanup()
 	ctx := context.Background()
 
+	createControllerTestRun(t, st, "leader")
+	createControllerTestRun(t, st, "waiter")
 	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "state-promoted-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -190,6 +192,21 @@ func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *t
 	}
 	if _, ok := body.Holders[0]["queue_arrived_at"]; !ok {
 		t.Fatalf("promoted holder response omits queue_arrived_at: %+v", body.Holders[0])
+	}
+}
+
+func createControllerTestRun(t *testing.T, st *store.Store, runID string) {
+	t.Helper()
+	if err := st.CreateRun(context.Background(), store.Run{
+		ID:        runID,
+		Pipeline:  "test",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun(%s): %v", runID, err)
+	}
+	if err := st.TouchRunHeartbeat(context.Background(), runID); err != nil {
+		t.Fatalf("TouchRunHeartbeat(%s): %v", runID, err)
 	}
 }
 

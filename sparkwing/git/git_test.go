@@ -16,6 +16,9 @@ import (
 func withRepo(t *testing.T) string {
 	t.Helper()
 
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
 	dir := t.TempDir()
 	runIn(t, dir, "git", "init", "--initial-branch=main", ".")
 	runIn(t, dir, "git", "config", "user.email", "test@example.com")
