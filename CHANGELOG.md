@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.16.1] - 2026-07-12
 ### Fixed
 
 - **admission:** Weighted queue admission can backfill a later runnable
