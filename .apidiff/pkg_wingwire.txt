@@ -16,7 +16,7 @@ type AdmissionRequest struct {
 
 	SemaphoresOnly bool
 
-	CostSource string
+	CostSource CostSource
 
 	ExpectedDurationMS int64
 
@@ -58,6 +58,10 @@ type ContainerLimit struct {
 
 	HostMemoryBytes int64
 }
+type CostSource string
+const CostSourceDefault CostSource = "default"
+const CostSourceMeasured CostSource = "measured"
+const CostSourcePin CostSource = "pin"
 func Decode(line []byte) (Message, error)
 type DrainAck struct {
 	HoldersRemaining int
