@@ -69,6 +69,10 @@ func (b *captureBackend) AppendEvent(ctx context.Context, _, _, _ string, _ []by
 	return nil
 }
 
+func (b *captureBackend) ListEventsAfter(ctx context.Context, _ string, _ int64, _ int) ([]store.Event, error) {
+	return nil, nil
+}
+
 func (b *captureBackend) AddNodeMetricSample(ctx context.Context, _, _ string, _ store.MetricSample) error {
 	return nil
 }

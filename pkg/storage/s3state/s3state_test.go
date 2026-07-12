@@ -254,7 +254,6 @@ func TestS3StateBackend_GetLatestRun_FiltersByPipeline(t *testing.T) {
 func TestS3StateBackend_AppendEvent_AndEventSequence(t *testing.T) {
 	art := newMemArt()
 	b := s3state.New(art, s3state.WithFlushInterval(5*time.Millisecond))
-	t.Cleanup(func() { _ = b.Close() })
 	ctx := context.Background()
 
 	if err := b.CreateRun(ctx, store.Run{ID: "r", StartedAt: time.Now().UTC()}); err != nil {
@@ -263,6 +262,30 @@ func TestS3StateBackend_AppendEvent_AndEventSequence(t *testing.T) {
 	for _, k := range []string{"k1", "k2", "k3"} {
 		if err := b.AppendEvent(ctx, "r", "", k, []byte(`{}`)); err != nil {
 			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b2 := s3state.New(art, s3state.WithFlushInterval(5*time.Millisecond))
+	t.Cleanup(func() { _ = b2.Close() })
+	if err := b2.AppendEvent(ctx, "r", "", "k4", []byte(`{}`)); err != nil {
+		t.Fatalf("AppendEvent after reload: %v", err)
+	}
+	events, err := b2.ListEventsAfter(ctx, "r", 2, 10)
+	if err != nil {
+		t.Fatalf("ListEventsAfter: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events after seq 2 = %d, want 2: %+v", len(events), events)
+	}
+	for i, want := range []struct {
+		seq  int64
+		kind string
+	}{{3, "k3"}, {4, "k4"}} {
+		if events[i].Seq != want.seq || events[i].Kind != want.kind {
+			t.Fatalf("events[%d] = seq %d kind %q, want seq %d kind %q", i, events[i].Seq, events[i].Kind, want.seq, want.kind)
 		}
 	}
 }

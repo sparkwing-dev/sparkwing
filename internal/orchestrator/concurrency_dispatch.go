@@ -589,7 +589,12 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		"leader_run_id":  leaderRun,
 		"leader_node_id": leaderNode,
 	})
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload)
+	if err := r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload); err != nil {
+		waitErr := fmt.Errorf("record concurrency wait: %w", err)
+		r.cancelWaiterAfterAdmissionEventFailure(cp.key, req.RunID, req.Node.ID())
+		r.markFailed(ctx, req.RunID, req.Node.ID(), waitErr)
+		return runner.Result{Outcome: sparkwing.Failed, Err: waitErr}
+	}
 
 	lastDetail := concWaitDetail(cp.key, initial, leaderRun, leaderNode)
 	if lastDetail != "" {
@@ -689,6 +694,15 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil)
 			return runner.Result{Outcome: sparkwing.Superseded, Err: err}
 		}
+	}
+}
+
+func (r *InProcessRunner) cancelWaiterAfterAdmissionEventFailure(key, runID, nodeID string) {
+	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := r.backends.Concurrency.CancelWaiter(bg, key, runID, nodeID); err != nil {
+		slog.Warn("cancel waiter after admission event failure failed; reaper will sweep it",
+			"key", key, "run", runID, "node", nodeID, "err", err)
 	}
 }
 

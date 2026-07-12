@@ -86,6 +86,44 @@ func TestBackendsSeam_StateErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestBackendsSeam_QueuedAdmissionEventFailureCancelsWaiter(t *testing.T) {
+	register("seam-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return seamOK{} })
+
+	fakes := newFakeBackends()
+	fakes.state.appendEventErrKind = "concurrency_wait"
+	fakes.state.appendEventErr = errors.New("event store down")
+	fakes.concurrency.acquire = func(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+		if req.NodeID == "b" {
+			return store.AcquireSlotResponse{
+				Kind:        store.AcquireQueued,
+				Position:    1,
+				QueueLength: 1,
+			}, nil
+		}
+		return store.AcquireSlotResponse{
+			Kind:           store.AcquireGranted,
+			HolderID:       req.HolderID,
+			LeaseExpiresAt: time.Now().Add(30 * time.Second),
+		}, nil
+	}
+
+	res, err := orchestrator.Run(context.Background(),
+		orchestrator.Backends{State: fakes.state, Logs: fakes.logs, Concurrency: fakes.concurrency},
+		orchestrator.Options{Pipeline: "seam-ok"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status=%q want failed; err=%v", res.Status, res.Error)
+	}
+	if fakes.concurrency.cancels != 1 {
+		t.Fatalf("CancelWaiter called %d times; want 1", fakes.concurrency.cancels)
+	}
+	if fakes.state.finishNodes == 0 {
+		t.Fatalf("FinishNode was not called for failed queued node")
+	}
+}
+
 type hostAdmissionPlanPipe struct{ sparkwing.Base }
 
 func (hostAdmissionPlanPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -517,16 +555,19 @@ func newFakeBackends() *fakeBackends {
 }
 
 type fakeState struct {
-	mu           sync.Mutex
-	createRuns   int
-	finishRuns   int
-	createNodes  int
-	startNodes   int
-	finishNodes  int
-	eventKinds   map[string]int
-	cache        map[string][]byte
-	runs         map[string]store.Run
-	createRunErr error
+	mu                 sync.Mutex
+	createRuns         int
+	finishRuns         int
+	createNodes        int
+	startNodes         int
+	finishNodes        int
+	eventKinds         map[string]int
+	events             []store.Event
+	cache              map[string][]byte
+	runs               map[string]store.Run
+	createRunErr       error
+	appendEventErrKind string
+	appendEventErr     error
 }
 
 func (f *fakeState) Close() error { return nil }
@@ -638,8 +679,37 @@ func (f *fakeState) TouchRunHeartbeat(ctx context.Context, runID string) error {
 func (f *fakeState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.appendEventErr != nil && kind == f.appendEventErrKind {
+		return f.appendEventErr
+	}
 	f.eventKinds[kind]++
+	f.events = append(f.events, store.Event{
+		RunID:   runID,
+		Seq:     int64(len(f.events) + 1),
+		NodeID:  nodeID,
+		Kind:    kind,
+		TS:      time.Now(),
+		Payload: payload,
+	})
 	return nil
+}
+
+func (f *fakeState) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if limit <= 0 {
+		limit = 500
+	}
+	events := make([]store.Event, 0, limit)
+	for _, event := range f.events {
+		if event.RunID == runID && event.Seq > afterSeq {
+			events = append(events, event)
+			if len(events) == limit {
+				break
+			}
+		}
+	}
+	return events, nil
 }
 
 func (f *fakeState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
@@ -750,6 +820,7 @@ type fakeConcurrency struct {
 	mu       sync.Mutex
 	acquires int
 	releases int
+	cancels  int
 	holders  map[string]store.ConcurrencyHolder
 	acquire  func(context.Context, store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
 	resolve  func(context.Context, string, string, string, string, string, string, bool) (store.WaiterResolution, error)
@@ -808,7 +879,10 @@ func (f *fakeConcurrency) ForceReleaseSuperseded(ctx context.Context, key string
 }
 
 func (f *fakeConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	return false, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancels++
+	return true, nil
 }
 
 func errIs(err error, substr string) bool {

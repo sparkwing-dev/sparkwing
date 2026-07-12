@@ -311,6 +311,10 @@ func (m *mirrorStateBackend) AppendEvent(ctx context.Context, runID, nodeID, kin
 		func() error { return m.local.AppendEvent(ctx, runID, nodeID, kind, payload) })
 }
 
+func (m *mirrorStateBackend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	return m.canonical.ListEventsAfter(ctx, runID, afterSeq, limit)
+}
+
 // GetNodeOutput is a read; delegate to canonical.
 func (m *mirrorStateBackend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	return m.canonical.GetNodeOutput(ctx, runID, nodeID)

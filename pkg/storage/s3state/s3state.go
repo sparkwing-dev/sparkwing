@@ -31,7 +31,6 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -78,8 +77,6 @@ type Backend struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
-
-	eventSeq atomic.Int64
 }
 
 // Option tunes the backend at construction time.
@@ -140,13 +137,14 @@ type runState struct {
 	flushing  bool
 
 	// Derived snapshot, kept up to date as envelopes are appended.
-	run       *store.Run
-	nodes     map[string]*store.Node
-	steps     map[string]map[string]*store.NodeStep // nodeID -> stepID
-	stepOrder []stepKey                             // insertion order for ListNodeSteps
-	events    []store.Event
-	metrics   map[string][]store.MetricSample
-	loaded    bool // true once we've attempted a load-from-disk
+	run          *store.Run
+	nodes        map[string]*store.Node
+	steps        map[string]map[string]*store.NodeStep // nodeID -> stepID
+	stepOrder    []stepKey                             // insertion order for ListNodeSteps
+	events       []store.Event
+	nextEventSeq int64
+	metrics      map[string][]store.MetricSample
+	loaded       bool // true once we've attempted a load-from-disk
 }
 
 type stepKey struct {
@@ -161,9 +159,10 @@ type envelope struct {
 
 func newRunState() *runState {
 	return &runState{
-		nodes:   map[string]*store.Node{},
-		steps:   map[string]map[string]*store.NodeStep{},
-		metrics: map[string][]store.MetricSample{},
+		nodes:        map[string]*store.Node{},
+		steps:        map[string]map[string]*store.NodeStep{},
+		nextEventSeq: 1,
+		metrics:      map[string][]store.MetricSample{},
 	}
 }
 
@@ -420,6 +419,9 @@ func applyEnvelope(rs *runState, env envelope) {
 		var e store.Event
 		if err := json.Unmarshal(env.Data, &e); err == nil {
 			rs.events = append(rs.events, e)
+			if e.Seq >= rs.nextEventSeq {
+				rs.nextEventSeq = e.Seq + 1
+			}
 		}
 	}
 }
@@ -776,9 +778,15 @@ func (b *Backend) AddNodeMetricSample(ctx context.Context, runID, nodeID string,
 }
 
 // AppendEvent serializes payload as an event envelope. Seq is
-// process-monotonic; survives crashes only at the per-PUT granularity.
+// per-run monotonic, including after a backend restart and reload.
 func (b *Backend) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
-	seq := b.eventSeq.Add(1)
+	rs, err := b.getRunState(ctx, runID, true)
+	if err != nil {
+		return err
+	}
+	rs.mu.Lock()
+	seq := rs.nextEventSeq
+	rs.nextEventSeq++
 	e := store.Event{
 		RunID:   runID,
 		Seq:     seq,
@@ -789,9 +797,42 @@ func (b *Backend) AppendEvent(ctx context.Context, runID, nodeID, kind string, p
 	}
 	env, err := encodeEnvelope(KindEvent, e)
 	if err != nil {
+		rs.mu.Unlock()
 		return err
 	}
-	return b.appendEnvelope(ctx, runID, env)
+	rs.envelopes = append(rs.envelopes, env)
+	rs.bufSize += len(env.Data) + len(env.Kind) + 32
+	rs.dirty = true
+	applyEnvelope(rs, env)
+	shouldFlush := rs.bufSize >= b.bufferLimit
+	rs.mu.Unlock()
+	if shouldFlush {
+		return b.flushRun(ctx, runID)
+	}
+	return nil
+}
+
+func (b *Backend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rs, err := b.getRunState(ctx, runID, true)
+	if err != nil {
+		return nil, err
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	out := make([]store.Event, 0, min(limit, len(rs.events)))
+	for _, event := range rs.events {
+		if event.Seq <= afterSeq {
+			continue
+		}
+		out = append(out, event)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 // GetNodeOutput returns the finished node's raw output bytes.
