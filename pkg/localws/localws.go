@@ -22,6 +22,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// schemaPollInterval bounds how long a resident dashboard keeps
+// serving a database another binary has migrated past it before the
+// schema guard notices on its own. The 5xx-triggered middleware check
+// usually fires first; this poll is the no-traffic safety net.
+const schemaPollInterval = 5 * time.Second
+
 // Options configures the local dev server. Addr defaults to
 // 127.0.0.1:4343; Home defaults to $SPARKWING_HOME or ~/.sparkwing.
 type Options struct {
@@ -157,6 +163,7 @@ func Run(ctx context.Context, opts Options) error {
 	webHandler := web.HandlerFromOptions(webOpts)
 
 	root := http.NewServeMux()
+	root.Handle("GET /api/v1/version", versionHandler(opts.Version))
 	root.Handle("/api/v1/health/services", webHandler)
 	root.Handle("GET /api/v1/runs/grep", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)
@@ -188,9 +195,21 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("write dev.env: %w", err)
 	}
 
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var handler http.Handler = root
+	if st != nil {
+		guard := newSchemaGuard(st, cancel)
+		handler = guard.middleware(root)
+		go guard.poll(ctx, schemaPollInterval)
+	}
+
 	srv := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           root,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -204,9 +223,6 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		lis = l
 	}
-
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {

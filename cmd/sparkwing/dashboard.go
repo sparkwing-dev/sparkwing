@@ -4,9 +4,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	flag "github.com/spf13/pflag"
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
@@ -29,6 +32,12 @@ const (
 	dashboardLogFile = "dashboard.log"
 	dashboardEnvFile = "dev.env"
 )
+
+// dashboardStartTimeout is the accept deadline for a freshly spawned
+// supervisor. Generous so a loaded machine (a full pipeline fleet
+// compiling, the store under write contention) still comes up rather
+// than tripping a tight bound; the start wait retries within it.
+const dashboardStartTimeout = 30 * time.Second
 
 // runDashboard dispatches `sparkwing dashboard <verb>`.
 func runDashboard(args []string) error {
@@ -129,7 +138,15 @@ func runDashboardStart(args []string) error {
 	}
 
 	if pid, alive := readLivePID(dp.pid); alive {
-		fmt.Fprintf(os.Stdout, "==> stopping previous dashboard (pid %d) for restart\n", pid)
+		mine := installedVersion()
+		if running, ok := probeDashboardVersion(dp.home, addr); ok && dashboardIsNewer(running.Version, mine) {
+			return fmt.Errorf(
+				"the running dashboard (%s, pid %d) is newer than this CLI (%s); "+
+					"it was left running. Upgrade the CLI with `sparkwing version update --cli`, "+
+					"or stop it first with `sparkwing dashboard kill`",
+				running.Version, pid, mine)
+		}
+		fmt.Fprintf(os.Stdout, "==> draining previous dashboard (pid %d) for replacement\n", pid)
 		if err := stopSupervisor(pid, dp.pid); err != nil {
 			return fmt.Errorf("restart: %w", err)
 		}
@@ -174,6 +191,8 @@ func runDashboardStart(args []string) error {
 		}
 		superviseArgs = append(superviseArgs, "--no-local-store")
 	}
+	logStartOffset := fileSize(dp.log)
+
 	cmd := exec.Command(self, superviseArgs...)
 	cmd.Stdin = nil
 	cmd.Stdout = logF
@@ -184,16 +203,23 @@ func runDashboardStart(args []string) error {
 		return fmt.Errorf("spawn supervisor: %w", err)
 	}
 	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
+	// safety: reap the detached child in the background so an early exit
+	// is observable via exited; without a Wait it would linger as a
+	// zombie and read as still-alive for the whole startup deadline.
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
 
 	baseURL := "http://" + addr
-	if err := waitForListener(addr, 3*time.Second); err != nil {
+	if err := waitForListenerOrExit(addr, exited, dashboardStartTimeout); err != nil {
 		_ = signalTerminate(pid)
-		tail := tailFile(dp.log, 40)
+		tail := tailFileFrom(dp.log, logStartOffset, 40)
 		if tail == "" {
-			tail = "(empty)"
+			tail = "(no output from the new supervisor)"
 		}
-		return fmt.Errorf("dashboard supervisor (pid %d) failed to accept connections within 3s; tail of %s:\n%s", pid, dp.log, tail)
+		return fmt.Errorf("dashboard supervisor (pid %d) %s; startup log:\n%s", pid, err, tail)
 	}
 	if _, alive := readLivePID(dp.pid); !alive {
 		_ = signalTerminate(pid)
@@ -425,11 +451,108 @@ func tailFile(path string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// waitForListener polls the bind address until a TCP connect succeeds
-// or the deadline expires. Used by `start` to delay printing the URL
-// until the supervisor's listener is actually live, so the operator
-// can curl it immediately.
-func waitForListener(addr string, timeout time.Duration) error {
+// fileSize returns the byte length of path, or 0 when it can't be
+// stat'd. Used to mark where a freshly spawned supervisor's log output
+// begins so a startup failure tails only the new instance's lines, not
+// the previous instance's request log.
+func fileSize(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+// tailFileFrom returns up to the last n lines written to path at or
+// after byteOffset -- the output of the instance that started once the
+// caller recorded the offset. Empty string when nothing was written
+// there or the file can't be read.
+func tailFileFrom(path string, byteOffset int64, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if byteOffset > 0 && byteOffset <= int64(len(b)) {
+		b = b[byteOffset:]
+	}
+	trimmed := strings.TrimRight(string(b), "\n")
+	if trimmed == "" {
+		return ""
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// probeDashboardVersion asks a resident dashboard for its version via
+// the unauthenticated GET /api/v1/version handshake. It tries the base
+// URL recorded in dev.env first, then falls back to the address this
+// start would bind. ok is false when no dashboard answers the endpoint
+// -- an older dashboard predating the endpoint, or one that isn't
+// reachable -- in which case the caller treats it as replaceable.
+func probeDashboardVersion(home, addr string) (localws.VersionInfo, bool) {
+	candidates := []string{}
+	if base := readBaseURL(home); base != "" {
+		candidates = append(candidates, base)
+	}
+	candidates = append(candidates, "http://"+addr)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	seen := map[string]bool{}
+	for _, base := range candidates {
+		base = strings.TrimRight(base, "/")
+		if base == "" || seen[base] {
+			continue
+		}
+		seen[base] = true
+		if info, ok := getDashboardVersion(client, base); ok {
+			return info, true
+		}
+	}
+	return localws.VersionInfo{}, false
+}
+
+// getDashboardVersion performs one GET base/api/v1/version and decodes
+// a non-empty version from a 200 response.
+func getDashboardVersion(client *http.Client, base string) (localws.VersionInfo, bool) {
+	resp, err := client.Get(base + "/api/v1/version")
+	if err != nil {
+		return localws.VersionInfo{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return localws.VersionInfo{}, false
+	}
+	var info localws.VersionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.Version == "" {
+		return localws.VersionInfo{}, false
+	}
+	return info, true
+}
+
+// dashboardIsNewer reports whether the running dashboard's version is
+// strictly newer than this CLI's, so `start` should refuse to replace
+// it rather than downgrade a live upgrade. Only a confident semver
+// comparison refuses: when either side isn't valid semver (a dev
+// pseudo-build, an "(unknown)" version), it returns false so start
+// falls back to the drain-and-replace path.
+func dashboardIsNewer(running, mine string) bool {
+	if !semver.IsValid(running) || !semver.IsValid(mine) {
+		return false
+	}
+	return semver.Compare(running, mine) > 0
+}
+
+// waitForListenerOrExit polls the bind address until a TCP connect
+// succeeds, the supervisor process exits (signaled on exited), or the
+// deadline expires. Keeping the deadline generous tolerates a loaded
+// machine, while the exit signal fails fast when the supervisor dies
+// early (e.g. a schema-skew refusal at store-open) instead of waiting
+// out the full deadline. The returned error names which of the two
+// ended the wait so the caller can frame the log tail correctly.
+func waitForListenerOrExit(addr string, exited <-chan struct{}, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
@@ -437,9 +560,14 @@ func waitForListener(addr string, timeout time.Duration) error {
 			_ = conn.Close()
 			return nil
 		}
+		select {
+		case <-exited:
+			return fmt.Errorf("exited during startup before accepting connections")
+		default:
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("listener at %s not ready", addr)
+	return fmt.Errorf("failed to accept connections within %s", timeout)
 }
 
 func bannerLine() string {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -588,6 +589,94 @@ const expectedSchemaVersion = 10
 // sparkwing_schema_version table on a fresh database.
 func ExpectedSchemaVersion() int { return expectedSchemaVersion }
 
+// metaKeyMinVersion is the sparkwing_meta row recording the minimum
+// binary version required to open the database at its current schema:
+// the version of whichever binary last advanced the schema. The
+// schema-skew error path reads it to name a concrete upgrade target
+// instead of a raw schema number. Stored in sparkwing_meta -- a table
+// present since schema v4, so every binary that could migrate past a
+// given binary's understanding also carries the row.
+const metaKeyMinVersion = "min_binary_version"
+
+// binaryVersion is the running binary's version string, injected by
+// the process entrypoint via SetBinaryVersion. Empty until set, in
+// which case resolveBinaryVersion falls back to build info.
+var binaryVersion string
+
+// SetBinaryVersion records the running binary's version so migrations
+// can stamp it into metaKeyMinVersion and the skew-error path can
+// report it. The CLI, dashboard supervisor, and pipeline binaries
+// call this at startup with their resolved installed version (which
+// honors the release ldflag and falls back to the module
+// pseudo-version). Safe to leave unset: resolveBinaryVersion reads
+// runtime build info instead.
+func SetBinaryVersion(v string) { binaryVersion = v }
+
+// resolveBinaryVersion returns the version to stamp and report:
+// the SetBinaryVersion value when present, else the module version
+// from build info, else "(devel)" for an unstamped local build.
+func resolveBinaryVersion() string {
+	if binaryVersion != "" {
+		return binaryVersion
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return "(devel)"
+}
+
+// stampMinVersion records resolveBinaryVersion into metaKeyMinVersion.
+// Called after a migration advances the schema so the row always
+// reflects the newest binary to have touched the database.
+func (s *Store) stampMinVersion(ctx context.Context) error {
+	now := time.Now()
+	_, err := s.exec(ctx,
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		metaKeyMinVersion, resolveBinaryVersion(), now.UnixNano())
+	return err
+}
+
+// readMinVersion returns the metaKeyMinVersion row's value, or "" when
+// the row (or the sparkwing_meta table) is absent. Best-effort: any
+// read error yields "" so the skew-error path degrades to schema
+// numbers rather than masking the original skew with a query error.
+func (s *Store) readMinVersion(ctx context.Context) string {
+	var v string
+	if err := s.queryRow(ctx,
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyMinVersion).Scan(&v); err != nil {
+		return ""
+	}
+	return v
+}
+
+// readMinVersionTx is readMinVersion against an open migration
+// transaction, used on the Postgres skew path where the version check
+// runs inside the advisory-locked tx.
+func readMinVersionTx(ctx context.Context, tx *storeTx) string {
+	var v string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyMinVersion).Scan(&v); err != nil {
+		return ""
+	}
+	return v
+}
+
+// CurrentSchemaVersion returns the schema version recorded in the
+// database (MAX of sparkwing_schema_version), or 0 when unrecorded.
+// A resident reader (the dashboard) polls this to notice a newer
+// binary migrating the shared database out from under it.
+func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
+	var v int
+	if err := s.queryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&v); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
 // schemaVersionTable is created unconditionally on every Open before
 // the version check runs; the check needs the table to exist in order
 // to read from it. The same DDL is valid in both dialects (INTEGER +
@@ -641,12 +730,35 @@ var pipelineProfilesTablePostgres = strings.NewReplacer(
 // errors.As to detect the condition (e.g. for surfacing a custom
 // upgrade prompt in the CLI); the wrapped message is plain English
 // and suitable for direct display.
+//
+// MinVersion and InstalledVersion carry the human-readable version
+// strings when they are known: MinVersion is the minimum binary
+// version the database records for its schema (the sparkwing_meta
+// row a migrating binary stamps), and InstalledVersion is the
+// running binary's own version. When both are present Error() names
+// them and the upgrade command; when MinVersion is absent (a database
+// migrated before version stamping shipped) it falls back to the
+// raw schema numbers.
 type SkewError struct {
-	DBVersion     int
-	BinaryVersion int
+	DBVersion        int
+	BinaryVersion    int
+	MinVersion       string
+	InstalledVersion string
 }
 
 func (e *SkewError) Error() string {
+	if e.MinVersion != "" && e.MinVersion != "(devel)" {
+		installed := e.InstalledVersion
+		if installed == "" || installed == "(devel)" {
+			installed = "an older build"
+		}
+		return fmt.Sprintf(
+			"sparkwing: this state database needs sparkwing >= %s; you have %s "+
+				"(database schema %d, this binary understands %d). "+
+				"Run `sparkwing version update --cli` to upgrade.",
+			e.MinVersion, installed, e.DBVersion, e.BinaryVersion,
+		)
+	}
 	return fmt.Sprintf(
 		"sparkwing: database is at schema version %d; this binary expects %d. Upgrade sparkwing or restore the database to a matching version.",
 		e.DBVersion, e.BinaryVersion,
@@ -741,7 +853,12 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if current > expectedSchemaVersion {
-		return &SkewError{DBVersion: current, BinaryVersion: expectedSchemaVersion}
+		return &SkewError{
+			DBVersion:        current,
+			BinaryVersion:    expectedSchemaVersion,
+			MinVersion:       s.readMinVersion(ctx),
+			InstalledVersion: resolveBinaryVersion(),
+		}
 	}
 	for v := current + 1; v <= expectedSchemaVersion; v++ {
 		if err := s.applyMigrationSQLite(ctx, v); err != nil {
@@ -752,6 +869,11 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 			 ON CONFLICT (version) DO NOTHING`,
 			v, time.Now().UnixNano()); err != nil {
 			return fmt.Errorf("record schema version v%d: %w", v, err)
+		}
+	}
+	if current < expectedSchemaVersion {
+		if err := s.stampMinVersion(ctx); err != nil {
+			return fmt.Errorf("stamp min version: %w", err)
 		}
 	}
 	return nil
@@ -777,7 +899,12 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if current > expectedSchemaVersion {
-		return &SkewError{DBVersion: current, BinaryVersion: expectedSchemaVersion}
+		return &SkewError{
+			DBVersion:        current,
+			BinaryVersion:    expectedSchemaVersion,
+			MinVersion:       readMinVersionTx(ctx, tx),
+			InstalledVersion: resolveBinaryVersion(),
+		}
 	}
 	if current == expectedSchemaVersion {
 		return tx.Commit()
@@ -792,6 +919,12 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 			v, time.Now().UnixNano()); err != nil {
 			return fmt.Errorf("record schema version v%d: %w", v, err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		metaKeyMinVersion, resolveBinaryVersion(), time.Now().UnixNano()); err != nil {
+		return fmt.Errorf("stamp min version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return err

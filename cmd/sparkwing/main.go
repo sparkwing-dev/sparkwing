@@ -25,6 +25,7 @@ import (
 
 func init() {
 	docs.Version = installedVersion()
+	store.SetBinaryVersion(installedVersion())
 }
 
 func main() {
@@ -245,6 +246,9 @@ func runSparkwing(args []string) error {
 
 	case "dashboard":
 		return runDashboard(args[1:])
+
+	case "repos":
+		return runRepos(args[1:])
 
 	case "cluster":
 		return runCluster(args[1:])

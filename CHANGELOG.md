@@ -47,7 +47,38 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing repos` lists the machine's fleet of sparkwing
+  repos -- derived from observed runs unioned with `repos.yaml` -- with
+  each repo's SDK pin, last run, and how many migration guides it is
+  behind. Linked git worktrees fold into their primary checkout; a
+  worktree pinned differently is reported as a detail line.
+- **cli:** `sparkwing repos update` bumps the fleet's SDK pins in one
+  sitting with a compiled per-repo verdict: `clean` when the bump
+  compiled and every pipeline plan is byte-identical, `plan-differs`
+  with a structured node/dep/step diff when a plan changed shape, and
+  `broken` with the actual error plus the crossed migration guides.
+  Dry-run by default; `--apply` commits per repo, `--verify` runs each
+  repo's pre-commit gate, `--repo` scopes to one.
+- **store:** the state database records the minimum sparkwing version
+  required for its schema. A binary meeting a newer database refuses
+  with `this state database needs sparkwing >= vX; you have vY; run
+  sparkwing version update --cli` instead of a bare schema number,
+  falling back to schema numbers for databases stamped before this
+  shipped.
+
 ### Changed
+
+- **cli:** `sparkwing dashboard start` handshakes a running dashboard
+  over a new unauthenticated version endpoint: a newer CLI drains and
+  replaces an older resident dashboard, while an older CLI refuses to
+  replace a newer one and leaves it running. A resident dashboard that
+  observes the shared database migrate past the schema it understands
+  now exits cleanly with a logged reason instead of serving 500s. The
+  startup deadline is generous under load, fails fast when the
+  supervisor exits early, and reports the new instance's own startup
+  log on timeout.
 
 - **orchestrator:** (Breaking) Local runs are admitted by the local
   admission daemon (`sparkwingd`) instead of box slots and store-side

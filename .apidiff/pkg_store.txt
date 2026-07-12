@@ -359,9 +359,12 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+func SetBinaryVersion(v string)
 type SkewError struct {
-	DBVersion     int
-	BinaryVersion int
+	DBVersion        int
+	BinaryVersion    int
+	MinVersion       string
+	InstalledVersion string
 }
 func (e *SkewError) Error() string
 type SpawnedChild struct {
@@ -403,6 +406,7 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, now time.Time) (*User, error)
+func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name string) error
