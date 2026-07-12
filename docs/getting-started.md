@@ -237,7 +237,7 @@ The pipeline runs validation gates before tagging, including:
 - `validate-version` -- the resolved tag must be free on origin (refuses
   force-push)
 - `check-clean-tree` -- working tree must be clean
-- `gate-pre-commit` / `gate-pre-push` -- the same gates the git hooks run
+- `gate-pre-commit` / `gate-pre-push` -- the same gate checks the git hooks run
 - `prepare-changelog` -- CHANGELOG.md must contain a matching `[vX.Y.Z]`
   heading
 

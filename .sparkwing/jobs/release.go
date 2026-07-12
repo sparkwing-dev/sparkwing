@@ -722,8 +722,10 @@ func (j *pushTagJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: detect current branch: %w", err)
 	}
 	if branch != "main" {
-		return fmt.Errorf("release: refusing to push from branch %q -- release pipeline expects to run on main "+
-			"so the changelog-rewrite commit and the tag land on the default branch", branch)
+		sparkwing.Info(ctx, "release: tagging from branch %q", branch)
+	}
+	if err := ensureBranchContainsRemote(ctx, j.RepoDir, branch); err != nil {
+		return err
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
 		return fmt.Errorf("release: push branch: %w", err)
@@ -750,14 +752,31 @@ func (j *pushTagJob) dryRun(ctx context.Context) error {
 }
 
 // currentBranch returns the abbreviated ref name (e.g. "main") of
-// HEAD. Detached HEAD returns "HEAD" -- the caller refuses the
-// release in that case via the `!= "main"` check.
+// HEAD. Detached HEAD returns "HEAD"; the release branch fence refuses
+// that before pushing a branch or tag.
 func currentBranch(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGitIn(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func ensureBranchContainsRemote(ctx context.Context, repoDir, branch string) error {
+	if branch == "" || branch == "HEAD" {
+		return fmt.Errorf("release: refusing to push from detached HEAD")
+	}
+	if _, err := runGitIn(ctx, repoDir, "fetch", "--quiet", "origin", branch); err != nil {
+		return fmt.Errorf("release: fetch origin/%s before tag push: %w", branch, err)
+	}
+	remoteRef := "origin/" + branch
+	if _, err := runGitIn(ctx, repoDir, "rev-parse", "--verify", "--quiet", remoteRef); err != nil {
+		return fmt.Errorf("release: remote branch %s does not exist; push the branch before releasing", remoteRef)
+	}
+	if _, err := runGitIn(ctx, repoDir, "merge-base", "--is-ancestor", remoteRef, "HEAD"); err != nil {
+		return fmt.Errorf("release: local %s does not contain %s; pull/rebase before releasing", branch, remoteRef)
+	}
+	return nil
 }
 
 func validateReleaseVersion(v string) error {

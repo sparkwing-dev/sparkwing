@@ -1,6 +1,10 @@
 package jobs
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -212,6 +216,54 @@ func TestHighestReleaseTag(t *testing.T) {
 				t.Fatalf("highestReleaseTag(%v) = %q, want %q", c.tags, got, c.want)
 			}
 		})
+	}
+}
+
+func TestEnsureBranchContainsRemote(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	work := filepath.Join(root, "work")
+	clone := filepath.Join(root, "clone")
+
+	runTestGit(t, root, "init", "--bare", remote)
+	runTestGit(t, root, "clone", remote, work)
+	runTestGit(t, work, "config", "user.name", "Test User")
+	runTestGit(t, work, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(work, "README.md"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, work, "add", "README.md")
+	runTestGit(t, work, "commit", "-m", "initial")
+	runTestGit(t, work, "branch", "-M", "release-test")
+	runTestGit(t, work, "push", "-u", "origin", "release-test")
+
+	if err := ensureBranchContainsRemote(ctx, work, "release-test"); err != nil {
+		t.Fatalf("fresh release branch rejected: %v", err)
+	}
+
+	runTestGit(t, root, "clone", remote, clone)
+	runTestGit(t, clone, "checkout", "release-test")
+	runTestGit(t, clone, "config", "user.name", "Test User")
+	runTestGit(t, clone, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, clone, "add", "README.md")
+	runTestGit(t, clone, "commit", "-m", "advance remote")
+	runTestGit(t, clone, "push", "origin", "HEAD:release-test")
+
+	if err := ensureBranchContainsRemote(ctx, work, "release-test"); err == nil {
+		t.Fatalf("stale release branch passed freshness fence")
+	}
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
 
