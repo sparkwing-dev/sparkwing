@@ -60,6 +60,7 @@ type StateBackend interface {
 	// AppendEvent mirrors store.AppendEvent but discards the sequence
 	// number; orchestrator call sites never read it.
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
+	ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
 
 	// GetNodeOutput returns a finished node's raw JSON output.
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
@@ -528,6 +529,10 @@ func firstNonEmptyStr(a, b string) string {
 func (l localState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	_, err := l.st.AppendEvent(ctx, runID, nodeID, kind, payload)
 	return err
+}
+
+func (l localState) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	return l.st.ListEventsAfter(ctx, runID, afterSeq, limit)
 }
 
 type localLogs struct {

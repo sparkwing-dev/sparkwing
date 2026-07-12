@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,14 +40,17 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
 	}
 
-	acquireCtx := ctx
+	acquireCtx, cancelAcquire := context.WithCancel(ctx)
+	defer cancelAcquire()
 	if limit.OnLimit == sparkwing.Queue && limit.QueueTimeout > 0 {
 		var cancel context.CancelFunc
-		acquireCtx, cancel = context.WithTimeoutCause(ctx, limit.QueueTimeout, errNodeQueueTimeout)
+		acquireCtx, cancel = context.WithTimeoutCause(acquireCtx, limit.QueueTimeout, errNodeQueueTimeout)
 		defer cancel()
 	}
 
 	waited := false
+	var waitEventMu sync.Mutex
+	var waitEventErr error
 	lastDetail := ""
 	onQueued := func(q wingwire.Queued) {
 		if !waited {
@@ -60,7 +64,12 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 				"position":     q.Position,
 				"queue_length": q.QueueLength,
 			})
-			_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_wait", payload)
+			if err := r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_wait", payload); err != nil {
+				waitEventMu.Lock()
+				waitEventErr = fmt.Errorf("record concurrency wait: %w", err)
+				waitEventMu.Unlock()
+				cancelAcquire()
+			}
 		}
 		if detail := fmt.Sprintf("queued in %s: %d ahead", key, max(0, q.Position-1)); detail != lastDetail {
 			lastDetail = detail
@@ -70,6 +79,16 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 	}
 
 	lease, err := la.acquireNodeSlot(acquireCtx, req.RunID, node.ID(), claim, onQueued)
+	waitEventMu.Lock()
+	eventErr := waitEventErr
+	waitEventMu.Unlock()
+	if eventErr != nil {
+		if lease != nil {
+			_ = lease.Release()
+		}
+		r.markFailed(ctx, req.RunID, node.ID(), eventErr)
+		return runner.Result{Outcome: sparkwing.Failed, Err: eventErr}
+	}
 	if err != nil {
 		return r.failedDaemonAcquire(ctx, acquireCtx, req, key, limit.QueueTimeout, err)
 	}

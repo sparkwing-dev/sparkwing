@@ -840,7 +840,43 @@ func dispatch(
 		state.scheduleExpansion(exp)
 	}
 
-	if waitForDispatch(&state.wg, dispatchWaitTimeout) == dispatchWaitTimedOut {
+	dispatchWait := waitForDispatch(dispatchCtx, &state.wg, dispatchWaitTimeout, func(ctx context.Context, progressSince, evaluateAt time.Time) bool {
+		continuation, err := unresolvedNodesBlockedByAdmission(ctx, backends.State, runID, plan, state, progressSince, evaluateAt)
+		if err != nil {
+			cancelDispatch(fmt.Errorf("read dispatch watchdog events: %w", err))
+			return true
+		}
+		if !continuation.Continue {
+			return false
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"reason":           continuation.Reason,
+			"timeout":          dispatchWaitTimeout.String(),
+			"unresolved_nodes": continuation.UnresolvedNode,
+		})
+		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_watchdog_continued", payload)
+		if delegate != nil {
+			delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "info",
+				Event: "dispatch_watchdog_continued",
+				Attrs: map[string]any{
+					"reason":           continuation.Reason,
+					"timeout_ms":       dispatchWaitTimeout.Milliseconds(),
+					"unresolved_nodes": continuation.UnresolvedNode,
+				},
+			})
+		}
+		return true
+	})
+	if dispatchWait == dispatchWaitAborted {
+		planReleaseOutcome = "failed"
+		if cause := context.Cause(dispatchCtx); cause != nil {
+			return cause
+		}
+		return dispatchCtx.Err()
+	}
+	if dispatchWait == dispatchWaitTimedOut {
 		stuck := stuckNodeIDs(plan, state)
 		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
 		summary, _ := json.Marshal(map[string]any{
@@ -1320,11 +1356,12 @@ type dispatchState struct {
 	outputs   map[string]any           // per-node typed output (in-process runner)
 	outputsJS map[string][]byte        // per-node raw JSON output (cluster runner)
 	outcomes  map[string]sparkwing.Outcome
-	errors    map[string]string            // per-node error message, set when runner.Result.Err is non-nil
-	failures  map[string]sparkwing.Failure // per-node failure (stage + err), set when a node fails
-	starts    map[string]time.Time         // per-node wall-clock start, stamped at runOneNode entry
-	durations map[string]time.Duration     // per-node wall-clock duration, computed when outcome is recorded
-	claimedBy map[string]string            // recoveryID -> parentID (OnFailure)
+	errors    map[string]string             // per-node error message, set when runner.Result.Err is non-nil
+	failures  map[string]sparkwing.Failure  // per-node failure (stage + err), set when a node fails
+	starts    map[string]time.Time          // per-node wall-clock start, stamped at runOneNode entry
+	durations map[string]time.Duration      // per-node wall-clock duration, computed when outcome is recorded
+	claimedBy map[string]string             // recoveryID -> parentID (OnFailure)
+	scheduled map[string]*sparkwing.JobNode // nodes with a dispatch goroutine, including detached recovery and dynamic children
 
 	// inlineRunner routes Node.IsInline nodes regardless of the
 	// configured Options.Runner so glue work skips pod spin-up.
@@ -1396,6 +1433,7 @@ func newDispatchState(
 		starts:    map[string]time.Time{},
 		durations: map[string]time.Duration{},
 		claimedBy: map[string]string{},
+		scheduled: map[string]*sparkwing.JobNode{},
 		debug:     debug,
 	}
 	if ipr, ok := r.(*InProcessRunner); ok {
@@ -1831,12 +1869,30 @@ func (s *dispatchState) lookupDoneCh(id string) (chan struct{}, bool) {
 // scheduleNode spawns the per-node dispatch goroutine.
 func (s *dispatchState) scheduleNode(node *sparkwing.JobNode) {
 	done := s.ensureDoneCh(node.ID())
+	s.mu.Lock()
+	s.scheduled[node.ID()] = node
+	s.mu.Unlock()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer close(done)
 		s.runOneNode(node)
 	}()
+}
+
+func (s *dispatchState) scheduledJobNodes() []*sparkwing.JobNode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.scheduled))
+	for id := range s.scheduled {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	nodes := make([]*sparkwing.JobNode, 0, len(ids))
+	for _, id := range ids {
+		nodes = append(nodes, s.scheduled[id])
+	}
+	return nodes
 }
 
 // scheduleExpansion waits for source, runs generator, inserts and
