@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -17,7 +18,6 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	"golang.org/x/mod/sumdb/dirhash"
-	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -395,7 +395,7 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if err := writeSelfModuleSums(j.RepoDir, version); err != nil {
+	if err := writeSelfModuleSums(ctx, j.RepoDir, version); err != nil {
 		return err
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
@@ -428,8 +428,8 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 	return nil
 }
 
-func writeSelfModuleSums(repoDir, version string) error {
-	zipHash, goModHash, err := selfModuleSums(repoDir, version)
+func writeSelfModuleSums(ctx context.Context, repoDir, version string) error {
+	zipHash, goModHash, err := selfModuleSums(ctx, repoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: compute .sparkwing self-module sums: %w", err)
 	}
@@ -464,7 +464,7 @@ func writeSelfModuleSums(repoDir, version string) error {
 	return nil
 }
 
-func selfModuleSums(repoDir, version string) (string, string, error) {
+func selfModuleSums(ctx context.Context, repoDir, version string) (string, string, error) {
 	tmp, err := os.CreateTemp("", "sparkwing-release-module-*.zip")
 	if err != nil {
 		return "", "", err
@@ -473,7 +473,11 @@ func selfModuleSums(repoDir, version string) (string, string, error) {
 	defer func() { _ = os.Remove(tmpPath) }()
 	defer func() { _ = tmp.Close() }()
 
-	if err := modzip.CreateFromVCS(tmp, module.Version{Path: sparkwingModulePath, Version: version}, repoDir, "HEAD", ""); err != nil {
+	moduleZip, err := createSelfModuleZip(ctx, repoDir, version)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := tmp.Write(moduleZip); err != nil {
 		return "", "", err
 	}
 	if err := tmp.Close(); err != nil {
@@ -495,6 +499,30 @@ func selfModuleSums(repoDir, version string) (string, string, error) {
 		return "", "", err
 	}
 	return zipHash, goModHash, nil
+}
+
+func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, error) {
+	escapedPath, err := module.EscapePath(sparkwingModulePath)
+	if err != nil {
+		return nil, err
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "archive", "--format=zip", "--prefix="+escapedPath+"@"+escapedVersion+"/", "HEAD")
+	cmd.Dir = repoDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return nil, fmt.Errorf("git archive HEAD: %w", err)
+		}
+		return nil, fmt.Errorf("git archive HEAD: %w: %s", err, msg)
+	}
+	return out, nil
 }
 
 // restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after

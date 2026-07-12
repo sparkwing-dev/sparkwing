@@ -260,6 +260,35 @@ func TestEnsureBranchContainsRemote(t *testing.T) {
 
 func TestWriteSelfModuleSums(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "repo")
+	writeSelfModuleSumsFixture(t, repo)
+
+	const version = "v0.1.0"
+	zipHash, goModHash, err := selfModuleSums(context.Background(), repo, version)
+	if err != nil {
+		t.Fatalf("selfModuleSums: %v", err)
+	}
+	assertWriteSelfModuleSums(t, repo, version, zipHash, goModHash)
+}
+
+func TestWriteSelfModuleSumsInGitWorktree(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	writeSelfModuleSumsFixture(t, repo)
+	runTestGit(t, repo, "branch", "release-line")
+
+	worktree := filepath.Join(tmp, "release-worktree")
+	runTestGit(t, repo, "worktree", "add", worktree, "release-line")
+
+	const version = "v0.1.0"
+	zipHash, goModHash, err := selfModuleSums(context.Background(), worktree, version)
+	if err != nil {
+		t.Fatalf("selfModuleSums: %v", err)
+	}
+	assertWriteSelfModuleSums(t, worktree, version, zipHash, goModHash)
+}
+
+func writeSelfModuleSumsFixture(t *testing.T, repo string) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -285,13 +314,11 @@ func TestWriteSelfModuleSums(t *testing.T) {
 	runTestGit(t, repo, "config", "user.email", "test@example.com")
 	runTestGit(t, repo, "add", ".")
 	runTestGit(t, repo, "commit", "-m", "initial")
+}
 
-	const version = "v0.1.0"
-	zipHash, goModHash, err := selfModuleSums(repo, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums: %v", err)
-	}
-	if err := writeSelfModuleSums(repo, version); err != nil {
+func assertWriteSelfModuleSums(t *testing.T, repo, version, zipHash, goModHash string) {
+	t.Helper()
+	if err := writeSelfModuleSums(context.Background(), repo, version); err != nil {
 		t.Fatalf("writeSelfModuleSums: %v", err)
 	}
 	first, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
@@ -310,7 +337,7 @@ func TestWriteSelfModuleSums(t *testing.T) {
 		t.Fatalf(".sparkwing/go.sum kept stale self-module sum:\n%s", first)
 	}
 
-	if err := writeSelfModuleSums(repo, version); err != nil {
+	if err := writeSelfModuleSums(context.Background(), repo, version); err != nil {
 		t.Fatalf("repeat writeSelfModuleSums: %v", err)
 	}
 	second, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
