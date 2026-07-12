@@ -29,7 +29,10 @@ const (
 type OnLimit string
 
 const (
-	// Queue waits in FIFO order for room, then runs.
+	// Queue waits for room, then runs. Waiters that fit run oldest-first; a
+	// waiter that cannot fit in the currently available weighted budget does
+	// not block later waiters that do fit unless younger backfilled holders
+	// are what keep the older waiter from fitting.
 	Queue OnLimit = "queue"
 	// Fail errors the node immediately.
 	Fail OnLimit = "fail"

@@ -185,6 +185,93 @@ func TestS3Concurrency_NoOverBudgetWithCost(t *testing.T) {
 	}
 }
 
+func TestS3Concurrency_CostBackfillsBehindNonFittingHeavyWaiter(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	key := "g:cost-backfill"
+
+	holder := holdSlot(t, c, key, "holder", "n", 8, 6)
+	if r := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "heavy/n", RunID: "heavy", NodeID: "n",
+		Capacity: 8, Cost: 6, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("heavy: want queued got %s", r.Kind)
+	}
+	if r := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "light/n", RunID: "light", NodeID: "n",
+		Capacity: 8, Cost: 2, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireGranted {
+		t.Fatalf("light: want granted as backfill got %s", r.Kind)
+	}
+
+	release(t, c, key, holder, "success")
+	heavyHolder := waitPromoted(t, c, key, "heavy", "n")
+	release(t, c, key, heavyHolder, "success")
+}
+
+func TestS3Concurrency_CostPromotionBackfillsBehindNonFittingHeavyWaiter(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	key := "g:cost-promotion-backfill"
+
+	holderHeavy := holdSlot(t, c, key, "holder-heavy", "n", 8, 6)
+	holderLight := holdSlot(t, c, key, "holder-light", "n", 8, 2)
+	if r := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "heavy/n", RunID: "heavy", NodeID: "n",
+		Capacity: 8, Cost: 6, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("heavy: want queued got %s", r.Kind)
+	}
+	if r := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "light/n", RunID: "light", NodeID: "n",
+		Capacity: 8, Cost: 2, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("light: want queued got %s", r.Kind)
+	}
+
+	release(t, c, key, holderLight, "success")
+	lightHolder := waitPromoted(t, c, key, "light", "n")
+	assertStillWaiting(t, c, key, "heavy", 0)
+	release(t, c, key, holderHeavy, "success")
+	heavyHolder := waitPromoted(t, c, key, "heavy", "n")
+	release(t, c, key, lightHolder, "success")
+	release(t, c, key, heavyHolder, "success")
+}
+
+func TestS3Concurrency_CostBackfillStopsWhenYoungerHolderBlocksOldestWaiter(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	key := "g:cost-backfill-bound"
+
+	older := holdSlot(t, c, key, "older", "n", 10, 5)
+	if r := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "heavy/n", RunID: "heavy", NodeID: "n",
+		Capacity: 10, Cost: 8, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("heavy: want queued got %s", r.Kind)
+	}
+	lightOne := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "light-1/n", RunID: "light-1", NodeID: "n",
+		Capacity: 10, Cost: 5, Policy: store.OnLimitQueue,
+	})
+	if lightOne.Kind != store.AcquireGranted {
+		t.Fatalf("light-1: want granted as backfill got %s", lightOne.Kind)
+	}
+	if r := acquire(t, c, store.AcquireSlotRequest{
+		Key: key, HolderID: "light-2/n", RunID: "light-2", NodeID: "n",
+		Capacity: 10, Cost: 5, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("light-2: want queued behind protected heavy got %s", r.Kind)
+	}
+
+	release(t, c, key, older, "success")
+	assertStillWaiting(t, c, key, "heavy", 0)
+	assertStillWaiting(t, c, key, "light-2", 1)
+	release(t, c, key, lightOne.HolderID, "success")
+	heavyHolder := waitPromoted(t, c, key, "heavy", "n")
+	release(t, c, key, heavyHolder, "success")
+}
+
 func TestS3Concurrency_ResolveWaiterPromotesAfterHolderLeaseExpires(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -365,9 +452,9 @@ func TestS3Concurrency_CancelOthersSupersedesInheritedHolder(t *testing.T) {
 }
 
 // TestS3Concurrency_QueueOrderingAndPromotion drives the queue policy
-// deterministically: arrivals report FIFO positions, ResolveWaiter
-// reflects the live queue, and each release promotes the head of line
-// in arrival order.
+// deterministically for equal-cost waiters: arrivals report positions,
+// ResolveWaiter reflects the live queue, and each release promotes the
+// oldest fitting waiter.
 func TestS3Concurrency_QueueOrderingAndPromotion(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)

@@ -142,7 +142,7 @@ collapse; the host cap prevents that saturation at the source.
 Tune or disable the cap:
 
 - `sparkwing run X --sw-box-slots N` (or `SPARKWING_BOX_SLOTS=N`) admits
-  at most `N` concurrent runs per host; extra invocations queue FIFO
+  at most `N` concurrent runs per host; extra invocations queue
   with a periodic `waiting for box slot (N active, max M)` line on
   stderr. Ctrl-C cancels the wait cleanly.
 - `sparkwing run X --sw-box-slots off` (or `SPARKWING_BOX_SLOTS=off`)
