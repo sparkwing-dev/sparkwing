@@ -840,7 +840,9 @@ func dispatch(
 		state.scheduleExpansion(exp)
 	}
 
-	if waitForDispatch(&state.wg, dispatchWaitTimeout) == dispatchWaitTimedOut {
+	if waitForDispatch(dispatchCtx, &state.wg, dispatchWaitTimeout, func(ctx context.Context, since time.Time) bool {
+		return unresolvedNodesBlockedByAdmission(ctx, backends.State, runID, plan, state, since)
+	}) == dispatchWaitTimedOut {
 		stuck := stuckNodeIDs(plan, state)
 		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
 		summary, _ := json.Marshal(map[string]any{

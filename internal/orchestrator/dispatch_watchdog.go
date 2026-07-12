@@ -1,11 +1,14 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -42,7 +45,7 @@ const (
 // Returning early is the entire point: a hung Wait holds the run's
 // concurrency-namespace slot indefinitely and locks the rest of the
 // fleet behind a process that will never make progress.
-func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResult {
+func waitForDispatch(ctx context.Context, wg *sync.WaitGroup, timeout time.Duration, canContinue func(context.Context, time.Time) bool) dispatchWaitResult {
 	if timeout <= 0 {
 		wg.Wait()
 		return dispatchWaitDone
@@ -52,11 +55,21 @@ func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResu
 		wg.Wait()
 		close(done)
 	}()
-	select {
-	case <-done:
-		return dispatchWaitDone
-	case <-time.After(timeout):
-		return dispatchWaitTimedOut
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	windowStartedAt := time.Now()
+	for {
+		select {
+		case <-done:
+			return dispatchWaitDone
+		case <-timer.C:
+			if canContinue != nil && canContinue(ctx, windowStartedAt) {
+				windowStartedAt = time.Now()
+				timer.Reset(timeout)
+				continue
+			}
+			return dispatchWaitTimedOut
+		}
 	}
 }
 
@@ -75,6 +88,100 @@ func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 		}
 	}
 	return stuck
+}
+
+func unresolvedNodesBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, plan *sparkwing.Plan, state *dispatchState, since time.Time) bool {
+	unresolved := make(map[string]*sparkwing.JobNode)
+	progress := false
+	for _, node := range plan.Nodes() {
+		if _, ok := state.getOutcome(node.ID()); !ok {
+			unresolved[node.ID()] = node
+			progress = progress || nodeProgressSince(ctx, stateBackend, runID, node.ID(), since)
+		}
+	}
+	if len(unresolved) == 0 {
+		return false
+	}
+	if progress {
+		return true
+	}
+	memo := make(map[string]bool, len(unresolved))
+	visiting := make(map[string]bool, len(unresolved))
+	for nodeID := range unresolved {
+		if !nodeBlockedByAdmission(ctx, stateBackend, runID, unresolved, memo, visiting, nodeID) {
+			return false
+		}
+	}
+	return true
+}
+
+func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, unresolved map[string]*sparkwing.JobNode, memo, visiting map[string]bool, nodeID string) bool {
+	if blocked, ok := memo[nodeID]; ok {
+		return blocked
+	}
+	if visiting[nodeID] {
+		return false
+	}
+	node := unresolved[nodeID]
+	if node == nil {
+		return false
+	}
+	if nodeWaitingForAdmission(ctx, stateBackend, runID, nodeID) {
+		memo[nodeID] = true
+		return true
+	}
+	visiting[nodeID] = true
+	defer delete(visiting, nodeID)
+	for _, depID := range node.DepIDs() {
+		if _, unresolvedDep := unresolved[depID]; unresolvedDep && nodeBlockedByAdmission(ctx, stateBackend, runID, unresolved, memo, visiting, depID) {
+			memo[nodeID] = true
+			return true
+		}
+	}
+	memo[nodeID] = false
+	return false
+}
+
+func nodeProgressSince(ctx context.Context, stateBackend StateBackend, runID, nodeID string, since time.Time) bool {
+	node, err := stateBackend.GetNode(ctx, runID, nodeID)
+	if err != nil || node == nil || node.LastHeartbeat == nil {
+		return false
+	}
+	return node.LastHeartbeat.After(since)
+}
+
+func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, runID, nodeID string) bool {
+	node, err := stateBackend.GetNode(ctx, runID, nodeID)
+	if err == nil && node != nil && isAdmissionWaitDetail(node.StatusDetail) {
+		return true
+	}
+	eventReader, ok := stateBackend.(interface {
+		ListEventsAfter(context.Context, string, int64, int) ([]store.Event, error)
+	})
+	if !ok {
+		return false
+	}
+	events, err := eventReader.ListEventsAfter(ctx, runID, 0, 500)
+	if err != nil {
+		return false
+	}
+	waiting := false
+	for _, event := range events {
+		if event.NodeID != nodeID {
+			continue
+		}
+		switch event.Kind {
+		case "concurrency_wait":
+			waiting = true
+		case "concurrency_promoted", "node_succeeded", "node_failed", "node_cancelled", "node_skipped":
+			waiting = false
+		}
+	}
+	return waiting
+}
+
+func isAdmissionWaitDetail(detail string) bool {
+	return strings.HasPrefix(detail, "queued in ")
 }
 
 // parseDispatchWaitTimeout reads SPARKWING_DISPATCH_WAIT_TIMEOUT into
