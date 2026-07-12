@@ -821,6 +821,80 @@ func txPromotePollingWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID
 	return txPromoteWaitersLocked(ctx, tx, key, nowNS, expiresNS, livePollingWaiter{runID: runID, nodeID: nodeID})
 }
 
+func txPromoteCoalesceWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string, nowNS, expiresNS int64) (*ConcurrencyWaiter, error) {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT `+waiterColumns+`
+		   FROM concurrency_waiters
+		  WHERE key = ? AND run_id = ? AND node_id = ? AND policy = ?
+		  LIMIT 1`,
+		key, runID, nodeID, OnLimitCoalesce,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var waiter *ConcurrencyWaiter
+	if rows.Next() {
+		w, err := scanWaiter(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		waiter = &w
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if waiter == nil {
+		return nil, nil
+	}
+
+	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
+	if err != nil {
+		return nil, err
+	}
+	cost := waiter.Cost
+	if cost <= 0 {
+		cost = 1
+	}
+	declaredCapacity := waiter.DeclaredCapacity
+	if declaredCapacity <= 0 {
+		declaredCapacity = acct.entryCap
+	}
+	if acct.floor > 0 && acct.floor < declaredCapacity {
+		declaredCapacity = acct.floor
+	}
+	if !fitsBudget(acct.used, cost, declaredCapacity) {
+		return nil, nil
+	}
+
+	holderID := waiter.HolderID
+	if holderID == "" {
+		holderID = fmt.Sprintf("%s/%s", waiter.RunID, nodeIDOrDash(waiter.NodeID))
+	}
+	if _, err := txDeleteWaiter(ctx, tx, waiter.Key, waiter.RunID, waiter.NodeID); err != nil {
+		return nil, err
+	}
+	if err := txInsertHolder(ctx, tx, holderRow{
+		key: waiter.Key, holderID: holderID, runID: waiter.RunID, nodeID: waiter.NodeID,
+		cost: cost, declaredCapacity: declaredCapacity, queueArrivedNS: waiter.ArrivedAt.UnixNano(),
+	}, nowNS, expiresNS); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE concurrency_waiters
+		    SET leader_run_id = ?, leader_node_id = ?
+		  WHERE key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?`,
+		waiter.RunID, waiter.NodeID, key, OnLimitCoalesce, waiter.LeaderRunID, waiter.LeaderNodeID,
+	); err != nil {
+		return nil, err
+	}
+	waiter.HolderID = holderID
+	return waiter, nil
+}
+
 type livePollingWaiter struct {
 	runID  string
 	nodeID string
@@ -1510,7 +1584,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	if err != nil {
 		return false, nil, nil, err
 	}
-	if released {
+	if released && coalesceFollowersCanInherit(outcome) {
 		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
 			return false, nil, nil, err
@@ -1588,6 +1662,15 @@ func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID
 		}
 	}
 	return out, nil
+}
+
+func coalesceFollowersCanInherit(outcome string) bool {
+	switch outcome {
+	case "", "cancelled", "superseded", "timed_out":
+		return false
+	default:
+		return true
+	}
 }
 
 // txPark parks an arrival as a waiter -- the single site that writes
@@ -1807,16 +1890,67 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		}, nil
 	}
 
-	var waiterArrivedNS int64
-	var waiterPolicy string
-	err = tx.QueryRowContext(
+	waiter, err := scanWaiter(tx.QueryRowContext(
 		ctx,
-		`SELECT arrived_at, policy FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
 		key, runID, nodeID,
-	).Scan(&waiterArrivedNS, &waiterPolicy)
+	))
 	if err == nil {
-		shouldPromote := waiterPolicy == OnLimitQueue
-		if waiterPolicy == OnLimitCancelOthers {
+		if waiter.Policy == OnLimitCoalesce {
+			leaderRun := waiter.LeaderRunID
+			leaderNode := waiter.LeaderNodeID
+			var leaderOutcome, leaderReason string
+			err := tx.QueryRowContext(
+				ctx,
+				`SELECT outcome, failure_reason FROM nodes WHERE run_id = ? AND node_id = ?`,
+				leaderRun, leaderNode,
+			).Scan(&leaderOutcome, &leaderReason)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return WaiterResolution{}, err
+			}
+			if coalesceFollowersCanInherit(leaderOutcome) {
+				if err := txCommitChecked(ctx, tx, nowNS, key); err != nil {
+					return WaiterResolution{}, err
+				}
+				return WaiterResolution{
+					Status:              WaiterLeaderFinished,
+					LeaderRunID:         leaderRun,
+					LeaderNodeID:        leaderNode,
+					LeaderOutcome:       leaderOutcome,
+					LeaderFailureReason: leaderReason,
+				}, nil
+			}
+
+			var liveLeaderHolders int
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM concurrency_holders
+				  WHERE key = ? AND run_id = ? AND node_id = ? AND `+holderLiveSQL(""),
+				key, leaderRun, leaderNode, nowNS,
+			).Scan(&liveLeaderHolders); err != nil {
+				return WaiterResolution{}, err
+			}
+			if liveLeaderHolders == 0 {
+				now := time.Now()
+				promoted, err := txPromoteCoalesceWaiter(ctx, tx, key, runID, nodeID, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+				if err != nil {
+					return WaiterResolution{}, err
+				}
+				if promoted != nil {
+					if err := txCommitChecked(ctx, tx, now.UnixNano(), key); err != nil {
+						return WaiterResolution{}, err
+					}
+					return WaiterResolution{
+						Status:             WaiterPromoted,
+						HolderID:           promoted.HolderID,
+						HolderLeaseExpires: now.Add(DefaultConcurrencyLease),
+					}, nil
+				}
+			}
+		}
+
+		shouldPromote := waiter.Policy == OnLimitQueue
+		if waiter.Policy == OnLimitCancelOthers {
 			var holderCount int
 			if err := tx.QueryRowContext(
 				ctx,
@@ -1850,7 +1984,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		if e := tx.QueryRowContext(
 			ctx,
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ? AND policy IN (?, ?) AND arrived_at < ?`,
-			key, OnLimitQueue, OnLimitCancelOthers, waiterArrivedNS,
+			key, OnLimitQueue, OnLimitCancelOthers, waiter.ArrivedAt.UnixNano(),
 		).Scan(&position); e != nil {
 			return WaiterResolution{}, e
 		}
