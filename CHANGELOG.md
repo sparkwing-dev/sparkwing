@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.15.11] - 2026-07-12
 ### Fixed
 
 - **orchestrator:** Dispatch wait timeouts now distinguish bounded
