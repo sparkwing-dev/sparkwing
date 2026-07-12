@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.2] - 2026-07-12
 ### Fixed
 
 - **admission:** The local admission daemon now backfills a smaller run
