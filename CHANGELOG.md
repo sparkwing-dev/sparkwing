@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Measured host costs that exceed the largest request the
+  daemon can grant are capped before admission, so one bad profile cannot
+  make a pipeline permanently never-admissible. Explicit `.Resources()`
+  pins still fail loudly when they exceed host capacity.
+- **local workspace:** Starting the local workspace with an explicit home
+  no longer mutates the process-wide `SPARKWING_HOME` environment value.
 
 ## [v0.16.3] - 2026-07-12
 ### Added
