@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.7] - 2026-07-13
 ### Fixed
 
 - **admission:** `sparkwing queue` now evaluates holder liveness from the
