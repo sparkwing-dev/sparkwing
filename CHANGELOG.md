@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.5] - 2026-07-13
 ### Fixed
 
 - **admission:** A host with no sparkwing holders now admits the queue
