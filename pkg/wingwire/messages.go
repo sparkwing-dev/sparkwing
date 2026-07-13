@@ -410,6 +410,37 @@ type QueueState struct {
 	// reading, but admission does not subtract it. False for older daemons
 	// and the default configuration.
 	IgnoreExternal bool `json:"ignore_external,omitempty"`
+	// CapacityChange records the most recent time the daemon re-derived a
+	// different machine capacity while running (a hot VM resize or a cgroup
+	// quota edit), for the queue header. Nil when capacity has held steady
+	// since start, or for older daemons.
+	CapacityChange *CapacityChange `json:"capacity_change,omitempty"`
+	// Runners carries each registered runner's advertised free capacity when
+	// the state comes from a controller's unified admission view. Empty for
+	// the local daemon, which arbitrates only its own host.
+	Runners []RunnerHeadroom `json:"runners,omitempty"`
+}
+
+// RunnerHeadroom is one registered runner's most recently advertised free
+// capacity, as surfaced in a controller's unified queue view: the local
+// admission daemon's grantable cores and memory after the operator reserve,
+// plus its queue depth. It is soft, staleable observability, never a gate.
+type RunnerHeadroom struct {
+	Name        string  `json:"name"`
+	Cores       float64 `json:"cores"`
+	MemoryBytes int64   `json:"memory_bytes,omitempty"`
+	QueueDepth  int     `json:"queue_depth,omitempty"`
+}
+
+// CapacityChange reports a runtime shift in the machine capacity the ledger
+// admits into: the daemon re-derives capacity periodically, so a resize or
+// quota edit is picked up without a restart. FromCores and ToCores are the
+// budgeted core totals before and after the shift.
+type CapacityChange struct {
+	FromCores float64 `json:"from_cores"`
+	ToCores   float64 `json:"to_cores"`
+	// AtMS is when the change was applied, in Unix milliseconds.
+	AtMS int64 `json:"at_ms,omitempty"`
 }
 
 // ContainerLimit reports the cgroup capacity ceiling a daemon runs under
@@ -506,6 +537,16 @@ type Cancel struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// StatsReset asks the daemon to clear its rolling admission-outcome window
+// (the data behind the queue view's recent-events summary), on a dedicated
+// control connection. The daemon answers with [StatsResetAck].
+type StatsReset struct{}
+
+// StatsResetAck confirms the daemon cleared its admission-outcome window.
+type StatsResetAck struct{}
+
+func (*StatsReset) wireType() MessageType       { return TypeStatsReset }
+func (*StatsResetAck) wireType() MessageType    { return TypeStatsResetAck }
 func (*CancelLease) wireType() MessageType      { return TypeCancelLease }
 func (*CancelLeaseAck) wireType() MessageType   { return TypeCancelLeaseAck }
 func (*Cancel) wireType() MessageType           { return TypeCancel }

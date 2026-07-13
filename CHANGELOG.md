@@ -86,9 +86,35 @@ code change to unlock.
   recovery docs, and `sparkwing info` surfaces the same pointer, so an
   upgraded fleet discovers new controls from its own command output instead
   of hoping agents browse the docs.
+- **ops:** Headless hosts are operable without the CLI. A compiled pipeline
+  binary now serves the admission surfaces for itself --
+  `<binary> ops queue|doctor|stats|stats-reset|version` -- with the same
+  output conventions (`-o pretty|json|plain`) and JSON shapes as
+  `sparkwing queue` / `sparkwing doctor`. This makes concrete the principle
+  *sparkwing does not require sparkwing*: the pipeline binary is the product,
+  the CLI a developer convenience, and everything the CLI does at runtime the
+  binary can do on its own. See the "Headless hosts" section of the CLI docs.
+- **cli:** `sparkwing queue --profile NAME` inspects a controller's admission
+  state through the same renderer as the local view: every concurrency key
+  with its holders and waiters, plus each registered runner's free capacity.
+  One vocabulary now reads local and cluster admission alike; it is the
+  preferred replacement for `sparkwing cluster concurrency`, which narrows to
+  a single namespace and is slated for removal once parity is complete.
 
 ### Fixed
 
+- **admission:** Machine capacity is a living value. The daemon re-derives it
+  at every start (never trusting a restored snapshot) and re-checks it on a
+  slow cadence while running, so a hot instance resize or a runtime cgroup
+  quota edit is picked up without a restart. Changes apply with a gentle
+  deadband, are logged, and show in the queue header (`capacity changed: 4.0
+  -> 8.0 cores`); a shrink never evicts a running holder -- it drains
+  naturally while admission tightens -- and the clamp now also honors
+  `cpuset.cpus`.
+- **admission:** A holder that reclaimed its lease after a daemon restart can
+  be cancelled. `sparkwing runs cancel` (and the daemon-first cancel path) now
+  reaches a reattached run, not only runs admitted by the current daemon
+  incarnation.
 - **daemon:** Stall detection now measures a holder's whole process tree, not
   just its own pid. A holder whose real work runs in forked children (a
   parallel `make`, a test runner, a shell pipeline) reads near-zero CPU on its

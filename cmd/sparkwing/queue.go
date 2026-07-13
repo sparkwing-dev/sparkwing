@@ -5,7 +5,8 @@
 // holder that is alive but idle while runs queue behind it is flagged
 // with the exact non-destructive recovery command. With no daemon
 // running there is nothing to arbitrate, so the command reports an empty
-// queue and exits 0.
+// queue and exits 0. Rendering is shared with the headless pipeline
+// binary through internal/opsview so both present an identical view.
 package main
 
 import (
@@ -14,13 +15,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -29,6 +31,7 @@ func runQueue(args []string) error {
 	fs := flag.NewFlagSet(cmdQueue.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
+	on := addProfileFlag(fs)
 	if err := parseAndCheck(cmdQueue, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -41,6 +44,10 @@ func runQueue(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("queue: unexpected positional %q (queue takes flags only)", fs.Arg(0))
+	}
+
+	if *on != "" {
+		return runQueueProfile(*on, format)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -68,6 +75,54 @@ func runQueue(args []string) error {
 	return nil
 }
 
+// runQueueProfile inspects a controller's admission state through the same
+// renderer as the local view: it fetches the controller's QueueState-shaped
+// endpoint and hands it to the one queue renderer, so an operator reads one
+// vocabulary regardless of where admission lives.
+func runQueueProfile(profileName, format string) error {
+	prof, err := resolveProfile(profileName)
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "queue"); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	qs, err := fetchControllerQueueState(ctx, prof.ControllerURL(), prof.ControllerToken())
+	if err != nil {
+		return fmt.Errorf("queue: %w", err)
+	}
+	return renderQueue(os.Stdout, qs, format)
+}
+
+// fetchControllerQueueState calls GET /api/v1/queue/state with bearer auth and
+// decodes the controller's unified admission view.
+func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wingwire.QueueState, error) {
+	u := strings.TrimRight(baseURL, "/") + "/api/v1/queue/state"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return wingwire.QueueState{}, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return wingwire.QueueState{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return wingwire.QueueState{}, fmt.Errorf("GET queue state: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var qs wingwire.QueueState
+	if err := json.NewDecoder(resp.Body).Decode(&qs); err != nil {
+		return wingwire.QueueState{}, fmt.Errorf("decode queue state: %w", err)
+	}
+	return qs, nil
+}
+
 // warnLegacy prints the legacy-coexistence warning to stderr when
 // older-pinned pipeline binaries are still admitting outside the daemon.
 // It goes to stderr so JSON and plain stdout stay machine-clean.
@@ -77,466 +132,26 @@ func warnLegacy(w io.Writer, n int) {
 	}
 }
 
-// renderNoDaemon reports the calm truth that nothing is queued: no daemon
-// means no admission is being arbitrated. JSON callers still get a
-// well-formed empty queue so a pipeline never special-cases the string.
 func renderNoDaemon(w io.Writer, format string) error {
-	switch format {
-	case "json":
-		return renderQueue(w, wingwire.QueueState{}, format)
-	case "plain":
-		return nil
-	default:
-		fmt.Fprintln(w, "no admission daemon running; nothing is queued")
-		return nil
-	}
+	return opsview.RenderNoDaemon(w, format)
 }
 
 func renderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
-	switch format {
-	case "json":
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(qs)
-	case "plain":
-		return renderQueuePlain(w, qs)
-	default:
-		return renderQueuePretty(w, qs)
-	}
+	return opsview.RenderQueue(w, qs, format)
 }
 
-// renderQueuePlain emits one tab-separated record per line, tagged by
-// kind so a shell pipeline can filter with grep/awk.
-func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
-	for _, r := range qs.Resources {
-		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
-			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
-			fmtAmount(r.Key, resourceAvailable(r)))
-	}
-	if c := qs.Container; c != nil {
-		fmt.Fprintf(w, "container\t%.3f\t%.3f\t%d\t%d\n",
-			c.Cores, c.HostCores, c.MemoryBytes, c.HostMemoryBytes)
-	}
-	if qs.Budget != nil {
-		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%t\n",
-			qs.Budget.Cores, qs.Budget.MachineCores,
-			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce)
-	}
-	if qs.IgnoreExternal {
-		fmt.Fprintln(w, "external\tignored")
-	}
-	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			h.RunID, orDash(h.Pipeline), orDash(h.Repo), orDash(originWord(h.Origin)),
-			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
-			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(h.Parent))
-	}
-	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			wt.Position, wt.RunID, orDash(wt.Pipeline), orDash(wt.Repo), orDash(originWord(wt.Origin)),
-			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
-			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
-	}
-	return nil
+func renderQueuePretty(w io.Writer, qs wingwire.QueueState) error {
+	return opsview.RenderQueuePretty(w, qs)
 }
 
-func renderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
-	clear := ""
-	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
-		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
-	}
-	if d := fmtDaemonHeader(qs); d != "" {
-		fmt.Fprintln(out, d)
-	}
-	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", len(qs.Holders), len(qs.Waiters), clear)
-	if line := fmtEventsLine(qs.Events); line != "" {
-		fmt.Fprintln(out, line)
-	}
-	fmt.Fprintln(out)
+func containerNote(c *wingwire.ContainerLimit) string { return opsview.ContainerNote(c) }
 
-	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RESOURCE\tCAPACITY\tIN USE\tRESERVED\tEXTERNAL\tAVAILABLE")
-	if len(qs.Resources) == 0 {
-		fmt.Fprintln(tw, "(none)\t\t\t\t\t")
-	}
-	for _, r := range qs.Resources {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
-			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
-			fmtAmount(r.Key, resourceAvailable(r)))
-	}
-	_ = tw.Flush()
+func budgetNote(b *wingwire.BudgetState) string { return opsview.BudgetNote(b) }
 
-	if c := containerNote(qs.Container); c != "" {
-		fmt.Fprintf(out, "%s\n", c)
-	}
-	if b := budgetNote(qs.Budget); b != "" {
-		fmt.Fprintf(out, "%s\n", b)
-	}
-	if qs.IgnoreExternal {
-		fmt.Fprintln(out, "external: ignored (operator setting)")
-	}
-	if note := externalPressureNote(qs); note != "" {
-		fmt.Fprintf(out, "\n%s\n", note)
-	}
+func fmtEventsLine(ev *wingwire.EventsWindow) string { return opsview.FmtEventsLine(ev) }
 
-	fmt.Fprintln(out)
-	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
-	if len(qs.Holders) == 0 {
-		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t")
-	}
-	for _, h := range qs.Holders {
-		run := h.RunID
-		if h.Parent != "" {
-			run = "  " + run + " (attached)"
-		}
-		if h.Stalled {
-			run += " (stalled)"
-		}
-		if h.Contended {
-			run += " (contended)"
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
-			orDash(originWord(h.Origin)), fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
-			orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
-	}
-	_ = tw.Flush()
+func fmtDaemonHeader(qs wingwire.QueueState) string { return opsview.FmtDaemonHeader(qs) }
 
-	fmt.Fprintln(out)
-	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
-	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t\t")
-	}
-	for _, wt := range qs.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
-			orDash(wt.Repo), orDash(originWord(wt.Origin)), fmtCost(wt.Resources), orDash(wt.CostSource),
-			fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
-	}
-	_ = tw.Flush()
+func originWord(o wingwire.Origin) string { return opsview.OriginWord(o) }
 
-	for _, wt := range qs.Waiters {
-		if wt.BlockingReason != "" {
-			fmt.Fprintf(out, "\n%s waiting: %s\n", wt.RunID, wt.BlockingReason)
-		}
-	}
-	for _, h := range qs.Holders {
-		if h.Stalled && h.Recovery != "" {
-			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", h.RunID, h.Recovery)
-		}
-	}
-	for _, h := range qs.Holders {
-		if h.Contended && h.ContentionReason != "" {
-			fmt.Fprintf(out, "\n%s is contended (%s).\n", h.RunID, h.ContentionReason)
-		}
-	}
-	for _, d := range queueDriftNotes(qs) {
-		fmt.Fprintf(out, "\n%s: %s\n", d.runID, d.warning)
-	}
-	return nil
-}
-
-// resourceAvailable is the grantable amount to show for a resource row:
-// the daemon's headroom-aware Available for the host dimensions, or plain
-// capacity-minus-held for a semaphore row (and for older daemons that
-// sent no Available).
-func resourceAvailable(r wingwire.ResourceState) float64 {
-	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0) {
-		return r.Available
-	}
-	free := r.Capacity - r.Held
-	if free < 0 {
-		free = 0
-	}
-	return free
-}
-
-// fmtHeadroomCell renders a reserve/external cell: a dash for semaphore
-// rows, which have no headroom decomposition.
-func fmtHeadroomCell(key string, v float64) string {
-	if !isHostResource(key) {
-		return "-"
-	}
-	return fmtAmount(key, v)
-}
-
-func isHostResource(key string) bool { return key == "cores" || key == "memory" }
-
-// externalPressureNote returns a one-line callout when non-sparkwing load
-// is what is holding runs back -- a queue that looks idle (free capacity,
-// no holders) but refuses work because the machine is busy with other
-// processes. Empty when external load is not the binding constraint.
-// budgetNote renders the machine-budget row for the queue's headroom
-// arithmetic: the capped capacity against the machine total, per capped
-// dimension, so the constraint is never a mystery. Empty when no budget
-// caps anything below the machine.
-// containerNote renders the container-limit row for the queue's headroom
-// arithmetic: the cgroup ceiling against the host it sits on, per clamped
-// dimension, so a daemon in a limited container shows why capacity is
-// below the machine total. Empty when no container limit binds.
-func containerNote(c *wingwire.ContainerLimit) string {
-	if c == nil {
-		return ""
-	}
-	var parts []string
-	if c.Cores > 0 && c.HostCores > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f cores (host %.1f)", c.Cores, c.HostCores))
-	}
-	if c.MemoryBytes > 0 && c.HostMemoryBytes > 0 {
-		parts = append(parts, fmt.Sprintf("%s memory (host %s)",
-			humanBytes(c.MemoryBytes), humanBytes(c.HostMemoryBytes)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "container limit: " + strings.Join(parts, ", ")
-}
-
-func budgetNote(b *wingwire.BudgetState) string {
-	if b == nil {
-		return ""
-	}
-	var parts []string
-	if b.MachineCores > 0 && b.Cores < b.MachineCores {
-		parts = append(parts, fmt.Sprintf("%.1f cores (machine %.1f)", b.Cores, b.MachineCores))
-	}
-	if b.MachineMemoryBytes > 0 && b.MemoryBytes < b.MachineMemoryBytes {
-		parts = append(parts, fmt.Sprintf("%s memory (machine %s)",
-			humanBytes(b.MemoryBytes), humanBytes(b.MachineMemoryBytes)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	note := "budget " + strings.Join(parts, ", ")
-	if b.Enforce {
-		note += "; OS-enforced"
-	}
-	return note
-}
-
-func externalPressureNote(qs wingwire.QueueState) string {
-	if qs.IgnoreExternal || len(qs.Waiters) == 0 {
-		return ""
-	}
-	for _, r := range qs.Resources {
-		if isHostResource(r.Key) && r.External > 0 && r.Held < r.Capacity {
-			for _, wt := range qs.Waiters {
-				if wt.BlockingReason != "" {
-					return "note: external (non-sparkwing) load is the binding constraint; free capacity above is reserved or already in use by other processes"
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// queueDriftNote pairs a run with its pin-drift warning for the bottom-of-
-// view callout.
-type queueDriftNote struct {
-	runID   string
-	warning string
-}
-
-// queueDriftNotes collects the pin-drift warnings across holders and
-// waiters so the pretty view surfaces the exact fix once per run.
-func queueDriftNotes(qs wingwire.QueueState) []queueDriftNote {
-	var notes []queueDriftNote
-	for _, h := range qs.Holders {
-		if h.DriftWarning != "" {
-			notes = append(notes, queueDriftNote{h.RunID, h.DriftWarning})
-		}
-	}
-	for _, wt := range qs.Waiters {
-		if wt.DriftWarning != "" {
-			notes = append(notes, queueDriftNote{wt.RunID, wt.DriftWarning})
-		}
-	}
-	return notes
-}
-
-// fmtDaemonHeader renders the daemon identity line above the queue: its
-// binary version and how long it has been up. Empty when the daemon
-// reported neither (an older daemon, or no daemon at all).
-func fmtDaemonHeader(qs wingwire.QueueState) string {
-	if qs.DaemonVersion == "" && qs.DaemonUptimeMS <= 0 {
-		return ""
-	}
-	version := qs.DaemonVersion
-	if version == "" {
-		version = "unknown"
-	}
-	up := "just started"
-	if qs.DaemonUptimeMS > 0 {
-		up = "up " + (time.Duration(qs.DaemonUptimeMS) * time.Millisecond).Round(time.Second).String()
-	}
-	return fmt.Sprintf("daemon %s, %s", version, up)
-}
-
-// fmtEventsLine renders the one-line recent-events health summary from
-// the daemon's rolling window: run count with median wait, then only the
-// trouble categories that actually occurred. Empty when the daemon sent
-// no window or nothing happened in it.
-func fmtEventsLine(ev *wingwire.EventsWindow) string {
-	if ev == nil || (ev.Runs == 0 && len(ev.Evictions) == 0 && ev.QueueTimeouts == 0 &&
-		ev.Cancellations == 0 && ev.Contended == 0) {
-		return ""
-	}
-	span := (time.Duration(ev.WindowMS) * time.Millisecond).Round(time.Hour)
-	label := span.String()
-	if h := int(span.Hours()); h > 0 {
-		label = fmt.Sprintf("%dh", h)
-	}
-	parts := []string{fmt.Sprintf("%d %s", ev.Runs, pluralWord(ev.Runs, "run", "runs"))}
-	if ev.Runs > 0 {
-		parts = append(parts, fmt.Sprintf("median wait %s",
-			(time.Duration(ev.MedianWaitMS)*time.Millisecond).Round(time.Second)))
-	}
-	if n := totalEvictions(ev.Evictions); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s (%s)", n, pluralWord(n, "eviction", "evictions"),
-			evictionKeys(ev.Evictions)))
-	}
-	if ev.QueueTimeouts > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s", ev.QueueTimeouts,
-			pluralWord(ev.QueueTimeouts, "queue-timeout", "queue-timeouts")))
-	}
-	if ev.Cancellations > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s", ev.Cancellations,
-			pluralWord(ev.Cancellations, "cancellation", "cancellations")))
-	}
-	if ev.Contended > 0 {
-		parts = append(parts, fmt.Sprintf("%d contended", ev.Contended))
-	}
-	out := "last " + label + ": "
-	for i, p := range parts {
-		if i > 0 {
-			out += ", "
-		}
-		out += p
-	}
-	return out
-}
-
-func totalEvictions(counts []wingwire.EvictionCount) int {
-	n := 0
-	for _, c := range counts {
-		n += c.Count
-	}
-	return n
-}
-
-// evictionKeys names the contested keys behind an eviction tally:
-// "key: land" for one key, "keys: deploy, land" for several.
-func evictionKeys(counts []wingwire.EvictionCount) string {
-	if len(counts) == 1 {
-		return "key: " + counts[0].Key
-	}
-	out := "keys: "
-	for i, c := range counts {
-		if i > 0 {
-			out += ", "
-		}
-		out += c.Key
-	}
-	return out
-}
-
-func pluralWord(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
-}
-
-// fmtHolderCost renders a holder's charge, or a dash for an attached
-// child, which rides its parent's lease and is charged nothing.
-func fmtHolderCost(h wingwire.Holder) string {
-	if h.Parent != "" {
-		return "-"
-	}
-	return fmtCost(h.Resources)
-}
-
-// fmtETA renders a waiter's estimated start offset: "now" when it is
-// admitted immediately, a rounded duration when it must wait, or "-" when
-// no estimate is available.
-func fmtETA(ms *int64) string {
-	if ms == nil {
-		return "-"
-	}
-	if *ms <= 0 {
-		return "now"
-	}
-	return (time.Duration(*ms) * time.Millisecond).Round(time.Second).String()
-}
-
-// fmtAmount renders a resource amount: memory keys as human bytes, every
-// other dimension (cores, semaphore costs) as a plain number.
-func fmtAmount(key string, v float64) string {
-	if key == "memory" {
-		return humanBytes(int64(v))
-	}
-	return trimFloat(v)
-}
-
-// fmtCost renders a holder's or waiter's host charge as "<cores> cores"
-// plus memory when charged.
-func fmtCost(r wingwire.HostResources) string {
-	out := trimFloat(r.Cores) + " cores"
-	if r.MemoryBytes > 0 {
-		out += ", " + humanBytes(r.MemoryBytes)
-	}
-	return out
-}
-
-func fmtElapsed(ms int64) string {
-	if ms <= 0 {
-		return "-"
-	}
-	return (time.Duration(ms) * time.Millisecond).Round(time.Second).String()
-}
-
-// trimFloat prints a float without trailing zero noise: whole numbers
-// render bare, fractions to two places.
-func trimFloat(v float64) string {
-	if v == float64(int64(v)) {
-		return fmt.Sprintf("%d", int64(v))
-	}
-	return fmt.Sprintf("%.2f", v)
-}
-
-func joinKeys(keys []string) string {
-	out := ""
-	for i, k := range keys {
-		if i > 0 {
-			out += ","
-		}
-		out += k
-	}
-	return out
-}
-
-// originWord renders a run's dispatch origin for the queue view. An empty
-// origin means the run was launched locally, so it reads "local"; an
-// unrecognized value passes through verbatim rather than being hidden.
-func originWord(o wingwire.Origin) string {
-	if o == "" {
-		return string(wingwire.OriginLocal)
-	}
-	return string(o)
-}
-
-// stalledWord is the holder's health word for the plain view: stalled
-// (wedged) takes precedence over contended (throttled); a healthy holder
-// is live.
-func stalledWord(h wingwire.Holder) string {
-	switch {
-	case h.Stalled:
-		return "stalled"
-	case h.Contended:
-		return "contended"
-	default:
-		return "live"
-	}
-}
+func externalPressureNote(qs wingwire.QueueState) string { return opsview.ExternalPressureNote(qs) }

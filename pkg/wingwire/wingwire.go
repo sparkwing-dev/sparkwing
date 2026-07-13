@@ -64,6 +64,8 @@ const (
 	TypeCancelLease      MessageType = "cancel_lease"
 	TypeCancelLeaseAck   MessageType = "cancel_lease_ack"
 	TypeCancel           MessageType = "cancel"
+	TypeStatsReset       MessageType = "stats_reset"
+	TypeStatsResetAck    MessageType = "stats_reset_ack"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -150,6 +152,10 @@ func emptyMessage(t MessageType) (Message, error) {
 		return &CancelLeaseAck{}, nil
 	case TypeCancel:
 		return &Cancel{}, nil
+	case TypeStatsReset:
+		return &StatsReset{}, nil
+	case TypeStatsResetAck:
+		return &StatsResetAck{}, nil
 	default:
 		return nil, fmt.Errorf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", t, ProtocolMajor)
 	}

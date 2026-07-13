@@ -388,16 +388,24 @@ Pretty on a terminal, JSON when piped (add -o json to force it), and
 one tab-separated record per line with -o plain for shell pipelines.
 
 When no daemon is running there is nothing to arbitrate: the command
-reports an empty queue and exits 0 rather than erroring.`,
+reports an empty queue and exits 0 rather than erroring.
+
+With --profile NAME the view switches to that profile's controller: the
+same renderer prints the controller's admission state -- every
+concurrency key, its holders and waiters, and each registered runner's
+free capacity -- so one vocabulary reads local and cluster admission
+alike.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Inspect this profile's controller instead of the local daemon", Group: "System"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
 		{"Show the current queue", "sparkwing queue"},
 		{"Agent-readable snapshot", "sparkwing queue -o json"},
 		{"One record per line for shell pipelines", "sparkwing queue -o plain"},
+		{"Inspect a controller's admission state", "sparkwing queue --profile prod"},
 	},
 }
 
@@ -2866,7 +2874,7 @@ Use -q to print just names, one per line, for shell piping
 
 var cmdClusterConcurrency = Command{
 	Path:     "sparkwing cluster concurrency",
-	Synopsis: "Inspect a concurrency namespace: holders + queue",
+	Synopsis: "Inspect a single concurrency namespace: holders + queue",
 	Description: `Shows who currently holds a concurrency namespace's slots
 and the queue of waiters behind it, each with its arrival-rank
 position. Weighted admission can run a later fitting waiter before
@@ -2874,7 +2882,12 @@ an earlier non-fitting waiter, so position is not always run order.
 Use it to tell whether a node is wedged or waiting for budget.
 
 Hits GET /api/v1/concurrency/{namespace}/state on the
-selected profile's controller.`,
+selected profile's controller.
+
+For a controller's whole admission state -- every key, its holders and
+waiters, and each registered runner's free capacity -- through the same
+view as the local queue, use 'sparkwing queue --profile NAME'. This
+command narrows to one namespace.`,
 	Flags: []FlagSpec{
 		{Name: "namespace", Argument: "NAME", Desc: "Concurrency namespace to inspect", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},

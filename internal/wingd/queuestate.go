@@ -134,6 +134,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		}
 	}
 	qs.IgnoreExternal = d.cfg.Budget.IgnoreExternal
+	qs.CapacityChange = d.capacityChange
 
 	remaining := map[string]float64{}
 	for _, r := range qs.Resources {

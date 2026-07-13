@@ -56,7 +56,7 @@ func TestDiagnose_CleanHomeFindsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("diagnose: %v", err)
 	}
-	if !rep.clean() {
+	if !rep.Clean() {
 		t.Fatalf("clean home not reported clean: %+v", rep)
 	}
 }
@@ -171,7 +171,7 @@ func TestDiagnose_SecondRunIsClean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second diagnose: %v", err)
 	}
-	if !rep.clean() {
+	if !rep.Clean() {
 		t.Fatalf("second run not clean: %+v", rep)
 	}
 }
