@@ -53,9 +53,11 @@ type HostResources struct {
 type CostSource string
 
 const (
-	CostSourcePin      CostSource = "pin"
-	CostSourceMeasured CostSource = "measured"
-	CostSourceDefault  CostSource = "default"
+	CostSourcePin       CostSource = "pin"
+	CostSourceMeasured  CostSource = "measured"
+	CostSourceDefault   CostSource = "default"
+	CostSourceMeasuring CostSource = "measuring"
+	CostSourceFloor     CostSource = "floor"
 )
 
 // Policy is what a run does when a resource or semaphore it needs is

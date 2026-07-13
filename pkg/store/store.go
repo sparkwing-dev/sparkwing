@@ -581,7 +581,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 10
+const expectedSchemaVersion = 11
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -967,6 +967,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesWaitCols)
 	case 10:
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesContendedCols)
+	case 11:
+		return s.ensureColumns("pipeline_profiles", pipelineProfilesVersioningCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1005,6 +1007,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesWaitCols)
 	case 10:
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesContendedCols)
+	case 11:
+		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesVersioningCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1134,6 +1138,19 @@ var pipelineProfilesWaitCols = map[string]string{
 // kept on the rollup row so capacity stats can show a per-pipeline share.
 var pipelineProfilesContendedCols = map[string]string{
 	"contended_count": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// pipelineProfilesVersioningCols is the additive column set v11 adds to
+// version profiles by plan hash and price a still-measuring version from
+// contended-run floors: the DAG-topology hash the clean window was measured
+// on, the per-resource demand floor learned from contended runs, and the
+// predecessor peak carried across a structural change for a warm start.
+var pipelineProfilesVersioningCols = map[string]string{
+	"plan_hash":              "TEXT NOT NULL DEFAULT ''",
+	"floor_cores":            "REAL NOT NULL DEFAULT 0",
+	"floor_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
+	"prev_peak_cores":        "REAL NOT NULL DEFAULT 0",
+	"prev_peak_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
 }
 
 func (s *Store) ensureColumnsAll() error {

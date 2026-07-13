@@ -51,16 +51,16 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED")
+	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tFLOOR")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 			s.Pipeline, s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
 			fmtCPUCells(s.Rollup), fmtMemCells(s.Rollup), fmtWaitCells(s.Rollup), s.Rollup.SampleCount,
-			fmtContendedCell(s.Rollup))
+			fmtContendedCell(s.Rollup), fmtFloorCell(s.Rollup))
 		for _, n := range s.Nodes {
-			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 				n.NodeID, fmtDur(n.P50Duration), fmtDur(n.P99Duration),
-				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount, "-")
+				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount, "-", "-")
 		}
 	}
 	if err := tw.Flush(); err != nil {
@@ -156,6 +156,20 @@ func fmtContendedCell(p store.PipelineProfile) string {
 	return fmt.Sprintf("%d/%d (%d%%)", p.ContendedCount, p.SampleCount, pct)
 }
 
+// fmtFloorCell renders a still-measuring version's demand floor -- the lower
+// bound its contended runs proved, which admission charges a safety multiple
+// of until a clean run finalizes the price. A dash once the version has
+// graduated to a measured peak or never ran under contention.
+func fmtFloorCell(p store.PipelineProfile) string {
+	if p.FloorCores <= 0 && p.FloorMemoryBytes <= 0 {
+		return "-"
+	}
+	if p.FloorMemoryBytes <= 0 {
+		return fmt.Sprintf("%.1f", p.FloorCores)
+	}
+	return fmt.Sprintf("%.1f/%s", p.FloorCores, humanBytes(p.FloorMemoryBytes))
+}
+
 // fmtWaitCells renders a rollup's queue-wait percentiles as p50/p99, or
 // a dash before any wait has been observed.
 func fmtWaitCells(p store.PipelineProfile) string {
@@ -199,13 +213,21 @@ func groupCapacityStats(profiles []store.PipelineProfile) []capacityStat {
 }
 
 // deriveSource reports where a pipeline's admission charge comes from,
-// mirroring the resolution order applied at admission time.
+// mirroring the resolution order applied at admission time: a pin wins, then
+// a graduated measured profile, then a still-measuring version priced from
+// its contended-run floor or a predecessor peak, else the cold-start default.
 func deriveSource(rollup store.PipelineProfile) store.CostSource {
 	if rollup.PinnedCores > 0 || rollup.PinnedMemoryBytes > 0 {
 		return store.CostSourcePin
 	}
 	if rollup.SampleCount >= capacity.MinSamples && (rollup.PeakCores > 0 || rollup.CPUMeasured) {
 		return store.CostSourceMeasured
+	}
+	if rollup.FloorCores > 0 {
+		return store.CostSourceFloor
+	}
+	if rollup.PrevPeakCores > 0 {
+		return store.CostSourceMeasuring
 	}
 	return store.CostSourceDefault
 }

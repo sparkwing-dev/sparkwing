@@ -71,3 +71,25 @@ func newProcSampler() *procSampler {
 
 // CPUFraction dispatches to the platform reading.
 func (p *procSampler) CPUFraction(pid int) (float64, bool) { return p.sample(pid) }
+
+// collectSubtree returns root and every process reachable from it through
+// the parent->children map, so a holder's forked work (make -j, test
+// runners, shell pipelines) is credited to the holder even when it runs
+// in child process groups the holder never touches. The seen set guards
+// against a cycle from recycled pids.
+func collectSubtree(root int, children map[int][]int) []int {
+	var out []int
+	seen := map[int]bool{}
+	stack := []int{root}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+		stack = append(stack, children[n]...)
+	}
+	return out
+}

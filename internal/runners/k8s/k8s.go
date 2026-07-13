@@ -391,7 +391,7 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 	if !pin.Empty() && pipeline != "" {
 		_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
 	}
-	return capacity.Resolve(pin, profile, podDefaultRefCPU)
+	return capacity.Resolve(pin, profile, podDefaultRefCPU, "")
 }
 
 // nodePin flattens a node's explicit .Resources() declaration to a

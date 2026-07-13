@@ -49,6 +49,24 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **admission:** Capacity measurement is now honest about contention and
+  pipeline change. A run the daemon flags as throttled by host contention no
+  longer folds into the measured profile: it measured what it got, not what it
+  wanted, so its reading only raises a per-pipeline demand *floor* (a lower
+  bound) and never sets the measured peak or graduates the profile. While a
+  version has not yet finalized a measured price it is charged a safety
+  multiple (2x) of that floor -- and a contended run that consumed essentially
+  its whole charge escalates the floor to the charge, so successive runs
+  double in on true demand from below. `sparkwing runs stats --capacity` shows
+  the operative floor and labels the source `floor`.
+- **admission:** Capacity profiles are now versioned by pipeline plan hash. A
+  structural (DAG-topology) change re-measures the pipeline instead of pricing
+  it on the previous version's samples: the changed version is charged 2x its
+  predecessor's peak (a large predecessor makes that exceed the box, so it runs
+  alone and measures solo emergently) and stays in `measuring` until clean,
+  uncontended runs finalize a new measured price. The queue and
+  `runs stats --capacity` views show the `measuring` and `floor` sources, and a
+  measuring run narrates itself (`re-measuring at N cores (2x prior charge)`).
 - **cli:** The changelog is now a readable, offline docs topic.
   `sparkwing docs read --topic changelog` serves the release notes embedded
   in the binary like every other doc, and `sparkwing version --changelog`
@@ -71,6 +89,11 @@ code change to unlock.
 
 ### Fixed
 
+- **daemon:** Stall detection now measures a holder's whole process tree, not
+  just its own pid. A holder whose real work runs in forked children (a
+  parallel `make`, a test runner, a shell pipeline) reads near-zero CPU on its
+  own pid and was falsely flagged stalled; the daemon now sums CPU across the
+  holder and every descendant, so a busy holder is seen as busy.
 - **admission:** No run is ever rejected for exceeding host capacity. A cost
   above what this box can grant -- a measured peak or an explicit
   `.Resources()` pin -- now runs alone at the machine's grantable budget

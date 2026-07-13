@@ -533,9 +533,18 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	finishCtx := context.WithoutCancel(ctx)
 	_ = backends.State.FinishRun(finishCtx, runID, finalStatus, errMsg)
 
+	contentionNote := ""
+	if lease != nil && !skipDispatch && opts.Admission != nil {
+		contentionNote = opts.Admission.contentionAttribution(finishCtx, runID)
+	}
+	contended := contentionNote != ""
 	if !skipDispatch {
 		if st := canonicalLocalStore(backends.State); st != nil {
-			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), execStart, time.Now())
+			charge := runCharge{}
+			if lease != nil {
+				charge = lease.charge
+			}
+			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), planTopologyHash(plan.Nodes()), charge, contended, execStart, time.Now())
 		}
 	}
 	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {
@@ -546,19 +555,17 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			Msg:   lease.driftWarning,
 		})
 	}
-	if lease != nil && !skipDispatch && opts.Admission != nil {
-		if note := opts.Admission.contentionAttribution(finishCtx, runID); note != "" {
-			if st := canonicalLocalStore(backends.State); st != nil && opts.Pipeline != "" {
-				_ = st.RecordContention(finishCtx, opts.Pipeline)
-			}
-			if opts.Delegate != nil {
-				opts.Delegate.Emit(sparkwing.LogRecord{
-					TS:    time.Now(),
-					Level: "info",
-					Event: "run_contended",
-					Msg:   note,
-				})
-			}
+	if contended {
+		if st := canonicalLocalStore(backends.State); st != nil && opts.Pipeline != "" {
+			_ = st.RecordContention(finishCtx, opts.Pipeline)
+		}
+		if opts.Delegate != nil {
+			opts.Delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "info",
+				Event: "run_contended",
+				Msg:   contentionNote,
+			})
 		}
 	}
 

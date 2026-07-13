@@ -20,56 +20,121 @@ import (
 // rather than pulling in a sysconf dependency for a threshold check.
 const linuxClockTicks = 100.0
 
-// sample derives a process's CPU as a fraction of one core from the
-// change in its cumulative user+system time between two /proc readings.
-// The first reading for a pid has no baseline and reports not-sampled.
+// sample derives the CPU of a holder's whole process tree as a fraction
+// of one core from the change in cumulative user+system time between two
+// /proc readings, summed over the holder and every descendant. Reading
+// only the holder's own pid misses work that runs in forked children, so
+// a busy holder driving child processes would read idle. The first
+// reading for the holder's pid has no baseline and reports not-sampled.
 func (p *procSampler) sample(pid int) (float64, bool) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		p.forget(pid)
+	cpu, children, ok := readProcTree()
+	if !ok {
 		return 0, false
 	}
-	line := string(data)
-	rparen := strings.LastIndexByte(line, ')')
-	if rparen < 0 || rparen+2 >= len(line) {
+	if _, alive := cpu[pid]; !alive {
+		p.mu.Lock()
+		p.pruneLocked(cpu)
+		p.mu.Unlock()
 		return 0, false
 	}
-	fields := strings.Fields(line[rparen+2:])
-	if len(fields) < 13 {
-		return 0, false
-	}
-	utime, err1 := strconv.ParseFloat(fields[11], 64)
-	stime, err2 := strconv.ParseFloat(fields[12], 64)
-	if err1 != nil || err2 != nil {
-		return 0, false
-	}
-	cpuSeconds := (utime + stime) / linuxClockTicks
 	now := time.Now()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	prev, ok := p.last[pid]
-	p.last[pid] = cpuSample{cpuSeconds: cpuSeconds, at: now}
-	if !ok {
-		return 0, false
+	var frac float64
+	rootPrimed := false
+	for _, spid := range collectSubtree(pid, children) {
+		cur := cpu[spid]
+		prev, had := p.last[spid]
+		p.last[spid] = cpuSample{cpuSeconds: cur, at: now}
+		if !had {
+			continue
+		}
+		if spid == pid {
+			rootPrimed = true
+		}
+		wall := now.Sub(prev.at).Seconds()
+		if wall <= 0 {
+			continue
+		}
+		if d := (cur - prev.cpuSeconds) / wall; d > 0 {
+			frac += d
+		}
 	}
-	wall := now.Sub(prev.at).Seconds()
-	if wall <= 0 {
+	p.pruneLocked(cpu)
+	if !rootPrimed {
 		return 0, false
-	}
-	frac := (cpuSeconds - prev.cpuSeconds) / wall
-	if frac < 0 {
-		frac = 0
 	}
 	return frac, true
 }
 
-// forget drops a dead pid's baseline so the map does not grow without
-// bound as runs come and go.
-func (p *procSampler) forget(pid int) {
-	p.mu.Lock()
-	delete(p.last, pid)
-	p.mu.Unlock()
+// pruneLocked drops baselines for pids no longer present so the map does
+// not grow without bound as runs and their children come and go.
+//
+// safety: callers hold p.mu.
+func (p *procSampler) pruneLocked(live map[int]float64) {
+	for pid := range p.last {
+		if _, ok := live[pid]; !ok {
+			delete(p.last, pid)
+		}
+	}
+}
+
+// readProcTree enumerates every process under /proc and returns each
+// pid's cumulative CPU seconds alongside a parent->children map for
+// subtree walks.
+func readProcTree() (map[int]float64, map[int][]int, bool) {
+	dir, err := os.Open("/proc")
+	if err != nil {
+		return nil, nil, false
+	}
+	names, err := dir.Readdirnames(-1)
+	dir.Close()
+	if err != nil {
+		return nil, nil, false
+	}
+	cpu := make(map[int]float64, len(names))
+	children := make(map[int][]int, len(names))
+	for _, name := range names {
+		pid, err := strconv.Atoi(name)
+		if err != nil {
+			continue
+		}
+		ppid, secs, ok := readProcStat(pid)
+		if !ok {
+			continue
+		}
+		cpu[pid] = secs
+		children[ppid] = append(children[ppid], pid)
+	}
+	return cpu, children, true
+}
+
+// readProcStat parses a single /proc/<pid>/stat line into its parent pid
+// and cumulative user+system CPU seconds. It splits after the comm field
+// (parenthesized and possibly containing spaces) so the numeric fields
+// line up regardless of the process name.
+func readProcStat(pid int) (int, float64, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, 0, false
+	}
+	line := string(data)
+	rparen := strings.LastIndexByte(line, ')')
+	if rparen < 0 || rparen+2 >= len(line) {
+		return 0, 0, false
+	}
+	fields := strings.Fields(line[rparen+2:])
+	if len(fields) < 13 {
+		return 0, 0, false
+	}
+	ppid, err0 := strconv.Atoi(fields[1])
+	utime, err1 := strconv.ParseFloat(fields[11], 64)
+	stime, err2 := strconv.ParseFloat(fields[12], 64)
+	if err0 != nil || err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return ppid, (utime + stime) / linuxClockTicks, true
 }
 
 func sampleHost() (HostStat, error) {

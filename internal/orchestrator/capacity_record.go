@@ -12,6 +12,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+// runCharge is the host cost a run was admitted at, threaded to the profile
+// fold so a contended run's ceiling hit can be recognized: a run that
+// consumed essentially its whole charge under contention proves it wanted at
+// least that much, escalating the demand floor.
+type runCharge struct {
+	Cores       float64
+	MemoryBytes int64
+}
+
 // recordRunProfile folds one finished run's measured node metrics into the
 // pipeline's stored profiles: a per-(pipeline, node) row plus the
 // pipeline-level rollup that admission and ETA read. It is best-effort --
@@ -21,7 +30,13 @@ import (
 // duration measures execution and excludes any admission queue wait, so a
 // busy box cannot inflate its own ETAs by folding past congestion into the
 // profile.
-func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, execStart, execEnd time.Time) {
+//
+// planHash versions the rollup: a structural change re-measures the pipeline
+// rather than pricing it on the predecessor's samples. A contended run
+// measured its allocation, not its demand, so it never folds into the clean
+// window or per-node peaks -- it only raises the rollup's demand floor, and
+// escalates that floor to its whole charge when it hit the ceiling.
+func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {
 	if st == nil || pipeline == "" {
 		return
 	}
@@ -48,18 +63,40 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 			}
 		}
 		peakCores := capLocalPeakCores(ctx, pipeline, n.NodeID, observedCores)
+		runPeakCores = math.Max(runPeakCores, peakCores)
+		if peakMem > runPeakMem {
+			runPeakMem = peakMem
+		}
+		if contended {
+			continue
+		}
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeDuration(n, samples),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     cpuMeasured,
+			PlanHash:        planHash,
 		})
-		runPeakCores = math.Max(runPeakCores, peakCores)
-		if peakMem > runPeakMem {
-			runPeakMem = peakMem
-		}
 	}
 	if !measured {
+		return
+	}
+	if contended {
+		floorCores := runPeakCores
+		if charge.Cores > 0 && runPeakCores >= capacity.CeilingHitFraction*charge.Cores {
+			floorCores = math.Max(floorCores, charge.Cores)
+		}
+		floorMem := runPeakMem
+		if charge.MemoryBytes > 0 && float64(runPeakMem) >= capacity.CeilingHitFraction*float64(charge.MemoryBytes) {
+			floorMem = max(floorMem, charge.MemoryBytes)
+		}
+		_ = st.RecordProfileObservation(ctx, pipeline, "", store.ProfileObservation{
+			CPUMeasured:      cpuMeasured,
+			PlanHash:         planHash,
+			Contended:        true,
+			FloorCores:       floorCores,
+			FloorMemoryBytes: floorMem,
+		})
 		return
 	}
 	runDur := execEnd.Sub(execStart)
@@ -71,6 +108,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		PeakCores:       runPeakCores,
 		PeakMemoryBytes: runPeakMem,
 		CPUMeasured:     cpuMeasured,
+		PlanHash:        planHash,
 	})
 	if !pin.Empty() {
 		_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)

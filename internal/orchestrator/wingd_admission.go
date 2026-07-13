@@ -143,6 +143,10 @@ type runLease struct {
 	// driftWarning, when set, is the one-line note that this run's explicit
 	// pin has drifted from its measured profile, surfaced at run end.
 	driftWarning string
+	// charge is the host cost this run was admitted at, carried so a
+	// contended run's end-of-run fold can recognize a ceiling hit. Zero for a
+	// child run that attached to its parent's lease.
+	charge runCharge
 }
 
 // release returns every held lease and closes the daemon connections.
@@ -204,6 +208,9 @@ func (la *LocalAdmission) admitRun(
 		req.DriftWarning = warning
 		fmt.Fprintln(la.stderr(), warning)
 	}
+	if note := measuringNarration(res, prof); note != "" {
+		fmt.Fprintln(la.stderr(), note)
+	}
 	submitted := time.Now()
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
 	if err != nil || outcome != admitProceed {
@@ -214,6 +221,7 @@ func (la *LocalAdmission) admitRun(
 	}
 	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
 	rl.driftWarning = warning
+	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
 	if lease.SoleRunUnderLoad {
 		fmt.Fprintf(la.stderr(),
 			"admitted as sole run; host under external load %.1f cores - additional runs will queue\n",
@@ -221,6 +229,29 @@ func (la *LocalAdmission) admitRun(
 	}
 	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
 	return rl, admitProceed, nil
+}
+
+// measuringNarration is the one-line note shown when a run is charged by
+// measurement rather than a finalized measured price: a version being
+// re-measured after a structural change (charged a safety multiple of the
+// prior peak), or one priced from the demand floor its contended runs
+// proved. It returns "" for the finalized measured, pin, and cold-start
+// default sources, which the queue view already labels.
+func measuringNarration(res capacity.Resolution, prof *store.PipelineProfile) string {
+	switch res.Source {
+	case store.CostSourceMeasuring:
+		return fmt.Sprintf("re-measuring at %.1f cores (2x prior charge); runs under contention only raise the floor, clean runs finalize the price",
+			res.Cores)
+	case store.CostSourceFloor:
+		n := 0
+		if prof != nil {
+			n = prof.ContendedCount
+		}
+		return fmt.Sprintf("measuring at %.1f cores from the demand floor of %d contended run(s); a clean run finalizes the price",
+			res.Cores, n)
+	default:
+		return ""
+	}
 }
 
 // hostChargeWarning picks the one-line note shown for a run's host charge: an
@@ -285,7 +316,7 @@ func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Back
 			profile = p
 		}
 	}
-	res := capacity.Resolve(pin, profile, runtime.NumCPU())
+	res := capacity.Resolve(pin, profile, runtime.NumCPU(), "")
 	res, overCap := la.applyHostCeiling(ctx, res)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
@@ -643,7 +674,7 @@ func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends
 			profile = p
 		}
 	}
-	res := capacity.Resolve(pin, profile, runtime.NumCPU())
+	res := capacity.Resolve(pin, profile, runtime.NumCPU(), planTopologyHash(plan.Nodes()))
 	res, overCap := la.applyHostCeiling(ctx, res)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }

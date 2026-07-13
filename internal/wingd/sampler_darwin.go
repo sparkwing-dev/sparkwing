@@ -17,16 +17,41 @@ import (
 // for its %CPU column.
 const darwinFScale = 1 << 11
 
-// sample reads the process's decaying CPU-percentage estimate from its
-// kinfo_proc and converts it to a fraction of one core. It reports
-// not-sampled when the process is gone or the sysctl buffer is short.
+// sample sums the decaying CPU-percentage estimate of a holder's whole
+// process tree -- the holder and every descendant -- into a fraction of
+// one core. Reading only the holder's own pid misses work that runs in
+// forked children, so a busy holder driving child processes would read
+// idle. It reports not-sampled when the holder is gone or the sysctl
+// buffer is too short to hold one kinfo_proc.
 func (p *procSampler) sample(pid int) (float64, bool) {
-	raw, err := unix.SysctlRaw("kern.proc.pid", pid)
-	if err != nil || len(raw) < int(unsafe.Sizeof(unix.KinfoProc{})) {
+	raw, err := unix.SysctlRaw("kern.proc.all")
+	if err != nil {
 		return 0, false
 	}
-	kp := (*unix.KinfoProc)(unsafe.Pointer(&raw[0]))
-	return float64(kp.Proc.P_pctcpu) / float64(darwinFScale), true
+	stride := int(unsafe.Sizeof(unix.KinfoProc{}))
+	if stride == 0 || len(raw) < stride {
+		return 0, false
+	}
+	pct := make(map[int]float64, len(raw)/stride)
+	children := make(map[int][]int, len(raw)/stride)
+	found := false
+	for off := 0; off+stride <= len(raw); off += stride {
+		kp := (*unix.KinfoProc)(unsafe.Pointer(&raw[off]))
+		cpid := int(kp.Proc.P_pid)
+		pct[cpid] = float64(kp.Proc.P_pctcpu) / float64(darwinFScale)
+		children[int(kp.Eproc.Ppid)] = append(children[int(kp.Eproc.Ppid)], cpid)
+		if cpid == pid {
+			found = true
+		}
+	}
+	if !found {
+		return 0, false
+	}
+	var frac float64
+	for _, spid := range collectSubtree(pid, children) {
+		frac += pct[spid]
+	}
+	return frac, true
 }
 
 func sampleHost() (HostStat, error) {
