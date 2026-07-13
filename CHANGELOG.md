@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.0] - 2026-07-13
 ### Added
 
 - **admission:** Capacity measurement is now honest about contention and
