@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.1] - 2026-07-13
 ### Added
 
 - **admission:** A queued run now explains where its charge came from, not
