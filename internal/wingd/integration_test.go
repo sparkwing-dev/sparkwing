@@ -119,7 +119,17 @@ func TestPromotionRebroadcastsRemainingWaiterPosition(t *testing.T) {
 	holder := mustAcquire(t, a, semReq("a", "deploy", 1, 1, wingwire.PolicyQueue))
 
 	b := ensure(t, home, "")
-	_, resultB := acquireAsync(b, semReq("b", "deploy", 1, 1, wingwire.PolicyQueue))
+	positionsB, resultB := acquireAsync(b, semReq("b", "deploy", 1, 1, wingwire.PolicyQueue))
+	select {
+	case q := <-positionsB:
+		if q.Position != 1 {
+			t.Fatalf("b initial position = %d, want 1", q.Position)
+		}
+	case r := <-resultB:
+		t.Fatalf("b resolved before queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("b never reported its initial queue position")
+	}
 
 	c := ensure(t, home, "")
 	positionsC, resultC := acquireAsync(c, semReq("c", "deploy", 1, 1, wingwire.PolicyQueue))
@@ -151,6 +161,84 @@ func TestPromotionRebroadcastsRemainingWaiterPosition(t *testing.T) {
 		t.Fatalf("c resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("c never received refreshed queue position after b promoted")
+	}
+}
+
+func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+	semOnly := func(runID, key string) wingwire.AdmissionRequest {
+		return wingwire.AdmissionRequest{
+			RunID:          runID,
+			SemaphoresOnly: true,
+			Semaphores: []wingwire.SemaphoreClaim{
+				{Name: key, Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
+			},
+		}
+	}
+
+	a := ensure(t, home, "")
+	holderA := mustAcquire(t, a, semOnly("a", "deploy-a"))
+	b := ensure(t, home, "")
+	mustAcquire(t, b, semOnly("b", "deploy-b"))
+	c := ensure(t, home, "")
+	mustAcquire(t, c, semOnly("c", "deploy-c"))
+
+	waitA := ensure(t, home, "")
+	_, resultWaitA := acquireAsync(waitA, semOnly("wait-a", "deploy-a"))
+	waitB := ensure(t, home, "")
+	waitBPositions, waitBResult := acquireAsync(waitB, semOnly("wait-b", "deploy-b"))
+	waitC := ensure(t, home, "")
+	waitCPositions, waitCResult := acquireAsync(waitC, semOnly("wait-c", "deploy-c"))
+
+	select {
+	case q := <-waitBPositions:
+		if q.Position != 1 {
+			t.Fatalf("wait-b initial position = %d, want 1", q.Position)
+		}
+	case r := <-waitBResult:
+		t.Fatalf("wait-b resolved before queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait-b never reported its initial queue position")
+	}
+	select {
+	case q := <-waitCPositions:
+		if q.Position != 1 {
+			t.Fatalf("wait-c initial position = %d, want 1", q.Position)
+		}
+	case r := <-waitCResult:
+		t.Fatalf("wait-c resolved before queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait-c never reported its initial queue position")
+	}
+
+	if err := holderA.Release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	r := waitResult(t, resultWaitA, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("wait-a should have promoted, got %v", r.err)
+	}
+
+	select {
+	case q := <-waitBPositions:
+		if q.Position != 1 {
+			t.Fatalf("wait-b refreshed position = %d, want 1", q.Position)
+		}
+	case r := <-waitBResult:
+		t.Fatalf("wait-b resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait-b never received refreshed queue position")
+	}
+	select {
+	case q := <-waitCPositions:
+		if q.Position != 1 {
+			t.Fatalf("wait-c refreshed position = %d, want 1", q.Position)
+		}
+	case r := <-waitCResult:
+		t.Fatalf("wait-c resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait-c never received refreshed queue position")
 	}
 }
 

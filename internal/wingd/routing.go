@@ -73,7 +73,14 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			}
 			out = append(out, delivery{c, grant})
 		case admission.EventQueued:
-			queueChanged = true
+			if c := d.byRun[ev.RequestID]; c != nil {
+				out = append(out, delivery{c, &wingwire.Queued{
+					RunID:          ev.RequestID,
+					Position:       ev.Position + 1,
+					QueueLength:    d.waiterCountLocked(),
+					BlockingReason: d.hostBlockingReasonLocked(c.resources),
+				}})
+			}
 		case admission.EventEvicted:
 			d.events.record(d.now(), admissionEvent{Kind: eventEviction, Key: ev.Key})
 			if c := d.byRun[ev.RequestID]; c != nil {
@@ -108,12 +115,49 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 		}
 		out = append(out, delivery{c, &wingwire.Queued{
 			RunID:          waiter.RequestID,
-			Position:       i + 1,
+			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
 			BlockingReason: d.hostBlockingReasonLocked(c.resources),
 		}})
 	}
 	return out
+}
+
+func waiterPosition(earlier []admission.WaiterState, waiter admission.WaiterState) int {
+	mine := waiterResources(waiter)
+	n := 0
+	for _, prev := range earlier {
+		if waitersOverlap(prev, mine) {
+			n++
+		}
+	}
+	return n
+}
+
+func waitersOverlap(waiter admission.WaiterState, resources map[string]struct{}) bool {
+	for r := range waiterResources(waiter) {
+		if _, ok := resources[r]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func waiterResources(waiter admission.WaiterState) map[string]struct{} {
+	resources := map[string]struct{}{}
+	if waiter.MilliCores > 0 {
+		resources["cores"] = struct{}{}
+	}
+	if waiter.MemoryBytes > 0 {
+		resources["memory"] = struct{}{}
+	}
+	for _, claim := range waiter.Claims {
+		if claim.Policy == admission.PolicyCancelOthers {
+			continue
+		}
+		resources["semaphore:"+claim.Key] = struct{}{}
+	}
+	return resources
 }
 
 // cancelWaiterLocked removes a queued run whose connection died. The

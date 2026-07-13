@@ -53,8 +53,8 @@ code change to unlock.
   local admission waits as queued work. Runs waiting for host capacity show
   `queued (N/M)` in list output and an admission line in status output, while
   admitted and terminal runs keep their actual run status.
-- **admission:** Queued runs now receive fresh position updates when the head
-  waiter promotes, so long waits no longer repeat an obsolete queue position.
+- **admission:** Queued runs now receive fresh position updates when the run
+  ahead is admitted, so long waits no longer repeat an obsolete queue position.
 
 ## [v0.16.7] - 2026-07-13
 ### Fixed
