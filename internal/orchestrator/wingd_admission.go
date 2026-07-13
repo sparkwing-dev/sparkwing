@@ -100,7 +100,7 @@ func (la *LocalAdmission) stderr() io.Writer {
 // contentionAttribution asks the daemon, before the run's lease is
 // released, whether it flagged this run as throttled by host contention.
 // When it did, it returns a one-line end-of-run attribution comparing the
-// run's duration to its measured p50 and naming the host-saturation share.
+// run's duration to its measured p99 and naming the host-saturation share.
 // It returns "" when no daemon answers, the run is not flagged, or there
 // is no measured baseline to compare against -- never a fabricated verdict.
 func (la *LocalAdmission) contentionAttribution(ctx context.Context, runID string) string {
@@ -114,7 +114,7 @@ func (la *LocalAdmission) contentionAttribution(ctx context.Context, runID strin
 		}
 		sat := int(h.SaturatedShare*100 + 0.5)
 		if h.ExpectedDurationMS > 0 {
-			return fmt.Sprintf("took %s vs p50 %s; host saturated %d%% of the run",
+			return fmt.Sprintf("took %s vs p99 %s; host saturated %d%% of the run",
 				fmtAdmissionDur(h.ElapsedMS), fmtAdmissionDur(h.ExpectedDurationMS), sat)
 		}
 		return h.ContentionReason

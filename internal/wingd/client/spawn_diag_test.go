@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// TestEnsureDaemon_SurfacesDaemonBindFailure pins BW-650: when a spawned
+// TestEnsureDaemon_SurfacesDaemonBindFailure: when a spawned
 // daemon dies at startup because it cannot bind, the returned error carries
 // the daemon's own bind failure (via its log) instead of an unrelated
 // spawn-layer error.

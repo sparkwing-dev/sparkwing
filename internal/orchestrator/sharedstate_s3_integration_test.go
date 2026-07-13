@@ -81,7 +81,7 @@ func registerS3IntegPipelines(t *testing.T) {
 // computes and writes the cache memo under If-Match; the second run's
 // memo acquire sees the entry and replays it. Both runs succeed and the
 // cacheable step executes exactly once. This is the cross-runner cache
-// reservation BW-322 adds; the no-op fallback (no CAS) is exercised
+// reservation adds; the no-op fallback (no CAS) is exercised
 // separately in TestS3Concurrency_FallsBackWhenPreconditionsIgnored.
 func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 	registerS3IntegPipelines(t)

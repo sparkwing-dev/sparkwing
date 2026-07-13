@@ -32,7 +32,7 @@ func (s *captureSink) peakCPU() int64 {
 	return peak
 }
 
-// TestRun_ReportsNonzeroCPUUnderLoad pins BW-651: on the host platform a
+// TestRun_ReportsNonzeroCPUUnderLoad: on the host platform a
 // CPU-burning process must produce a nonzero sampled peak, so learned
 // capacity can activate rather than costing every run by the default.
 func TestRun_ReportsNonzeroCPUUnderLoad(t *testing.T) {

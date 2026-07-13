@@ -91,7 +91,7 @@ func holdLease(t *testing.T, home, runID string, cores float64, origin wingwire.
 
 // TestRunnerAdmissionE2E stands up a real local admission daemon and a real
 // controller, holds local and controller-origin work on the box, and
-// asserts the two behaviours BW-647 promises this machine can show:
+// asserts the two behaviors this machine can show:
 // controller-dispatched work appears in the queue with a controller origin
 // beside a local run, and the headroom the runner advertises to the
 // controller shrinks as local work holds capacity.

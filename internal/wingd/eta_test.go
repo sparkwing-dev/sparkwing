@@ -52,6 +52,20 @@ func TestSimulateQueue_ETA(t *testing.T) {
 			wantStarts: []float64{0},
 			wantClear:  inf,
 		},
+		{
+			name:       "millicore rounding at capacity still fits",
+			capCores:   7.889999999,
+			waiters:    []simRun{{cores: 7.89, duration: 5000}},
+			wantStarts: []float64{0},
+			wantClear:  5000,
+		},
+		{
+			name:       "oversized waiter makes clear time unknown",
+			capCores:   8,
+			waiters:    []simRun{{cores: 9, duration: 5000}},
+			wantStarts: []float64{inf},
+			wantClear:  inf,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

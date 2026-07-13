@@ -54,6 +54,15 @@ func TestApplyHostCeiling(t *testing.T) {
 			wantCores:  1,
 			wantMem:    16 << 30,
 		},
+		{
+			name:        "memory pin over capacity clamps with loud warning",
+			res:         Resolution{Cores: 1, MemoryBytes: 32 << 30, Source: store.CostSourcePin},
+			grantCores:  8,
+			grantMem:    16 << 30,
+			wantCores:   1,
+			wantMem:     16 << 30,
+			wantWarning: "pin 32GB memory exceeds this machine (16GB); running alone - consider a smaller pin or a machine budget",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,6 +83,7 @@ func TestApplyHostCeiling(t *testing.T) {
 func TestResolve_Order(t *testing.T) {
 	measured := &store.PipelineProfile{
 		P50Duration:     30 * time.Second,
+		P99Duration:     90 * time.Second,
 		PeakCores:       6,
 		PeakMemoryBytes: 4 << 30,
 		SampleCount:     MinSamples,
@@ -91,11 +101,11 @@ func TestResolve_Order(t *testing.T) {
 	}{
 		{
 			name: "pin wins over measured", pin: &Pin{Cores: 2}, profile: measured, numCPU: 8,
-			wantCores: 2, wantSource: store.CostSourcePin, wantDur: 30 * time.Second,
+			wantCores: 2, wantSource: store.CostSourcePin, wantDur: 90 * time.Second,
 		},
 		{
 			name: "measured used when enough samples", pin: nil, profile: measured, numCPU: 8,
-			wantCores: 6, wantSource: store.CostSourceMeasured, wantDur: 30 * time.Second,
+			wantCores: 6, wantSource: store.CostSourceMeasured, wantDur: 90 * time.Second,
 		},
 		{
 			name: "below threshold falls to default", pin: nil, profile: thin, numCPU: 8,
@@ -107,7 +117,7 @@ func TestResolve_Order(t *testing.T) {
 		},
 		{
 			name: "empty pin ignored", pin: &Pin{}, profile: measured, numCPU: 8,
-			wantCores: 6, wantSource: store.CostSourceMeasured, wantDur: 30 * time.Second,
+			wantCores: 6, wantSource: store.CostSourceMeasured, wantDur: 90 * time.Second,
 		},
 	}
 	for _, tc := range cases {

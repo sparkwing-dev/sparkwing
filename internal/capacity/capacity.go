@@ -111,7 +111,7 @@ type Resolution struct {
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
 	res := Resolution{}
 	if profile != nil {
-		res.ExpectedDuration = profile.P50Duration
+		res.ExpectedDuration = profile.P99Duration
 	}
 	if !pin.Empty() {
 		res.Cores = pin.Cores
@@ -200,6 +200,11 @@ func ApplyHostCeiling(res Resolution, machineCores, grantableCores float64, gran
 		res.Cores = grantableCores
 	}
 	if grantableMemoryBytes > 0 && res.MemoryBytes > grantableMemoryBytes {
+		if res.Source == store.CostSourcePin {
+			warning = fmt.Sprintf(
+				"pin %s memory exceeds this machine (%s); running alone - consider a smaller pin or a machine budget",
+				gib(res.MemoryBytes), gib(grantableMemoryBytes))
+		}
 		res.MemoryBytes = grantableMemoryBytes
 	}
 	return res, warning

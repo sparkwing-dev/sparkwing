@@ -14,7 +14,7 @@ func deepHome(t *testing.T) string {
 	return home
 }
 
-// TestSocketPath_StaysShortForDeepHome pins BW-649: a home deep enough
+// TestSocketPath_StaysShortForDeepHome: a home deep enough
 // that the old under-home socket would exceed sun_path still resolves to a
 // short socket path, while the lock and state stay under the home.
 func TestSocketPath_StaysShortForDeepHome(t *testing.T) {

@@ -588,14 +588,13 @@ SELECT pipeline, node_id, ` + profileColumns + `
 	return out, nil
 }
 
-// CacheExcludedCounts reports, per pipeline, how many finished runs were
-// dominated by cache hits and so were excluded from profile learning: runs
-// where at least fraction of their completed nodes carry the cachedOutcome
-// status. No counter is stored for this (unlike contention); the figure is
-// derived live from retained run history, so it reflects the runs still in the
-// store rather than every run ever excluded. Pass a pipeline to scope to one,
-// or "" for every pipeline. Pipelines with no cache-dominant runs are absent
-// from the map.
+// CacheExcludedCounts reports, per pipeline, how many finished runs had every
+// completed node served from cache and no metric samples, so they were excluded
+// from profile learning. No counter is stored for this (unlike contention);
+// the figure is derived live from retained run history, so it reflects the
+// runs still in the store rather than every run ever excluded. Pass a pipeline
+// to scope to one, or "" for every pipeline. Pipelines with no fully-cached
+// runs are absent from the map.
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
 	q := `
 SELECT r.pipeline, COUNT(*)
@@ -606,9 +605,14 @@ SELECT r.pipeline, COUNT(*)
       FROM nodes
      GROUP BY run_id
   ) x
+  LEFT JOIN (
+    SELECT run_id, COUNT(*) AS samples
+      FROM node_metrics
+     GROUP BY run_id
+  ) m ON m.run_id = x.run_id
   JOIN runs r ON r.id = x.run_id
- WHERE x.total > 0 AND CAST(x.cached AS REAL) / x.total >= ?`
-	args := []any{cachedOutcome, fraction}
+ WHERE x.total > 0 AND x.cached = x.total AND COALESCE(m.samples, 0) = 0`
+	args := []any{cachedOutcome}
 	if pipeline != "" {
 		q += ` AND r.pipeline = ?`
 		args = append(args, pipeline)

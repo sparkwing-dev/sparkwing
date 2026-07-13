@@ -136,7 +136,7 @@ type AdmissionRequest struct {
 	// where a charge came from. The daemon may cap measured costs to the
 	// largest idle-grantable request.
 	CostSource CostSource `json:"cost_source,omitempty"`
-	// ExpectedDurationMS is the pipeline's measured p50 run duration in
+	// ExpectedDurationMS is the pipeline's measured p99 run duration in
 	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
 	// no measured duration exists yet, so the run contributes no ETA.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
@@ -299,7 +299,7 @@ type Holder struct {
 	// ("measured p99 over 12 runs", "explicit pin"), for a dashboard to
 	// tooltip beside the charge. Empty when the source is unknown.
 	CostRationale string `json:"cost_rationale,omitempty"`
-	// ExpectedDurationMS is the holder's measured p50 run duration; zero
+	// ExpectedDurationMS is the holder's measured p99 run duration; zero
 	// when unknown. ETA uses it to estimate when the holder frees capacity.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
 	// DriftWarning, when set, notes that the holder's pin has drifted from
@@ -369,7 +369,7 @@ type Waiter struct {
 	// measured"), also folded into BlockingReason. Empty when the source is
 	// unknown.
 	CostRationale string `json:"cost_rationale,omitempty"`
-	// ExpectedDurationMS is the waiter's measured p50 run duration; zero
+	// ExpectedDurationMS is the waiter's measured p99 run duration; zero
 	// when unknown.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
 	// DriftWarning, when set, notes that the waiter's pin has drifted from

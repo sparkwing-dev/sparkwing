@@ -47,6 +47,21 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Queue ETAs now use measured p99 duration instead of p50.
+  Long-tail pipelines no longer look ready to clear just because they passed
+  their median runtime.
+- **admission:** Cache-heavy runs with real measured work now update learned
+  capacity profiles. Fully-cached runs still stay out of learning, but a run
+  with measured non-cached work no longer loses its sample because most setup
+  nodes hit cache.
+- **cli:** Capacity reporting now counts only fully-cached, unmeasured runs as
+  cache-excluded. A run that updated the learned profile is no longer also
+  reported as excluded from learning.
+- **admission:** Memory pins that exceed the host's grantable memory now warn
+  when Sparkwing clamps them to the machine budget, matching core pin
+  behavior.
 
 ## [v0.17.1] - 2026-07-13
 ### Added

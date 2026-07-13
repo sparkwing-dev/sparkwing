@@ -6,7 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestResolve_PlanHashChangeReMeasuresAtTwicePrior pins BW-693: a
+// TestResolve_PlanHashChangeReMeasuresAtTwicePrior: a
 // structural change (a new plan hash) prices the changed version at the
 // safety multiple of its predecessor's measured peak, not on the stale
 // measured peak, and labels the charge measuring.
@@ -45,7 +45,7 @@ func TestResolve_SameHashGraduatedUsesMeasuredPeak(t *testing.T) {
 	}
 }
 
-// TestResolve_ContendedFloorChargesTwiceFloor pins BW-690: a version still
+// TestResolve_ContendedFloorChargesTwiceFloor: a version still
 // short of clean samples but with a demand floor from its contended runs is
 // charged the safety multiple of that floor, sourced as floor.
 func TestResolve_ContendedFloorChargesTwiceFloor(t *testing.T) {

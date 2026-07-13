@@ -17,7 +17,7 @@ func openTestStore(t *testing.T) (*Store, context.Context) {
 	return st, context.Background()
 }
 
-// TestRecordProfileObservation_ContendedRaisesFloorNotPeak pins BW-690: a
+// TestRecordProfileObservation_ContendedRaisesFloorNotPeak: a
 // contended observation feeds the demand floor only. It never enters the
 // clean window, so the measured peak, the duration percentiles, and the
 // sample count that graduates a version are all untouched.
@@ -73,7 +73,7 @@ func TestRecordProfileObservation_FloorOnlyRises(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_PlanHashChangeResetsWindow pins BW-693: a
+// TestRecordProfileObservation_PlanHashChangeResetsWindow: a
 // structural change clears the version's learned window and floor and carries
 // the outgoing peak into PrevPeak, so the changed version re-measures from a
 // warm start rather than inheriting stale samples.

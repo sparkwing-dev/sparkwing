@@ -288,7 +288,7 @@ type simEvent struct {
 // waiter that must wait behind it starts at +Inf, and the clear time is
 // +Inf when any run never finishes.
 func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts []float64, clear float64) {
-	const eps = 1e-9
+	const eps = 1e-6
 	freeCores := capCores
 	freeMem := capMem
 	var events []simEvent
@@ -305,6 +305,7 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 	for i, w := range waiters {
 		if w.cores > capCores+eps || w.mem > capMem+eps {
 			starts[i] = math.Inf(1)
+			clear = math.Inf(1)
 			continue
 		}
 		for w.cores > freeCores+eps || w.mem > freeMem+eps {
@@ -348,7 +349,7 @@ func popEarliest(events *[]simEvent) (simEvent, bool) {
 	return e, true
 }
 
-// remainingMS is a holder's estimated milliseconds left: its measured p50
+// remainingMS is a holder's estimated milliseconds left: its measured p99
 // minus elapsed, floored at zero. An unmeasured duration is +Inf.
 func remainingMS(expectedMS, elapsedMS int64) float64 {
 	if expectedMS <= 0 {
