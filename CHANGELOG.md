@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.8] - 2026-07-13
 ### Fixed
 
 - **runs:** `sparkwing runs list` and `sparkwing runs status` now surface
