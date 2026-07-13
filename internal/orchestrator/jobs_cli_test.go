@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestListJobs_EmptyDB(t *testing.T) {
@@ -126,6 +127,76 @@ func TestListJobs_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestListJobs_ShowsLocalAdmissionWait(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	started := time.Now().Add(-2 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-admission-list",
+		Pipeline:  "push-checks",
+		Status:    "running",
+		StartedAt: started,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, "run-admission-list", "", "admission_wait", []byte(`{"position":1,"queue_length":3}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &buf); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "queued (1/3)") {
+		t.Fatalf("list should surface admission wait, got:\n%s", out)
+	}
+}
+
+func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	started := time.Now().Add(-3 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-stale-admission-list",
+		Pipeline:  "push-checks",
+		Status:    "running",
+		StartedAt: started,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.FinishRun(ctx, "run-stale-admission-list", "cancelled", "cancelled via test"); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, "run-stale-admission-list", "", "admission_wait", []byte(`{"position":1,"queue_length":3}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &buf); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "admission_wait") {
+		t.Fatalf("finished run should not show stale admission wait, got:\n%s", out)
+	}
+	if !strings.Contains(out, "cancelled") {
+		t.Fatalf("finished run should keep terminal status, got:\n%s", out)
+	}
+}
+
 func TestJobStatus_RendersFanOutDAG(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fanout-ok"})
@@ -187,6 +258,126 @@ func TestJobStatus_JSON(t *testing.T) {
 	run, _ := payload["run"].(map[string]any)
 	if run["id"] != res.RunID {
 		t.Fatalf("json run id mismatch: %v", run)
+	}
+}
+
+func TestJobStatus_ShowsLocalAdmissionWait(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	started := time.Now().Add(-2 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-admission-wait",
+		Pipeline:  "push-checks",
+		Status:    "running",
+		StartedAt: started,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{
+		RunID:  "run-admission-wait",
+		NodeID: "gate-test",
+		Status: "pending",
+	}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, "run-admission-wait", "", "admission_wait", []byte(`{"position":2,"queue_length":5}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-admission-wait", orchestrator.StatusOpts{}, &buf); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"status:    running",
+		"admission: queued for local admission",
+		"position 2 of 5",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestJobStatus_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	started := time.Now().Add(-3 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-stale-admission-status",
+		Pipeline:  "push-checks",
+		Status:    "running",
+		StartedAt: started,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.FinishRun(ctx, "run-stale-admission-status", "cancelled", "cancelled via test"); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, "run-stale-admission-status", "", "admission_wait", []byte(`{"position":2,"queue_length":5}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-stale-admission-status", orchestrator.StatusOpts{}, &buf); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "admission:") {
+		t.Fatalf("finished run should not show stale admission wait, got:\n%s", out)
+	}
+}
+
+func TestListJobs_ReadsAdmissionTerminalEventPastFirstPage(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	started := time.Now().Add(-2 * time.Minute)
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        "run-admission-long-events",
+		Pipeline:  "push-checks",
+		Status:    "running",
+		StartedAt: started,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, "run-admission-long-events", "", "admission_wait", []byte(`{"position":1,"queue_length":1}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	for i := 0; i < 500; i++ {
+		if _, err := st.AppendEvent(ctx, "run-admission-long-events", "node", "node_started", nil); err != nil {
+			t.Fatalf("AppendEvent filler %d: %v", i, err)
+		}
+	}
+	if _, err := st.AppendEvent(ctx, "run-admission-long-events", "", "admission_granted", nil); err != nil {
+		t.Fatalf("AppendEvent granted: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &buf); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "queued") {
+		t.Fatalf("admitted run should not show stale queued state, got:\n%s", out)
 	}
 }
 
