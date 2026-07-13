@@ -388,8 +388,12 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 	if pipeline != "" {
 		profile, _ = r.ctrl.GetPipelineProfile(ctx, pipeline, req.NodeID)
 	}
-	if !pin.Empty() && pipeline != "" {
-		_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
+	if pipeline != "" {
+		if pin.Empty() {
+			_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, 0, 0)
+		} else {
+			_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
+		}
 	}
 	return capacity.Resolve(pin, profile, podDefaultRefCPU)
 }

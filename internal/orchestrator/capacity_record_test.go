@@ -103,6 +103,46 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 	}
 }
 
+func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	start := time.Now()
+	createMeasuredRun := func(runID string) {
+		t.Helper()
+		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
+			TS:            start,
+			CPUMillicores: 1200,
+			MemoryBytes:   1 << 30,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	createMeasuredRun("r1")
+	recordRunProfile(ctx, st, "demo", "r1", &capacity.Pin{Cores: 0.25}, start, start.Add(time.Second))
+	createMeasuredRun("r2")
+	recordRunProfile(ctx, st, "demo", "r2", nil, start, start.Add(time.Second))
+
+	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || rollup == nil {
+		t.Fatalf("rollup profile missing: %v", err)
+	}
+	if rollup.PinnedCores != 0 || rollup.PinnedMemoryBytes != 0 {
+		t.Fatalf("rollup pin = %.2f cores/%d bytes, want cleared after undeclared plan", rollup.PinnedCores, rollup.PinnedMemoryBytes)
+	}
+}
+
 // TestRecordRunProfile_DurationExcludesQueueWait pins BW-652: the rollup
 // duration measures grant-to-finish (execStart..execEnd), so a run that
 // waited in admission before executing records only its execution time.

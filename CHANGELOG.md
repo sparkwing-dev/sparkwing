@@ -49,6 +49,12 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **admission:** Removing a `.Resources()` declaration now clears the stored
+  capacity pin the next time that pipeline or cluster-dispatched node runs.
+  Previous versions could keep charging the last explicit pin from the local
+  profile store or controller profile even after source stopped declaring it,
+  so stale undersized pins survived code cleanup until an operator manually
+  reset state.
 - **admission:** No run is ever rejected for exceeding host capacity. A cost
   above what this box can grant -- a measured peak or an explicit
   `.Resources()` pin -- now runs alone at the machine's grantable budget

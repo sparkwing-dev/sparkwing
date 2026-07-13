@@ -72,9 +72,11 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		PeakMemoryBytes: runPeakMem,
 		CPUMeasured:     cpuMeasured,
 	})
-	if !pin.Empty() {
-		_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+	if pin.Empty() {
+		_ = st.SetProfilePin(ctx, pipeline, "", 0, 0)
+		return
 	}
+	_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
 }
 
 // capLocalPeakCores enforces the stored-profile invariant that a local

@@ -1,11 +1,18 @@
 package k8s
 
 import (
+	"context"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -102,5 +109,37 @@ func TestPodResources_PinCoresOnlyFallsBackForMemory(t *testing.T) {
 	}
 	if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != 128<<20 {
 		t.Errorf("mem request should fall back to config default: got %d want %d", got, int64(128<<20))
+	}
+}
+
+func TestResolveResources_ClearsControllerPinWhenNodeDeclaresNone(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	if err := st.RecordProfileObservation(ctx, "deploy", "build", store.ProfileObservation{
+		Duration: time.Minute, PeakCores: 1.2, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertProfilePin(ctx, "deploy", "build", 0.25, 0); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil })
+	k8sRunner := &Runner{ctrl: client.New(srv.URL, nil), cfg: defaultsCfg}
+	_ = k8sRunner.resolveResources(ctx, runner.Request{Pipeline: "deploy", NodeID: "build", Node: node})
+
+	profile, err := st.GetPipelineProfile(ctx, "deploy", "build")
+	if err != nil || profile == nil {
+		t.Fatalf("profile missing: %v", err)
+	}
+	if profile.PinnedCores != 0 || profile.PinnedMemoryBytes != 0 {
+		t.Fatalf("controller pin = %.2f cores/%d bytes, want cleared after undeclared node", profile.PinnedCores, profile.PinnedMemoryBytes)
 	}
 }

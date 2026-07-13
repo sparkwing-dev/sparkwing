@@ -48,7 +48,13 @@ func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.UpsertProfilePin(r.Context(), pipeline, nodeID, body.Cores, body.MemoryBytes); err != nil {
+	var err error
+	if body.Cores <= 0 && body.MemoryBytes <= 0 {
+		err = s.store.SetProfilePin(r.Context(), pipeline, nodeID, 0, 0)
+	} else {
+		err = s.store.UpsertProfilePin(r.Context(), pipeline, nodeID, body.Cores, body.MemoryBytes)
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
