@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.9] - 2026-07-13
 ### Fixed
 
 - **admission:** Capacity profiles with obsolete CPU accounting are ignored
