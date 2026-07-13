@@ -47,6 +47,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** `sparkwing queue` now evaluates holder liveness from the
+  holder's process tree instead of only the root process. A wrapper or shell
+  that is idle while child test processes are still active no longer appears
+  as stalled, while an idle descendant tree still reports as stalled after a
+  bounded grace window.
 
 ## [v0.16.6] - 2026-07-13
 ### Fixed
