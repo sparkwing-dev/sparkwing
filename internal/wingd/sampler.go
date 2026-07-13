@@ -37,15 +37,16 @@ type platformSampler struct{}
 // Sample returns a live [HostStat] for the host it runs on.
 func (platformSampler) Sample() (HostStat, error) { return sampleHost() }
 
-// ProcSampler reads a single process's recent CPU usage as a fraction of
+// ProcSampler reads a process tree's recent CPU usage as a fraction of
 // one core (1.0 means one core fully busy). The daemon consults it at a
 // slow cadence, and only while runs are queued, to tell a working holder
 // from one that is alive but wedged. Tests supply a fake so stall
 // flagging is exercised deterministically.
 type ProcSampler interface {
-	// CPUFraction reports the process's CPU usage as a fraction of one
-	// core, and false when the process cannot be sampled -- it is gone,
-	// or the platform offers no cheap per-process reading.
+	// CPUFraction reports the root process and descendant processes' CPU
+	// usage as a fraction of one core, and false when the process tree
+	// cannot be sampled -- it is gone, or the platform offers no cheap
+	// per-process reading.
 	CPUFraction(pid int) (float64, bool)
 }
 
