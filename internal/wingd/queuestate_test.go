@@ -26,6 +26,12 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
 
 	cl := ensure(t, home, "v1")
+	holder := mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:     "holder",
+		Resources: wingwire.HostResources{Cores: 1},
+	})
+	t.Cleanup(func() { _ = holder.Release() })
+
 	_, result := acquireAsync(cl, wingwire.AdmissionRequest{
 		RunID:     "heavy",
 		Resources: wingwire.HostResources{Cores: 5},

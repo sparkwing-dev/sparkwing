@@ -94,15 +94,21 @@ func TestRestore_LedgerContinuesExactlyWhereSnapshotLeftOff(t *testing.T) {
 		t.Fatalf("parent release with child attached emitted %v", events)
 	}
 	events = mustRelease(t, restored, parent.ID, "child")
-	wantKinds(t, events, EventReleased)
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "waiter-1" {
+		t.Fatalf("promoted %q, want waiter-1", events[1].RequestID)
+	}
 
 	events, err := restored.SetHeadroom(4, 1024)
 	if err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
-	wantKinds(t, events, EventPromoted)
-	if events[0].RequestID != "waiter-1" {
-		t.Fatalf("promoted %q, want waiter-1", events[0].RequestID)
+	if len(events) != 0 {
+		t.Fatalf("SetHeadroom after promotion emitted %v", events)
+	}
+	snap := restored.Snapshot()
+	if len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "waiter-2" {
+		t.Fatalf("remaining waiters = %+v, want only waiter-2", snap.Waiters)
 	}
 }
 

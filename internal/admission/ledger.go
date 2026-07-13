@@ -458,7 +458,7 @@ func (l *Ledger) starvedByYounger(w spec, r resource) bool {
 func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, capacity int64, ok bool) {
 	switch r {
 	case resourceCores:
-		capacity = min(l.totalMilliCores, l.headroomMilliCores)
+		capacity = l.coreCapacity()
 		used = l.usedMilliCores
 		for _, le := range l.leases {
 			if le.admit <= w.admit {
@@ -467,7 +467,7 @@ func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, ca
 		}
 		return w.milliCores, used, usedOlder, capacity, true
 	case resourceMemory:
-		capacity = int64(min(l.totalMemory, l.headroomMemory))
+		capacity = int64(l.memoryCapacity())
 		used = int64(l.usedMemory)
 		for _, le := range l.leases {
 			if le.admit <= w.admit {
@@ -554,13 +554,27 @@ func touchesAny(s spec, set map[resource]bool) bool {
 }
 
 func (l *Ledger) hostFits(s spec) bool {
-	effCores := min(l.totalMilliCores, l.headroomMilliCores)
-	effMemory := min(l.totalMemory, l.headroomMemory)
+	effCores := l.coreCapacity()
+	effMemory := l.memoryCapacity()
 	coresOK := s.milliCores == 0 ||
 		(l.usedMilliCores <= effCores && s.milliCores <= effCores-l.usedMilliCores)
 	memoryOK := s.memory == 0 ||
 		(l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
 	return coresOK && memoryOK
+}
+
+func (l *Ledger) coreCapacity() int64 {
+	if l.usedMilliCores == 0 {
+		return l.totalMilliCores
+	}
+	return min(l.totalMilliCores, l.headroomMilliCores)
+}
+
+func (l *Ledger) memoryCapacity() uint64 {
+	if l.usedMemory == 0 {
+		return l.totalMemory
+	}
+	return min(l.totalMemory, l.headroomMemory)
 }
 
 func (l *Ledger) semUsed(key string) int {

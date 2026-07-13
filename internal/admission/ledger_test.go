@@ -612,6 +612,22 @@ func TestSetHeadroom_ShrinkBelowGrantedNeverEvicts(t *testing.T) {
 	mustQueue(t, l, Request{ID: "c", Cores: 1})
 }
 
+func TestSetHeadroom_EmptyHostAdmitsQueueHead(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	if _, err := l.SetHeadroom(0, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	lease := mustGrant(t, l, Request{ID: "a", Cores: 2, MemoryBytes: 512})
+	mustQueue(t, l, Request{ID: "b", Cores: 2, MemoryBytes: 512})
+
+	events := mustRelease(t, l, lease.ID, "a")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "b" {
+		t.Fatalf("promoted %q, want b", events[1].RequestID)
+	}
+}
+
 func TestSetHeadroom_RejectsInvalidValues(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	for _, cores := range []float64{-1, math.NaN(), math.Inf(1)} {
