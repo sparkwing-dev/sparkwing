@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **runs:** `sparkwing runs list` and `sparkwing runs status` now surface
+  local admission waits as queued work. Runs waiting for host capacity show
+  `queued (N/M)` in list output and an admission line in status output, while
+  admitted and terminal runs keep their actual run status.
 
 ## [v0.16.7] - 2026-07-13
 ### Fixed
