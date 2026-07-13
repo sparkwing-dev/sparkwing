@@ -61,6 +61,9 @@ var (
 	ErrUnknownToken = errors.New("admission: unknown re-attach token")
 	// ErrInvalidHeadroom reports a non-finite or negative headroom value.
 	ErrInvalidHeadroom = errors.New("admission: invalid headroom")
+	// ErrInvalidResize reports a total capacity change that would make
+	// the current ledger state impossible.
+	ErrInvalidResize = errors.New("admission: invalid resize")
 	// ErrInvalidSnapshot reports a snapshot that fails validation or the
 	// ledger invariants on restore.
 	ErrInvalidSnapshot = errors.New("admission: invalid snapshot")

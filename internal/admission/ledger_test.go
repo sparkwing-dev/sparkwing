@@ -684,6 +684,109 @@ func TestSetHeadroom_ShrinkBelowGrantedNeverEvicts(t *testing.T) {
 	mustQueue(t, l, Request{ID: "c", Cores: 1})
 }
 
+func TestSetHeadroom_EmptyHostAdmitsQueueHead(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	if _, err := l.SetHeadroom(0, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	lease := mustGrant(t, l, Request{ID: "a", Cores: 2, MemoryBytes: 512})
+	mustQueue(t, l, Request{ID: "b", Cores: 2, MemoryBytes: 512})
+
+	events := mustRelease(t, l, lease.ID, "a")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "b" {
+		t.Fatalf("promoted %q, want b", events[1].RequestID)
+	}
+}
+
+// TestSetHeadroom_PerResourceFloorAdmitsUnheldAxis pins the floor's
+// per-resource shape: a lease on one host axis leaves the other axis's
+// zero-holder floor intact, so under collapsed headroom a waiter on the
+// still-idle axis admits rather than parking behind an unrelated holder.
+func TestSetHeadroom_PerResourceFloorAdmitsUnheldAxis(t *testing.T) {
+	tests := []struct {
+		name   string
+		holder Request
+		waiter Request
+	}{
+		{
+			name:   "memory holder still admits a cpu waiter",
+			holder: Request{ID: "holder", MemoryBytes: 1},
+			waiter: Request{ID: "waiter", Cores: 1},
+		},
+		{
+			name:   "cpu holder still admits a memory waiter",
+			holder: Request{ID: "holder", Cores: 1},
+			waiter: Request{ID: "waiter", MemoryBytes: 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := testLedger(t, 4, 1024)
+			if _, err := l.SetHeadroom(0, 0); err != nil {
+				t.Fatalf("SetHeadroom: %v", err)
+			}
+
+			mustGrant(t, l, tt.holder)
+			mustGrant(t, l, tt.waiter)
+		})
+	}
+}
+
+func TestResizeTotals_GatesNewAdmission(t *testing.T) {
+	l := testLedger(t, 8, 2048)
+	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 512})
+	if err := l.ResizeTotals(2, 1024); err != nil {
+		t.Fatalf("ResizeTotals: %v", err)
+	}
+
+	mustQueue(t, l, Request{ID: "waiter", Cores: 2, MemoryBytes: 1024})
+}
+
+// TestLivenessFloor_IdleBoxAdmitsChargeAboveHeadroom reproduces a field
+// incident: a restored ledger whose headroom sits one millicore below a
+// run's measured cost (3199 vs 3200) must still admit that run on an
+// otherwise-idle box, not park it forever a hair short of grantable.
+func TestLivenessFloor_IdleBoxAdmitsChargeAboveHeadroom(t *testing.T) {
+	l := testLedger(t, 4, 8<<30)
+	if _, err := l.SetHeadroom(3.199, 8<<30); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	d, _, err := l.Submit(Request{ID: "deploy", Cores: 3.2})
+	if err != nil {
+		t.Fatalf("Submit deploy: %v", err)
+	}
+	if d.Kind != DecisionGranted {
+		t.Fatalf("idle-box deploy at 3.2 cores under 3.199 headroom = %s, want granted (liveness floor)", d.Kind)
+	}
+}
+
+// TestResizeTotals_GrowAdmitsSecondRunAgainstRealBudget covers the same
+// incident's other half: a snapshot restored with a stale, too-small total
+// (a cgroup-capped or pre-resize capacity) is grown to the machine's real
+// budget, so a second concurrent run the stale total could never fit admits
+// once headroom reflects the real box. Fails without ResizeTotals: the stale
+// total keeps the effective capacity pinned below the second run.
+func TestResizeTotals_GrowAdmitsSecondRunAgainstRealBudget(t *testing.T) {
+	l := testLedger(t, 4, 4<<30)
+	mustGrant(t, l, Request{ID: "holder", Cores: 3})
+	mustQueue(t, l, Request{ID: "second", Cores: 3})
+
+	if err := l.ResizeTotals(8, 4<<30); err != nil {
+		t.Fatalf("ResizeTotals: %v", err)
+	}
+	events, err := l.SetHeadroom(8, 4<<30)
+	if err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+	if !containsKind(events, EventPromoted) {
+		t.Fatalf("second run not promoted after growing to the real budget: %v", eventKinds(events))
+	}
+}
+
 func TestSetHeadroom_RejectsInvalidValues(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	for _, cores := range []float64{-1, math.NaN(), math.Inf(1)} {

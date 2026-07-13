@@ -1149,6 +1149,8 @@ export interface QueueHolder {
   expected_duration_ms?: number;
   drift_warning?: string;
   stalled?: boolean;
+  contended?: boolean;
+  contention_reason?: string;
   recovery?: string;
 }
 
@@ -1181,6 +1183,7 @@ export interface QueueEvents {
   evictions?: { key: string; count: number }[];
   queue_timeouts?: number;
   cancellations?: number;
+  contended?: number;
 }
 
 // QueueState is the daemon's full accounting snapshot. The endpoint
@@ -1194,6 +1197,7 @@ export interface QueueState {
   expected_clear_ms?: number | null;
   daemon_version?: string;
   daemon_uptime_ms?: number;
+  ignore_external?: boolean;
   events?: QueueEvents | null;
 }
 

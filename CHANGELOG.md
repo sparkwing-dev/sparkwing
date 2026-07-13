@@ -73,6 +73,22 @@ code change to unlock.
   longer fails with "use of closed network connection" when the daemon blinks;
   it recovers within the grace window, and a daemon that never returns is named
   in the error with its log tail.
+- **daemon:** Admission state restored from disk is resized to the machine's
+  current budget before the daemon serves. A restart after a capacity change --
+  a resized box, or a stale or cgroup-capped snapshot -- can no longer admit new
+  runs against stale-too-large totals, nor strand a run the real machine could
+  fit against stale-too-small ones. First shipped in v0.16.5.
+
+## [v0.16.5] - 2026-07-13
+### Fixed
+
+- **admission:** A host with no sparkwing holders now admits the queue
+  head even when external load leaves zero measured headroom. A saturated
+  machine falls back to one sparkwing run at a time instead of letting the
+  queue park forever.
+- **daemon:** Restored admission state is resized to the current machine
+  budget before the daemon serves, so a restart after a capacity change
+  cannot admit new runs against stale totals.
 
 ## [v0.16.4] - 2026-07-12
 ### Fixed

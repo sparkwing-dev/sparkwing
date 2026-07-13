@@ -342,6 +342,13 @@ function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {
               </span>
             </Tooltip>
           )}
+          {!h.stalled && h.contended && (
+            <Tooltip content="Running slower than its measured profile while the host is saturated">
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 cursor-default">
+                contended
+              </span>
+            </Tooltip>
+          )}
         </div>
       </Td>
       <Td hideSm mono muted>

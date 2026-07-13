@@ -135,6 +135,21 @@ describe("externalPressureNote", () => {
     };
     assert.equal(externalPressureNote(qs), "");
   });
+  it("stays quiet when admission ignores external load", () => {
+    const qs: QueueState = {
+      ignore_external: true,
+      resources: [{ key: "cores", capacity: 8, held: 2, external: 5 }],
+      waiters: [
+        {
+          run_id: "w",
+          position: 1,
+          resources: { cores: 4 },
+          blocking_reason: "waiting on cores",
+        },
+      ],
+    };
+    assert.equal(externalPressureNote(qs), "");
+  });
 });
 
 describe("groupHolders", () => {
@@ -186,6 +201,15 @@ describe("eventsLine", () => {
       median_wait_ms: 0,
     });
     assert.equal(line, "last 24h: 3 runs, median wait 0s");
+  });
+  it("includes contended runs when the daemon reports them", () => {
+    const line = eventsLine({
+      window_ms: 3_600_000,
+      runs: 0,
+      median_wait_ms: 0,
+      contended: 2,
+    });
+    assert.equal(line, "last 1h: 0 runs, 2 contended");
   });
   it("is empty for a quiet or absent window", () => {
     assert.equal(eventsLine(null), "");
