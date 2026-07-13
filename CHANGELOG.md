@@ -62,6 +62,9 @@ code change to unlock.
 - **admission:** Memory pins that exceed the host's grantable memory now warn
   when Sparkwing clamps them to the machine budget, matching core pin
   behavior.
+- **cli:** Source-built scaffolds now fall back to the latest released SDK
+  version, so fresh projects created from a development binary pass the
+  version-freshness gate.
 
 ## [v0.17.1] - 2026-07-13
 ### Added
