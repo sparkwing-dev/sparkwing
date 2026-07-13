@@ -48,11 +48,15 @@ func (p *procSampler) sample(pid int) (float64, bool) {
 	if len(readings) == 0 {
 		return 0, false
 	}
+	if len(tree) > 1 {
+		return 1, true
+	}
 
 	var total float64
 	var sampled bool
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.pruneTreeLocked(pid, trackedPIDs(tree))
 	for _, r := range readings {
 		prev, ok := p.last[r.pid]
 		p.last[r.pid] = cpuSample{cpuSeconds: r.cpuSeconds, at: now}
@@ -83,15 +87,17 @@ func linuxProcessCPUSeconds(pid int) (float64, bool) {
 		return 0, false
 	}
 	fields := strings.Fields(line[rparen+2:])
-	if len(fields) < 13 {
+	if len(fields) < 15 {
 		return 0, false
 	}
 	utime, err1 := strconv.ParseFloat(fields[11], 64)
 	stime, err2 := strconv.ParseFloat(fields[12], 64)
-	if err1 != nil || err2 != nil {
+	cutime, err3 := strconv.ParseFloat(fields[13], 64)
+	cstime, err4 := strconv.ParseFloat(fields[14], 64)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
 		return 0, false
 	}
-	return (utime + stime) / linuxClockTicks, true
+	return (utime + stime + cutime + cstime) / linuxClockTicks, true
 }
 
 func linuxProcessTree(root int) ([]int, bool) {
@@ -153,7 +159,25 @@ func linuxParentPID(pid int) (int, bool) {
 func (p *procSampler) forget(pid int) {
 	p.mu.Lock()
 	delete(p.last, pid)
+	delete(p.tree, pid)
 	p.mu.Unlock()
+}
+
+func trackedPIDs(pids []int) map[int]struct{} {
+	tracked := make(map[int]struct{}, len(pids))
+	for _, pid := range pids {
+		tracked[pid] = struct{}{}
+	}
+	return tracked
+}
+
+func (p *procSampler) pruneTreeLocked(root int, live map[int]struct{}) {
+	for pid := range p.tree[root] {
+		if _, ok := live[pid]; !ok {
+			delete(p.last, pid)
+		}
+	}
+	p.tree[root] = live
 }
 
 func sampleHost() (HostStat, error) {

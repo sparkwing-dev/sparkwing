@@ -3,12 +3,14 @@
 package wingd
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -37,6 +39,9 @@ func (p *procSampler) sample(pid int) (float64, bool) {
 	for i := 0; i < len(tree); i++ {
 		tree = append(tree, children[tree[i]]...)
 	}
+	if len(tree) > 1 {
+		return 1, true
+	}
 	return darwinProcessCPUFraction(tree)
 }
 
@@ -59,8 +64,10 @@ func darwinProcesses() ([]unix.KinfoProc, bool) {
 }
 
 func darwinProcessCPUFraction(pids []int) (float64, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	args := []string{"-o", "pcpu=", "-p", darwinPIDList(pids)}
-	out, err := exec.Command("ps", args...).Output()
+	out, err := exec.CommandContext(ctx, "ps", args...).Output()
 	if err != nil {
 		return 0, false
 	}

@@ -57,6 +57,7 @@ type ProcSampler interface {
 type procSampler struct {
 	mu   sync.Mutex
 	last map[int]cpuSample
+	tree map[int]map[int]struct{}
 }
 
 // cpuSample is one cumulative-CPU reading paired with the wall clock at
@@ -67,7 +68,10 @@ type cpuSample struct {
 }
 
 func newProcSampler() *procSampler {
-	return &procSampler{last: map[int]cpuSample{}}
+	return &procSampler{
+		last: map[int]cpuSample{},
+		tree: map[int]map[int]struct{}{},
+	}
 }
 
 // CPUFraction dispatches to the platform reading.
