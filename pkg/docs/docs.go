@@ -14,6 +14,16 @@ import (
 //go:embed all:mirror
 var allDocs embed.FS
 
+//go:embed changelog.md
+var changelogMD string
+
+// ChangelogSlug is the synthetic topic under which the repo-root
+// CHANGELOG.md is surfaced by [Read], [List], [Search], and [All].
+// It is not part of the docs/ mirror: the embed pipeline copies
+// CHANGELOG.md into this package (bin/sync-docs.sh) so "what changed"
+// is answerable offline and version-locked to the running binary.
+const ChangelogSlug = "changelog"
+
 // Entry describes one doc topic. Slug is what the CLI takes via
 // --topic. Title and Summary are extracted from the markdown's first
 // H1 / first paragraph. Field shape mirrors the web's
@@ -52,6 +62,13 @@ func List() []Entry {
 		})
 		return nil
 	})
+	title, summary := extractTitleSummary([]byte(changelogMD))
+	entries = append(entries, Entry{
+		Slug:    ChangelogSlug,
+		Title:   title,
+		Summary: summary,
+		Bytes:   len(changelogMD),
+	})
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Slug < entries[j].Slug })
 	return entries
 }
@@ -61,6 +78,9 @@ func List() []Entry {
 // rewriteCLILinks). Returns ErrNotFound when the slug is unknown.
 func Read(slug string) (string, error) {
 	slug = strings.TrimSuffix(slug, ".md")
+	if slug == ChangelogSlug {
+		return rewriteCLILinks(changelogMD), nil
+	}
 	p := path.Join("mirror", slug+".md")
 	body, err := fs.ReadFile(allDocs, p)
 	if err != nil {
@@ -174,6 +194,57 @@ func Search(query string) []Entry {
 		out[i] = h.Entry
 	}
 	return out
+}
+
+// Changelog returns the raw embedded CHANGELOG.md body.
+func Changelog() string { return changelogMD }
+
+// ChangelogSection returns the body of the `## [version]` section of
+// the embedded changelog with its heading and surrounding blank lines
+// stripped. version matches with or without a leading v and ignores
+// any trailing ` - <date>` on the heading; the label "Unreleased"
+// selects the `## [Unreleased]` block. ok is false when no such
+// section exists (an older binary whose changelog predates the
+// version, or a name with no entry).
+func ChangelogSection(version string) (body string, ok bool) {
+	want := strings.ToLower(strings.TrimSpace(version))
+	want = strings.TrimPrefix(want, "v")
+	if want == "" {
+		return "", false
+	}
+	var collected []string
+	inSection := false
+	for _, line := range strings.Split(changelogMD, "\n") {
+		if strings.HasPrefix(line, "## ") {
+			if inSection {
+				break
+			}
+			if changelogHeadingMatches(line, want) {
+				inSection = true
+			}
+			continue
+		}
+		if inSection {
+			collected = append(collected, line)
+		}
+	}
+	if !inSection {
+		return "", false
+	}
+	return strings.TrimSpace(strings.Join(collected, "\n")), true
+}
+
+// changelogHeadingMatches reports whether a `## [X] - date` heading
+// names the wanted version label (already lowercased, v-stripped).
+func changelogHeadingMatches(heading, want string) bool {
+	rest := strings.TrimSpace(strings.TrimPrefix(heading, "## "))
+	rest = strings.TrimPrefix(rest, "[")
+	if i := strings.IndexByte(rest, ']'); i >= 0 {
+		rest = rest[:i]
+	}
+	rest = strings.ToLower(strings.TrimSpace(rest))
+	rest = strings.TrimPrefix(rest, "v")
+	return rest == want
 }
 
 // ErrNotFound signals an unknown slug.

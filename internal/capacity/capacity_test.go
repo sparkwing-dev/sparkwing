@@ -112,7 +112,7 @@ func TestResolve_Order(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Resolve(tc.pin, tc.profile, tc.numCPU)
+			got := Resolve(tc.pin, tc.profile, tc.numCPU, "")
 			if got.Cores != tc.wantCores {
 				t.Errorf("Cores = %v, want %v", got.Cores, tc.wantCores)
 			}
@@ -134,7 +134,7 @@ func TestResolve_ZeroCPUProfileQualifiesOnHealthySampler(t *testing.T) {
 		SampleCount:     MinSamples,
 		CPUMeasured:     true,
 	}
-	got := Resolve(nil, sleepHeavy, 8)
+	got := Resolve(nil, sleepHeavy, 8, "")
 	if got.Source != store.CostSourceMeasured {
 		t.Fatalf("Source = %q, want measured (healthy sampler, near-zero peak)", got.Source)
 	}
@@ -154,7 +154,7 @@ func TestResolve_ZeroCPUProfileStaysConservativeOnBlindSampler(t *testing.T) {
 		SampleCount:     MinSamples,
 		CPUMeasured:     false,
 	}
-	got := Resolve(nil, blind, 8)
+	got := Resolve(nil, blind, 8, "")
 	if got.Source != store.CostSourceDefault {
 		t.Fatalf("Source = %q, want default (blind sampler's zero is not a measurement)", got.Source)
 	}
@@ -169,13 +169,13 @@ func TestResolve_MeasuredPeakBelowFloorLiftsToFloor(t *testing.T) {
 		SampleCount: MinSamples,
 		CPUMeasured: true,
 	}
-	if got := Resolve(nil, tiny, 8); got.Cores != measuredCoreFloor {
+	if got := Resolve(nil, tiny, 8, ""); got.Cores != measuredCoreFloor {
 		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
 	}
 }
 
 func TestResolve_ColdStartSerializesOnBigMachine(t *testing.T) {
-	got := Resolve(nil, nil, 32)
+	got := Resolve(nil, nil, 32, "")
 	if got.Cores != 16 {
 		t.Errorf("cold-start cores = %v, want 16 (half of 32)", got.Cores)
 	}
@@ -185,7 +185,7 @@ func TestResolve_ColdStartSerializesOnBigMachine(t *testing.T) {
 }
 
 func TestResolve_ColdStartNeverBelowOne(t *testing.T) {
-	if got := Resolve(nil, nil, 1); got.Cores != 1 {
+	if got := Resolve(nil, nil, 1, ""); got.Cores != 1 {
 		t.Errorf("single-core machine cold-start = %v, want 1", got.Cores)
 	}
 }

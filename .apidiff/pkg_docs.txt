@@ -12,6 +12,9 @@ type CacheStats struct {
 	IndexFiles     int
 	VersionsState  string
 }
+func Changelog() string
+func ChangelogSection(version string) (body string, ok bool)
+const ChangelogSlug = "changelog"
 const DefaultBaseURL = "https://sparkwing.dev"
 func DefaultCacheDir() string
 type Entry struct {

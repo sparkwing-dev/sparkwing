@@ -7,6 +7,13 @@ every command, flag, and argument lives in
 `sparkwing docs read --topic cli-reference`). Treat that generated
 reference as authoritative -- when this page and it disagree, it wins.
 
+**Sparkwing does not require sparkwing.** The CLI is a developer
+convenience, not a dependency: everything it does at runtime, a compiled
+pipeline binary can do for itself. The binary embeds the admission daemon
+and its client, so a host that only ships the pinned pipeline binary --
+no CLI installed -- still runs pipelines and stays operable. See
+[Headless hosts](#headless-hosts).
+
 The rule across the whole tree: **every input is a named flag**. The one
 intentional exception is the pipeline name on `sparkwing run <pipeline>`
 (and its `sparkwing pipeline run <pipeline>` long form), which is
@@ -89,3 +96,29 @@ sparkwing commands                              # the entire CLI surface as JSON
 The describe schema matches `sparkwing.DescribePipeline` plus
 `group` / `tags` / `triggers` drawn from the `pipelines:` block in
 `.sparkwing/sparkwing.yaml`.
+
+## Headless hosts
+
+A runner host does not need the `sparkwing` CLI. Ship it the compiled
+pipeline binary (a plain `go build` of your `.sparkwing/` module),
+invoke pipelines by name, and operate the local admission daemon through
+the binary's own `ops` verbs:
+
+```bash
+./pipelines <name>                # run a pipeline (spawns/uses the local daemon)
+./pipelines ops queue             # the admission queue: holders, waiters, capacity
+./pipelines ops doctor            # find and repair provably-dead local state
+./pipelines ops stats             # the rolling admission-outcome window
+./pipelines ops stats-reset       # clear that window after an incident
+./pipelines ops version           # the binary's SDK version
+```
+
+The `ops` verbs share the CLI's output conventions -- `-o pretty|json|plain`,
+the same JSON shapes as `sparkwing queue` / `sparkwing doctor` -- so a
+script written against the CLI works unchanged against the binary. They
+are the field-recovery surface for a host with no browser and no CLI:
+`ops queue` shows why work is stuck, `ops doctor` clears it, and both are
+non-destructive to live runs.
+
+This is the operational face of *sparkwing does not require sparkwing*:
+the pipeline binary is the product, and it is self-sufficient.

@@ -75,6 +75,14 @@ func (w *eventWindow) pruneLocked(now time.Time) {
 	}
 }
 
+// reset clears the window, so an operator can zero the recent-events summary
+// after resolving an incident.
+func (w *eventWindow) reset() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.entries = nil
+}
+
 // snapshot returns a copy of the live entries for persistence.
 func (w *eventWindow) snapshot(now time.Time) []admissionEvent {
 	w.mu.Lock()

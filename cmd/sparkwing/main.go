@@ -230,6 +230,7 @@ func runSparkwing(args []string) error {
 		PrintHelp(cmdSparkwing, os.Stderr)
 		os.Exit(2)
 	}
+	noteVersionTransition(os.Stderr, args[0])
 	switch args[0] {
 	case "info":
 		return runInfo(args[1:])

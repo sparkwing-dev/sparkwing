@@ -2564,6 +2564,48 @@ func prefixColumns(cols, alias string) string {
 	return strings.Join(parts, ", ")
 }
 
+// ListConcurrencyStates returns the full admission picture for every
+// concurrency key with a live holder or waiter, so a controller can serve the
+// unified queue view. Keys are returned in lexical order; a key that races to
+// empty between enumeration and read is skipped.
+func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error) {
+	rows, err := s.query(
+		ctx,
+		`SELECT key FROM concurrency_holders
+		 UNION SELECT key FROM concurrency_waiters
+		 ORDER BY key`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	states := make([]*ConcurrencyState, 0, len(keys))
+	for _, k := range keys {
+		st, err := s.GetConcurrencyState(ctx, k)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		states = append(states, st)
+	}
+	return states, nil
+}
+
 // reconcileConcurrencyKeys is the startup recovery sweep; PromoteNext
 // for every key with queued waiters and room.
 func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error) {

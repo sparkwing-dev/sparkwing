@@ -155,7 +155,7 @@ sparkwing cluster agents list --profile prod -q
 
 ## `sparkwing cluster concurrency`
 
-Inspect a concurrency namespace: holders + queue
+Inspect a single concurrency namespace: holders + queue
 
 Shows who currently holds a concurrency namespace's slots
 and the queue of waiters behind it, each with its arrival-rank
@@ -165,6 +165,11 @@ Use it to tell whether a node is wedged or waiting for budget.
 
 Hits GET /api/v1/concurrency/{namespace}/state on the
 selected profile's controller.
+
+For a controller's whole admission state -- every key, its holders and
+waiters, and each registered runner's free capacity -- through the same
+view as the local queue, use 'sparkwing queue --profile NAME'. This
+command narrows to one namespace.
 
 ### Flags
 
@@ -2839,12 +2844,19 @@ one tab-separated record per line with -o plain for shell pipelines.
 When no daemon is running there is nothing to arbitrate: the command
 reports an empty queue and exits 0 rather than erroring.
 
+With --profile NAME the view switches to that profile's controller: the
+same renderer prints the controller's admission state -- every
+concurrency key, its holders and waiters, and each registered runner's
+free capacity -- so one vocabulary reads local and cluster admission
+alike.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain |
 | `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `--profile NAME` | Inspect this profile's controller instead of the local daemon |
 
 ### Examples
 
@@ -2857,6 +2869,9 @@ sparkwing queue -o json
 
 # One record per line for shell pipelines
 sparkwing queue -o plain
+
+# Inspect a controller's admission state
+sparkwing queue --profile prod
 ```
 
 ## `sparkwing repos`
@@ -4185,6 +4200,7 @@ For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.
 |---|---|
 | `--check` | Report installed vs latest; exit 1 if a newer release exists (read-only) |
 | `--force` | Allow downgrading to an older release |
+| `--override-hold` | Cross an operator version hold |
 | `--version TAG` | Target release tag (e.g. v0.17.0). Default: latest. |
 
 ### Examples
@@ -4224,6 +4240,7 @@ latest) for shell pipelines.
 ### Subcommands
 
 - `update` -- Self-update CLI binary or bump SDK pin (requires --cli or --sdk)
+- `hold` -- Show, set, or clear the operator ceiling on CLI upgrades
 
 ### Flags
 
@@ -4231,6 +4248,7 @@ latest) for shell pipelines.
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 | `--offline` | Skip the network fetch for latest release |
+| `--changelog` | Print the changelog for the installed release |
 
 ### Examples
 
@@ -4247,11 +4265,60 @@ sparkwing version -o plain | head -n1
 # Local-only (no network)
 sparkwing version --offline
 
+# Changelog for the installed release
+sparkwing version --changelog
+
 # Update the CLI binary
 sparkwing version update --cli
 
 # Bump the SDK pin in this project
 sparkwing version update --sdk
+```
+
+## `sparkwing version hold`
+
+Show, set, or clear the operator ceiling on CLI upgrades
+
+A version hold is an operator-set ceiling that the tool enforces:
+once set, 'sparkwing version update --cli' (and 'sparkwing update')
+refuse to install anything beyond it, so an agent cannot perform a
+major upgrade against operator instruction.
+
+The ceiling shape controls its reach:
+
+  vMAJOR.MINOR       caps a whole minor series -- every patch of that
+                     minor is allowed, the next minor is refused
+                     (e.g. v0.15 allows v0.15.9 but refuses v0.16.0).
+  vMAJOR.MINOR.PATCH exact ceiling -- nothing above that patch installs.
+
+With no flags, prints the current hold and where it is set. The hold
+persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
+version-hold); the SPARKWING_VERSION_HOLD environment variable
+overrides the file for a shell or a whole fleet. Releases beyond the
+hold still show in 'sparkwing version' so the operator sees what is
+being deferred.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--set VERSION` | Set the ceiling (e.g. v0.15 or v0.15.4) |
+| `--clear` | Remove the hold so upgrades are unrestricted |
+
+### Examples
+
+```sh
+# Show the current hold
+sparkwing version hold
+
+# Hold the minor series at v0.15
+sparkwing version hold --set v0.15
+
+# Pin an exact ceiling
+sparkwing version hold --set v0.15.4
+
+# Lift the hold
+sparkwing version hold --clear
 ```
 
 ## `sparkwing version update`
@@ -4282,6 +4349,7 @@ applies to whichever target is selected.
 | `--sdk` | Bump the SDK pin in this project's .sparkwing/go.mod |
 | `--version TAG` | Target release tag (e.g. v0.17.0). Omit for latest. |
 | `--force` | Allow downgrading to an older release (--cli only) |
+| `--override-hold` | Cross an operator version hold (--cli only) |
 
 ### Examples
 

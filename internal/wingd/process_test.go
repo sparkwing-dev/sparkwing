@@ -177,7 +177,8 @@ func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 		holders[i] = startProc(t, "hold",
 			"--home", home,
 			"--run", "r"+strconv.Itoa(i),
-			"--cores", "0.1",
+			"--sem", "election-"+strconv.Itoa(i),
+			"--semaphores-only",
 			"--daemon-idle-ms", "1500",
 		)
 	}

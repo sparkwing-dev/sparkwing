@@ -34,6 +34,7 @@ func runUpdate(args []string) error {
 	check := fs.Bool("check", false, "report current vs latest; exit 1 if a newer release exists")
 	force := fs.Bool("force", false, "allow downgrading to an older release")
 	version := fs.String("version", "", "target release tag (e.g. v0.17.0). Default: latest.")
+	overrideHold := fs.Bool("override-hold", false, "cross an operator version hold (do not use to defy an operator)")
 	if err := parseAndCheck(cmdUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -46,7 +47,7 @@ func runUpdate(args []string) error {
 	if *check {
 		return runUpdateCheck()
 	}
-	return runUpdateBinary(*version, *force)
+	return runUpdateBinary(*version, *force, *overrideHold)
 }
 
 func runUpdateCheck() error {
@@ -107,8 +108,11 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 }
 
 // runUpdateBinary downloads + verifies + atomically installs.
-// Falls back to `go install` when the download fails.
-func runUpdateBinary(version string, force bool) error {
+// Falls back to `go install` when the download fails. An operator
+// version hold is enforced here (unless overrideHold): the ceiling
+// binds every self-upgrade path, `sparkwing update` and
+// `sparkwing version update --cli` alike.
+func runUpdateBinary(version string, force, overrideHold bool) error {
 	resolved := strings.TrimSpace(version)
 	if resolved == "" {
 		v, err := fetchLatestRelease()
@@ -124,6 +128,14 @@ func runUpdateBinary(version string, force bool) error {
 	if current != "(unknown)" && current != "(devel)" && resolved == current {
 		fmt.Fprintf(os.Stdout, "sparkwing is already at %s\n", current)
 		return nil
+	}
+
+	if hold := resolveVersionHold(); hold.Value != "" && exceedsHold(resolved, hold.Value) {
+		if !overrideHold {
+			return holdRefusal(resolved, hold)
+		}
+		fmt.Fprintf(os.Stderr, "update: crossing operator version hold %s (%s) via --override-hold\n",
+			hold.Value, hold.Source)
 	}
 
 	switch classifyDowngrade(current, resolved) {
@@ -167,6 +179,7 @@ func runVersionUpdate(args []string) error {
 	sdk := fs.Bool("sdk", false, "bump the SDK pin in this project's .sparkwing/go.mod")
 	version := fs.String("version", "", "target release (e.g. v0.17.0). Default: latest.")
 	force := fs.Bool("force", false, "allow downgrading to an older release")
+	overrideHold := fs.Bool("override-hold", false, "cross an operator version hold (do not use to defy an operator)")
 	if err := parseAndCheck(cmdVersionUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -180,7 +193,7 @@ func runVersionUpdate(args []string) error {
 	case *cli && *sdk:
 		return errors.New("version update: --cli and --sdk are mutually exclusive")
 	case *cli:
-		return runUpdateBinary(*version, *force)
+		return runUpdateBinary(*version, *force, *overrideHold)
 	case *sdk:
 		return runUpdateSDK(*version)
 	default:

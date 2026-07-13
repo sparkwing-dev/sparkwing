@@ -71,6 +71,13 @@ func Main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "ops" {
+		if err := runOpsCLI(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ops:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	args := os.Args[1:]
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {

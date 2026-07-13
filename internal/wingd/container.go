@@ -63,6 +63,11 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 		if c, ok := parseCPUMax(s.readTrim(filepath.Join(dir, "cpu.max"))); ok {
 			cores = c
 		}
+		if n, ok := parseCpuset(s.readTrim(filepath.Join(dir, "cpuset.cpus.effective"))); ok {
+			if cores == 0 || float64(n) < cores {
+				cores = float64(n)
+			}
+		}
 		if m, ok := parseMemMax(s.readTrim(filepath.Join(dir, "memory.max"))); ok {
 			memBytes = m
 		}
@@ -311,6 +316,42 @@ func parseMemMax(content string) (uint64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// parseCpuset counts the CPUs a cgroup v2 cpuset list pins the process to
+// ("0-3,6" -> 5), so a container narrowed by cpu affinity caps capacity even
+// when cpu.max leaves the quota unbounded. An empty or malformed list reports
+// not-limited.
+func parseCpuset(content string) (int, bool) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return 0, false
+	}
+	total := 0
+	for _, part := range strings.Split(content, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lo, hi, isRange := strings.Cut(part, "-")
+		if !isRange {
+			if _, err := strconv.Atoi(part); err != nil {
+				return 0, false
+			}
+			total++
+			continue
+		}
+		start, err1 := strconv.Atoi(strings.TrimSpace(lo))
+		end, err2 := strconv.Atoi(strings.TrimSpace(hi))
+		if err1 != nil || err2 != nil || end < start {
+			return 0, false
+		}
+		total += end - start + 1
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return total, true
 }
 
 // parseUsageUsec reads the cumulative usage_usec field from a cgroup v2

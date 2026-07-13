@@ -55,6 +55,29 @@ func TestParseCPUMax(t *testing.T) {
 	}
 }
 
+func TestParseCpuset(t *testing.T) {
+	tests := []struct {
+		in    string
+		count int
+		ok    bool
+	}{
+		{"0-3", 4, true},
+		{"0-3,6", 5, true},
+		{"2", 1, true},
+		{"0,2,4", 3, true},
+		{"0-1,4-7", 6, true},
+		{"", 0, false},
+		{"3-1", 0, false},
+		{"garbage", 0, false},
+	}
+	for _, tc := range tests {
+		n, ok := parseCpuset(tc.in)
+		if ok != tc.ok || n != tc.count {
+			t.Errorf("parseCpuset(%q) = %d,%v want %d,%v", tc.in, n, ok, tc.count, tc.ok)
+		}
+	}
+}
+
 func TestParseMemMax(t *testing.T) {
 	tests := []struct {
 		in    string

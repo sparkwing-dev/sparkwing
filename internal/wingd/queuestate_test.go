@@ -75,14 +75,14 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 // fakeProcSampler feeds controllable per-pid CPU fractions so stall
 // flagging is exercised without a real busy or idle process.
 type fakeProcSampler struct {
-	mu  sync.Mutex
-	cpu map[int]float64
+	mu    sync.Mutex
+	usage map[int]wingd.ProcUsage
 }
 
-func (f *fakeProcSampler) CPUFraction(pid int) (float64, bool) {
+func (f *fakeProcSampler) CPUUsage(pid int) (wingd.ProcUsage, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	v, ok := f.cpu[pid]
+	v, ok := f.usage[pid]
 	return v, ok
 }
 
@@ -291,7 +291,7 @@ func TestQueueState_ReportsHoldersWaitersPositionsAndPipelines(t *testing.T) {
 
 func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 	home := shortHome(t)
-	proc := &fakeProcSampler{cpu: map[int]float64{9001: 0}}
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{9001: {}}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          newFakeSampler(4, 8<<30),
@@ -330,7 +330,7 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 
 func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 	home := shortHome(t)
-	proc := &fakeProcSampler{cpu: map[int]float64{7001: 0.9}}
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{7001: {Fraction: 0.9}}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          newFakeSampler(4, 8<<30),
@@ -359,5 +359,41 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 	}
 	if qs.Holders[0].Stalled {
 		t.Fatalf("a busy holder must never be flagged stalled")
+	}
+}
+
+func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
+	home := shortHome(t)
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{8001: {HasDescendant: true}}}
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(4, 8<<30),
+		HeadroomFraction: -1,
+		ProcSampler:      proc,
+		StallInterval:    5 * time.Millisecond,
+		StallWindow:      20 * time.Millisecond,
+	})
+
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, semHostReq("idle-tree", "worker", 8001, "deploy"))
+
+	waiter := ensure(t, home, "")
+	positions, _ := acquireAsync(waiter, semHostReq("waiting", "builder", 8002, "deploy"))
+	waitForQueue(t, positions)
+
+	q := ensure(t, home, "")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		qs, err := q.QueueState(context.Background())
+		if err != nil {
+			t.Fatalf("queue state: %v", err)
+		}
+		if len(qs.Holders) == 1 && qs.Holders[0].Stalled {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle descendant tree never flagged stalled: %+v", qs.Holders)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

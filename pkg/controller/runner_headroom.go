@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,32 @@ func (r *runnerHeadroomRegistry) lookup(name string, now time.Time, staleAfter t
 		return runnerHeadroom{}, false
 	}
 	return h, true
+}
+
+// namedRunnerHeadroom is one registry entry paired with its runner name, for
+// the unified queue view.
+type namedRunnerHeadroom struct {
+	Name string
+	runnerHeadroom
+}
+
+// list returns every runner whose advertised headroom is fresher than
+// staleAfter before now, in name order. A nil registry returns nothing.
+func (r *runnerHeadroomRegistry) list(now time.Time, staleAfter time.Duration) []namedRunnerHeadroom {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]namedRunnerHeadroom, 0, len(r.m))
+	for name, h := range r.m {
+		if now.Sub(h.UpdatedAt) > staleAfter {
+			continue
+		}
+		out = append(out, namedRunnerHeadroom{Name: name, runnerHeadroom: h})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // holderName extracts the runner name and kind from a claim holder id of

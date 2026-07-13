@@ -11,10 +11,16 @@ import (
 const loadEMAAlpha = 0.4
 
 // sampleLoop periodically re-reads host pressure and feeds it into the
-// ledger's headroom until the context is cancelled or the daemon stops.
+// ledger's headroom until the context is cancelled or the daemon stops. On a
+// slower cadence it also re-derives machine capacity, so an instance resize
+// or a cgroup-quota edit is picked up without a restart. Capacity is refreshed
+// before headroom in the same tick, so a grow's promotion runs against the new
+// total.
 func (d *Daemon) sampleLoop(ctx context.Context) {
 	t := time.NewTicker(d.cfg.sampleInterval())
 	defer t.Stop()
+	capEvery := d.cfg.capacityInterval()
+	lastCap := d.now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -22,6 +28,10 @@ func (d *Daemon) sampleLoop(ctx context.Context) {
 		case <-d.quit:
 			return
 		case <-t.C:
+			if now := d.now(); now.Sub(lastCap) >= capEvery {
+				d.refreshCapacity()
+				lastCap = now
+			}
 			d.refreshHeadroom()
 		}
 	}

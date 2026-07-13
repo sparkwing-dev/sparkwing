@@ -76,6 +76,9 @@ type Daemon struct {
 	containerMemory uint64
 	budgetCores     float64
 	budgetMemory    uint64
+	// capacityChange holds the most recent runtime capacity shift for the
+	// queue header, nil until one occurs. Guarded by mu.
+	capacityChange *wingwire.CapacityChange
 
 	// container reads this process's own cgroup limits so admission plans
 	// against the container it runs in, not the host. Nil disables
@@ -245,26 +248,15 @@ func (d *Daemon) initLedger() error {
 	if serr != nil {
 		d.cfg.logf("initial host sample: %v", serr)
 	}
-	d.hostCores = stat.TotalCores
-	d.hostMemory = stat.TotalMemoryBytes
-	d.machineCores = stat.TotalCores
-	d.machineMemory = stat.TotalMemoryBytes
-	if ccores, cmem := d.container.capacityLimits(); ccores > 0 || cmem > 0 {
-		if ccores > 0 && ccores < d.machineCores {
-			d.containerCores = ccores
-			d.machineCores = ccores
-		}
-		if cmem > 0 && cmem < d.machineMemory {
-			d.containerMemory = cmem
-			d.machineMemory = cmem
-		}
-		if d.containerCores > 0 || d.containerMemory > 0 {
-			d.cfg.logf("container limit: %.1f cores, %s (host %.1f cores, %s)",
-				d.machineCores, humanBytesLog(d.machineMemory), d.hostCores, humanBytesLog(d.hostMemory))
-		}
+	cap := d.deriveCapacity(stat)
+	d.hostCores, d.hostMemory = cap.hostCores, cap.hostMemory
+	d.machineCores, d.machineMemory = cap.machineCores, cap.machineMemory
+	d.containerCores, d.containerMemory = cap.containerCores, cap.containerMemory
+	d.budgetCores, d.budgetMemory = cap.budgetCores, cap.budgetMemory
+	if d.containerCores > 0 || d.containerMemory > 0 {
+		d.cfg.logf("container limit: %.1f cores, %s (host %.1f cores, %s)",
+			d.machineCores, humanBytesLog(d.machineMemory), d.hostCores, humanBytesLog(d.hostMemory))
 	}
-	d.budgetCores = d.cfg.Budget.CapCores(d.machineCores)
-	d.budgetMemory = d.cfg.Budget.CapMemory(d.machineMemory)
 	if d.cfg.Budget.HasCap() {
 		d.cfg.logf("budget: %.1f cores, %s (machine %.1f cores, %s)",
 			d.budgetCores, humanBytesLog(d.budgetMemory), d.machineCores, humanBytesLog(d.machineMemory))
@@ -291,6 +283,9 @@ func (d *Daemon) initLedger() error {
 		lg, err := admission.Restore(*snap, nil)
 		if err != nil {
 			return fmt.Errorf("wingd: restore ledger: %w", err)
+		}
+		if err := lg.ResizeTotals(d.budgetCores, d.budgetMemory); err != nil {
+			return fmt.Errorf("wingd: resize restored ledger: %w", err)
 		}
 		d.ledger = lg
 		for _, ls := range snap.Leases {
@@ -404,6 +399,8 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleQueueState(c)
 	case *wingwire.CancelLease:
 		d.handleCancelLease(c, m)
+	case *wingwire.StatsReset:
+		d.handleStatsReset(c)
 	case *wingwire.DrainRequest:
 		d.handleDrain(c, m)
 		return true
@@ -730,6 +727,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	c.leaseID = leaseID
 	c.runID = requestID
 	c.startAt = d.now()
+	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
 	if members, ok := d.leaseMembers[leaseID]; ok {
 		c.members = members
@@ -835,6 +833,20 @@ func (d *Daemon) handleQueueState(c *conn) {
 	qs := d.buildQueueStateLocked()
 	d.mu.Unlock()
 	_ = c.send(&qs)
+}
+
+// handleStatsReset clears the daemon's rolling admission-outcome window and
+// persists the empty window so the reset survives a restart, then acks.
+func (d *Daemon) handleStatsReset(c *conn) {
+	d.events.reset()
+	d.mu.Lock()
+	snap := d.ledger.Snapshot()
+	d.mu.Unlock()
+	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+		d.cfg.logf("persist: %v", err)
+	}
+	d.cfg.logf("stats reset: admission-outcome window cleared")
+	_ = c.send(&wingwire.StatsResetAck{})
 }
 
 // handleDisconnect reacts to a connection ending. On a healthy daemon a

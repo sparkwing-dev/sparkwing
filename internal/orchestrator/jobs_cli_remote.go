@@ -45,7 +45,7 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 	if opts.Limit > 0 && len(runs) > opts.Limit {
 		runs = runs[:opts.Limit]
 	}
-	return renderRunList(runs, opts, out)
+	return renderRunList(runs, opts, out, nil)
 }
 
 // JobStatusRemote is the cluster-mode counterpart to JobStatus.

@@ -111,3 +111,27 @@ func TestGroupCapacityStats_CarriesDistributionFields(t *testing.T) {
 		t.Errorf("node rows lost distribution fields: %+v", stats[0].Nodes)
 	}
 }
+
+// TestDeriveSource_MeasuringAndFloorStates pins that the capacity view names
+// a still-measuring version's charge source: a contended-run floor as floor,
+// a predecessor peak (a structural change) as measuring, and a version still
+// gathering its first clean samples as the plain cold-start default.
+func TestDeriveSource_MeasuringAndFloorStates(t *testing.T) {
+	cases := []struct {
+		name   string
+		rollup store.PipelineProfile
+		want   store.CostSource
+	}{
+		{"floor from contended runs", store.PipelineProfile{FloorCores: 3, SampleCount: 1, CPUMeasured: true}, store.CostSourceFloor},
+		{"measuring after structural change", store.PipelineProfile{PrevPeakCores: 2, SampleCount: 1, CPUMeasured: true}, store.CostSourceMeasuring},
+		{"default while gathering first samples", store.PipelineProfile{SampleCount: 1, CPUMeasured: true}, store.CostSourceDefault},
+		{"graduated wins over floor", store.PipelineProfile{FloorCores: 3, PeakCores: 4, SampleCount: 3, CPUMeasured: true}, store.CostSourceMeasured},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := deriveSource(tc.rollup); got != tc.want {
+				t.Errorf("deriveSource = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

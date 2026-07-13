@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -32,6 +34,7 @@ type VersionReport struct {
 	LatestRelease  string          `json:"latest_release,omitempty"`
 	LatestFetchErr string          `json:"latest_fetch_error,omitempty"`
 	Behind         bool            `json:"behind"`
+	Hold           *versionHold    `json:"hold,omitempty"`
 	Project        *VersionProject `json:"project,omitempty"`
 }
 
@@ -73,10 +76,14 @@ func runVersion(args []string) error {
 	if len(args) > 0 && args[0] == "update" {
 		return runVersionUpdate(args[1:])
 	}
+	if len(args) > 0 && args[0] == "hold" {
+		return runVersionHold(args[1:])
+	}
 	fs := flag.NewFlagSet(cmdVersion.Path, flag.ContinueOnError)
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	offline := fs.Bool("offline", false, "skip the network fetch for latest release")
+	changelog := fs.Bool("changelog", false, "print the changelog for the installed release")
 	if err := parseAndCheck(cmdVersion, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -88,6 +95,11 @@ func runVersion(args []string) error {
 	}
 
 	report := gatherVersionReport(*offline)
+
+	if *changelog {
+		printVersionChangelog(os.Stdout, report)
+		return nil
+	}
 
 	if output == "table" {
 		output = "pretty"
@@ -128,6 +140,9 @@ func gatherVersionReport(offline bool) VersionReport {
 	}
 	if r.CLI.Semver != "" && r.LatestRelease != "" {
 		r.Behind = semver.Compare(r.CLI.Semver, r.LatestRelease) < 0
+	}
+	if hold := resolveVersionHold(); hold.Value != "" {
+		r.Hold = &hold
 	}
 	if proj := gatherVersionProject(r.LatestRelease); proj != nil {
 		r.Project = proj
@@ -231,6 +246,40 @@ func isSemver(v string) bool {
 	return semver.IsValid(v)
 }
 
+// printVersionChangelog renders the embedded changelog for the
+// installed release. The embedded corpus only covers up to the running
+// binary's own version, so this is best-effort offline: it prints the
+// installed version's section (or [Unreleased] for a dev build), and
+// when the network check knows a newer release exists it points at the
+// release page rather than pretending to have notes it cannot embed.
+func printVersionChangelog(w io.Writer, r VersionReport) {
+	const releasesURL = "https://github.com/sparkwing-dev/sparkwing/releases"
+	printed := false
+	if r.CLI.Semver != "" {
+		if body, ok := docs.ChangelogSection(r.CLI.Semver); ok {
+			fmt.Fprintf(w, "%s\n\n%s\n", color.Bold("sparkwing "+r.CLI.Semver), body)
+			printed = true
+		}
+	}
+	if !printed {
+		if body, ok := docs.ChangelogSection("Unreleased"); ok && strings.TrimSpace(body) != "" {
+			fmt.Fprintf(w, "%s\n\n%s\n", color.Bold("sparkwing (unreleased)"), body)
+			printed = true
+		}
+	}
+	if !printed {
+		fmt.Fprintf(w, "no embedded changelog entry for %s\n", r.CLI.Installed)
+		fmt.Fprintf(w, "full changelog: %s -- see %s\n",
+			"sparkwing docs read --topic "+docs.ChangelogSlug, releasesURL)
+		return
+	}
+	fmt.Fprintln(w)
+	if r.Behind {
+		fmt.Fprintf(w, "%s newer releases exist -- see %s\n", color.Yellow("note:"), releasesURL)
+	}
+	fmt.Fprintf(w, "full changelog: %s\n", "sparkwing docs read --topic "+docs.ChangelogSlug)
+}
+
 func printVersionTable(r VersionReport) {
 	cv := r.CLI
 	fmt.Printf("CLI\n")
@@ -258,6 +307,11 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  upgrade:  %s\n", "sparkwing version update --cli")
 	} else {
 		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing version update --cli"))
+	}
+	if r.Hold != nil {
+		fmt.Printf("  hold:     %s %s\n",
+			color.Yellow("held at "+r.Hold.Value+" by operator"),
+			color.Dim("("+r.Hold.Source+")"))
 	}
 	fmt.Printf("  releases: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	fmt.Printf("  schema:   %d %s\n", r.SchemaVersion, color.Dim("(embedded runs-store schema)"))

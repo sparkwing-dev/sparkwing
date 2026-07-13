@@ -49,6 +49,12 @@ type CancelLease struct {
 type CancelLeaseAck struct {
 	Found bool
 }
+type CapacityChange struct {
+	FromCores float64
+	ToCores   float64
+
+	AtMS int64
+}
 type ContainerLimit struct {
 	Cores float64
 
@@ -60,7 +66,9 @@ type ContainerLimit struct {
 }
 type CostSource string
 const CostSourceDefault CostSource = "default"
+const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
+const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
 func Decode(line []byte) (Message, error)
 type DrainAck struct {
@@ -191,6 +199,10 @@ type QueueState struct {
 	Container *ContainerLimit
 
 	IgnoreExternal bool
+
+	CapacityChange *CapacityChange
+
+	Runners []RunnerHeadroom
 }
 type Queued struct {
 	RunID string
@@ -218,6 +230,12 @@ type ResourceState struct {
 
 	Available float64
 }
+type RunnerHeadroom struct {
+	Name        string
+	Cores       float64
+	MemoryBytes int64
+	QueueDepth  int
+}
 type SemaphoreClaim struct {
 	Name     string
 	Cost     int
@@ -228,6 +246,8 @@ type SemaphoreClaim struct {
 
 	CancelTimeoutMS int64
 }
+type StatsReset struct{}
+type StatsResetAck struct{}
 const TypeAdmissionRequest MessageType = "admission_request"
 const TypeCancel MessageType = "cancel"
 const TypeCancelLease MessageType = "cancel_lease"
@@ -242,6 +262,8 @@ const TypeQueueState MessageType = "queue_state"
 const TypeQueued MessageType = "queued"
 const TypeReattach MessageType = "reattach"
 const TypeRelease MessageType = "release"
+const TypeStatsReset MessageType = "stats_reset"
+const TypeStatsResetAck MessageType = "stats_reset_ack"
 type Waiter struct {
 	RunID string
 

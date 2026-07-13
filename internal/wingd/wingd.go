@@ -64,6 +64,11 @@ const (
 	DefaultGraceWindow = 10 * time.Second
 	// DefaultSampleInterval is the period between host-load samples.
 	DefaultSampleInterval = 5 * time.Second
+	// DefaultCapacityInterval is how often the daemon re-derives machine
+	// capacity while running, so an instance resize or a cgroup-quota edit is
+	// picked up without a restart. Slower than the load sampler because fixed
+	// capacity moves rarely.
+	DefaultCapacityInterval = 60 * time.Second
 	// DefaultHeadroomFraction is the share of host capacity reserved and
 	// never offered to admission.
 	DefaultHeadroomFraction = 0.20
@@ -120,6 +125,9 @@ type Config struct {
 	GraceWindow time.Duration
 	// SampleInterval overrides [DefaultSampleInterval] when non-zero.
 	SampleInterval time.Duration
+	// CapacityInterval overrides [DefaultCapacityInterval] when non-zero,
+	// setting how often capacity is re-derived while the daemon runs.
+	CapacityInterval time.Duration
 	// StallInterval overrides [DefaultStallInterval] when non-zero.
 	StallInterval time.Duration
 	// StallWindow overrides [DefaultStallWindow] when non-zero.
@@ -161,6 +169,13 @@ func (c Config) sampleInterval() time.Duration {
 		return c.SampleInterval
 	}
 	return DefaultSampleInterval
+}
+
+func (c Config) capacityInterval() time.Duration {
+	if c.CapacityInterval > 0 {
+		return c.CapacityInterval
+	}
+	return DefaultCapacityInterval
 }
 
 func (c Config) stallInterval() time.Duration {

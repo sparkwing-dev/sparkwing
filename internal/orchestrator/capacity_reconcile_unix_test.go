@@ -90,7 +90,7 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 	stopSampler()
 	<-done
 
-	recordRunProfile(ctx, st, "burn", "r1", nil, start, time.Now())
+	recordRunProfile(ctx, st, "burn", "r1", nil, "", runCharge{}, false, start, time.Now())
 
 	rollup, err := st.GetPipelineProfile(ctx, "burn", "")
 	if err != nil || rollup == nil {

@@ -44,7 +44,7 @@ func (s stubSampler) Sample() (wingd.HostStat, error) { return s.stat, nil }
 // stall flagging fires deterministically for a blocked holder.
 type idleProcSampler struct{}
 
-func (idleProcSampler) CPUFraction(int) (float64, bool) { return 0, true }
+func (idleProcSampler) CPUUsage(int) (wingd.ProcUsage, bool) { return wingd.ProcUsage{}, true }
 
 // startWingd runs a real daemon in-process for home with a fixed host
 // capacity, wired to the same orphan-run finalizer production uses.
