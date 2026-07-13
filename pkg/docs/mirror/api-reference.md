@@ -33,6 +33,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/pool/checkout` | `admin` |
 | `POST` | `/api/v1/pool/heartbeat` | `admin` |
 | `POST` | `/api/v1/pool/return` | `admin` |
+| `GET` | `/api/v1/queue/state` | `runs.read` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `admin` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |

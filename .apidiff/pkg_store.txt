@@ -118,7 +118,9 @@ type ConcurrencyWaiter struct {
 }
 type CostSource string
 const CostSourceDefault CostSource = "default"
+const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
+const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
 type DebugPause struct {
 	RunID       string
@@ -283,6 +285,14 @@ type PipelineProfile struct {
 	PinnedMemoryBytes int64
 
 	ContendedCount int
+
+	PlanHash string
+
+	FloorCores       float64
+	FloorMemoryBytes int64
+
+	PrevPeakCores       float64
+	PrevPeakMemoryBytes int64
 }
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -291,6 +301,13 @@ type ProfileObservation struct {
 	PeakMemoryBytes int64
 
 	CPUMeasured bool
+
+	PlanHash string
+
+	Contended bool
+
+	FloorCores       float64
+	FloorMemoryBytes int64
 }
 type ProfileResetSummary struct {
 	Pipelines      []string
@@ -443,6 +460,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
+func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)

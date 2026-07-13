@@ -13,4 +13,4 @@ package scaffold
 // Keep it current: the version-freshness gate (CheckVersionsFreshness)
 // fails when this pin falls behind the latest released SDK, so a fresh
 // scaffold never emits a go.mod that can't build the current templates.
-const FallbackSDKVersion = "v0.16.8"
+const FallbackSDKVersion = "v0.16.9"

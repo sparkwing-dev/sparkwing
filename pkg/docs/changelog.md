@@ -59,12 +59,15 @@ code change to unlock.
   its whole charge escalates the floor to the charge, so successive runs
   double in on true demand from below. `sparkwing runs stats --capacity` shows
   the operative floor and labels the source `floor`.
-- **admission:** Capacity profiles are now versioned by pipeline plan hash. A
-  structural (DAG-topology) change re-measures the pipeline instead of pricing
-  it on the previous version's samples: the changed version is charged 2x its
-  predecessor's peak (a large predecessor makes that exceed the box, so it runs
-  alone and measures solo emergently) and stays in `measuring` until clean,
-  uncontended runs finalize a new measured price. The queue and
+- **admission (Breaking):** Capacity profiles are now versioned by pipeline
+  plan hash, advancing the runs-store schema from version 10 to version 11 --
+  see the
+  [migration guide](docs/migrations/v0.17.0.md#runs-store-schema-moves-to-version-11).
+  A structural (DAG-topology) change re-measures the pipeline instead of
+  pricing it on the previous version's samples: the changed version is charged
+  2x its predecessor's peak (a large predecessor makes that exceed the box, so
+  it runs alone and measures solo emergently) and stays in `measuring` until
+  clean, uncontended runs finalize a new measured price. The queue and
   `runs stats --capacity` views show the `measuring` and `floor` sources, and a
   measuring run narrates itself (`re-measuring at N cores (2x prior charge)`).
 - **cli:** The changelog is now a readable, offline docs topic.
@@ -115,43 +118,14 @@ code change to unlock.
   be cancelled. `sparkwing runs cancel` (and the daemon-first cancel path) now
   reaches a reattached run, not only runs admitted by the current daemon
   incarnation.
-- **daemon:** Stall detection now measures a holder's whole process tree, not
-  just its own pid. A holder whose real work runs in forked children (a
-  parallel `make`, a test runner, a shell pipeline) reads near-zero CPU on its
-  own pid and was falsely flagged stalled; the daemon now sums CPU across the
-  holder and every descendant, so a busy holder is seen as busy. First shipped
-  in v0.16.7.
-- **admission:** No run is ever rejected for exceeding host capacity. A cost
-  above what this box can grant -- a measured peak or an explicit
-  `.Resources()` pin -- now runs alone at the machine's grantable budget
-  instead of being refused as never-admissible. An oversized pin still runs,
-  with a loud warning naming the pin and the machine (`pin 16.0 cores exceeds
-  this machine (10.0); running alone`) on the run's stderr and in the queue
-  view. This supersedes the v0.16.4 behavior where an oversized pin failed.
-  First shipped in v0.16.6.
 - **admission:** A liveness floor guarantees sparkwing never refuses all work.
   Whenever no run holds a host resource, the queue head is admitted regardless
   of the reserve or external load, so a fully loaded box still runs exactly one
   pipeline at a time rather than none; headroom sensing gates only the runs
   beyond that first. A sole run admitted under load says so
-  (`admitted as sole run; host under external load ...`).
-- **admission:** Measurement no longer overshoots. A reaped command's CPU is
-  amortized over its own wall time instead of landing in one sample interval,
-  the sampler clamps a derived rate to host cores, and a stored local profile
-  peak is capped at host capacity. A parallel `make -j` burst is recorded at
-  its real concurrency, not a momentary spike above the machine's core count.
-  First shipped in v0.16.6.
-- **admission:** Clients transparently reconnect and reattach across a daemon
-  restart, idle-exit, or version takeover. A run waiting in the admission
-  queue, holding a lease, running a semaphore sub-request, or cancelling no
-  longer fails with "use of closed network connection" when the daemon blinks;
-  it recovers within the grace window, and a daemon that never returns is named
-  in the error with its log tail. First shipped in v0.16.6.
-- **daemon:** Admission state restored from disk is resized to the machine's
-  current budget before the daemon serves. A restart after a capacity change --
-  a resized box, or a stale or cgroup-capped snapshot -- can no longer admit new
-  runs against stale-too-large totals, nor strand a run the real machine could
-  fit against stale-too-small ones. First shipped in v0.16.5.
+  (`admitted as sole run; host under external load ...`). The empty-host case
+  first shipped in v0.16.5; this release extends the floor to every
+  no-holder state.
 
 ## [v0.16.9] - 2026-07-13
 ### Fixed
@@ -190,9 +164,15 @@ code change to unlock.
   so stale undersized pins survived code cleanup until an operator manually
   reset state.
 
-This release also first shipped the host-capacity admission wave that
-[Unreleased] describes: no run rejected for exceeding host capacity,
-measurement no longer overshooting, and transparent client reconnect.
+This release also first shipped the host-capacity admission wave: no run is
+rejected for exceeding host capacity (an oversized measured peak or explicit
+`.Resources()` pin runs alone at the machine's grantable budget, with a loud
+warning naming the pin and the machine, superseding the v0.16.4 behavior where
+an oversized pin failed); measurement no longer overshoots (a reaped command's
+CPU is amortized over its own wall time, derived rates are clamped to host
+cores, and stored profile peaks are capped at host capacity); and clients
+transparently reconnect and reattach across a daemon restart, idle-exit, or
+version takeover.
 
 ## [v0.16.5] - 2026-07-13
 ### Fixed
