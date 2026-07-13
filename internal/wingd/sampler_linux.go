@@ -58,6 +58,11 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	usages := make(map[int]ProcUsage, len(trees))
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	previous := make(map[int]cpuSample, len(p.last))
+	for pid, sample := range p.last {
+		previous[pid] = sample
+	}
+	nextSamples := map[int]cpuSample{}
 	for pid, tree := range trees {
 		usage := ProcUsage{HasDescendant: len(tree) > 1}
 		var sampled bool
@@ -67,8 +72,8 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			if !ok {
 				continue
 			}
-			prev, ok := p.last[treePID]
-			p.last[treePID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
+			nextSamples[treePID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
+			prev, ok := previous[treePID]
 			if !ok {
 				continue
 			}
@@ -85,6 +90,9 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 		if sampled {
 			usages[pid] = usage
 		}
+	}
+	for pid, sample := range nextSamples {
+		p.last[pid] = sample
 	}
 	return usages
 }
