@@ -49,6 +49,24 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **admission:** Capacity measurement is now honest about contention and
+  pipeline change. A run the daemon flags as throttled by host contention no
+  longer folds into the measured profile: it measured what it got, not what it
+  wanted, so its reading only raises a per-pipeline demand *floor* (a lower
+  bound) and never sets the measured peak or graduates the profile. While a
+  version has not yet finalized a measured price it is charged a safety
+  multiple (2x) of that floor -- and a contended run that consumed essentially
+  its whole charge escalates the floor to the charge, so successive runs
+  double in on true demand from below. `sparkwing runs stats --capacity` shows
+  the operative floor and labels the source `floor`.
+- **admission:** Capacity profiles are now versioned by pipeline plan hash. A
+  structural (DAG-topology) change re-measures the pipeline instead of pricing
+  it on the previous version's samples: the changed version is charged 2x its
+  predecessor's peak (a large predecessor makes that exceed the box, so it runs
+  alone and measures solo emergently) and stays in `measuring` until clean,
+  uncontended runs finalize a new measured price. The queue and
+  `runs stats --capacity` views show the `measuring` and `floor` sources, and a
+  measuring run narrates itself (`re-measuring at N cores (2x prior charge)`).
 - **cli:** The changelog is now a readable, offline docs topic.
   `sparkwing docs read --topic changelog` serves the release notes embedded
   in the binary like every other doc, and `sparkwing version --changelog`
@@ -71,6 +89,12 @@ code change to unlock.
 
 ### Fixed
 
+- **daemon:** Stall detection now measures a holder's whole process tree, not
+  just its own pid. A holder whose real work runs in forked children (a
+  parallel `make`, a test runner, a shell pipeline) reads near-zero CPU on its
+  own pid and was falsely flagged stalled; the daemon now sums CPU across the
+  holder and every descendant, so a busy holder is seen as busy. First shipped
+  in v0.16.7.
 - **admission:** No run is ever rejected for exceeding host capacity. A cost
   above what this box can grant -- a measured peak or an explicit
   `.Resources()` pin -- now runs alone at the machine's grantable budget
@@ -78,6 +102,7 @@ code change to unlock.
   with a loud warning naming the pin and the machine (`pin 16.0 cores exceeds
   this machine (10.0); running alone`) on the run's stderr and in the queue
   view. This supersedes the v0.16.4 behavior where an oversized pin failed.
+  First shipped in v0.16.6.
 - **admission:** A liveness floor guarantees sparkwing never refuses all work.
   Whenever no run holds a host resource, the queue head is admitted regardless
   of the reserve or external load, so a fully loaded box still runs exactly one
@@ -89,17 +114,59 @@ code change to unlock.
   the sampler clamps a derived rate to host cores, and a stored local profile
   peak is capped at host capacity. A parallel `make -j` burst is recorded at
   its real concurrency, not a momentary spike above the machine's core count.
+  First shipped in v0.16.6.
 - **admission:** Clients transparently reconnect and reattach across a daemon
   restart, idle-exit, or version takeover. A run waiting in the admission
   queue, holding a lease, running a semaphore sub-request, or cancelling no
   longer fails with "use of closed network connection" when the daemon blinks;
   it recovers within the grace window, and a daemon that never returns is named
-  in the error with its log tail.
+  in the error with its log tail. First shipped in v0.16.6.
 - **daemon:** Admission state restored from disk is resized to the machine's
   current budget before the daemon serves. A restart after a capacity change --
   a resized box, or a stale or cgroup-capped snapshot -- can no longer admit new
   runs against stale-too-large totals, nor strand a run the real machine could
   fit against stale-too-small ones. First shipped in v0.16.5.
+
+## [v0.16.9] - 2026-07-13
+### Fixed
+
+- **admission:** Capacity profiles with obsolete CPU accounting are ignored
+  on read and on the next profile update. Older samples could preserve
+  impossible CPU peaks, causing admission to reserve too much CPU and block
+  queued runs unnecessarily.
+
+## [v0.16.8] - 2026-07-13
+### Fixed
+
+- **runs:** `sparkwing runs list` and `sparkwing runs status` now surface
+  local admission waits as queued work. Runs waiting for host capacity show
+  `queued (N/M)` in list output and an admission line in status output, while
+  admitted and terminal runs keep their actual run status.
+- **admission:** Queued runs now receive fresh position updates when the run
+  ahead is admitted, so long waits no longer repeat an obsolete queue position.
+
+## [v0.16.7] - 2026-07-13
+### Fixed
+
+- **admission:** `sparkwing queue` now evaluates holder liveness from the
+  holder's process tree instead of only the root process. A wrapper or shell
+  that is idle while child test processes are still active no longer appears
+  as stalled, while an idle descendant tree still reports as stalled after a
+  bounded grace window.
+
+## [v0.16.6] - 2026-07-13
+### Fixed
+
+- **admission:** Removing a `.Resources()` declaration now clears the stored
+  capacity pin the next time that pipeline or cluster-dispatched node runs.
+  Previous versions could keep charging the last explicit pin from the local
+  profile store or controller profile even after source stopped declaring it,
+  so stale undersized pins survived code cleanup until an operator manually
+  reset state.
+
+This release also first shipped the host-capacity admission wave that
+[Unreleased] describes: no run rejected for exceeding host capacity,
+measurement no longer overshooting, and transparent client reconnect.
 
 ## [v0.16.5] - 2026-07-13
 ### Fixed

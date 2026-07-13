@@ -247,9 +247,15 @@ func startLocalws(t *testing.T, opts Options) string {
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, opts) }()
 
+	client := &http.Client{Timeout: 250 * time.Millisecond}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get("http://" + addr + "/api/v1/health")
+		select {
+		case err := <-done:
+			t.Fatalf("localws exited before readiness: %v", err)
+		default:
+		}
+		resp, err := client.Get("http://" + addr + "/api/v1/health")
 		if err == nil {
 			resp.Body.Close()
 			return addr

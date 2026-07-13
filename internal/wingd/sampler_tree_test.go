@@ -52,14 +52,17 @@ func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 	root := startProcessTree(t, `sh -c "while :; do :; done" & sleep 5`)
 	p := newProcSampler()
 
-	p.CPUFraction(root)
+	p.CPUUsage(root)
 	time.Sleep(500 * time.Millisecond)
-	frac, ok := p.CPUFraction(root)
+	usage, ok := p.CPUUsage(root)
 	if !ok {
 		t.Fatalf("root pid %d not sampled", root)
 	}
-	if frac <= 0.2 {
-		t.Fatalf("subtree CPU credited to root = %.3f, want > 0.2 (busy descendant not counted)", frac)
+	if usage.Fraction <= 0.2 {
+		t.Fatalf("subtree CPU credited to root = %.3f, want > 0.2 (busy descendant not counted)", usage.Fraction)
+	}
+	if !usage.HasDescendant {
+		t.Fatalf("root pid %d has a forked child, want HasDescendant", root)
 	}
 }
 
@@ -71,14 +74,14 @@ func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 	root := startProcessTree(t, `sleep 5`)
 	p := newProcSampler()
 
-	p.CPUFraction(root)
+	p.CPUUsage(root)
 	time.Sleep(500 * time.Millisecond)
-	frac, ok := p.CPUFraction(root)
+	usage, ok := p.CPUUsage(root)
 	if !ok {
 		t.Fatalf("root pid %d not sampled", root)
 	}
-	if frac > 0.1 {
-		t.Fatalf("idle tree CPU = %.3f, want ~0", frac)
+	if usage.Fraction > 0.1 {
+		t.Fatalf("idle tree CPU = %.3f, want ~0", usage.Fraction)
 	}
 }
 

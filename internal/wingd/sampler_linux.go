@@ -20,121 +20,167 @@ import (
 // rather than pulling in a sysconf dependency for a threshold check.
 const linuxClockTicks = 100.0
 
-// sample derives the CPU of a holder's whole process tree as a fraction
-// of one core from the change in cumulative user+system time between two
-// /proc readings, summed over the holder and every descendant. Reading
-// only the holder's own pid misses work that runs in forked children, so
-// a busy holder driving child processes would read idle. The first
-// reading for the holder's pid has no baseline and reports not-sampled.
-func (p *procSampler) sample(pid int) (float64, bool) {
-	cpu, children, ok := readProcTree()
+// sample derives a process tree's CPU as a fraction of one core from the
+// change in cumulative user+system time between two /proc readings. The
+// first reading for every live pid has no baseline; sample reports once
+// at least one process in the tree has two readings.
+func (p *procSampler) sample(pid int) (ProcUsage, bool) {
+	usages := p.sampleMany([]int{pid})
+	usage, ok := usages[pid]
+	return usage, ok
+}
+
+// sampleMany derives each holder's process-tree CPU -- the holder and
+// every descendant -- from a single /proc enumeration shared by every
+// requested pid. Reading only a holder's own pid would miss work that
+// runs in forked children, so a busy holder driving child processes
+// would read idle.
+func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
+	procs, ok := linuxProcesses()
 	if !ok {
-		return 0, false
-	}
-	if _, alive := cpu[pid]; !alive {
-		p.mu.Lock()
-		p.pruneLocked(cpu)
-		p.mu.Unlock()
-		return 0, false
+		return nil
 	}
 	now := time.Now()
 
+	children := map[int][]int{}
+	for processID, proc := range procs {
+		children[proc.parentPID] = append(children[proc.parentPID], processID)
+	}
+
+	trees := make(map[int][]int, len(pids))
+	for _, pid := range pids {
+		if _, ok := procs[pid]; !ok {
+			p.forget(pid)
+			continue
+		}
+		trees[pid] = collectSubtree(pid, children)
+	}
+
+	usages := make(map[int]ProcUsage, len(trees))
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var frac float64
-	rootPrimed := false
-	for _, spid := range collectSubtree(pid, children) {
-		cur := cpu[spid]
-		prev, had := p.last[spid]
-		p.last[spid] = cpuSample{cpuSeconds: cur, at: now}
-		if !had {
-			continue
+	previous := make(map[int]cpuSample, len(p.last))
+	for pid, sample := range p.last {
+		previous[pid] = sample
+	}
+	nextSamples := map[int]cpuSample{}
+	for pid, tree := range trees {
+		usage := ProcUsage{HasDescendant: len(tree) > 1}
+		var sampled bool
+		p.pruneTreeLocked(pid, trackedPIDs(tree))
+		for _, treePID := range tree {
+			proc, ok := procs[treePID]
+			if !ok {
+				continue
+			}
+			nextSamples[treePID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
+			prev, ok := previous[treePID]
+			if !ok {
+				continue
+			}
+			wall := now.Sub(prev.at).Seconds()
+			if wall <= 0 {
+				continue
+			}
+			frac := (proc.cpuSeconds - prev.cpuSeconds) / wall
+			if frac > 0 {
+				usage.Fraction += frac
+			}
+			sampled = true
 		}
-		if spid == pid {
-			rootPrimed = true
-		}
-		wall := now.Sub(prev.at).Seconds()
-		if wall <= 0 {
-			continue
-		}
-		if d := (cur - prev.cpuSeconds) / wall; d > 0 {
-			frac += d
+		if sampled {
+			usages[pid] = usage
 		}
 	}
-	p.pruneLocked(cpu)
-	if !rootPrimed {
-		return 0, false
+	for pid, sample := range nextSamples {
+		p.last[pid] = sample
 	}
-	return frac, true
+	return usages
 }
 
-// pruneLocked drops baselines for pids no longer present so the map does
-// not grow without bound as runs and their children come and go.
-//
-// safety: callers hold p.mu.
-func (p *procSampler) pruneLocked(live map[int]float64) {
-	for pid := range p.last {
-		if _, ok := live[pid]; !ok {
-			delete(p.last, pid)
-		}
-	}
+type linuxProc struct {
+	parentPID  int
+	cpuSeconds float64
 }
 
-// readProcTree enumerates every process under /proc and returns each
-// pid's cumulative CPU seconds alongside a parent->children map for
-// subtree walks.
-func readProcTree() (map[int]float64, map[int][]int, bool) {
-	dir, err := os.Open("/proc")
+func linuxProcesses() (map[int]linuxProc, bool) {
+	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil, nil, false
+		return nil, false
 	}
-	names, err := dir.Readdirnames(-1)
-	dir.Close()
-	if err != nil {
-		return nil, nil, false
-	}
-	cpu := make(map[int]float64, len(names))
-	children := make(map[int][]int, len(names))
-	for _, name := range names {
-		pid, err := strconv.Atoi(name)
+	procs := map[int]linuxProc{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		ppid, secs, ok := readProcStat(pid)
-		if !ok {
-			continue
+		proc, ok := linuxProcess(pid)
+		if ok {
+			procs[pid] = proc
 		}
-		cpu[pid] = secs
-		children[ppid] = append(children[ppid], pid)
 	}
-	return cpu, children, true
+	return procs, true
 }
 
-// readProcStat parses a single /proc/<pid>/stat line into its parent pid
-// and cumulative user+system CPU seconds. It splits after the comm field
-// (parenthesized and possibly containing spaces) so the numeric fields
-// line up regardless of the process name.
-func readProcStat(pid int) (int, float64, bool) {
+// linuxProcess parses /proc/<pid>/stat into its parent pid and cumulative
+// user+system (+reaped-children) CPU seconds. It splits after the comm
+// field (parenthesized and possibly containing spaces) so the numeric
+// fields line up regardless of the process name.
+func linuxProcess(pid int) (linuxProc, bool) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return 0, 0, false
+		return linuxProc{}, false
 	}
 	line := string(data)
 	rparen := strings.LastIndexByte(line, ')')
 	if rparen < 0 || rparen+2 >= len(line) {
-		return 0, 0, false
+		return linuxProc{}, false
 	}
 	fields := strings.Fields(line[rparen+2:])
-	if len(fields) < 13 {
-		return 0, 0, false
+	if len(fields) < 15 {
+		return linuxProc{}, false
 	}
-	ppid, err0 := strconv.Atoi(fields[1])
+	parent, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return linuxProc{}, false
+	}
 	utime, err1 := strconv.ParseFloat(fields[11], 64)
 	stime, err2 := strconv.ParseFloat(fields[12], 64)
-	if err0 != nil || err1 != nil || err2 != nil {
-		return 0, 0, false
+	cutime, err3 := strconv.ParseFloat(fields[13], 64)
+	cstime, err4 := strconv.ParseFloat(fields[14], 64)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return linuxProc{}, false
 	}
-	return ppid, (utime + stime) / linuxClockTicks, true
+	return linuxProc{parentPID: parent, cpuSeconds: (utime + stime + cutime + cstime) / linuxClockTicks}, true
+}
+
+// forget drops a dead pid's baseline so the map does not grow without
+// bound as runs come and go.
+func (p *procSampler) forget(pid int) {
+	p.mu.Lock()
+	delete(p.last, pid)
+	delete(p.tree, pid)
+	p.mu.Unlock()
+}
+
+func trackedPIDs(pids []int) map[int]struct{} {
+	tracked := make(map[int]struct{}, len(pids))
+	for _, pid := range pids {
+		tracked[pid] = struct{}{}
+	}
+	return tracked
+}
+
+func (p *procSampler) pruneTreeLocked(root int, live map[int]struct{}) {
+	for pid := range p.tree[root] {
+		if _, ok := live[pid]; !ok {
+			delete(p.last, pid)
+		}
+	}
+	p.tree[root] = live
 }
 
 func sampleHost() (HostStat, error) {

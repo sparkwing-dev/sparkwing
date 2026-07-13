@@ -11,4 +11,6 @@ func sampleHost() (HostStat, error) {
 // sample reports not-sampled: platforms outside Linux and macOS offer no
 // cheap per-process CPU reading, so stall flagging stays inert here
 // rather than pulling in a heavier dependency.
-func (p *procSampler) sample(int) (float64, bool) { return 0, false }
+func (p *procSampler) sample(int) (ProcUsage, bool) { return ProcUsage{}, false }
+
+func (p *procSampler) sampleMany([]int) map[int]ProcUsage { return nil }

@@ -37,16 +37,25 @@ type platformSampler struct{}
 // Sample returns a live [HostStat] for the host it runs on.
 func (platformSampler) Sample() (HostStat, error) { return sampleHost() }
 
-// ProcSampler reads a single process's recent CPU usage as a fraction of
+// ProcSampler reads a process tree's recent CPU usage as a fraction of
 // one core (1.0 means one core fully busy). The daemon consults it at a
 // slow cadence, and only while runs are queued, to tell a working holder
 // from one that is alive but wedged. Tests supply a fake so stall
 // flagging is exercised deterministically.
 type ProcSampler interface {
-	// CPUFraction reports the process's CPU usage as a fraction of one
-	// core, and false when the process cannot be sampled -- it is gone,
-	// or the platform offers no cheap per-process reading.
-	CPUFraction(pid int) (float64, bool)
+	// CPUUsage reports the root process and descendant processes' CPU
+	// usage, and false when the process tree cannot be sampled -- it is
+	// gone, or the platform offers no cheap per-process reading.
+	CPUUsage(pid int) (ProcUsage, bool)
+}
+
+type ProcBatchSampler interface {
+	CPUUsages(pids []int) map[int]ProcUsage
+}
+
+type ProcUsage struct {
+	Fraction      float64
+	HasDescendant bool
 }
 
 // procSampler is the platform ProcSampler. It carries a small per-pid
@@ -56,6 +65,7 @@ type ProcSampler interface {
 type procSampler struct {
 	mu   sync.Mutex
 	last map[int]cpuSample
+	tree map[int]map[int]struct{}
 }
 
 // cpuSample is one cumulative-CPU reading paired with the wall clock at
@@ -66,11 +76,16 @@ type cpuSample struct {
 }
 
 func newProcSampler() *procSampler {
-	return &procSampler{last: map[int]cpuSample{}}
+	return &procSampler{
+		last: map[int]cpuSample{},
+		tree: map[int]map[int]struct{}{},
+	}
 }
 
-// CPUFraction dispatches to the platform reading.
-func (p *procSampler) CPUFraction(pid int) (float64, bool) { return p.sample(pid) }
+// CPUUsage dispatches to the platform reading.
+func (p *procSampler) CPUUsage(pid int) (ProcUsage, bool) { return p.sample(pid) }
+
+func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids) }
 
 // collectSubtree returns root and every process reachable from it through
 // the parent->children map, so a holder's forked work (make -j, test

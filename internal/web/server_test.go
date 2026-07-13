@@ -74,16 +74,21 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	_ = ln.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		_ = web.Serve(ctx, paths, addr)
-		close(done)
+		done <- web.Serve(ctx, paths, addr)
 	}()
 
 	base := fmt.Sprintf("http://%s", addr)
+	client := &http.Client{Timeout: 250 * time.Millisecond}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if resp, err := http.Get(base + "/api/health"); err == nil {
+		select {
+		case err := <-done:
+			t.Fatalf("web server exited before readiness: %v", err)
+		default:
+		}
+		if resp, err := client.Get(base + "/api/health"); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return base, func() {

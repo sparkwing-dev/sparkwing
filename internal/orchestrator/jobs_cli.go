@@ -99,7 +99,10 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if opts.Limit > 0 && len(runs) > opts.Limit {
 		runs = runs[:opts.Limit]
 	}
-	return renderRunList(runs, opts, out)
+	admissionStatus := func(runID string) (admissionWaitDetail, bool) {
+		return latestAdmissionWait(ctx, b, runID)
+	}
+	return renderRunList(runs, opts, out, admissionStatus)
 }
 
 // listFetchLimit returns the server-side LIMIT to use. When any
@@ -118,7 +121,12 @@ func listFetchLimit(opts ListOpts) int {
 }
 
 // renderRunList prints quiet/JSON/table output.
-func renderRunList(runs []*store.Run, opts ListOpts, out io.Writer) error {
+func renderRunList(
+	runs []*store.Run,
+	opts ListOpts,
+	out io.Writer,
+	admissionStatus func(runID string) (admissionWaitDetail, bool),
+) error {
 	if opts.Quiet {
 		if opts.JSON {
 			ids := make([]string, 0, len(runs))
@@ -147,9 +155,15 @@ func renderRunList(runs []*store.Run, opts ListOpts, out io.Writer) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tPIPELINE\tSTATUS\tSTARTED\tDURATION")
 	for _, r := range runs {
+		status := r.Status
+		if admissionStatus != nil && runCanDisplayAdmissionWait(r) {
+			if detail, ok := admissionStatus(r.ID); ok {
+				status = detail.listStatus()
+			}
+		}
 		fmt.Fprintf(
 			tw, "%s\t%s\t%s\t%s\t%s\n",
-			r.ID, r.Pipeline, r.Status,
+			r.ID, r.Pipeline, status,
 			formatStartedAt(r.StartedAt),
 			formatRunDuration(r),
 		)
@@ -305,6 +319,11 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	if run.GitBranch != "" || run.GitSHA != "" {
 		fmt.Fprintf(out, "%s %s @ %s\n", label("git:      "), run.GitBranch, shortSHA(run.GitSHA))
 	}
+	if runCanDisplayAdmissionWait(run) {
+		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
+			fmt.Fprintf(out, "%s %s\n", label("admission:"), detail.statusLine())
+		}
+	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "nodes (%d total, %d done):\n", len(nodes), countFinished(nodes))
@@ -332,6 +351,62 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		}
 	}
 	return nil
+}
+
+type admissionWaitDetail struct {
+	Position    int `json:"position"`
+	QueueLength int `json:"queue_length"`
+}
+
+func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (admissionWaitDetail, bool) {
+	var detail admissionWaitDetail
+	waiting := false
+	var after int64
+	for {
+		events, err := b.ListEventsAfter(ctx, runID, after, 500)
+		if err != nil {
+			return admissionWaitDetail{}, false
+		}
+		if len(events) == 0 {
+			break
+		}
+		for _, event := range events {
+			after = event.Seq
+			switch event.Kind {
+			case "admission_wait":
+				waiting = true
+				detail = admissionWaitDetail{}
+				if len(event.Payload) > 0 {
+					_ = json.Unmarshal(event.Payload, &detail)
+				}
+			case "admission_granted", "admission_cancelled", "admission_queue_timeout":
+				waiting = false
+				detail = admissionWaitDetail{}
+			}
+		}
+	}
+	if !waiting {
+		return admissionWaitDetail{}, false
+	}
+	return detail, true
+}
+
+func (d admissionWaitDetail) listStatus() string {
+	if d.Position > 0 && d.QueueLength > 0 {
+		return fmt.Sprintf("queued (%d/%d)", d.Position, d.QueueLength)
+	}
+	return "queued"
+}
+
+func (d admissionWaitDetail) statusLine() string {
+	if d.Position > 0 && d.QueueLength > 0 {
+		return fmt.Sprintf("queued for local admission (position %d of %d)", d.Position, d.QueueLength)
+	}
+	return "queued for local admission"
+}
+
+func runCanDisplayAdmissionWait(run *store.Run) bool {
+	return run.Status == "running" && run.FinishedAt == nil
 }
 
 // renderNodesWithSteps prints the node table, then per-node step

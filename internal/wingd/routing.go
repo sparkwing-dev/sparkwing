@@ -13,7 +13,7 @@ import (
 // events; the loop drains them all. The caller holds d.mu.
 func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 	var out []delivery
-	qlen := d.waiterCountLocked()
+	queueChanged := false
 	// safety: the ledger emits a grant's eviction events before the grant
 	// itself, so the lease-to-run map must be seeded up front for an
 	// Evicted frame to name its superseder.
@@ -28,6 +28,9 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 		queue = queue[1:]
 		switch ev.Kind {
 		case admission.EventGranted, admission.EventPromoted:
+			if ev.Kind == admission.EventPromoted {
+				queueChanged = true
+			}
 			d.leaseRun[ev.Lease] = ev.RequestID
 			c := d.byRun[ev.RequestID]
 			if c == nil {
@@ -74,7 +77,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 				out = append(out, delivery{c, &wingwire.Queued{
 					RunID:          ev.RequestID,
 					Position:       ev.Position + 1,
-					QueueLength:    qlen,
+					QueueLength:    d.waiterCountLocked(),
 					BlockingReason: d.hostBlockingReasonLocked(c.resources),
 				}})
 			}
@@ -89,12 +92,72 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 				}})
 			}
 		case admission.EventReleased:
+			queueChanged = true
 			delete(d.leaseRun, ev.Lease)
 			delete(d.leaseCharge, ev.Lease)
 			delete(d.leaseMembers, ev.Lease)
 		}
 	}
+	if queueChanged {
+		out = append(out, d.waiterDeliveriesLocked()...)
+	}
 	return out
+}
+
+func (d *Daemon) waiterDeliveriesLocked() []delivery {
+	snap := d.ledger.Snapshot()
+	qlen := len(snap.Waiters)
+	out := make([]delivery, 0, qlen)
+	for i, waiter := range snap.Waiters {
+		c := d.byRun[waiter.RequestID]
+		if c == nil {
+			continue
+		}
+		out = append(out, delivery{c, &wingwire.Queued{
+			RunID:          waiter.RequestID,
+			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
+			QueueLength:    qlen,
+			BlockingReason: d.hostBlockingReasonLocked(c.resources),
+		}})
+	}
+	return out
+}
+
+func waiterPosition(earlier []admission.WaiterState, waiter admission.WaiterState) int {
+	mine := waiterResources(waiter)
+	n := 0
+	for _, prev := range earlier {
+		if waitersOverlap(prev, mine) {
+			n++
+		}
+	}
+	return n
+}
+
+func waitersOverlap(waiter admission.WaiterState, resources map[string]struct{}) bool {
+	for r := range waiterResources(waiter) {
+		if _, ok := resources[r]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func waiterResources(waiter admission.WaiterState) map[string]struct{} {
+	resources := map[string]struct{}{}
+	if waiter.MilliCores > 0 {
+		resources["cores"] = struct{}{}
+	}
+	if waiter.MemoryBytes > 0 {
+		resources["memory"] = struct{}{}
+	}
+	for _, claim := range waiter.Claims {
+		if claim.Policy == admission.PolicyCancelOthers {
+			continue
+		}
+		resources["semaphore:"+claim.Key] = struct{}{}
+	}
+	return resources
 }
 
 // cancelWaiterLocked removes a queued run whose connection died. The

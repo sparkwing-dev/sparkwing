@@ -159,11 +159,12 @@ type profileSample struct {
 }
 
 // profileSchemaCurrent stamps the meaning of a profile's stored samples.
-// Schema 2 measures rollup duration from admission grant to finish;
-// schema 1 (and the older bare-array format) folded admission queue wait
-// into the duration, so those samples are discarded on load rather than
-// contaminating percentiles until they age out.
-const profileSchemaCurrent = 2
+// Schema 3 uses CPU peaks from amortized child accounting. Schema 2 measured
+// rollup duration from admission grant to finish but still allowed reaped
+// child CPU to land in one sample window. Schema 1 and the older bare-array
+// format folded admission queue wait into duration. Older samples are dropped
+// on load rather than contaminating admission until they age out.
+const profileSchemaCurrent = 3
 
 // profileWindowDoc is the versioned envelope samples_json holds. The
 // bare-array format written before versioning fails to decode into it and
@@ -281,11 +282,8 @@ func (s *Store) loadProfileMutState(ctx context.Context, pipeline, nodeID string
 		return profileMutState{}, err
 	}
 	st.cpuMeasured = measured != 0
-	if len(raw) > 0 {
-		var doc profileWindowDoc
-		if err := json.Unmarshal(raw, &doc); err == nil && doc.Schema == profileSchemaCurrent {
-			st.window = doc.Samples
-		}
+	if samples, ok := decodeProfileWindow(raw); ok {
+		st.window = samples
 	}
 	return st, nil
 }
@@ -631,6 +629,19 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 	if err := scan(dests...); err != nil {
 		return nil, err
 	}
+	samples, samplesCurrent := decodeProfileWindow(samplesRaw)
+	if count > 0 && !samplesCurrent {
+		p50 = 0
+		p99 = 0
+		cores = 0
+		mem = 0
+		count = 0
+		cpuMeasured = 0
+		floorCores = 0
+		floorMem = 0
+		prevPeakCores = 0
+		prevPeakMem = 0
+	}
 	prof := &PipelineProfile{
 		P50Duration:         time.Duration(p50) * time.Millisecond,
 		P99Duration:         time.Duration(p99) * time.Millisecond,
@@ -651,24 +662,30 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		PrevPeakCores:       prevPeakCores,
 		PrevPeakMemoryBytes: prevPeakMem,
 	}
-	annotateResourcePercentiles(prof, samplesRaw)
+	annotateResourcePercentiles(prof, samples)
 	return prof, nil
 }
 
-// annotateResourcePercentiles fills the display-only CPU and memory
-// distribution fields from the persisted sample window. Missing or
-// older-format samples leave the fields zero.
-func annotateResourcePercentiles(prof *PipelineProfile, raw []byte) {
+func decodeProfileWindow(raw []byte) ([]profileSample, bool) {
 	if len(raw) == 0 {
-		return
+		return nil, false
 	}
 	var doc profileWindowDoc
 	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != profileSchemaCurrent || len(doc.Samples) == 0 {
+		return nil, false
+	}
+	return doc.Samples, true
+}
+
+// annotateResourcePercentiles fills the display-only CPU and memory
+// distribution fields from the persisted sample window.
+func annotateResourcePercentiles(prof *PipelineProfile, samples []profileSample) {
+	if len(samples) == 0 {
 		return
 	}
-	cores := make([]float64, len(doc.Samples))
-	mems := make([]float64, len(doc.Samples))
-	for i, s := range doc.Samples {
+	cores := make([]float64, len(samples))
+	mems := make([]float64, len(samples))
+	for i, s := range samples {
 		cores[i] = s.C
 		mems[i] = float64(s.M)
 	}
