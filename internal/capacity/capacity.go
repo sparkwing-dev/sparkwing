@@ -54,6 +54,13 @@ const (
 	// floor rises to the charge and the next run doubles. Below it, the run's
 	// measured peak alone raises the floor and the charge does not escalate.
 	CeilingHitFraction = 0.9
+	// CacheDominantFraction is the share of a run's completed nodes that must
+	// be cache hits for the run to count as cache-dominant and be excluded from
+	// profile learning. A run at or above this threshold measured the cache,
+	// not the work -- its wall time collapses and its CPU is near zero -- so
+	// folding it would poison durations and age real peaks out of the window,
+	// the same measurement contamination contention already guards against.
+	CacheDominantFraction = 0.9
 )
 
 // Pin is an explicit .Resources() declaration flattened to host figures.

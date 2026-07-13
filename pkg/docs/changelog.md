@@ -65,6 +65,12 @@ code change to unlock.
   holds exactly rather than appearing off by the deadband. A one-line legend
   spells out that arithmetic, and "Running" and "Waiting" headers label the
   two tables.
+- **admission:** Fully-cached runs no longer poison learned profiles. A run
+  whose completed nodes are predominantly cache hits measured the cache, not
+  the work, so it is excluded from duration and resource learning like a
+  contended run -- its millisecond wall time can no longer collapse a
+  pipeline's p50 or age out its real peak. `sparkwing runs stats` reports how
+  many runs were excluded this way in a new CACHED column.
 
 ## [v0.17.0] - 2026-07-13
 ### Added

@@ -44,6 +44,9 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	if err != nil {
 		return
 	}
+	if cacheDominant(nodes) {
+		return
+	}
 	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	var runPeakCores float64
 	var runPeakMem int64
@@ -115,6 +118,27 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		return
 	}
 	_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+}
+
+// cacheDominant reports whether a finished run's completed nodes were
+// predominantly cache hits -- at or above capacity.CacheDominantFraction of
+// them served from cache. Such a run measured the cache, not the work: its
+// rollup wall time collapses to milliseconds and its CPU is near zero, so
+// folding it would collapse the pipeline's p50 and age its real peaks out of
+// the window. It is excluded from learning entirely, like a contended run, but
+// without raising a demand floor -- a cached run proves no demand.
+func cacheDominant(nodes []*store.Node) bool {
+	cached, total := 0, 0
+	for _, n := range nodes {
+		if n.Outcome == "" {
+			continue
+		}
+		total++
+		if n.Outcome == string(sparkwing.Cached) {
+			cached++
+		}
+	}
+	return total > 0 && float64(cached) >= capacity.CacheDominantFraction*float64(total)
 }
 
 // capLocalPeakCores enforces the stored-profile invariant that a local

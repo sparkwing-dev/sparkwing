@@ -10,17 +10,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // capacityStat is one pipeline's measured capacity view: the rollup the
 // admission charge derives from, its per-node breakdown, the resolved
 // source, and any pin-drift note.
 type capacityStat struct {
-	Pipeline string                  `json:"pipeline"`
-	Source   string                  `json:"source"`
-	Drift    string                  `json:"drift,omitempty"`
-	Rollup   store.PipelineProfile   `json:"rollup"`
-	Nodes    []store.PipelineProfile `json:"nodes,omitempty"`
+	Pipeline       string                  `json:"pipeline"`
+	Source         string                  `json:"source"`
+	Drift          string                  `json:"drift,omitempty"`
+	CachedExcluded int                     `json:"cached_excluded,omitempty"`
+	Rollup         store.PipelineProfile   `json:"rollup"`
+	Nodes          []store.PipelineProfile `json:"nodes,omitempty"`
 }
 
 // runCapacityStats prints the measured capacity profiles as a table, one
@@ -42,6 +44,13 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		return err
 	}
 	stats := groupCapacityStats(profiles)
+	cachedExcluded, err := st.CacheExcludedCounts(ctx, pipeline, string(sparkwing.Cached), capacity.CacheDominantFraction)
+	if err != nil {
+		return err
+	}
+	for i := range stats {
+		stats[i].CachedExcluded = cachedExcluded[stats[i].Pipeline]
+	}
 
 	if emitJSON {
 		return jsonEncode(os.Stdout, stats)
@@ -51,16 +60,16 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tFLOOR")
+	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tCACHED\tFLOOR")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			s.Pipeline, s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
 			fmtCPUCells(s.Rollup), fmtMemCells(s.Rollup), fmtWaitCells(s.Rollup), s.Rollup.SampleCount,
-			fmtContendedCell(s.Rollup), fmtFloorCell(s.Rollup))
+			fmtContendedCell(s.Rollup), fmtCachedCell(s.CachedExcluded), fmtFloorCell(s.Rollup))
 		for _, n := range s.Nodes {
-			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 				n.NodeID, fmtDur(n.P50Duration), fmtDur(n.P99Duration),
-				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount, "-", "-")
+				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount, "-", "-", "-")
 		}
 	}
 	if err := tw.Flush(); err != nil {
@@ -154,6 +163,17 @@ func fmtContendedCell(p store.PipelineProfile) string {
 	}
 	pct := int(float64(p.ContendedCount)/float64(p.SampleCount)*100 + 0.5)
 	return fmt.Sprintf("%d/%d (%d%%)", p.ContendedCount, p.SampleCount, pct)
+}
+
+// fmtCachedCell renders how many finished runs were excluded from learning
+// for being cache-dominant (at least CacheDominantFraction of their nodes
+// served from cache). A dash before any run is excluded. The count is derived
+// from retained run history, so it tracks the runs still in the store.
+func fmtCachedCell(n int) string {
+	if n == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 // fmtFloorCell renders a still-measuring version's demand floor -- the lower

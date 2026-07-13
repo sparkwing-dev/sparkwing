@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
@@ -254,6 +256,129 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	if got := rollup.P50Duration; got < 9*time.Second || got > 11*time.Second {
 		t.Errorf("rollup P50Duration = %s, want ~%s (execution only, not %s incl. queue wait)",
 			got, execTime, queueWait+execTime)
+	}
+}
+
+// TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks establishes a
+// profile from real measured runs, then folds a burst of fully-cached runs and
+// asserts the profile is untouched: cached runs measure the cache, not the
+// work, so they must not collapse the p50 or age out the real peak. The burst
+// is also surfaced separately as the cache-excluded count.
+func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	start := time.Now()
+
+	measured := func(runID string) {
+		t.Helper()
+		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
+			TS: start, CPUMillicores: 3000, MemoryBytes: 2 << 30,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		recordRunProfile(ctx, st, "demo", runID, nil, "", runCharge{}, false, start, start.Add(30*time.Second))
+	}
+	cachedRun := func(runID string) {
+		t.Helper()
+		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishNode(ctx, runID, "build", string(sparkwing.Cached), "", nil); err != nil {
+			t.Fatal(err)
+		}
+		recordRunProfile(ctx, st, "demo", runID, nil, "", runCharge{}, false, start, start.Add(41*time.Millisecond))
+	}
+
+	measured("r1")
+	measured("r2")
+	measured("r3")
+	before, err := st.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || before == nil {
+		t.Fatalf("rollup profile missing: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		cachedRun(fmt.Sprintf("c%d", i))
+	}
+	after, err := st.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || after == nil {
+		t.Fatalf("rollup profile missing: %v", err)
+	}
+
+	if after.SampleCount != before.SampleCount {
+		t.Errorf("SampleCount moved from %d to %d after a cached burst", before.SampleCount, after.SampleCount)
+	}
+	if after.PeakCores != before.PeakCores {
+		t.Errorf("PeakCores moved from %v to %v after a cached burst", before.PeakCores, after.PeakCores)
+	}
+	if after.P50Duration != before.P50Duration {
+		t.Errorf("P50Duration moved from %s to %s after a cached burst", before.P50Duration, after.P50Duration)
+	}
+
+	counts, err := st.CacheExcludedCounts(ctx, "demo", string(sparkwing.Cached), capacity.CacheDominantFraction)
+	if err != nil {
+		t.Fatalf("CacheExcludedCounts: %v", err)
+	}
+	if counts["demo"] != 5 {
+		t.Errorf("cache-excluded count = %d, want 5", counts["demo"])
+	}
+}
+
+// TestRecordRunProfile_MixedRunBelowThresholdStillFolds confirms a run with a
+// minority of cache hits is not treated as cache-dominant: its executed work is
+// real, so the rollup still folds.
+func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	start := time.Now()
+
+	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "fetch", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+		TS: start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "r1", "build", string(sparkwing.Success), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "r1", "fetch", string(sparkwing.Cached), "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	recordRunProfile(ctx, st, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
+
+	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || rollup == nil {
+		t.Fatalf("rollup profile missing for a below-threshold mixed run: %v", err)
+	}
+	if rollup.SampleCount != 1 || rollup.PeakCores != 2.0 {
+		t.Errorf("rollup = samples %d peak %v, want 1 sample and 2.0 peak from the executed node",
+			rollup.SampleCount, rollup.PeakCores)
 	}
 }
 
