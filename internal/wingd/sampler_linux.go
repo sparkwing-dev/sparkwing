@@ -20,13 +20,61 @@ import (
 // rather than pulling in a sysconf dependency for a threshold check.
 const linuxClockTicks = 100.0
 
-// sample derives a process's CPU as a fraction of one core from the
-// change in its cumulative user+system time between two /proc readings.
-// The first reading for a pid has no baseline and reports not-sampled.
+// sample derives a process tree's CPU as a fraction of one core from the
+// change in cumulative user+system time between two /proc readings. The
+// first reading for every live pid has no baseline; sample reports once
+// at least one process in the tree has two readings.
 func (p *procSampler) sample(pid int) (float64, bool) {
+	tree, ok := linuxProcessTree(pid)
+	if !ok {
+		p.forget(pid)
+		return 0, false
+	}
+	now := time.Now()
+
+	type reading struct {
+		pid        int
+		cpuSeconds float64
+	}
+	readings := make([]reading, 0, len(tree))
+	for _, treePID := range tree {
+		cpuSeconds, ok := linuxProcessCPUSeconds(treePID)
+		if !ok {
+			p.forget(treePID)
+			continue
+		}
+		readings = append(readings, reading{pid: treePID, cpuSeconds: cpuSeconds})
+	}
+	if len(readings) == 0 {
+		return 0, false
+	}
+
+	var total float64
+	var sampled bool
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, r := range readings {
+		prev, ok := p.last[r.pid]
+		p.last[r.pid] = cpuSample{cpuSeconds: r.cpuSeconds, at: now}
+		if !ok {
+			continue
+		}
+		wall := now.Sub(prev.at).Seconds()
+		if wall <= 0 {
+			continue
+		}
+		frac := (r.cpuSeconds - prev.cpuSeconds) / wall
+		if frac > 0 {
+			total += frac
+		}
+		sampled = true
+	}
+	return total, sampled
+}
+
+func linuxProcessCPUSeconds(pid int) (float64, bool) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		p.forget(pid)
 		return 0, false
 	}
 	line := string(data)
@@ -43,25 +91,61 @@ func (p *procSampler) sample(pid int) (float64, bool) {
 	if err1 != nil || err2 != nil {
 		return 0, false
 	}
-	cpuSeconds := (utime + stime) / linuxClockTicks
-	now := time.Now()
+	return (utime + stime) / linuxClockTicks, true
+}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	prev, ok := p.last[pid]
-	p.last[pid] = cpuSample{cpuSeconds: cpuSeconds, at: now}
-	if !ok {
+func linuxProcessTree(root int) ([]int, bool) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, false
+	}
+	children := map[int][]int{}
+	rootFound := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		if pid == root {
+			rootFound = true
+		}
+		parent, ok := linuxParentPID(pid)
+		if ok {
+			children[parent] = append(children[parent], pid)
+		}
+	}
+	if !rootFound {
+		return nil, false
+	}
+	tree := []int{root}
+	for i := 0; i < len(tree); i++ {
+		tree = append(tree, children[tree[i]]...)
+	}
+	return tree, true
+}
+
+func linuxParentPID(pid int) (int, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
 		return 0, false
 	}
-	wall := now.Sub(prev.at).Seconds()
-	if wall <= 0 {
+	line := string(data)
+	rparen := strings.LastIndexByte(line, ')')
+	if rparen < 0 || rparen+2 >= len(line) {
 		return 0, false
 	}
-	frac := (cpuSeconds - prev.cpuSeconds) / wall
-	if frac < 0 {
-		frac = 0
+	fields := strings.Fields(line[rparen+2:])
+	if len(fields) < 2 {
+		return 0, false
 	}
-	return frac, true
+	parent, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, false
+	}
+	return parent, true
 }
 
 // forget drops a dead pid's baseline so the map does not grow without

@@ -5,28 +5,84 @@ package wingd
 import (
 	"encoding/binary"
 	"fmt"
+	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-// darwinFScale is the fixed-point scale (1<<FSHIFT, FSHIFT=11) that the
-// kernel applies to ExternProc.P_pctcpu. Dividing by it yields the
-// process's CPU as a fraction of one core, the same figure ps derives
-// for its %CPU column.
-const darwinFScale = 1 << 11
-
-// sample reads the process's decaying CPU-percentage estimate from its
-// kinfo_proc and converts it to a fraction of one core. It reports
-// not-sampled when the process is gone or the sysctl buffer is short.
+// sample finds the root process's descendants from kinfo_proc and sums
+// the process tree's CPU percentage through ps, matching the operator
+// view on macOS. It reports not-sampled when the process is gone or the
+// process table cannot be read.
 func (p *procSampler) sample(pid int) (float64, bool) {
-	raw, err := unix.SysctlRaw("kern.proc.pid", pid)
-	if err != nil || len(raw) < int(unsafe.Sizeof(unix.KinfoProc{})) {
+	procs, ok := darwinProcesses()
+	if !ok {
 		return 0, false
 	}
-	kp := (*unix.KinfoProc)(unsafe.Pointer(&raw[0]))
-	return float64(kp.Proc.P_pctcpu) / float64(darwinFScale), true
+	children := map[int][]int{}
+	byPID := map[int]unix.KinfoProc{}
+	for _, kp := range procs {
+		processID := int(kp.Proc.P_pid)
+		byPID[processID] = kp
+		children[int(kp.Eproc.Ppid)] = append(children[int(kp.Eproc.Ppid)], processID)
+	}
+	if _, ok := byPID[pid]; !ok {
+		return 0, false
+	}
+	tree := []int{pid}
+	for i := 0; i < len(tree); i++ {
+		tree = append(tree, children[tree[i]]...)
+	}
+	return darwinProcessCPUFraction(tree)
+}
+
+func darwinProcesses() ([]unix.KinfoProc, bool) {
+	raw, err := unix.SysctlRaw("kern.proc.all")
+	if err != nil {
+		return nil, false
+	}
+	size := int(unsafe.Sizeof(unix.KinfoProc{}))
+	if size == 0 || len(raw) < size {
+		return nil, false
+	}
+	count := len(raw) / size
+	procs := make([]unix.KinfoProc, 0, count)
+	for i := 0; i < count; i++ {
+		start := i * size
+		procs = append(procs, *(*unix.KinfoProc)(unsafe.Pointer(&raw[start])))
+	}
+	return procs, true
+}
+
+func darwinProcessCPUFraction(pids []int) (float64, bool) {
+	args := []string{"-o", "pcpu=", "-p", darwinPIDList(pids)}
+	out, err := exec.Command("ps", args...).Output()
+	if err != nil {
+		return 0, false
+	}
+	var total float64
+	var sampled bool
+	for _, field := range strings.Fields(string(out)) {
+		percent, err := strconv.ParseFloat(field, 64)
+		if err != nil {
+			continue
+		}
+		total += percent / 100.0
+		sampled = true
+	}
+	return total, sampled
+}
+
+func darwinPIDList(pids []int) string {
+	parts := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		parts = append(parts, strconv.Itoa(pid))
+	}
+	return strings.Join(parts, ",")
 }
 
 func sampleHost() (HostStat, error) {
