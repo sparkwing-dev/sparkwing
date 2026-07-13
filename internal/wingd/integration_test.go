@@ -111,6 +111,49 @@ func TestHolderDisconnect_ReleasesAndPromotes(t *testing.T) {
 	}
 }
 
+func TestPromotionRebroadcastsRemainingWaiterPosition(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	a := ensure(t, home, "")
+	holder := mustAcquire(t, a, semReq("a", "deploy", 1, 1, wingwire.PolicyQueue))
+
+	b := ensure(t, home, "")
+	_, resultB := acquireAsync(b, semReq("b", "deploy", 1, 1, wingwire.PolicyQueue))
+
+	c := ensure(t, home, "")
+	positionsC, resultC := acquireAsync(c, semReq("c", "deploy", 1, 1, wingwire.PolicyQueue))
+	select {
+	case q := <-positionsC:
+		if q.Position != 2 {
+			t.Fatalf("c initial position = %d, want 2", q.Position)
+		}
+	case r := <-resultC:
+		t.Fatalf("c resolved before queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("c never reported its initial queue position")
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	r := waitResult(t, resultB, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("b should have promoted, got %v", r.err)
+	}
+
+	select {
+	case q := <-positionsC:
+		if q.Position != 1 {
+			t.Fatalf("c refreshed position = %d, want 1", q.Position)
+		}
+	case r := <-resultC:
+		t.Fatalf("c resolved instead of remaining queued: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("c never received refreshed queue position after b promoted")
+	}
+}
+
 func TestMeasuredRequestAboveIdleGrantableCapacityIsAdmitted(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
