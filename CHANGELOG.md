@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Capacity profiles with obsolete CPU accounting are ignored
+  on read and on the next profile update. Older samples could preserve
+  impossible CPU peaks, causing admission to reserve too much CPU and block
+  queued runs unnecessarily.
 
 ## [v0.16.8] - 2026-07-13
 ### Fixed

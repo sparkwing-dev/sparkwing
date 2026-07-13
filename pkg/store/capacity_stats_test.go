@@ -2,10 +2,12 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -146,5 +148,68 @@ func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
 	}
 	if list[0].CPUP50 != prof.CPUP50 || list[0].MemoryP95Bytes != prof.MemoryP95Bytes {
 		t.Errorf("List and Get disagree on percentiles: %+v vs %+v", list[0], prof)
+	}
+}
+
+func TestRecordProfileObservation_DropsPreviousCPUSampleSchema(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	oldWindow, err := json.Marshal(map[string]any{
+		"schema": 2,
+		"samples": []map[string]any{
+			{"d": int64(time.Minute), "c": 14.0, "m": int64(1 << 30)},
+			{"d": int64(time.Minute), "c": 14.0, "m": int64(1 << 30)},
+			{"d": int64(time.Minute), "c": 14.0, "m": int64(1 << 30)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`
+INSERT INTO pipeline_profiles
+    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"schema-shift", "", time.Minute.Milliseconds(), time.Minute.Milliseconds(), 14.0, int64(1<<30), 3, 1,
+		time.Now().UnixNano(), oldWindow); err != nil {
+		t.Fatalf("seed old profile window: %v", err)
+	}
+
+	prof, err := st.GetPipelineProfile(ctx, "schema-shift", "")
+	if err != nil || prof == nil {
+		t.Fatalf("get stale profile: %v (prof=%v)", err, prof)
+	}
+	if prof.SampleCount != 0 {
+		t.Errorf("stale SampleCount = %d, want old CPU sample schema ignored on read", prof.SampleCount)
+	}
+	if prof.PeakCores != 0 {
+		t.Errorf("stale PeakCores = %v, want old CPU sample schema ignored on read", prof.PeakCores)
+	}
+	if got := capacity.Resolve(nil, prof, 12); got.Source != store.CostSourceDefault {
+		t.Errorf("stale profile resolved as %q, want default", got.Source)
+	}
+
+	if err := st.RecordProfileObservation(ctx, "schema-shift", "", store.ProfileObservation{
+		Duration:        5 * time.Second,
+		PeakCores:       2,
+		PeakMemoryBytes: 128 << 20,
+		CPUMeasured:     true,
+	}); err != nil {
+		t.Fatalf("RecordProfileObservation: %v", err)
+	}
+
+	prof, err = st.GetPipelineProfile(ctx, "schema-shift", "")
+	if err != nil || prof == nil {
+		t.Fatalf("get profile: %v (prof=%v)", err, prof)
+	}
+	if prof.SampleCount != 1 {
+		t.Errorf("SampleCount = %d, want old CPU sample schema dropped", prof.SampleCount)
+	}
+	if prof.PeakCores != 2 {
+		t.Errorf("PeakCores = %v, want 2 from the new observation only", prof.PeakCores)
 	}
 }
