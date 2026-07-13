@@ -7,6 +7,14 @@ require (
 	golang.org/x/mod v0.35.0
 )
 
+// The pipelines tree is consumed as the same module path the SDK
+// itself ships, so the require above is a placeholder; this replace
+// pins it to the parent checkout (the sparkwing repo root). The
+// pattern follows the standard "consumer .sparkwing/ uses a local
+// replace during development" convention; here the parent IS the
+// SDK rather than a sibling.
+replace github.com/sparkwing-dev/sparkwing => ..
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
